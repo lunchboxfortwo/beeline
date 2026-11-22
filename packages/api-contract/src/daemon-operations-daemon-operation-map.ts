@@ -322,7 +322,7 @@ export type DaemonOperationMap = {
   listUntrackedCorners: Operation<RoomInput, CornerListResult>;
   getRoomRepositoryState: Operation<RoomInput, RoomRepositoryStateResult>;
   getRoomGitHubToken: Operation<RoomInput & { readonly write?: boolean }, RoomGitHubTokenResult>;
-  becomeImplementer: Operation<RoomInput & TurnOutputAuthority, WriteResult>;
+  becomeImplementer: Operation<RoomInput & TurnOutputAuthority & { readonly cornerId?: string }, WriteResult>;
   dispatchRoomWorkflow: Operation<RoomInput & TurnOutputAuthority & {
     readonly requestId: string;
     readonly inputs?: Readonly<Record<string, string>>;

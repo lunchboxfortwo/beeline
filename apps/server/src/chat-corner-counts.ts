@@ -116,7 +116,8 @@ export function deliverableCommandSql(command: string): string {
     AND ${command}.state='pending'`;
 }
 
-/** A running turn, or a command still waiting for one, retains the review role recorded by its dispatch. */
+/** A running turn, or a command still waiting for one, retains the review role recorded by its dispatch.
+ * Another agent's running turn is peer activity: it only keeps an otherwise idle thread from idling. */
 export function cornerWorkSql(): string {
   const implementer = cornerImplementerSql('f', 'c');
   const reviewerAgent = `ANY(array_remove(ARRAY[${cornerReviewerSql('c')}],NULL))`;
@@ -143,21 +144,21 @@ export function cornerWorkSql(): string {
               AND ${workingTurnFreshSql('live')})`;
   return `LEFT JOIN rooms parent ON parent.id=c.parent_id
     LEFT JOIN LATERAL (WITH activity_rows AS (
-        SELECT ${reviewerTurn} AS review
+        SELECT ${reviewerTurn} AS review,NOT (t.agent_id=${implementer} OR ${reviewerTurn}) AS peer
         FROM agent_turns t WHERE t.room_id=c.id AND t.status='working' AND ${workingTurnFreshSql('t')}
-          AND (t.agent_id=${implementer} OR ${reviewerTurn})
           AND NOT EXISTS(SELECT 1 FROM agent_commands notice WHERE notice.room_id=t.room_id
             AND notice.agent_id=t.agent_id AND notice.turn_request_id=t.request_id
             AND notice.reason='report' AND notice.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}')
         UNION ALL
-        SELECT ${reviewerCommand}
+        SELECT ${reviewerCommand},false
         FROM agent_commands command
         WHERE command.room_id=c.id AND ${deliverableCommandSql('command')} AND ${currentCornerCommandTargetSql('command')}
           AND (command.agent_id=${implementer} OR ${reviewerCommand})
           AND ${noLiveTurn}
       )
-      SELECT COALESCE(bool_or(NOT review),false) worker_active,
-        COALESCE(bool_or(review),false) reviewer_active
+      SELECT COALESCE(bool_or(NOT review AND NOT peer),false) worker_active,
+        COALESCE(bool_or(review),false) reviewer_active,
+        COALESCE(bool_or(peer),false) peer_active
       FROM activity_rows
     ) activity ON true`;
 }

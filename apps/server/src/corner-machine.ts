@@ -63,6 +63,8 @@ export type CornerMachineFacts = {
   /** Running worker receipts; reviewer work has its own input. */
   turnRunning: boolean;
   reviewerActive?: boolean;
+  /** Another agent's running turn; it shows working only where the thread would otherwise be idle. */
+  peerActive?: boolean;
   lifecycle?: CornerLifecycleView;
   /**
    * The selected blocker. Merge holds are selected only when no other blocker
@@ -256,6 +258,7 @@ export function transitionCorner(
     state = { ...base, state: 'review', phase: 'reviewer' };
   else if (checksUnderway) state = { ...base, state: 'review', phase: 'checks' };
   else if (backlog) state = { ...base, state: 'idle', reason: 'backlog' };
+  else if (f.peerActive) state = { ...base, state: 'working' };
   else {
     state = { ...base, state: 'idle' };
     if (f.idleEligible && f.idleSince) notify('idle', `idle:${f.idleSince}`);

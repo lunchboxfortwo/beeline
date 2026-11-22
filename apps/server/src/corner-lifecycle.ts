@@ -387,6 +387,7 @@ async function readCornerAdvance(
       implementerActive: active?.worker === true,
       implementerAvailable: Boolean(corner.worker_agent_id),
       reviewerActive: row?.reviewer_active === true || review.pending,
+      peerActive: row?.peer_active === true,
       // Activity owns the displayed state. Only a request sent with passing
       // checks suppresses the first green-head review dispatch.
       reviewRequestActive: review.pending,
@@ -410,7 +411,7 @@ async function readCornerAdvance(
               ? `cache:${head}` : undefined),
       idleSince: row ? `${row.person_since}:${row.idle_report_count}` : undefined,
       idleEligible: row
-        ? !row.suppressed && !row.worker_active && !row.reviewer_active && !row.blocking
+        ? !row.suppressed && !row.worker_active && !row.reviewer_active && !row.peer_active && !row.blocking
           && !row.idle_report_pending && row.idle_report_count<CORNER_IDLE_REPORT_BUDGET
         : false,
     };

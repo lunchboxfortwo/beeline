@@ -1,4 +1,5 @@
 import { cornerIdleBudgetSql } from './corner-idle-budget.js';
+import { PERSON_STOP_REASON } from './agent-turn-end.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerBlockerSql, cornerScheduledWaitSql, cornerWorkSql,
@@ -9,6 +10,7 @@ export type CornerIdleRow = CornerStateRow & {
   locked: boolean;
   worker_active: boolean;
   reviewer_active: boolean;
+  peer_active: boolean;
   blocking: boolean;
   last_turn_ended_at: Date | null;
   name: string;
@@ -32,9 +34,9 @@ export function cornerIdleSql(cornerId: string): string {
   ) SELECT snapshot.*,
     (machine->>'state'='idle' AND archived_at IS NULL
       AND machine->>'reason' IS DISTINCT FROM 'backlog'
-      AND NOT (worker_active OR reviewer_active OR blocking OR suppressed)) idle_eligible
+      AND NOT (worker_active OR reviewer_active OR peer_active OR blocking OR suppressed)) idle_eligible
     FROM (SELECT c.id,c.name,c.parent_id,c.archived_at,gh.lifecycle,f.locked,f.machine,
-      activity.worker_active,activity.reviewer_active,NULL::text latest_turn_status,
+      activity.worker_active,activity.reviewer_active,activity.peer_active,NULL::text latest_turn_status,
       extract(epoch FROM person_epoch.at)::text person_since,
       idle_budget.report_count idle_report_count,idle_budget.pending idle_report_pending,
       blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,
@@ -50,6 +52,7 @@ export function cornerIdleSql(cornerId: string): string {
           AND queued.review_context->>'headSha'=gh.lifecycle->'pr'->>'headSha'
           AND queued.review_context->>'purpose' IS NULL AND queued.agent_id IS DISTINCT FROM ${cornerImplementerSql('f', 'c')})
         OR gh.lifecycle->>'checks'='pending'
+        OR ${personStopHoldSql('c')}
         OR (NULLIF(gh.lifecycle->'pr','null'::jsonb) IS NOT NULL AND gh.lifecycle->'checksSummary'->>'status'='unknown'
           AND gh.lifecycle->'checksSummary'->>'fetchStartedAt' IS NULL)
       ) IS TRUE suppressed
@@ -72,6 +75,14 @@ export function cornerIdleSql(cornerId: string): string {
         person_epoch.at
       ) at OFFSET 0) boundary
       ) snapshot`;
+}
+
+/** A person's stop holds idle notices until a person acts in the thread again or any turn starts there. */
+function personStopHoldSql(corner: string): string {
+  return `EXISTS(SELECT 1 FROM agent_commands stopped WHERE stopped.room_id=${corner}.id
+    AND stopped.cancellation_reason='${PERSON_STOP_REASON}' AND stopped.completed_at>=person_epoch.at
+    AND NOT EXISTS(SELECT 1 FROM agent_turns later WHERE later.room_id=${corner}.id
+      AND later.started_at>stopped.completed_at))`;
 }
 
 /** Same idle episode command pickup used to inline. Planned once per session, and only for an idle alert. */
