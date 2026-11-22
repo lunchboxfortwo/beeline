@@ -20,6 +20,7 @@ import { recordReportedReviewApproval } from './corner-reads.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
+import { normalizePlaceAddresses } from './place-address.js';
 import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output } from './values.js';
 import { modelText } from '../message-origin.js';
 import { sendMessage,replyToMessage } from '../agent-messaging.js';
@@ -306,6 +307,7 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
   name: Name, input: Input<Name>, agentId: string,
   helperConnection?: { connectionId: string; epoch: number },
 ): Promise<Output<Name>> {
+  input = normalizePlaceAddresses(name, input);
   const value = input as Record<string, unknown>;
   if (name==='message' || name==='reply') {
     const messageId=typeof value.transportRequestId==='string'

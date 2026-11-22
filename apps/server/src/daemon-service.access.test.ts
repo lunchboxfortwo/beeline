@@ -99,14 +99,14 @@ describe('daemon chat access', () => {
       daemon.execute('getCornerRestoreState', { cornerId: ROOM }, AGENT),
     ).resolves.toMatchObject({ held: true });
   });
-  it('denies a malformed chat id before the UUID access query', async () => {
+  it('refuses a malformed chat id before the UUID access query', async () => {
     const query = vi.fn(async () => {
       throw Object.assign(new Error('invalid input syntax for type uuid'), { code: '22P02' });
     });
     const daemon = new DaemonService({ query } as unknown as SqlDatabase, new LiveHub());
 
     await expect(daemon.execute('getCornerRestoreState', { cornerId: 'not-a-uuid' }, AGENT))
-      .rejects.toThrow('daemon chat access denied');
+      .rejects.toThrow('unknown place; use an id from read(facet:addresses)');
     expect(query).not.toHaveBeenCalled();
   });
 });
