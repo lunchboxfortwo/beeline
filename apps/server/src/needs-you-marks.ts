@@ -87,7 +87,7 @@ CREATE TRIGGER question_needs_you_mark AFTER INSERT OR UPDATE OF status ON room_
 CREATE OR REPLACE FUNCTION maintain_needs_you_marks() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE reasked_block text;
 BEGIN
-  IF NEW.presentation='message' AND NEW.system_event IS NULL AND NEW.deleted_at IS NULL THEN
+  IF (NEW.presentation='message' OR NEW.card_type='agent-command') AND NEW.system_event IS NULL AND NEW.deleted_at IS NULL THEN
     UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='answered'
     FROM messages m WHERE (mark.identity_id=NEW.author_id OR mark.message_id=NEW.reply_to_message_id)
       AND mark.cleared_at IS NULL
@@ -99,7 +99,7 @@ BEGIN
     FROM messages m WHERE mark.identity_id=NEW.card->>'reportToId' AND mark.cleared_at IS NULL
       AND m.id=mark.message_id AND ${supersedesSql('NEW', 'm', 'mark.identity_id')};
   END IF;
-  IF NEW.reply_to_message_id IS NOT NULL AND NEW.presentation='message' THEN
+  IF NEW.reply_to_message_id IS NOT NULL AND (NEW.presentation='message' OR NEW.card_type='agent-command') THEN
     UPDATE messages block SET block_reasked_at=NEW.created_at
       FROM corner_facts fact WHERE block.id=reply_block_root(NEW.reply_to_message_id)
       AND ((fact.corner_id=block.block_corner_id AND fact.implementer_agent_id=NEW.author_id)

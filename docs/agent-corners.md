@@ -12,7 +12,7 @@ That commander is the sender of the opening task, else of the first task deliver
 Thread work never takes a turn outside the thread: review gaps wake only the implementer there, and a commander who becomes the implementer gets no notice elsewhere.
 A closed return place ends the turn without rerouting.
 Each ask owns its wait and, for a person, its own answer card with an automatic source link.
-Plain text, including blocked or done wording, creates no card.
+Plain text blocks create a replyable message and a Tasks mark; real options alone create a choice card. Done wording creates no card.
 Attachments follow the same recorded tuple.
 Coverage: `messaging-s1-implementer.test.ts` through `messaging-s8-idle.test.ts`; the owner's four conditions, including external MCP and joined-session agents, in `messaging-c1-reply-place.test.ts` through `messaging-c4-external.test.ts`.
 

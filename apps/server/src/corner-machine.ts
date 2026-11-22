@@ -185,7 +185,7 @@ export function transitionCorner(
       'merge-refused',
       `refused:${event.headSha}:${event.reason}:${event.confirmedUnmerged ? f.checkSourceId : ''}`,
     );
-  // Explicit waits remain visible during CI, but a running worker owns Working.
+  // Explicit blocks remain visible until closure; native waits yield to running work.
   // Red and green facts retain their existing admission through the wait.
   const review = f.reviewEnded;
   const exhausted = (review?.emptyCount ?? 0) >= 1;

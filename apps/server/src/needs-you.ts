@@ -245,7 +245,8 @@ export function needsYouAnsweredSql(message: string, viewerId: string): string {
       AND (reply.author_id=${viewerId} OR (${question}
         AND EXISTS (SELECT 1 FROM needs_you_marks recipient WHERE recipient.message_id=${message}.id
           AND recipient.identity_id=reply.author_id)))
-      AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
+      AND (reply.presentation='message' OR ((${message}.block_corner_id IS NOT NULL OR ${message}.block_parent_id IS NOT NULL)
+        AND reply.card_type='agent-command')) AND reply.system_event IS NULL AND reply.deleted_at IS NULL
       AND reply.created_at>COALESCE(${message}.block_reasked_at,${message}.created_at)
   ) OR (${question} AND EXISTS (SELECT 1 FROM needs_you_marks answered
     WHERE answered.message_id=${message}.id AND answered.cleared_at IS NOT NULL AND answered.cleared_reason='answered'))

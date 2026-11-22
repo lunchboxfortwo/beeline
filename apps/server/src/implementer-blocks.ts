@@ -20,7 +20,7 @@ CREATE INDEX IF NOT EXISTS messages_open_blocks_idx ON messages(block_corner_id,
 export function openBlocksSql(corner: string): string {
   return `SELECT m.*,m.card->>'reportToId' holder_id FROM messages m
     JOIN rooms block_room ON block_room.id=COALESCE(m.block_corner_id,m.room_id) AND block_room.archived_at IS NULL
-    WHERE (m.block_corner_id=${corner} OR (m.block_corner_id IS NULL AND m.block_parent_id IS NOT NULL AND m.card->>'sourceRoomId'=(${corner})::text)) AND m.ask_closed_reason IS NULL AND m.deleted_at IS NULL`;
+    WHERE (m.block_corner_id=${corner} OR (m.block_corner_id IS NULL AND m.block_parent_id IS NOT NULL AND (m.room_id=${corner} OR m.card->>'sourceRoomId'=(${corner})::text))) AND m.ask_closed_reason IS NULL AND m.deleted_at IS NULL`;
 }
 
 export async function blockReminder(db: SqlDatabase, agent: string, room: string): Promise<string> {

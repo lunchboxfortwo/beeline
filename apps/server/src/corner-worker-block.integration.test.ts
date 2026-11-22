@@ -206,6 +206,7 @@ it.each([false, true])('Reproduction 22 Nov schedule-target-place: reply clears 
 });
 
 it('BLOCK-CHAIN: re-ask in the reply chain reopens one Tasks row, and takeover owns closure', async()=>{
+  await createAgentCommand(db,{roomId:C,agentId:WORKER,sourceMessageId:null,reason:'corner_objective',privatePayload:{kind:'order',authorId:COMMANDER,fromRoomId:ROOM,text:modelText('Build')}});
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('block',$1,$2,'blocked: Need access',
     jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'))`,[C,WORKER,HUMAN]);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES('answer',$1,$2,'Ready','block')`,[C,HUMAN]);
@@ -217,6 +218,7 @@ it('BLOCK-CHAIN: re-ask in the reply chain reopens one Tasks row, and takeover o
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES('second-answer',$1,$2,'Answered again','reask')`,[C,HUMAN]);
   await db.query(`UPDATE messages SET text='Edited re-ask' WHERE id='reask'`);
   expect((await phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items).toHaveLength(0);
+  await db.query('UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1',[ROOM]);
   await daemon.execute('becomeImplementer',await input(REVIEWER),REVIEWER);
   await expect(closeAgentAsk(db,WORKER,{messageId:'block',reason:'withdrawn'})).rejects.toThrow('current implementer');
   expect(await blockReminder(db,REVIEWER,C)).toContain('block');
@@ -236,11 +238,14 @@ it.each([COMMANDER,HUMAN])('BLOCK-OVERRIDE: commander or higher person clears an
 it('BLOCK-PROMPT: every queued implementer turn includes unchanged open blocks',async()=>{
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('prompt-block',$1,$2,'blocked: Offline',
     jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'))`,[C,WORKER,HUMAN]);
+  for(let n=0;n<6;n++) await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) SELECT $1,room_id,author_id,text,card FROM messages WHERE id='prompt-block'`,['prompt-extra-'+n]);
   for(let n=0;n<2;n++) {
     await input();
     const command=(await db.query<{message:{openAsksChanged:string}}>(`SELECT message FROM agent_commands WHERE agent_id=$1 AND room_id=$2 ORDER BY inbox_sequence DESC LIMIT 1`,[WORKER,C])).rows[0]!;
     expect(command.message.openAsksChanged).toContain('prompt-block');
     expect(command.message.openAsksChanged).toContain('clear those that no longer hold');
+    expect(command.message.openAsksChanged.split('\n').filter(line=>line.startsWith('- '))).toHaveLength(5);
+    expect(command.message.openAsksChanged).toContain('2 more');
   }
 });
 
@@ -278,6 +283,10 @@ it('BLOCK-MESSAGE: plain blocks route to commander, who can pass a linked questi
   expect(row).toEqual({presentation:'message',card_type:null,block_corner_id:C,recipient:COMMANDER});
   const parent=(await db.query<import('./agent-command.js').CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[block.id])).rows[0]!;
   expect(parent).toMatchObject({agent_id:COMMANDER,room_id:ROOM,reason:'message',state:'pending'});
+  const response=await sendMessage(db,{route:{from:{agent:COMMANDER,place:ROOM},to:{agent:WORKER,place:C}},text:'I am checking access',replyTo:block.id,parent});
+  expect(await blockReminder(db,WORKER,C)).toContain('; answered');
+  await sendMessage(db,{route:{from:{agent:WORKER,place:C},to:{agent:COMMANDER,place:ROOM}},text:'Still need access',replyTo:response.id});
+  expect(await blockReminder(db,WORKER,C)).toContain('; unanswered');
   const passed=await sendMessage(db,{route:{from:{agent:COMMANDER,place:ROOM},to:{agent:HUMAN,place:ROOM}},text:'blocked: Please provide access',parent});
   expect((await db.query('SELECT block_parent_id FROM messages WHERE id=$1',[passed.id])).rows[0]).toEqual({block_parent_id:block.id});
   expect((await phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items.map(i=>i.messageId)).toEqual([passed.id]);

@@ -52,6 +52,7 @@ export async function agentOpenAsks(
      JOIN rooms room ON room.id=m.room_id AND room.archived_at IS NULL
      JOIN identities person ON person.id=mark.identity_id
      WHERE mark.cleared_at IS NULL AND m.deleted_at IS NULL
+       AND m.block_corner_id IS NULL AND m.block_parent_id IS NULL
        AND ((NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
          AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
          OR ${questionRecipientSql('m', 'mark.identity_id')})
