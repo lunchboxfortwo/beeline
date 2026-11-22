@@ -73,6 +73,11 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
 
 it('a configuration change refreshes configuration without rereading every optional resource', async () => {
   const f=await fixture(),answering=deferred<Record<string,unknown>>();
+  const receipt = deferred<void>();
+  f.execute.mockImplementation(async name => {
+    if (name === 'postAgentTurnReceipt') receipt.resolve();
+    return { id: 'posted', createdAt: 1 };
+  });
   harness.deliver.mockReturnValueOnce(answering.promise);
   f.changed([f.item('active')]);
   await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
@@ -81,7 +86,8 @@ it('a configuration change refreshes configuration without rereading every optio
   expect(harness.refreshConfiguration).toHaveBeenCalledOnce();
   expect(harness.stop).not.toHaveBeenCalled();
   answering.resolve({text:'answer',steps:[],toolCalls:[],cleanup:async()=>{}});
-  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt',expect.anything()));
+  await receipt.promise;
+  expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt', expect.objectContaining({ requestId: 'active' }));
 });
 
 it('reannounces an active turn after registration without delivering its prompt again', async () => {
