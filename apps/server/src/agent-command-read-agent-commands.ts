@@ -17,7 +17,8 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
   // Idle notices describe one episode, unlike accepted human work. Retire an
   // obsolete episode through the terminal owner before delivering the queue.
   return db.query<CommandRow & { parent_room_id: string | null; room_name: string | null;
-    return_room_name: string | null; offline_seconds: number | null; operator_agent:boolean }>(
+    return_room_name: string | null; offline_seconds: number | null; operator_agent:boolean;
+    selected_model: string | null; selected_effort: string | null; fast_mode: boolean | null }>(
     `WITH queued AS MATERIALIZED (
        SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
      ), obsolete AS MATERIALIZED (
@@ -29,6 +30,7 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
          beeline_finish_agent_command(obsolete.id,'complete',NULL,NULL) ended ON true
      ) SELECT item.*,room.parent_id parent_room_id,room.name room_name,return_room.name return_room_name,
        agent.owner_id='${OPERATOR_OWNER_ID}' operator_agent,
+       agent.selected_model,agent.selected_effort,agent.fast_mode,
        CASE WHEN item.created_at<=connection.connected_at THEN
          EXTRACT(EPOCH FROM connection.connected_at-connection.offline_since)::double precision END offline_seconds
      FROM queued item
@@ -63,6 +65,11 @@ export async function readAgentCommands(
       return {
         ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
         ...(credentials?.has(item.id) ? { modelCredential: credentials.get(item.id) } : {}),
+        ...(item.selected_model || item.selected_effort || item.fast_mode != null ? { modelSelection: {
+          ...(item.selected_model ? { model: item.selected_model } : {}),
+          ...(item.selected_effort ? { effort: item.selected_effort } : {}),
+          ...(item.fast_mode != null ? { fastMode: item.fast_mode } : {}),
+        } } : {}),
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.room_name ? { roomName: item.room_name } : {}),
         ...(item.return_room_name ? { returnRoomName: item.return_room_name } : {}),

@@ -273,12 +273,27 @@ export class PlaceSession {
     });
   }
 
+  /**
+   * The queue item carries the owner's choice as the server read it with the
+   * item. It outranks any configuration read, and a live session that runs
+   * another choice starts fresh before answering, so no turn waits for a read.
+   */
+  private queuedSelection(item: AgentCommand): void {
+    if (!item.modelSelection) return;
+    this.queued = item.modelSelection;
+    if (this.activeSelection !== undefined && this.activeSelection !== JSON.stringify(this.selectionFrom(undefined)))
+      this.stale = true;
+  }
+
+  private queued?: AgentCommand['modelSelection'];
+
   private selectionFrom(configuration: SessionResources['context']['configuration']) {
     const { config } = this.options;
+    const owner = this.queued ?? configuration;
     return {
-      model: configuration?.model ?? config.modelSelection?.model,
-      effort: configuration?.effort ?? config.modelSelection?.effort,
-      fastMode: configuration?.fastMode,
+      model: owner?.model ?? config.modelSelection?.model,
+      effort: owner?.effort ?? config.modelSelection?.effort,
+      fastMode: owner?.fastMode,
     };
   }
 
@@ -352,6 +367,7 @@ export class PlaceSession {
     if (item) {
       this.model = await this.hostedModel(item);
       await this.writeContext(item, [], this.model?.paths().directory);
+      this.queuedSelection(item);
     }
     if (!this.alive || this.stale) await this.startFresh();
     await this.prepareGitHubLaunchers();

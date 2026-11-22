@@ -2,6 +2,7 @@ import type { AcpClient } from './acp.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import {
   applyAgentModelSelectionWithUpdatedCatalog,
+  appliedModelBeforeFailure,
   filterAllowedModelConfigOptions,
   parseAdvertisedConfigOptions,
 } from './model-config.js';
@@ -75,7 +76,7 @@ export function switchLiveModel(input: {
     .catch((error) => {
       console.warn('[body] model selection could not be applied:', error);
       input.report({
-        model: running,
+        model: appliedModelBeforeFailure(error) ?? running,
         selected: selection.model,
         reason: error instanceof Error ? error.message : String(error),
       });
@@ -147,7 +148,7 @@ export function reconcileStartupModel(input: {
         .catch((error) => {
           console.warn('[body] model selection could not be applied:', error);
           input.report({
-            model: advertisedDefault,
+            model: appliedModelBeforeFailure(error) ?? advertisedDefault,
             selected: selection.model,
             reason: error instanceof Error ? error.message : String(error),
           });

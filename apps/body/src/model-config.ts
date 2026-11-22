@@ -542,8 +542,32 @@ export async function applyAgentModelSelectionWithUpdatedCatalog(
   advertisedOptions: AgentModelConfigOption[],
   selection: { model?: string; effort?: string; fastMode?: boolean },
 ): Promise<AppliedModelSelectionResult> {
-  let currentOptions = advertisedOptions;
   const appliedSelection: { model?: string; effort?: string } = {};
+  try {
+    return await applySelectionAxes(client, sessionId, advertisedOptions, selection, appliedSelection);
+  } catch (error) {
+    // A later axis can fail after the model setter succeeded; the session
+    // then runs that model, and callers must not report the old one.
+    if (appliedSelection.model && error instanceof Error)
+      Object.assign(error, { appliedModel: appliedSelection.model });
+    throw error;
+  }
+}
+
+/** The model a failed apply had already switched to, if any. */
+export function appliedModelBeforeFailure(error: unknown): string | undefined {
+  const model = (error as { appliedModel?: unknown } | null)?.appliedModel;
+  return typeof model === 'string' ? model : undefined;
+}
+
+async function applySelectionAxes(
+  client: ModelConfigSettable,
+  sessionId: string,
+  advertisedOptions: AgentModelConfigOption[],
+  selection: { model?: string; effort?: string; fastMode?: boolean },
+  appliedSelection: { model?: string; effort?: string },
+): Promise<AppliedModelSelectionResult> {
+  let currentOptions = advertisedOptions;
   let modelWasSubstituted = false;
   for (const target of modelSelectionTargets(selection)) {
     if (!target.value) continue;

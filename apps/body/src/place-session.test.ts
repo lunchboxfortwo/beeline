@@ -856,7 +856,7 @@ it('reports the running model when the selected model is not offered, without ho
   await f.session.dispose();
 });
 
-it('runs a changed model on the next turn without holding delivery for the fresh read', async () => {
+it('runs a changed model on the very next turn while the configuration read is still unresolved', async () => {
   const f = await fixture();
   f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
   f.client.sessionNew.mockResolvedValue(twoModels);
@@ -865,19 +865,43 @@ it('runs a changed model on the next turn without holding delivery for the fresh
   await f.session.start(f.item);
   await f.session.deliver(f.item, []);
   expect(setter).not.toHaveBeenCalled();
-  // The owner picks Astra; a message is queued at once, before the read lands.
-  let answer!: (value: unknown) => void;
-  f.execute.mockImplementation((name: string) => name === 'getAgentConfiguration'
-    ? new Promise(resolve => { answer = resolve; }) : new Promise(() => {}));
+  // The owner picks Astra and a message follows at once. The configuration
+  // read never answers; the queue item carries the choice.
+  f.execute.mockImplementation(() => new Promise(() => {}));
   f.session.configurationChanged();
-  expect(f.session.stale).toBe(true);
-  await f.session.start(f.item);
+  const next = { ...f.item, id: 'next', turnRequestId: 'next', modelSelection: { model: 'astra' } } as AgentCommand;
+  await f.session.start(next);
+  await f.session.deliver(next, []);
   expect(f.client.sessionNew).toHaveBeenCalledTimes(2);
-  answer({ model: 'astra', commands: [], yoloMode: false });
-  await vi.waitFor(() => expect(setter).toHaveBeenCalledWith('live', 'model', 'astra'));
+  expect(setter).toHaveBeenCalledWith('live', 'model', 'astra');
+  expect(setter.mock.invocationCallOrder[0]).toBeLessThan(f.prompt.mock.invocationCallOrder[1]!);
+  await f.session.dispose();
+});
+
+it('sends the model setter before the prompt even while the setter has not answered', async () => {
+  const f = await fixture();
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  const setter = vi.fn(() => new Promise(() => {}));
+  Object.assign(f.client, { setConfigOption: setter });
+  const item = { ...f.item, modelSelection: { model: 'astra' } } as AgentCommand;
+  await f.session.start(item);
+  await f.session.deliver(item, []);
+  expect(setter).toHaveBeenCalledWith('live', 'model', 'astra');
+  expect(setter.mock.invocationCallOrder[0]).toBeLessThan(f.prompt.mock.invocationCallOrder[0]!);
+  await f.session.dispose();
+});
+
+it('restarts a live session whose model differs from the choice a queue item carries', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  Object.assign(f.client, { setConfigOption: vi.fn(async () => ({})) });
+  await f.session.start(f.item);
   await f.session.deliver(f.item, []);
-  await vi.waitFor(() => expect(runningReports(f.execute).at(-1)).toEqual(
-    { agentId: 'a'.repeat(64), model: 'astra', selected: 'astra' }));
+  await f.session.start({ ...f.item, modelSelection: { model: 'sol' } } as AgentCommand);
+  expect(f.client.sessionNew).toHaveBeenCalledTimes(1);
+  await f.session.start({ ...f.item, modelSelection: { model: 'astra' } } as AgentCommand);
+  expect(f.client.sessionNew).toHaveBeenCalledTimes(2);
   await f.session.dispose();
 });
 
@@ -929,4 +953,23 @@ it('writes a completed thread tool while the harness prompt remains unresolved',
     try { await answer; }
     finally { await f.session.dispose(); }
   }
+});
+
+it('reports the model that did switch when a later setting is refused', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'astra', effort: 'high', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue({ sessionId: 'live', raw: { configOptions: [
+    { id: 'model', category: 'model', currentValue: 'sol', options: [{ value: 'sol' }, { value: 'astra' }] },
+    { id: 'effort', category: 'effort', currentValue: 'low', options: [{ value: 'low' }, { value: 'high' }] },
+  ] } });
+  const setter = vi.fn(async (_session: string, id: string) => {
+    if (id === 'effort') throw new Error('high effort is not on this plan');
+    return {};
+  });
+  Object.assign(f.client, { setConfigOption: setter });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  await vi.waitFor(() => expect(runningReports(f.execute).at(-1)).toEqual({ agentId: 'a'.repeat(64), model: 'astra',
+    selected: 'astra', reason: expect.stringContaining('high effort is not on this plan') }));
+  await f.session.dispose();
 });
