@@ -208,7 +208,11 @@ export async function requestGrant(
     }
     if (kind === 'path') return `approved: ${ask} [grant ${grantId}]. Use it now through run_granted_command; its tool sandbox loads the current path grant.`;
     if (kind === 'mcp') return `approved: ${ask} [grant ${grantId}]. Use your session tools; read(facet:session) shows the route's load result.`;
-    return `approved: ${ask} [grant ${grantId}]; applies at the agent's next session.`;
+    // Nothing loads host or secret grants into a session, so say what they do
+    // and what to ask for instead of promising a later session.
+    if (kind === 'host')
+      return `approved: ${ask} [grant ${grantId}]. This grant records consent only; it opens no network route and runs nothing. To run anything on ${target}, call request_grant kind:command with the full exact argv, for example \`ssh user@host <command>\`, then run that argv with run_granted_command.`;
+    return `approved: ${ask} [grant ${grantId}]. This grant records consent only; it puts nothing in your environment. To use the secret, call request_grant kind:command whose target is the full exact argv plus a --with ${target} suffix, then pass only the argv to run_granted_command.`;
   }
   // Yolo covers most asks; these two shapes never do, and saying which one this
   // is stops the model retrying the same line expecting a different answer.

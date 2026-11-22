@@ -537,8 +537,16 @@ m9_describe('beeline-agent request_grant', () => {
       scope8.deps({ grantId: 'g-3', status: 'approved', auto: true }),
     );
     m9_expect(host).toBe(
-      "approved: reach api.fly.io [grant g-3]; applies at the agent's next session.",
+      'approved: reach api.fly.io [grant g-3]. This grant records consent only; it opens no network route and runs nothing. To run anything on api.fly.io, call request_grant kind:command with the full exact argv, for example `ssh user@host <command>`, then run that argv with run_granted_command.',
     );
+    m9_expect(host).not.toContain('next session');
+    const secret = await m9_requestGrant(
+      { action: 'Use the requested resource', kind: 'secret', target: 'FLY_TOKEN', purpose: 'deploy', reason: 'deploy' },
+      scope8.deps({ grantId: 'g-6', status: 'approved', auto: true }),
+    );
+    m9_expect(secret).toContain('records consent only');
+    m9_expect(secret).toContain('--with FLY_TOKEN');
+    m9_expect(secret).not.toContain('next session');
   });
 
 
