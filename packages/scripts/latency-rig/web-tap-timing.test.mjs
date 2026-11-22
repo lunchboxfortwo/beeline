@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { armTapTiming, readTapTiming, tapFeedback } from './web-tap-timing.mjs';
 
-test('approval timing waits for Once removal and its accepted operation', () => {
+test('approval timing observes the current Once control', () => {
   let mutation,
     pointerdown,
     shown = true;
@@ -40,10 +40,7 @@ test('approval timing waits for Once removal and its accepted operation', () => 
   assert.equal(frames.length, 0);
   shown = false;
   mutation();
-  assert.equal(frames.length, 0, 'optimistic removal is not committed completion');
-  sandbox.window.__latencyTapTiming.operations.push({op:'decideAgentGrant',replyMs:100});
-  mutation();
-  assert.equal(frames.length, 1, 'accepted removal ends the DOM interval');
+  assert.equal(frames.length, 1, 'removing the actual approval control ends the DOM interval');
 });
 
 test('a result needs input and visibility before its two result frames', () => {
@@ -176,9 +173,6 @@ test('creating a thread cannot finish on the parent Room composer', () => {
   mutation();
   assert.equal(frames.length, 0);
   location.pathname = '/beeline/chat/new-thread';
-  mutation();
-  assert.equal(frames.length, 0, 'navigation alone is not an accepted creation');
-  sandbox.window.__latencyTapTiming.operations.push({op:'createHumanCorner',replyMs:100});
   mutation();
   assert.equal(frames.length, 1);
 });

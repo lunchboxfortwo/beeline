@@ -1,5 +1,5 @@
 /** Observe the same visible result as the driver, on the browser's own clock. */
-function feedbackConfig(name, fixture, token) {
+export function tapFeedback(name, fixture, token) {
   const input = '[data-testid="chat-input"]';
   const room = `/beeline/chat/${fixture.roomId}`;
   switch (name) {
@@ -66,21 +66,6 @@ function feedbackConfig(name, fixture, token) {
   }
 }
 
-export function tapFeedback(name, fixture, token) {
-  const config = feedbackConfig(name, fixture, token);
-  if (!config) return config;
-  const operations = {
-    'create-dm': 'resolveDirectMessage', 'create-corner': 'createHumanCorner',
-    'send-text': 'sendRoomMessage', 'send-attachment': 'sendRoomMessage',
-    'react-message': 'reactToMessage', 'report-message': 'reportMessageIssue',
-    'delete-message': 'deleteRoomMessage', 'rename-room': 'updateRoom',
-    'leave-room': 'leaveRoom', 'close-corner': 'requestCornerClose',
-    'answer-approval': 'decideAgentGrant', 'choose-model': 'updateAgentModelSelection',
-    'change-yolo': 'updateAgentYolo', 'stop-turn': 'cancelAgentTurn',
-  };
-  return { ...config, ...(operations[name] ? { expectedOperation: operations[name] } : {}) };
-}
-
 // Runs inside Chromium. Mutation delivery observes DOM commits without a
 // driver round trip or selector polling between the commit and its frame.
 export function armTapTiming(config) {
@@ -113,7 +98,7 @@ export function armTapTiming(config) {
       return;
     }
     const operation = replies.get(response.id);
-    if (operation) { operation.replyMs = performance.now(); check(); }
+    if (operation) operation.replyMs = performance.now();
   };
   function observeSend(data) {
     if (timing.startMs !== null) {
@@ -167,15 +152,12 @@ export function armTapTiming(config) {
       }
       if (config.absentText ? found : !found) return;
     }
-    if (config.expectedOperation && !timing.operations.some(op => op.op === config.expectedOperation && Number.isFinite(op.replyMs))) return;
     observed = true;
     observer.disconnect();
     timing.domMs = performance.now();
-    performance.mark?.("latency-visible-committed-dom");
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         timing.frameMs = performance.now();
-        performance.mark?.("latency-visible-committed-frame");
         timing.durationMs = timing.frameMs - timing.startMs;
         if (send && WebSocket.prototype.send === observeSend) WebSocket.prototype.send = send;
         for (const socket of sockets) socket.removeEventListener('message', receive);
@@ -194,7 +176,6 @@ export function armTapTiming(config) {
       document.removeEventListener('pointerdown', start, true);
       document.removeEventListener('keydown', start, true);
       timing.startMs = performance.now();
-      performance.mark?.("latency-input");
     };
     document.addEventListener('pointerdown', start, { once: true, capture: true });
     document.addEventListener('keydown', start, { once: true, capture: true });

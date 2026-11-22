@@ -287,7 +287,7 @@ async function main() {
             try {
               const page = await context.newPage();
               let traceSession;
-              if (sample === 0) {
+              if (sample === 0 && process.env.LATENCY_RIG_CAPTURE_TRACES === '1') {
                 traceSession = await context.newCDPSession(page);
                 await traceSession.send('Tracing.start', {categories:'devtools.timeline,blink.user_timing,v8.execute',transferMode:'ReportEvents'});
                 const traceEvents = [];
