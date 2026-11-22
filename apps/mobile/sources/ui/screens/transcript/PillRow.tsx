@@ -158,7 +158,8 @@ function RunList({ run }: { run: readonly PillRunEntry[] }) {
                             <Pair from={entry.from} to={entry.to} stop={entry.stop} />
                             <Copy small quiet>{`· ${entry.time}`}</Copy>
                         </XStack>
-                        {entry.stop ? null : entry.body}
+                        {/* A stop opens to its system line, like every other system message. */}
+                        {entry.body}
                     </YStack>
                 ))}
             </YStack>

@@ -72,7 +72,7 @@ describe('PillRow', () => {
         id: 'e1', system: false, from: ruby, to: claude, time: '09:41', body: null,
         run: [
             { id: 'm1', from: ruby, to: claude, time: '09:36', body: React.createElement('Text', { testID: 'm1-body' }, 'Stop your worker') },
-            { id: 's1', from: ruby, to: claude, time: '09:37', stop: true },
+            { id: 's1', from: ruby, to: claude, time: '09:37', stop: true, body: React.createElement('Text', { testID: 's1-body' }, '@ruby stopped @claude') },
             { id: 'm2', from: claude, to: ruby, time: '09:38', body: React.createElement('Text', { testID: 'm2-body' }, 'Stopped') },
             { id: 'm3', from: ruby, to: jelly, time: '09:39', body: React.createElement('Text', { testID: 'm3-body' }, 'Send timings') },
         ],
@@ -115,7 +115,8 @@ describe('PillRow', () => {
         const stop = entries[1];
         expect(stop.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-stop-ring')
             .findAll((node: any) => node.props.testID === 'pill-stop-square')).not.toHaveLength(0);
-        expect(text(stop)).toEqual(['· 09:37']);
+        // Opened, a stop reads its system line, the same as every other system message.
+        expect(text(stop)).toEqual(['· 09:37', '@ruby stopped @claude']);
         expect(stop.props['aria-label']).toBe('Ruby stopped Claude');
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
