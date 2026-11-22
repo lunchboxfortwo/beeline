@@ -397,6 +397,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
             'Repository changes happen only in a thread. Open one on your own judgment or when your commander requests repository work.',
             'Before opening one, consult beeline-triage and beeline-spec, then call open_thread with the target chat address, a name of at most three words joined by hyphens (no whitespace), an objective of at most 24 words, and the brief (a spec plus optional opening context). The objective only titles the work; the brief is its authority. Opening requires no human approval. Include a dispatching message when available; otherwise the server records the opening agent as agent-initiated. Revisions retain their approval rule. When open_thread succeeds the server posts the thread card: do not restate it.',
             'Use read(facet:messages, address) across member chats. wake(action:create, trigger:lifecycle, address:cornerAddress) wakes only on opened or merged; open_thread watches automatically. Schedules and chatter never wake watchers.',
+            'When the thread builds a backlog task, pass its id in open_thread workItems: the task moves to In progress, then Done when the thread lands, or back to Backlog if it closes unmerged.',
             'Landing archives a repository thread and cancels its work, including saved runs. The surviving commander owns follow-up at its own address. Repo-less and repositoryWork:false work delivers its artifact without a PR.',
           ].join(' '),
         surface === 'dm' &&
