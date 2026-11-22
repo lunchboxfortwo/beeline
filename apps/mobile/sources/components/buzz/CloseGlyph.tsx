@@ -63,7 +63,7 @@ export function CloseButton({
       accessibilityRole="button"
       disabled={disabled}
       hitSlop={hitSlop}
-      icon={control ? <YStack position="absolute" top={0} right={0} backgroundColor="canvas" borderRadius="lg"><CloseGlyph /></YStack> : <CloseGlyph />}
+      icon={control ? <YStack position="absolute" top={0} right={0} width={18} height={18} alignItems="center" justifyContent="center" backgroundColor="attachmentBadgeFill" borderRadius="lg"><CloseGlyph size={10} color="attachmentBadgeInk" /></YStack> : <CloseGlyph />}
       iconOnly
       label=""
       onPress={onPress}

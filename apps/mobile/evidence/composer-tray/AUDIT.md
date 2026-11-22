@@ -10,7 +10,7 @@ The implementation uses the existing composer frame, SuggestionCard/Row, icon se
 
 - Both themes render at phone and desktop widths with the real production components and fonts. The before/after images sit next to the approved mock.
 - Measured whole-composer height stays (196 px) with either one or six attachments. Previously it grew from (227 px) to (394 px).
-- The thumbnail row measures (48 px) high. Each remove button measures (44 × 44 px), including the reply cancel control. Each thumbnail has the house radius and no surrounding card, border, count label or gradient.
+- The thumbnail row measures (48 px) high. Each remove button measures (44 × 44 px), including the reply cancel control. Each thumbnail has the house radius and no surrounding card, border, count label or gradient. Non-image thumbnails use the raised fill; the dark remove badge is (18 px), inset (2 px), with its original (44 px) target.
 - A synthesized Chromium touch swipe at phone width (320 px) scrolls the strip (50 px) and retains text-field focus. This is a browser touch test, not a claim about native keyboard gestures.
 - Uploading thumbnails are dimmed and expose a named, accessible, politely announced busy state. No spinner mounts in the attachment tray. Failed uploads retain a separately reachable Retry action alongside the thumbnail without increasing row height.
 - Reply content stays on one truncated line. The text field grows through four lines and then scrolls within its (92 px) limit.

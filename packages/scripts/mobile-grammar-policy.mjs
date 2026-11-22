@@ -16,7 +16,7 @@ export const TOKEN_FILES = new Set(['ui/tamagui.config.ts', 'buzz/groknight.ts']
 
 export const COLOR_TOKENS = new Set([
   'canvas', 'raised', 'highlight', 'stroke', 'strongStroke', 'ink', 'secondary',
-  'needsYou', 'added', 'removed', 'primaryFill', 'primaryInk', 'transparent',
+  'needsYou', 'added', 'removed', 'primaryFill', 'primaryInk', 'attachmentBadgeFill', 'attachmentBadgeInk', 'transparent',
 ]);
 // 0, 4, 8, 12, 16, 20, 24, 32 and the one 2 px optical nudge.
 export const SPACE_TOKENS = new Set(['0', '1', '2', '3', '4', '5', '6', '8', '0.5']);

@@ -511,7 +511,7 @@ export function SafeSides({ children }: { children: React.ReactNode }) {
  * style in one colour token as a plain, memoised TextStyle for them.
  */
 export type ColorToken = 'canvas' | 'raised' | 'highlight' | 'stroke' | 'strongStroke' | 'ink' | 'secondary'
-    | 'needsYou' | 'added' | 'removed' | 'primaryFill' | 'primaryInk' | 'transparent';
+    | 'needsYou' | 'added' | 'removed' | 'primaryFill' | 'primaryInk' | 'attachmentBadgeFill' | 'attachmentBadgeInk' | 'transparent';
 function useTypeStyle(v: Variant, color: ColorToken = 'ink'): import('react-native').TextStyle {
     const textSize = useTextSize();
     const ink = (useTheme() as Record<string, { val: string } | undefined>)[color]?.val;

@@ -1,3 +1,5 @@
+> Historical gesture evidence captured before the document-fill and inset-badge correction. Current appearance is shown in the regenerated web comparisons.
+
 # Android native component evidence
 
 These are genuine Android emulator screenshots of the production ConversationComposer in an isolated Expo Go fixture. They are supplemental component evidence, not authenticated chat or end-to-end upload evidence. The top buttons and gear are fixture/Expo controls, outside the product.

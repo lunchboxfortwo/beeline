@@ -38,6 +38,7 @@ function themeValues(mode: Mode, palette: Palette): Record<string, string> & { n
         ink: c.textPrimary, secondary: c.textSecondary,
         needsYou: c.accent, added: c.diffAdded, removed: c.diffRemoved,
         primaryFill: c.buttonPrimaryFill, primaryInk: c.buttonPrimaryText,
+        attachmentBadgeFill: `${beelineThemes.bone.textPrimary}b8`, attachmentBadgeInk: beelineThemes.bone.bgBase,
     };
     return theme;
 }
