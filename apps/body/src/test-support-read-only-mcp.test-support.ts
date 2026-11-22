@@ -762,7 +762,7 @@ export function fixtureScope38() {
 
 
 
-const valid = { mode: 'request', action: 'Inspect the service', kind: 'host', target: 'example.com', reason: 'Inspect service', purpose: 'Diagnose the service' };
+const valid = { mode: 'request', action: 'Inspect the service', kind: 'host', target: 'ops@example.com', reason: 'Inspect service', purpose: 'Diagnose the service' };
 
 
 

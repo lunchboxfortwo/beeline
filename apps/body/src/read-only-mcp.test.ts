@@ -533,14 +533,61 @@ m9_describe('beeline-agent request_grant', () => {
       'approved: run npm test [grant g-2]. Run it now with run_granted_command and the argv.',
     );
     const host = await m9_requestGrant(
-      { action: 'Use the requested resource', kind: 'host', target: ' api.fly.io ', purpose: 'reach the Fly API', reason: 'reach the Fly API' },
+      { action: 'Use the requested resource', kind: 'host', target: ' do@100.126.74.60 ', purpose: 'check Chad', reason: 'check Chad' },
       scope8.deps({ grantId: 'g-3', status: 'approved', auto: true }),
     );
     m9_expect(host).toBe(
-      "approved: reach api.fly.io [grant g-3]; applies at the agent's next session.",
+      'approved: reach do@100.126.74.60 [grant g-3]. Use it now: run_granted_command argv ["ssh", "do@100.126.74.60", "<command>", ...] runs that command on do@100.126.74.60 as that user, with Beeline\'s fixed ssh options; pass no ssh options yourself.',
     );
+    m9_expect(host).not.toContain('next session');
   });
 
+
+  m9_it('never promises a later session for any grant kind, approved at once or on a card', async () => {
+    const asks = [
+      { kind: 'command', target: 'npm test' },
+      { kind: 'path', target: '/srv/data' },
+      { kind: 'device', target: '/dev/kvm' },
+      { kind: 'mcp', target: 'squire' },
+      { kind: 'host', target: 'do@100.126.74.60' },
+      { kind: 'secret', target: 'FLY_TOKEN' },
+    ];
+    for (const { kind, target } of asks) {
+      for (const answer of [{ status: 'approved', auto: true }, { status: 'pending' }]) {
+        const reply = await m9_requestGrant(
+          { action: 'Use the requested resource', kind, target, purpose: 'do the work', reason: 'do the work' },
+          scope8.deps({ grantId: `g-${kind}`, ...answer }),
+        );
+        m9_expect(reply).not.toMatch(/next session|new session|later session/i);
+      }
+    }
+    const card = await m9_requestGrant(
+      { action: 'Use the requested resource', kind: 'host', target: 'do@100.126.74.60', purpose: 'check Chad', reason: 'check Chad' },
+      scope8.deps({ grantId: 'g-card', status: 'pending' }),
+    );
+    m9_expect(card).toContain('Once approved, in this same session: Use it now: run_granted_command argv ["ssh", "do@100.126.74.60"');
+    const secret = await m9_requestGrant(
+      { action: 'Use the requested resource', kind: 'secret', target: 'FLY_TOKEN', purpose: 'deploy', reason: 'deploy' },
+      scope8.deps({ grantId: 'g-secret', status: 'approved', auto: true }),
+    );
+    m9_expect(secret).toContain('run_granted_command with secrets ["FLY_TOKEN"]');
+    m9_expect(secret).not.toContain('fly-secret-value-123');
+  });
+
+  m9_it('refuses at ask time a grant no session could use, before the server is called', async () => {
+    const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const deps = scope8.deps({ grantId: 'never' }, ops);
+    await m9_expect(
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'secret', target: 'GHOST_TOKEN', purpose: 'deploy', reason: 'deploy' }, deps),
+    ).rejects.toThrow(/Store it first with store_secret/);
+    await m9_expect(
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'secret', target: 'fly token', purpose: 'deploy', reason: 'deploy' }, deps),
+    ).rejects.toThrow(/UPPER_CASE/);
+    await m9_expect(
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'api.fly.io', purpose: 'reach Fly', reason: 'reach Fly' }, deps),
+    ).rejects.toThrow(/user@host/);
+    m9_expect(ops).toEqual([]);
+  });
 
   m9_it('makes an approved device available to tools without replacing the session', async () => {
     const device = await m9_requestGrant(
@@ -577,10 +624,10 @@ m9_describe('beeline-agent request_grant', () => {
       'target must be a non-empty string',
     );
     await m9_expect(
-      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'api.fly.io', purpose: 'Inspect the checkout', reason: ' ' }, answer),
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'do@100.126.74.60', purpose: 'Inspect the checkout', reason: ' ' }, answer),
     ).rejects.toThrow('reason must be a non-empty string');
     await m9_expect(
-      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'api.fly.io', purpose: 'x', reason: 'x', ttl: 5 }, answer),
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'do@100.126.74.60', purpose: 'x', reason: 'x', ttl: 5 }, answer),
     ).rejects.toThrow('ttl must be');
     m9_expect(ops).toEqual([]);
   });

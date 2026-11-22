@@ -58,7 +58,10 @@ import {
   interpreterScriptArgument,
   parseCommandGrantTarget,
   type CommandGrantRule,
+  hostGrantSshArgv,
 } from '@beeline/api-contract/agent-grants';
+import { HOST_GRANT_ARGV_HINT, hostGrantRefusal, matchHostGrant, trustedHostSsh } from './grant-host.js';
+import { requireSecretGrants, validateRequestedSecrets } from './grant-secret.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
 import { surfaceAllows, type AgentSurface } from '@beeline/api-contract/surface-capabilities';
@@ -465,6 +468,8 @@ export interface GrantCommandRunnerOptions {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   outputCapBytes?: number;
+  /** Resolves the trusted installed program a host grant spawns; tests replace it. */
+  trustedExecutable?: typeof installedGrantExecutable;
 }
 
 export class GrantCommandRunner {
@@ -494,7 +499,7 @@ export class GrantCommandRunner {
     }
   }
 
-  async run(input: { roomId: unknown; argv: unknown; stdin?: unknown }): Promise<GrantRunResult> {
+  async run(input: { roomId: unknown; argv: unknown; stdin?: unknown; secrets?: unknown }): Promise<GrantRunResult> {
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     const room = this.rooms.get(input.roomId);
     if (!room) throw new Error('this daemon is not serving that chat');
@@ -507,6 +512,7 @@ export class GrantCommandRunner {
     )
       throw new Error('stdin must be bounded text');
     const stdin = input.stdin as string | undefined;
+    const requestedSecrets = validateRequestedSecrets(input.secrets);
     const turn = room.turn();
     if (!turn?.requestId) throw new Error('command requires an active turn');
     const live = await this.options.api.execute('listTurnAgentGrants', {
@@ -544,33 +550,55 @@ export class GrantCommandRunner {
       match = possible;
       break;
     }
-    if (!match) {
+    // An exact command grant wins; otherwise `ssh user@host <command>` may run
+    // under an approved host grant for exactly that login.
+    const hostMatch = match || bindingFailure ? undefined : matchHostGrant(live.grants, room.workspaceId, argv);
+    if (!match && !hostMatch) {
       if (bindingFailure) throw bindingFailure;
+      const hostRefusal = argv[0] === 'ssh' ? hostGrantRefusal(live.grants, room.workspaceId, argv) : undefined;
+      if (hostRefusal) throw new Error(hostRefusal);
       const history = await this.options.api.execute('listAgentGrantRequests', {
         agentId: this.options.agentId,
         roomId: input.roomId,
       });
       const nearest = closestCommandGrant(history.grants ?? live.grants, room.workspaceId, argv);
       throw new Error(
-        `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.`,
+        `no approved command grant matches.${nearest} Check the named mismatch before asking again with request_grant kind=command for this argv.` +
+          (argv[0] === 'ssh'
+            ? ` No live host grant is approved for this session either; to run commands on one login, ask with request_grant kind=host target=user@host. ${HOST_GRANT_ARGV_HINT}`
+            : ''),
       );
     }
-    const { grant, rule } = match;
+    const grant = match?.grant ?? hostMatch!.grant;
     // Use the same surface policy for the entire run.
-    await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
+    if (match) await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
+    const execArgv = hostMatch ? hostGrantSshArgv(hostMatch.login, argv.slice(2)) : argv;
+    if (hostMatch && requestedSecrets.length)
+      throw new Error('secrets are not passed to a host grant run; ssh does not carry this environment to the remote host.');
+    // Each requested secret needs its own live secret grant; the command itself
+    // still has to match a command grant exactly.
+    const secretGrants = requireSecretGrants(live.grants, room.workspaceId, requestedSecrets);
     const secrets = new Map<string, string>();
-    for (const name of rule.secrets) {
+    for (const name of [...(match?.rule.secrets ?? []), ...requestedSecrets]) {
       const value = await this.resolveSecret(name);
       if (!value) throw new Error(`secret ${name} is not in the operator key store`);
       secrets.set(name, value);
     }
+    const source = this.options.env ?? process.env;
+    const sshPath = hostMatch
+      ? trustedHostSsh(this.options.trustedExecutable ?? installedGrantExecutable, room.cwd, source.PATH)
+      : undefined;
     // A once grant is spent before the command starts, so a second call in the
     // same instant cannot ride the same approval.
-    if (grant.status === 'once') {
-      await this.options.api.execute('consumeAgentGrant', { grantId: grant.grantId });
+    for (const spent of [grant, ...secretGrants]) {
+      if (spent.status === 'once') await this.options.api.execute('consumeAgentGrant', { grantId: spent.grantId });
     }
-    const source = this.options.env ?? process.env;
-    const env: Record<string, string> = {
+    // ssh needs the owner's real HOME for its keys and known hosts, so a host
+    // run gets only PATH and HOME, never the session's tool environment.
+    const env: Record<string, string> = hostMatch ? {
+      ...(source.PATH ? { PATH: source.PATH } : {}),
+      ...(source.HOME ? { HOME: source.HOME } : {}),
+    } : {
       ...(source.PATH ? { PATH: source.PATH } : {}),
       ...(source.HOME ? { HOME: source.HOME } : {}),
       XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
@@ -584,12 +612,14 @@ export class GrantCommandRunner {
     // plainly; a Room may not, so it spawns into the very mount table an
     // ordinary Room session gets — whole host readable, writable only in its own
     // scratch and home overlay.
-    const runsOnHost = surfaceAllows(policy.surface, 'run-host-command');
+    // A host grant acts on the remote login it names; a Room sandbox hides the
+    // keys ssh needs, so that run spawns plainly with the fixed options.
+    const runsOnHost = hostMatch !== undefined || surfaceAllows(policy.surface, 'run-host-command');
     const sandboxMarker = runsOnHost
       ? undefined
       : `[beeline-sandbox-started:${randomBytes(16).toString('hex')}]`;
     const spawn = runsOnHost
-      ? { command: argv[0]!, args: argv.slice(1) }
+      ? { command: sshPath ?? execArgv[0]!, args: execArgv.slice(1) }
       : roomSandboxCommand(
           policy,
           room.cwd,
@@ -600,7 +630,7 @@ export class GrantCommandRunner {
           grantedSandboxDevices(live),
         );
     // Re-check after secret resolution and Once consumption, immediately before exec.
-    await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
+    if (match) await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
     const outcome = await new Promise<{
       exitCode: number | null;
       signal?: string;
@@ -707,12 +737,12 @@ export class GrantCommandRunner {
       activity: [
         {
           kind: 'tool',
-          title: `ran ${argv.join(' ')} under grant ${grant.grantId} · asked by ${
+          title: `ran ${execArgv.join(' ')} under grant ${grant.grantId} · asked by ${
             requester.name ?? requester.pubkey.slice(0, 12)
           }`,
           operation: 'execute',
           status,
-          command: argv.join(' '),
+          command: execArgv.join(' '),
           ...(output ? { output } : {}),
           requestedBy: requester,
         },
@@ -958,8 +988,9 @@ export class GrantRunnerServer {
         roomId?: unknown;
         argv?: unknown;
         stdin?: unknown;
+        secrets?: unknown;
       };
-      send(200, await this.runner.run({ roomId: body.roomId, argv: body.argv, stdin: body.stdin }));
+      send(200, await this.runner.run({ roomId: body.roomId, argv: body.argv, stdin: body.stdin, secrets: body.secrets }));
     } catch (error) {
       send(400, { error: error instanceof Error ? error.message : String(error) });
     }

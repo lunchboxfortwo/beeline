@@ -1,7 +1,7 @@
 import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
 import { type SecretResolver, operatorSecretResolver, storeOperatorSecret } from "./grant-runner.js";
 import { pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
-import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME } from "@beeline/api-contract/agent-grants";
+import { type CommandGrantRule, type CommandGrantScript, interpreterScriptArgument, isRequestableAgentGrantKind, REQUESTABLE_AGENT_GRANT_KINDS, AGENT_GRANT_TARGET_MAX_LENGTH, parseCommandGrantTarget, AGENT_GRANT_REASON_MAX_LENGTH, HOST_EMULATOR_TARGET, AGENT_GRANT_VERBS, type AgentGrantEscalation, formatGrantEscalationReason, isSharedAssetCategory, SHARED_ASSET_CATEGORIES, COMMAND_SECRET_NAME, parseHostGrantTarget } from "@beeline/api-contract/agent-grants";
 import { resolveGrantCommand, isNativeGrantExecutable, installedGrantExecutable } from "./grant-script.js";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -122,6 +122,16 @@ export function readGrantScript(
 
 
 
+/** How an approved host grant is used, the same in this session or after a card. */
+function hostGrantUse(target: string): string {
+  return `Use it now: run_granted_command argv ["ssh", "${target}", "<command>", ...] runs that command on ${target} as that user, with Beeline's fixed ssh options; pass no ssh options yourself.`;
+}
+
+/** How an approved secret grant is used, the same in this session or after a card. */
+function secretGrantUse(name: string): string {
+  return `Use it now: run_granted_command with secrets ["${name}"] and an argv that a command grant matches exactly puts ${name} in that command's environment; the value never appears in output.`;
+}
+
 /** Legacy action selected the operation; leave display copy to the server. */
 function grantApprovalIntent(args: JsonObject) {
   const intent = normalizeApprovalIntent(args);
@@ -146,6 +156,21 @@ export async function requestGrant(
   const target = kind === 'command' ? (rawTarget ?? '') : (rawTarget ?? '').trim();
   if (!target) throw new Error('target must be a non-empty string');
   if (target.length > AGENT_GRANT_TARGET_MAX_LENGTH) throw new Error('target is too long');
+  // Refuse at ask time what no session could use, instead of approving it.
+  if (kind === 'secret') {
+    if (!COMMAND_SECRET_NAME.test(target))
+      throw new Error('a secret grant target is one UPPER_CASE secret name, such as FLY_TOKEN.');
+    // An approved secret that cannot resolve could never be used, so refuse now.
+    if (!(await (deps.resolveSecret ?? operatorSecretResolver(process.env))(target)))
+      throw new Error(
+        `secret ${target} is not in the operator key store or the daemon environment, so a grant for it could never be used. Store it first with store_secret.`,
+      );
+  }
+  if (kind === 'host' && target !== HOST_EMULATOR_TARGET && !parseHostGrantTarget(target))
+    throw new Error(
+      `a host grant names one SSH login as user@host, and ${target} is not one. ` +
+        'Ask for user@host to run ssh commands there, or ask with kind:command for the exact argv you need.',
+    );
   const rule = kind === 'command' ? parseCommandGrantTarget(target) : undefined;
   const script = rule ? readGrantScript(rule, deps) : undefined;
   const commandContext = rule ? resolveGrantCommand(rule.argv, deps.scriptRoots?.[0] ?? '.', deps.scriptEnv ?? process.env) : undefined;
@@ -208,7 +233,9 @@ export async function requestGrant(
     }
     if (kind === 'path') return `approved: ${ask} [grant ${grantId}]. Use it now through run_granted_command; its tool sandbox loads the current path grant.`;
     if (kind === 'mcp') return `approved: ${ask} [grant ${grantId}]. Use your session tools; read(facet:session) shows the route's load result.`;
-    return `approved: ${ask} [grant ${grantId}]; applies at the agent's next session.`;
+    if (kind === 'host') return `approved: ${ask} [grant ${grantId}]. ${hostGrantUse(target)}`;
+    if (kind === 'secret') return `approved: ${ask} [grant ${grantId}]. ${secretGrantUse(target)}`;
+    throw new Error(`grant ${grantId} was approved, but Beeline has no way to use a ${kind} grant in this session.`);
   }
   // Yolo covers most asks; these two shapes never do, and saying which one this
   // is stops the model retrying the same line expecting a different answer.
@@ -243,7 +270,14 @@ export async function requestGrant(
     'your turn is paused on this grant. Tell the human what you are waiting for and end your turn now; ' +
     (kind === 'mcp'
       ? 'the approval wake continues this session; read(facet:session) shows the route load result, then use it with your session tools without restarting or scheduling another turn.'
-      : 'you will be woken with the answer.')
+      : 'you will be woken with the answer.') +
+    (kind === 'host' && target !== HOST_EMULATOR_TARGET
+      ? ` Once approved, in this same session: ${hostGrantUse(target)}`
+      : kind === 'secret'
+        ? ` Once approved, in this same session: ${secretGrantUse(target)}`
+      : kind === 'path' || kind === 'device'
+        ? ' Once approved, run_granted_command loads it in this same session.'
+        : '')
   );
 }
 

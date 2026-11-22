@@ -65,7 +65,7 @@ export const SCRATCH_TOOLS: ToolDefinition[] = [
 
 export const RUNNER_TOOL: ToolDefinition = {
   "name": "run_granted_command",
-  "description": "Run a command under an approved command grant, only when an approved grant is a word-for-word prefix of argv. In a top-level chat it runs on the SAME read-only filesystem the chat promises — you can read anything and write only your own scratch, so open a thread for work that changes files. A thread can do everything a chat can and more: its worktree is writable and a command there may act on the live host, next to the branch and the transcript that explain it. The named secrets are in its environment and never in the output. Ten-minute timeout, capped output, one ledger row per run.",
+  "description": "Run a command under an approved command grant, only when an approved grant matches the exact argv, word for word and the same length; extra or missing words never match. An approved host grant for user@host also runs argv ['ssh', 'user@host', '<command>', ...] with fixed ssh options; pass no ssh options. In a top-level chat it runs on the SAME read-only filesystem the chat promises — you can read anything and write only your own scratch, so open a thread for work that changes files. A thread can do everything a chat can and more: its worktree is writable and a command there may act on the live host, next to the branch and the transcript that explain it. The named secrets are in its environment and never in the output. Ten-minute timeout, capped output, one ledger row per run.",
   "inputSchema": {
     "type": "object",
     "required": ["argv"],
@@ -76,6 +76,12 @@ export const RUNNER_TOOL: ToolDefinition = {
         "minItems": 1,
         "items": {"type": "string", "minLength": 1},
         "description": "The command and its arguments as separate words."
+      },
+      "secrets": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+        "description": "Secret names, each under its own approved secret grant, added to this command's environment; the argv must still match a command grant exactly."
       }
     },
     "additionalProperties": false

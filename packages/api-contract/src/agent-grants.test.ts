@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   grantPresentation,
+  hostGrantSshArgv,
+  parseHostGrantTarget,
   agentGrantAutoApproves,
   commandGrantEscalations,
   commandGrantMatches,
@@ -363,11 +365,36 @@ it('preapproves a short list of read-only gh and git commands and still asks nea
 
 
 it.each([false, true])('outside-resource auto authority follows effective yolo=%s, except shared emulator/cache retirement', yolo => {
-  for (const kind of ['path', 'host', 'secret', 'device', 'command', 'mcp'] as const)
+  for (const kind of ['path', 'secret', 'device', 'command', 'mcp'] as const)
     expect(agentGrantAutoApproves({ kind, target: '/host/resource', yolo })).toBe(yolo);
+  expect(agentGrantAutoApproves({ kind: 'host', target: 'do@100.126.74.60', yolo })).toBe(false);
   expect(agentGrantAutoApproves({ kind: 'host', target: '127.0.0.1:5037', yolo })).toBe(true);
   expect(agentGrantAutoApproves({ kind: 'mcp', target: 'app:foreign', ownApp: false, yolo })).toBe(false);
   expect(agentGrantAutoApproves({ kind: 'command', target: 'cat .env', escalations: ['credential'], yolo })).toBe(false);
   expect(agentGrantAutoApproves({ kind: 'command', target: 'python3 task.py', escalations: ['unseen-script'], yolo })).toBe(false);
   expect(agentGrantAutoApproves({ kind: 'mcp', target: 'wallet', requesterIsOwner: false, yolo })).toBe(false);
+});
+
+describe('host grants', () => {
+  it('parse only a plain user@host login', () => {
+    expect(parseHostGrantTarget('do@100.126.74.60')).toEqual({ user: 'do', host: '100.126.74.60' });
+    expect(parseHostGrantTarget('deploy@chad.example.com')).toEqual({ user: 'deploy', host: 'chad.example.com' });
+    for (const target of ['api.fly.io', '@host', 'do@', 'a@b@c', '-oProxyCommand=x@host', 'do@-host', 'do@ho st', 'do@host;id'])
+      expect(parseHostGrantTarget(target)).toBeUndefined();
+  });
+
+  it('run ssh with fixed options and the approved login after --', () => {
+    const argv = hostGrantSshArgv({ user: 'do', host: '100.126.74.60' }, ['uname', '-a']);
+    expect(argv[0]).toBe('ssh');
+    expect(argv).toContain('BatchMode=yes');
+    expect(argv.slice(argv.indexOf('--'))).toEqual(['--', 'do@100.126.74.60', 'uname', '-a']);
+  });
+
+  it('tell the approver the grant allows any command as that user', () => {
+    expect(grantPresentation({ kind: 'host', target: 'do@100.126.74.60', reason: 'check Chad', capabilities: 'read only' }).facts)
+      .toEqual([
+        { label: 'Touches', value: 'do@100.126.74.60' },
+        { label: 'Can', value: 'Run any command on 100.126.74.60 as do' },
+      ]);
+  });
 });

@@ -156,6 +156,46 @@ export function commandGrantMatches(rule: CommandGrantRule, requested: readonly 
   return requested.length === rule.argv.length && rule.argv.every((word, index) => requested[index] === word);
 }
 
+/** One SSH login a host grant names: `user@host`. */
+export type HostGrantLogin = { readonly user: string; readonly host: string };
+
+const HOST_GRANT_USER = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
+const HOST_GRANT_HOST =
+  /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/;
+
+/** Parse a host grant target; only a plain `user@host` login can be run. */
+export function parseHostGrantTarget(target: string): HostGrantLogin | undefined {
+  const at = target.indexOf('@');
+  if (at <= 0 || at !== target.lastIndexOf('@')) return undefined;
+  const user = target.slice(0, at);
+  const host = target.slice(at + 1);
+  return HOST_GRANT_USER.test(user) && HOST_GRANT_HOST.test(host) ? { user, host } : undefined;
+}
+
+/**
+ * Options every host-grant run uses. No user config is read, so a config entry
+ * cannot send the login to another host or run a local or proxy command, and
+ * nothing is forwarded back to this machine.
+ */
+export const HOST_GRANT_SSH_OPTIONS: readonly string[] = [
+  '-F', 'none',
+  '-T',
+  '-o', 'BatchMode=yes',
+  '-o', 'ConnectTimeout=15',
+  '-o', 'StrictHostKeyChecking=accept-new',
+  '-o', 'ProxyCommand=none',
+  '-o', 'ProxyJump=none',
+  '-o', 'PermitLocalCommand=no',
+  '-o', 'ClearAllForwardings=yes',
+  '-o', 'ForwardAgent=no',
+  '-o', 'ForwardX11=no',
+];
+
+/** The argv a host grant runs: fixed options, the approved login, then the remote command. */
+export function hostGrantSshArgv(login: HostGrantLogin, remote: readonly string[]): string[] {
+  return ['ssh', ...HOST_GRANT_SSH_OPTIONS, '--', `${login.user}@${login.host}`, ...remote];
+}
+
 /**
  * The system line the server posts when the owner answers a card. It mentions
  * the agent so the daemon inbox delivers it, and the daemon recognises it
@@ -672,6 +712,8 @@ export function agentGrantAutoApproves(input: {
   requireOwnerApproval?: boolean; ownApp?: boolean; yolo?: boolean; requesterIsOwner?: boolean;
 }): boolean {
   if (input.kind === 'shared_asset' || (input.kind === 'host' && input.target === HOST_EMULATOR_TARGET)) return true;
+  // A host grant lets the agent run any command on that login, so only the owner's card approves it.
+  if (input.kind === 'host') return false;
   return !input.requireOwnerApproval && !input.escalations?.length && input.yolo === true &&
     (input.kind === 'mcp' && (input.target.startsWith('app:') || input.target.startsWith('connection-install:'))
       ? input.ownApp === true
@@ -699,6 +741,16 @@ export function grantPresentation(grant: {
 }) {
   let runs: string | undefined;
   let uses: string | undefined;
+  const login = grant.kind === 'host' ? parseHostGrantTarget(grant.target.trim()) : undefined;
+  if (login) {
+    return {
+      purpose: grant.purpose ?? grant.reason,
+      facts: [
+        { label: 'Touches', value: `${login.user}@${login.host}` },
+        { label: 'Can', value: `Run any command on ${login.host} as ${login.user}` },
+      ],
+    };
+  }
   if (grant.kind === 'command') {
     try {
       const rule = parseCommandGrantTarget(grant.target);
