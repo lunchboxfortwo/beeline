@@ -629,3 +629,16 @@ it('failure after the original anchor replied still finalizes and resumes the ow
  next.resolve({text:'Sibling result',steps:[],toolCalls:[],cleanup:async()=>{}});
  await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'Sibling result'})),{timeout:5000});
 });
+
+it('records session end when the harness fails after its only request was answered', async () => {
+  const f = await fixture(), item = f.item('answered-before-failure');
+  let fail!: (error: Error) => void;
+  harness.deliver.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+  f.changed([item]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledOnce());
+  f.changed([], [item.id]);
+  fail(new Error('session lost after reply'));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: item.id, harnessEnded: true, invocation: { id: expect.any(String), requestId: item.turnRequestId },
+  })));
+});

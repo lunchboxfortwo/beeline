@@ -168,14 +168,17 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
         if(source && !connection.rowCount) return;
         if (request.invocationId) await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId);
         await db.query(`WITH delivered AS (SELECT * FROM agent_commands
-          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending' FOR SHARE),
+          WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3
+            AND (state='pending' OR (state='complete' AND EXISTS(SELECT 1 FROM agent_invocations invocation
+              WHERE invocation.command_id=agent_commands.id AND NOT invocation.ended))) FOR SHARE),
           ${workflowOutputBindingCtes('delivered')}
-          INSERT INTO agent_turns(room_id,request_id,agent_id,status,connection_epoch)
-          SELECT command.room_id,command.turn_request_id,command.agent_id,'working',$4::bigint FROM delivered command
+          INSERT INTO agent_turns(room_id,request_id,agent_id,status,connection_epoch,invocation_id)
+          SELECT command.room_id,command.turn_request_id,command.agent_id,'working',$4::bigint,$5::text FROM delivered command
           ORDER BY command.created_at DESC LIMIT 1
           ON CONFLICT(room_id,request_id,agent_id) DO UPDATE SET status='working',failure_reason=NULL,
-            completion_kind=NULL,created_at=now(),started_at=now(),connection_epoch=EXCLUDED.connection_epoch`,
-          [request.roomId, authenticatedAgentId, request.requestId,connection.rows[0]?.epoch ?? null]);
+            completion_kind=NULL,created_at=now(),started_at=now(),connection_epoch=EXCLUDED.connection_epoch,
+            invocation_id=COALESCE(EXCLUDED.invocation_id,agent_turns.invocation_id)`,
+          [request.roomId, authenticatedAgentId, request.requestId,connection.rows[0]?.epoch ?? null,request.invocationId ?? null]);
         });
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'turn', agentId: authenticatedAgentId });
         }

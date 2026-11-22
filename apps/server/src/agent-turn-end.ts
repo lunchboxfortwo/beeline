@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS agent_invocations (
   final_suppressed boolean NOT NULL DEFAULT false,
   PRIMARY KEY(command_id,invocation_id)
 );
+ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS ended boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS connection_epoch bigint;
+ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS invocation_id text;
 -- Lifecycle projections may finish their reads in a different order. Keep a
 -- revision even when two executions start in one second. The constant column
 -- default avoids rewriting turn history during rollout; new writes use the
@@ -76,6 +78,8 @@ DECLARE ended agent_commands%ROWTYPE;
 BEGIN
   SELECT * INTO ended FROM agent_commands WHERE id=command_id AND state<>'pending';
   IF NOT FOUND THEN RETURN; END IF;
+  IF ended.state<>'cancelled' AND EXISTS(SELECT 1 FROM agent_invocations invocation
+    WHERE invocation.command_id=ended.id AND NOT invocation.ended) THEN RETURN; END IF;
   PERFORM beeline_project_agent_turn(ended.agent_id,ended.room_id,ended.turn_request_id,
     CASE WHEN failed OR ended.report_outcome='failed' THEN 'failed' ELSE ended.state END,reason,NULL,NULL,false);
   DELETE FROM live_outputs WHERE room_id=ended.room_id AND agent_id=ended.agent_id
@@ -116,11 +120,21 @@ END; $$;
 export const PERSON_STOP_REASON = 'person_stop';
 
 /** Use the recorded replacement epoch to avoid interrupting a newer execution. */
-export async function interruptAgentTurns(db: SqlDatabase, agentId: string, beforeEpoch: number): Promise<string[]> {
+export async function interruptAgentTurns(db: SqlDatabase, agentId: string, beforeEpoch: number, offline = false): Promise<string[]> {
   const turns = await db.query<{ room_id: string; request_id: string }>(`SELECT room_id,request_id FROM agent_turns
     WHERE agent_id=$1 AND status='working' AND (connection_epoch IS NULL OR connection_epoch<$2)`, [agentId,beforeEpoch]);
-  for (const turn of turns.rows) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,$4,NULL)',
-    [agentId,turn.room_id,turn.request_id,beforeEpoch]);
+  for (const turn of turns.rows) {
+    const ended = await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,$4,NULL)',
+      [agentId,turn.room_id,turn.request_id,beforeEpoch]);
+    if (offline && ended.rowCount) {
+      const agent = (await db.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [agentId])).rows[0]!;
+      await systemLine(db, {
+        id: createHash('sha256').update(`host-offline:${agentId}:${turn.request_id}:${beforeEpoch}`).digest('hex'),
+        roomId: turn.room_id, subject: { kind: 'agent', id: agentId, name: agent.name },
+        verb: systemMessage('agent-turn.host-offline'), requestId: turn.request_id, routeCommands: false,
+      });
+    }
+  }
   return [...new Set(turns.rows.map(turn=>turn.room_id))];
 }
 
@@ -153,10 +167,8 @@ export async function failHostedAgentTurn(db: SqlDatabase,
   return true;
 }
 
-/** A turn is working only while its queue item is still pending. */
+/** The execution record owns working independently of answer delivery. */
 export function workingTurnFreshSql(alias: string): string {
   if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) throw new Error('Invalid turn SQL alias');
-  return `EXISTS(SELECT 1 FROM agent_commands working_command
-    WHERE working_command.room_id=${alias}.room_id AND working_command.agent_id=${alias}.agent_id
-      AND working_command.turn_request_id=${alias}.request_id AND working_command.state='pending')`;
+  return `${alias}.status='working'`;
 }

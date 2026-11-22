@@ -822,3 +822,25 @@ it.runIf(process.platform !== 'win32')('Stop kills granted commands and descenda
     await f.session.dispose();
   }
 });
+
+it('writes a completed thread tool while the harness prompt remains unresolved', async () => {
+  const f = await fixture(true);
+  f.execute.mockImplementation(async () => ({}));
+  let finish!: (result: any) => void;
+  f.prompt.mockImplementation((...args: any[]) => {
+    const onTools = args[4];
+    onTools([{ id: 'live-tool', title: 'Read source', status: 'completed' }]);
+    return new Promise(resolve => { finish = resolve; });
+  });
+  await f.session.start(f.item);
+  let returned = false;
+  const answer = f.session.deliver(f.item, [], { id: 'live-invocation', requestId: f.item.turnRequestId })
+    .then(result => { returned = true; return result; });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postAgentActivity', expect.objectContaining({
+    cornerActivityKey: 'live-invocation:0', activity: [expect.objectContaining({ title: 'Read source' })],
+  })));
+  expect(returned).toBe(false);
+  finish({ agentText: 'Done', stopReason: 'end_turn', updates: [], toolCalls: [] });
+  await answer;
+  await f.session.stop();
+});

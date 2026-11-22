@@ -29,6 +29,7 @@ export type CornerStateRow = {
   archived_at: Date | null;
   lifecycle: CornerLifecycleView | null;
   latest_turn_status: string | null;
+  working_agent_name?: string | null;
   waiting_item_id?: string | null;
   waiting_reason?: CornerStateReason | null;
   waiting_person_id?: string | null;
@@ -90,6 +91,8 @@ export function cornerFactsSql(viewerExpr: string): {
       blocker.item_id waiting_item_id,blocker.reason waiting_reason,
       blocker.kind waiting_kind,blocker.person_name waiting_person_name,
       blocker.person_id waiting_person_id,
+      (SELECT identity.name FROM agent_turns running JOIN identities identity ON identity.id=running.agent_id
+        WHERE running.room_id=c.id AND running.status='working' ORDER BY running.started_at DESC LIMIT 1) working_agent_name,
       turn.status latest_turn_status,turn.created_at latest_turn_created_at,
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,
@@ -296,6 +299,7 @@ export function chatCornerCounts(
     count.openCorners.push({
       id: row.id,
       name: row.name,
+      ...(row.working_agent_name ? { workingAgentName: row.working_agent_name } : {}),
       state,
       ...(reason ? { reason } : {}),
       ...(blocker ? { blocker } : {}),
