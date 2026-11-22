@@ -109,7 +109,8 @@ describe('PillRow', () => {
         expect(m2.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
         expect(text(m2)).toEqual(['· 09:38', 'Stopped']);
         const stop = entries[1];
-        expect(stop.findAll((node: any) => node.type === 'Icon.CircleStop')).toHaveLength(1);
+        expect(stop.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-stop-ring')
+            .findAll((node: any) => node.props.testID === 'pill-stop-square')).not.toHaveLength(0);
         expect(text(stop)).toEqual(['· 09:37']);
         expect(stop.props['aria-label']).toBe('Ruby stopped Claude');
         act(() => pill().props.onPress());
@@ -124,7 +125,9 @@ describe('PillRow', () => {
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'stop-pill');
         expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['owner', 'ruby']);
         // The stop square in a ring, in the arrow's colour.
-        expect(pill.findAll((node: any) => node.type === 'Icon.CircleStop')).toHaveLength(1);
+        const ring = pill.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-stop-ring');
+        expect(ring.props.borderRadius).toBe('full');
+        expect(ring.findAll((node: any) => node.props.testID === 'pill-stop-square')).not.toHaveLength(0);
         expect(pill.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(0);
         expect(text(pill)).toEqual([]);
         expect(pill.props['aria-label']).toBe('Owner stopped Ruby');

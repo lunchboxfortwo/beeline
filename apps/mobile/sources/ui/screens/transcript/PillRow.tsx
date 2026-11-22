@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { XStack, YStack } from 'tamagui';
-import { ArrowRight, CircleStop } from 'lucide-react-native';
+import { ArrowRight } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { TranscriptLine } from './TranscriptLine';
@@ -9,6 +9,8 @@ import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 const PILL_FACE_SIZE = 22;
 /** The Beeline logo inside the system circle: 22 less the ring and a 3 px inset. */
 const SYSTEM_MARK_SIZE = 14;
+/** The solid stop square inside its ring: small enough to read as a stop button, not a checkbox. */
+const STOP_SQUARE_SIZE = 8;
 /** A folded run shows at most this many faces; opening it (and its label) shows everyone. */
 const RUN_FACES = 3;
 
@@ -44,14 +46,23 @@ export type PillItem = {
     system: boolean;
 };
 
+/** A face-sized ring: holds the Beeline logo for a system face and the stop square for a stop. */
+function Ring({ children, testID }: { children: React.ReactNode; testID: string }) {
+    return (
+        <YStack width={PILL_FACE_SIZE} height={PILL_FACE_SIZE} borderRadius="full" borderWidth={1} borderColor="strongStroke"
+            alignItems="center" justifyContent="center" testID={testID}>
+            {children}
+        </YStack>
+    );
+}
+
 function Face({ face }: { face: PillFace }) {
     if (face.kind === 'system') {
         // The Beeline account reads as a bot face: its logo inside a ring, the size of every other face.
         return (
-            <YStack width={PILL_FACE_SIZE} height={PILL_FACE_SIZE} borderRadius="full" borderWidth={1} borderColor="strongStroke"
-                alignItems="center" justifyContent="center" testID="pill-system-face">
+            <Ring testID="pill-system-face">
                 <IdentityMark kind="human" seed={SYSTEM_IDENTITY_PUBKEY} name={face.name} size={SYSTEM_MARK_SIZE} />
-            </YStack>
+            </Ring>
         );
     }
     return face.kind === 'agent'
@@ -96,7 +107,11 @@ function Pair({ from, to, stop }: { from: PillFace; to?: PillFace; stop?: boolea
     return (
         <>
             <Face face={from} />
-            {to ? (stop ? <Glyph icon={CircleStop} size={18} /> : <Glyph icon={ArrowRight} size={14} />) : null}
+            {to ? (stop ? (
+                <Ring testID="pill-stop-ring">
+                    <YStack width={STOP_SQUARE_SIZE} height={STOP_SQUARE_SIZE} backgroundColor="secondary" testID="pill-stop-square" />
+                </Ring>
+            ) : <Glyph icon={ArrowRight} size={14} />) : null}
             {to ? <Face face={to} /> : null}
         </>
     );
