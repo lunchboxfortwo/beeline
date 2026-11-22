@@ -416,6 +416,18 @@ describe('the read cursor over the live phone surface', () => {
     expect((await deckRow()).unread).toBe(false);
   });
 
+  it('orders equal timestamps by id across the read boundary', async () => {
+    await database.query(`UPDATE messages SET created_at=$1 WHERE room_id=$2`,
+      [MESSAGES[0]!.at, ROOM]);
+    expect(await cursor()).toEqual({
+      messageId: null, firstUnreadMessageId: MESSAGES[0]!.id, unreadCount: 4,
+    });
+    await request(`/v1/phone/rooms/${ROOM}/read`, 'POST', { messageId: MESSAGES[1]!.id });
+    expect(await cursor()).toEqual({
+      messageId: MESSAGES[1]!.id, firstUnreadMessageId: MESSAGES[2]!.id, unreadCount: 2,
+    });
+  });
+
   it('caps the count rather than scanning a whole abandoned backlog', async () => {
     for (let index = 0; index < 120; index += 1) {
       await database.query(
