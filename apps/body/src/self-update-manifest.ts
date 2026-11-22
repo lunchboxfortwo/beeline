@@ -128,6 +128,12 @@ export function compareBundleIdentity(
   installed: InstalledBundleIdentity | undefined,
   published: PublishedBundle,
 ): UpdateVerdict {
+  if (installed?.version && published.version && installed.version !== published.version) {
+    const installedNewer = versionAtLeast(installed.version, published.version);
+    const publishedNewer = versionAtLeast(published.version, installed.version);
+    if (installedNewer && !publishedNewer) return { kind: 'current' };
+    if (publishedNewer && !installedNewer) return { kind: 'update-available', published };
+  }
   if (installed?.commit && published.commit) {
     if (installed.commit === published.commit) return { kind: 'current' };
     return { kind: 'update-available', published };
@@ -177,4 +183,17 @@ export function compareVersions(a: string, b: string): number {
     return String(l) > String(r) ? 1 : -1;
   }
   return 0;
+}
+
+export function versionAtLeast(actual: string, minimum: string): boolean {
+  const parse = (value: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$/.exec(value);
+    return match ? [...match.slice(1, 4).map(Number), match[4] === undefined ? Infinity : Number(match[4])] : undefined;
+  };
+  const left = parse(actual),
+    right = parse(minimum);
+  if (!left || !right) return false;
+  for (let index = 0; index < 4; index++)
+    if (left[index] !== right[index]) return left[index]! > right[index]!;
+  return true;
 }

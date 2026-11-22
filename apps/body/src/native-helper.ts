@@ -1,3 +1,4 @@
+import { observe, progress } from './update-progress.js';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -137,7 +138,7 @@ export async function convergeNativeHelper(
   return withKernelLock(
     `native-helper:${home}`,
     async () => {
-      const run: NativeRunner =
+      const execute: NativeRunner =
         options.run ??
         (async (args, opts) => {
           const remaining = (options.deadlineAt ?? Date.now() + 120_000) - Date.now();
@@ -153,6 +154,7 @@ export async function convergeNativeHelper(
           );
           return { stdout: result.stdout };
         });
+      const run: NativeRunner = (args, opts) => observe(`native ${kind}: ${args.join(' ')}`, execute(args, opts), { timeoutMs: opts?.timeoutMs ?? 120_000 });
       if (kind === 'systemd') {
         const directory = resolve(env.XDG_CONFIG_HOME || resolve(home, '.config'), 'systemd/user');
         const path = resolve(directory, SYSTEMD_HELPER_UNIT_NAME);
@@ -300,6 +302,7 @@ export async function nativeHelperStatus(
             SYSTEMD_HELPER_UNIT_NAME,
           ]
         : ['print', `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`];
+    progress(`reading native ${kind} status`);
     const result = await exec(kind === 'systemd' ? 'systemctl' : 'launchctl', args, {
       env,
       encoding: 'utf8',

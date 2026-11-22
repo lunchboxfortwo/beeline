@@ -19,7 +19,7 @@ it.each([
 });
 
 it.each(['v0.1.201', 'v0.1.202-rc.4'])(
-  'refuses a requested downgrade to %s and discards its staged selection', async version => {
+  'treats older %s as current and discards only its staged selection', async version => {
     const root = await mkdtemp(join(tmpdir(), 'beeline-downgrade-'));
     const layout = { libDir: join(root, 'lib'), releasesRoot: join(root, 'releases'), binDir: join(root, 'bin') };
     for (const [id, value] of [['running', 'v0.1.202-rc.5'], ['older', version]]) {
@@ -35,8 +35,8 @@ it.each(['v0.1.201', 'v0.1.202-rc.4'])(
       await update.prepared('older');
       await update.pending;
       expect(handoff).not.toHaveBeenCalled();
-      expect(failed).toHaveBeenCalledTimes(1);
-      expect(String(failed.mock.calls[0]![0])).toContain('older');
+      expect(failed).not.toHaveBeenCalled();
+      expect((await readUpdateState(layout)).lastCheckResult).toBe('current');
       expect(update.desiredRelease).toBeUndefined();
       expect(await readUpdateState(layout)).toMatchObject({ previousReleaseId: 'previous' });
       expect((await readUpdateState(layout)).stagedReleaseId).toBeUndefined();

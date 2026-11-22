@@ -79,3 +79,14 @@ test('server shutdown sinks follow only an unchanged mechanical owner move',()=>
   assert.ok(judgeMachineSites(new Map([[id,2]]),{[id]:{count:2,reason:'shutdown'}},baseline,true).length);
 });
 
+
+
+test('local observers have pinned progress and expiry timers without adding machine liveness timers',()=>{
+  for(const [file,owner] of [['machine-control.ts','requestMachine'],['kernel-lock.ts','withKernelLock'],
+    ['update-progress.ts','observe'],['update-child.ts','observeChild'],['update-download.ts','downloadBytes']]) {
+    const source=`function ${owner}(){setInterval(progress,5000);setTimeout(expire,30000)}`;
+    assert.deepEqual(inspectMachineConnectionSource('apps/body/src/'+file,source),[]);
+    assert.ok(inspectMachineConnectionSource('apps/body/src/'+file,source.replace('setTimeout(expire,30000)','setTimeout(expire,30000);setTimeout(retry,1)')).length);
+    assert.ok(inspectMachineConnectionSource('apps/body/src/'+file,source.replace(owner,'reconnect')).length);
+  }
+});
