@@ -175,12 +175,18 @@ it('loads stored answers before delivering a reconnect snapshot to the harness',
 
 it('retains a refused stored answer and never runs the agent again on another queue snapshot', async () => {
   const f = await fixture(), item = f.item('delivery');
+  // The answer is written to disk before each post; wait for the posts themselves.
+  const posts = [deferred<void>(), deferred<void>()];
   f.execute.mockImplementation(async name => {
-    if (name === 'postRoomMessage' && f.execute.mock.calls.filter(call => call[0] === name).length === 1) throw new Error('optional output read failed');
+    if (name === 'postRoomMessage') {
+      const count = f.execute.mock.calls.filter(call => call[0] === name).length;
+      posts[count - 1]?.resolve();
+      if (count === 1) throw new Error('optional output read failed');
+    }
     return { id: 'posted', createdAt: 1 };
   });
   f.changed([item]);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.anything()));
+  await posts[0]!.promise;
   expect(JSON.parse(await readFile(join(f.root, 'answers', `${item.id}.json`), 'utf8')).text).toBe('answer');
   // Revoked membership can temporarily hide a still-pending item.
   f.changed([]);
@@ -188,7 +194,8 @@ it('retains a refused stored answer and never runs the agent again on another qu
   await Promise.resolve();
   expect(JSON.parse(await readFile(join(f.root, 'answers', `${item.id}.json`), 'utf8')).text).toBe('answer');
   f.changed([item]);
-  await vi.waitFor(() => expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2));
+  await posts[1]!.promise;
+  expect(f.execute.mock.calls.filter(call => call[0] === 'postRoomMessage')).toHaveLength(2);
   expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
