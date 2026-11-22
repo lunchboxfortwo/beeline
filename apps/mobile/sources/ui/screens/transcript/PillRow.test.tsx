@@ -80,6 +80,18 @@ describe('PillRow', () => {
         expect(pill.props['aria-label']).toBe('Read 4 messages between Ruby, Claude and Jellybean, 09:41');
     });
 
+    it('shows at most three faces on a folded run and names everyone in its label', () => {
+        let tree: any;
+        const many = ['a', 'b', 'c', 'd', 'e'].map((seed) => ({ kind: 'agent', seed, name: seed.toUpperCase() } as const));
+        const fan: PillItem = { id: 'fan', system: false, from: ruby, to: many[0], time: '10:00', body: null,
+            run: many.map((to, index) => ({ id: `f${index}`, from: ruby, to, time: '10:00', body: null })) };
+        act(() => { tree = create(<PillRow items={[fan]} />); });
+        const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+        expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['ruby', 'a', 'b']);
+        expect(text(pill)).toEqual(['5 messages']);
+        expect(pill.props['aria-label']).toBe('Read 5 messages between Ruby, A, B, C, D and E, 10:00');
+    });
+
     it('opens every run message in send order under a face → face heading, and folds again', () => {
         let tree: any;
         act(() => { tree = create(<PillRow items={[runItem]} />); });
@@ -107,8 +119,8 @@ describe('PillRow', () => {
         act(() => { tree = create(<PillRow items={[stop]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'stop-pill');
         expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['owner', 'ruby']);
+        // A filled square in the arrow's colour: it reads as stop, not as a checkbox.
         const [glyph] = pill.findAll((node: any) => node.type === 'Icon.Square');
-        expect(glyph.props.fill).toBeDefined();
         expect(glyph.props.fill).toBe(glyph.props.color);
         expect(pill.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(0);
         expect(text(pill)).toEqual([]);

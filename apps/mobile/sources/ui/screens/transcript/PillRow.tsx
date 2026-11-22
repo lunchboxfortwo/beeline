@@ -7,6 +7,8 @@ import { TranscriptLine } from './TranscriptLine';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 const PILL_FACE_SIZE = 22;
+/** A folded run shows at most this many faces; opening it (and its label) shows everyone. */
+const RUN_FACES = 3;
 
 /** One end of a pill: the Beeline account, a person or an agent. */
 export type PillFace =
@@ -86,7 +88,7 @@ function Pair({ from, to, stop, summary }: { from: PillFace; to?: PillFace; stop
         <>
             <Face face={from} />
             {summary ? <Copy small quiet numberOfLines={1} flexShrink={1}>{summary}</Copy> : null}
-            {to ? (stop ? <Glyph icon={Square} size={14} accent filled /> : <Glyph icon={ArrowRight} size={14} />) : null}
+            {to ? (stop ? <Glyph icon={Square} size={14} filled /> : <Glyph icon={ArrowRight} size={14} />) : null}
             {to ? <Face face={to} /> : null}
         </>
     );
@@ -126,7 +128,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
     const [openId, setOpenId] = useState<string | null>(null);
     const open = items.find((item) => item.id === openId);
     return (
-        <YStack gap="2" width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
+        <YStack gap={open?.run ? '3' : '2'} width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
             <XStack gap="2" flexWrap="wrap" alignItems="flex-start">
                 {items.map((item) => {
                     const expanded = item.id === openId;
@@ -148,13 +150,8 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                         >
                             {item.run ? (
                                 <>
-                                    <XStack>
-                                        {runFaces(item.run).map((face) => (
-                                            // A 2 px ring in the pill's own fill keeps adjacent faces apart
-                                            // (the grammar has no negative spacing, so faces sit side by side).
-                                            <YStack key={faceKey(face)} borderWidth={2}
-                                                borderColor="raised" borderRadius="sm"><Face face={face} /></YStack>
-                                        ))}
+                                    <XStack gap="1" alignItems="center">
+                                        {runFaces(item.run).slice(0, RUN_FACES).map((face) => <Face key={faceKey(face)} face={face} />)}
                                     </XStack>
                                     <Copy small quiet numberOfLines={1}>{`${item.run.length} messages`}</Copy>
                                 </>
