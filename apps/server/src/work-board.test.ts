@@ -771,19 +771,21 @@ describe('corner report blocks on the board', () => {
         (await readWorkBoard(db, workspace, viewer)).items.find((item) => item.roomId === thread),
       ].map((item) => [item?.state, item?.idle ?? false]);
     // [thread read, board row] per viewer. The board lists the viewer's ask in the thread's place.
+    // A wait on someone else draws waiting (In progress, not idle), never the idle ring.
     const progress = ['in-progress', true],
+      waiting = ['in-progress', false],
       asked = ['needs-you', false];
     expect(await states(person)).toEqual([progress, asked]);
     expect(await states(other)).toEqual([progress, progress]);
     await machine(thread, 'waiting');
     expect(await states(person)).toEqual([asked, asked]);
-    expect(await states(other)).toEqual([progress, progress]);
+    expect(await states(other)).toEqual([waiting, waiting]);
     await post('worker-output-elsewhere', chat, 10, { card_type: 'vault-save', card: {} });
     expect(await states(person)).toEqual([asked, asked]);
-    expect(await states(other)).toEqual([progress, progress]);
+    expect(await states(other)).toEqual([waiting, waiting]);
     await post('worker-output-after', thread, 10, { card_type: 'vault-save', card: {} });
     expect(await states(person)).toEqual([asked, asked]);
-    expect(await states(other)).toEqual([progress, progress]);
+    expect(await states(other)).toEqual([waiting, waiting]);
   });
 });
 
@@ -834,13 +836,13 @@ describe('viewer-scoped task states', () => {
       ],
     );
     expect((await readWorkThread(db, thread, person))[0]).toMatchObject({ state: 'needs-you' });
-    expect((await readWorkThread(db, thread, other))[0]).toMatchObject({
-      state: 'in-progress',
-      idle: true,
-    });
-    expect(
-      (await readWorkBoard(db, workspace, other)).items.find((item) => item.id === thread),
-    ).toMatchObject({ state: 'in-progress', idle: true });
+    expect((await readWorkThread(db, thread, other))[0]).toMatchObject({ state: 'in-progress' });
+    expect((await readWorkThread(db, thread, other))[0]?.idle).toBeUndefined();
+    const otherRow = (await readWorkBoard(db, workspace, other)).items.find(
+      (item) => item.id === thread,
+    );
+    expect(otherRow).toMatchObject({ state: 'in-progress' });
+    expect(otherRow?.idle).toBeUndefined();
     expect(
       (await read()).items.some((item) => item.roomId === thread && item.state === 'needs-you'),
     ).toBe(true);
@@ -856,10 +858,10 @@ describe('viewer-scoped task states', () => {
     await db.query(
       `UPDATE permission_authority SET status='authorized' WHERE permission_id='viewer-permission'`,
     );
-    for (const viewer of [person, other])
-      expect((await readWorkThread(db, thread, viewer))[0]).toMatchObject({
-        state: 'in-progress',
-        idle: true,
-      });
+    for (const viewer of [person, other]) {
+      const row = (await readWorkThread(db, thread, viewer))[0];
+      expect(row).toMatchObject({ state: 'in-progress' });
+      expect(row?.idle).toBeUndefined();
+    }
   });
 });
