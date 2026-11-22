@@ -11,6 +11,11 @@ export function threadWebUrl(threadId: string, workspaceId: string): string {
   return `https://web.usebeeline.app/beeline/chat/${encodeURIComponent(threadId)}?communityId=${encodeURIComponent(workspaceId)}`;
 }
 
+/** Trimmed, deduplicated and sorted, so a retry compares equal to the first open. */
+export function normalizedThreadWorkItems(itemIds: readonly string[] | undefined): string[] {
+  return [...new Set((itemIds ?? []).map(id => String(id).trim()).filter(Boolean))].sort();
+}
+
 /**
  * Link chat tasks to the thread opened to build them, inside the opening transaction.
  * Each id must name a task (not a thread or an ask) in the thread's parent chat. Each
@@ -20,7 +25,7 @@ export async function linkThreadWorkItems(db: SqlDatabase, input: {
   threadId: string; chatId: string; workspaceId: string; threadName: string;
   itemIds: readonly string[]; actorId: string;
 }): Promise<void> {
-  const ids = [...new Set(input.itemIds.map(id => String(id).trim()).filter(Boolean))];
+  const ids = normalizedThreadWorkItems(input.itemIds);
   if (!ids.length) return;
   if (ids.length > MAX_THREAD_WORK_ITEMS)
     throw new CommandRefusalError(`a thread builds at most ${MAX_THREAD_WORK_ITEMS} work items`, 400);

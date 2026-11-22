@@ -70,7 +70,7 @@ async function task(title: string, roomId = R) {
   return id;
 }
 
-async function open(workItems: string[]) {
+async function open(workItems: string[] | undefined, retry?: (string[] | undefined)[]) {
   await phone.execute(
     'sendRoomMessage',
     { roomId: R, messageId: randomBytes(32).toString('hex'), text: '@ruby please build this' },
@@ -79,15 +79,20 @@ async function open(workItems: string[]) {
   const command = (await daemon.execute('getAgentCommands', { roomId: R }, A)).commands.at(-1)!;
   await startQueuedCommand(daemon, { roomId: R, commandId: command.id }, A);
   pr += 1;
-  return daemon.execute(
+  const create = (items: string[] | undefined) => daemon.execute(
     'createCorner',
     {
-      roomId: R, requestId: command.turnRequestId, name: `Build-${pr}`, objective: 'Build the task',
-      repository: 'owner/widgets', targetBranch: 'main', workItems,
+      roomId: R, requestId: command.turnRequestId, idempotencyKey: `open-${pr}`, name: `Build-${pr}`,
+      objective: 'Build the task', repository: 'owner/widgets', targetBranch: 'main',
+      ...(items ? { workItems: items } : {}),
       brief: { spec: 'Build the task', approval: { sourceMessageId: command.sourceMessageId } },
     },
     A,
   );
+  const created = await create(workItems);
+  const retries = [];
+  for (const items of retry ?? []) retries.push(await create(items).then(value => value, (error: Error) => error));
+  return Object.assign(created, { retries });
 }
 
 async function merge(cornerId: string) {
@@ -166,4 +171,21 @@ it('refuses ids that are not tasks in the parent chat, and opens nothing', async
   await expect(open(['missing'])).rejects.toThrow(/missing/);
   expect(await threads()).toBe(before);
   expect((await state(elsewhere))!.state).toBe('backlog');
+}, 30_000);
+
+it('a retry of the same opening must name the same tasks', async () => {
+  const a = await task('Retry A');
+  const b = await task('Retry B');
+  const c = await task('Retry C');
+  // Same tasks in another order and with a duplicate: the same thread, nothing new.
+  const same = await open([a, b], [[b, a, a]]);
+  expect(same.retries[0]).toMatchObject({ cornerId: same.cornerId });
+  // Changed tasks, or tasks added to an opening that named none, are a different assignment.
+  const changed = await open([a], [[c]]);
+  const added = await open(undefined, [[c]]);
+  for (const retry of [changed.retries[0], added.retries[0]])
+    expect(String(retry)).toMatch(/thread assignment conflict.*work items/);
+  expect((await state(c))!.state).toBe('backlog');
+  expect((await db.query(`SELECT 1 FROM work_item_threads WHERE work_item_id=$1`, [c])).rowCount).toBe(0);
+  expect((await db.query(`SELECT 1 FROM work_item_threads WHERE thread_id=$1`, [same.cornerId])).rowCount).toBe(2);
 }, 30_000);
