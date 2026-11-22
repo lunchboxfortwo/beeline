@@ -50,6 +50,21 @@ try {
     await daemon.execute('reply',{id:answer.id,text:'done: Continuing with the agreed scope.'},worker);
     assert.equal(await state(),'idle');
   }
+  if(process.argv.includes('--choice-reask')) {
+    const {sendMessage}=await load('agent-messaging');
+    const choiceBlock=await sendMessage(db,{route:{from:{agent:worker,place:corner},to:{agent:human,place:room}},
+      text:'blocked: Which access?',ask:{question:'Which access?',options:['One','Two']}});
+    const choice=(await db.query('SELECT id FROM room_choices WHERE message_id=$1',[choiceBlock.id])).rows[0];
+    await phone.execute('answerChoice',{choiceId:choice.id,optionId:'A'},human);
+    assert(!(await tasks()).includes(choiceBlock.id));
+    await sendMessage(db,{route:{from:{agent:worker,place:corner},to:{agent:human,place:room}},
+      text:'Please answer again',replyTo:choiceBlock.id});
+    assert((await tasks()).includes(choiceBlock.id),'Re-asking an answered choice must restore its original Tasks item');
+    assert.equal((await db.query('SELECT count(*)::int count FROM needs_you_marks WHERE message_id=$1',[choiceBlock.id])).rows[0].count,1);
+    await phone.execute('sendRoomReply',{roomId:room,parentMessageId:choiceBlock.id,text:'Use Two this time'},human);
+    assert(!(await tasks()).includes(choiceBlock.id));
+    console.log('Choice re-ask: original Tasks item restored once; fresh reply clears it.');
+  }
   console.log(JSON.stringify({reproduction:'22 Nov schedule-target-place',mode:before?'reproduced':'demonstrated',
     report:'waiting; Tasks open',unrelatedMessage:before?'WRONG: thread idle; Tasks open':'thread waiting; Tasks open',
     directAnswer:before?'WRONG: thread idle; Tasks cleared':'thread waiting; Tasks cleared',

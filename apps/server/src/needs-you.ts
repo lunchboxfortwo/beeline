@@ -249,9 +249,12 @@ export function needsYouAnsweredSql(message: string, viewerId: string): string {
         AND reply.card_type='agent-command')) AND reply.system_event IS NULL AND reply.deleted_at IS NULL
       AND reply.created_at>COALESCE(${message}.block_reasked_at,${message}.created_at)
   ) OR (${question} AND EXISTS (SELECT 1 FROM needs_you_marks answered
-    WHERE answered.message_id=${message}.id AND answered.cleared_at IS NOT NULL AND answered.cleared_reason='answered'))
+    WHERE answered.message_id=${message}.id AND answered.cleared_at IS NOT NULL AND answered.cleared_reason='answered'
+      AND (${message}.block_reasked_at IS NULL OR answered.cleared_at>${message}.block_reasked_at)))
     OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
-    AND choice.mode='question' AND choice.status='answered'))`;
+    AND choice.mode='question' AND choice.status='answered'
+    AND (${message}.block_reasked_at IS NULL OR EXISTS (SELECT 1 FROM room_choice_votes vote
+      WHERE vote.choice_id=choice.id AND vote.updated_at>${message}.block_reasked_at))))`;
 }
 
 /** The thread id `humanReportCornerSql` names, or NULL when it is not a uuid. */
@@ -305,7 +308,8 @@ const QUESTION_WHERE = `mark.cleared_at IS NULL AND m.deleted_at IS NULL
   AND ((m.presentation='message'
     AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
     AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
-    OR ${questionRecipientSql('m', 'mark.identity_id')})`;
+    OR ${questionRecipientSql('m', 'mark.identity_id')}
+    OR (m.block_reasked_at IS NOT NULL AND m.card->>'reportToId'=mark.identity_id))`;
 
 /** Clear every current question. */
 export async function clearNeedsYouQuestions(
@@ -479,8 +483,8 @@ const questionBranch=(projection:CandidateProjection)=>`
   JOIN messages m ON m.id=mark.message_id
   JOIN viewer_rooms room ON room.id=m.room_id
   ${projection==='cells'?'LEFT JOIN identities author ON author.id=m.author_id':''}
-  WHERE ${QUESTION_WHERE} AND m.presentation='message'
-    AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
+  WHERE ${QUESTION_WHERE} AND (m.presentation='message' OR (m.block_reasked_at IS NOT NULL AND m.card_type='${CHOICE_CARD_TYPE}' AND m.card->>'status'='answered'))
+    AND (NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id) OR (m.block_reasked_at IS NOT NULL AND m.card_type='${CHOICE_CARD_TYPE}' AND m.card->>'status'='answered'))
 `;
 
 /** The same authorized candidates drive the tray and its badge. */

@@ -205,13 +205,22 @@ it.each([false, true])('Reproduction 22 Nov schedule-target-place: reply clears 
   expect(await tasks()).toEqual([]);
 });
 
-it('BLOCK-CHAIN: re-ask in the reply chain reopens one Tasks row, and takeover owns closure', async()=>{
-  await createAgentCommand(db,{roomId:C,agentId:WORKER,sourceMessageId:null,reason:'corner_objective',privatePayload:{kind:'order',authorId:COMMANDER,fromRoomId:ROOM,text:modelText('Build')}});
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('block',$1,$2,'blocked: Need access',
-    jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'))`,[C,WORKER,HUMAN]);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES('answer',$1,$2,'Ready','block')`,[C,HUMAN]);
+it.each([false,true])('BLOCK-CHAIN: re-ask reopens one Tasks row and takeover owns closure (choice=%s)', async(choice)=>{
+  if(choice) await db.query('DELETE FROM agent_commands WHERE room_id=$1',[C]);
+  await createAgentCommand(db,{roomId:C,agentId:WORKER,sourceMessageId:null,reason:'corner_objective',privatePayload:{kind:'order',authorId:choice?HUMAN:COMMANDER,fromRoomId:ROOM,...(choice?{route:{from:{agent:HUMAN,place:ROOM},to:{agent:WORKER,place:C}}}:{}),text:modelText('Build')}});
+  if(choice) {
+    const {sendMessage}=await import('./agent-messaging.js');
+    await sendMessage(db,{id:'block',route:{from:{agent:WORKER,place:C},to:{agent:HUMAN,place:ROOM}},
+      text:'blocked: Need access',ask:{question:'Which access?',options:['One','Two']}});
+    const card=(await db.query<{id:string}>('SELECT id FROM room_choices WHERE message_id=$1',['block'])).rows[0]!;
+    await phone.execute('answerChoice',{choiceId:card.id,optionId:'A'},HUMAN);
+  } else {
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('block',$1,$2,'blocked: Need access',
+      jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'))`,[C,WORKER,HUMAN]);
+    await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES('answer',$1,$2,'Ready','block')`,[C,HUMAN]);
+  }
   expect((await phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items).toHaveLength(0);
-  await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES('reask',$1,$2,'Still need access','answer')`,[C,WORKER]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES('reask',$1,$2,'Still need access',$3)`,[C,WORKER,choice?'block':'answer']);
   expect((await phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items.map(i=>i.messageId)).toEqual(['block']);
   await db.query(`UPDATE messages SET text='Still need access, please' WHERE id='reask'`);
   expect((await db.query("SELECT * FROM needs_you_marks WHERE message_id='block'")).rows).toHaveLength(1);
