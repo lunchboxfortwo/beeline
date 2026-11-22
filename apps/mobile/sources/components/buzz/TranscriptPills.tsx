@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
-import { YStack } from 'tamagui';
 import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
-import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
-import { LedgerSystemLine } from './Ledger';
+import { stopNotice } from '@/buzz/transcript-pills';
+import { isNotice, PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
+import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
 import { NotificationLifecycleCard } from './PrLifecycleCard';
 
@@ -32,14 +32,19 @@ type PillHandlers = {
 function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers): PillItem {
   const time = ledgerStamp(message.timestamp);
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
-  if (message.isSystemNotice || author === SYSTEM_IDENTITY_PUBKEY || !author) {
+  const stop = stopNotice(message);
+  // A message() to an agent keeps its sender's face even when stored as a system notice.
+  const agentMessage = message.agentCommand?.recipient.kind === 'agent' && author && author !== SYSTEM_IDENTITY_PUBKEY;
+  if (stop || (!agentMessage && (message.isSystemNotice || author === SYSTEM_IDENTITY_PUBKEY || !author))) {
     return {
       id: message.id,
       system: true,
-      from: BEELINE,
-      to: systemTarget(message, resolve),
+      ...(stop
+        // A stop is the stopper's face, the stop glyph and the stopped agent's face; the line itself opens on tap.
+        ? { stop: true, from: resolve(stop.stopper.id, stop.stopper.name, stop.stopper.kind),
+          to: resolve(stop.stopped.id, stop.stopped.name, 'agent') }
+        : { from: BEELINE, to: systemTarget(message, resolve), summary: message.text }),
       time,
-      summary: message.text,
       body: (
         <LedgerSystemLine
           id={message.id}
@@ -60,9 +65,8 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
   const to = recipient
     ? resolve(recipient.id, recipient.name, 'agent')
     : firstMention ? resolve(firstMention, '', 'agent') : undefined;
-  const text = recipient
-    ? `@${(recipient.handle ?? recipient.name).replace(/^@/, '')} ${message.agentCommand!.text}`
-    : message.text;
+  // Every opened pill reads as a run row: the face → face heading already names the recipient.
+  const text = recipient ? message.agentCommand!.text : message.text;
   return {
     id: message.id,
     system: false,
@@ -70,13 +74,25 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
     to,
     time,
     body: (
-      // The settled agent-prose tone: body in ink.
-      <TypedView view={MonoMarkdown} v="body" color="ink" markdown={text} testID={`pill-message-${message.id}`} />
+      // An opened pill's messages read one step quieter than the transcript's own.
+      <TypedView view={MonoMarkdown} v="body" color="secondary" markdown={text} testID={`pill-message-${message.id}`} />
     ),
   };
 }
 
-/** One transcript row of pills: a folded run, or a lone system/agent-to-agent message. */
+/**
+ * Consecutive pill messages (agent-to-agent messages, stops and system
+ * notices) fold into one pill that opens as a list in send order. A lone
+ * message keeps its own pill. Anything else in the transcript ends the stretch.
+ */
+export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdentityResolver, handlers: PillHandlers): PillItem[] {
+  const entries = run.map((message) => pillItem(message, resolve, handlers));
+  if (entries.length < 2) return entries;
+  return [{ id: entries[0]!.id, system: entries.every(isNotice), from: entries[0]!.from, to: entries[0]!.to,
+    time: entries.at(-1)!.time, run: entries, body: null }];
+}
+
+/** One transcript row of pills: system lines, lone agent messages, stops and folded agent runs. */
 export function TranscriptPills({
   run,
   resolve,
@@ -90,16 +106,16 @@ export function TranscriptPills({
   resolve: PillIdentityResolver;
 } & PillHandlers) {
   const items = useMemo(
-    () => run.map((message) => pillItem(message, resolve, { onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId })),
+    () => pillItems(run, resolve, { onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId }),
     [run, resolve, onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId],
   );
   return (
-    // The ledger's bylined entry rhythm: the speaker-change air on top.
-    <YStack width="100%" minWidth={0} paddingTop="4" paddingBottom="2" testID={`chat-message-${run[0]?.id ?? ''}`}>
+    // The ledger's bylined entry rhythm: 24 at a speaker change on both sides of the pills.
+    <LedgerEntryFrame hasByline testID={`chat-message-${run[0]?.id ?? ''}`}>
       {run.length === 1 && run[0]?.notificationLifecycleRun ? (
         <NotificationLifecycleCard message={run[0]} cornerId={cornerId}
           onOpenCorner={onOpenCorner ?? (() => {})} onOpenUrl={onOpenUrl ?? (() => {})} />
       ) : <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />}
-    </YStack>
+    </LedgerEntryFrame>
   );
 }

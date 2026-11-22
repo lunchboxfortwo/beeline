@@ -81,3 +81,15 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
   flush();
   return result;
 }
+
+/** A stop of an agent's turn, with who stopped whom, when the line names both. */
+export function stopNotice(message: Pick<ChatDisplayMessage, 'systemEvent'>):
+  { stopper: { id: string; name: string; kind: 'agent' | 'human' }; stopped: { id: string; name: string } } | undefined {
+  const event = message.systemEvent;
+  if (event?.kind !== 'turn-cancelled' || !event.subject.id || !event.object?.id) return undefined;
+  if (event.subject.kind !== 'person' && event.subject.kind !== 'agent') return undefined;
+  return {
+    stopper: { id: event.subject.id, name: event.subject.name, kind: event.subject.kind === 'agent' ? 'agent' : 'human' },
+    stopped: { id: event.object.id, name: event.object.text },
+  };
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { SYSTEM_IDENTITY_PUBKEY } from './system-identity';
-import { foldPillRuns, isPillMessage } from './transcript-pills';
+import { foldPillRuns, isPillMessage, stopNotice } from './transcript-pills';
 import { ledgerSpeakerKey } from './ledger-attribution';
 import { transcriptBylineOpeners } from './message-dates';
 
@@ -81,5 +81,14 @@ describe('transcript pills', () => {
     expect(ledgerSpeakerKey(row('tag', { pubkey: 'alan', isAgentAuthor: true, mentionPubkeys: ['jimmy'] }), AGENTS)).toBe('agent:alan');
     expect(ledgerSpeakerKey(row('reply', { pubkey: 'alan', isAgentAuthor: true }), AGENTS)).toBe('agent:alan');
     expect(transcriptBylineOpeners([system('s1'), row('m', { pubkey: 'dan' })])).toEqual(new Set(['m']));
+  });
+
+  const stop = (id: string, kind: 'person' | 'agent') => row(id, { isSystemNotice: true, pubkey: 'x',
+    systemEvent: { kind: 'turn-cancelled', subject: { kind, id: 'x', name: 'X' }, verb: 'stopped',
+      object: { text: 'Jimmy', id: 'jimmy' }, consequence: 'turn cancelled' } });
+  it('reads who stopped whom from a turn-cancelled line', () => {
+    expect(stopNotice(stop('s', 'person'))).toEqual({
+      stopper: { id: 'x', name: 'X', kind: 'human' }, stopped: { id: 'jimmy', name: 'Jimmy' } });
+    expect(stopNotice(system('joined'))).toBeUndefined();
   });
 });

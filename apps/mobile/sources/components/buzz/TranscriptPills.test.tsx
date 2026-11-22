@@ -12,10 +12,11 @@ vi.mock('react-native-unistyles', () => ({
   StyleSheet: { create: () => ({}) },
   useUnistyles: () => ({ theme: { buzz: {} } }),
 }));
-vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: () => null }));
+vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: () => null,
+  LedgerEntryFrame: ({ children, testID }: any) => React.createElement('View', { testID }, children) }));
 vi.mock('./Ledger-styles', () => ({ settledAgentProseStyle: () => ({}) }));
 vi.mock('./MonoMarkdown', () => ({ MonoMarkdown: () => null }));
-vi.mock('@/ui/screens/transcript/PillRow', () => ({ PillRow: () => <React.Fragment /> }));
+vi.mock('@/ui/screens/transcript/PillRow', async (original) => ({ ...(await original<object>()), PillRow: () => <React.Fragment /> }));
 vi.mock('./ChevronGlyph', () => ({ ChevronGlyph: () => null, CHEVRON_ROW_SIZE: 14 }));
 vi.mock('./IndexRow', () => ({
   InlineRow: ({ children }: any) => <>{children}</>,
@@ -26,7 +27,7 @@ vi.mock('./IndexRow', () => ({
 
 import { foldPrLifecycleRuns } from '@/buzz/pr-lifecycle';
 import { foldPillRuns } from '@/buzz/transcript-pills';
-import { TranscriptPills } from './TranscriptPills';
+import { pillItems, TranscriptPills } from './TranscriptPills';
 import { PillRow } from '@/ui/screens/transcript/PillRow';
 
 it.each(['message', 'reply'] as const)('renders an addressed %s with the recorded sender, recipient and text', kind => {
@@ -43,8 +44,58 @@ it.each(['message', 'reply'] as const)('renders an addressed %s with the recorde
   const [item] = tree.root.findByType(PillRow).props.items;
   expect(item).toMatchObject({ id: 'addressed', system: false,
     from: { seed: 'ruby', name: 'Ruby' }, to: { seed: 'claude', name: 'Claude' } });
-  expect(item.body.props.markdown).toBe('@claude Please review the phone layout');
+  expect(item.body.props.markdown).toBe('Please review the phone layout');
   act(() => tree.unmount());
+});
+
+it('folds agent messages, stops and system notices in a row into one PillRow pill, in send order', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const resolve = (id: string, name: string, kind?: 'agent' | 'human') => ({ kind: kind ?? 'agent', seed: id, name });
+  const base = (id: string, fields: Partial<ChatDisplayMessage>): ChatDisplayMessage =>
+    ({ id, text: id, isUser: false, timestamp: 1_800_000_000, ...fields });
+  const say = (id: string, from: string, to: string) => base(id, { pubkey: from, authorIdentity: { pubkey: from, name: from, kind: 'agent' },
+    agentCommand: { kind: 'message', recipient: { id: to, name: to, kind: 'agent' }, text: id } });
+  const stop = (id: string, by: string, kind: 'person' | 'agent', whom: string) => base(id, { isSystemNotice: true, pubkey: by,
+    systemEvent: { kind: 'turn-cancelled', subject: { kind, id: by, name: by }, verb: 'stopped', object: { text: whom, id: whom } } });
+  const run = [
+    say('m1', 'ruby', 'claude'), stop('s1', 'ruby', 'agent', 'claude'), say('m2', 'claude', 'ruby'),
+    stop('s2', 'owner', 'person', 'ruby'),
+    say('m3', 'ruby', 'jelly'), say('m4', 'jelly', 'ruby'),
+    base('joined', { isSystemNotice: true, text: 'Nerd joined' }),
+    say('m5', 'ruby', 'nerd'),
+  ];
+  const items = pillItems(run, resolve, {});
+  expect(items.map(item => [item.id, item.system, item.run?.map(entry => entry.id) ?? null])).toEqual([
+    ['m1', false, ['m1', 's1', 'm2', 's2', 'm3', 'm4', 'joined', 'm5']]]);
+  const entries = items[0]!.run!;
+  expect(entries[1]).toMatchObject({ stop: true, from: { seed: 'ruby' }, to: { seed: 'claude' } });
+  expect(entries[3]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
+  expect(entries[6]).toMatchObject({ system: true, summary: 'Nerd joined', from: { kind: 'system' } });
+  // Every opened pill reads as a run row: the heading names the recipient, so the body drops the @mention and reads quieter.
+  expect(entries[0]!.body).toMatchObject({ props: { markdown: 'm1', color: 'secondary' } });
+  expect(pillItems([say('m5', 'ruby', 'nerd')], resolve, {})[0]!.body).toMatchObject({ props: { markdown: 'm5', color: 'secondary' } });
+  let tree: any;
+  act(() => { tree = create(<TranscriptPills run={run} resolve={resolve} />); });
+  expect(tree.root.findByType(PillRow).props.items.map((item: any) => item.id)).toEqual(['m1']);
+  act(() => tree.unmount());
+});
+
+it('folds consecutive system notices, person stops included, into one pill that opens in send order', () => {
+  const resolve = (id: string, name: string, kind?: 'agent' | 'human') => ({ kind: kind ?? 'agent', seed: id, name });
+  const base = (id: string, fields: Partial<ChatDisplayMessage>): ChatDisplayMessage =>
+    ({ id, text: id, isUser: false, timestamp: 1_800_000_000, ...fields });
+  const notice = (id: string, who?: string) => base(id, { isSystemNotice: true,
+    ...(who ? { systemEvent: { subject: { kind: 'agent', id: who, name: who }, verb: 'joined' } } : {}) });
+  const personStop = base('s1', { isSystemNotice: true, pubkey: 'owner',
+    systemEvent: { kind: 'turn-cancelled', subject: { kind: 'person', id: 'owner', name: 'owner' }, verb: 'stopped', object: { text: 'ruby', id: 'ruby' } } });
+  const say = (id: string, from: string, to: string) => base(id, { pubkey: from, authorIdentity: { pubkey: from, name: from, kind: 'agent' },
+    agentCommand: { kind: 'message', recipient: { id: to, name: to, kind: 'agent' }, text: id } });
+  const items = pillItems([notice('n1', 'nerd'), personStop, notice('n2')], resolve, {});
+  expect(items.map(item => [item.id, item.system, item.run?.map(entry => entry.id) ?? null])).toEqual([
+    ['n1', true, ['n1', 's1', 'n2']]]);
+  expect(items[0]!.run![1]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
+  // One agent message in the stretch makes it a mixed run, not a system stack.
+  expect(pillItems([notice('n1', 'nerd'), say('m1', 'ruby', 'claude')], resolve, {})[0]).toMatchObject({ system: false });
 });
 
 it('MERGE-ROWS-1 shows the merge count immediately and expands every stored event and destination', () => {
