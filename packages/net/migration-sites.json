@@ -485,14 +485,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/mobile/sources/app/_layout.tsx::import:posthog-react-native",
-      "file": "apps/mobile/sources/app/_layout.tsx",
-      "kind": "import:posthog-react-native",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M4"
-    },
-    {
       "id": "apps/mobile/sources/auth/github-auth-session.ts::fetch",
       "file": "apps/mobile/sources/auth/github-auth-session.ts",
       "kind": "fetch",
