@@ -193,6 +193,8 @@ export function sessionToolScopeMeta(
       // Claude's native elapsed-silence reminder ignores server wake provenance.
       // Beeline's turn prompt owns whether a human is owed a reply.
       CLAUDE_CODE_SILENT_TURN_REMINDER: '0',
+      // Claude's native background-task wake starts prompts Beeline never issued.
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
       CLAUDE_CODE_TERMINAL_MCP_TOOLS: [...new Set([
         ...terminalTools.split(',').map(name => name.trim()).filter(Boolean),
         'mcp__beeline-agent__no_reply_needed',
