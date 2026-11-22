@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HOST_GRANT_SSH_OPTIONS } from '@beeline/api-contract/agent-grants';
@@ -35,18 +35,27 @@ const hostGrant = (overrides: Partial<Grant> = {}): Grant => ({
 });
 
 // A fake ssh on PATH prints the argv it got, so the test sees exactly what ran.
-async function setup(grants: () => Grant[], surface: AgentSurface = 'room') {
+// It stands in for the installed ssh only when `trustFake` says so; it also
+// leaves a marker, which proves whether it ran at all.
+async function setup(
+  grants: () => Grant[],
+  surface: AgentSurface = 'room',
+  { trustFake = true, secrets = {} as Record<string, string> } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'grant-host-'));
   roots.push(root);
   const bin = join(root, 'bin');
   await mkdir(bin);
   const ssh = join(bin, 'ssh');
-  await writeFile(ssh, '#!/bin/sh\nprintf "%s\\n" "$@"\n');
+  const marker = join(root, 'marker');
+  await writeFile(ssh, `#!/bin/sh\ntouch '${marker}'\nprintf "%s\\n" "$@"\n`);
   await chmod(ssh, 0o755);
   const calls: { name: string; input: unknown }[] = [];
   const runner = new GrantCommandRunner({
     agentId: 'agent',
     env: { PATH: `${bin}:${process.env.PATH}`, HOME: root },
+    resolveSecret: async (name) => secrets[name],
+    ...(trustFake ? { trustedExecutable: () => ssh } : {}),
     api: {
       execute: async (name: string, input: unknown) => {
         calls.push({ name, input });
@@ -61,7 +70,7 @@ async function setup(grants: () => Grant[], surface: AgentSurface = 'room') {
     turn: () => ({ requestId: 'request' }),
     writePolicy: () => ({ surface }),
   });
-  return { runner, calls };
+  return { runner, calls, marker };
 }
 
 it('runs ssh to the approved login with fixed options and writes one ledger row', async () => {
@@ -174,4 +183,71 @@ it.each([
   const after = await runner.run({ roomId: 'room', argv: ['true'] });
   expect(grantedBind(before.output, target(root))).toBe(false);
   expect(grantedBind(after.output, target(root))).toBe(true);
+});
+
+it('never runs an untrusted ssh found on PATH, so a writable fake cannot act outside the sandbox', async () => {
+  const { runner, calls, marker } = await setup(() => [hostGrant()], 'room', { trustFake: false });
+  await expect(runner.run({ roomId: 'room', argv: ['ssh', 'do@100.126.74.60', 'id'] })).rejects.toThrow(
+    /not a trusted installed executable/,
+  );
+  await expect(stat(marker)).rejects.toThrow();
+  expect(calls.some((call) => call.name === 'postAgentActivity' || call.name === 'consumeAgentGrant')).toBe(false);
+});
+
+// Secret grants: a command that matches a command grant exactly gets each
+// requested secret that has its own live secret grant in this session.
+const envGrant: Grant = {
+  grantId: 'env', workspaceId: 'workspace', kind: 'command', target: 'env', status: 'approved', requestedBy: 'owner',
+};
+const secretGrant = (overrides: Partial<Grant> = {}): Grant => ({
+  grantId: 'secret-1', workspaceId: 'workspace', roomId: 'room', kind: 'secret', target: 'FLY_TOKEN',
+  status: 'approved', requestedBy: 'owner', ...overrides,
+});
+const secretValues = { FLY_TOKEN: 'fly-secret-value-123' };
+
+it('gives a granted command a secret approved mid-session, scrubbed from output', async () => {
+  let grants: Grant[] = [envGrant];
+  const { runner } = await setup(() => grants, 'corner', { secrets: secretValues });
+  await expect(runner.run({ roomId: 'room', argv: ['env'], secrets: ['FLY_TOKEN'] })).rejects.toThrow(
+    /no approved secret grant for FLY_TOKEN/,
+  );
+  grants = [envGrant, secretGrant()];
+  const result = await runner.run({ roomId: 'room', argv: ['env'], secrets: ['FLY_TOKEN'] });
+  expect(result.output).toContain('FLY_TOKEN=[FLY_TOKEN]');
+  expect(result.output).not.toContain('fly-secret-value-123');
+  // Without asking for it, the command gets no secret.
+  expect((await runner.run({ roomId: 'room', argv: ['env'] })).output).not.toContain('FLY_TOKEN');
+});
+
+it('keeps exact command matching when a secret is granted', async () => {
+  const { runner } = await setup(() => [envGrant, secretGrant()], 'corner', { secrets: secretValues });
+  await expect(runner.run({ roomId: 'room', argv: ['env', '-0'], secrets: ['FLY_TOKEN'] })).rejects.toThrow(
+    /no approved command grant matches/,
+  );
+});
+
+it.each([
+  ['expired', secretGrant({ expiresAt: Math.floor(Date.now() / 1000) - 1 })],
+  ['revoked', secretGrant({ status: 'revoked' })],
+  ['for another name', secretGrant({ target: 'OTHER_TOKEN' })],
+  ['from another workspace', secretGrant({ workspaceId: 'other' })],
+])('refuses a secret whose grant is %s', async (_name, grant) => {
+  const { runner, calls } = await setup(() => [envGrant, grant], 'corner', { secrets: secretValues });
+  await expect(runner.run({ roomId: 'room', argv: ['env'], secrets: ['FLY_TOKEN'] })).rejects.toThrow(
+    /no approved secret grant for FLY_TOKEN/,
+  );
+  expect(calls.some((call) => call.name === 'postAgentActivity')).toBe(false);
+});
+
+it('spends a once secret grant before the command runs', async () => {
+  const { runner, calls } = await setup(() => [envGrant, secretGrant({ status: 'once' })], 'corner', { secrets: secretValues });
+  await runner.run({ roomId: 'room', argv: ['env'], secrets: ['FLY_TOKEN'] });
+  expect(calls.filter((call) => call.name === 'consumeAgentGrant').map((call) => call.input)).toEqual([{ grantId: 'secret-1' }]);
+});
+
+it('does not pass secrets to a host grant run', async () => {
+  const { runner } = await setup(() => [hostGrant(), secretGrant()], 'room', { secrets: secretValues });
+  await expect(
+    runner.run({ roomId: 'room', argv: ['ssh', 'do@100.126.74.60', 'id'], secrets: ['FLY_TOKEN'] }),
+  ).rejects.toThrow(/not passed to a host grant run/);
 });

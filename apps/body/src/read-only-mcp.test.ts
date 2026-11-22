@@ -437,8 +437,7 @@ m9_describe('beeline-agent request_grant', () => {
     const tool = m9_agentToolsFor(true, false).find((entry) => entry.name === 'request_grant');
     const kinds = (tool?.inputSchema as { properties: { kind: { enum: string[] } } }).properties
       .kind.enum;
-    // A secret grant gives a session nothing to use; secrets ride on command grants (--with NAME).
-    m9_expect([...kinds].sort()).toEqual([...m9_REQUESTABLE_AGENT_GRANT_KINDS].filter((kind) => kind !== 'secret').sort());
+    m9_expect([...kinds].sort()).toEqual([...m9_REQUESTABLE_AGENT_GRANT_KINDS].sort());
     // The description is the interface the model reads to pick a kind: a kind
     // the schema offers but the prose never names is one nobody asks for.
     m9_expect(tool?.inputSchema.properties).toHaveProperty('kind');
@@ -551,6 +550,7 @@ m9_describe('beeline-agent request_grant', () => {
       { kind: 'device', target: '/dev/kvm' },
       { kind: 'mcp', target: 'squire' },
       { kind: 'host', target: 'do@100.126.74.60' },
+      { kind: 'secret', target: 'FLY_TOKEN' },
     ];
     for (const { kind, target } of asks) {
       for (const answer of [{ status: 'approved', auto: true }, { status: 'pending' }]) {
@@ -566,14 +566,23 @@ m9_describe('beeline-agent request_grant', () => {
       scope8.deps({ grantId: 'g-card', status: 'pending' }),
     );
     m9_expect(card).toContain('Once approved, in this same session: Use it now: run_granted_command argv ["ssh", "do@100.126.74.60"');
+    const secret = await m9_requestGrant(
+      { action: 'Use the requested resource', kind: 'secret', target: 'FLY_TOKEN', purpose: 'deploy', reason: 'deploy' },
+      scope8.deps({ grantId: 'g-secret', status: 'approved', auto: true }),
+    );
+    m9_expect(secret).toContain('run_granted_command with secrets ["FLY_TOKEN"]');
+    m9_expect(secret).not.toContain('fly-secret-value-123');
   });
 
   m9_it('refuses at ask time a grant no session could use, before the server is called', async () => {
     const ops: Array<{ name: string; input: Record<string, unknown> }> = [];
     const deps = scope8.deps({ grantId: 'never' }, ops);
     await m9_expect(
-      m9_requestGrant({ action: 'Use the requested resource', kind: 'secret', target: 'FLY_TOKEN', purpose: 'deploy', reason: 'deploy' }, deps),
-    ).rejects.toThrow(/--with FLY_TOKEN/);
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'secret', target: 'GHOST_TOKEN', purpose: 'deploy', reason: 'deploy' }, deps),
+    ).rejects.toThrow(/Store it first with store_secret/);
+    await m9_expect(
+      m9_requestGrant({ action: 'Use the requested resource', kind: 'secret', target: 'fly token', purpose: 'deploy', reason: 'deploy' }, deps),
+    ).rejects.toThrow(/UPPER_CASE/);
     await m9_expect(
       m9_requestGrant({ action: 'Use the requested resource', kind: 'host', target: 'api.fly.io', purpose: 'reach Fly', reason: 'reach Fly' }, deps),
     ).rejects.toThrow(/user@host/);

@@ -49,7 +49,7 @@ export async function openPoll(
 
 export interface GrantRunDeps {
   roomId: string;
-  run: (input: { roomId: string; argv: string[]; stdin?: string }) => Promise<JsonObject>;
+  run: (input: { roomId: string; argv: string[]; stdin?: string; secrets?: string[] }) => Promise<JsonObject>;
 }
 
 
@@ -69,7 +69,15 @@ export async function runGrantedCommand(
     throw new Error('argv must be a non-empty array of words');
   }
   if (args.stdin !== undefined && typeof args.stdin !== 'string') throw new Error('stdin must be text');
-  const result = await deps.run({ roomId: deps.roomId, argv: argv as string[], ...(typeof args.stdin === 'string' ? { stdin: args.stdin } : {}) });
+  const secrets = args.secrets;
+  if (secrets !== undefined && (!Array.isArray(secrets) || !secrets.every((name) => typeof name === 'string')))
+    throw new Error('secrets must be an array of secret names');
+  const result = await deps.run({
+    roomId: deps.roomId,
+    argv: argv as string[],
+    ...(typeof args.stdin === 'string' ? { stdin: args.stdin } : {}),
+    ...(secrets?.length ? { secrets: secrets as string[] } : {}),
+  });
   const grantId = typeof result.grantId === 'string' ? result.grantId : 'unknown';
   const verdict =
     result.sandboxFailure === true

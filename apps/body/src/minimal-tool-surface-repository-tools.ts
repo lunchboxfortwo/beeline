@@ -76,6 +76,12 @@ export const RUNNER_TOOL: ToolDefinition = {
         "minItems": 1,
         "items": {"type": "string", "minLength": 1},
         "description": "The command and its arguments as separate words."
+      },
+      "secrets": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"},
+        "description": "Secret names, each under its own approved secret grant, added to this command's environment; the argv must still match a command grant exactly."
       }
     },
     "additionalProperties": false

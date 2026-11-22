@@ -1111,6 +1111,7 @@
        "enum": [
         "path",
         "host",
+        "secret",
         "device",
         "command",
         "mcp"
@@ -1120,7 +1121,7 @@
        "type": "string",
        "minLength": 1,
        "maxLength": 512,
-       "description": "What you need: a path, an SSH login as user@host (then run_granted_command argv ['ssh', 'user@host', '<command>']), a device, or a command line (optional --with SECRET_NAME suffixes for secrets). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
+       "description": "What you need: a path, an SSH login as user@host (then run_granted_command argv ['ssh', 'user@host', '<command>']), a secret name (then pass it in run_granted_command secrets), a device, or a command line (optional --with SECRET_NAME suffixes). For inline code use a JSON argv array; for interpreter stdin use a JSON object with argv and stdin. MCP targets name the host server."
       },
       "touches": {
        "type": "string",
@@ -1346,6 +1347,15 @@
         "minLength": 1
        },
        "description": "The command and its arguments as separate words."
+      },
+      "secrets": {
+       "type": "array",
+       "maxItems": 8,
+       "items": {
+        "type": "string",
+        "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+       },
+       "description": "Secret names, each under its own approved secret grant, added to this command's environment; the argv must still match a command grant exactly."
       },
       "requestId": {
        "type": "string",

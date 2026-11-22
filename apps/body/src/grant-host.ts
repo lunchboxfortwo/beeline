@@ -41,3 +41,21 @@ export function hostGrantRefusal(grants: readonly LiveGrant[], workspaceId: stri
 
 export const HOST_GRANT_ARGV_HINT =
   'Call it as ["ssh", "user@host", "<command>", ...] with no ssh options; Beeline adds its own.';
+
+/**
+ * A host run spawns outside the Room sandbox, so it must be the installed ssh:
+ * root-owned in a tree the agent cannot modify, never a writable or shadowing
+ * file earlier on PATH. Returns its absolute path or refuses.
+ */
+export function trustedHostSsh(
+  resolve: (name: string, cwd: string, env: NodeJS.ProcessEnv) => string | undefined,
+  cwd: string,
+  path: string | undefined,
+): string {
+  const ssh = resolve('ssh', cwd, { PATH: path ?? '' });
+  if (!ssh)
+    throw new Error(
+      'the first ssh on PATH is not a trusted installed executable (missing, writable by this agent, or shadowing the system one), so the host grant did not run.',
+    );
+  return ssh;
+}

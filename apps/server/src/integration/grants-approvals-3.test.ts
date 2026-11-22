@@ -407,6 +407,28 @@ const fixture = monolithFixture();
     expect(await live()).not.toContain(old.grantId);
   });
 
+  it.each([true, false])('lists a secret grant for the same turn, approved at once or on a card (yolo=%s)', async (yolo) => {
+    await fixture.database.query(`UPDATE agents SET yolo_mode=$2 WHERE agent_id=$1`, [AGENT, yolo]);
+    const source = (await (await fixture.operation('sendRoomMessage', {
+      roomId: ROOM, text: '@bee deploy', mentions: [AGENT],
+    })).json()) as { messageId: string };
+    const ask = (await (await fixture.daemonOperation('requestAgentGrant', {
+      roomId: ROOM, requestId: source.messageId, kind: 'secret', target: 'FLY_TOKEN', reason: 'deploy', purpose: 'Deploy',
+    })).json()) as { grantId: string; status: string; auto: boolean };
+    const live = async () => ((await (await fixture.daemonOperation('listTurnAgentGrants', {
+      roomId: ROOM, requestId: source.messageId,
+    })).json()) as { grants: Array<{ grantId: string; kind: string; target: string }> }).grants;
+    if (yolo) expect(ask).toMatchObject({ status: 'approved', auto: true });
+    else {
+      expect(ask).toMatchObject({ status: 'pending', auto: false });
+      expect((await live()).map(grant => grant.grantId)).not.toContain(ask.grantId);
+      expect((await fixture.operation('decideAgentGrant', { grantId: ask.grantId, decision: 'always' })).status).toBe(200);
+    }
+    expect(await live()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ grantId: ask.grantId, kind: 'secret', target: 'FLY_TOKEN' }),
+    ]));
+  });
+
   it.each(['host', 'command'] as const)('%s refusal stays visible to the agent without granting access', async kind => {
     await fixture.database.query(`UPDATE agents SET yolo_mode=false WHERE agent_id=$1`, [AGENT]);
     const ask = (await (await fixture.daemonOperation('requestAgentGrant', {

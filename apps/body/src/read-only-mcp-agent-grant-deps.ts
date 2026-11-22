@@ -127,6 +127,11 @@ function hostGrantUse(target: string): string {
   return `Use it now: run_granted_command argv ["ssh", "${target}", "<command>", ...] runs that command on ${target} as that user, with Beeline's fixed ssh options; pass no ssh options yourself.`;
 }
 
+/** How an approved secret grant is used, the same in this session or after a card. */
+function secretGrantUse(name: string): string {
+  return `Use it now: run_granted_command with secrets ["${name}"] and an argv that a command grant matches exactly puts ${name} in that command's environment; the value never appears in output.`;
+}
+
 /** Legacy action selected the operation; leave display copy to the server. */
 function grantApprovalIntent(args: JsonObject) {
   const intent = normalizeApprovalIntent(args);
@@ -152,11 +157,15 @@ export async function requestGrant(
   if (!target) throw new Error('target must be a non-empty string');
   if (target.length > AGENT_GRANT_TARGET_MAX_LENGTH) throw new Error('target is too long');
   // Refuse at ask time what no session could use, instead of approving it.
-  if (kind === 'secret')
-    throw new Error(
-      `a secret grant gives a session nothing to use, so none is issued. To use ${target}, call request_grant kind:command ` +
-        `whose target is the exact argv plus --with ${target} (store the value first with store_secret if it is not stored), then pass only the argv to run_granted_command.`,
-    );
+  if (kind === 'secret') {
+    if (!COMMAND_SECRET_NAME.test(target))
+      throw new Error('a secret grant target is one UPPER_CASE secret name, such as FLY_TOKEN.');
+    // An approved secret that cannot resolve could never be used, so refuse now.
+    if (!(await (deps.resolveSecret ?? operatorSecretResolver(process.env))(target)))
+      throw new Error(
+        `secret ${target} is not in the operator key store or the daemon environment, so a grant for it could never be used. Store it first with store_secret.`,
+      );
+  }
   if (kind === 'host' && target !== HOST_EMULATOR_TARGET && !parseHostGrantTarget(target))
     throw new Error(
       `a host grant names one SSH login as user@host, and ${target} is not one. ` +
@@ -225,6 +234,7 @@ export async function requestGrant(
     if (kind === 'path') return `approved: ${ask} [grant ${grantId}]. Use it now through run_granted_command; its tool sandbox loads the current path grant.`;
     if (kind === 'mcp') return `approved: ${ask} [grant ${grantId}]. Use your session tools; read(facet:session) shows the route's load result.`;
     if (kind === 'host') return `approved: ${ask} [grant ${grantId}]. ${hostGrantUse(target)}`;
+    if (kind === 'secret') return `approved: ${ask} [grant ${grantId}]. ${secretGrantUse(target)}`;
     throw new Error(`grant ${grantId} was approved, but Beeline has no way to use a ${kind} grant in this session.`);
   }
   // Yolo covers most asks; these two shapes never do, and saying which one this
@@ -263,6 +273,8 @@ export async function requestGrant(
       : 'you will be woken with the answer.') +
     (kind === 'host' && target !== HOST_EMULATOR_TARGET
       ? ` Once approved, in this same session: ${hostGrantUse(target)}`
+      : kind === 'secret'
+        ? ` Once approved, in this same session: ${secretGrantUse(target)}`
       : kind === 'path' || kind === 'device'
         ? ' Once approved, run_granted_command loads it in this same session.'
         : '')
