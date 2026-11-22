@@ -49,6 +49,9 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
       ? { brief: brief as unknown as import('@beeline/api-contract/daemon').CornerBriefDraft }
       : {}),
     ...(args.hold === true ? { hold: true } : {}),
+    ...(Array.isArray(args.workItems) && args.workItems.length
+      ? { workItems: args.workItems.map(String) }
+      : {}),
     ...(typeof args.sourceMessageId === 'string' ? { sourceMessageId: args.sourceMessageId } : {}),
     ...(repository.resolution === 'repository'
       ? {

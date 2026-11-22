@@ -1,3 +1,5 @@
+import { versionAtLeast } from './self-update-manifest.js';
+import { downloadBytes } from './update-download.js';
 import { readFile, mkdir, open, rename, lstat, access, writeFile, rm, chmod } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -393,9 +395,7 @@ export function archiveUrlFor(manifestUrl: string, file: string): string {
 
 
 export async function fetchText(url: string, fetchImpl: typeof fetch): Promise<string> {
-  const response = await fetchImpl(url, { signal: undefined });
-  if (!response.ok) throw new Error(`fetching ${url} failed: HTTP ${response.status}`);
-  return response.text();
+  return Buffer.from(await downloadBytes(url, fetchImpl)).toString('utf8');
 }
 
 
@@ -487,12 +487,9 @@ export async function stageRelease(
   } = {},
 ): Promise<string> {
   assertInstallTestIsolation(layout);
-  const deadlineAt = opts.deadlineAt ?? Date.now() + 3 * 60_000;
-  const remaining = () => {
-    const ms = deadlineAt - Date.now();
-    if (ms <= 0) throw new Error('release preparation deadline exceeded');
-    return ms;
-  };
+  // Each local subprocess has its own observation budget. Transfer progress
+  // must not consume a later extraction or smoke-test budget.
+  const remaining = () => 180_000;
   const fetchImpl: typeof fetch = (input, init) =>
     (opts.fetchImpl ?? fetch)(input, {
       ...init,
@@ -535,19 +532,10 @@ export async function stageRelease(
   const tempArchive = join(layout.releasesRoot, `.download-${releaseId}-${process.pid}.tar.gz`);
   try {
     log(`downloading ${published.file}`);
-    const response = await fetchImpl(archiveUrlFor(manifestUrl, published.file), {
-      signal: undefined,
-    });
-    if (!response.ok || !response.body) {
-      throw new Error(`downloading ${published.file} failed: HTTP ${response.status}`);
-    }
+    const bytes = await downloadBytes(archiveUrlFor(manifestUrl, published.file), fetchImpl, { report: log });
     const hash = createHash('sha256');
-    const chunks: Buffer[] = [];
-    for await (const chunk of response.body) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as ArrayBufferLike);
-      hash.update(buffer);
-      chunks.push(buffer);
-    }
+    hash.update(bytes);
+    const chunks = [Buffer.from(bytes)];
     const actual = hash.digest('hex');
     if (actual !== published.sha256.toLowerCase()) {
       throw new Error(
@@ -557,6 +545,7 @@ export async function stageRelease(
     await writeFile(tempArchive, Buffer.concat(chunks), { mode: 0o600 });
 
     // Path-traversal guard, mirroring the installer.
+    log(`checking archive paths for ${published.file}`);
     const entries = (
       await new Promise<string>((resolveList, rejectList) => {
         const child = spawn('tar', ['-tzf', tempArchive], { stdio: ['ignore', 'pipe', 'inherit'] });
@@ -580,6 +569,7 @@ export async function stageRelease(
       }
     }
 
+    log(`extracting ${published.file}`);
     const extract = await run(
       'tar',
       ['-xzf', tempArchive, '-C', releaseDir],
@@ -624,6 +614,7 @@ export async function stageRelease(
     // Smoke-test the new cli BEFORE it can become active: a bundle that cannot
     // even answer --version must never win the symlink.
     if (opts.smokeTestCli !== false) {
+      log(`checking staged CLI startup for ${releaseId}`);
       const probe = await run(
         process.execPath,
         [join(releaseDir, BUNDLE_ENTRYPOINT), '--version'],
@@ -757,6 +748,15 @@ export async function prepareLatestRelease(
         await fetchText(manifestUrl, options.fetchImpl ?? fetch),
         hostPlatformKey(),
       ).bundle;
+    const installed = await readInstalledBundleIdentity(layout);
+    const active = await activeReleaseId(layout);
+    if (active && installed?.version && bundle.version && installed.version !== bundle.version &&
+        versionAtLeast(installed.version, bundle.version) && !versionAtLeast(bundle.version, installed.version)) {
+      options.logger?.(`already on ${installed.version}; published ${bundle.version} is older; repairing helper`);
+      return { releaseId: active, identity: installed };
+    }
+    if (installed?.commit === bundle.commit && installed?.version === bundle.version)
+      options.logger?.(`already on ${installed?.version ?? active}; verifying content and repairing helper`);
     const pending = (await readUpdateState(layout)).stagedReleaseId;
     const pendingDigest = pending
       ? await readFile(join(layout.releasesRoot, pending, '.stage-ok'), 'utf8').catch(() => '')

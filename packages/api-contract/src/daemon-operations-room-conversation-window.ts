@@ -620,6 +620,8 @@ export type CreateCornerInput = TurnOutputAuthority &
     readonly objective: string;
     /** Full assignment; the short objective remains a navigation summary. */
     readonly brief?: CornerBriefDraft;
+    /** Ids of tasks in the parent chat this thread builds; they move to In progress on open. */
+    readonly workItems?: readonly string[];
     readonly repository?: string;
     readonly targetBranch?: string;
   };

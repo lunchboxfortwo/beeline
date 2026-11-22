@@ -1,3 +1,4 @@
+import { progress } from './update-progress.js';
 import { watch } from 'node:fs';
 import { chmod, rm } from 'node:fs/promises';
 import { createConnection, createServer, type Socket } from 'node:net';
@@ -84,16 +85,31 @@ export class MachineControl {
   }
 }
 
+export class MachineObservationError extends Error {
+  constructor(message: string, readonly responded: boolean) { super(message); }
+}
+export function helperAbsent(error: unknown): boolean {
+  return error instanceof MachineObservationError && !error.responded ||
+    ['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException)?.code ?? '');
+}
+
 /** Subscribe once; readiness changes and successor socket creation drive completion. */
 export async function requestMachine(
   stateRoot: string,
   request: MachineRequest,
   accept: (status: HelperStatusFile) => boolean,
-  _timeoutMs = 600_000,
+  timeoutMs = 600_000,
 ): Promise<HelperStatusFile> {
   const path = machineControlPath(stateRoot);
   await preparePrivateSocketDirectory(path);
   return new Promise((done, reject) => {
+    let responded = false;
+    let latest = 'no acknowledgment';
+    progress(`helper ${request.operation}: waiting for acknowledgment`);
+    const heartbeat = setInterval(() => progress(`helper ${request.operation}: ${latest}`), 5000);
+    const timer = setTimeout(() => finish(new MachineObservationError(
+      `helper ${request.operation}: observer expired (${latest}); helper was not stopped`, responded,
+    )), timeoutMs);
     let socket: Socket | undefined;
     let connecting = false;
     let reconnectNeeded = false;
@@ -108,6 +124,8 @@ export async function requestMachine(
     function finish(error?: Error, status?: HelperStatusFile) {
       if (settled) return;
       settled = true;
+      clearInterval(heartbeat);
+      clearTimeout(timer);
       watcher.close();
       socket?.destroy();
       if (error) reject(error);
@@ -146,7 +164,10 @@ export async function requestMachine(
               Array.isArray(status.agents)
             )
               throw new Error('invalid helper acknowledgment');
-                  if (accept(status)) finish(undefined, status);
+            responded = true;
+            latest = `pid ${status.pid}, generation ${status.generation}, release ${status.loadedRelease ?? 'unknown'}, ${status.processState}${status.lastError ? `; last error: ${status.lastError}` : ''}`;
+            progress(`helper ${request.operation}: ${latest}`);
+            if (accept(status)) finish(undefined, status);
           } catch (error) {
             finish(error instanceof Error ? error : new Error(String(error)));
           }

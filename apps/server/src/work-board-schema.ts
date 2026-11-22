@@ -99,6 +99,17 @@ CREATE TRIGGER work_attachment_changed AFTER INSERT ON work_item_attachments
 DROP TRIGGER IF EXISTS work_note_changed ON work_item_entries;
 CREATE TRIGGER work_note_changed AFTER INSERT ON work_item_entries
   FOR EACH ROW WHEN (NEW.kind='note') EXECUTE FUNCTION beeline_work_detail_changed();
+-- A chat task a thread builds (work-item-threads.ts). Opening the thread links it and moves
+-- it to In progress. When its last open linked thread closes, it moves to Done if any linked
+-- thread landed, else back to Backlog.
+CREATE TABLE IF NOT EXISTS work_item_threads (
+  work_item_id text NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
+  thread_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  landed boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (work_item_id,thread_id)
+);
+CREATE INDEX IF NOT EXISTS work_item_threads_thread_idx ON work_item_threads(thread_id);
 CREATE TABLE IF NOT EXISTS work_questions (
   message_id text PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
   room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,

@@ -171,7 +171,7 @@ without a Pages propagation loop.
 
 `npx usebeeline@latest update` runs a small recovery entry independent of the
 installed body. It downloads, verifies checksum, Node requirements and imports,
-then installs the stable launcher. It normalizes flat installs, real anchor
+then installs the stable launcher. Progress is written to stderr; final command output stays on stdout. It normalizes flat installs, real anchor
 directories, old symlinks, broken forwarders and recorded Node paths. It disables
 and stops legacy per-agent units before enabling the sole native helper. The
 new unit has no exit-79 exception; an empty helper stays alive. Any exit restarts
@@ -180,9 +180,10 @@ unless the operator explicitly stops the native service.
 The CLI that is already executing on an old machine still has its old behavior.
 Use the new npm recovery entry for a dead or broken old install. After the first
 forward migration, both installed `beeline update`/`beeline start` and npx select
-the current release, ensure the native helper is running, and wait for a live
-process-generation acknowledgment that every enabled agent is serving. A failed
-agent is named with its reason. `update` preserves stopped agents; `start --all`
+the current release, ensure the native helper is running, and wait for a live process-generation acknowledgment. Update completes when
+that helper runs the selected release (or a strictly newer release), and prints
+a timestamped state and diagnostic for each hosted agent. Agent readiness does
+not gate update. Start still waits for every enabled agent to serve. `update` preserves stopped agents; `start --all`
 or `start --agent <key>` explicitly re-enables them. `update --status` is a local,
 read-only observation; `--check` checks only the published artifact.
 
@@ -190,8 +191,22 @@ read-only observation; `--check` checks only the published artifact.
 release when one is already installed. It writes the paired agent's runtime,
 asks the running helper to converge, and waits for that agent alone. A new
 machine installs the helper first and starts it after the runtime is written.
-The helper rejects a requested version older than its loaded release,
-including comparisons between final and rc releases.
+An older publication is a freshness result, including final versus rc comparisons;
+helper repair still runs. Equal versions still verify content, and --force stages
+a separate repair release. Obsolete staging is cleared only when it still matches
+the attempt holding the install lock.
+
+Socket and lock observers print their current phase while waiting and report a
+named error when they stop observing. They never restart a helper after a protocol
+error, take over a live install lock, or cancel its owner. Detached preparation and
+dependency children keep durable stdout/stderr logs, stream progress to the CLI,
+and continue when its observer leaves. Native convergence likewise has a detached owner;
+its lock covers the complete transaction, including after the observing CLI exits.
+Adapter installation has no child-killing deadline; only its outer observer may expire. Dependencies converge using the selected
+bundle before this invocation requests successor startup. Downloads have a network
+inactivity budget covering DNS, connection, headers and body; each received chunk
+resets it and reports cumulative bytes. There is no command-wide deadline that
+kills progressing work.
 
 Legacy helper records sign the one-time authenticated
 `/v1/auth/daemon/migrate-legacy` server route with their existing identity. The

@@ -1,8 +1,9 @@
+import { progress } from './update-progress.js';
 import { createHash } from 'node:crypto';
 import { createConnection, createServer, type Socket } from 'node:net';
 
 class KernelLockBusyError extends Error {
-  constructor() { super('timed out waiting for Beeline installer owner'); }
+  constructor(holder = 'unknown') { super(`installer lock observer expired; holder ${holder}; owner was not stopped`); }
 }
 
 /** Cache reuse is optional: never queue a serving agent behind its owner. */
@@ -32,10 +33,13 @@ export async function withKernelLock<T>(
       ? { path: `\0beeline-lock-${hash.toString('hex')}` }
       : { port: 20_000 + (hash.readUInt32BE(0) % 10_000), host: '127.0.0.1' };
   const deadline = Date.now() + waitMs;
+  let holder = `lock ${key}`;
   for (;;) {
     const peers = new Set<Socket>();
+    const since = new Date().toISOString();
     const server = createServer((peer) => {
       peers.add(peer);
+      peer.write(JSON.stringify({ pid: process.pid, key, since }) + '\n');
       peer.on('error', () => undefined);
       peer.once('close', () => peers.delete(peer));
     });
@@ -54,15 +58,21 @@ export async function withKernelLock<T>(
       }
     }
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new KernelLockBusyError();
+    if (remaining <= 0) throw new KernelLockBusyError(holder);
     // Wait for owner death/completion on the connection, rather than rereading a lock file.
+    progress(`waiting for installer ${holder}`);
     await new Promise<void>((done) => {
       const peer = createConnection(address);
       // Consume EOF so a completed owner's connection closes. A paused
       // client can otherwise keep a Linux abstract address referenced after
       // the listener has gone, preventing the next owner from binding it.
-      peer.resume();
+      peer.setEncoding('utf8');
+      peer.on('data', (chunk: string) => { holder = chunk.trim().slice(0, 1024); progress(`installer held by ${holder}`); });
+      const heartbeat = setInterval(() => progress(`waiting for installer ${holder}`), 5000);
+      const timer = setTimeout(() => finish(), remaining);
       const finish = () => {
+        clearTimeout(timer);
+        clearInterval(heartbeat);
         peer.destroy();
         done();
       };
