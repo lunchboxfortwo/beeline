@@ -417,3 +417,12 @@ it.each([false, true])('keeps a human opening static with a resident source=%s',
   await phone.execute('requestCornerClose', { roomId: input.cornerId }, H);
   expect((await phone.readRoom(R, OUTSIDER))!.messages.filter(m => m.daemonFact?.cornerId === input.cornerId)).toEqual(row);
 });
+
+it('returns the new thread with its creation when asked, read as the opening screen reads it', async () => {
+  const input = { roomId: R, title: 'opened-with-read', cornerId: randomUUID(), includeRoomView: true };
+  const created = await phone.execute('createHumanCorner', input, H) as { id: string; roomView?: { room: { id: string } } };
+  expect(created.id).toBe(input.cornerId);
+  expect(created.roomView).toEqual(await phone.readRoom(input.cornerId, H));
+  const without = await phone.execute('createHumanCorner', { roomId: R, title: 'opened-alone', cornerId: randomUUID() }, H);
+  expect(without).not.toHaveProperty('roomView');
+});

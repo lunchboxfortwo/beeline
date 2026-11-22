@@ -21,6 +21,8 @@ import { getBuzzRuntimeConfig } from '@/buzz/runtime-config';
 import type { RepoCandidate } from '@/buzz/room-repo-picker';
 import { monolithPhoneOperation } from './monolith-operation';
 import { sharedLiveConnection } from './live-connection';
+import { publishOpenedRoom } from '@/buzz/opened-room-cache';
+import { currentSurfaceStamp } from '@/buzz/surface-clock';
 
 export type LiveWireTrace = {
   id: string;
@@ -449,6 +451,7 @@ export class MonolithRigTransport {
   ) {
     // Bounded so a dead link reports a failure instead of hanging; the server
     // returns the same corner when a retry repeats `cornerId`.
+    const stamp = currentSurfaceStamp();
     return this.operation(
       'createHumanCorner',
       {
@@ -457,9 +460,16 @@ export class MonolithRigTransport {
         sourceMessageId,
         titleGenerated,
         cornerId,
+        includeRoomView: true,
       },
       { timeoutMs: MONOLITH_REQUEST_TIMEOUT_MS },
-    ).then((value) => (value as { id: string }).id);
+    ).then((value) => {
+      const result = value as { id: string; roomView?: unknown };
+      // The new thread's first read came back with the write; its screen
+      // paints it at mount and refreshes after that first frame.
+      if (result.roomView) publishOpenedRoom(result.roomView, stamp);
+      return result.id;
+    });
   }
   roomRepositorySet(roomId: string, input: RoomRepositoryInput): Promise<RoomRepositoryResult> {
     return this.operation('setRoomRepository', {
