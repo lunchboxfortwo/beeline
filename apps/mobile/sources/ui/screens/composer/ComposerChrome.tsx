@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { Card, XStack, YStack } from 'tamagui';
-import { CornerUpLeft, FileText, X } from 'lucide-react-native';
+import { Card, Image, XStack, YStack } from 'tamagui';
+import { CornerUpLeft, FileText } from 'lucide-react-native';
+import { CloseButton } from '@/components/buzz/CloseGlyph';
 import { VOICE_LONG_PRESS_MS } from '@beeline/api-contract/phone';
 import { Waveform } from './Waveform';
 import { Btn, Glyph, T } from '@/ui/grammar';
@@ -16,7 +17,7 @@ export function ComposerFrame({ focused, pill = false, children }: { focused: bo
     return (
         <Card
             backgroundColor={pill ? 'transparent' : 'raised'}
-            borderRadius="lg"
+            borderRadius="transcript"
             borderWidth={pill ? 0 : 1}
             borderColor={focused ? 'needsYou' : 'stroke'}
             padding={pill ? '0' : '1'}
@@ -108,57 +109,39 @@ export function ComposerNote({ children }: { children: React.ReactNode }) {
     return <YStack paddingHorizontal="3" paddingTop="1" paddingBottom="2">{children}</YStack>;
 }
 
-/** The reply and the staged files sit above the card, each in its own raised card. */
+/** Reply and file tray share the existing composer frame. */
 export function ComposerAdjuncts({ testID, children }: { testID: string; children: React.ReactNode }) {
-    return <YStack gap="2" marginBottom="2" testID={testID}>{children}</YStack>;
+    return <YStack testID={testID}>{children}</YStack>;
 }
 
 export function ComposerReply({ handle, preview, onCancel }: { handle: string; preview: string; onCancel?: () => void }) {
     return (
-        <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="md" padding="2" paddingLeft="3" testID="reply-composer-banner">
-            <XStack gap="2" alignItems="center">
-                <Glyph icon={CornerUpLeft} size={16} accent />
-                <YStack flex={1} minWidth={0}>
-                    <T v="meta" color="secondary" numberOfLines={1}>Replying to <T v="metaStrong" color="needsYou">@{handle}</T></T>
-                    <T v="meta" color="ink" numberOfLines={1}>{preview}</T>
-                </YStack>
-                <Btn kind="icon" label="Cancel reply" onPress={onCancel} testID="reply-composer-cancel"><Glyph icon={X} size={18} /></Btn>
-            </XStack>
-        </Card>
+        <XStack gap="2" alignItems="center" paddingLeft="2" borderBottomWidth={1} borderColor="stroke" testID="reply-composer-banner">
+            <Glyph icon={CornerUpLeft} size={16} />
+            <T flex={1} minWidth={0} v="meta" color="secondary" numberOfLines={1}>
+                <T v="metaStrong" color="needsYou">@{handle}</T> {preview}
+            </T>
+            <CloseButton accessibilityLabel="Cancel reply" onPress={onCancel} testID="reply-composer-cancel" />
+        </XStack>
     );
 }
 
-export function ComposerAttachment({ index, name, sizeLabel, mimeType, uploadState, busy, onRetry, onRemove }: {
-    index: number; name: string; sizeLabel: string; mimeType: string;
+export function ComposerAttachment({ index, uri, name, mimeType, uploadState, busy, onRetry, onRemove }: {
+    index: number; uri: string; name: string; sizeLabel: string; mimeType: string;
     uploadState?: 'uploading' | 'uploaded' | 'failed'; busy: boolean; onRetry: () => void; onRemove: () => void;
 }) {
     const failed = uploadState === 'failed';
+    const uploading = uploadState !== 'uploaded' && !failed;
     return (
-        <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="md" padding="2" paddingLeft="3" testID={`pending-chat-attachment-${index}`}>
-            <XStack gap="2" alignItems="center">
-                <Glyph icon={FileText} />
-                <YStack flex={1} minWidth={0}>
-                    <T v="meta" color="ink" numberOfLines={1}>{name}</T>
-                    <T v="meta" color="secondary" numberOfLines={1} testID={`pending-chat-attachment-meta-${index}`}>
-                        <T v="meta" color={failed ? 'removed' : 'secondary'} testID={`pending-chat-attachment-state-${index}`}>
-                            {uploadState === 'uploaded' ? 'Ready' : failed ? 'Upload failed' : 'Uploading…'}
-                        </T>{' '}
-                        · {sizeLabel} · {mimeType.toUpperCase()}
-                    </T>
-                </YStack>
-                {failed ? (
-                    <Btn kind="secondary" label={`Retry uploading ${name}`} disabled={busy} onPress={onRetry} testID={`pending-chat-attachment-retry-${index}`}>
-                        <T v="metaStrong">Retry</T>
-                    </Btn>
-                ) : null}
-                <Btn kind="icon" label={`Remove ${name}`} disabled={busy} onPress={onRemove} testID={`pending-chat-attachment-remove-${index}`}>
-                    <Glyph icon={X} size={18} />
-                </Btn>
-            </XStack>
-        </Card>
+        <YStack position="relative" width={48} height={48} flexShrink={0} testID={`pending-chat-attachment-${index}`}>
+            <YStack width={48} height={48} borderRadius="house" overflow="hidden" opacity={uploading ? 0.4 : 1}
+                alignItems="center" justifyContent="center" aria-label={`${name}, ${failed ? 'upload failed' : uploading ? 'uploading' : 'ready'}`}>
+                {mimeType.startsWith('image/')
+                    ? <Image source={{ uri }} width={48} height={48} resizeMode="cover" />
+                    : <Glyph icon={FileText} />}
+            </YStack>
+            <CloseButton position="absolute" top={0} right={0} accessibilityLabel={`Remove ${name}`} disabled={busy} onPress={onRemove} testID={`pending-chat-attachment-remove-${index}`} />
+            {failed && <Btn position="absolute" bottom={0} left={0} kind="quiet" label={`Retry uploading ${name}`} disabled={busy} onPress={onRetry} testID={`pending-chat-attachment-retry-${index}`}><T v="meta">Retry</T></Btn>}
+        </YStack>
     );
-}
-
-export function ComposerMoreAttachments({ count }: { count: number }) {
-    return <YStack paddingHorizontal="3" testID="pending-chat-attachments-more"><T v="meta" color="needsYou">{count} more</T></YStack>;
 }

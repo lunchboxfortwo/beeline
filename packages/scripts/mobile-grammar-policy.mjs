@@ -20,7 +20,7 @@ export const COLOR_TOKENS = new Set([
 ]);
 // 0, 4, 8, 12, 16, 20, 24, 32 and the one 2 px optical nudge.
 export const SPACE_TOKENS = new Set(['0', '1', '2', '3', '4', '5', '6', '8', '0.5']);
-export const RADIUS_TOKENS = new Set(['sm', 'md', 'lg', 'full', 'transcript', 'viewer']);
+export const RADIUS_TOKENS = new Set(['sm', 'md', 'lg', 'full', 'house', 'transcript', 'viewer']);
 export const CONTROL_HEIGHTS = new Set([44, 48, 52, 56]);
 
 const TYPE_PROPS = new Set(['fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'fontStyle']);

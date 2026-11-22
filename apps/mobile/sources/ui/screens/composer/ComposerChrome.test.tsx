@@ -3,6 +3,8 @@ import * as React from 'react';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
+vi.mock('expo-image', () => ({ Image: 'Image' }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
@@ -44,11 +46,10 @@ it('the card takes the brass border only while the field has focus', () => {
 it('a failed upload says so and offers Retry beside Remove', () => {
   const onRetry = vi.fn();
   act(() => {
-    tree = create(<ComposerAttachment index={0} name="review.pdf" sizeLabel="12 KB" mimeType="application/pdf"
+    tree = create(<ComposerAttachment index={0} uri="file:///review.pdf" name="review.pdf" sizeLabel="12 KB" mimeType="application/pdf"
       uploadState="failed" busy={false} onRetry={onRetry} onRemove={() => undefined} />);
   });
-  const state = tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'pending-chat-attachment-state-0');
-  expect(state.props.children).toBe('Upload failed');
+  expect(tree.root.findAll((node: any) => node.props['aria-label'] === 'review.pdf, upload failed').length).toBeGreaterThan(0);
   tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'pending-chat-attachment-retry-0').props.onPress();
   expect(onRetry).toHaveBeenCalled();
 });
@@ -60,4 +61,19 @@ it('draws the speaking waveform while dictation listens', () => {
     expect(line).toHaveLength(1);
     expect(line[0].findAll((node: any) => node.type === 'YStack' && node.props.backgroundColor === 'needsYou')).toHaveLength(64);
     act(() => tree.unmount());
+});
+
+it('keeps uploading thumbnails at 48px, dimmed, with a named remove control', () => {
+  const remove = vi.fn();
+  act(() => { tree = create(<ComposerAttachment index={0} uri="file:///photo.jpg" name="photo.jpg" sizeLabel="1 KB" mimeType="image/jpeg" uploadState="uploading" busy={false} onRetry={() => undefined} onRemove={remove} />); });
+  const tile = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pending-chat-attachment-0');
+  expect(tile.props.height).toBe(48);
+  expect(tile.props.width).toBe(48);
+  const preview = tree.root.find((node: any) => node.type === 'YStack' && node.props['aria-label'] === 'photo.jpg, uploading');
+  expect(preview.props.opacity).toBe(0.4);
+  expect(preview.props.borderRadius).toBe('house');
+  const close = tree.root.find((node: any) => node.type === 'XStack' && node.props.testID === 'pending-chat-attachment-remove-0');
+  expect(close.props.accessibilityLabel).toBe('Remove photo.jpg');
+  close.props.onPress();
+  expect(remove).toHaveBeenCalledOnce();
 });

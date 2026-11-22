@@ -23,11 +23,17 @@ it('puts this chat\'s threads first, newest activity on top, then the other Room
 });
 
 it('writes ↳name for a picked thread and #name for a picked Room', () => {
-  const [newest, , , room] = channelSuggestionCandidates(rooms, { name: 'beeline' }, threads);
+  const [room, newest] = channelSuggestionCandidates(rooms, { name: 'beeline' }, threads);
   const text = 'Same cause as #s';
   const active = activeChannelAtCursor(text, text.length)!;
   expect(replaceActiveChannel(text, active, channelSuggestionText(newest!))).toEqual({
     text: 'Same cause as ↳sending-new-message ', cursor: 35,
   });
   expect(channelSuggestionText(room!)).toBe('#beeline');
+});
+
+it('offers the current chat before its threads for its own name', () => {
+  const result = filterChannelSuggestions(channelSuggestionCandidates(rooms, { name: 'beeline' }, threads), 'beeline');
+  expect(result.matches.map((item) => item.id)).toEqual(['r1', 't2', 't3', 't1']);
+  expect(result.matches[0].currentChat).toBe(true);
 });

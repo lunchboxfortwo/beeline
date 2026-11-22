@@ -147,7 +147,7 @@ export function useChatComposerSuggestions([
             name: item.room.name,
             repositoryName: item.repositoryName,
           })),
-        corners?.room ?? null,
+        corners?.room ?? (channelCornerRoomId ? workspaceChats.find((item) => item.room.id === channelCornerRoomId)?.room ?? null : null),
         corners?.corners ?? [],
       ),
       activeChannel.query,

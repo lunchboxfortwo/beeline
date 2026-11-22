@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { ScrollView, YStack } from 'tamagui';
+import { ScrollView } from 'tamagui';
 import { AlertTriangle, AtSign, Check, CornerDownRight, Hash } from 'lucide-react-native';
 import { Glyph, T } from '@/ui/grammar';
 import { compactRelativeTime } from '@/buzz/relative-time';
@@ -173,9 +173,8 @@ export function MentionSuggestionMenu({
 
 /**
  * The composer's `#` menu, the same card, scroll cap and row height as the
- * @-mention menu. This chat's threads lead ("Threads in #chat"), newest
- * activity on top, each with how long ago it last spoke; the other Rooms
- * follow under "Other rooms". After `#chat/` only that chat's threads remain.
+ * @-mention menu. The current chat leads its threads in one list, newest
+ * activity first. After `#chat/` only that chat's threads remain.
  */
 export function ChannelSuggestionMenu({
   query,
@@ -200,13 +199,13 @@ export function ChannelSuggestionMenu({
   );
   const cornerRoom = channelCornerRoom(query, matches)
     ?? (matches[0]?.kind === 'corner' ? matches[0].token.slice(0, matches[0].token.indexOf('/')) : null);
-  const firstRoom = matches.findIndex((item) => item.kind === 'room');
+  const currentChat = matches.find((item) => item.currentChat);
   return (
     <SuggestionCard
-      title={cornerRoom ? `Threads in #${cornerRoom}` : 'Chats'}
+      title={currentChat ? `In #${currentChat.token}` : cornerRoom ? `In #${cornerRoom}` : 'Chats'}
       label="Link a thread or chat"
       testID="channel-suggestions"
-      overflow={overflow}
+      overflow={overflow + Math.max(0, matches.length - visibleRows)}
       overflowTestID="channel-suggestion-overflow"
     >
       <ScrollView
@@ -227,7 +226,7 @@ export function ChannelSuggestionMenu({
           const row = (
             <SuggestionRow
               key={suggestion.id}
-              first={index === 0 || index === firstRoom}
+              first={index === 0}
               selected={index === highlightedIndex}
               label={[name, suggestion.subtitle, thread ? 'thread' : 'chat'].filter(Boolean).join(', ')}
               state={{ selected: index === highlightedIndex }}
@@ -235,18 +234,11 @@ export function ChannelSuggestionMenu({
               testID={`channel-suggestion-${suggestion.token}`}
               name={name}
               detail={suggestion.subtitle}
-              trailing={age ? <T v="meta" color="secondary">{age}</T> : undefined}
+              trailing={suggestion.currentChat ? <T v="meta" color="secondary">this chat</T> : age ? <T v="meta" color="secondary">{age}</T> : undefined}
               mark={<SuggestionGlyph icon={thread ? CornerDownRight : Hash} />}
             />
           );
-          return index === firstRoom && firstRoom > 0 ? (
-            <React.Fragment key={suggestion.id}>
-              <YStack paddingTop="2" paddingBottom="1" paddingHorizontal="1" testID="channel-suggestion-other-rooms">
-                <T v="metaStrong" color="secondary">Other rooms</T>
-              </YStack>
-              {row}
-            </React.Fragment>
-          ) : row;
+          return row;
         })}
       </ScrollView>
     </SuggestionCard>
