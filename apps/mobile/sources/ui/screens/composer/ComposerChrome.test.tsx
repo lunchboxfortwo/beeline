@@ -66,9 +66,9 @@ it('draws the speaking waveform while dictation listens', () => {
 it('keeps uploading thumbnails at 48px, dimmed, with a named remove control', () => {
   const remove = vi.fn();
   act(() => { tree = create(<ComposerAttachment index={0} uri="file:///photo.jpg" name="photo.jpg" sizeLabel="1 KB" mimeType="image/jpeg" uploadState="uploading" busy={false} onRetry={() => undefined} onRemove={remove} />); });
-  const tile = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pending-chat-attachment-0');
+  const tile = tree.root.find((node: any) => node.type === 'XStack' && node.props.testID === 'pending-chat-attachment-0');
   expect(tile.props.height).toBe(48);
-  expect(tile.props.width).toBe(48);
+  expect(tile.findAll((node: any) => node.type === 'YStack' && node.props.width === 48).length).toBeGreaterThan(0);
   const preview = tree.root.find((node: any) => node.type === 'YStack' && node.props['aria-label'] === 'photo.jpg, uploading');
   expect(preview.props.opacity).toBe(0.4);
   expect(preview.props.borderRadius).toBe('house');

@@ -133,15 +133,18 @@ export function ComposerAttachment({ index, uri, name, mimeType, uploadState, bu
     const failed = uploadState === 'failed';
     const uploading = uploadState !== 'uploaded' && !failed;
     return (
-        <YStack position="relative" width={48} height={48} flexShrink={0} testID={`pending-chat-attachment-${index}`}>
+        <XStack gap="2" height={48} flexShrink={0} testID={`pending-chat-attachment-${index}`}>
+        <YStack position="relative" width={48} height={48}>
             <YStack width={48} height={48} borderRadius="house" overflow="hidden" opacity={uploading ? 0.4 : 1}
+                accessible accessibilityLiveRegion="polite" accessibilityState={{ busy: uploading }}
                 alignItems="center" justifyContent="center" aria-label={`${name}, ${failed ? 'upload failed' : uploading ? 'uploading' : 'ready'}`}>
                 {mimeType.startsWith('image/')
-                    ? <Image source={{ uri }} width={48} height={48} resizeMode="cover" />
+                    ? <Image src={uri} width={48} height={48} resizeMode="cover" />
                     : <Glyph icon={FileText} />}
             </YStack>
-            <CloseButton position="absolute" top={0} right={0} accessibilityLabel={`Remove ${name}`} disabled={busy} onPress={onRemove} testID={`pending-chat-attachment-remove-${index}`} />
-            {failed && <Btn position="absolute" bottom={0} left={0} kind="quiet" label={`Retry uploading ${name}`} disabled={busy} onPress={onRetry} testID={`pending-chat-attachment-retry-${index}`}><T v="meta">Retry</T></Btn>}
+            <CloseButton control position="absolute" top={0} right={0} accessibilityLabel={`Remove ${name}`} disabled={busy} onPress={onRemove} testID={`pending-chat-attachment-remove-${index}`} />
         </YStack>
+            {failed && <Btn kind="quiet" label={`Retry uploading ${name}`} disabled={busy} onPress={onRetry} testID={`pending-chat-attachment-retry-${index}`}><T v="meta">Retry</T></Btn>}
+        </XStack>
     );
 }
