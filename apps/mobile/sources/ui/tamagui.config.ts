@@ -38,6 +38,7 @@ function themeValues(mode: Mode, palette: Palette): Record<string, string> & { n
         ink: c.textPrimary, secondary: c.textSecondary,
         needsYou: c.accent, added: c.diffAdded, removed: c.diffRemoved,
         primaryFill: c.buttonPrimaryFill, primaryInk: c.buttonPrimaryText,
+        attachmentBadgeFill: `${beelineThemes.bone.textPrimary}b8`, attachmentBadgeInk: beelineThemes.bone.bgBase,
     };
     return theme;
 }
@@ -78,7 +79,7 @@ const body = {
 export const tamaguiConfig = createTamagui({
     ...defaultConfig,
     // Historical browser surfaces retain their pre-redesign geometry.
-    tokens: { ...defaultConfig.tokens, radius: { ...defaultConfig.tokens.radius, transcript: 10, viewer: 14 } },
+    tokens: { ...defaultConfig.tokens, radius: { ...defaultConfig.tokens.radius, house: 3, transcript: 10, viewer: 14 } },
     animations,
     // Longhand style props (paddingHorizontal, backgroundColor) are the grammar's spelling.
     settings: { ...defaultConfig.settings, onlyAllowShorthands: false },

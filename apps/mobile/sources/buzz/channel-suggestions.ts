@@ -1,6 +1,6 @@
 /**
- * The composer's `#` picker. This chat's threads come first, newest activity
- * on top, then the other Rooms. Picking a thread inserts `↳name` (a thread
+ * The composer's `#` picker. This chat comes first, followed by its threads
+ * with newest activity on top, then the other Rooms. Picking a thread inserts `↳name` (a thread
  * link the server resolves); picking a Room inserts `#room`, the token
  * `findChannelReferences` links once the message is sent.
  */
@@ -23,6 +23,7 @@ export type ChannelSuggestion = {
   readonly name?: string;
   /** When a thread last spoke, in unix seconds. */
   readonly activityAt?: number;
+  readonly currentChat?: boolean;
 };
 
 const CHANNEL_QUERY_PATTERN = /(?:^|[\s([{])#([\p{L}\p{M}\p{N}_\-/]*)$/u;
@@ -40,7 +41,7 @@ export function activeChannelAtCursor(text: string, cursor: number): ActiveChann
   return { start: cursor - query.length - 1, end: cursor, query };
 }
 
-/** Rooms first, then the current Room's corners; duplicate ids keep their first entry. */
+/** Current chat, its threads, then other chats; duplicate ids keep their first entry. */
 export function channelSuggestionCandidates(
   rooms: readonly {
     readonly id: string;
@@ -58,6 +59,8 @@ export function channelSuggestionCandidates(
     candidates.push(candidate);
   };
   if (cornerRoom?.name) {
+    const room = rooms.find((item) => fold(item.name) === fold(cornerRoom.name));
+    if (room) add({ kind: 'room', id: room.id, token: room.name, currentChat: true });
     const newestFirst = corners
       .map((corner, index) => ({ corner, index }))
       .sort((a, b) => (b.corner.activityAt ?? 0) - (a.corner.activityAt ?? 0) || a.index - b.index);
@@ -104,8 +107,9 @@ export function filterChannelSuggestions(
       return { candidate, index, prefix: token.startsWith(folded) || name.startsWith(folded) };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
-    // This chat's threads stay above Rooms; within each, prefix matches lead.
-    .sort((a, b) => Number(b.candidate.kind === 'corner') - Number(a.candidate.kind === 'corner')
+    // The current chat leads its threads, then other chats; prefix matches lead within each.
+    .sort((a, b) => Number(Boolean(b.candidate.currentChat)) - Number(Boolean(a.candidate.currentChat))
+      || Number(b.candidate.kind === 'corner') - Number(a.candidate.kind === 'corner')
       || Number(b.prefix) - Number(a.prefix) || a.index - b.index);
   return {
     matches: matching.slice(0, limit).map((item) => item.candidate),

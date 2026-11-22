@@ -12,7 +12,7 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEvent,
 } from 'react-native';
-import { YStack, useTheme } from 'tamagui';
+import { ScrollView, XStack, YStack, useTheme } from 'tamagui';
 import { Spinner, useTextSize } from '@/ui/grammar';
 import { NativeTypeInput, NativeTypeMeasure } from '@/ui/grammar-root';
 import { groknight } from '@/buzz/groknight';
@@ -33,7 +33,6 @@ import {
   ComposerControls,
   ComposerFrame,
   ComposerListening,
-  ComposerMoreAttachments,
   ComposerNote,
   ComposerReply,
   ComposerStatus,
@@ -126,7 +125,7 @@ type Props = {
 };
 
 export const COMPOSER_SINGLE_LINE_INPUT_HEIGHT = 26;
-export const COMPOSER_MAX_INPUT_HEIGHT = 5 * groknight.type.body.lineHeight;
+export const COMPOSER_MAX_INPUT_HEIGHT = 4 * groknight.type.body.lineHeight;
 const NO_TAG_HANDLES: ReadonlySet<string> = new Set();
 
 export function ConversationComposer(props: Props) {
@@ -425,20 +424,22 @@ function ConversationComposerContent({
       void Promise.resolve(onSend(send)).finally(settle);
     });
   };
-  const visibleAttachments = attachments.slice(0, 3);
-  const hiddenAttachmentCount = Math.max(0, attachments.length - visibleAttachments.length);
   const permissionDeniedNative = speech.state === 'permission-denied' && Platform.OS !== 'web';
   return (
     <>
     {(conversationActive || voice?.connecting) && voice && <VoiceAgentStrip voice={voice} />}
     <YStack ref={containerRef as never} {...containerProps}>
+      <ComposerFrame focused={focused} pill={viewerPill}>
       {(reply || attachments.length > 0) && (
         <ComposerAdjuncts testID={`${testIDPrefix}-composer-adjuncts`}>
           {reply && <ComposerReply handle={reply.handle} preview={reply.preview} onCancel={onCancelReply} />}
-          {visibleAttachments.map((attachment, index) => (
+          {attachments.length > 0 && <ScrollView horizontal keyboardShouldPersistTaps="handled" keyboardDismissMode="none" showsHorizontalScrollIndicator={false} testID={`${testIDPrefix}-attachment-scroll`}>
+          <XStack gap="2" paddingHorizontal="2" paddingVertical="2">
+          {attachments.map((attachment, index) => (
             <ComposerAttachment
               key={`${attachment.uri}:${index}`}
               index={index}
+              uri={attachment.uri}
               name={attachment.name}
               sizeLabel={attachment.sizeLabel}
               mimeType={attachment.mimeType}
@@ -448,10 +449,9 @@ function ConversationComposerContent({
               onRemove={() => onRemoveAttachment?.(index)}
             />
           ))}
-          {hiddenAttachmentCount > 0 && <ComposerMoreAttachments count={hiddenAttachmentCount} />}
+          </XStack></ScrollView>}
         </ComposerAdjuncts>
       )}
-      <ComposerFrame focused={focused} pill={viewerPill}>
       {conversationActive && voice ? (
         <VoiceBar voice={voice} testIDPrefix={testIDPrefix} />
       ) : (

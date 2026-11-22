@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Insets, PressableProps } from 'react-native';
 import Svg, { Line } from 'react-native-svg';
-import { useTheme } from 'tamagui';
+import { YStack, useTheme } from 'tamagui';
 import type { ColorToken } from '@/ui/grammar';
 import { Button, type ButtonLayout } from './Button';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';
@@ -46,6 +46,7 @@ export function CloseButton({
   testID,
   disabled,
   hitSlop,
+  control = false,
   ...layout
 }: ButtonLayout & {
   accessibilityLabel: string;
@@ -53,6 +54,8 @@ export function CloseButton({
   testID?: string;
   disabled?: boolean;
   hitSlop?: number | Insets;
+  /** Seat the glyph in a thumbnail corner while retaining the full target. */
+  control?: boolean;
 }) {
   return (
     <Button
@@ -60,7 +63,7 @@ export function CloseButton({
       accessibilityRole="button"
       disabled={disabled}
       hitSlop={hitSlop}
-      icon={<CloseGlyph />}
+      icon={control ? <YStack position="absolute" top={0} right={0} width={18} height={18} alignItems="center" justifyContent="center" backgroundColor="attachmentBadgeFill" borderRadius="lg"><CloseGlyph size={10} color="attachmentBadgeInk" /></YStack> : <CloseGlyph />}
       iconOnly
       label=""
       onPress={onPress}
