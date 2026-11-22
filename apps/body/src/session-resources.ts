@@ -35,7 +35,10 @@ function toolsMatching(result: unknown, query: unknown): unknown {
   return { ...(result as object), tools };
 }
 
-/** Optional facts load beside the live session. No caller can wait for a refresh. */
+/**
+ * Optional facts load beside the live session. Only a session restarted for a
+ * configuration change waits, briefly, for the fresh configuration.
+ */
 export class SessionResources {
   readonly context: Partial<Context> = {};
   readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
@@ -56,6 +59,8 @@ export class SessionResources {
       /** The `workspace` tool's checkout; returns its result text. */
       checkout?(): Promise<string>;
       squireMcp?(input: { tool?: unknown; args?: unknown }): Promise<unknown>;
+      /** A fresh configuration read landed. */
+      onConfiguration?(value: Context['configuration'] | undefined): void;
     },
   ) {
     // A cache miss or corrupt cache cannot delay the first message. Grants
@@ -78,7 +83,7 @@ export class SessionResources {
 
   refresh(): void {
     const { api, agentId, placeId, parentRoomId, workspaceId } = this.options;
-    this.refreshConfiguration();
+    void this.refreshConfiguration();
     this.load('roster', () => api.execute('getWorkspaceRoster', { agentId, workspaceId }));
     this.load('repository', () =>
       api.execute('getRoomRepositoryState', { roomId: parentRoomId ?? placeId }),
@@ -88,24 +93,52 @@ export class SessionResources {
       this.load('restore', () => api.execute('getCornerRestoreState', { cornerId: placeId }));
   }
 
-  refreshConfiguration(): void {
+  refreshConfiguration(): Promise<boolean> {
     const { api, agentId, placeId } = this.options;
-    this.load('configuration', () =>
+    const read = this.load('configuration', () =>
       api.execute('getAgentConfiguration', { agentId, roomId: placeId }),
-    );
+    ).then((loaded) => {
+      if (loaded && this.configurationRead === read)
+        this.options.onConfiguration?.(this.context.configuration);
+      return loaded;
+    });
+    this.configurationRead = read;
+    return read;
   }
 
-  private load<K extends keyof Context>(key: K, read: () => Promise<Context[K]>): void {
+  /**
+   * Wait for the newest configuration read, at most `ms`. True when it loaded;
+   * false when it failed or is still loading, so the caller falls back visibly.
+   */
+  async freshConfiguration(ms: number): Promise<boolean> {
+    const read = this.configurationRead ?? this.refreshConfiguration();
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([read, late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private configurationRead?: Promise<boolean>;
+
+  private load<K extends keyof Context>(key: K, read: () => Promise<Context[K]>): Promise<boolean> {
     this.status[key] = 'loading';
-    void Promise.resolve()
+    return Promise.resolve()
       .then(read)
       .then((value) => {
         this.context[key] = value;
         this.status[key] = 'ready';
         this.persist();
+        return true;
       })
       .catch((error) => {
         this.status[key] = error instanceof Error ? error.message : String(error);
+        return false;
       });
   }
 

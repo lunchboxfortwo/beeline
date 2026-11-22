@@ -82,6 +82,8 @@ export class AgentRunner {
   private removalReads = 0;
   private wake?: () => void;
   private pendingBootstrap = true;
+  /** The owner changed this agent's configuration while this helper ran. */
+  private configurationChanged = false;
 
   constructor(
     private readonly runtime: AgentRuntimeRecord,
@@ -166,6 +168,9 @@ export class AgentRunner {
         cancelGrantedCommands: () => this.grantRunner.cancel(placeId),
       }),
     };
+    // A place first seen after a configuration change would otherwise start
+    // from its cached settings, which predate that change.
+    if (this.configurationChanged) created.session.configurationChanged();
     this.places.set(placeId, created);
     this.grantRunner.register(placeId, created.session.grantPlace());
     return created;
@@ -423,9 +428,9 @@ export class AgentRunner {
   }
 
   private configChanged(): void {
+    this.configurationChanged = true;
     for (const [placeId, place] of this.places) {
-      place.session.resources.refreshConfiguration();
-      place.session.stale = true;
+      place.session.configurationChanged();
       if (!place.running) void place.session.stop().then(() => this.pump(placeId));
     }
     void Promise.resolve(this.options.onConfigChanged?.()).catch(error => console.error('[body] config-change refresh failed', error));

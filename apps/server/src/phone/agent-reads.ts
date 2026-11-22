@@ -45,6 +45,7 @@ import { reviveDates, roomSchedule } from './read-projection.js';
       commands: AgentDetailView['commands'] | null;
       selected_model: string | null; selected_effort: string | null;
       fast_mode: boolean | null; model_unavailable: 'model' | 'effort' | 'selection' | null;
+      running_model: string | null; running_model_selected: string | null; running_model_reason: string | null;
       yolo_mode: boolean; yolo_forced_off: boolean; yolo_set_by_name: string | null;
       yolo_set_at: Date | null; avatar_generation_id: string | null;
       avatar_generation_pending: boolean; can_change_yolo: boolean;
@@ -60,7 +61,7 @@ import { reviveDates, roomSchedule } from './read-projection.js';
         beeline_workspace_handle(agent_identity.id,$2) member_handle,agent_identity.avatar member_avatar,
         agent_identity.face_id member_face,agent_membership.role member_role,
         a.harness,a.soul,a.model_catalog,a.commands,a.selected_model,a.selected_effort,
-        a.fast_mode,a.model_unavailable,
+        a.fast_mode,a.model_unavailable,a.running_model,a.running_model_selected,a.running_model_reason,
         floor(extract(epoch FROM a.updated_at)*1000000)::bigint::text config_version,
         (SELECT id::text FROM agent_avatars WHERE agent_id=a.agent_id) avatar_generation_id,
         EXISTS(SELECT 1 FROM agent_commands c WHERE c.agent_id=a.agent_id
@@ -163,7 +164,20 @@ import { reviveDates, roomSchedule } from './read-projection.js';
       presence_body: presenceRow?.presence_body ?? null,
       presence_updated_at: presenceRow?.presence_updated_at ?? null,
     }], null)[0]!;
-    const runtimeModel = config.model_catalog?.find(axis => axis.category === 'model')?.currentValue;
+    // A live session's report outranks the published catalog: the catalog
+    // probe can be stale, and the stored choice may never have been applied.
+    const reported = Boolean(config.running_model || config.running_model_selected || config.running_model_reason);
+    const runtimeModel = config.running_model
+      ?? config.model_catalog?.find(axis => axis.category === 'model')?.currentValue;
+    const mismatch = reported && config.selected_model && config.running_model !== config.selected_model
+      ? {
+          selected: config.selected_model,
+          ...(config.running_model ? { running: config.running_model } : {}),
+          // A reason belongs to the selection that session tried, not a newer one.
+          ...(config.running_model_reason && config.running_model_selected === config.selected_model
+            ? { reason: config.running_model_reason } : {}),
+        }
+      : undefined;
     const runtimeEffort = config.model_catalog?.find(axis => ['thought_level', 'effort', 'reasoning_effort'].includes(axis.category))?.currentValue;
     const recentWork = config.recent_work;
     const grants = phoneProjectAgentGrants(ctx, config.grants);
@@ -229,7 +243,10 @@ import { reviveDates, roomSchedule } from './read-projection.js';
         ),
       ),
       commands: config?.commands ?? [],
-      ...(config?.model_unavailable ? { modelUnavailable: config.model_unavailable } : {}),
+      ...(config?.model_unavailable
+        ? { modelUnavailable: config.model_unavailable }
+        : mismatch?.reason ? { modelUnavailable: 'model' as const } : {}),
+      ...(mismatch && !mcpClient ? { modelMismatch: mismatch } : {}),
       ...(mcpClient || config?.selected_model || config?.selected_effort
         ? {
             selected: {

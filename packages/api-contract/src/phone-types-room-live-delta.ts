@@ -449,6 +449,16 @@ export type AgentDetailView = {
   /** Which persisted selection axis failed the daemon's live startup validation. */
   readonly modelUnavailable?: 'model' | 'effort' | 'selection';
   /**
+   * The selected model differs from the model the agent's latest session
+   * reported running. `running` is absent when the harness did not name its
+   * model; `reason` says why the selection was not applied, when known.
+   */
+  readonly modelMismatch?: {
+    readonly selected: string;
+    readonly running?: string;
+    readonly reason?: string;
+  };
+  /**
    * The agent "yolo" switch: grant requests are approved without asking.
    * `canChange` is the server's verdict for this viewer (agent owner or a
    * workspace admin); the phone mirrors it, never decides it.

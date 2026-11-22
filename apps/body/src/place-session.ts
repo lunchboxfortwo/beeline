@@ -76,6 +76,9 @@ import {
 } from './workspace-checkout.js';
 import { syncCornerBranch } from './corner-branch-sync.js';
 
+/** How long a restart for a configuration change waits for the fresh read. */
+export const CONFIGURATION_WAIT_MS = 10_000;
+
 export interface PlaceSessionOptions {
   agent: { publicKey: string; name: string };
   runtime: AgentRuntimeRecord;
@@ -116,6 +119,13 @@ export class PlaceSession {
   sessionId?: string;
   /** Configuration changed; start fresh before the next item. */
   stale = false;
+  /** A configuration change is being read; the next start waits for it. */
+  private configurationPending = false;
+  /** The model selection this session started with, to spot a newer one. */
+  private activeSelection?: string;
+  /** This session has sent a prompt; reports go out at once from now on. */
+  private prompted = false;
+  private runningReport?: { model?: string; selected?: string; reason?: string };
   private notes: string[] = [];
   /** This session has received the bounded recent window. */
   private windowDelivered = false;
@@ -159,6 +169,18 @@ export class PlaceSession {
           ...(options.parentRoomId ? { parentRoomId: options.parentRoomId } : {}),
         }),
       squireMcp: (input) => this.requestSquire(input),
+      onConfiguration: (configuration) => {
+        // A newer selection than this session runs retires it before the
+        // next item, so a model change never waits for an idle stop.
+        if (
+          this.activeSelection !== undefined &&
+          this.activeSelection !== JSON.stringify(this.selectionFrom(configuration))
+        ) {
+          if (!this.stale)
+            console.log(`[body] place ${options.placeId}: model selection changed; next turn starts fresh`);
+          this.stale = true;
+        }
+      },
     });
     this.warm = new WarmTranscript({ path: resolve(root, 'agent-home', 'warm-transcript.json') });
     const api = options.api;
@@ -237,6 +259,49 @@ export class PlaceSession {
     };
   }
 
+  /** The owner changed this agent's configuration; read it before the next start. */
+  configurationChanged(): void {
+    this.configurationPending = true;
+    this.stale = true;
+    void this.resources.refreshConfiguration();
+  }
+
+  private selectionFrom(configuration: SessionResources['context']['configuration']) {
+    const { config } = this.options;
+    return {
+      model: configuration?.model ?? config.modelSelection?.model,
+      effort: configuration?.effort ?? config.modelSelection?.effort,
+      fastMode: configuration?.fastMode,
+    };
+  }
+
+  /**
+   * Tell the server which model this session runs. Like the optional reads,
+   * the write goes out after the first prompt, so it never holds delivery.
+   */
+  private reportRunningModel(
+    client: AcpClient,
+    report: { model?: string; selected?: string; reason?: string },
+  ): void {
+    if (this.client !== client) return;
+    this.runningReport = report;
+    if (this.prompted) this.flushRunningModel();
+  }
+
+  private flushRunningModel(): void {
+    const report = this.runningReport;
+    this.runningReport = undefined;
+    if (!report) return;
+    void this.options.api
+      .execute('postAgentRunningModel', {
+        agentId: this.options.agent.publicKey,
+        ...(report.model ? { model: report.model } : {}),
+        ...(report.selected ? { selected: report.selected } : {}),
+        ...(report.reason ? { reason: report.reason } : {}),
+      })
+      .catch((error) => console.warn('[body] running model not reported:', error));
+  }
+
   get alive(): boolean {
     return this.client?.isAlive === true && Boolean(this.sessionId);
   }
@@ -310,6 +375,8 @@ export class PlaceSession {
   private async startFresh(): Promise<void> {
     await this.stop();
     this.stale = false;
+    this.prompted = false;
+    this.runningReport = undefined;
     this.notes = [
       'Trusty Squire uses app_tool(app:"registry-mcp:squire"); discover operate_drive and use_credential there. A direct squire MCP startup failure does not establish that this route is unavailable.',
     ];
@@ -341,14 +408,21 @@ export class PlaceSession {
       ? cornerCheckoutFolders(runtime.supervisorRoot, placeId, agent.publicKey).gitCommonDir
       : undefined;
     if (gitCommonDir) await mkdir(gitCommonDir, { recursive: true, mode: 0o700 });
+    if (this.configurationPending) {
+      this.configurationPending = false;
+      console.log(`[body] place ${placeId}: reading changed model settings before starting`);
+      if (!(await this.resources.freshConfiguration(CONFIGURATION_WAIT_MS))) {
+        console.warn(`[body] place ${placeId}: changed model settings not read; starting with cached settings`);
+        this.notes.push(
+          `Changed model settings did not load within ${CONFIGURATION_WAIT_MS / 1000} s; this session starts with the last known settings.`,
+        );
+      }
+    }
     const { configuration, roster, repository, restore } = this.resources.context;
     this.names = new Map((roster?.members ?? []).map((member) => [member.identityId, member.name]));
     const self = roster?.members.find((member) => member.identityId === agent.publicKey);
-    const selection = {
-      model: configuration?.model ?? config.modelSelection?.model,
-      effort: configuration?.effort ?? config.modelSelection?.effort,
-      fastMode: configuration?.fastMode,
-    };
+    const selection = this.selectionFrom(configuration);
+    this.activeSelection = JSON.stringify(selection);
     const operatorHome = config.operatorHome ?? homedir();
     const homeOverlay = config.agentHomeRoot
       ? await prepareRoomAgentCredentials({
@@ -658,18 +732,37 @@ export class PlaceSession {
           modelChange ? selection : { effort: selection.effort, fastMode: selection.fastMode },
         )
           .then((applied) => {
+            this.reportRunningModel(client, {
+              model: modelChange ? (applied.appliedSelection.model ?? advertisedDefault) : advertisedDefault,
+              selected: selection.model,
+            });
             if (this.client === client) this.resources.rememberModelCatalog(applied.options);
             const index = this.client === client ? sessionNotes.indexOf(configurationNote) : -1;
             if (index !== -1 && applied.appliedSelection.model)
               sessionNotes[index] =
                 `This session uses ${applied.appliedSelection.model}; ${configurationNote}`;
           })
-          .catch((error) => console.warn('[body] model selection could not be applied:', error));
-      } else
+          .catch((error) => {
+            console.warn('[body] model selection could not be applied:', error);
+            this.reportRunningModel(client, {
+              model: advertisedDefault,
+              selected: selection.model,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          });
+      } else {
         this.notes.push(
           `Selected model ${selection.model} is unavailable at startup; this session runs with ${runningModel}.`,
         );
+        console.warn(`[body] place ${placeId}: selected model ${selection.model} is not offered; running ${runningModel}`);
+        this.reportRunningModel(client, {
+          model: advertisedDefault,
+          selected: selection.model,
+          reason: `This agent's harness does not offer ${selection.model}.`,
+        });
+      }
     }
+    if (!modelChange) this.reportRunningModel(client, { model: advertisedDefault, selected: selection.model });
     this.notes.push(
       `${reconcilingModel ? '' : `This session uses ${runningModel}; `}${configurationNote}`,
     );
@@ -807,6 +900,8 @@ export class PlaceSession {
         stream.onChunk,
       );
       this.resources.refresh();
+      this.prompted = true;
+      this.flushRunningModel();
       result = await answering;
       const reply = result.agentText.trim();
       if (CLIPROXY_SIGNED_OUT.exec(reply)?.[0] === reply) throw wall('signed-in', reply);

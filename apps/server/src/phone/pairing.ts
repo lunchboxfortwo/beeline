@@ -244,7 +244,7 @@ import { hash, unix, normalizeAgentName, CONNECT_RENAME_WINDOW_MS } from './valu
          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7)
          ON CONFLICT(agent_id) DO UPDATE SET owner_id=EXCLUDED.owner_id,soul=EXCLUDED.soul,
            selected_model=EXCLUDED.selected_model,selected_effort=EXCLUDED.selected_effort,
-           model_catalog='[]'::jsonb,model_unavailable=NULL,commands='[]'::jsonb,
+           model_catalog='[]'::jsonb,model_unavailable=NULL,running_model=NULL,running_model_selected=NULL,running_model_reason=NULL,commands='[]'::jsonb,
            yolo_mode=false,yolo_set_by=NULL,yolo_set_at=NULL,
            access_policy='{"type":"everyone"}'::jsonb,machine_id=EXCLUDED.machine_id,
            machine_name=EXCLUDED.machine_name,updated_at=now()`,

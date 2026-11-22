@@ -177,7 +177,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            WHERE room.id=$1 ${('')}
          ), member_rows AS (
            SELECT i.id,i.kind,i.name,beeline_room_handle(i.id,$1) handle,i.avatar,i.face_id,
-             agent.selected_model,agent.model_catalog,
+             agent.selected_model,agent.model_catalog,agent.running_model,
              ${mcpClientIdentitySql('i.id')} mcp_client,
              COALESCE(roster_workspace.role,roster_member.role) role,NULL::jsonb presence_body,
              NULL::timestamptz presence_updated_at

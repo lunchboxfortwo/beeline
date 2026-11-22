@@ -244,6 +244,7 @@ export type { PostPermissionExecutionInput } from './daemon-operations-room-conv
 export type { PostAgentToolMandateInput } from './daemon-operations-room-conversation-window.js';
 export type { PostAgentCommandsInput } from './daemon-operations-room-conversation-window.js';
 export type { PostAgentModelCatalogInput } from './daemon-operations-room-conversation-window.js';
+export type { PostAgentRunningModelInput } from './daemon-operations-room-conversation-window.js';
 export type { CornerWatchKind } from './daemon-operations-room-conversation-window.js';
 export type { CornerWatchResult } from './daemon-operations-room-conversation-window.js';
 export type { PostCornerRemoteStateInput } from './daemon-operations-room-conversation-window.js';

@@ -822,3 +822,94 @@ it.runIf(process.platform !== 'win32')('Stop kills granted commands and descenda
     await f.session.dispose();
   }
 });
+
+const twoModels = { sessionId: 'live', raw: { configOptions: [
+  { id: 'model', category: 'model', currentValue: 'sol', options: [{ value: 'sol' }, { value: 'astra' }] },
+] } };
+const runningReports = (execute: ReturnType<typeof vi.fn>) =>
+  execute.mock.calls.filter(([name]) => name === 'postAgentRunningModel').map(([, input]) => input);
+
+it('reports the running model and the reason when the harness refuses the selected model', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'astra', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  Object.assign(f.client, { setConfigOption: vi.fn(async () => { throw new Error('astra is not on this plan'); }) });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  await vi.waitFor(() => expect(runningReports(f.execute)).toContainEqual({
+    agentId: 'a'.repeat(64), model: 'sol', selected: 'astra',
+    reason: expect.stringContaining('astra is not on this plan'),
+  }));
+  await f.session.dispose();
+});
+
+it('reports the running model when the selected model is not offered, without holding delivery', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'gpt-astra', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  await f.session.start(f.item);
+  expect(runningReports(f.execute)).toEqual([]);
+  await f.session.deliver(f.item, []);
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('Selected model gpt-astra is unavailable at startup');
+  expect(runningReports(f.execute)).toEqual([{ agentId: 'a'.repeat(64), model: 'sol', selected: 'gpt-astra',
+    reason: "This agent's harness does not offer gpt-astra." }]);
+  await f.session.dispose();
+});
+
+it('runs a changed model on the next turn: the restart waits for the fresh selection, never the cached one', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  const setter = vi.fn(async () => ({}));
+  Object.assign(f.client, { setConfigOption: setter });
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  expect(setter).not.toHaveBeenCalled();
+  // The owner picks Astra; a message is queued at once, before the read lands.
+  let answer!: (value: unknown) => void;
+  f.execute.mockImplementation((name: string) => name === 'getAgentConfiguration'
+    ? new Promise(resolve => { answer = resolve; }) : new Promise(() => {}));
+  f.session.configurationChanged();
+  expect(f.session.stale).toBe(true);
+  const starting = f.session.start(f.item);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(f.client.sessionNew).toHaveBeenCalledTimes(1);
+  answer({ model: 'astra', commands: [], yoloMode: false });
+  await starting;
+  await vi.waitFor(() => expect(setter).toHaveBeenCalledWith('live', 'model', 'astra'));
+  await f.session.deliver(f.item, []);
+  await vi.waitFor(() => expect(runningReports(f.execute).at(-1)).toEqual(
+    { agentId: 'a'.repeat(64), model: 'astra', selected: 'astra' }));
+  await f.session.dispose();
+});
+
+it('starts with the last known settings, and says so, when the changed settings cannot be read', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const f = await fixture();
+    f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+    f.client.sessionNew.mockResolvedValue(twoModels);
+    f.session.configurationChanged();
+    const starting = f.session.start(f.item);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await starting;
+    await f.session.deliver(f.item, []);
+    expect(f.prompt.mock.calls[0]?.[1]).toContain('Changed model settings did not load within 10 s');
+    await f.session.dispose();
+  } finally { vi.useRealTimers(); }
+});
+
+it('retires a session before its next turn when a fresh read carries a newer selection', async () => {
+  const f = await fixture();
+  f.session.resources.context.configuration = { model: 'sol', commands: [], yoloMode: false };
+  f.client.sessionNew.mockResolvedValue(twoModels);
+  let answer!: (value: unknown) => void;
+  f.execute.mockImplementation((name: string) => name === 'getAgentConfiguration'
+    ? new Promise(resolve => { answer = resolve; }) : new Promise(() => {}));
+  await f.session.start(f.item);
+  await f.session.deliver(f.item, []);
+  expect(f.session.stale).toBe(false);
+  answer({ model: 'astra', commands: [], yoloMode: false });
+  await vi.waitFor(() => expect(f.session.stale).toBe(true));
+  await f.session.dispose();
+});
