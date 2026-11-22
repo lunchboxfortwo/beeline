@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { XStack, YStack } from 'tamagui';
-import { ArrowRight } from 'lucide-react-native';
+import { ArrowRight, Square } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
@@ -12,11 +12,26 @@ export type PillFace =
     | { kind: 'system'; name: string }
     | { kind: 'agent' | 'human'; seed: string; name: string; face?: string; avatarUrl?: string };
 
+/** One message of a folded agent run, read in send order once the run opens. */
+export type PillRunEntry = {
+    id: string;
+    from: PillFace;
+    to?: PillFace;
+    time: string;
+    /** A stop: drawn face, stop glyph, face, with no text. */
+    stop?: boolean;
+    body?: React.ReactNode;
+};
+
 export type PillItem = {
     id: string;
     from: PillFace;
     to?: PillFace;
     time: string;
+    /** A stop of an agent's turn: face, stop glyph, face, with no text. */
+    stop?: boolean;
+    /** Consecutive agent-to-agent messages folded into one pill: faces and a count. */
+    run?: readonly PillRunEntry[];
     /** A system fact remains readable while its details are collapsed. */
     summary?: string;
     /** The message, read under the row once its pill is opened. */
@@ -33,13 +48,72 @@ function Face({ face }: { face: PillFace }) {
         : <IdentityMark kind="human" seed={face.seed} face={face.face} avatarUrl={face.avatarUrl} name={face.name} size={PILL_FACE_SIZE} />;
 }
 
-function heading(item: PillItem): string {
+function heading(item: Pick<PillItem, 'from' | 'to'>): string {
     return item.to ? `${item.from.name} → ${item.to.name}` : item.from.name;
+}
+
+function faceKey(face: PillFace): string {
+    return face.kind === 'system' ? SYSTEM_IDENTITY_PUBKEY : face.seed;
+}
+
+/** Everyone in a run, in the order they first appear. */
+function runFaces(run: readonly PillRunEntry[]): PillFace[] {
+    const seen = new Map<string, PillFace>();
+    for (const entry of run) {
+        for (const face of entry.to ? [entry.from, entry.to] : [entry.from]) {
+            if (!seen.has(faceKey(face))) seen.set(faceKey(face), face);
+        }
+    }
+    return [...seen.values()];
+}
+
+function names(faces: readonly PillFace[]): string {
+    const all = faces.map((face) => face.name);
+    return all.length <= 1 ? all.join('') : `${all.slice(0, -1).join(', ')} and ${all.at(-1)}`;
+}
+
+function pillLabel(item: PillItem, expanded: boolean): string {
+    const verb = expanded ? 'Hide' : 'Read';
+    if (item.run) return `${verb} ${item.run.length} messages between ${names(runFaces(item.run))}, ${item.time}`;
+    if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;
+    return `${verb} message from ${heading(item)}, ${item.time}`;
+}
+
+/** Two faces joined by an arrow, or by the stop glyph for a stop; a system summary sits after the first. */
+function Pair({ from, to, stop, summary }: { from: PillFace; to?: PillFace; stop?: boolean; summary?: string }) {
+    return (
+        <>
+            <Face face={from} />
+            {summary ? <Copy small quiet numberOfLines={1} flexShrink={1}>{summary}</Copy> : null}
+            {to ? <Glyph icon={stop ? Square : ArrowRight} size={14} /> : null}
+            {to ? <Face face={to} /> : null}
+        </>
+    );
+}
+
+/** The opened run: every message in send order under its own face → face heading. */
+function RunList({ run }: { run: readonly PillRunEntry[] }) {
+    return (
+        <>
+            {run.map((entry) => (
+                <YStack key={entry.id} gap="1" testID={`pill-run-entry-${entry.id}`}
+                    aria-label={entry.stop ? `${entry.from.name} stopped ${entry.to?.name ?? ''}` : heading(entry)}>
+                    <XStack gap="1" alignItems="center">
+                        <Pair from={entry.from} to={entry.to} stop={entry.stop} />
+                        <Copy small quiet>{` · ${entry.time}`}</Copy>
+                    </XStack>
+                    {entry.stop ? null : entry.body}
+                </YStack>
+            ))}
+        </>
+    );
 }
 
 /**
  * System facts and agent-to-agent messages in one wrapping row. System pills
  * keep their summary visible; a tap opens the full message under the row.
+ * A run of agent messages folds into one pill of faces and a count, and opens
+ * as a plain list in send order. A stop is face, stop glyph, face.
  */
 export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?: string }) {
     const [openId, setOpenId] = useState<string | null>(null);
@@ -53,7 +127,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                         <Btn
                             key={item.id}
                             kind="secondary"
-                            label={`${expanded ? 'Hide' : 'Read'} message from ${heading(item)}, ${item.time}`}
+                            label={pillLabel(item, expanded)}
                             minHeight={HEIGHT.control}
                             maxWidth="100%"
                             paddingHorizontal="2"
@@ -63,20 +137,33 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                             backgroundColor="raised"
                             aria-expanded={expanded}
                             onPress={() => setOpenId(expanded ? null : item.id)}
-                            testID={item.system ? 'system-pill' : 'agent-pill'}
+                            testID={item.run ? 'run-pill' : item.stop ? 'stop-pill' : item.system ? 'system-pill' : 'agent-pill'}
                         >
-                            <Face face={item.from} />
-                            {item.system && item.summary ? <Copy small quiet numberOfLines={1} flexShrink={1}>{item.summary}</Copy> : null}
-                            {item.to ? <Glyph icon={ArrowRight} size={14} /> : null}
-                            {item.to ? <Face face={item.to} /> : null}
+                            {item.run ? (
+                                <>
+                                    <XStack>
+                                        {runFaces(item.run).map((face, index) => (
+                                            <YStack key={faceKey(face)} marginLeft={index ? -4 : 0}><Face face={face} /></YStack>
+                                        ))}
+                                    </XStack>
+                                    <Copy small quiet numberOfLines={1}>{`${item.run.length} messages`}</Copy>
+                                </>
+                            ) : (
+                                <Pair from={item.from} to={item.to} stop={item.stop}
+                                    summary={item.system && !item.stop ? item.summary : undefined} />
+                            )}
                         </Btn>
                     );
                 })}
             </XStack>
             {open ? (
-                <YStack paddingLeft="2" borderLeftWidth={2} borderColor="stroke" gap="1" testID="pill-open">
-                    <Copy small quiet>{`${heading(open)} · ${open.time}`}</Copy>
-                    {open.body}
+                <YStack paddingLeft="2" borderLeftWidth={2} borderColor="stroke" gap={open.run ? '2' : '1'} testID="pill-open">
+                    {open.run ? <RunList run={open.run} /> : (
+                        <>
+                            <Copy small quiet>{`${heading(open)} · ${open.time}`}</Copy>
+                            {open.body}
+                        </>
+                    )}
                 </YStack>
             ) : null}
         </YStack>

@@ -26,7 +26,7 @@ vi.mock('./IndexRow', () => ({
 
 import { foldPrLifecycleRuns } from '@/buzz/pr-lifecycle';
 import { foldPillRuns } from '@/buzz/transcript-pills';
-import { TranscriptPills } from './TranscriptPills';
+import { pillItems, TranscriptPills } from './TranscriptPills';
 import { PillRow } from '@/ui/screens/transcript/PillRow';
 
 it.each(['message', 'reply'] as const)('renders an addressed %s with the recorded sender, recipient and text', kind => {
@@ -44,6 +44,34 @@ it.each(['message', 'reply'] as const)('renders an addressed %s with the recorde
   expect(item).toMatchObject({ id: 'addressed', system: false,
     from: { seed: 'ruby', name: 'Ruby' }, to: { seed: 'claude', name: 'Claude' } });
   expect(item.body.props.markdown).toBe('@claude Please review the phone layout');
+  act(() => tree.unmount());
+});
+
+it('folds agent runs into one PillRow pill and keeps person stops and other system lines outside them', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const resolve = (id: string, name: string, kind?: 'agent' | 'human') => ({ kind: kind ?? 'agent', seed: id, name });
+  const base = (id: string, fields: Partial<ChatDisplayMessage>): ChatDisplayMessage =>
+    ({ id, text: id, isUser: false, timestamp: 1_800_000_000, ...fields });
+  const say = (id: string, from: string, to: string) => base(id, { pubkey: from, authorIdentity: { pubkey: from, name: from, kind: 'agent' },
+    agentCommand: { kind: 'message', recipient: { id: to, name: to, kind: 'agent' }, text: id } });
+  const stop = (id: string, by: string, kind: 'person' | 'agent', whom: string) => base(id, { isSystemNotice: true, pubkey: by,
+    systemEvent: { kind: 'turn-cancelled', subject: { kind, id: by, name: by }, verb: 'stopped', object: { text: whom, id: whom } } });
+  const run = [
+    say('m1', 'ruby', 'claude'), stop('s1', 'ruby', 'agent', 'claude'), say('m2', 'claude', 'ruby'),
+    stop('s2', 'owner', 'person', 'ruby'),
+    say('m3', 'ruby', 'jelly'), say('m4', 'jelly', 'ruby'),
+    base('joined', { isSystemNotice: true, text: 'Nerd joined' }),
+    say('m5', 'ruby', 'nerd'),
+  ];
+  const items = pillItems(run, resolve, {});
+  expect(items.map(item => [item.id, item.run?.map(entry => entry.id) ?? null])).toEqual([
+    ['m1', ['m1', 's1', 'm2']], ['s2', null], ['m3', ['m3', 'm4']], ['joined', null], ['m5', null]]);
+  expect(items[0]!.run![1]).toMatchObject({ stop: true, from: { seed: 'ruby' }, to: { seed: 'claude' } });
+  expect(items[1]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
+  expect(items[3]).toMatchObject({ system: true, summary: 'Nerd joined', from: { kind: 'system' } });
+  let tree: any;
+  act(() => { tree = create(<TranscriptPills run={run} resolve={resolve} />); });
+  expect(tree.root.findByType(PillRow).props.items.map((item: any) => item.id)).toEqual(['m1', 's2', 'm3', 'joined', 'm5']);
   act(() => tree.unmount());
 });
 
