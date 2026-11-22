@@ -122,13 +122,12 @@ export function Copy({ children, quiet = false, small = false, strong = false, a
     return <T v={v} color={accent ? 'needsYou' : quiet ? 'secondary' : 'ink'} {...rest}>{children}</T>;
 }
 
-type IconComponent = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number; fill?: string }>;
-/** Icons: lucide outline at 16 or 20, 1.7 stroke, secondary; brass when it means you. `filled` paints the shape solid (the stop ■). */
-export function Glyph({ icon: Icon, size = 20, accent = false, color, strong = false, filled = false }: { icon: IconComponent; size?: 14 | 16 | 18 | 20; accent?: boolean; color?: 'ink' | 'primaryInk' | 'removed'; strong?: boolean; filled?: boolean }) {
+type IconComponent = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+/** Icons: lucide outline at 16 or 20, 1.7 stroke, secondary; brass when it means you. */
+export function Glyph({ icon: Icon, size = 20, accent = false, color, strong = false }: { icon: IconComponent; size?: 14 | 16 | 18 | 20; accent?: boolean; color?: 'ink' | 'primaryInk' | 'removed'; strong?: boolean }) {
     const t = useTheme() as Record<string, { val: string } | undefined>;
     const ink = color ? t[color]?.val : accent ? t.needsYou?.val : t.secondary?.val;
-    return filled ? <Icon size={size} color={ink} fill={ink} strokeWidth={strong ? 2.3 : 1.7} />
-        : <Icon size={size} color={ink} strokeWidth={strong ? 2.3 : 1.7} />;
+    return <Icon size={size} color={ink} strokeWidth={strong ? 2.3 : 1.7} />;
 }
 
 export type ButtonKind = 'primary' | 'secondary' | 'icon' | 'quiet' | 'destructive' | 'accent';

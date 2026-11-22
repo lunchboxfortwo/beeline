@@ -44,14 +44,18 @@ describe('PillRow', () => {
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-open')).toHaveLength(0);
     });
-    it('W5 keeps a collapsed system pill readable by its summary', () => {
+    it('W5 folds a system pill to the ringed Beeline logo, its text only in the label', () => {
         let tree: any;
         const system: PillItem = { id: 'call-ended', system: true, from: { kind: 'system', name: 'Beeline' }, time: '22:41',
             summary: 'Voice call ended · 2:13', body: React.createElement('Text', { testID: 'call-body' }, 'Voice call ended · 2:13') };
         act(() => { tree = create(<PillRow items={[system]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'system-pill');
         expect(pill.props['aria-expanded']).toBe(false);
-        expect(pill.findAll((node: any) => node.type === 'Text').map((node: any) => node.props.children)).toContain('Voice call ended · 2:13');
+        expect(pill.findAll((node: any) => node.type === 'Text')).toHaveLength(0);
+        expect(pill.props['aria-label']).toBe('Read Voice call ended · 2:13, 22:41');
+        const ring = pill.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face');
+        expect(ring.props.borderRadius).toBe('full');
+        expect(ring.find((node: any) => node.type === 'IdentityMark').props.seed).toBe(SYSTEM_IDENTITY_PUBKEY);
     });
 
     const ruby = { kind: 'agent', seed: 'ruby', name: 'Ruby' } as const;
@@ -105,7 +109,7 @@ describe('PillRow', () => {
         expect(m2.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
         expect(text(m2)).toEqual(['· 09:38', 'Stopped']);
         const stop = entries[1];
-        expect(stop.findAll((node: any) => node.type === 'Icon.Square')).toHaveLength(1);
+        expect(stop.findAll((node: any) => node.type === 'Icon.CircleStop')).toHaveLength(1);
         expect(text(stop)).toEqual(['· 09:37']);
         expect(stop.props['aria-label']).toBe('Ruby stopped Claude');
         act(() => pill().props.onPress());
@@ -119,9 +123,8 @@ describe('PillRow', () => {
         act(() => { tree = create(<PillRow items={[stop]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'stop-pill');
         expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['owner', 'ruby']);
-        // A filled square in the arrow's colour: it reads as stop, not as a checkbox.
-        const [glyph] = pill.findAll((node: any) => node.type === 'Icon.Square');
-        expect(glyph.props.fill).toBe(glyph.props.color);
+        // The stop square in a ring, in the arrow's colour.
+        expect(pill.findAll((node: any) => node.type === 'Icon.CircleStop')).toHaveLength(1);
         expect(pill.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(0);
         expect(text(pill)).toEqual([]);
         expect(pill.props['aria-label']).toBe('Owner stopped Ruby');

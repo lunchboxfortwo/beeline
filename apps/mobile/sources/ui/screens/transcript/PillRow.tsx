@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { XStack, YStack } from 'tamagui';
-import { ArrowRight, Square } from 'lucide-react-native';
+import { ArrowRight, CircleStop } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { TranscriptLine } from './TranscriptLine';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 const PILL_FACE_SIZE = 22;
+/** The Beeline logo inside the system circle: 22 less the ring and a 3 px inset. */
+const SYSTEM_MARK_SIZE = 14;
 /** A folded run shows at most this many faces; opening it (and its label) shows everyone. */
 const RUN_FACES = 3;
 
@@ -35,7 +37,7 @@ export type PillItem = {
     stop?: boolean;
     /** Consecutive agent-to-agent messages folded into one pill: faces and a count. */
     run?: readonly PillRunEntry[];
-    /** A system fact remains readable while its details are collapsed. */
+    /** A system fact's text: the folded pill's accessibility label; it shows only once opened. */
     summary?: string;
     /** The message, read under the row once its pill is opened. */
     body: React.ReactNode;
@@ -44,7 +46,13 @@ export type PillItem = {
 
 function Face({ face }: { face: PillFace }) {
     if (face.kind === 'system') {
-        return <IdentityMark kind="human" seed={SYSTEM_IDENTITY_PUBKEY} name={face.name} size={PILL_FACE_SIZE} />;
+        // The Beeline account reads as a bot face: its logo inside a ring, the size of every other face.
+        return (
+            <YStack width={PILL_FACE_SIZE} height={PILL_FACE_SIZE} borderRadius="full" borderWidth={1} borderColor="strongStroke"
+                alignItems="center" justifyContent="center" testID="pill-system-face">
+                <IdentityMark kind="human" seed={SYSTEM_IDENTITY_PUBKEY} name={face.name} size={SYSTEM_MARK_SIZE} />
+            </YStack>
+        );
     }
     return face.kind === 'agent'
         ? <IdentityMark kind="agent" seed={face.seed} face={face.face} avatarUrl={face.avatarUrl} name={face.name} size={PILL_FACE_SIZE} />
@@ -79,16 +87,16 @@ function pillLabel(item: PillItem, expanded: boolean): string {
     const verb = expanded ? 'Hide' : 'Read';
     if (item.run) return `${verb} ${item.run.length} messages between ${names(runFaces(item.run))}, ${item.time}`;
     if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;
+    if (item.system && item.summary) return `${verb} ${item.summary}, ${item.time}`;
     return `${verb} message from ${heading(item)}, ${item.time}`;
 }
 
-/** Two faces joined by an arrow, or by the stop glyph for a stop; a system summary sits after the first. */
-function Pair({ from, to, stop, summary }: { from: PillFace; to?: PillFace; stop?: boolean; summary?: string }) {
+/** Two faces joined by an arrow, or by the ringed stop glyph for a stop. */
+function Pair({ from, to, stop }: { from: PillFace; to?: PillFace; stop?: boolean }) {
     return (
         <>
             <Face face={from} />
-            {summary ? <Copy small quiet numberOfLines={1} flexShrink={1}>{summary}</Copy> : null}
-            {to ? (stop ? <Glyph icon={Square} size={14} filled /> : <Glyph icon={ArrowRight} size={14} />) : null}
+            {to ? (stop ? <Glyph icon={CircleStop} size={18} /> : <Glyph icon={ArrowRight} size={14} />) : null}
             {to ? <Face face={to} /> : null}
         </>
     );
@@ -119,8 +127,8 @@ function RunList({ run }: { run: readonly PillRunEntry[] }) {
 }
 
 /**
- * System facts and agent-to-agent messages in one wrapping row. System pills
- * keep their summary visible; a tap opens the full message under the row.
+ * System facts and agent-to-agent messages in one wrapping row. Every pill is
+ * faces only; a tap opens the full message under the row.
  * A run of agent messages folds into one pill of faces and a count, and opens
  * as a plain list in send order. A stop is face, stop glyph, face.
  */
@@ -156,8 +164,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                                     <Copy small quiet numberOfLines={1}>{`${item.run.length} messages`}</Copy>
                                 </>
                             ) : (
-                                <Pair from={item.from} to={item.to} stop={item.stop}
-                                    summary={item.system && !item.stop ? item.summary : undefined} />
+                                <Pair from={item.from} to={item.to} stop={item.stop} />
                             )}
                         </Btn>
                     );
