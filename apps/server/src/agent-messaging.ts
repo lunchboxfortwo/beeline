@@ -4,6 +4,7 @@ import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMes
 import { randomBytes } from 'node:crypto';
 import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
 import { commandAddress } from './commander.js';
+import { cornerCommanderIdSql } from './corner-commander.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import type { SqlDatabase } from './database.js';
 import { modelText } from './message-origin.js';
@@ -53,7 +54,14 @@ export async function sendMessage(db: SqlDatabase, input: {
     if (!human) {
       // Self-addressed speech and acknowledgements of informational replies
       // stay in the transcript without authorizing another agent turn.
-      const transcriptOnly = to.agent === route.from.agent || Boolean(input.replyTo && !input.ask &&
+      const self = to.agent === route.from.agent;
+      // A commander or implementer may queue one turn for itself in its thread.
+      // A turn a self-message started cannot queue another, so it cannot loop.
+      const selfWake = self && !input.replyTo && Boolean(input.parent) && input.parent!.private_payload?.selfWake !== true &&
+        (await tx.query(`SELECT 1 FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id
+          WHERE corner.id=$1 AND corner.archived_at IS NULL
+            AND $2 IN (fact.implementer_agent_id,${cornerCommanderIdSql('corner')})`,[to.place,to.agent])).rowCount > 0;
+      const transcriptOnly = self && !selfWake || Boolean(input.replyTo && !input.ask &&
         isInformationalReply(input.parent?.reason, input.parent?.private_payload?.messageAsk));
       if (transcriptOnly && !(await tx.query(`SELECT 1 FROM room_access member
         JOIN rooms room ON room.id=member.room_id AND room.archived_at IS NULL
@@ -65,7 +73,7 @@ export async function sendMessage(db: SqlDatabase, input: {
         reason:input.replyTo ? 'reply' : 'message',parent:input.parent,
         privatePayload:{kind:input.replyTo ? 'reply' : 'message',route,messageAsk:input.ask,inReplyTo:input.replyTo,
           text:modelText(input.text),authorId:route.from.agent,fromRoomId:route.from.place,
-          returnIdentityId:route.from.agent,attachments:input.attachments},
+          returnIdentityId:route.from.agent,attachments:input.attachments,...(selfWake ? {selfWake:true} : {})},
       });
       // A transcript reference shares a delivered command's identity, but is
       // never a source message or another wake. Room reads enforce place access;

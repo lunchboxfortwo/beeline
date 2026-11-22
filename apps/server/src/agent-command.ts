@@ -227,6 +227,8 @@ export type PrivateCommandPayload = PayloadVoice & {
   /** Status supplied by the explicit report operation; ordinary answers have none. */
   reportStatus?: 'blocked' | 'needs-decision' | 'done' | 'failed';
   idleSince?: string;
+  /** Queued by its own agent at a thread it commands or implements; it cannot queue another. */
+  selfWake?: boolean;
   /** Agent whose work a server-authored report describes; prevents self-wakes. */
   sourceAgentId?: string;
   fromRoomId: string;
