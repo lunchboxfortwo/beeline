@@ -32,7 +32,7 @@ export function tapFeedback(name, fixture, token) {
     case 'leave-room':
       return { hidden: '[data-testid="leave-chat"]' };
     case 'answer-approval':
-      return { buttonRemovedPrefix: 'Approve: ' };
+      return { buttonRemovedPrefix: 'Once' };
     case 'send-attachment':
       return {
         text: 'Local Beeline latency attachment',

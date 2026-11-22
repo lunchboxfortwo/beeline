@@ -52,8 +52,10 @@ cleanup() {
 trap cleanup EXIT
 node packages/scripts/latency-rig/local-object-store.mjs &
 object_pid=$!
+if [[ "${LATENCY_RIG_REUSE_BUILD:-0}" != 1 ]]; then
 (cd apps/mobile && EXPO_PUBLIC_BUZZY_MONOLITH_URL="$LATENCY_RIG_WEB_BACKEND" \
   ./node_modules/.bin/expo export --platform web --clear --max-workers 2 --output-dir "$run_dir/build") >"$run_dir/build.log" 2>&1
+fi
 bash packages/scripts/latency-rig/run-local.sh >"$run_dir/server.log" 2>&1 &
 server_pid=$!
 node packages/scripts/latency-rig/web-serve.mjs "$run_dir/build" &

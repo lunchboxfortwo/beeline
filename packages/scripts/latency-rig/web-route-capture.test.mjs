@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureRoutes } from './web-route-capture.mjs';
 
-test('route captures cannot inherit another route context and retain resource observations', async () => {
+test('route captures stay isolated and a failed checkpoint preserves earlier evidence', async () => {
   const out = await mkdtemp(join(tmpdir(), 'route-isolation-'));
   const contexts = [];
   const browser = {
@@ -18,6 +18,7 @@ test('route captures cannot inherit another route context and retain resource ob
         closed: false,
         route: async () => {},
         routeWebSocket: async () => {},
+        unrouteAll: async () => {},
         newCDPSession: async () => ({
           send: async (method) =>
             method === 'Performance.getMetrics'
@@ -66,6 +67,7 @@ test('route captures cannot inherit another route context and retain resource ob
   };
   try {
     await captureRoutes({
+      db: { query: async () => ({ rows: [] }) },
       browser,
       routes: [{ path: '/' }, { path: '/beeline/chat/[channelId]' }],
       origin: new URL('http://127.0.0.1:18089'),
@@ -100,6 +102,26 @@ test('route captures cannot inherit another route context and retain resource ob
         assert.ok(after.host.totalMemoryBytes > 0);
       }
     }
+    // A failed temporary write must leave the previous complete checkpoint intact.
+    const previous = await readFile(join(out, 'route-captures.json'), 'utf8');
+    await mkdir(join(out, 'route-captures.json.tmp'));
+    await assert.rejects(
+      captureRoutes({
+        db: { query: async () => ({ rows: [] }) },
+        browser,
+        routes: [{ path: '/' }],
+        origin: new URL('http://127.0.0.1:18089'),
+        backend: new URL('http://127.0.0.1:18090'),
+        secret: 'local-fixture',
+        out,
+        blockedRequests: [],
+        storageState: 'reviewer-session.json',
+      }),
+      { code: 'EISDIR' },
+    );
+    assert.equal(await readFile(join(out, 'route-captures.json'), 'utf8'), previous);
+    const record = JSON.parse(await readFile(join(out, 'route-record-0-cold-1.json')));
+    assert.deepEqual(record.samples, [100, 100, 100]);
   } finally {
     await rm(out, { recursive: true, force: true });
   }
@@ -115,6 +137,7 @@ test('a warm page that misses its fixture is recorded and the sweep continues', 
         storageState: async () => ({ cookies: [], origins: [] }),
         route: async () => {},
         routeWebSocket: async () => {},
+        unrouteAll: async () => {},
         newCDPSession: async () => ({
           send: async (method) =>
             method === 'Performance.getMetrics'
@@ -166,6 +189,7 @@ test('a warm page that misses its fixture is recorded and the sweep continues', 
   };
   try {
     await captureRoutes({
+      db: { query: async () => ({ rows: [] }) },
       browser,
       routes: [{ path: '/' }, { path: '/beeline/brief' }, { path: '/beeline/agent-profile' }],
       origin: new URL('http://127.0.0.1:18089'),
@@ -193,4 +217,49 @@ test('a warm page that misses its fixture is recorded and the sweep continues', 
   } finally {
     await rm(out, { recursive: true, force: true });
   }
+});
+
+test('the route sweep restores the grant consumed by the approval tap before opening the tray', async () => {
+  const { fixture, hash } = await import('./web-fixtures.mjs');
+  const approval = fixture('answer-approval');
+  let grantStatus = 'once';
+  let cardStatus = 'once';
+  let dismissed = true;
+  const db = {
+    query: async (sql, args) => {
+      if (sql.startsWith('DELETE FROM needs_you_marks')) {
+        assert.equal(args[1], hash('approval-card'));
+        dismissed = false;
+      }
+      if (sql.startsWith('INSERT INTO agent_grants')) {
+        assert.equal(args[0], approval.grantId);
+        assert.match(sql, /'pending'/);
+        grantStatus = 'pending';
+      }
+      if (sql.startsWith('UPDATE messages SET card=')) {
+        assert.equal(args[0], hash('approval-card'));
+        assert.match(sql, /pending/);
+        cardStatus = 'pending';
+      }
+      return { rows: [] };
+    },
+  };
+  const reached = new Error('fixture ready before first browser context');
+  const browser = {
+    newContext: async () => {
+      assert.equal(grantStatus, 'pending');
+      assert.equal(cardStatus, 'pending');
+      assert.equal(dismissed, false);
+      throw reached;
+    },
+  };
+  await assert.rejects(
+    captureRoutes({
+      db,
+      browser,
+      routes: [{ path: '/beeline/tray' }],
+      origin: new URL('http://127.0.0.1:18089'),
+    }),
+    (error) => error === reached,
+  );
 });

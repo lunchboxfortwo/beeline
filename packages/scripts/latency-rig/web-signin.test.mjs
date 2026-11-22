@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fixtureSignIn, saveReviewerSession } from './web-signin.mjs';
+import { fixtureContext, fixtureSignIn, saveReviewerSession } from './web-signin.mjs';
 
 test('reusable sign-in retains credentials without priming surfaces or device settings', async () => {
   const names = [
@@ -69,6 +69,7 @@ test('bootstrap saves one reviewer login for both inventories, then closes its c
       return {
         route: async () => {},
         routeWebSocket: async () => {},
+        unrouteAll: async ({ behavior }) => assert.equal(behavior, 'ignoreErrors'),
         storageState: async () => structuredClone(state),
         newPage: async () => ({
           goto: async (url) => {
@@ -103,4 +104,15 @@ test('bootstrap saves one reviewer login for both inventories, then closes its c
   } finally {
     await rm(out, { recursive: true, force: true });
   }
+});
+
+test('routed requests are detached before context disposal', async () => {
+  const events=[];
+  const context=await fixtureContext({newContext:async()=>({
+    route:async()=>{},routeWebSocket:async()=>{},
+    unrouteAll:async options=>events.push(['unroute',options.behavior]),
+    close:async()=>events.push(['close']),
+  })},{origin:new URL('http://127.0.0.1:28089'),backend:new URL('http://127.0.0.1:28090'),blockedRequests:[]});
+  await context.close();
+  assert.deepEqual(events,[['unroute','ignoreErrors'],['close']]);
 });

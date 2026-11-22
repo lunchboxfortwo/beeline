@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { armTapTiming, readTapTiming, tapFeedback } from './web-tap-timing.mjs';
 
-test('approval timing observes the same Approve action as the redesigned tray', () => {
+test('approval timing observes the current Once control', () => {
   let mutation,
     pointerdown,
     shown = true;
   const frames = [];
   const button = {
-    textContent: 'Approve',
-    getAttribute: () => 'Approve: Allow local fixture access',
+    textContent: 'Once',
+    getAttribute: () => 'Once',
     getBoundingClientRect: () => ({ width: shown ? 100 : 0, height: 20 }),
   };
   const sandbox = {

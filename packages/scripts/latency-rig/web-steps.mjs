@@ -222,7 +222,7 @@ export const steps = {
   },
   'answer-approval': async (p, f) => {
     await p.goto(`/beeline/tray?communityId=${workspace}`);
-    const target = p.getByRole('button', { name: /^Approve: / }).first();
+    const target = p.getByRole('button', { name: 'Once', exact: true }).first();
     await visible(target);
     return { act: () => click(target), done: () => hidden(target) };
   },

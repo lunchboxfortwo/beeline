@@ -286,6 +286,19 @@ async function main() {
             });
             try {
               const page = await context.newPage();
+              let traceSession;
+              if (sample === 0 && process.env.LATENCY_RIG_CAPTURE_TRACES === '1') {
+                traceSession = await context.newCDPSession(page);
+                await traceSession.send('Tracing.start', {categories:'devtools.timeline,blink.user_timing,v8.execute',transferMode:'ReportEvents'});
+                const traceEvents = [];
+                traceSession.on('Tracing.dataCollected', ({value}) => traceEvents.push(...value));
+                page.__finishLatencyTrace = async () => {
+                  const complete = new Promise(resolve => traceSession.once('Tracing.tracingComplete', resolve));
+                  await traceSession.send('Tracing.end'); await complete;
+                  await writeFile(resolve(out, `${name}-${capture}-trace.json`), JSON.stringify({traceEvents}));
+                  await traceSession.detach();
+                };
+              }
               page.setDefaultTimeout(4000);
               page.setDefaultNavigationTimeout(6000);
               try {
@@ -364,6 +377,7 @@ async function main() {
                   'Committed effect',
                 );
                 record.samples.push(duration);
+                record.observedAt = new Date().toISOString();
                 record.resources.push({ before, after: await readWebResources(context, page) });
               } catch (error) {
                 record.reason = `Sample ${sample + 1}: ${stripVTControlCharacters(error.message)}`;
@@ -381,6 +395,8 @@ async function main() {
                     .catch(() => ''),
                 );
                 break;
+              } finally {
+                await page.__finishLatencyTrace?.();
               }
             } finally {
               await context.close();
@@ -393,13 +409,15 @@ async function main() {
       }
     }
     const selectedRoute = process.env.LATENCY_RIG_WEB_ROUTE;
-    if (selectedRoute && !routes.some((route) => route.path === selectedRoute))
+    const selectedRoutes = selectedRoute ? selectedRoute.split(',') : null;
+    if (selectedRoutes?.some(path => !routes.some(route => route.path === path)))
       throw new Error(`Unknown web route: ${selectedRoute}`);
     const routeInventory =
       process.env.LATENCY_RIG_WEB_ROUTES === '1' || process.env.LATENCY_RIG_WEB_ROUTES_ONLY === '1'
         ? await captureRoutes({
+            db,
             browser,
-            routes: selectedRoute ? routes.filter((route) => route.path === selectedRoute) : routes,
+            routes: selectedRoutes ? routes.filter(route => selectedRoutes.includes(route.path)) : routes,
             origin,
             backend,
             secret,
