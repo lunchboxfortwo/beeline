@@ -297,6 +297,11 @@ export class PlaceSession {
     };
   }
 
+  /** The harness has answered the model setter, applied or refused. */
+  private modelSwitch(switching: Promise<void>): Promise<void> {
+    return switching;
+  }
+
   /** Only the current session's reports reach the server. */
   private reportRunningModel(client: AcpClient, report: RunningModelReport): void {
     if (this.client === client) this.running.report(report);
@@ -685,13 +690,17 @@ export class PlaceSession {
     });
     this.warm.rememberSession(opened.sessionId, fingerprint);
     this.sessionId = opened.sessionId;
-    reconcileStartupModel({
+    // The owner asked that a commanded model switch simply take effect
+    // (22 Nov 2026): the first prompt after a model change follows the
+    // harness's answer to the setter.
+    const switching = reconcileStartupModel({
       client, sessionId: opened.sessionId, raw: opened.raw, selection, notes: this.notes,
       cached: Boolean(configuration), placeId,
       current: () => this.client === client,
       remember: (catalog) => this.resources.rememberModelCatalog(catalog),
       report: (report) => this.reportRunningModel(client, report),
     });
+    if (switching) await this.modelSwitch(switching);
     if (agentOpenRouterKey(config.agentKind, selection.model, config.agentEnv))
       console.log(`[body] place ${placeId} uses an OpenRouter key`);
   }

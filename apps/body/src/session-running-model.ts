@@ -85,8 +85,10 @@ export function switchLiveModel(input: {
 
 /**
  * After a session opens: read its live catalog, send any differing selection
- * through the setter without awaiting it, tell the agent which model it runs,
- * and report that model. The live catalog owns the verdict.
+ * through the setter, tell the agent which model it runs, and report that
+ * model. The live catalog owns the verdict. A model change returns the apply,
+ * which settles (never rejects) once the harness answers, so the first prompt
+ * can follow the switch; effort and Fast Mode alone stay unawaited.
  */
 export function reconcileStartupModel(input: {
   client: AcpClient;
@@ -100,8 +102,9 @@ export function reconcileStartupModel(input: {
   current(): boolean;
   remember(catalog: AgentModelConfigOption[]): void;
   report(report: RunningModelReport): void;
-}): void {
+}): Promise<void> | undefined {
   const { client, selection, notes } = input;
+  let applying: Promise<void> | undefined;
   const catalog = filterAllowedModelConfigOptions(parseAdvertisedConfigOptions(input.raw));
   input.remember(catalog);
   const advertisedDefault = catalog.find((option) => option.category === 'model')?.currentValue;
@@ -127,9 +130,7 @@ export function reconcileStartupModel(input: {
   const modelChange = Boolean(selection.model && selection.model !== runningModel);
   if (modelChange || axesDiffer) {
     if (!modelChange || available) {
-      // Send the setter before the first prompt, but never hold delivery on
-      // an optional harness request.
-      void applyAgentModelSelectionWithUpdatedCatalog(
+      applying = applyAgentModelSelectionWithUpdatedCatalog(
         client,
         input.sessionId,
         catalog,
@@ -167,4 +168,5 @@ export function reconcileStartupModel(input: {
   }
   if (!modelChange) input.report({ model: advertisedDefault, selected: selection.model });
   notes.push(`${reconcilingModel ? '' : `This session uses ${runningModel}; `}${configurationNote}`);
+  return modelChange ? applying : undefined;
 }
