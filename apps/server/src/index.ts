@@ -337,7 +337,7 @@ async function main() {
   const daemon = new DaemonService(
     database,
     live,
-    github ? (roomId) => github!.roomToken(roomId) : undefined,
+    github ? (roomId, access) => github!.roomToken(roomId, access) : undefined,
     Number(process.env.MEDIA_MAX_BYTES ?? String(DEFAULT_MEDIA_MAXIMUM_BYTES)),
     false,
     undefined,

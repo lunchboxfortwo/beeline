@@ -4,7 +4,7 @@ import { queueMessage } from './agent-command.js';
 import { readAgentCommands } from './agent-command-read-agent-commands.js';
 import { itemPrompt } from '../../body/src/place-prompt.js';
 import { renderWake } from '../../body/src/session-join/bridge.js';
-import { AGENT, ROOM, describe, expect, fixtureScope1, fixtureScope3, it } from './test-support-rooms-mcp.test-support.js';
+import { AGENT, PUBLIC_CORNER, ROOM, describe, expect, fixtureScope1, fixtureScope3, it } from './test-support-rooms-mcp.test-support.js';
 
 const ask = { question: 'Which output?', options: ['Web', 'Phone'] };
 const runner = { node: '/proof/node', bundle: '/proof/beeline.mjs' };
@@ -87,11 +87,17 @@ describe('replies without an ask end acknowledgement exchanges', () => {
     expect(member).toBeTruthy();
   });
 
+  it('never tells a self-message sender to do another place\'s work in its current turn', async () => {
+    const sent = await scope.daemon.execute('message', {roomId:ROOM,to:{agent:AGENT,place:PUBLIC_CORNER},text:'Do the thread work'}, AGENT);
+    expect(sent).toMatchObject({receipt:'Message stored and visible. No agents woken. You addressed yourself; your turn in that place does this work, not this turn.'});
+    expect(sent.receipt).not.toContain('do the work in this turn');
+  });
+
   it.each([false, true])('records self-messages and replies without a wake, ask=%s', async asked => {
     const args = asked ? {ask} : {};
     const self = await scope.daemon.execute('message', {roomId:ROOM,to:{agent:AGENT,place:ROOM},text:'Note to self',...args}, AGENT);
     expect(await native()).toEqual([]);
-    expect(self).toMatchObject({receipt:'Message stored and visible. No agents woken. You addressed yourself; do the work in this turn.'});
+    expect(self).toMatchObject({receipt:'Message stored and visible. No agents woken. You addressed yourself; it is a note in this place.'});
     expect((await scope.db.query('SELECT text FROM messages WHERE id=$1',[self.id])).rows).toEqual([{text:'Note to self'}]);
     // Already queued self-addressed commands from older servers can be answered
     // without feeding another item back to the sender.

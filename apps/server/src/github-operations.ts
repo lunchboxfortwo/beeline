@@ -18,6 +18,12 @@ import { gitHubOperationsRefreshCheckRollup, gitHubOperationsLifecycle, gitHubOp
 import { gitHubOperationsUserCredential, gitHubOperationsRotateUserCredential, gitHubOperationsStoreRepository } from './github-operations-user-credential.js';
 import { repositoryIconPushTarget, resolveRepositoryIcons } from './repository-icons.js';
 
+/** What an agent session reads with: code, pull requests, issues and CI. No writes. */
+const ROOM_READ_PERMISSIONS = Object.freeze({
+  contents: 'read', pull_requests: 'read', issues: 'read', actions: 'read',
+  checks: 'read', statuses: 'read', metadata: 'read',
+});
+
 export class GitHubOperations {
 
   readonly #key: Buffer;
@@ -102,7 +108,11 @@ async createRepository(viewerId: string, input: Input<'createGitHubRepository'>,
     for (const roomId of changed) this.onRoomChanged?.(roomId);
   }
 
-  async roomToken(roomId: string) {
+  /**
+   * `read` mints a read-only credential. Only a thread's own session gets
+   * `write`, because a write credential can push any branch of the repository.
+   */
+  async roomToken(roomId: string, access: 'read' | 'write' = 'write') {
     const row = (
       await this.database.query<{ github_installation_id: string; repository_id: string }>(
         `SELECT r.github_installation_id,g.repository_id FROM rooms r
@@ -120,7 +130,7 @@ async createRepository(viewerId: string, input: Input<'createGitHubRepository'>,
     for (const [key, value] of this.#roomTokens) {
       if (value.expiresAt - now <= 5 * 60_000) this.#roomTokens.delete(key);
     }
-    const key = `${row.github_installation_id}:${row.repository_id}`;
+    const key = `${row.github_installation_id}:${row.repository_id}${access === 'read' ? ':read' : ''}`;
     const cached = this.#roomTokens.get(key);
     if (cached) return { ...cached };
     const pending = this.#roomTokenMints.get(key);
@@ -128,6 +138,7 @@ async createRepository(viewerId: string, input: Input<'createGitHubRepository'>,
     const mint = (async () => {
       const value = await this.app.installationToken(Number(row.github_installation_id), {
         repositoryIds: [Number(row.repository_id)],
+        ...(access === 'read' ? { permissions: ROOM_READ_PERMISSIONS } : {}),
       });
       const token = { token: value.token, expiresAt: new Date(value.expiresAt).getTime() };
       if (token.expiresAt - Date.now() > 5 * 60_000) this.#roomTokens.set(key, token);

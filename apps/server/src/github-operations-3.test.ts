@@ -475,6 +475,11 @@ const scope1 = fixtureScope1();
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app, 'secret');
     await expect(operations.roomToken(room)).resolves.toMatchObject({ token: 'scoped-token' });
     expect(app.installationToken).toHaveBeenCalledWith(77, { repositoryIds: [101] });
+    // Agent session reads get a separate read-only mint; it cannot push.
+    await operations.roomToken(room, 'read');
+    expect(app.installationToken).toHaveBeenLastCalledWith(77, { repositoryIds: [101], permissions: {
+      contents: 'read', pull_requests: 'read', issues: 'read', actions: 'read', checks: 'read', statuses: 'read', metadata: 'read' } });
+    expect(app.installationToken).toHaveBeenCalledTimes(2);
     await scope1.database.query(
       `UPDATE rooms SET repository_remote='https://github.com/owner/missing.git' WHERE id=$1`,
       [room],
@@ -482,7 +487,7 @@ const scope1 = fixtureScope1();
     await expect(operations.roomToken(room)).rejects.toThrow(
       'GitHub repository installation not found',
     );
-    expect(app.installationToken).toHaveBeenCalledTimes(1);
+    expect(app.installationToken).toHaveBeenCalledTimes(2);
   });
 
   it('does not cache failed room token mints and shares concurrent failures', async () => {

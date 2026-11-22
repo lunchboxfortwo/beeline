@@ -93,7 +93,10 @@ export async function sendMessage(db: SqlDatabase, input: {
       const saved = recorded.rows[0] ?? (await tx.query<{id:string;created_at:Date}>(
         'SELECT id,created_at FROM messages WHERE id=$1',[command?.id ?? id])).rows[0]!;
       return { id:saved.id,createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
-        ...(transcriptOnly ? { receipt: notWokenReceipt(to.agent === route.from.agent ? 'You addressed yourself; do the work in this turn.'
+        ...(transcriptOnly ? { receipt: notWokenReceipt(to.agent === route.from.agent
+          // Work addressed to another place belongs to that place's own turn.
+          ? to.place === route.from.place ? 'You addressed yourself; it is a note in this place.'
+            : 'You addressed yourself; your turn in that place does this work, not this turn.'
           : 'An acknowledgement of an informational reply wakes no one; add ask or use message() to reach them.') } : {}) };
     }
     if (input.ask) {

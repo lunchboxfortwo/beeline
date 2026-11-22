@@ -111,9 +111,38 @@ export function cornerGitHubCommandRefusal(
     return withoutOwner.replace(/^refs\/heads\//, '');
   };
   if (launcher === 'gh') {
+    // Session credentials are read-only. Any gh command that may change
+    // GitHub goes through the thread's write authority instead.
+    const words: string[] = [];
+    for (let index = 0; index < argv.length && words.length < 2; index += 1) {
+      const arg = argv[index]!;
+      if (arg === '--repo' || arg === '-R') index += 1;
+      else if (!arg.startsWith('-')) words.push(arg);
+    }
+    const reads: Record<string, readonly string[]> = {
+      pr: ['view', 'list', 'status', 'checks', 'diff'],
+      issue: ['view', 'list', 'status'],
+      run: ['view', 'list', 'watch', 'download'],
+      workflow: ['view', 'list'],
+      release: ['view', 'list', 'download'],
+      repo: ['view'],
+      auth: ['status', 'token'],
+    };
+    const apiRead = () => {
+      const method = argv.find((_arg, index) => argv[index - 1] === '-X' || argv[index - 1] === '--method')
+        ?? argv.find((arg) => arg.startsWith('--method='))?.slice('--method='.length)
+        ?? argv.find((arg) => arg.startsWith('-X') && arg.length > 2)?.slice(2);
+      const fields = argv.some((arg) => /^(-f|-F|--field|--raw-field|--input)(=|$)/.test(arg) || /^-[fF]./.test(arg));
+      return method === undefined ? !fields : method.toUpperCase() === 'GET';
+    };
+    const read =
+      words.length === 0 ||
+      argv.includes('--help') || argv.includes('-h') || argv.includes('--version') ||
+      words[0] === 'help' || words[0] === 'version' || words[0] === 'search' ||
+      (words[0] === 'api' ? apiRead() : (reads[words[0]!] ?? []).includes(words[1] ?? ''));
+    if (!read) onWrite();
     const pr = argv.indexOf('pr');
     if (pr < 0 || argv[pr + 1] !== 'create') return undefined;
-    onWrite();
     for (let index = pr + 2; index < argv.length; index += 1) {
       const arg = argv[index]!;
       const head =
@@ -341,7 +370,8 @@ function token() {
   // The credential belongs to this repository session until GitHub's expiry.
   // Writes still ask the server for current implementer authority every time.
   const remote = git(['remote', 'get-url', 'origin'], { encoding: 'utf8' });
-  const scope = JSON.stringify([config.room, config.config, config.cli, remote.status === 0 ? remote.stdout.trim() : '']);
+  // 'read' keeps a credential cached before reads became read-only from being reused.
+  const scope = JSON.stringify(['read', config.room, config.config, config.cli, remote.status === 0 ? remote.stdout.trim() : '']);
   if (!threadWrite) {
     try {
       const issued = JSON.parse(readFileSync(config.credentialPath, 'utf8'));
@@ -360,7 +390,8 @@ function token() {
       return output;
     }
     if (typeof issued.token === 'string' && issued.token) {
-      if (Number.isFinite(issued.expiresAt))
+      // A write credential is used for this one command and never stored.
+      if (!threadWrite && Number.isFinite(issued.expiresAt))
         writeFileSync(config.credentialPath, JSON.stringify({ scope, token: issued.token, expiresAt: issued.expiresAt }), { mode: 0o600 });
       return issued.token;
     }

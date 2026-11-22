@@ -198,7 +198,8 @@ async function main(): Promise<void> {
     const roomId = roomFlag >= 0 ? args[roomFlag + 1] : undefined;
     if (!configPath || !roomId) throw new Error('thread-read-token requires --config and --room');
     const credential = await DaemonApiClient.readRepositoryCredential(resolve(configPath), roomId, undefined, args.includes('--write')).catch(error => {
-      if (error?.code === 'Call claim_thread before pushing or opening a PR for this thread.') {
+      if (error?.code === 'Call claim_thread before pushing or opening a PR for this thread.' ||
+          (typeof error?.code === 'string' && error.code.includes(' from its own session;'))) {
         process.stderr.write(`${error.code}\n`);
         process.exit(1);
       }

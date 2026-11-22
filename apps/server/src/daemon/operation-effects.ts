@@ -189,22 +189,31 @@ export async function getRoomGitHubTokenOperation<Name extends keyof DaemonOpera
 
         if (!ctx.roomGitHubToken) throw new Error('GitHub chat token service unavailable');
         let roomId = (input as Input<'getRoomGitHubToken'>).roomId;
-        if ((input as Input<'getRoomGitHubToken'>).write) {
+        const write = (input as Input<'getRoomGitHubToken'>).write === true;
+        if (write) {
           // Old helpers send the chat ID. Their write authority still requires
           // a recorded implementer of an open thread in that exact chat.
-          const fact = await ctx.database.query<{ parent_id: string }>(`SELECT corner.parent_id
+          // A write credential can push any branch, so only the thread's own
+          // session gets one: the implementer must have a turn working there.
+          const fact = await ctx.database.query<{ parent_id: string; name: string; own_session: boolean }>(`SELECT corner.parent_id,corner.name,
+              EXISTS(SELECT 1 FROM agent_turns turn WHERE turn.room_id=corner.id
+                AND turn.agent_id=$2 AND turn.status='working') AS own_session
             FROM rooms addressed
             JOIN rooms corner ON corner.id=addressed.id
               OR (addressed.parent_id IS NULL AND corner.parent_id=addressed.id)
             JOIN corner_facts fact ON fact.corner_id=corner.id AND fact.implementer_agent_id=$2
             WHERE addressed.id=$1 AND addressed.archived_at IS NULL
               AND corner.parent_id IS NOT NULL AND corner.archived_at IS NULL
+            ORDER BY own_session DESC
             LIMIT 1`, [roomId, authenticatedAgentId]);
           if (!fact.rowCount) throw new CommandRefusalError('Call claim_thread before pushing or opening a PR for this thread.', 409);
+          if (!fact.rows[0]!.own_session)
+            throw new CommandRefusalError(`Work on thread ${fact.rows[0]!.name} from its own session; only that session can push to its branch or open its PR.`, 409);
           roomId = fact.rows[0]!.parent_id;
         }
         try {
-          return (await ctx.roomGitHubToken(roomId)) as Output<Name>;
+          // Reads get a read-only credential; it cannot push any branch.
+          return (await ctx.roomGitHubToken(roomId, write ? 'write' : 'read')) as Output<Name>;
         } catch (error) {
           // The exact missing-installation result is a Room configuration
           // fact. An upstream 404 alone does not establish that fact.

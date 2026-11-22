@@ -40,6 +40,7 @@ export interface DaemonDependencies {
   readonly live: LiveHub;
   readonly roomGitHubToken?: (
       roomId: string,
+      access?: 'read' | 'write',
     ) => Promise<{ token: string; expiresAt: number }>;
   readonly mediaMaximumBytes: number;
   readonly commandTransaction: boolean;

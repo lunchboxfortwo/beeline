@@ -173,3 +173,44 @@ it('routes launcher credentials through the real CLI command parser', async () =
   });
   expect(result.stdout).toBe('fixture-token');
 });
+
+it('sends gh writes through thread authority and never stores a write credential', async () => {
+  const root=await mkdtemp(join(tmpdir(),'beeline-gh-writes-')); roots.push(root);
+  const cli=join(root,'credential.mjs'),gh=join(root,'gh'),git=join(root,'git'),requests=join(root,'requests');
+  await writeFile(cli,`import {appendFileSync} from 'node:fs';
+const write=process.argv.includes('--write');
+appendFileSync(${JSON.stringify(requests)},(write?'write ':'read ')+process.argv[process.argv.indexOf('--room')+1]+'\\n');
+process.stdout.write(JSON.stringify({token:write?'write-token':'read-token',expiresAt:Date.now()+3_600_000}));`);
+  await writeFile(gh,'#!/bin/sh\nprintf "%s" "$GH_TOKEN"\n'); await writeFile(git,'#!/bin/sh\nprintf "%s" "$GH_TOKEN"\n');
+  await Promise.all([chmod(gh,0o755),chmod(git,0o755)]);
+  await installCornerGitHubWrappers({root,runtimeConfigPath:join(root,'runtime.json'),roomId:'chat',cornerId:'thread',
+    cliEntrypoint:cli,gitBinary:git,ghBinary:gh,featureBranch:'feature/test',targetBranch:'main'});
+  const run=(args:string[])=>promisify(execFile)(process.execPath,[join(root,'beeline-github-bin/gh'),...args],{
+    env:{...process.env,HOME:root,XDG_CONFIG_HOME:join(root,'config'),XDG_STATE_HOME:join(root,'state')}});
+  for (const args of [['pr','ready','1'],['pr','comment','1','--body','b'],['pr','merge','1'],
+    ['api','-X','POST','/repos/acme/repo/issues'],['api','/repos/acme/repo/issues','-f','title=x'],['issue','create']])
+    expect((await run(args)).stdout).toBe('write-token');
+  for (const args of [['pr','view','1'],['pr','checks','1'],['api','/repos/acme/repo/pulls'],['run','view','9'],['pr','view','1','-R','acme/repo']])
+    expect((await run(args)).stdout).toBe('read-token');
+  expect(await readFile(requests,'utf8')).toBe('write thread\n'.repeat(6)+'read chat\n');
+  // Only the read credential is kept on disk for later commands.
+  expect(JSON.parse(await readFile(join(root,'beeline-github-bin/repository-credential.json'),'utf8')).token).toBe('read-token');
+});
+
+it('passes the thread-session refusal through to the agent in plain words', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beeline-wrapper-session-')); roots.push(root);
+  const cli = join(root, 'credential.mjs'), binary = join(root, 'git');
+  const refusal = 'Work on thread host-grant-truth from its own session; only that session can push to its branch or open its PR.';
+  await writeFile(cli, `
+    import { DaemonApiClient, DaemonApiError } from ${JSON.stringify(new URL('./daemon-api-client.ts', import.meta.url).href)};
+    DaemonApiClient.readRepositoryCredential = async () => { throw new DaemonApiError('refused', 409, false, ${JSON.stringify(refusal)}); };
+    await import(${JSON.stringify(new URL('./cli.ts', import.meta.url).href)});
+  `);
+  await writeFile(binary, '#!/bin/sh\ncase "$*" in *show-ref*) exit 1;; *symbolic-ref*) echo feature/test;; *) echo pushed;; esac\n'); await chmod(binary, 0o755);
+  await installCornerGitHubWrappers({ root, runtimeConfigPath: join(root, 'runtime.json'), roomId: 'chat', cornerId: 'thread',
+    cliEntrypoint: cli, gitBinary: binary, featureBranch: 'feature/test', targetBranch: 'main' });
+  await expect(promisify(execFile)(process.execPath, [join(root, 'beeline-github-bin/git'), 'push', 'origin', 'feature/test'], {
+    env: { ...process.env, NODE_OPTIONS: `--import ${createRequire(import.meta.url).resolve('tsx')}`,
+      HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') },
+  })).rejects.toMatchObject({ stderr: refusal + '\n', stdout: '' });
+});

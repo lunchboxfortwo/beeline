@@ -94,6 +94,32 @@ it('P1: grants claimed thread pushes against the parent repository, including le
   expect(tokenRooms).toEqual([]);
 });
 
+it('R1: issues a write credential only to the thread\'s own session, and reads stay read-only', async () => {
+  // Ruby's chat session pushed to a thread branch it implemented elsewhere.
+  await rootFixture.db.query('UPDATE corner_facts SET implementer_agent_id=NULL');
+  await rootFixture.db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1',[C,A]);
+  await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE agent_id=$1`,[A]);
+  const name=(await rootFixture.db.query<{name:string}>('SELECT name FROM rooms WHERE id=$1',[C])).rows[0]!.name;
+  const issued: [string, string | undefined][] = [];
+  const service=new DaemonService(rootFixture.db,rootFixture.live,async (roomId,access)=>{
+    issued.push([roomId,access]);
+    return {token:`${access}-token`,expiresAt:9999999999};
+  });
+  await send('@hoots Work in the chat',R);
+  await claim((await commands(A,R))[0]!);
+  for (const roomId of [C, R])
+    await expect(service.execute('getRoomGitHubToken',{roomId,write:true},A))
+      .rejects.toThrow(`Work on thread ${name} from its own session; only that session can push to its branch or open its PR.`);
+  expect(issued).toEqual([]);
+  await expect(service.execute('getRoomGitHubToken',{roomId:R},A)).resolves.toEqual({token:'read-token',expiresAt:9999999999});
+  expect(issued.splice(0)).toEqual([[R,'read']]);
+  // The thread's own session still pushes and opens its PR.
+  await send('@hoots Work in the thread',C);
+  await claim((await commands(A,C)).at(-1)!);
+  await expect(service.execute('getRoomGitHubToken',{roomId:C,write:true},A)).resolves.toEqual({token:'write-token',expiresAt:9999999999});
+  expect(issued).toEqual([[R,'write']]);
+});
+
 it('backfills the old latest-tag derivation once and never overwrites an explicit takeover', async () => {
   await send('@hoots Latest tag',C);
   await rootFixture.db.query(`DELETE FROM beeline_release_steps WHERE name='thread-implementer-v1'`);
