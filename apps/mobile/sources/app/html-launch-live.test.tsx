@@ -56,8 +56,7 @@ function launch(pathname: string, saved: Record<string, string | null>, denied =
       },
     },
     __beelineLaunchLive: undefined as
-      | undefined
-      | { url: string; token: string; release(): unknown[] },
+      undefined | { url: string; token: string; release(): unknown[] },
   };
   runInNewContext(script, { window, WebSocket, JSON, Date, decodeURIComponent });
   return {
@@ -67,20 +66,24 @@ function launch(pathname: string, saved: Record<string, string | null>, denied =
 }
 const signedIn = { 'buzzy.monolith.access.v1': access(), 'buzzy.monolith.identity.v1': 'viewer' };
 
-it.each(['/', '/beeline/channels', '/beeline/community', '/beeline/create-workspace/', '/beeline/chat/room%20one', '/beeline/tray'])(
-  'opens one live socket and sends no frames on %s',
-  (pathname) => {
-    const { window, sockets } = launch(pathname, signedIn);
-    expect(sockets).toHaveLength(1);
-    const socket = sockets[0]!;
-    expect(socket.url).toBe('wss://server.fixture/v1/phone/live');
-    expect(socket.protocols).toEqual(['bearer.saved-access']);
-    socket.fire('open');
-    socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
-    expect(socket.sent).toEqual([]);
-    expect(window.__beelineLaunchLive).toMatchObject({ url: socket.url, token: 'saved-access' });
-  },
-);
+it.each([
+  '/',
+  '/beeline/channels',
+  '/beeline/community',
+  '/beeline/create-workspace/',
+  '/beeline/chat/room%20one',
+  '/beeline/tray',
+])('opens one live socket and sends no frames on %s', (pathname) => {
+  const { window, sockets } = launch(pathname, signedIn);
+  expect(sockets).toHaveLength(1);
+  const socket = sockets[0]!;
+  expect(socket.url).toBe('wss://server.fixture/v1/phone/live');
+  expect(socket.protocols).toEqual(['bearer.saved-access']);
+  socket.fire('open');
+  socket.fire('message', { data: JSON.stringify({ type: 'subscribed', roomId: 'room one' }) });
+  expect(socket.sent).toEqual([]);
+  expect(window.__beelineLaunchLive).toMatchObject({ url: socket.url, token: 'saved-access' });
+});
 
 it('hands over the frames received before adoption and stops keeping them', () => {
   const { window, sockets } = launch('/', signedIn);

@@ -64,7 +64,9 @@ const URL = 'ws://fixture.invalid/v1/phone/live';
 const roomId = 'launch-room';
 const room = { room: { id: roomId }, messages: [] };
 
-function launch(options: { token?: string; url?: string; open?: boolean; received?: { data: string }[] } = {}) {
+function launch(
+  options: { token?: string; url?: string; open?: boolean; received?: { data: string }[] } = {},
+) {
   const socket = new Socket(options.url ?? URL, [`bearer.${options.token ?? 'launch-access'}`]);
   if (options.open !== false) socket.readyState = 1;
   const release = vi.fn(() => options.received ?? []);
@@ -103,24 +105,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it.each([true, false])('adopts the launch socket and sends its own first request (open: %s)', async (open) => {
-  const { socket, release } = launch({ open });
-  const connection = connect();
-  const read = connection.request('readRoom', { roomId });
-  await tick();
-  expect(Socket.instances).toEqual([socket]);
-  expect(release).toHaveBeenCalledOnce();
-  if (!open) {
-    expect(socket.requests()).toEqual([]);
-    socket.open();
-  }
-  expect(socket.requests()).toHaveLength(1);
-  const [frame] = socket.requests();
-  expect(frame).toMatchObject({ t: 'req', id: '1', op: 'readRoom', args: { roomId } });
-  socket.emit({ t: 'res', id: frame.id, ok: true, result: room });
-  await expect(read).resolves.toEqual(room);
-  expect(connection.commandState().ready).toBe(true);
-});
+it.each([true, false])(
+  'adopts the launch socket and sends its own first request (open: %s)',
+  async (open) => {
+    const { socket, release } = launch({ open });
+    const connection = connect();
+    const read = connection.request('readRoom', { roomId });
+    await tick();
+    expect(Socket.instances).toEqual([socket]);
+    expect(release).toHaveBeenCalledOnce();
+    if (!open) {
+      expect(socket.requests()).toEqual([]);
+      socket.open();
+    }
+    expect(socket.requests()).toHaveLength(1);
+    const [frame] = socket.requests();
+    expect(frame).toMatchObject({ t: 'req', id: '1', op: 'readRoom', args: { roomId } });
+    socket.emit({ t: 'res', id: frame.id, ok: true, result: room });
+    await expect(read).resolves.toEqual(room);
+    expect(connection.commandState().ready).toBe(true);
+  },
+);
 
 it('processes frames received before socket adoption', async () => {
   const invalidation = { type: 'invalidate', roomId: '', reason: 'postgres:memberships' };
@@ -133,25 +138,25 @@ it('processes frames received before socket adoption', async () => {
   expect(socket.sent).toEqual([]);
 });
 
-it.each([
-  { token: 'old-access' },
-  { url: 'ws://other.invalid/v1/phone/live' },
-])('closes an incompatible launch socket and connects fresh: %j', async (options) => {
-  const { socket, release } = launch(options);
-  const read = connect().request('readRoom', { roomId });
-  await tick();
-  expect(socket.closed).toBe(true);
-  expect(release).toHaveBeenCalledOnce();
-  const replacement = Socket.instances.at(-1)!;
-  expect(replacement).not.toBe(socket);
-  expect(replacement.url).toBe(URL);
-  expect(replacement.protocols).toEqual(['bearer.launch-access']);
-  replacement.open();
-  const [frame] = replacement.requests();
-  expect(frame).toMatchObject({ op: 'readRoom', args: { roomId } });
-  replacement.emit({ t: 'res', id: frame.id, ok: true, result: room });
-  await expect(read).resolves.toEqual(room);
-});
+it.each([{ token: 'old-access' }, { url: 'ws://other.invalid/v1/phone/live' }])(
+  'closes an incompatible launch socket and connects fresh: %j',
+  async (options) => {
+    const { socket, release } = launch(options);
+    const read = connect().request('readRoom', { roomId });
+    await tick();
+    expect(socket.closed).toBe(true);
+    expect(release).toHaveBeenCalledOnce();
+    const replacement = Socket.instances.at(-1)!;
+    expect(replacement).not.toBe(socket);
+    expect(replacement.url).toBe(URL);
+    expect(replacement.protocols).toEqual(['bearer.launch-access']);
+    replacement.open();
+    const [frame] = replacement.requests();
+    expect(frame).toMatchObject({ op: 'readRoom', args: { roomId } });
+    replacement.emit({ t: 'res', id: frame.id, ok: true, result: room });
+    await expect(read).resolves.toEqual(room);
+  },
+);
 
 it('closes an unadopted launch socket on disposal', () => {
   const { socket, release } = launch();
