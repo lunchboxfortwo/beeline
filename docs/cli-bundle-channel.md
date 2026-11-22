@@ -200,7 +200,9 @@ Socket and lock observers print their current phase while waiting and report a
 named error when they stop observing. They never restart a helper after a protocol
 error, take over a live install lock, or cancel its owner. Detached preparation and
 dependency children keep durable stdout/stderr logs, stream progress to the CLI,
-and continue when its observer leaves. Dependencies converge using the selected
+and continue when its observer leaves. Native convergence likewise has a detached owner;
+its lock covers the complete transaction, including after the observing CLI exits.
+Adapter installation has no child-killing deadline; only its outer observer may expire. Dependencies converge using the selected
 bundle before this invocation requests successor startup. Downloads have a network
 inactivity budget covering DNS, connection, headers and body; each received chunk
 resets it and reports cumulative bytes. There is no command-wide deadline that

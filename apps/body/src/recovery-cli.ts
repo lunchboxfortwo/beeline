@@ -58,6 +58,11 @@ async function main(): Promise<void> {
   }
   if (command === 'helper-bootstrap')
     throw new Error('helper-bootstrap must run through the installed native launcher');
+  if (command === 'native-converge-worker') {
+    const { runNativeConvergenceWorker } = await import('./native-helper.js');
+    console.log(JSON.stringify({ pid: await runNativeConvergenceWorker() }));
+    return;
+  }
   if (command === 'managed-update-worker') {
     if (process.env.BEELINE_UPDATE_GROUP_OWNER !== '1')
       throw new Error('release worker requires its recovery owner');
