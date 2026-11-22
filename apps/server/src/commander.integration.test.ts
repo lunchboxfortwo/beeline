@@ -495,6 +495,11 @@ it('reconnect recovery keeps every private report, even when each was queued off
 it('cross-Room reads work from a DM, while nonmembers get no data or order', async () => {
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('target-read',$1,$2,'Member history')`, [ROOM, HUMAN]);
   expect((await rootFixture.daemon.execute('read', { roomId: DM, address: ROOM }, RUBY)).items.map(m => m.body)).toContain('Member history');
+  expect(await rootFixture.daemon.execute('read', { roomId: DM, address: `#${ROOM}` }, RUBY))
+    .toEqual(await rootFixture.daemon.execute('read', { roomId: DM, address: ROOM }, RUBY));
+  for (const address of ['#dev-chat', '#beeline/room-address-check'])
+    await expect(rootFixture.daemon.execute('read', { roomId: DM, address }, RUBY))
+      .rejects.toMatchObject({ message: 'unknown place; use an id from read(facet:addresses)', status: 400 });
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id=$2`, [RUBY, ROOM]);
   await expect(rootFixture.daemon.execute('read', { roomId: DM, address: ROOM }, RUBY)).rejects.toThrow('membership');
   await expect(rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, text: 'Do this' }, RUBY)).rejects.toThrow('membership');

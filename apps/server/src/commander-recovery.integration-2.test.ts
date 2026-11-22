@@ -485,7 +485,10 @@ it('AGENT-STOP-3: an orderer stops its own turn and preserves an unrelated human
     .rejects.toThrow(/you did not order this turn and you do not command this thread/);
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
     [ROOM, assigned.turnRequestId])).rows[0]?.status).toBe('working');
-  const result = await rootFixture.daemon.execute('stopAgentTurn', { ...authority(rootFixture.order), address: ROOM, agent: 'worker' }, RUBY);
+  for (const address of ['#dev-chat', '#beeline/room-address-check'])
+    await expect(rootFixture.daemon.execute('stopAgentTurn', { ...authority(rootFixture.order), address, agent: 'worker' }, RUBY))
+      .rejects.toMatchObject({ message: 'unknown place; use an id from read(facet:addresses)', status: 400 });
+  const result = await rootFixture.daemon.execute('stopAgentTurn', { ...authority(rootFixture.order), address: `#${ROOM}`, agent: 'worker' }, RUBY);
   expect(result).toMatchObject({ stopped: true, agent: WORKER });
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
     [ROOM, assigned.turnRequestId])).rows[0]?.status).toBe('cancelled');
