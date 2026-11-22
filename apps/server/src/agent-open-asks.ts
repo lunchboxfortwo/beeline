@@ -1,3 +1,4 @@
+import { closeBlock } from './implementer-blocks.js';
 import { createHash } from 'node:crypto';
 import { shortenAsk } from '@beeline/api-contract/phone';
 import { CommandRefusalError } from './command-refusal.js';
@@ -100,10 +101,12 @@ export async function closeAgentAsk(
       400,
     );
   return db.transaction(async (tx) => {
+    const blockClosed = await closeBlock(tx, agentId, input.messageId as string, input.reason as string);
+    if (blockClosed) await tx.query("UPDATE room_choices SET status='closed' WHERE message_id=$1 AND mode='question' AND status='open'",[input.messageId]);
     const question = await tx.query<{ ask_closed_reason: string }>(
       `UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2)
-       WHERE id=$1 AND author_id=$3 RETURNING ask_closed_reason`,
-      [input.messageId, input.reason, agentId],
+       WHERE id=$1 AND (author_id=$3 OR $4) RETURNING ask_closed_reason`,
+      [input.messageId, input.reason, agentId, blockClosed],
     );
     if (!question.rowCount)
       throw new CommandRefusalError('close_ask: that id is not one of your asks', 404);

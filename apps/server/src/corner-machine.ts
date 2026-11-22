@@ -62,6 +62,8 @@ export type CornerMachineFacts = {
   locked?: boolean;
   /** Running worker receipts; reviewer work has its own input. */
   turnRunning: boolean;
+  /** A durable implementer block stays visible until explicitly closed. */
+  implementerBlocked?: boolean;
   reviewerActive?: boolean;
   lifecycle?: CornerLifecycleView;
   /**
@@ -235,7 +237,7 @@ export function transitionCorner(
   let state: CornerMachine;
   if (
     f.blocker &&
-    !f.turnRunning &&
+    (!f.turnRunning || f.implementerBlocked) &&
     (f.blocker.blocker?.kind !== 'merge-hold' ||
       (!f.turnRunning && !f.reviewerActive && !checksUnderway && !wakes.some((w) => w.kind === 'review')))
   ) {

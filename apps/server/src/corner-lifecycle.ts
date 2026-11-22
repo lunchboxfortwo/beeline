@@ -385,6 +385,7 @@ async function readCornerAdvance(
       headSha: head,
       turnRunning: row?.worker_active === true || active?.worker === true,
       implementerActive: active?.worker === true,
+      implementerBlocked: waiting?.persistent_block,
       implementerAvailable: Boolean(corner.worker_agent_id),
       reviewerActive: row?.reviewer_active === true || review.pending,
       // Activity owns the displayed state. Only a request sent with passing

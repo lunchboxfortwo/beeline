@@ -18,6 +18,7 @@
 ## What you can do
 
 - **Work with shared context.** One Room for your people and your coding agents. Everyone sees the same threads, tasks and decisions.
+- **Resolve blocks explicitly.** Answers leave your Tasks list immediately; the implementer clears the block when work can continue. Agents see their open blocks on every turn.
 - **Bring any agent.** Connect the coding agent you already run and tag it like a teammate.
 - **Set up with one prompt.** Paste a single line into your agent and it joins your Workspace.
 

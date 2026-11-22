@@ -240,12 +240,13 @@ export function needsYouAnsweredSql(message: string, viewerId: string): string {
     OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id AND choice.mode='question'))`;
   return `(EXISTS (
     SELECT 1 FROM messages reply
-    WHERE reply.reply_to_message_id=${message}.id
+    WHERE reply.reply_to_message_id=ANY(CASE WHEN ${message}.block_corner_id IS NOT NULL OR ${message}.block_parent_id IS NOT NULL
+      THEN block_reply_items(${message}.id) ELSE ARRAY[${message}.id] END)
       AND (reply.author_id=${viewerId} OR (${question}
         AND EXISTS (SELECT 1 FROM needs_you_marks recipient WHERE recipient.message_id=${message}.id
           AND recipient.identity_id=reply.author_id)))
       AND reply.presentation='message' AND reply.system_event IS NULL AND reply.deleted_at IS NULL
-      AND reply.created_at>${message}.created_at
+      AND reply.created_at>COALESCE(${message}.block_reasked_at,${message}.created_at)
   ) OR (${question} AND EXISTS (SELECT 1 FROM needs_you_marks answered
     WHERE answered.message_id=${message}.id AND answered.cleared_at IS NOT NULL AND answered.cleared_reason='answered'))
     OR EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=${message}.id
@@ -279,6 +280,7 @@ export function agentReportSql(message: string): string {
 export function supersedesSql(newer: string, message: string, viewerId: string): string {
   return `(${newer}.author_id=${message}.author_id AND ${newer}.card->>'reportToId'=${viewerId}
     AND (${newer}.created_at,${newer}.id)>(${message}.created_at,${message}.id)
+    AND reply_block_root(${newer}.reply_to_message_id) IS DISTINCT FROM ${message}.id
     AND ${agentReportSql(newer)} AND ${humanReportCornerSql(newer)}=${humanReportCornerSql(message)}
     AND EXISTS (SELECT 1 FROM rooms thread WHERE thread.id=${reportThreadIdSql(message)} AND thread.parent_id IS NOT NULL))`;
 }

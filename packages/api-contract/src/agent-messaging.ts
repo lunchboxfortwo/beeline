@@ -28,7 +28,7 @@ export const ASK_BRIEF_MAX_CHARACTERS = 280;
 /** The limits every tool that writes an ask states up front. */
 const ASK_LIMITS_TEXT = `Character limits: question at most ${ASK_QUESTION_MAX_CHARACTERS} characters, brief at most ${ASK_BRIEF_MAX_CHARACTERS} characters, both counted in characters; an ask over either limit is refused with its counts, so rewrite it shorter.`;
 /** The ask sentence for every message/reply tool description, before anything else about the tool. */
-export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words. For blocked:/needs-decision: reports, supply top-level question, brief and options (2–4 labels of at most 3 words), or use ask; both create the same decision buttons and enforce the same limits and refusals. Omit digest fields for a legacy report.`;
+export const ASK_TOOL_TEXT = `Add ask only when a person must decide: their Needs you card shows only ask.question, ask.brief and the option buttons, with your full text one tap away. ${ASK_LIMITS_TEXT} Use 2–4 option labels of at most 3 words. Blocks (blocked:/needs-decision:) are plain text by default; omit digest fields and ask for a plain reply. Supply question, brief and options, or ask, only when real choices help. Answers clear Tasks; close_ask explicitly clears the block.`;
 export const MESSAGE_ASK_SCHEMA = {
   type: 'object', required: ['question', 'options'], additionalProperties: false,
   description: `The person's Needs you card shows only question, brief and the option buttons; the full message text is one tap away. ${ASK_LIMITS_TEXT}`,
