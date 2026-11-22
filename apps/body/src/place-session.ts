@@ -59,6 +59,7 @@ import { assembleSessionPrompt, cornerHasRepositoryWork } from './prompt-assembl
 import { resourceCallFacts } from './resource-mcp-facade.js';
 import { roomPermissionDecision, unsandboxedPermissionDecision } from './room-permissions.js';
 import { beelineAgentMcpServer, readOnlyMcpServer } from './room-session.js';
+import { LiveTurnSteps } from './live-turn-steps.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
@@ -799,12 +800,18 @@ export class PlaceSession {
       commandId: item.id,
       label: `place ${item.roomId}`,
     });
+    const liveSteps = this.options.parentRoomId ? new LiveTurnSteps(this.options.api, {
+      agentId: this.options.agent.publicKey, roomId: item.roomId, requestId: item.turnRequestId,
+      invocationId: invocation?.id ?? item.id,
+    }) : undefined;
     let result: PromptResult;
     try {
       const answering = client.sessionPrompt(
         sessionId,
         images.length ? [{ type: 'text', text: prompt }, ...images] : prompt,
         stream.onChunk,
+        undefined,
+        liveSteps?.onToolCalls,
       );
       this.resources.refresh();
       result = await answering;
@@ -821,7 +828,8 @@ export class PlaceSession {
     const text = durableReplyText(result.agentText);
     let steps: Answer['steps'] = [];
     try {
-      steps = roomReplySteps(agentTurnSteps(result.updates ?? []));
+      const collected = agentTurnSteps(result.updates ?? []);
+      steps = roomReplySteps(liveSteps ? await liveSteps.remaining(collected) : collected);
     } catch (error) {
       console.warn('[body] optional answer history omitted:', error);
     }

@@ -50,3 +50,7 @@ describe('thread status (header B)', () => {
     expect(threadPrLine(lifecycle({ pr: { ...pr, mergeability: 'draft' }, checks: 'unknown' }), false)).toBe('#4181 · Draft · No checks ran');
   });
 });
+
+it('uses the running session name even after a reply changes the thread workflow', () => {
+  expect(threadListLabel({ state: 'waiting', workingAgentName: 'Ruby' }, undefined).word).toBe('Ruby is working');
+});

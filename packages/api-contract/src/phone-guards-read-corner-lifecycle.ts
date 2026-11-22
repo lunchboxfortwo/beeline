@@ -88,6 +88,7 @@ function readCorner(value: unknown): CornerListItem | null {
     corner,
     lifecycle,
     state: item.state,
+    ...field('workingAgentName', nonempty(item.workingAgentName) ? item.workingAgentName : undefined),
     ...field('stateAt', integer(item.stateAt) ? item.stateAt : undefined),
     ...field('closedAt', integer(item.closedAt) ? item.closedAt : undefined),
     ...field('reason', oneOf(item.reason, ['approve', 'connect', 'question', 'backlog'])),

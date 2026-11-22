@@ -204,7 +204,7 @@ it('settles both chat-specific status lines through receipts, reordered live rea
       tree = create(React.createElement(Harness));
     });
     const label = () => tree!.root.findByType('status').props.children;
-    expect(label()).toMatch(/Jellybean, Ruby brewing/);
+    expect(label()).toBe('Jellybean, Ruby are working');
     for (const agent of [RUBY, JELLY])
       live.publish({
         type: 'invalidate',

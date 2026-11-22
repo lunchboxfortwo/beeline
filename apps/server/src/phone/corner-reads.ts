@@ -604,6 +604,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
         corner: about ? { ...header, about } : header,
         lifecycle,
         ...derived,
+        ...(corner.working_agent_name ? { workingAgentName: corner.working_agent_name } : {}),
         stateAt:
           hasLiveWorkingTurn && corner.latest_turn_created_at
             ? unix(corner.latest_turn_created_at)
