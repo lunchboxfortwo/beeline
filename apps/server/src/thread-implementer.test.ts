@@ -106,3 +106,17 @@ it('backfills the old latest-tag derivation once and never overwrites an explici
   expect((await rootFixture.db.query('SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[C])).rows[0])
     .toEqual({implementer_agent_id:B});
 });
+
+it('lets a commander claim a thread from its parent chat', async () => {
+  const recorded=async()=> (await rootFixture.db.query<{implementer_agent_id:string}>(
+    'SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[C])).rows[0]!.implementer_agent_id;
+  expect(await recorded()).toBe(B);
+  await send('@hoots Take this thread', R);
+  const fromChat=(await commands(A,R))[0]!;
+  await claim(fromChat);
+  await rootFixture.daemon.execute('becomeImplementer',{roomId:R,requestId:fromChat.turnRequestId,cornerId:C},A);
+  expect(await recorded()).toBe(A);
+  // The chat itself is not a thread to claim.
+  await expect(rootFixture.daemon.execute('becomeImplementer',{roomId:R,requestId:fromChat.turnRequestId},A))
+    .rejects.toThrow('claim_thread needs a thread address.');
+});

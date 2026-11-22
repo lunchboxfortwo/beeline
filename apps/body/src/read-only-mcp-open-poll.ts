@@ -360,7 +360,7 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       }
       return execute('revise_thread_brief', input);
     }
-    case 'claim_thread': return execute(name);
+    case 'claim_thread': return execute(name, addressed);
     case 'report_feedback':
     case 'send_operator_system_dm':
     case 'read_operator_system_dm': return execute(name);

@@ -9,6 +9,7 @@ export type CornerIdleRow = CornerStateRow & {
   locked: boolean;
   worker_active: boolean;
   reviewer_active: boolean;
+  peer_active: boolean;
   blocking: boolean;
   last_turn_ended_at: Date | null;
   name: string;
@@ -32,9 +33,9 @@ export function cornerIdleSql(cornerId: string): string {
   ) SELECT snapshot.*,
     (machine->>'state'='idle' AND archived_at IS NULL
       AND machine->>'reason' IS DISTINCT FROM 'backlog'
-      AND NOT (worker_active OR reviewer_active OR blocking OR suppressed)) idle_eligible
+      AND NOT (worker_active OR reviewer_active OR peer_active OR blocking OR suppressed)) idle_eligible
     FROM (SELECT c.id,c.name,c.parent_id,c.archived_at,gh.lifecycle,f.locked,f.machine,
-      activity.worker_active,activity.reviewer_active,NULL::text latest_turn_status,
+      activity.worker_active,activity.reviewer_active,activity.peer_active,NULL::text latest_turn_status,
       extract(epoch FROM person_epoch.at)::text person_since,
       idle_budget.report_count idle_report_count,idle_budget.pending idle_report_pending,
       blocker.item_id IS NOT NULL blocking,blocker.item_id waiting_item_id,

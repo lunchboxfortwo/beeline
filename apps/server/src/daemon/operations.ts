@@ -387,8 +387,14 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           inputs => ctx.github!.dispatchProductionRelease(release.roomId, inputs)) as Output<Name>;
       }
       case 'becomeImplementer': {
-        const roomId = (input as Input<'becomeImplementer'>).roomId;
-        await becomeThreadImplementer(ctx.database, roomId, authenticatedAgentId);
+        // The request authorizes from its own place; an addressed thread lets a
+        // commander claim from the parent chat once membership there is checked.
+        const claim = input as Input<'becomeImplementer'>;
+        const cornerId = claim.cornerId ?? claim.roomId;
+        if (cornerId !== claim.roomId) await daemonAccess(ctx, cornerId, authenticatedAgentId);
+        if (!(await ctx.database.query('SELECT 1 FROM corner_facts WHERE corner_id=$1', [cornerId])).rowCount)
+          throw new CommandRefusalError('claim_thread needs a thread address.', 400);
+        await becomeThreadImplementer(ctx.database, cornerId, authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
       }
       case 'getRoomGitHubToken':
