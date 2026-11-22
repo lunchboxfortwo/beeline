@@ -190,7 +190,9 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   'this.prepareGitHubLaunchers',
   // Owner-requested pre-turn steps: a thread checkout picks up the feature
   // branch before its turn, and received pictures ride inline as before.
-  'this.refreshFeatureBranch', 'deliverAttachments']);
+  'this.refreshFeatureBranch', 'deliverAttachments',
+  // Final history drains the protocol writes already emitted during the session.
+  'liveSteps.remaining']);
 
 export function wallKinds(root) {
   const source = ts.createSourceFile(WALL_BUILDER_FILE, readFileSync(resolve(root, WALL_BUILDER_FILE), 'utf8'), ts.ScriptTarget.Latest, true);

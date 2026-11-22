@@ -33,7 +33,7 @@ it('keeps a closed connection’s item pending for the same helper to continue',
   const {source,command}=await claimed();await presence.releaseConnection(AGENT,source.connectionId);
   expect((await database.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows)
     .toEqual([{state:'pending'}]);
-  expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'working'}]);
+  expect((await database.query('SELECT status FROM agent_turns WHERE request_id=$1',[command.turn_request_id])).rows).toEqual([{status:'cancelled'}]);
   expect(await body()).toMatchObject({status:'offline'});
 });
 it('a late close of an older socket cannot release the current owner',async()=>{

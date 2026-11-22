@@ -293,3 +293,9 @@ describe('chat corner counts', () => {
     );
   });
 });
+
+it('carries the running session name into the thread list after a reply changes workflow state', () => {
+  const counts = chatCornerCounts([{ ...row(), working_agent_name: 'Ruby' }], 'viewer');
+  expect(counts.get('room')?.openCorners[0]?.workingAgentName).toBe('Ruby');
+  expect(chatCornerCounts([row()], 'viewer').get('room')?.openCorners[0]?.workingAgentName).toBeUndefined();
+});

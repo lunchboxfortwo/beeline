@@ -195,7 +195,7 @@ it('replacement closes the phone running indicator and redelivers the unanswered
   const c=await ask();
   await releaseAgentConnection(db,live,A,owner.connectionId);
   expect((await readAgentCommands(db, A, R)).commands.map(item=>item.id)).toEqual([c.id]);
-  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(true);
+  expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
   await claimAgentConnection(db,live,A,{lifecycleId:'first-boot'},{connectionId:'second-connection',instanceId:'test-server'});
   expect((await phone.readRoom(R,H))?.latestAgentTurns?.some(turn=>turn.status==='working')).toBe(false);
   expect((await db.query('SELECT status,ended_at FROM agent_turns WHERE request_id=$1',[c.turnRequestId])).rows)
@@ -238,4 +238,59 @@ it('a delivered terminal report keeps its order resumable in the same generation
   await releaseAgentConnection(db,live,A,owner.connectionId);
   expect((await readAgentCommands(db, A, R)).commands).toEqual([]);
   expect((await notices()).rowCount).toBe(0);
+});
+
+it('keeps an answered invocation working indefinitely until its session returns', async () => {
+  const c = await ask();
+  const invocation = { id: 'running-session', requestId: c.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: invocation.id }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'An answer during work.' }, A);
+  await db.backgroundWork.drain();
+  await db.query("UPDATE agent_turns SET started_at=now()-interval '30 days',created_at=now()-interval '30 days' WHERE request_id=$1", [c.turnRequestId]);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(expect.objectContaining({ status: 'working' }));
+  await daemon.execute('postAgentActivity', { roomId: R, requestId: c.turnRequestId,
+    activity: [{ kind: 'tool', title: 'Completed live step', status: 'completed' }] }, A);
+  expect((await phone.readRoom(R, H))?.messages.some(message => message.activity?.some(step => step.title === 'Completed live step'))).toBe(true);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: '', harnessEnded: true, invocation }, A);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
+});
+
+it('clears an answered running session on host disconnect and shows the offline fact', async () => {
+  const c = await ask();
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'offline-run' }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Still working.' }, A);
+  await releaseAgentConnection(db, live, A, owner.connectionId);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
+  expect((await db.query("SELECT text FROM messages WHERE room_id=$1 AND presentation='system'", [R])).rows)
+    .toContainEqual({ text: expect.stringContaining('has an offline host') });
+});
+
+it('reasserts an answered session when its live helper reconnects', async () => {
+  const c = await ask();
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'reconnect-after-answer' }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Continuing.' }, A);
+  await releaseAgentConnection(db, live, A, owner.connectionId);
+  await claimAgentConnection(db, live, A, {}, { connectionId: 'resumed', instanceId: 'test-server' });
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId }, A);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(expect.objectContaining({ status: 'working' }));
+});
+
+it('a late old session final cannot clear a newer invocation of the same unanswered request', async () => {
+  const c = await ask();
+  const old = { id: 'old-run', requestId: c.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: old.id }, A);
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'new-run' }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Obsolete session answer', harnessEnded: true, invocation: old }, A);
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND text=$2', [R, 'Obsolete session answer'])).rows).toEqual([]);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(expect.objectContaining({ status: 'working' }));
+});
+
+
+it('ends a registered invocation when an older sender omitted its turn invocation id', async () => {
+  const c = await ask();
+  const invocation = { id: 'unprojected-run', requestId: c.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: invocation.id }, A);
+  await db.query('UPDATE agent_turns SET invocation_id=NULL WHERE request_id=$1', [c.turnRequestId]);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Answer', harnessEnded: true, invocation }, A);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
 });

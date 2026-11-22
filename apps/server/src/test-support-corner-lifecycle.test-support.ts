@@ -320,6 +320,11 @@ export async function pushToCorner(cornerId: string, headSha: string) {
     WHERE command.room_id=$1 AND (command.agent_id=${cornerImplementerSql('fact', 'corner')}
       OR command.agent_id IS DISTINCT FROM COALESCE(fact.reviewer_agent_id,(SELECT reviewer_agent_id FROM rooms WHERE id=corner.parent_id)))
       AND command.reason<>'report' AND command.state IN ('pending','claimed') AND command.action IN ('input','resume')) terminal`, [cornerId]);
+  // This fixture models the worker returning after its push.
+  await db.query(`SELECT beeline_interrupt_agent_turn(turn.agent_id,turn.room_id,turn.request_id,NULL,turn.started_at)
+    FROM agent_turns turn JOIN agent_commands command ON command.room_id=turn.room_id
+      AND command.agent_id=turn.agent_id AND command.turn_request_id=turn.request_id
+    WHERE turn.room_id=$1 AND turn.status='working' AND command.state='complete'`, [cornerId]);
   githubHead = headSha;
   await github.processWebhook('push', {
     installation: { id: 77 },
