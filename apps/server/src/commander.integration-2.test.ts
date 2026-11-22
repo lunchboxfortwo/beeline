@@ -1,4 +1,5 @@
 import { DM,HUMAN,ROOM,RUBY,WORKER,WS,authority,claim,commands,cornerImplementerSql,cornerOpenedFromSql,cornerTurnWithPendingChecks,createAgentCommand,duplicateReproduction,expect,insertCornerFacts,it,migrate,open,privateAssignment,quotedTagPosts,randomUUID,readCornerObjective,rootFixture,systemLine,worker,writeCornerObjective,type CommandRow } from './test-support-commander.integration.test-support.js';
+import { UNKNOWN_PLACE } from './daemon/place-address.js';
 
 
 
@@ -27,7 +28,7 @@ it('Reproduction corner-ancestor-rule: orders reach member agents in siblings, c
   await rootFixture.daemon.execute('order', { ...authority(turn), address: otherRoom, agent: 'ruby', text: 'Review in other Room' }, WORKER);
   await rootFixture.daemon.execute('order', { ...authority(turn), address: DM, text: 'Review through DM' }, WORKER);
   for (const address of [RUBY, 'ruby', '@ruby'])
-    await expect(rootFixture.daemon.execute('order', { ...authority(turn), address, text: 'Invalid address' }, WORKER)).rejects.toMatchObject({kind:'membership'});
+    await expect(rootFixture.daemon.execute('order', { ...authority(turn), address, text: 'Invalid address' }, WORKER)).rejects.toMatchObject({message:UNKNOWN_PLACE,status:400});
   await rootFixture.daemon.execute('order', { ...authority(turn), address: otherRoom, text: 'Resolve the sole other agent' }, WORKER);
   await expect(rootFixture.daemon.execute('order', { ...authority(turn), address: randomUUID(), text: 'No membership' }, WORKER))
     .rejects.toThrow('address requires current membership');
@@ -595,7 +596,7 @@ it('R1: a member posts a public message to a top-level Room', async () => {
 it('R1: post refuses removed membership, archived and unknown addresses clearly', async () => {
   const unknown = randomUUID();
   await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: unknown, text: 'Refused' }, RUBY)).rejects.toMatchObject({kind:'membership'});
-  await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: 'bad-address', text: 'Refused' }, RUBY)).rejects.toMatchObject({kind:'membership'});
+  await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: 'bad-address', text: 'Refused' }, RUBY)).rejects.toMatchObject({message:UNKNOWN_PLACE,status:400});
   await rootFixture.db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [ROOM]);
   await expect(rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Refused' }, RUBY)).rejects.toThrow('address is archived');
   await rootFixture.db.query(`UPDATE rooms SET archived_at=NULL WHERE id=$1`, [ROOM]);
