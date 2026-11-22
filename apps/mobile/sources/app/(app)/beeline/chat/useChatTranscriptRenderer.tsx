@@ -51,8 +51,7 @@ type Props = [
   openCorner: (subchannelId: string | undefined) => void,
   handleGrantDecision: (grantId: string, decision: "always" | "once" | "deny") => Promise<void>,
   desktopExperience: boolean,
-  handleChoiceAnswer: (choiceId: string, optionId: string, note?: string) => Promise<void>,
-  handleChoiceSkip: (choiceId: string) => Promise<void>,
+  handleChoiceAnswer: (choiceId: string, optionId: string) => Promise<void>,
   setAppSignInActionId: React.Dispatch<React.SetStateAction<string | null>>,
   activeCommunityId: string | null,
   handleAcceptConnectorOffer: (offerId: string, connectorType: string) => Promise<void>,
@@ -105,7 +104,7 @@ export function useChatTranscriptRenderer([
   connectorOfferActionId, appSignInActionId, targetBranchActionId, roomRepository,
   participantsHydrated, personProfileByPubkey, agentProfileModelByPubkey, agentByPubkey,
   roomParticipants, decodedId, cacheViewerPubkey, roomName, rowActions, openCorner,
-  handleGrantDecision, desktopExperience, handleChoiceAnswer, handleChoiceSkip,
+  handleGrantDecision, desktopExperience, handleChoiceAnswer,
   setAppSignInActionId, activeCommunityId, handleAcceptConnectorOffer, setConnectorOfferActionId,
   continueConnectorOffer, openWorkbench, isCorner, handleOpenGitHubEvent, targetBranchNotice,
   setTargetBranchActionId, handleOpenSystemIdentity, openCurrentBrief, replyTargetForMessage,
@@ -321,7 +320,6 @@ export function useChatTranscriptRenderer([
             viewerPubkey={cacheViewerPubkey}
             actionId={rowChoice}
             onAnswer={handleChoiceAnswer}
-            onSkip={handleChoiceSkip}
           />
         );
       }
@@ -603,7 +601,6 @@ export function useChatTranscriptRenderer([
       isDesktop,
       handleGrantDecision,
       handleChoiceAnswer,
-      handleChoiceSkip,
       handleOpenSystemIdentity,
       openCurrentBrief,
       handleOpenCode,

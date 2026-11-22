@@ -621,7 +621,9 @@ describe('PhoneService Needs-you tray', () => {
       status: 'open',
       agent: hoots,
       prompt: 'Ship the OTA tonight?',
-      options: [{ optionId: 'A', label: 'Ship now', consequence: 'Release tonight' }, { optionId: 'B', label: 'Wait for the voice fix', consequence: 'Release after the fix' }],
+      // Stored before options lost their description: the Tasks card drops it.
+      options: [{ optionId: 'A', label: 'Ship now', consequence: 'Release tonight' },
+        { optionId: 'B', label: 'Wait for the voice fix', consequence: 'Release after the fix' }],
       mentionIds: [VIEWER],
     });
     await database.query(
@@ -641,12 +643,13 @@ describe('PhoneService Needs-you tray', () => {
         subject: 'Ship the OTA tonight?',
         detail: 'Ship now · Wait for the voice fix',
         actions: [
-          { kind: 'choice', choiceId: '66666666-6666-4666-8666-666666666666', optionId: 'A', label: 'Ship now', detail: 'Release tonight' },
-          { kind: 'choice', choiceId: '66666666-6666-4666-8666-666666666666', optionId: 'B', label: 'Wait for the voice fix', detail: 'Release after the fix' },
+          { kind: 'choice', choiceId: '66666666-6666-4666-8666-666666666666', optionId: 'A', label: 'Ship now' },
+          { kind: 'choice', choiceId: '66666666-6666-4666-8666-666666666666', optionId: 'B', label: 'Wait for the voice fix' },
           { kind: 'skip-choice', choiceId: '66666666-6666-4666-8666-666666666666', label: 'Skip' },
         ],
       },
     });
+    for (const action of item?.approval?.actions ?? []) expect(action).not.toHaveProperty('detail');
     // Reproduction tray-choice-clarity: historical workflow cards need no new
     // metadata to distinguish their explicit outcomes from tray dismissal.
     await database.query(`UPDATE messages SET card=card || '{"runId":"workflow-run"}'::jsonb WHERE id=$1`, [id]);

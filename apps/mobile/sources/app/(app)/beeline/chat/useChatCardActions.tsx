@@ -45,8 +45,7 @@ export function useChatCardActions([
   handleWritePermission: (message: ChatDisplayMessage, decision: "allow" | "deny") => Promise<void>,
   handleConfirmTargetBranch: (message: ChatDisplayMessage) => Promise<void>,
   handleGrantDecision: (grantId: string, decision: "always" | "once" | "deny") => Promise<void>,
-  handleChoiceAnswer: (choiceId: string, optionId: string, note?: string) => Promise<void>,
-  handleChoiceSkip: (choiceId: string) => Promise<void>,
+  handleChoiceAnswer: (choiceId: string, optionId: string) => Promise<void>,
   handleAcceptConnectorOffer: (offerId: string, connectorType: string) => Promise<void>,
   continueConnectorOffer: (offerId: string, connectorType: string, pairedConnectorId: string, reconnect: boolean) => Promise<void>,
   openWorkbench: () => void,
@@ -120,15 +119,11 @@ export function useChatCardActions([
 
 
   const handleChoiceAnswer = useCallback(
-    async (choiceId: string, optionId: string, note?: string) => {
+    async (choiceId: string, optionId: string) => {
       if (viewerIsAgent || choiceActionId) return;
       setChoiceActionId(choiceId);
       try {
-        await monolithPhoneOperation('answerChoice', {
-          choiceId,
-          optionId,
-          ...(note ? { note } : {}),
-        });
+        await monolithPhoneOperation('answerChoice', { choiceId, optionId });
         const picked = roomSurface?.messages.find(message => message.choice?.choiceId === choiceId)?.choice;
         if (picked?.options.find(option => option.optionId === optionId)?.label === 'Something else') focusComposer();
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -144,22 +139,6 @@ export function useChatCardActions([
   );
 
 
-  const handleChoiceSkip = useCallback(
-    async (choiceId: string) => {
-      if (viewerIsAgent || choiceActionId) return;
-      setChoiceActionId(choiceId);
-      try {
-        await monolithPhoneOperation('skipChoice', { choiceId });
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      } catch (err) {
-        console.warn('Choice skip failed:', err);
-        Modal.alert('Could not skip', phoneOperationFailureReason(err));
-      } finally {
-        setChoiceActionId(null);
-      }
-    },
-    [choiceActionId, viewerIsAgent],
-  );
 
 
   const handleCreatePoll = useCallback(
@@ -294,7 +273,7 @@ export function useChatCardActions([
   );
   return [
     handleWritePermission, handleConfirmTargetBranch, handleGrantDecision, handleChoiceAnswer,
-    handleChoiceSkip, handleAcceptConnectorOffer, continueConnectorOffer, openWorkbench,
+    handleAcceptConnectorOffer, continueConnectorOffer, openWorkbench,
     handleCreatePoll,
   ];
 }

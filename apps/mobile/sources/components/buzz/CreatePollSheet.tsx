@@ -15,7 +15,7 @@ const CLOSING_TIMES = [
 
 export type PollDraft = {
   prompt: string;
-  options: { label: string; consequence: string }[];
+  options: { label: string }[];
   ttlSeconds: number;
 };
 
@@ -71,10 +71,7 @@ export function CreatePollSheet({
                 const clearOptions = optionsDraft.capture();
                 const succeeded = await onCreate({
                   prompt: prompt.trim(),
-                  options: options.map((option) => ({
-                    label: option.trim(),
-                    consequence: option.trim(),
-                  })),
+                  options: options.map((option) => ({ label: option.trim() })),
                   ttlSeconds,
                 });
                 if (succeeded) {

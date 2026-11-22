@@ -656,8 +656,8 @@ describe('a workflow gate answer with a note', () => {
       mode: 'question',
       prompt: 'Ship it?',
       options: [
-        { label: 'yes', consequence: 'ship' },
-        { label: 'no', consequence: 'hold' },
+        { label: 'yes' },
+        { label: 'no' },
       ],
     });
     await expect(

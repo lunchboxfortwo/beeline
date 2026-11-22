@@ -66,7 +66,7 @@ async function rig(work: (reader: SqlDatabase, writer: SqlDatabase) => Promise<v
       JSON.stringify({ runId: RUN, attempt: 0, requester: { pubkey: A } })]);
     await reader.query(`INSERT INTO room_choices(id,workspace_id,room_id,agent_id,message_id,mode,prompt,options,electorate,status,closes_at,workflow_run_id)
       VALUES($1,$2,$3,$4,'choice-card','question','Synthetic?',$5::jsonb,$6::text[],'open',clock_timestamp()+interval '10 minutes',$7)`,
-    [CHOICE, W, CORNER, AGENT, JSON.stringify([{ optionId: 'A', letter: 'A', label: 'Stop', consequence: 'Stop' }]), [A], RUN]);
+    [CHOICE, W, CORNER, AGENT, JSON.stringify([{ optionId: 'A', letter: 'A', label: 'Stop' }]), [A], RUN]);
     // This is the real capture/fence trigger, not a hand-written notification.
 
     await work(reader, writer);

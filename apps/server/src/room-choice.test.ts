@@ -24,7 +24,7 @@ it('creates standard UUIDs for idempotent choices and preserves new and legacy I
   const create = (messageId: string) => database.transaction(tx => postRoomChoice(tx, {
     messageId, messageText: modelText('Choose a sample'), roomId: ROOM, agentId: AGENT,
     requesterId: OWNER, mode: 'question', prompt: 'Which sample?',
-    options: [{ label: 'First', consequence: 'Use first' }, { label: 'Second', consequence: 'Use second' }],
+    options: [{ label: 'First' }, { label: 'Second' }],
   }));
   for (const digit of '0123456789abcdef') {
     const messageId = digit.repeat(64);
@@ -52,4 +52,22 @@ it('creates standard UUIDs for idempotent choices and preserves new and legacy I
   }, OWNER);
   expect((await database.query('SELECT reply_to_message_id FROM messages WHERE id=$1', [replyId])).rows)
     .toEqual([{ reply_to_message_id: parentId }]);
+});
+
+it('refuses an option with a description, so no choice row or card stores a sub label', async () => {
+  const database = db = await migratedDatabase();
+  await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES
+    ($1,'human','Sample Owner','sample.owner'),($2,'agent','Sample Agent','sample.agent')`, [OWNER, AGENT]);
+  await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [AGENT, OWNER]);
+  await database.query("INSERT INTO workspaces(id,name) VALUES($1,'Synthetic choices')", [WORKSPACE]);
+  await database.query("INSERT INTO rooms(id,workspace_id,name,created_by) VALUES($1,$2,'Samples',$3)", [ROOM, WORKSPACE, OWNER]);
+  for (const member of [OWNER, AGENT]) await database.query(
+    "INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')",
+    [WORKSPACE, ROOM, member]);
+  await expect(database.transaction(tx => postRoomChoice(tx, {
+    roomId: ROOM, agentId: AGENT, requesterId: OWNER, mode: 'question', prompt: 'Approve fixes?',
+    options: [{ label: 'Approve all', consequence: 'Open one fix thread per item' }, { label: 'Not now' }],
+  }))).rejects.toThrow('choice option takes only a label; remove "consequence"');
+  expect((await database.query('SELECT id FROM room_choices')).rows).toEqual([]);
+  expect((await database.query("SELECT id FROM messages WHERE card_type='choice'")).rows).toEqual([]);
 });

@@ -390,7 +390,7 @@ const within = (visit: Visit, at: number) =>
  */
 type GateChoiceRow = {
   run_id: string | null; attempt: number | null; prompt: string;
-  options: Array<{ optionId: string; letter: string; label: string; consequence: string }>;
+  options: Array<{ optionId: string; letter: string; label: string }>;
   status: WorkflowGateRecordView['status']; created_us: string;
   option_id: string | null; answered_at: Date | null;
   voter_id: string | null; voter_name: string | null;

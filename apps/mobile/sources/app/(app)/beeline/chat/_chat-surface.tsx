@@ -334,7 +334,7 @@ export function BuzzChatSurface({
   ]);
   const [
     handleWritePermission, handleConfirmTargetBranch, handleGrantDecision, handleChoiceAnswer,
-    handleChoiceSkip, handleAcceptConnectorOffer, continueConnectorOffer, openWorkbench,
+    handleAcceptConnectorOffer, continueConnectorOffer, openWorkbench,
     handleCreatePoll,
   ] = useChatCardActions([
     transport, viewerIsAgent, cacheViewerPubkey, setPermissionActionId, decodedId, grantActionId,
@@ -404,7 +404,7 @@ export function BuzzChatSurface({
     connectorOfferActionId, appSignInActionId, targetBranchActionId, roomRepository,
     participantsHydrated, personProfileByPubkey, agentProfileModelByPubkey, agentByPubkey,
     roomParticipants, decodedId, cacheViewerPubkey, roomName, rowActions, openCorner,
-    handleGrantDecision, desktopExperience, handleChoiceAnswer, handleChoiceSkip,
+    handleGrantDecision, desktopExperience, handleChoiceAnswer,
     setAppSignInActionId, activeCommunityId, handleAcceptConnectorOffer, setConnectorOfferActionId,
     continueConnectorOffer, openWorkbench, isCorner, handleOpenGitHubEvent, targetBranchNotice,
     setTargetBranchActionId, handleOpenSystemIdentity, openCurrentBrief, replyTargetForMessage,

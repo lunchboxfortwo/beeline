@@ -116,11 +116,11 @@ import { useChatTranscriptRenderer } from '@/app/(app)/beeline/chat/useChatTrans
 
 it.each([false, true])('UAR-1 chat renders person-facing report text immediately (desktop=%s)', desktop => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  const args: unknown[] = Array(69).fill(undefined);
+  const args: unknown[] = Array(68).fill(undefined);
   args[10] = new Map(); args[11] = new Map(); args[12] = new Map([['ruby', {}], ['worker', {}]]);
-  args[13] = []; args[17] = {}; args[20] = desktop; args[52] = desktop;
-  args[53] = new Set(); args[54] = new Set(); args[55] = new Set();
-  args[56] = { states: new Map(), retry: vi.fn() }; args[63] = [];
+  args[13] = []; args[17] = {}; args[20] = desktop; args[51] = desktop;
+  args[52] = new Set(); args[53] = new Set(); args[54] = new Set();
+  args[55] = { states: new Map(), retry: vi.fn() }; args[62] = [];
   const message = (kind: 'human' | 'agent' | undefined): ChatDisplayMessage => ({
     id: 'report', text: 'Ruby reported to recipient', isUser: false, timestamp: 1_800_000_000,
     pubkey: 'ruby', isAgentAuthor: true, mentionPubkeys: ['worker'],

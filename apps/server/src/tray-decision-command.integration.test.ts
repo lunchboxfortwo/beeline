@@ -144,7 +144,7 @@ describe('durable DB-only Tray decision adapter', () => {
 
   it('skips an actual ordinary choice once and refuses a due choice before its expiry worker runs', async () => {
     const create = () => db.transaction(tx => postRoomChoice(tx, { roomId: ROOM, agentId: AGENT, mode: 'question', prompt: 'Synthetic?',
-      options: [{ label: 'One', consequence: 'Use one' }, { label: 'Two', consequence: 'Use two' }], ttlSeconds: 300 }));
+      options: [{ label: 'One' }, { label: 'Two' }], ttlSeconds: 300 }));
     const choice = await create();
     const input = { choiceId: choice.choiceId };
     const receipt = await dispatch('skipChoice', input, 'skip');

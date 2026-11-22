@@ -57,11 +57,8 @@ export async function postWorkflowGate(
     mode: 'question',
     prompt: (input.state.does?.replace(/\s+/g, systemMessage("workflow-runs.space")).trim() ||
       systemMessage("workflow-runs.choose-the-next-step-for", input.contract.name.replace(/[-_]/g, systemMessage("workflow-runs.space")))).slice(0, 120),
-    options: Object.entries(input.state.on).map(([outcome, target]) => ({
-      label: outcome,
-      consequence: (input.contract.handoffs[target]?.does?.replace(/\s+/g, systemMessage("workflow-runs.space")).trim() ||
-        systemMessage("workflow-runs.continue-to", target.replace(/[-_]/g, systemMessage("workflow-runs.space")))).slice(0, 80),
-    })),
+    // The label stays the outcome key: the run settles by it, and the card shows it as words.
+    options: Object.keys(input.state.on).map((outcome) => ({ label: outcome })),
   });
   await db.query(
     `UPDATE messages SET card=card || $2::jsonb WHERE id=$1`,

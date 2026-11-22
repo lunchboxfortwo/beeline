@@ -481,15 +481,15 @@ describe('Reproduction workflow-stalls', () => {
     await migrate(database);
     await postRoomChoice(database, { roomId: ROOM, agentId: APPROVER, mode: 'question',
       prompt: 'Choose a plan', options: [
-        { label: 'First', consequence: 'Use first plan' },
-        { label: 'Second', consequence: 'Use second plan' },
+        { label: 'First' },
+        { label: 'Second' },
       ] });
     expect((await database.query(`SELECT workflow_run_id FROM room_choices WHERE workflow_run_id=$1`, [runId])).rowCount).toBe(1);
   });
 
   it('opens workflow gates beside independent ordinary questions', async () => {
     const ordinary = () => postRoomChoice(database, { roomId: ROOM, agentId: APPROVER,
-      mode: 'question', prompt: 'Which plan?', options: [{ label: 'First', consequence: 'Use first plan' }, { label: 'Second', consequence: 'Use second plan' }] });
+      mode: 'question', prompt: 'Which plan?', options: [{ label: 'First' }, { label: 'Second' }] });
     await ordinary();
     const runId = await startedGatedRun({ room_id: ROOM, agent_id: OWNER });
     await reachGate(runId);

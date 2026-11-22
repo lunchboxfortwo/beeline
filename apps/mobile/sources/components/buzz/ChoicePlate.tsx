@@ -13,7 +13,6 @@ export type TranscriptCardChoice = {
    */
   mark?: 'chevron' | 'none';
   label: string;
-  consequence: string;
   costly?: boolean;
   votes?: number;
   share?: number;
@@ -91,9 +90,6 @@ export function TranscriptCardChoicePlate({
           >
             {choice.label}
           </T>
-          {choice.consequence ? (
-            <T v="meta" color="secondary" marginTop="1">{choice.consequence}</T>
-          ) : null}
         </YStack>
         {choice.busy ? (
           <YStack justifyContent="center" height={26}>
@@ -133,7 +129,7 @@ export function TranscriptCardChoicePlate({
       {...(pressable
         ? {
             accessibilityRole: 'button' as const,
-            accessibilityLabel: `${choice.letter}. ${choice.label}. ${choice.consequence}`,
+            accessibilityLabel: `${choice.letter}. ${choice.label}`,
             accessibilityState: { disabled, busy: choice.busy === true },
             'aria-busy': choice.busy === true,
             cursor: disabled ? 'default' : 'pointer',

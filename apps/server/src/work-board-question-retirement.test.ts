@@ -222,8 +222,8 @@ describe('question retirement', () => {
       mode: 'question',
       prompt: 'Which surface?',
       options: [
-        { label: 'Web', consequence: 'Web' },
-        { label: 'Phone', consequence: 'Phone' },
+        { label: 'Web' },
+        { label: 'Phone' },
       ],
     });
     await db.query(
@@ -312,8 +312,8 @@ describe('question retirement', () => {
       mode: 'question',
       prompt: 'Which surface?',
       options: [
-        { label: 'Web', consequence: 'Web' },
-        { label: 'Phone', consequence: 'Phone' },
+        { label: 'Web' },
+        { label: 'Phone' },
       ],
     });
     await closeAgentAsk(db, agent, { messageId: question.messageId, reason: 'withdrawn' });
@@ -412,8 +412,8 @@ describe('question retirement', () => {
       mode: 'question',
       prompt: 'Which surface?',
       options: [
-        { label: 'Web', consequence: 'Web' },
-        { label: 'Phone', consequence: 'Phone' },
+        { label: 'Web' },
+        { label: 'Phone' },
       ],
     });
     await db.query(
@@ -505,8 +505,8 @@ describe('question retirement', () => {
       mode: 'question',
       prompt: 'Which surface?',
       options: [
-        { label: 'Web', consequence: 'Web' },
-        { label: 'Phone', consequence: 'Phone' },
+        { label: 'Web' },
+        { label: 'Phone' },
       ],
     });
     expect(await tasks()).toEqual([question.messageId]);

@@ -600,24 +600,24 @@ export async function offerConnector(
 
 
 
+/** A choice option is a short label only; a description is refused, never sent. */
 export function choiceOptionArgs(args: JsonObject): Array<{
   label: string;
-  consequence: string;
   costly?: boolean;
 }> {
   if (!Array.isArray(args.options)) throw new Error('options must be an array');
   return args.options.map((raw) => {
     if (!raw || typeof raw !== 'object') throw new Error('choice option is invalid');
     const entry = raw as Record<string, unknown>;
+    const extra = Object.keys(entry).find((key) => key !== 'label' && key !== 'costly');
+    if (extra !== undefined) {
+      throw new Error(`choice option takes only a label; remove "${extra}" and put any detail in the question`);
+    }
     if (typeof entry.label !== 'string' || !entry.label.trim()) {
       throw new Error('choice option label is required');
     }
-    if (typeof entry.consequence !== 'string' || !entry.consequence.trim()) {
-      throw new Error('choice option consequence is required');
-    }
     return {
       label: entry.label,
-      consequence: entry.consequence,
       ...(entry.costly === true ? { costly: true } : {}),
     };
   });
