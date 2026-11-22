@@ -59,7 +59,7 @@ it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of 
     for (const ask of ['x'.repeat(141), '**Choose now?**', 'First? Second?', 'First\nSecond', 42, '']) {
       for (const operation of ['askRoomChoice']) {
         const refused = await post(operation, { ...turn, status: 'needs_decision', text: 'needs-decision: Choose now',
-          prompt: 'Choose now?', options: [{ label: 'Yes', consequence: 'Continue' }, { label: 'No', consequence: 'Stop' }], ask });
+          prompt: 'Choose now?', options: [{ label: 'Yes' }, { label: 'No' }], ask });
         expect(refused.status).toBe(400);
         expect(refused.body.error).toMatch(/^ask /);
       }
@@ -68,7 +68,7 @@ it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of 
     await Sentry.flush(2000);
     expect(envelopes.some(envelope => envelope.includes('"exception"'))).toBe(false);
     expect((await post('askRoomChoice', { ...turn, ask: 'x'.repeat(140), prompt: 'Choose now?',
-      options: [{ label: 'Yes', consequence: 'Continue' }, { label: 'No', consequence: 'Stop' }] })).status).toBe(200);
+      options: [{ label: 'Yes' }, { label: 'No' }] })).status).toBe(200);
     console.info('Demonstrated ask-refusal: malformed asks return 400 without Sentry events; the 140-character boundary is accepted');
     const brief = { spec: 'Keep the approved scope', approval: { sourceMessageId: source }, change: 'Clarify the scope' };
     const opened = await post('createCorner', { ...turn, name: 'Refusal-proof', objective: 'Prove revision refusals', brief });

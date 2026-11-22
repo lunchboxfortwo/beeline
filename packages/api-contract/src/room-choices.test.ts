@@ -17,57 +17,70 @@ import {
   normalizeChoicePrompt,
   normalizeChoiceTtl,
   tallyChoiceVotes,
+  workflowGateOptionLabel,
 } from './room-choices.js';
 
 describe('choice option normalisation', () => {
   it('assigns A–D and flattens whitespace before judging length', () => {
     expect(
       normalizeChoiceOptions([
-        { label: '  Kraken paper  ', consequence: 'Works with plugin auth' },
-        { label: 'Keep waiting', consequence: 'Blocked on CDP JWT', costly: true },
+        { label: '  Kraken paper  ' },
+        { label: 'Keep waiting', costly: true },
       ]),
     ).toEqual([
       {
         optionId: 'A',
         letter: 'A',
         label: 'Kraken paper',
-        consequence: 'Works with plugin auth',
       },
       {
         optionId: 'B',
         letter: 'B',
         label: 'Keep waiting',
-        consequence: 'Blocked on CDP JWT',
         costly: true,
       },
     ]);
   });
 
   it('refuses fewer than two options, more than four, and over-long copy', () => {
-    expect(() => normalizeChoiceOptions([{ label: 'A', consequence: 'one' }])).toThrow(
+    expect(() => normalizeChoiceOptions([{ label: 'A' }])).toThrow(
       '2 to 4 options',
     );
     expect(() =>
       normalizeChoiceOptions([
-        { label: 'A', consequence: 'a' },
-        { label: 'B', consequence: 'b' },
-        { label: 'C', consequence: 'c' },
-        { label: 'D', consequence: 'd' },
-        { label: 'E', consequence: 'e' },
+        { label: 'A' },
+        { label: 'B' },
+        { label: 'C' },
+        { label: 'D' },
+        { label: 'E' },
       ]),
     ).toThrow('2 to 4 options');
     expect(() =>
       normalizeChoiceOptions([
-        { label: 'x'.repeat(CHOICE_LABEL_MAX_LENGTH + 1), consequence: 'ok' },
-        { label: 'B', consequence: 'ok' },
+        { label: 'x'.repeat(CHOICE_LABEL_MAX_LENGTH + 1) },
+        { label: 'B' },
       ]),
     ).toThrow('label is too long');
-    expect(() =>
-      normalizeChoiceOptions([
-        { label: 'A', consequence: 'x'.repeat(81) },
-        { label: 'B', consequence: 'ok' },
-      ]),
-    ).toThrow('consequence is too long');
+  });
+
+  it('refuses an option that carries a description, so a sub label is never stored', () => {
+    for (const key of ['consequence', 'description', 'detail']) {
+      expect(() =>
+        normalizeChoiceOptions([{ label: 'Approve all', [key]: 'Open one fix thread per item' }, { label: 'Not now' }]),
+      ).toThrow(`choice option takes only a label; remove "${key}"`);
+    }
+  });
+
+  it('reads a stored option without its old description and shows gate keys as words', () => {
+    const [stored] = decorateChoiceOptions(
+      [{ optionId: 'A', letter: 'A', label: 'approve_all' } as never],
+      undefined,
+    );
+    expect(stored).toEqual({ optionId: 'A', letter: 'A', label: 'approve_all' });
+    expect(workflowGateOptionLabel('approve_all')).toBe('Approve all');
+    expect(workflowGateOptionLabel('not_now')).toBe('Not now');
+    expect(workflowGateOptionLabel('skip')).toBe('Skip');
+    expect(workflowGateOptionLabel('Ship it')).toBe('Ship it');
   });
 
   it('owns prompt, constraint, and the ttl enum', () => {
@@ -87,9 +100,9 @@ describe('choice option normalisation', () => {
 
 describe('a closed poll tally is width, not permission', () => {
   const options = normalizeChoiceOptions([
-    { label: 'Kraken', consequence: 'plugin auth' },
-    { label: 'CDP', consequence: 'wait', costly: true },
-    { label: 'Pause', consequence: 'stop' },
+    { label: 'Kraken' },
+    { label: 'CDP', costly: true },
+    { label: 'Pause' },
   ]);
 
   it('gives the unique leader full width and denser wash metadata', () => {

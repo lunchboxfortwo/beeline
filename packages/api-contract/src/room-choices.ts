@@ -18,7 +18,6 @@ export type ChoiceLetter = (typeof CHOICE_LETTERS)[number];
 export const CHOICE_PROMPT_MAX_LENGTH = 120;
 export const CHOICE_CONSTRAINT_MAX_LENGTH = 160;
 export const CHOICE_LABEL_MAX_LENGTH = 48;
-export const CHOICE_CONSEQUENCE_MAX_LENGTH = 80;
 /** A workflow gate answer's optional note; the same cap as a workflow receipt line. */
 export const CHOICE_NOTE_MAX_LENGTH = 140;
 export const CHOICE_OPTIONS_MIN = 2;
@@ -35,9 +34,9 @@ export const CHOICE_CARD_TYPE = 'choice';
 export const CHOICE_WAKE_CARD_TYPES = ['choice-answered', 'choice-skipped', 'poll-closed'] as const;
 export type ChoiceWakeCardType = (typeof CHOICE_WAKE_CARD_TYPES)[number];
 
+/** An option is its short label only; any detail belongs in the question or a chat message. */
 export type ChoiceOptionInput = {
   readonly label: string;
-  readonly consequence: string;
   readonly costly?: boolean;
 };
 
@@ -45,9 +44,10 @@ export type ChoiceOptionRecord = {
   readonly optionId: string;
   readonly letter: ChoiceLetter;
   readonly label: string;
-  readonly consequence: string;
   readonly costly?: boolean;
 };
+
+const CHOICE_OPTION_INPUT_KEYS: readonly string[] = ['label', 'costly'];
 
 export type ChoiceOptionView = ChoiceOptionRecord & {
   readonly votes?: number;
@@ -76,8 +76,10 @@ function refuse(message: string): never {
 }
 
 /**
- * Validate caller options and assign A–D. Labels and consequences are flattened
- * before length is judged, so only a genuinely over-long text is refused.
+ * Validate caller options and assign A–D. A label is flattened before length is
+ * judged, so only a genuinely over-long text is refused. An option carries no
+ * description: any other field (such as the retired `consequence`) is refused,
+ * so a sub label can never be stored.
  */
 export function normalizeChoiceOptions(input: unknown): ChoiceOptionRecord[] {
   if (!Array.isArray(input)) refuse('choice options are required');
@@ -88,21 +90,18 @@ export function normalizeChoiceOptions(input: unknown): ChoiceOptionRecord[] {
   return input.map((raw, index) => {
     if (!raw || typeof raw !== 'object') refuse('choice option is invalid');
     const entry = raw as Record<string, unknown>;
+    const extra = Object.keys(entry).find((key) => !CHOICE_OPTION_INPUT_KEYS.includes(key));
+    if (extra !== undefined)
+      refuse(`choice option takes only a label; remove "${extra}" and put any detail in the question`);
     if (typeof entry.label !== 'string') refuse('choice option label is required');
-    if (typeof entry.consequence !== 'string') refuse('choice option consequence is required');
     const label = flattenLine(entry.label);
-    const consequence = flattenLine(entry.consequence);
     if (!label) refuse('choice option label is required');
-    if (!consequence) refuse('choice option consequence is required');
     if (label.length > CHOICE_LABEL_MAX_LENGTH) refuse('choice option label is too long');
-    if (consequence.length > CHOICE_CONSEQUENCE_MAX_LENGTH)
-      refuse('choice option consequence is too long');
     const letter = CHOICE_LETTERS[index]!;
     return {
       optionId: letter,
       letter,
       label,
-      consequence,
       ...(entry.costly === true ? { costly: true } : {}),
     };
   });
@@ -183,16 +182,38 @@ export function choiceOptionShare(votes: number, leadingVotes: number): number {
   return votes / leadingVotes;
 }
 
+/** A stored option's displayable fields; drops any field an older card stored (such as `consequence`). */
+export function choiceOptionRecord(option: ChoiceOptionRecord): ChoiceOptionRecord {
+  return {
+    optionId: option.optionId,
+    letter: option.letter,
+    label: option.label,
+    ...(option.costly === true ? { costly: true } : {}),
+  };
+}
+
+/**
+ * The words a workflow gate option shows. A gate's options are its outcome
+ * keys (`approve_all`); they read as words with a capital first letter
+ * ("Approve all"). The stored label stays the key, since the run settles by it.
+ * An ask's author-given label is shown as written.
+ */
+export function workflowGateOptionLabel(label: string): string {
+  return /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(label)
+    ? label[0]!.toUpperCase() + label.slice(1).replaceAll('_', ' ')
+    : label;
+}
+
 export function decorateChoiceOptions(
   options: readonly ChoiceOptionRecord[],
   tally: ChoiceTally | undefined,
 ): ChoiceOptionView[] {
-  if (!tally) return options.map((option) => ({ ...option }));
+  if (!tally) return options.map(choiceOptionRecord);
   return options.map((option) => {
     const votes = tally.votesByOption[option.optionId] ?? 0;
     const leader = tally.uniqueLeaderId === option.optionId;
     return {
-      ...option,
+      ...choiceOptionRecord(option),
       votes,
       share: choiceOptionShare(votes, tally.leadingVotes),
       ...(leader ? { leader: true } : {}),

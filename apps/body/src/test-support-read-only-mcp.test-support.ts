@@ -277,8 +277,8 @@ function deps(
 
 
 const options = [
-  { label: 'Kraken paper', consequence: 'Works with plugin auth' },
-  { label: 'Keep waiting', consequence: 'Blocked on CDP JWT', costly: true },
+  { label: 'Kraken paper' },
+  { label: 'Keep waiting', costly: true },
 ];
 return {
 deps,

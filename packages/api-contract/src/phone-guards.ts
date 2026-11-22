@@ -675,12 +675,12 @@ export function choiceLetter(value: unknown): value is (typeof CHOICE_LETTERS)[n
 export function readChoiceOption(value: unknown): ChoiceCardView['options'][number] | null {
   const item = record(value);
   if (!item || !choiceLetter(item.optionId) || item.letter !== item.optionId) return null;
-  if (typeof item.label !== 'string' || typeof item.consequence !== 'string') return null;
+  // An older stored card may still carry `consequence`; it is dropped here, never shown.
+  if (typeof item.label !== 'string') return null;
   return {
     optionId: item.optionId,
     letter: item.optionId,
     label: item.label,
-    consequence: item.consequence,
     ...field('costly', item.costly === true ? true : undefined),
     ...field('votes', integer(item.votes) ? item.votes : undefined),
     ...field(

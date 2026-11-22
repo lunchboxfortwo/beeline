@@ -463,7 +463,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
               id: `corner-proposal-${decision}-${message.id}`,
               letter,
               label,
-              consequence: '',
               selected: (cornerProposalAnswer?.decision ?? cornerProposalAction) === decision,
               ...(onCornerProposalDecision && !cornerProposalAnswer && !cornerProposalAction
                 ? { onPress: () => onCornerProposalDecision(message, decision) }

@@ -1,12 +1,12 @@
 import React from 'react';
 import { ListItem, XStack, YStack } from 'tamagui';
 import { ChevronRight } from 'lucide-react-native';
-import { Copy, Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
+import { Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
 import type { TranscriptCardChoice } from '@/components/buzz/ChoicePlate';
 
 /**
  * One option of a question or poll, as the mock's decision card draws it:
- * a framed row, brass when it is the pick, its letter, label and quiet detail.
+ * a framed row, brass when it is the pick, its letter and label. An option has no sub label.
  * A closed poll keeps its vote count and a highlight wash for its share.
  */
 export function ChoiceOption({ choice, closed }: { choice: TranscriptCardChoice; closed: boolean }) {
@@ -26,9 +26,8 @@ export function ChoiceOption({ choice, closed }: { choice: TranscriptCardChoice;
                     : choice.mark === 'none' ? null
                         : <T v="metaStrong" color={choice.selected ? 'needsYou' : choice.costly ? 'removed' : 'ink'}>{choice.letter}</T>}
             </YStack>
-            <YStack flex={1} minWidth={0} gap="1">
+            <YStack flex={1} minWidth={0}>
                 <T v={choice.leader ? 'heading' : 'body'} color={choice.disabled && !choice.busy ? 'secondary' : 'ink'}>{choice.label}</T>
-                {choice.consequence ? <Copy small quiet>{choice.consequence}</Copy> : null}
             </YStack>
             {choice.busy ? <Spinner size="small" /> : null}
             {closed && choice.votes !== undefined ? (
@@ -46,7 +45,7 @@ export function ChoiceOption({ choice, closed }: { choice: TranscriptCardChoice;
             onPress={choice.onPress} disabled={pressable ? disabled : undefined}
             opacity={choice.disabled && !choice.busy ? 0.5 : 1}
             accessibilityRole={pressable ? 'button' : undefined}
-            aria-label={pressable ? `${choice.letter}. ${choice.label}. ${choice.consequence}` : undefined}
+            aria-label={pressable ? `${choice.letter}. ${choice.label}` : undefined}
             aria-busy={pressable ? choice.busy === true : undefined}
             testID={testID}>
             {body}

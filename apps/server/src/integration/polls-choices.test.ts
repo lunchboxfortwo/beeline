@@ -23,8 +23,8 @@ const fixture = monolithFixture();
       requestId,
       prompt: 'Which branch should I use?',
       options: [
-        { label: 'Main', consequence: 'Ships today' },
-        { label: 'Release', consequence: 'Ships Friday' },
+        { label: 'Main' },
+        { label: 'Release' },
       ],
     });
     expect(asked.status).toBe(200);
@@ -60,8 +60,8 @@ const fixture = monolithFixture();
       prompt: 'How do you want to push the desk past this?',
       constraint: 'CDP AgentKit needs JWT signing',
       options: [
-        { label: 'Kraken paper', consequence: 'Works with plugin auth' },
-        { label: 'Keep waiting', consequence: 'Blocked on CDP JWT', costly: true },
+        { label: 'Kraken paper' },
+        { label: 'Keep waiting', costly: true },
       ],
     });
     expect(posted.status).toBe(200);
@@ -111,8 +111,8 @@ const fixture = monolithFixture();
       prompt: 'Which paper API?',
       ttlSeconds: 300,
       options: [
-        { label: 'Kraken paper', consequence: 'plugin auth' },
-        { label: 'Keep waiting', consequence: 'blocked' },
+        { label: 'Kraken paper' },
+        { label: 'Keep waiting' },
       ],
     });
     expect(undersized.status).toBe(400);
@@ -127,8 +127,8 @@ const fixture = monolithFixture();
       prompt: 'Which paper API?',
       ttlSeconds: 300,
       options: [
-        { label: 'Kraken paper', consequence: 'plugin auth' },
-        { label: 'Keep waiting', consequence: 'blocked' },
+        { label: 'Kraken paper' },
+        { label: 'Keep waiting' },
       ],
     });
     expect(poll.status).toBe(200);
@@ -161,8 +161,8 @@ const fixture = monolithFixture();
         prompt: 'Which plan?',
         ttlSeconds: 900,
         options: [
-          { label: 'Plan A', consequence: 'Plan A' },
-          { label: 'Plan B', consequence: 'Plan B' },
+          { label: 'Plan A' },
+          { label: 'Plan B' },
         ],
       },
       memberToken,

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { YStack } from 'tamagui';
 import { NotificationLifecycleCard } from '@/components/buzz/PrLifecycleCard';
-import { CHOICE_NOTE_MAX_LENGTH, formatChoiceClock } from '@beeline/api-contract/phone';
+import { formatChoiceClock, workflowGateOptionLabel } from '@beeline/api-contract/phone';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { connectorOfferWaitingLine } from '@/buzz/connector-offer-copy';
@@ -318,8 +318,7 @@ export interface ChoiceCardProps {
   viewerIsAgent: boolean;
   viewerPubkey: string;
   actionId: string | null;
-  onAnswer(choiceId: string, optionId: string, note?: string): void;
-  onSkip(choiceId: string): void;
+  onAnswer(choiceId: string, optionId: string): void;
 }
 
 
@@ -330,8 +329,10 @@ function choiceHandle(identity?: { handle?: string; name: string; pubkey: string
 
 
 /**
- * One choice family: lettered plates for a question or a poll. Skip is a footer
- * word on an open question. Settled questions show their decision without
+ * One choice family: lettered plates for a question or a poll. A question card
+ * is its prompt and its choices only: no sub labels, no note box and no Skip
+ * (a person who wants to say more replies in chat; a workflow gate's default is
+ * already one of its choices). Settled questions show their decision without
  * option plates. Closed polls retain their vote results in a still brass wash.
  */
 export const ChoiceCard = React.memo(function ChoiceCard({
@@ -341,7 +342,6 @@ export const ChoiceCard = React.memo(function ChoiceCard({
   viewerPubkey,
   actionId,
   onAnswer,
-  onSkip,
 }: ChoiceCardProps) {
   const card = message.choice!;
   const display =
@@ -352,13 +352,12 @@ export const ChoiceCard = React.memo(function ChoiceCard({
   const canAct =
     open && !viewerIsAgent && (card.mode === 'question' || card.electorate.includes(viewerPubkey));
   const busy = actionId === card.choiceId;
-  // Only a workflow gate takes a note; its outcome still comes from the pick.
-  const takesNote = canAct && card.mode === 'question' && !!card.runId;
-  const [note, setNote] = React.useState('');
-  const answer = (optionId: string) =>
-    takesNote && note.trim()
-      ? onAnswer(card.choiceId, optionId, note.trim())
-      : onAnswer(card.choiceId, optionId);
+  const answer = (optionId: string) => onAnswer(card.choiceId, optionId);
+  // A workflow gate's options are outcome keys (approve_all); show them as words.
+  const optionLabel = (label: string) => (card.runId ? workflowGateOptionLabel(label) : label);
+  // A question card here is a workflow gate (an ask renders as its message). Its
+  // text is the system line "<agent> asked <prompt>", which the title already shows.
+  const body = card.mode === 'question' ? undefined : message.text || undefined;
   const turnout = `${card.votedCount} of ${card.electorateCount} voted`;
   const clock = open && card.closesAt ? `closes ${formatChoiceClock(card.closesAt)}` : undefined;
   const subline =
@@ -375,13 +374,12 @@ export const ChoiceCard = React.memo(function ChoiceCard({
         ? 'Skipped'
         : card.mode === 'question' ? 'Closed · no longer waiting for an answer' : undefined);
   const footer = card.mode === 'question' && card.status === 'answered' && selectedOption
-    ? `${selectedOption.label} · ${decision}`
+    ? `${optionLabel(selectedOption.label)} · ${decision}`
     : decision;
   const choices: TranscriptCardChoice[] = (!open && card.mode === 'question' ? [] : card.options).map((option) => ({
     id: option.optionId,
     letter: option.letter,
-    label: option.label,
-    consequence: option.consequence === option.label ? '' : option.consequence,
+    label: optionLabel(option.label),
     costly: option.costly,
     votes: option.votes,
     share: option.share,
@@ -393,18 +391,6 @@ export const ChoiceCard = React.memo(function ChoiceCard({
         ? { onPress: () => answer(option.optionId) }
         : {}),
   }));
-  const actions: TranscriptCardAction[] =
-    canAct && card.mode === 'question'
-      ? [
-          {
-            label: 'Skip',
-            dismiss: true,
-            disabled: busy,
-            onPress: () => onSkip(card.choiceId),
-            testID: `choice-${card.choiceId}-skip`,
-          },
-        ]
-      : [];
   return (
     <YStack marginTop="5">
       <TranscriptCard
@@ -422,31 +408,18 @@ export const ChoiceCard = React.memo(function ChoiceCard({
         }
         title={card.prompt}
         wrapTitle
-        body={message.text || undefined}
+        body={body}
         media={<RequestMedia message={message} />}
         subline={subline}
         sublineTestID={`choice-${card.choiceId}-subline`}
         stamp={ledgerStamp(message.timestamp)}
         choices={choices}
-        noteInput={
-          takesNote
-            ? {
-                value: note,
-                onChangeText: setNote,
-                placeholder: 'Add a note (optional)',
-                maxLength: CHOICE_NOTE_MAX_LENGTH,
-                editable: !busy,
-                testID: `choice-${card.choiceId}-note`,
-              }
-            : undefined
-        }
         footerNote={
           open
             ? busy ? 'Sending decision…' : undefined
             : footer
         }
         footerNoteTestID={`choice-${card.choiceId}-footer`}
-        actions={actions}
       />
     </YStack>
   );

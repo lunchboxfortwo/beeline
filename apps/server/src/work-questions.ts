@@ -32,10 +32,7 @@ export async function askOwnerQuestion(
         mode: 'question',
         prompt: input.question,
         ask: input.question,
-        options: input.options.map((option) => ({
-          label: option.label,
-          consequence: option.label,
-        })),
+        options: input.options.map((option) => ({ label: option.label })),
         requesterId: owner.id,
         requestId: input.requestId,
       });

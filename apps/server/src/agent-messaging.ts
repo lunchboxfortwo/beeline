@@ -102,7 +102,7 @@ export async function sendMessage(db: SqlDatabase, input: {
         messageId: id, messageText: modelText(input.text), messageCard: { route, sourceRoomId: route.from.place, ...(reportStatus ? {reportStatus,reportToId:to.agent}: {}) },
         messageAttachments:input.attachments,messageOrigin:route.from,messageAudienceId:input.replyTo ? to.agent : undefined,
         prompt: input.ask.question, ask: input.ask.question, requestId: input.parent?.turn_request_id,
-        options: input.ask.options.map(label => ({ label, consequence: label })),
+        options: input.ask.options.map(label => ({ label })),
       });
       const options = (await tx.query<{ options: { optionId: string; label: string }[] }>(
         'SELECT options FROM room_choices WHERE id=$1',[choice.choiceId])).rows[0]!.options;

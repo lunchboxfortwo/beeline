@@ -32,7 +32,7 @@ describe('P7 dispatcher durable command adapter', () => {
     await db.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[agent,VIEWER]);
     await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')",[WORKSPACE,ROOM,agent]);
     const choice=await db.transaction(tx=>postRoomChoice(tx,{roomId:ROOM,agentId:agent,mode:'question',prompt:'Synthetic?',
-      options:[{label:'One',consequence:'Use one'},{label:'Two',consequence:'Use two'}],ttlSeconds:300}));
+      options:[{label:'One'},{label:'Two'}],ttlSeconds:300}));
     const first=server(),second=server(),legacy=vi.spyOn(second.phone,'execute');
     const input={choiceId:choice.choiceId},identity={v:1 as const,id:'tray-dispatch-skip'};
     const receipt=await first.dispatch('skipChoice', input, VIEWER, undefined, undefined, identity);

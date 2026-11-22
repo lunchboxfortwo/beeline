@@ -79,7 +79,7 @@ async function onlineHelper() {
     const { messageId } = await fixture.database.transaction(tx => postRoomChoice(tx, {
       roomId: ROOM, agentId: AGENT, requesterId: HUMAN, mode: 'question',
       prompt: 'Which synthetic direction?',
-      options: [{ label: 'Editorial', consequence: 'Use editorial' }, { label: 'Minimal', consequence: 'Use minimal' }],
+      options: [{ label: 'Editorial' }, { label: 'Minimal' }],
     }));
     const react = () => fixture.phone.reactToMessage({ roomId: ROOM, messageId, emoji: '👍' }, HUMAN);
     const reaction = { emoji: '👍', count: 1, reacted: true,

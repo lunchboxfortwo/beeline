@@ -107,7 +107,6 @@ describe('phone contract', () => {
           optionId: 'A',
           letter: 'A',
           label: 'Kraken paper',
-          consequence: 'plugin auth',
           votes: 2,
           share: 1,
           leader: true,
@@ -116,7 +115,6 @@ describe('phone contract', () => {
           optionId: 'B',
           letter: 'B',
           label: 'Keep waiting',
-          consequence: 'blocked',
           votes: 1,
           share: 0.5,
         },
@@ -129,6 +127,12 @@ describe('phone contract', () => {
       footer: 'closed · 3 of 4 voted',
     };
     expect(isRoomView({ ...room, messages: [{ ...message, choice }] })).toBe(true);
+    // A card stored before options lost their description still reads, without it.
+    const stored = readRoomView({ ...room, messages: [{ ...message, choice: { ...choice,
+      options: choice.options.map((option) => ({ ...option, consequence: 'old sub label' })) } }] })
+      ?.messages[0]?.choice;
+    expect(stored?.options.map((option) => option.label)).toEqual(['Kraken paper', 'Keep waiting']);
+    for (const option of stored?.options ?? []) expect(option).not.toHaveProperty('consequence');
     for (const runId of ['af0d790d02ea49aa245270dbad8788436c1ef87d374f2aac5e75b484ab8a39d2', 'invalid', null]) {
       const gate = readRoomView({ ...room, messages: [{ ...message, choice: {
         ...choice, mode: 'question', runId,

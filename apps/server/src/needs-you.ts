@@ -1,7 +1,7 @@
 import { permissionDeciderSql } from './permission-decider.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
 import { messageColumns } from './message-columns.js';
-import { squireApprovalAction } from '@beeline/api-contract/phone';
+import { squireApprovalAction, workflowGateOptionLabel } from '@beeline/api-contract/phone';
 import { approvalAsk } from './tray-approval-ask.js';
 import {
   AGENT_SIGN_IN_SERVICE_LABELS,
@@ -146,7 +146,7 @@ type ApprovalCard = {
   detail?: string;
   linkKind?: 'approval' | 'passkey' | 'vouch';
   prompt?: string;
-  options?: { optionId?: string; label?: string; consequence?: string }[];
+  options?: { optionId?: string; label?: string }[];
   choiceId?: string;
   runId?: string;
   permissionId?: string;
@@ -766,9 +766,8 @@ function approvalView(
       ] };
     }
     case 'choice': {
-      // An identifier-shaped label (approve_all) reads as words on the Tasks card.
-      const optionLabel = (label: string) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(label)
-        ? label[0]!.toUpperCase() + label.slice(1).replaceAll('_', ' ') : label;
+      // A workflow gate's outcome key (approve_all) reads as words; an ask keeps its own label.
+      const optionLabel = (label: string) => card.runId ? workflowGateOptionLabel(label) : label;
       const result = view(
         'choice',
         'asks you to choose',
@@ -785,8 +784,7 @@ function approvalView(
       const actions: NeedsYouActionView[] = (card.options ?? []).flatMap(option =>
         option.optionId && option.label ? [{ kind: 'choice' as const, choiceId: card.choiceId!,
           optionId: option.optionId,
-          label: optionLabel(option.label),
-          detail: option.consequence }] : []);
+          label: optionLabel(option.label) }] : []);
       // A workflow default is already one of its explicit outcomes. Skipping
       // would apply that outcome, whereas dismissing only hides the tray row.
       if (!card.runId) actions.push({ kind: 'skip-choice', choiceId: card.choiceId, label: 'Skip' });

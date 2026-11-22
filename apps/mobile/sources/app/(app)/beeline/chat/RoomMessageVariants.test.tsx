@@ -239,9 +239,9 @@ it.each([
     Object.assign(args, {
       0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(),
       13: [], 14: stored.room_id, 15: VIEWER, 17: {}, 20: false,
-      21: onAnswer, 22: onSkip, 42: beginReply, 51: false,
-      52: new Set(), 53: new Set(), 54: new Set(),
-      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [messageRow],
+      21: onAnswer, 41: beginReply, 50: false,
+      51: new Set(), 52: new Set(), 53: new Set(),
+      54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(), 61: [messageRow],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: messageRow });
@@ -284,7 +284,6 @@ it.each([
     { handle: 'sample.artist', pubkey: stored.author_id });
   expect(focus).toHaveBeenCalledOnce();
   expect(onAnswer).not.toHaveBeenCalled();
-  expect(onSkip).not.toHaveBeenCalled();
 });
 it.each([
   { kind: 'attachment', allowed: true },
@@ -311,9 +310,9 @@ it.each([
     const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
       0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
-      14: roomId, 15: VIEWER, 17: {}, 20: !!scenario.desktop, 36: !!scenario.announcement,
-      42: beginReply, 51: !!scenario.desktop, 52: new Set(), 53: new Set(), 54: new Set(),
-      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
+      14: roomId, 15: VIEWER, 17: {}, 20: !!scenario.desktop, 35: !!scenario.announcement,
+      41: beginReply, 50: !!scenario.desktop, 51: new Set(), 52: new Set(), 53: new Set(),
+      54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(), 61: [row],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: row });
@@ -335,8 +334,8 @@ const choice: ChoiceCardView = {
   constraint: 'No answer in 24 h applies abandon',
   closesAt: 1793786400,
   options: [
-    { optionId: 'A', letter: 'A', label: 'retry', consequence: 'Retry this step' },
-    { optionId: 'B', letter: 'B', label: 'abandon', consequence: 'End this run' },
+    { optionId: 'A', letter: 'A', label: 'retry' },
+    { optionId: 'B', letter: 'B', label: 'abandon' },
   ], electorate: [VIEWER], responses: [], votedCount: 0, electorateCount: 1,
 };
 const message: ChatDisplayMessage = { id: 'message', text: '', isUser: false, timestamp: 1793700000, choice };
@@ -396,9 +395,9 @@ it.each(cardRendererCases)('wraps the $name renderer once and replies to that ca
     const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
       0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
-      14: source.room_id, 15: VIEWER, 17: {}, 20: false, 21: onAnswer, 22: onSkip,
-      42: beginReply, 51: false, 52: new Set(), 53: new Set(), 54: new Set(),
-      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
+      14: source.room_id, 15: VIEWER, 17: {}, 20: false, 21: onAnswer,
+      41: beginReply, 50: false, 51: new Set(), 52: new Set(), 53: new Set(),
+      54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(), 61: [row],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: row });
@@ -413,10 +412,10 @@ it.each(cardRendererCases)('wraps the $name renderer once and replies to that ca
     reference: { channelId: source.room_id, eventId: source.id, rootId: source.id },
   }));
   expect(onAnswer).not.toHaveBeenCalled();
-  expect(onSkip).not.toHaveBeenCalled();
 });
-it('renders the morning workflow approval beside its same-time handoff with working decisions', () => {
+it('renders the morning workflow approval as its question and choices only', () => {
   // Reduced from the two 2026-11-18 production rows. Raw exports stay outside the repo.
+  // The gate card was stored before options lost `consequence`; it still renders, without it.
   const owner = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
   const agent = {
     face: 'owl', kind: 'agent', name: 'Ruby', handle: 'ruby',
@@ -465,9 +464,9 @@ it('renders the morning workflow approval beside its same-time handoff with work
     Object.assign(args, {
       0: false, 4: null, 10: new Map(), 11: new Map(), 12: new Map(),
       13: [], 14: syntheticImageChoice.room_id, 15: owner, 17: {}, 20: false,
-      21: onAnswer, 22: onSkip, 51: false,
-      52: new Set(), 53: new Set(), 54: new Set(),
-      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: folded.rows,
+      21: onAnswer, 50: false,
+      51: new Set(), 52: new Set(), 53: new Set(),
+      54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(), 61: folded.rows,
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return <>{folded.rows.map(item => <React.Fragment key={item.id}>{render({ item })}</React.Fragment>)}</>;
@@ -476,25 +475,25 @@ it('renders the morning workflow approval beside its same-time handoff with work
   expect(renderer.root.findAllByType('TranscriptCard')).toHaveLength(1);
   expect(cardProps().title).toBe(prompt);
   expect(cardProps().tier).toBe('ask');
+  // The prompt shows once: the "@ruby asked <prompt>" system text is not a second body.
+  expect(cardProps().body).toBeUndefined();
   expect(plates().map((plate: { props: React.ComponentProps<typeof TranscriptCardChoicePlate> }) =>
-    plate.props.choice.label)).toEqual(['approve_all', 'pick_numbers', 'skip']);
+    plate.props.choice.label)).toEqual(['Approve all', 'Pick numbers', 'Skip']);
+  for (const plate of plates()) expect(plate.props.choice).not.toHaveProperty('consequence');
+  expect(cardProps().noteInput).toBeUndefined();
+  expect(cardProps().actions).toBeUndefined();
+  expect(cardProps().subline).toBeUndefined();
   for (const plate of plates()) {
     act(() => plate.props.choice.onPress());
     expect(onAnswer).toHaveBeenLastCalledWith(choiceId, plate.props.choice.id);
   }
-  act(() => cardProps().noteInput.onChangeText('1, 3'));
-  act(() => plates()[1].props.choice.onPress());
-  expect(onAnswer).toHaveBeenLastCalledWith(choiceId, 'B', '1, 3');
-  act(() => cardProps().actions[0].onPress());
-  expect(onSkip).toHaveBeenCalledExactlyOnceWith(choiceId);
 });
 
 let renderer: ReactTestRenderer;
 const onAnswer = vi.fn();
-const onSkip = vi.fn();
 function element(card: ChoiceCardView, actionId: string | null = null) {
   return <ChoiceCard message={{ ...message, choice: card }} viewerIsAgent={false}
-    viewerPubkey={VIEWER} actionId={actionId} onAnswer={onAnswer} onSkip={onSkip} />;
+    viewerPubkey={VIEWER} actionId={actionId} onAnswer={onAnswer} />;
 }
 function cardProps() { return renderer.root.findByType('TranscriptCard').props; }
 function plates() { return renderer.root.findAllByType(TranscriptCardChoicePlate); }
@@ -510,7 +509,7 @@ it('renders a workflow-closed question as a record without dead option boxes', (
   expect(cardProps().tier).toBe('record');
   expect(cardProps().footerNote).toBe('Closed · no longer waiting for an answer');
   expect(plates()).toHaveLength(0);
-  expect(cardProps().actions).toEqual([]);
+  expect(cardProps().actions).toBeUndefined();
   expect(cardProps().noteInput).toBeUndefined();
   expect(cardProps().subline).toBeUndefined();
   expect(cardProps().wrapTitle).toBe(true);
@@ -522,6 +521,17 @@ it('shows the selected outcome and actor after an answer, without option boxes',
     footer: 'picked B · @alex.chen', responses: [{ identityId: VIEWER, optionId: 'B' }],
   })); });
   expect(cardProps().footerNote).toBe('abandon · picked B · @alex.chen');
+  expect(plates()).toHaveLength(0);
+});
+
+it('shows an answered workflow gate as its question and the chosen label in words', () => {
+  act(() => { renderer = create(element({ ...choice, runId: 'run', status: 'answered', selectedOptionId: 'A',
+    options: [{ optionId: 'A', letter: 'A', label: 'approve_all' }, { optionId: 'B', letter: 'B', label: 'not_now' }],
+    answeredBy: { pubkey: VIEWER, kind: 'human', name: 'Alex Chen', handle: 'alex.chen' },
+    footer: 'picked A · @alex.chen', responses: [{ identityId: VIEWER, optionId: 'A' }],
+  })); });
+  expect(cardProps().title).toBe(choice.prompt);
+  expect(cardProps().footerNote).toBe('Approve all · picked A · @alex.chen');
   expect(plates()).toHaveLength(0);
 });
 
@@ -549,9 +559,9 @@ it('answers an open question on tap, then removes controls when its closed DTO a
   expect(buttons).toHaveLength(2);
   act(() => buttons[1].props.onPress());
   expect(onAnswer).toHaveBeenCalledWith(choice.choiceId, 'B');
-  expect(cardProps().noteInput).toBeDefined();
+  expect(cardProps().noteInput).toBeUndefined();
   expect(cardProps().subline).toContain('No answer in 24 h applies abandon');
-  expect(cardProps().actions[0].label).toBe('Skip');
+  expect(cardProps().actions).toBeUndefined();
   act(() => renderer.update(element({ ...choice, status: 'closed', runId: 'run' })));
   expect(choicePlates()).toHaveLength(0);
   expect(cardProps().noteInput).toBeUndefined();
@@ -708,9 +718,9 @@ it('removes desktop New thread when an ordinary message Room is archived', () =>
     Object.assign(args, {
       0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
       14: 'room', 15: VIEWER, 17: { handleForwardToNewCorner: forward },
-      20: true, 29: true, 47: false, 48: archived, 51: true,
-      52: new Set(), 53: new Set(), 54: new Set(),
-      55: { states: new Map(), retry: vi.fn() }, 56: {}, 57: new Map(), 62: [row],
+      20: true, 28: true, 46: false, 47: archived, 50: true,
+      51: new Set(), 52: new Set(), 53: new Set(),
+      54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(), 61: [row],
     });
     const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
     return render({ item: row });

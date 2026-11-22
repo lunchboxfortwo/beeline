@@ -110,7 +110,7 @@ it('WORKER-BLOCK: native ask cards retain the block and remain open through comm
   await daemon.execute('report', { ...await input(), status: 'blocked', text: 'Need a decision.' }, WORKER);
   const ask = await input();
   const choice = await daemon.execute('askRoomChoice', { ...ask, prompt: 'Which scope?',
-    options: [{ label: 'One', consequence: 'Continue' }, { label: 'Two', consequence: 'Stop' }] }, WORKER);
+    options: [{ label: 'One' }, { label: 'Two' }] }, WORKER);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation)
     VALUES('commander-chatter',$1,$2,'Use option one.','message'),('person-chatter',$1,$3,'Looking.','message')`, [C, COMMANDER, HUMAN]);
   expect(await state()).toBe('waiting');
