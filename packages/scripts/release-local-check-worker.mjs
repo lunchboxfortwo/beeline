@@ -5,7 +5,8 @@ import { LocalActions } from './release-local-actions.mjs';
 import { Processes, privateWrite } from './release-local-process.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { localHooks } from './release-local.mjs';
-import { writeToolAdapters } from './release-local-delivery.mjs';
+import { awaitChecksVerdict, writeToolAdapters } from './release-local-delivery.mjs';
+import { awaitsVerdict } from './release-local-policy.mjs';
 
 const spec = JSON.parse(readFileSync(process.argv[2] || '/state/spec.json', 'utf8'));
 const root = spec.root || '/source', directory = spec.directory || '/state';
@@ -26,7 +27,23 @@ hooks.job = async args => {
     XDG_CACHE_HOME: join(directory, 'cache'), DOCKER_CONFIG: join(directory, 'docker'), CI_TEST_WORKERS: '2', TURBO_CONCURRENCY: '1', UV_THREADPOOL_SIZE: '1' });
   return result;
 };
+// An early-started leg waits once, before its first production step.
+let verdict;
 hooks.step = async args => {
+  if (spec.verdictFile && awaitsVerdict(spec.context.github.job, args.step)) {
+    verdict ??= (async () => {
+      const waiting = Date.now();
+      processes.log('Waiting for the full-checks verdict before changing production.');
+      let outcome = 'failure';
+      try { await awaitChecksVerdict(spec.verdictFile, { signal: engine.abortController.signal }); outcome = 'success'; }
+      finally {
+        const waited = Date.now() - waiting;
+        engine.verdictWaitMs += waited;
+        args.context.job.timings?.push({ name: 'Wait for the full-checks verdict', started_at: new Date(waiting).toISOString(), seconds: Math.round(waited / 100) / 10, outcome });
+      }
+    })();
+    await verdict;
+  }
   if (!spec.delivery && !spec.preparation && args.step.uses === './.github/actions/ci-workspace') {
     processes.log('Using the workspace installed, built and provenance-verified once before this queue.');
     return true;

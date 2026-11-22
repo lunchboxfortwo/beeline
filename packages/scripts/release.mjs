@@ -129,8 +129,8 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
   for (const result of results) if (result.status === 'rejected') throw result.reason;
 }
 
-// A finished release keeps only what it published (release.json and
-// release-checks.json on its GitHub release). Its working directory holds full
+// A finished release keeps only what it published (release.json,
+// release-checks.json and the check evidence on its GitHub release). Its working directory holds full
 // source copies, overlays, node_modules and logs (tens of GB per release).
 export function removeReleaseDirectory(directory, run = execFileSync) {
   run('sudo', ['-n', 'rm', '-rf', directory], { stdio: 'ignore' });

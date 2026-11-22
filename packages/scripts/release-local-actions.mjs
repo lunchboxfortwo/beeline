@@ -40,6 +40,7 @@ export class LocalActions {
     this.artifacts = new Map();
     this.records = new Map();
     this.counter = 0;
+    this.verdictWaitMs = 0;
     this.cancelled = false;
     this.abortController = new AbortController();
     // Do not leak the operator's production environment into test jobs.
@@ -159,12 +160,15 @@ export class LocalActions {
   async runJob(job, context, label, workflowEnv, directory, started, logFile) {
     const finish = result => {
       if (this.cancelled && result.result === 'success') result.result = 'cancelled';
-      this.records.set(label, { id: label, name: label, conclusion: result.result, started_at: started, completed_at: new Date().toISOString(), logFile });
+      this.records.set(label, { id: label, name: label, conclusion: result.result, started_at: started, completed_at: new Date().toISOString(), logFile,
+        ...(context.job?.timings?.length ? { steps: context.job.timings } : {}) });
       privateWrite(join(this.directory, 'records.json'), JSON.stringify([...this.records.values()], null, 2));
       return result;
     };
     context = structuredClone(context);
     context.job.cacheSaves = [];
+    // Composite steps share this array through their shallow job copy.
+    context.job.timings = [];
     const runner = { name: 'beeline-ci-squire-local-release', os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux', temp: directory.replaceAll('\\', '/'), arch: process.arch === 'x64' ? 'X64' : 'ARM64' };
     context.runner = runner;
     context.env = {
@@ -253,8 +257,10 @@ export class LocalActions {
       };
       if (process.platform === 'win32') for (const key of ['GITHUB_OUTPUT', 'GITHUB_ENV', 'GITHUB_PATH']) env[key] = env[key].replaceAll('\\', '/');
       for (const path of [env.GITHUB_OUTPUT, env.GITHUB_ENV, env.GITHUB_PATH]) privateWrite(path, '');
-      const timeout = Math.min((step['timeout-minutes'] ?? 60) * 60_000, context.deadline - Date.now());
-      this.processes.log(`  ${step.name ?? step.uses ?? id}`);
+      // Time spent waiting for the full-checks verdict does not count against job deadlines.
+      const timeout = Math.min((step['timeout-minutes'] ?? 60) * 60_000, context.deadline + this.verdictWaitMs - Date.now());
+      const stepName = step.name ?? step.uses ?? id, startedAt = Date.now(), waitedBefore = this.verdictWaitMs;
+      this.processes.log(`  ${stepName}`);
       try {
         if (timeout <= 0) throw new Error('Job deadline exceeded');
         const handled = await this.hooks.step?.({ step, context, env, result, engine: this });
@@ -280,6 +286,8 @@ export class LocalActions {
         if (paths.length) context.env.PATH = `${paths.reverse().join(delimiter)}${delimiter}${context.env.PATH}`;
         context.steps[id] = result;
         if (previousStatus === 'failure') context.job.status = 'failure';
+        context.job.timings?.push({ name: stepName, started_at: new Date(startedAt).toISOString(),
+          seconds: Math.round((Date.now() - startedAt - (this.verdictWaitMs - waitedBefore)) / 100) / 10, outcome: result.outcome });
       }
     }
   }
