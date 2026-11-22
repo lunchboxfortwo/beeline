@@ -233,6 +233,8 @@ async function turn(agent = WORKER) {
 async function end(agent = WORKER, age = 0) {
   await db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL) FROM agent_commands
     WHERE room_id=$1 AND agent_id=$2 AND state='pending'`,[C,agent]);
+  await db.query(`SELECT beeline_interrupt_agent_turn(agent_id,room_id,request_id,NULL,started_at)
+    FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND status='working'`,[C,agent]);
   await db.query(`UPDATE agent_turns SET ended_at=clock_timestamp()-make_interval(secs=>$2)
     WHERE room_id=$1 AND status<>'working' AND agent_id=$3`,[C,age,agent]);
 }

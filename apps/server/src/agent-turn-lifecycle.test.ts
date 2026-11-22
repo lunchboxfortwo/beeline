@@ -280,6 +280,17 @@ it('a late old session final cannot clear a newer invocation of the same unanswe
   const old = { id: 'old-run', requestId: c.turnRequestId };
   await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: old.id }, A);
   await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'new-run' }, A);
-  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: '', harnessEnded: true, invocation: old }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Obsolete session answer', harnessEnded: true, invocation: old }, A);
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND text=$2', [R, 'Obsolete session answer'])).rows).toEqual([]);
   expect((await phone.readRoom(R, H))?.latestAgentTurns).toContainEqual(expect.objectContaining({ status: 'working' }));
+});
+
+
+it('ends a registered invocation when an older sender omitted its turn invocation id', async () => {
+  const c = await ask();
+  const invocation = { id: 'unprojected-run', requestId: c.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: invocation.id }, A);
+  await db.query('UPDATE agent_turns SET invocation_id=NULL WHERE request_id=$1', [c.turnRequestId]);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.turnRequestId, text: 'Answer', harnessEnded: true, invocation }, A);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
 });

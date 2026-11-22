@@ -19,3 +19,6 @@ Intentional visual differences: the working sentence in the thread/header/list, 
 - API contracts passed (441 tests); network codecs passed (11 tests). Codecs were regenerated from the changed contracts.
 - Architecture and UI component policy checks passed.
 - The broader PlaceSession suite encountered unrelated host restrictions: read-only `/var/tmp`, Git wrappers refusing fixture-only branch pushes, and the launcher-path assertion seeing the wrapper rather than `/usr/bin/gh`. Focused helper tests used a temporary `/tmp` isolation path; that test-helper change was restored and is not part of the PR. No broader PlaceSession passing result is claimed.
+
+
+CI repair validation: the previously failing server suites now pass locally (187 tests across queue, invocation, session lifecycle, thread attention, blocker reconciliation, review lifecycle and storage registry). Both failing mobile suites pass (9 tests). Server and mobile typechecks, the Walls check and its mutation tests (46), and dead-code detection pass. Finalization accepts registered invocations lacking a turn projection while retaining the replacement-session fence; regression coverage rejects obsolete final text and clears older sender projections. Idle fixtures explicitly finish their sessions, and the offline-start test compares newly added notices rather than earlier tests' history.

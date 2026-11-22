@@ -36,14 +36,16 @@ export async function finalizeAgentInvocation<T>(database: SqlDatabase, agent: s
     const receipt = await lockAgentInvocation(db,agent,room,invocation);
     await db.query(`UPDATE agent_invocations SET ended=true WHERE command_id=$1 AND invocation_id=$2`,
       [receipt.command_id,invocation.id]);
-    const current = await db.query(`SELECT 1 FROM agent_turns WHERE agent_id=$1 AND room_id=$2
-      AND request_id=$3 AND invocation_id=$4`, [agent,room,invocation.requestId,invocation.id]);
-    if (!current.rowCount) return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000),answered:false as const,suppressed:true as const};
+    // Older senders may register an invocation without publishing a turn projection.
+    // Only a recorded replacement proves that this final belongs to an obsolete session.
+    const replacement = await db.query(`SELECT 1 FROM agent_turns WHERE agent_id=$1 AND room_id=$2
+      AND request_id=$3 AND invocation_id IS NOT NULL AND invocation_id<>$4`, [agent,room,invocation.requestId,invocation.id]);
+    if (replacement.rowCount) return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000),answered:false as const,suppressed:true as const};
     if (!receipt.replied) {
       const result = await publish(db);
       await db.query(`SELECT ended.* FROM agent_turns turn
         CROSS JOIN LATERAL beeline_interrupt_agent_turn($1,$2,$3,NULL,turn.started_at) ended
-        WHERE turn.agent_id=$1 AND turn.room_id=$2 AND turn.request_id=$3 AND turn.invocation_id=$4`,
+        WHERE turn.agent_id=$1 AND turn.room_id=$2 AND turn.request_id=$3 AND (turn.invocation_id IS NULL OR turn.invocation_id=$4)`,
         [agent,room,invocation.requestId,invocation.id]);
       return result;
     }
@@ -51,7 +53,7 @@ export async function finalizeAgentInvocation<T>(database: SqlDatabase, agent: s
       [receipt.command_id,invocation.id]);
     await db.query(`SELECT ended.* FROM agent_turns turn
         CROSS JOIN LATERAL beeline_interrupt_agent_turn($1,$2,$3,NULL,turn.started_at) ended
-        WHERE turn.agent_id=$1 AND turn.room_id=$2 AND turn.request_id=$3 AND turn.invocation_id=$4`,
+        WHERE turn.agent_id=$1 AND turn.room_id=$2 AND turn.request_id=$3 AND (turn.invocation_id IS NULL OR turn.invocation_id=$4)`,
         [agent,room,invocation.requestId,invocation.id]);
     return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000),answered:false as const,suppressed:true as const};
   });
