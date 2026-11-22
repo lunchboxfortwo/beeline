@@ -172,7 +172,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     item_ids: { type: 'array', maxItems: 20, items: { type: 'string' } }, snapshot_items: { type: 'array', maxItems: 20, items: { type: 'integer' } },
     slug: { type: 'string', maxLength: 64 }, description: { type: 'string', maxLength: 60 }, markdown: { type: 'string', maxLength: 32768 },
   }, ['address', 'kind', 'action']),
-  tool('claim_thread', 'Become the recorded implementer of this thread before pushing or opening its PR.', { address: address('Thread id.') }, ['address']),
+  tool('claim_thread', 'Become the recorded implementer of this thread before your first edit or commit there.', { address: address('Thread id.') }, ['address']),
   tool('open_thread', 'Open one unit of work in a chat you belong to. Name another agent as implementer. Code work goes in a thread with another agent as implementer: use feature/corner- plus the first 12 hex characters of its id with hyphens removed; push existing commits there in the same repository with your own GitHub access, or post the patch in that thread, not the chat, with base commit and test commands for the implementer to apply and push with the Beeline GitHub App; your owner\'s connection approval covers sharing the patch. Opening wakes the implementer; do not send a second message. hold:true requires sourceMessageId citing a readable person’s request to hold.', {
     room: address('Parent chat id.'), name: { type: 'string', maxLength: 120, description: 'At most 3 words joined by hyphens.' },
     objective: { type: 'string', maxLength: 2000, description: 'At most 24 words.' }, brief,

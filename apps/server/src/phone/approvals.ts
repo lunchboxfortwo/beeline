@@ -1,6 +1,6 @@
 import { dropQueuedOrdersForStop } from '../agent-command-queue.js';
 import { lockAgentCommandQueue } from '../agent-command-queue.js';
-import { endAgentTurn } from '../agent-turn-end.js';
+import { endAgentTurn, PERSON_STOP_REASON } from '../agent-turn-end.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
 import { cornerKindSql } from '../corner-opening.js';
@@ -86,7 +86,7 @@ export async function phoneCancelAgentTurn(
     if (!command) throw new Error('running turn not found');
     // Stop cancels every pending item of this turn. The helper running one
     // sees it leave the queue and cancels that session's turn.
-    for (const item of commands.rows) await endAgentTurn(database, item, 'cancelled', 'stop');
+    for (const item of commands.rows) await endAgentTurn(database, item, 'cancelled', PERSON_STOP_REASON);
     const dropped = await dropQueuedOrdersForStop(database, command);
     await systemLine(database, {
       roomId: input.roomId,

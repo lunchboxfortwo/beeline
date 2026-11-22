@@ -96,10 +96,11 @@ it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report su
   await daemon.execute('report', { ...finished, status: status === 'blocked' ? 'done' : 'failed', text: 'The task is complete.' }, WORKER);
   expect(await state()).toBe('idle');
 });
-it('WORKER-ROLE: a worker-created corner displays worker activity and excludes commander-only activity', async () => {
+it('WORKER-ROLE: a worker-created corner displays worker activity and a commander turn there as working', async () => {
   const commander = await input(COMMANDER);
-  expect(await state()).toBe('idle');
+  expect(await state()).toBe('working');
   await daemon.execute('postRoomMessage', { ...commander, text: 'Acknowledged.' }, COMMANDER);
+  expect(await state()).toBe('idle');
   const worker = await input();
   expect(await state()).toBe('working');
   await daemon.execute('postRoomMessage', { ...worker, text: 'Finished.' }, WORKER);

@@ -16,7 +16,7 @@ import { AGENT_COMMAND_DELEGATION_SCHEMA } from './agent-command-queue.js';
 import { queuedWorkflowWakeDetail,squireDecisionDetail,type WorkflowWakeCard } from './agent-input-context.js';
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
-import { endAgentTurn } from './agent-turn-end.js';
+import { endAgentTurn, PERSON_STOP_REASON } from './agent-turn-end.js';
 import { closingActivity,replySteps } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { cornerCommanderBriefSql } from './corner-commander.js';
@@ -227,7 +227,7 @@ export type PrivateCommandPayload = PayloadVoice & {
   automatic?: boolean;
   /** Status supplied by the explicit report operation; ordinary answers have none. */
   reportStatus?: 'blocked' | 'needs-decision' | 'done' | 'failed';
-  idleSince?: string;
+  idleSince?: string; selfWake?: boolean; // selfWake: a self-message turn in its own thread; it cannot queue another.
   /** Agent whose work a server-authored report describes; prevents self-wakes. */
   sourceAgentId?: string;
   fromRoomId: string;
@@ -608,7 +608,7 @@ async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Prom
     parseTaggedAgentLifecycleCommand(input.text, member.handle) === 'stop') : [];
   if (stops.length) await db.query(
     `SELECT ended.id FROM agent_commands item CROSS JOIN LATERAL
-       beeline_finish_agent_command(item.id,'cancelled','stop',NULL) ended
+       beeline_finish_agent_command(item.id,'cancelled','${PERSON_STOP_REASON}',NULL) ended
      WHERE item.room_id=$1 AND item.agent_id=ANY($2::text[]) AND item.state='pending'`,
     [chat.id, stops.map(member => member.id)]);
   const channel = handles.some(isChannelMentionToken);

@@ -836,6 +836,8 @@ it('uses chat and thread language across all assembled agent prompt surfaces', (
     expect(systemPrompt).not.toMatch(/\b(?:corner|corners|Room|Rooms)\b/);
     const turn=assembleTurnPrompt({surface,task:{body:'Proceed.',commandReason:'corner_merge_conflict'}}).text;
     expect(turn).not.toMatch(/\b(?:corner|corners|Room|Rooms)\b/);
-    if(surface==='code-corner')expect(systemPrompt).toContain('Before pushing or opening a PR for this thread, call claim_thread.');
+    const thread=surface==='code-corner'||surface==='repo-less-corner';
+    expect(systemPrompt.includes('Before your first edit or commit in this thread, call claim_thread.')).toBe(thread);
+    expect(systemPrompt).not.toContain('Before pushing or opening a PR for this thread, call claim_thread.');
   }
 });

@@ -106,3 +106,30 @@ it('backfills the old latest-tag derivation once and never overwrites an explici
   expect((await rootFixture.db.query('SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[C])).rows[0])
     .toEqual({implementer_agent_id:B});
 });
+
+it('lets a commander claim a thread from its parent chat and refuses the reviewer', async () => {
+  const recorded=async()=> (await rootFixture.db.query<{implementer_agent_id:string}>(
+    'SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[C])).rows[0]!.implementer_agent_id;
+  expect(await recorded()).toBe(B);
+  await send('@hoots Take this thread', R);
+  const fromChat=(await commands(A,R))[0]!;
+  await claim(fromChat);
+  await rootFixture.daemon.execute('becomeImplementer',{roomId:R,requestId:fromChat.turnRequestId,cornerId:C},A);
+  expect(await recorded()).toBe(A);
+  // The chat itself is not a thread to claim.
+  await expect(rootFixture.daemon.execute('becomeImplementer',{roomId:R,requestId:fromChat.turnRequestId},A))
+    .rejects.toThrow('claim_thread needs a thread address.');
+  // The configured reviewer is refused, whether it claims from the thread or the parent chat.
+  await rootFixture.db.query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1',[R,B]);
+  await send('@goosy Review this thread', C);
+  const review=(await commands(B,C))[0]!;
+  await claim(review);
+  await expect(rootFixture.daemon.execute('becomeImplementer',{roomId:C,requestId:review.turnRequestId},B))
+    .rejects.toThrow('The thread reviewer cannot claim the implementer role.');
+  await send('@goosy Claim it from here', R);
+  const reviewerInChat=(await commands(B,R))[0]!;
+  await claim(reviewerInChat);
+  await expect(rootFixture.daemon.execute('becomeImplementer',{roomId:R,requestId:reviewerInChat.turnRequestId,cornerId:C},B))
+    .rejects.toThrow('The thread reviewer cannot claim the implementer role.');
+  expect(await recorded()).toBe(A);
+});

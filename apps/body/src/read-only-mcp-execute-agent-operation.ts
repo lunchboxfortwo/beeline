@@ -376,8 +376,13 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...await activeCommandContext(),
         agentId: requiredEnv('BEELINE_DAEMON_AGENT_ID'), sendId: String(args.sendId ?? ''),
       }));
-    case 'claim_thread':
-      return JSON.stringify(await daemonExecute('becomeImplementer', await activeCommandContext()));
+    case 'claim_thread': {
+      const context = await activeCommandContext();
+      const cornerId = typeof args.cornerId === 'string' ? args.cornerId : typeof args.address === 'string' ? args.address : undefined;
+      return JSON.stringify(await daemonExecute('becomeImplementer', {
+        ...context, ...(cornerId && cornerId !== context.roomId ? { cornerId } : {}),
+      }));
+    }
     case 'open_thread':
       return openCorner(args, toolCallId);
     case 'revise_thread_brief':

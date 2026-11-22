@@ -165,6 +165,8 @@ export function cornerHasRepositoryWork(brief?: CornerBrief): boolean {
   return true;
 }
 
+/** The agent doing the work holds the implementer label; read-only and review turns never claim. */
+export const CORNER_CLAIM_RULE = 'Before your first edit or commit in this thread, call claim_thread. Do not claim on read-only or review turns.';
 export const CORNER_RUNTIME_AUTHOR_CONTRACT = `Work in this thread; deliver task outcomes with reply(id). The current brief's spec, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story and criterion, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested. Deliver artifacts with post_artifact and reply without requiring a PR. Claim another agent's progress only from durable commands, the current prompt or tool evidence. No unrequested features or refactors.`;
 
 export const CORNER_AUTHOR_CONTRACT = `Work in this thread; deliver task outcomes with reply(id). Reply when done, blocked or failed; add ask when an answer is needed. Worker done requires an opened PR or repositoryWork:false.
@@ -443,6 +445,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
         'Do not repeat the trigger, instructions, or a posted answer.',
         surface === 'room' &&
           'If nothing is actionable for you, do not reply. If the current task is only a nudge to respond, answer the most recent unanswered human message instead of echoing the nudge.',
+        surface === 'repo-less-corner' && CORNER_CLAIM_RULE,
         surface === 'repo-less-corner' &&
           'Reply to the task message with the deliverable, adding ask if an answer is needed. Close the thread when requested.',
       ),
@@ -464,9 +467,10 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: ['code-corner'],
     render: ({ brief, reviewer, reviewerHandle, worktree, githubCli, cornerPrepareScript }) => {
       const repositoryWork = cornerHasRepositoryWork(brief);
-      const push = `Before pushing or opening a PR for this thread, call claim_thread. Only when the brief calls for repository changes: commit and push only ${worktree?.featureBranch}; never force-push or write to ${worktree?.targetBranch}. Before pushing, run \`git ls-remote --exit-code origin ${worktree?.featureBranch}\`. Exit code 0: fetch origin ${worktree?.featureBranch}; if origin/${worktree?.featureBranch} is an ancestor of HEAD, keep HEAD; else merge origin/${worktree?.featureBranch}; resolve conflicts and rerun affected tests. Exit code 2: absent branch; push. Other exit: stop.`;
+      const push = `Only when the brief calls for repository changes: commit and push only ${worktree?.featureBranch}; never force-push or write to ${worktree?.targetBranch}. Before pushing, run \`git ls-remote --exit-code origin ${worktree?.featureBranch}\`. Exit code 0: fetch origin ${worktree?.featureBranch}; if origin/${worktree?.featureBranch} is an ancestor of HEAD, keep HEAD; else merge origin/${worktree?.featureBranch}; resolve conflicts and rerun affected tests. Exit code 2: absent branch; push. Other exit: stop.`;
       return paragraphs(
         `Implementer rules: the rules below${reviewer ? ', up to the reviewer rules,' : ''} apply whenever you write code.`,
+        CORNER_CLAIM_RULE,
         repositoryWork && cornerPrepareScript === true && 'Run npm run corner:prepare first.',
         repositoryWork &&
           (githubCli === 'rest'

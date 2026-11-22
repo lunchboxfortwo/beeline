@@ -112,6 +112,9 @@ END; $$;
 
 `;
 
+/** Cancellation reason of a turn a person stopped; an agent's stop keeps 'stop'. */
+export const PERSON_STOP_REASON = 'person_stop';
+
 /** Use the recorded replacement epoch to avoid interrupting a newer execution. */
 export async function interruptAgentTurns(db: SqlDatabase, agentId: string, beforeEpoch: number): Promise<string[]> {
   const turns = await db.query<{ room_id: string; request_id: string }>(`SELECT room_id,request_id FROM agent_turns
