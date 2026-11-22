@@ -45,12 +45,14 @@ it('delivers committed reply ids and carries the last queue into a reconnect sub
     rootCommandId:'command',rootSourceMessageId:'source',reason:'human_tag',action:'input',agentDepth:0,
     source:{id:'source',authorId:'human',body:'hello',createdAt:1,attachments:[]}};
   sockets[0]!.receive({type:'commands',commandProtocol:2,commands:[item],completedCommandIds:[]});
-  expect(listener).toHaveBeenLastCalledWith([item],[]);
+  expect(listener).toHaveBeenLastCalledWith([item],[],[]);
   sockets[0]!.close();await flush();
   sockets[1]!.open();sockets[1]!.register(2);await flush();
   expect(sockets[1]!.frames).toContainEqual({type:'subscribe-queue',agentId,knownCommandIds:['command']});
   sockets[1]!.receive({type:'commands',commandProtocol:2,commands:[],completedCommandIds:['command']});
-  expect(listener).toHaveBeenLastCalledWith([],['command']);
+  expect(listener).toHaveBeenLastCalledWith([],['command'],[]);
+  sockets[1]!.receive({type:'commands',commandProtocol:2,commands:[],completedCommandIds:[],stoppedCommandIds:['command',7]});
+  expect(listener).toHaveBeenLastCalledWith([],[],['command']);
 });
 it('registration refusal leaves requests waiting without another socket or a timer',async()=>{
   vi.useFakeTimers();const {api,sockets,machine}=fixture();let settled=false;
