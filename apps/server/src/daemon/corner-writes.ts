@@ -25,6 +25,7 @@ import { daemonBriefAttachmentRooms } from './corner-reports.js';
 import { Input } from './values.js';
 import { modelText } from '../message-origin.js';
 import { recordedMessageRoute } from '../message-route.js';
+import { linkThreadWorkItems } from '../work-item-threads.js';
 
 
 
@@ -261,6 +262,9 @@ import { recordedMessageRoute } from '../message-route.js';
           ],
         );
       }
+      // The chat tasks this thread builds move to In progress with the open.
+      if (input.workItems?.length) await linkThreadWorkItems(db, { threadId: cornerId, chatId: roomId,
+        workspaceId: parent.workspace_id, threadName: name, itemIds: input.workItems, actorId: agentId });
       const from=implementerAgentId===agentId
         ? (await recordedMessageRoute(db,parentCommand)).from : {agent:agentId,place:commandRoomId};
       const taskText=implementerAgentId===agentId

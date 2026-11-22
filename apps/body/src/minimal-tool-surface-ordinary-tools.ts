@@ -241,6 +241,12 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         "hold": {
           "type": "boolean",
           "description": "Create a merge hold atomically; sourceMessageId must cite a readable person’s request."
+        },
+        "workItems": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {"type": "string", "minLength": 1},
+          "description": "Ids of the parent chat's backlog tasks this thread builds. Pass them whenever you open a thread for a backlog item: they move to In progress now, Done when the thread lands, and back to Backlog if it closes unmerged."
         }
       },
       "additionalProperties": false
