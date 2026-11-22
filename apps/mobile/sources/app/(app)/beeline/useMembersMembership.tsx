@@ -129,10 +129,13 @@ export function useMembersMembership([
     }
   };
 
+  // Opening a direct message leaves this screen. A working state would render
+  // the whole profile twice on the way out, so a ref stops a second tap instead.
+  const messagingRef = React.useRef(false);
   const messagePerson = async (pubkey: string) => {
-    if (!identity || !workspaceId || pubkey === identity.publicKey) return;
+    if (!identity || !workspaceId || pubkey === identity.publicKey || messagingRef.current) return;
+    messagingRef.current = true;
     prefetchDirectMessageOpen(workspaceId, pubkey);
-    setWorking('message-person');
     setError(null);
     try {
       const room = await new BuzzRigTransport(identity).resolveDirectMessage(workspaceId, pubkey);
@@ -141,7 +144,7 @@ export function useMembersMembership([
     } catch (reason) {
       setError(appErrorCopy(reason, `Could not open message.`));
     } finally {
-      setWorking(null);
+      messagingRef.current = false;
     }
   };
 return [

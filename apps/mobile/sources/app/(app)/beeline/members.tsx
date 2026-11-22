@@ -12,7 +12,6 @@ export type MembersAction =
   | 'pair-agent'
   | 'person-role'
   | 'remove-person'
-  | 'message-person'
   | 'save-agent-soul'
   | 'remove-agent'
   | 'model-config'
