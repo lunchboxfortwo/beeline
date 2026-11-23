@@ -15,9 +15,14 @@ afterEach(async () => {
   await Promise.all(tmpLinks.splice(0).map(path => rm(path, { force: true })));
   await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
-const cursorCases = [
-  { source: '.config/cursor/auth.json', privateFile: 'user/.config/cursor/auth.json' },
-  { source: '.cursor/agent-cli-state.json', privateFile: 'cursor/agent-cli-state.json' },
+const nativeLoginCases: Array<{ kind: AgentKind; source: string; privateFile: string }> = [
+  { kind: 'cursor', source: '.config/cursor/auth.json', privateFile: 'user/.config/cursor/auth.json' },
+  { kind: 'cursor', source: '.cursor/agent-cli-state.json', privateFile: 'cursor/agent-cli-state.json' },
+  {
+    kind: 'antigravity',
+    source: '.gemini/antigravity-cli/antigravity-oauth-token',
+    privateFile: 'user/.gemini/antigravity-cli/antigravity-oauth-token',
+  },
 ];
 const proxied: Array<{ kind: AgentKind; source: string; privateFile: string }> = [
   { kind: 'claude', source: '.claude/.credentials.json', privateFile: 'claude/.credentials.json' },
@@ -38,7 +43,7 @@ async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<st
 }
 
 for (const mode of ['readonly', 'edit'] as const) {
-  it.each(cursorCases)('Cursor native login store $source supports refresh in ' + mode + ' mode', async ({ source, privateFile }) => {
+  it.each(nativeLoginCases)('$kind native login store $source supports refresh in ' + mode + ' mode', async ({ kind, source, privateFile }) => {
     const root = await mkdtemp('/var/tmp/beeline-login-mounts-'); roots.push(root);
     const operatorHome = join(root, 'operator');
     const shared = join(operatorHome, source);
@@ -48,10 +53,10 @@ for (const mode of ['readonly', 'edit'] as const) {
     await writeFile(shared, '{}');
     await writeFile(join(operatorHome, 'unrelated.json'), 'unrelated');
     const privateRoot = join(root, 'private');
-    const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: 'cursor' });
+    const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: kind });
     tmpLinks.push(env.TMPDIR!);
     const credential = join(privateRoot, privateFile);
-    await sandboxed(mode, root, env, 'cursor', operatorHome, `
+    await sandboxed(mode, root, env, kind, operatorHome, `
       const target = fs.realpathSync(${JSON.stringify(credential)});
       fs.writeFileSync(target + '.next', JSON.stringify({ refreshed: true }));
       fs.renameSync(target + '.next', target);

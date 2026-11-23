@@ -233,7 +233,7 @@ export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
       pollText: true,
     },
   },
-  antigravity: { label: 'Antigravity' },
+  antigravity: { label: 'Antigravity', nativeLoginDirs: ['.gemini/antigravity-cli'] },
   reference: {},
   custom: { modelLaunch: 'command' },
 };
@@ -303,6 +303,13 @@ export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string;
     // from ~/.config/cursor/auth.json, so the isolated HOME needs it linked.
     { dir: 'cursor', source: '.cursor/agent-cli-state.json', target: 'agent-cli-state.json' },
     { dir: 'user', source: '.config/cursor/auth.json', target: '.config/cursor/auth.json' },
+    // agy acp reads its cached sign-in from ~/.gemini/antigravity-cli; the
+    // isolated HOME links that one file, never a copy of it.
+    {
+      dir: 'user',
+      source: '.gemini/antigravity-cli/antigravity-oauth-token',
+      target: '.gemini/antigravity-cli/antigravity-oauth-token',
+    },
   ];
 
 /**
