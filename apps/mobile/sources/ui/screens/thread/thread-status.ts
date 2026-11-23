@@ -1,7 +1,7 @@
 import { threadWorkState, type CornerBlocker, type CornerLifecycleView, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 
 /** The facts a list line reads: the server's state and, while waiting, its blocker. */
-export type ThreadWaitFacts = { readonly workingAgentName?: string; readonly state: CornerState; readonly blocker?: CornerBlocker; readonly reason?: CornerStateReason };
+export type ThreadWaitFacts = { readonly state: CornerState; readonly blocker?: CornerBlocker; readonly reason?: CornerStateReason };
 
 /**
  * A thread line's second line in lists, per viewer: "waiting on you" (`you`,
@@ -9,7 +9,6 @@ export type ThreadWaitFacts = { readonly workingAgentName?: string; readonly sta
  * for everyone else, then "review", "working", "backlog", "idle", "done"; one corner state drives both.
  */
 export function threadListLabel(thread: ThreadWaitFacts, viewer: string | undefined): { word: string; you: boolean } {
-  if (thread.workingAgentName) return { word: `${thread.workingAgentName} is working`, you: false };
   const work = threadWorkState(thread, viewer);
   if (work === 'needs-you') return { word: 'waiting on you', you: true };
   if (work === 'backlog' || work === 'done') return { word: work, you: false };

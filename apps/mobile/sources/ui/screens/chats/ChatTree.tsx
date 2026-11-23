@@ -125,7 +125,6 @@ function ThreadLine({
       testID={`thread-row-${corner.id}`}
     >
       <XStack width={layout === 'C' ? 40 : undefined} flexShrink={0}><Glyph icon={CornerDownRight} size={16} /></XStack>
-      <YStack flex={1} minWidth={0} gap="1">
       <T
         v={state === 'needs-you' ? 'metaStrong' : 'meta'}
         color={state === 'needs-you' ? 'ink' : 'secondary'}
@@ -134,8 +133,6 @@ function ThreadLine({
       >
         {title}
       </T>
-        {corner.workingAgentName ? <T v="meta" color="secondary">{word}</T> : null}
-      </YStack>
       <YStack width={STATE_MARK} height={STATE_MARK} flexShrink={0} alignItems="center" justifyContent="center">
         <WorkStateMark state={state} idle={idle} />
       </YStack>

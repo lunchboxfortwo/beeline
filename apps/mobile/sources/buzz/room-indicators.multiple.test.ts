@@ -7,7 +7,7 @@ const conversationIdentities = new Map(names.map(name => [name, {pubkey:name, na
 const input = {isCorner:true, now:200_000, viewerPubkey:'viewer',viewerCanSend:true,conversationIdentities};
 it('joins two names and carries each server receipt time and cancellation coordinates', () => {
   const ack = selectComposerAckPresentation({...input,activeTurns:turns.slice(0,2)});
-  expect(ack?.label).toBe('Ruby, Jellybean are working');
+  expect(ack?.label).toBe('Ruby, Jellybean brewing…');
   expect(ack?.startedAt).toBe(100);
   expect(ack?.agents?.map(agent => [agent.name,agent.startedAt,agent.stop])).toEqual([
     ['Ruby',100,{agentPubkey:'Ruby',requestId:'request-0'}],['Jellybean',120,{agentPubkey:'Jellybean',requestId:'request-1'}],
@@ -15,7 +15,7 @@ it('joins two names and carries each server receipt time and cancellation coordi
 });
 it('counts three or more and keeps unauthorized cancellation controls absent', () => {
   const ack = selectComposerAckPresentation({...input,viewerCanSend:false,activeTurns:turns});
-  expect(ack?.label).toBe('Ruby, Jellybean, Grunt, Bee are working');
+  expect(ack?.label).toBe('4 agents brewing…');
   expect(ack?.agents).toHaveLength(4);
   expect(ack?.agents?.every(agent => !agent.stop)).toBe(true);
 });

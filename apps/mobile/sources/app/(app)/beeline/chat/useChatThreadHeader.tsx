@@ -50,7 +50,6 @@ export function useChatThreadHeader({
     if (!isCorner) return undefined;
     const prLine = threadPrLine(roomSurface?.cornerLifecycle, isArchived);
     return {
-      workingAgentName: openingRow?.workingAgentName ?? openingSummary?.workingAgentName,
       chatTag: parentName ? (roomTitle(parentName) ?? null) : null,
       repositoryHomepageIcon: roomSurface?.room.homepageIcon,
       title: cornerShortTitle(parentName, title, decodedId),
@@ -61,7 +60,7 @@ export function useChatThreadHeader({
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [openingRow?.workingAgentName, openingSummary?.workingAgentName, decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, threadReason]);
+  }, [decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, threadReason]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

@@ -5,6 +5,7 @@ import { IdentityMark } from './IdentityMark';
 import { Button } from './Button';
 import type { ComposerWorkingAgent } from '@/buzz/room-indicators';
 import { TURN_LINE_ROW_MIN_HEIGHT } from '@/buzz/room-bottom-chrome';
+import { SPINNER_STEP_MS, elapsedSeconds, formatWorkingCounter } from '@/buzz/turn-clock';
 import { TurnBandSlot, TurnLineBar } from './TurnLineFrame';
 
 export { TurnBandSlot };
@@ -15,12 +16,13 @@ const SLOP = { top: STOP_HIT_SLOP, bottom: STOP_HIT_SLOP, left: 8, right: 8 };
 
 /**
  * The status line (decision 16): one small line above the composer while an
- * agent works — a spinner, "Jimmy is working" in brass, and a plain Stop for
+ * agent works — a spinner, "Jimmy thinking…" in brass, and a plain Stop for
  * the person who may withdraw the question. "Name · starting…" is the
  * explicit helper startup phase; nothing shows when idle. It reports a turn
  * and goes nowhere; Stop is the one action a turn in progress admits. A press
  * is acknowledged here (Stop dims) before the cancelled receipt lands; a
- * failed stop enables it again. Running status carries no elapsed counter.
+ * failed stop enables it again. The elapsed counter ticks from the server
+ * receipt's own time; without a receipt time no interval is scheduled.
  */
 export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgressLineBody> & {
   /** Accepted external sends use the same line without live motion. */
@@ -43,6 +45,8 @@ export function TurnProgressLine(props: React.ComponentProps<typeof TurnProgress
 const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   label,
   live = true,
+  startedAt,
+  received = false,
   onStop,
   stopping = false,
   testID,
@@ -56,7 +60,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   live?: boolean;
   /** Desktop callers already supply the transcript inset around this row. */
   inset?: boolean;
-  /** Retained for callers that also render the settled turn receipt. */
+  /** Server receipt time, unix seconds, the elapsed counter ticks from. */
   startedAt?: number;
   /** A new human steer was committed against this running turn. */
   received?: boolean;
@@ -77,6 +81,21 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   };
   const group = agents && agents.length > 1 ? agents : undefined;
   useEffect(() => { setExpanded(false); setStoppingAgents(new Set()); }, [group?.map(agent => `${agent.pubkey}:${agent.stop?.requestId}`).join(',')]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt == null) return;
+    const tick = () => {
+      const next = Date.now();
+      setNow((previous) =>
+        elapsedSeconds(startedAt * 1_000, previous) === elapsedSeconds(startedAt * 1_000, next) ? previous : next,
+      );
+    };
+    tick();
+    const timer = setInterval(tick, SPINNER_STEP_MS);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  const counter = startedAt != null ? formatWorkingCounter(startedAt * 1_000, now, stopping ? 'stopping' : 'thinking') : undefined;
+  const stateLabel = [counter, received ? 'received' : undefined].filter(Boolean).join(' · ');
   const workingAvatars = agents?.length ? (
     <XStack alignItems="center" flexShrink={0}>
       {agents.slice(0, 3).map((agent, index) => <YStack key={agent.pubkey} width={index === Math.min(agents.length, 3) - 1 ? 24 : 16} flexShrink={0}
@@ -89,7 +108,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   return (
     <TurnLineBar
       inset={inset}
-      accessibilityLabel={label}
+      accessibilityLabel={stateLabel ? `${label} (${stateLabel})` : label}
       accessibilityLiveRegion="polite"
       accessibilityRole={group ? undefined : live ? 'progressbar' : 'text'}
       testID={testID}
@@ -103,7 +122,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
               return <XStack key={agent.pubkey} paddingHorizontal="3" minHeight={44} gap="2" alignItems="center">
                 <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={24} />
                 <T v="meta" flex={1}>{agent.name}</T>
-                <T v="meta" color="secondary">{`${agent.name} is working`}</T>
+                <T v="meta" color="secondary">{formatWorkingCounter(agent.startedAt * 1_000, now, busy ? 'stopping' : 'thinking')}</T>
                 {agent.stop && onStopAgent ? <Button size="inline" variant="quiet" alignSelf="center" label="Stop" disabled={busy}
                   accessibilityLabel={`Stop ${agent.name}`} onPress={() => void stopAgent(agent)} testID={`stop-agent-${agent.pubkey}`} /> : null}
               </XStack>;
@@ -120,11 +139,14 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
             role="button" aria-expanded={expanded} hitSlop={SLOP} accessibilityState={{ expanded }} testID="working-agents-toggle">
             {workingAvatars}
             <T v="meta" color="secondary" numberOfLines={1} testID={testID ? `${testID}-label` : undefined}>{label}</T>
+            {counter != null ? <T v="meta" color="secondary" flexShrink={0} testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}
           </ListItem>
         ) : <>
         {workingAvatars}
         <XStack flex={1} minWidth={0} alignItems="center">
           <T v="meta" color="needsYou" numberOfLines={1} testID={testID ? `${testID}-label` : undefined}>{label}</T>
+          {counter != null ? <T v="meta" color="needsYou" marginLeft="1" testID={testID ? `${testID}-elapsed` : undefined}>{counter}</T> : null}
+          {received ? <T v="meta" color="needsYou" testID={testID ? `${testID}-received` : undefined}> · received</T> : null}
         </XStack>
         </>}
         {group?.some(agent => agent.stop) && onStopAgent ? <Button size="inline" variant="quiet" alignSelf="center"
