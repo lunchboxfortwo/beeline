@@ -1,7 +1,7 @@
 // Wires a joined app to Beeline without manual edits. Every change is additive (other entries stay), backed up once,
 // and removed again by `usebeeline session leave`. Ported from Reason Network (src/setup.rs, src/setup/*.rs),
 // Copyright 2026 Reason Machines, Inc., MIT OR Apache-2.0. See ./NOTICE and ./UPSTREAM.json for the copied commit.
-import { runOwned } from '../wait.js';
+import { runOwnedFile } from '../wait.js';
 import {
   copyFileSync,
   existsSync,
@@ -144,7 +144,8 @@ function writeJson(path: string, value: Json): boolean {
   return writeFile(path, JSON.stringify(value, null, 2) + '\n');
 }
 
-function quote(value: string): string {
+/** One shell word, double-quoted only when it needs to be. */
+export function quote(value: string): string {
   return /^[A-Za-z0-9_./:@=-]+$/.test(value) ? value : `"${value.replace(/(["\\$`])/g, '\\$1')}"`;
 }
 
@@ -406,14 +407,13 @@ async function hermes(context: SetupContext): Promise<string[]> {
   ];
   if (remove) rmSync(dir, { recursive: true, force: true });
   // Hermes loads only plugins its person enabled: enable ours, so no manual step remains.
-  const done = await runOwned({
-    step: 'Hermes plugin setup',
-    file: 'hermes',
-    args: ['plugins', remove ? 'disable' : 'enable', NAME],
+  const enabled = await runOwnedFile('hermes', ['plugins', remove ? 'disable' : 'enable', NAME], {
     env: context.env,
-    machineRead: true,
-  }).catch(() => ({ code: 1 }));
-  if (!remove && done.code !== 0)
+  }).then(
+    () => true,
+    () => false,
+  );
+  if (!remove && !enabled)
     lines.push(`Run "hermes plugins enable ${NAME}" once if Hermes does not load it.`);
   return lines;
 }

@@ -38,10 +38,7 @@ export async function flushClaudeMcp(
   requeued?: (path: string) => void,
 ): Promise<boolean> {
   if (!session.messagingSocketPath) return false;
-  const joined = readState(dir).sessions.find(
-    (s) =>
-      s.agent === 'claude-code' && (s.pid === session.pid || s.sessionId === session.sessionId),
-  );
+  const joined = joinedFor(dir, session);
   if (!joined) return false;
   const text = takeInbox(dir, joined.key);
   if (!text) return false;
@@ -55,15 +52,14 @@ export async function flushClaudeMcp(
   }
 }
 
-/** The joined record of the Claude Code session this process runs inside, if it joined. */
-function joinedClaude(
-  dir: string,
-  env: NodeJS.ProcessEnv,
-  chain: number[],
-): JoinedSession | undefined {
+/** The live Claude Code session this process runs inside. */
+function ownClaude(env: NodeJS.ProcessEnv, chain: number[]): ClaudeSession | undefined {
   const live = scanClaude(env);
-  const session = chain.map((pid) => live.find((s) => s.pid === pid)).find(Boolean);
-  if (!session) return undefined;
+  return chain.map((pid) => live.find((s) => s.pid === pid)).find(Boolean);
+}
+
+/** The joined record of a Claude Code session, if it joined. */
+function joinedFor(dir: string, session: ClaudeSession): JoinedSession | undefined {
   return readState(dir).sessions.find(
     (s) =>
       s.agent === 'claude-code' && (s.pid === session.pid || s.sessionId === session.sessionId),
@@ -93,8 +89,7 @@ export async function runClaudeMcp(
     try {
       while (dirty) {
         dirty = false;
-        const live = scanClaude(env);
-        const session = chain.map((pid) => live.find((s) => s.pid === pid)).find(Boolean);
+        const session = ownClaude(env, chain);
         if (!session) return;
         if (!registration && !deaf) {
           const folder = join(dir, 'claude-mcp');
@@ -148,8 +143,8 @@ export async function runClaudeMcp(
         continue;
       }
       if (request.id === undefined) continue;
-      const joined =
-        request.method === 'initialize' && rulesFor ? joinedClaude(dir, env, chain) : undefined;
+      const session = request.method === 'initialize' && rulesFor && ownClaude(env, chain);
+      const joined = session ? joinedFor(dir, session) : undefined;
       const result =
         request.method === 'initialize'
           ? {

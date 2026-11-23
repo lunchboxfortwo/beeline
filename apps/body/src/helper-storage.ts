@@ -1,22 +1,16 @@
 import { runOwnedFile } from './wait.js';
 import { lstat, readdir, readFile, readlink } from 'node:fs/promises';
 import { resolve, sep, relative } from 'node:path';
-import { type ExecFileOptions } from 'node:child_process';
-const execFileAsync = runOwnedFile;
 import {
   canonicalStoragePath,
+  firstAtOrAfter,
   ordinaryDirectory,
   storageTree,
   isSquirePath,
   removeStoragePath,
   type TreeEntry,
 } from './storage-filesystem.js';
-export {
-  ordinaryDirectory,
-  storageTree,
-  isSquirePath,
-  removeStoragePath,
-} from './storage-filesystem.js';
+export { ordinaryDirectory, storageTree, isSquirePath } from './storage-filesystem.js';
 import { SHARED_CREDENTIALS } from './agent-home.js';
 
 let reportChild: ((line: string) => void) | undefined;
@@ -28,11 +22,11 @@ export function reportStorageChildren(report: ((line: string) => void) | undefin
 export function storageChild(
   file: string,
   args: readonly string[],
-  options: ExecFileOptions = {},
+  options: Parameters<typeof runOwnedFile>[2] = {},
   label = [file, ...args].join(' '),
 ): Promise<{ stdout: string; stderr: string }> {
   reportChild?.(label);
-  return execFileAsync(file, [...args], { ...options, encoding: 'utf8' });
+  return runOwnedFile(file, args, options);
 }
 
 export const STORAGE_ITEM_UNUSED_MS = 7 * 24 * 60 * 60_000;
@@ -81,14 +75,11 @@ function inventory(path: string, tree: Map<string, TreeEntry>): Map<string, Inod
   };
   if (tree.has(path)) add(path);
   const prefix = `${path}/`;
-  let low = 0,
-    high = paths.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if (paths[middle]! < prefix) low = middle + 1;
-    else high = middle;
-  }
-  for (let index = low; index < paths.length && paths[index]!.startsWith(prefix); index++)
+  for (
+    let index = firstAtOrAfter(paths, prefix);
+    index < paths.length && paths[index]!.startsWith(prefix);
+    index++
+  )
     add(paths[index]!);
   return inodes;
 }
@@ -226,14 +217,7 @@ function processPathIndex(values: string[]): (root: string) => boolean {
     root = canonicalStoragePath(root);
     if (exact.has(root)) return true;
     const prefix = `${root}${sep}`;
-    let low = 0,
-      high = paths.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (paths[middle]! < prefix) low = middle + 1;
-      else high = middle;
-    }
-    return paths[low]?.startsWith(prefix) === true;
+    return paths[firstAtOrAfter(paths, prefix)]?.startsWith(prefix) === true;
   };
 }
 
@@ -259,18 +243,6 @@ const HISTORY_TREES = [
 const HISTORY_FILES =
   /^(?:codex\/(?:history\.jsonl|session_index\.jsonl|(?:state_\d+|thread_history_\d+)\.sqlite(?:-wal|-shm)?)|user\/\.local\/share\/opencode\/opencode\.db(?:-wal|-shm)?)$/;
 const RESUME_FILES = ['user/.pi/pi-acp/session-map.json', 'warm-transcript.json'];
-
-function retainedPaths(root: string, archived: boolean): string[] {
-  const homes = ['agent-home', 'scratch/agent-home'];
-  return homes.flatMap((home) => {
-    const paths = [...HISTORY_TREES].map((path) => resolve(root, home, path));
-    paths.push(...RESUME_FILES.map((path) => resolve(root, home, path)));
-    if (!archived) {
-      paths.push(...SHARED_CREDENTIALS.map((item) => resolve(root, home, item.dir, item.target)));
-    }
-    return paths;
-  });
-}
 
 // These are whole cache/download objects, never individual old files.
 const HOME_DISPOSABLE = [
@@ -347,9 +319,23 @@ const OPEN_SETTINGS = [
 
 function disposalObjects(root: string, archived: boolean, tree: Map<string, TreeEntry>): string[] {
   if (archived) return wholeObjectsExceptSquire(root, tree);
-  const keep = retainedPaths(root, archived);
-  const squirePaths = [...tree.keys()].filter(isSquirePath);
   const homes = ['agent-home', 'scratch/agent-home'];
+  const keep = homes.flatMap((home) =>
+    [
+      ...HISTORY_TREES,
+      ...RESUME_FILES,
+      ...SHARED_CREDENTIALS.map((item) => `${item.dir}/${item.target}`),
+      ...OPEN_SETTINGS,
+    ].map((path) => resolve(root, home, path)),
+  );
+  keep.push(
+    resolve(root, 'agent-private'),
+    resolve(root, 'scratch/agent-private'),
+    resolve(root, '.expo'),
+    resolve(root, 'scratch/.expo'),
+    resolve(root, '.beeline-corner.json'),
+  );
+  const squirePaths = [...tree.keys()].filter(isSquirePath);
   const disposable = homes.flatMap((home) =>
     HOME_DISPOSABLE.map((path) => resolve(root, home, path)),
   );
@@ -358,15 +344,6 @@ function disposalObjects(root: string, archived: boolean, tree: Map<string, Tree
       BUILD_OBJECTS.map((path) => resolve(root, prefix, path)),
     ),
   );
-  if (!archived) {
-    keep.push(...homes.flatMap((home) => OPEN_SETTINGS.map((path) => resolve(root, home, path))));
-    keep.push(resolve(root, 'agent-private'), resolve(root, 'scratch/agent-private'));
-    keep.push(
-      resolve(root, '.expo'),
-      resolve(root, 'scratch/.expo'),
-      resolve(root, '.beeline-corner.json'),
-    );
-  }
   const containers = new Set<string>();
   for (const known of [...keep, ...disposable]) {
     for (
@@ -390,14 +367,7 @@ function disposalObjects(root: string, archived: boolean, tree: Map<string, Tree
   const protectedExact = new Set(protectedPaths);
   const containsProtected = (path: string) => {
     const prefix = `${path}/`;
-    let low = 0,
-      high = protectedPaths.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (protectedPaths[middle]! < prefix) low = middle + 1;
-      else high = middle;
-    }
-    return protectedPaths[low]?.startsWith(prefix) === true;
+    return protectedPaths[firstAtOrAfter(protectedPaths, prefix)]?.startsWith(prefix) === true;
   };
   const objects: string[] = [];
   const children = new Map<string, string[]>();

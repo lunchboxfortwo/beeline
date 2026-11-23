@@ -5,7 +5,6 @@ import { readdir } from 'node:fs/promises';
 import { readStorageOwners } from './storage-owners.js';
 import type { StorageReclaimEntry, StorageRoomState } from './helper-storage.js';
 
-const exec = runOwnedFile;
 const DISK_INTERVAL_MS = 6 * 60 * 60_000;
 
 // Stream metadata, not file contents. O_NOATIME prevents measuring retention
@@ -75,7 +74,7 @@ export async function sampleHelperUsage(
   mode: 'disk' | 'process',
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const { stdout } = await exec(
+  const { stdout } = await runOwnedFile(
     '/usr/bin/python3',
     ['-c', INVENTORY, root, mode, String(process.pid)],
     {

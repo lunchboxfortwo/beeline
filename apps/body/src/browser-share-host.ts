@@ -3,7 +3,7 @@ import { chmodSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { shareChromiumPage, type ChromiumPage } from './browser-share.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
-import { answer, ask, listen, type Listening } from './wait.js';
+import { ask, listen, type Listening } from './wait.js';
 
 export function browserShareHostPath(stateRoot: string, agentId: string): string {
   return privateSocketPath(
@@ -30,68 +30,53 @@ export class BrowserShareHost {
     const server = createServer({ allowHalfOpen: true }, (socket) => {
       let text = '';
       socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => {
+        text += chunk;
+        if (text.length > 65_536) socket.destroy();
+      });
       // The client's half-close is the whole request; a close or error before it is a lost one.
-      void answer<void>(
-        'browser share client',
-        [
-          [socket, 'end', 'answer'],
-          [socket, 'error'],
-          [socket, 'close'],
-        ],
-        ({ reject }) => {
-          socket.on('data', (chunk: string) => {
-            text += chunk;
-            if (text.length > 65_536) {
-              reject(new Error('browser share request too large'));
-              socket.destroy();
-            }
+      socket.on('end', () => {
+        void (async () => {
+          const request = JSON.parse(text) as ShareRequest;
+          if (
+            !request.page?.webSocketDebuggerUrl ||
+            !request.shareId ||
+            !request.roomId ||
+            !request.serverBaseUrl ||
+            !request.daemonToken
+          )
+            throw new Error('Invalid browser share request');
+          await shareChromiumPage({
+            page: request.page,
+            shareId: request.shareId,
+            serverBaseUrl: request.serverBaseUrl,
+            daemonToken: request.daemonToken,
+            // The hosted share can outlive its model/MCP process; this closed
+            // session-end receipt has its own lifetime, without a turn source.
+            onEnded: async () => {
+              await ask(
+                {
+                  url: new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl),
+                  peer: 'Beeline server',
+                },
+                {
+                  method: 'POST',
+                  headers: {
+                    authorization: `Bearer ${request.daemonToken}`,
+                    'content-type': 'application/json',
+                  },
+                  body: JSON.stringify({ roomId: request.roomId, sessionId: request.page.id }),
+                },
+              ).catch(() => {});
+            },
           });
-        },
-      )
-        .then(
-          async () => {
-            const request = JSON.parse(text) as ShareRequest;
-            if (
-              !request.page?.webSocketDebuggerUrl ||
-              !request.shareId ||
-              !request.roomId ||
-              !request.serverBaseUrl ||
-              !request.daemonToken
-            )
-              throw new Error('Invalid browser share request');
-            await shareChromiumPage({
-              page: request.page,
-              shareId: request.shareId,
-              serverBaseUrl: request.serverBaseUrl,
-              daemonToken: request.daemonToken,
-              // The hosted share can outlive its model/MCP process; this closed
-              // session-end receipt has its own lifetime, without a turn source.
-              onEnded: async () => {
-                await ask(
-                  {
-                    url: new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl),
-                    peer: 'Beeline server',
-                  },
-                  {
-                    method: 'POST',
-                    headers: {
-                      authorization: `Bearer ${request.daemonToken}`,
-                      'content-type': 'application/json',
-                    },
-                    body: JSON.stringify({ roomId: request.roomId, sessionId: request.page.id }),
-                  },
-                ).catch(() => {});
-              },
-            });
-            socket.end(JSON.stringify({ ok: true }));
-          },
-          () => undefined,
-        )
-        .catch((error: unknown) =>
+          socket.end(JSON.stringify({ ok: true }));
+        })().catch((error: unknown) =>
           socket.end(
             JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
           ),
         );
+      });
     });
     this.server = await listen(server, this.socketPath);
     chmodSync(this.socketPath, 0o600);

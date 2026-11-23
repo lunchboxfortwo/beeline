@@ -8,7 +8,7 @@ import {
 } from '@beeline/api-contract/daemon';
 import { validateArtifact } from './artifact-validation.js';
 import { fileURLToPath } from 'node:url';
-import { runOwned } from './wait.js';
+import { runGit } from './read-only-mcp-read-tools.js';
 import {
   MESSAGE_REACTION_EMOJIS,
   type MessageReactionEmoji,
@@ -276,31 +276,17 @@ export async function namedPrivateFiles(
       const checkout = roots[0];
       if (checkout && gitBinary && withinRoot(realpathSync(checkout), resolved)) {
         try {
-          const tracked = await runOwned({
-            step: 'git ls-files',
-            file: gitBinary,
-            args: [
-              '-c',
-              'core.fsmonitor=false',
-              '-c',
-              'core.hooksPath=/dev/null',
+          await runGit(
+            [
               '--literal-pathspecs',
-              '-C',
-              checkout,
               'ls-files',
               '--error-unmatch',
               '--',
               relative(realpathSync(checkout), resolved),
             ],
-            env: {
-              PATH: '/usr/bin:/bin',
-              GIT_CONFIG_NOSYSTEM: '1',
-              GIT_CONFIG_GLOBAL: '/dev/null',
-              GIT_OPTIONAL_LOCKS: '0',
-            },
-            machineRead: true,
-          });
-          if (tracked.code === 0) continue;
+            checkout,
+          );
+          continue;
         } catch {
           /* Untracked files (or unavailable index evidence) need attachments. */
         }

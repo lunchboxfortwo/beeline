@@ -13,7 +13,8 @@ import { harnessStateDirsFromEnv, prepareRoomAgentCredentials } from './agent-ho
 import { wrapAgentCommand } from './bwrap-sandbox.js';
 import { PlaceSession } from './place-session.js';
 import { runtimeDirectory, type AgentRuntimeRecord } from './runtime.js';
-import { cornerCheckoutFolders, materializeCornerWorktree } from './workspace-checkout.js';
+import { materializeCornerWorktree } from './workspace-checkout.js';
+import { agentCornerCheckoutPaths as cornerCheckoutFolders } from './agent-corner-checkout.js';
 
 const git = promisify(execFile);
 const roots: string[] = [];
@@ -23,71 +24,126 @@ const servers: Server[] = [];
 afterEach(async () => {
   for (const child of children.splice(0)) child.kill('SIGKILL');
   for (const session of sessions.splice(0)) await session.dispose();
-  for (const server of servers.splice(0)) await new Promise<void>(done => server.close(() => done()));
+  for (const server of servers.splice(0))
+    await new Promise<void>((done) => server.close(() => done()));
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-it.each([false, true])('commits from the live thread sandbox after workspace setup (warm=%s)', async warm => {
-  const root = await mkdtemp('/var/tmp/beeline-thread-checkout-');
-  roots.push(root);
-  const source = join(root, 'source');
-  await mkdir(source);
-  await git('git', ['init', '-b', 'main', source]);
-  await writeFile(join(source, 'proof.txt'), 'seed\n');
-  await git('git', ['-C', source, 'add', '.']);
-  await git('git', ['-C', source, '-c', 'user.name=Proof', '-c', 'user.email=proof@example.com', 'commit', '-m', 'seed']);
-  const supervisorRoot = join(root, 'home', '.local', 'state');
-  const agentId = 'a'.repeat(64);
-  const ownState = runtimeDirectory(supervisorRoot, agentId);
-  const placeRoot = join(ownState, 'rooms', 'thread');
-  const privateHome = join(placeRoot, 'agent-home');
-  const operatorHome = join(root, 'operator');
-  const credentialState = join(operatorHome, '.claude');
-  await mkdir(credentialState, { recursive: true });
-  const login = { claudeAiOauth: { accessToken: 'original', refreshToken: 'original', expiresAt: 1000 } };
-  await writeFile(join(credentialState, '.credentials.json'), JSON.stringify(login));
-  const browserSocket = join(root, 'browser', 'control.sock');
-  await mkdir(join(browserSocket, '..'), { recursive: true });
-  const browser = createServer(socket => socket.end('reachable'));
-  servers.push(browser);
-  await new Promise<void>((done, reject) => { browser.once('error', reject); browser.listen(browserSocket, done); });
-  const cache = join(privateHome, 'cache');
-  const protectedFiles = [join(ownState, 'runtime.json'), join(operatorHome, 'settings.json'), join(credentialState, 'settings.json'),
-    ...['agent-home/auth.json', 'agent-home/warm-transcript.json', 'turn-context.json'].map(name =>
-      join(ownState, 'rooms', 'sibling', name))];
-  for (const file of protectedFiles) {
-    await mkdir(join(file, '..'), { recursive: true });
-    await writeFile(file, 'protected');
-  }
-  await mkdir(cache, { recursive: true });
-  const hostFile = join(supervisorRoot, 'host-state');
-  await writeFile(hostFile, 'host');
-  const input = { supervisorRoot, cornerId: 'thread', featureBranch: 'feature/thread', targetBranch: 'main',
-    token: '', remote: `file://${source}`, committer: { name: 'Proof', publicKey: agentId } };
-  const { path, gitCommonDir } = cornerCheckoutFolders(supervisorRoot, 'thread', agentId);
-  const client = Object.assign(new EventEmitter(), {
-    isAlive: true, startProcess: async () => {}, stopProcess: async () => {},
-    sessionNew: async () => ({ sessionId: 'live', raw: { configOptions: [] } }),
-    canLoadSession: () => false,
-  });
-  let launch: ConstructorParameters<typeof AcpClient>[0] | undefined;
-  const session = new PlaceSession({
-    agent: { publicKey: agentId, name: 'Proof' },
-    runtime: { supervisorRoot, agent: { publicKey: agentId } } as AgentRuntimeRecord,
-    config: { workspaceRoot: placeRoot, agentHomeRoot: privateHome, operatorHome,
-      agentBinary: 'claude', agentKind: 'claude', agentEnv: {}, bwrapPath: '/usr/bin/bwrap',
-      browserShareHostSocket: browserSocket, readonlyMcpCommand: 'fixture', mcpBinary: 'fixture' } as BodyConfig,
-    api: { baseUrl: 'https://synthetic.test', execute: async () => new Promise(() => {}),
-      refreshMachineVault: async () => {}, connection: () => ({ baseUrl: 'http://localhost',
-        daemonToken: 'fixture', agentId, helperVersion: 'test' }) } as unknown as DaemonApiClient,
-    placeId: 'thread', parentRoomId: 'parent', workspaceId: 'workspace', onExit() {},
-    createAcpClient: options => { launch = options; return client as unknown as AcpClient; },
-  });
-  sessions.push(session);
-  await session.start();
-  if (warm) await materializeCornerWorktree(input);
-  const inode = (await stat(gitCommonDir)).ino;
-  const probe = `
+it.each([false, true])(
+  'commits from the live thread sandbox after workspace setup (warm=%s)',
+  async (warm) => {
+    const root = await mkdtemp('/var/tmp/beeline-thread-checkout-');
+    roots.push(root);
+    const source = join(root, 'source');
+    await mkdir(source);
+    await git('git', ['init', '-b', 'main', source]);
+    await writeFile(join(source, 'proof.txt'), 'seed\n');
+    await git('git', ['-C', source, 'add', '.']);
+    await git('git', [
+      '-C',
+      source,
+      '-c',
+      'user.name=Proof',
+      '-c',
+      'user.email=proof@example.com',
+      'commit',
+      '-m',
+      'seed',
+    ]);
+    const supervisorRoot = join(root, 'home', '.local', 'state');
+    const agentId = 'a'.repeat(64);
+    const ownState = runtimeDirectory(supervisorRoot, agentId);
+    const placeRoot = join(ownState, 'rooms', 'thread');
+    const privateHome = join(placeRoot, 'agent-home');
+    const operatorHome = join(root, 'operator');
+    const credentialState = join(operatorHome, '.claude');
+    await mkdir(credentialState, { recursive: true });
+    const login = {
+      claudeAiOauth: { accessToken: 'original', refreshToken: 'original', expiresAt: 1000 },
+    };
+    await writeFile(join(credentialState, '.credentials.json'), JSON.stringify(login));
+    const browserSocket = join(root, 'browser', 'control.sock');
+    await mkdir(join(browserSocket, '..'), { recursive: true });
+    const browser = createServer((socket) => socket.end('reachable'));
+    servers.push(browser);
+    await new Promise<void>((done, reject) => {
+      browser.once('error', reject);
+      browser.listen(browserSocket, done);
+    });
+    const cache = join(privateHome, 'cache');
+    const protectedFiles = [
+      join(ownState, 'runtime.json'),
+      join(operatorHome, 'settings.json'),
+      join(credentialState, 'settings.json'),
+      ...['agent-home/auth.json', 'agent-home/warm-transcript.json', 'turn-context.json'].map(
+        (name) => join(ownState, 'rooms', 'sibling', name),
+      ),
+    ];
+    for (const file of protectedFiles) {
+      await mkdir(join(file, '..'), { recursive: true });
+      await writeFile(file, 'protected');
+    }
+    await mkdir(cache, { recursive: true });
+    const hostFile = join(supervisorRoot, 'host-state');
+    await writeFile(hostFile, 'host');
+    const input = {
+      supervisorRoot,
+      cornerId: 'thread',
+      featureBranch: 'feature/thread',
+      targetBranch: 'main',
+      token: '',
+      remote: `file://${source}`,
+      committer: { name: 'Proof', publicKey: agentId },
+    };
+    const { path, gitCommonDir } = cornerCheckoutFolders(supervisorRoot, 'thread', agentId);
+    const client = Object.assign(new EventEmitter(), {
+      isAlive: true,
+      startProcess: async () => {},
+      stopProcess: async () => {},
+      sessionNew: async () => ({ sessionId: 'live', raw: { configOptions: [] } }),
+      canLoadSession: () => false,
+    });
+    let launch: ConstructorParameters<typeof AcpClient>[0] | undefined;
+    const session = new PlaceSession({
+      agent: { publicKey: agentId, name: 'Proof' },
+      runtime: { supervisorRoot, agent: { publicKey: agentId } } as AgentRuntimeRecord,
+      config: {
+        workspaceRoot: placeRoot,
+        agentHomeRoot: privateHome,
+        operatorHome,
+        agentBinary: 'claude',
+        agentKind: 'claude',
+        agentEnv: {},
+        bwrapPath: '/usr/bin/bwrap',
+        browserShareHostSocket: browserSocket,
+        readonlyMcpCommand: 'fixture',
+        mcpBinary: 'fixture',
+      } as BodyConfig,
+      api: {
+        baseUrl: 'https://synthetic.test',
+        execute: async () => new Promise(() => {}),
+        refreshMachineVault: async () => {},
+        connection: () => ({
+          baseUrl: 'http://localhost',
+          daemonToken: 'fixture',
+          agentId,
+          helperVersion: 'test',
+        }),
+      } as unknown as DaemonApiClient,
+      placeId: 'thread',
+      parentRoomId: 'parent',
+      workspaceId: 'workspace',
+      onExit() {},
+      createAcpClient: (options) => {
+        launch = options;
+        return client as unknown as AcpClient;
+      },
+    });
+    sessions.push(session);
+    await session.start();
+    if (warm) await materializeCornerWorktree(input);
+    const inode = (await stat(gitCommonDir)).ino;
+    const probe = `
       console.log('ready');
       require('node:readline').createInterface({ input: process.stdin }).once('line', async () => {
         try {
@@ -121,36 +177,48 @@ it.each([false, true])('commits from the live thread sandbox after workspace set
         process.stdin.destroy();
       });
     `;
-  expect(launch?.agentCommand).toBe('/usr/bin/bwrap');
-  const commandIndex = launch!.agentArgs!.lastIndexOf(launch!.harnessCommand!);
-  expect(commandIndex).toBeGreaterThan(0);
-  const child = spawn(launch!.agentCommand, [...launch!.agentArgs!.slice(0, commandIndex), process.execPath, '-e', probe],
-    { env: { ...process.env, ...launch!.agentEnv }, stdio: ['pipe', 'pipe', 'pipe'] });
-  children.push(child);
-  const lines: string[] = [];
-  let stderr = '';
-  child.stderr!.on('data', chunk => { stderr += chunk; });
-  const ended = new Promise<number | null>(resolve => child.once('exit', resolve));
-  await new Promise<void>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', code => reject(new Error(`sandbox exited before ready: ${code}: ${stderr}`)));
-    createInterface({ input: child.stdout! }).on('line', line => { lines.push(line); if (line === 'ready') resolve(); });
-  });
-  await materializeCornerWorktree(input);
-  child.stdin!.end('commit\n');
-  expect(await ended, stderr).toBe(0);
-  expect((await stat(gitCommonDir)).ino).toBe(inode);
-  const head = (await git('git', ['-C', path, 'rev-parse', 'HEAD'])).stdout.trim();
-  expect(lines.at(-1)).toBe(head);
-  expect(await readFile(join(path, 'proof.txt'), 'utf8')).toBe('thread edit\n');
-  expect(await readFile(join(cache, 'private'), 'utf8')).toBe('cache');
-  expect(await readFile(join(placeRoot, 'own-state'), 'utf8')).toBe('private');
-  expect(await readFile(join(privateHome, 'claude', 'refresh-lock'), 'utf8')).toBe('refresh');
-  expect(JSON.parse(await readFile(join(credentialState, '.credentials.json'), 'utf8'))).toEqual(login);
-  expect(await readFile(hostFile, 'utf8')).toBe('host');
-  for (const file of protectedFiles) expect(await readFile(file, 'utf8')).toBe('protected');
-});
-
+    expect(launch?.agentCommand).toBe('/usr/bin/bwrap');
+    const commandIndex = launch!.agentArgs!.lastIndexOf(launch!.harnessCommand!);
+    expect(commandIndex).toBeGreaterThan(0);
+    const child = spawn(
+      launch!.agentCommand,
+      [...launch!.agentArgs!.slice(0, commandIndex), process.execPath, '-e', probe],
+      { env: { ...process.env, ...launch!.agentEnv }, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    children.push(child);
+    const lines: string[] = [];
+    let stderr = '';
+    child.stderr!.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    const ended = new Promise<number | null>((resolve) => child.once('exit', resolve));
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', (code) =>
+        reject(new Error(`sandbox exited before ready: ${code}: ${stderr}`)),
+      );
+      createInterface({ input: child.stdout! }).on('line', (line) => {
+        lines.push(line);
+        if (line === 'ready') resolve();
+      });
+    });
+    await materializeCornerWorktree(input);
+    child.stdin!.end('commit\n');
+    expect(await ended, stderr).toBe(0);
+    expect((await stat(gitCommonDir)).ino).toBe(inode);
+    const head = (await git('git', ['-C', path, 'rev-parse', 'HEAD'])).stdout.trim();
+    expect(lines.at(-1)).toBe(head);
+    expect(await readFile(join(path, 'proof.txt'), 'utf8')).toBe('thread edit\n');
+    expect(await readFile(join(cache, 'private'), 'utf8')).toBe('cache');
+    expect(await readFile(join(placeRoot, 'own-state'), 'utf8')).toBe('private');
+    expect(await readFile(join(privateHome, 'claude', 'refresh-lock'), 'utf8')).toBe('refresh');
+    expect(JSON.parse(await readFile(join(credentialState, '.credentials.json'), 'utf8'))).toEqual(
+      login,
+    );
+    expect(await readFile(hostFile, 'utf8')).toBe('host');
+    for (const file of protectedFiles) expect(await readFile(file, 'utf8')).toBe('protected');
+  },
+);
 
 it('keeps operator Claude settings and login read-only in a proxied Room', async () => {
   const root = await mkdtemp('/var/tmp/beeline-room-login-');
@@ -164,7 +232,9 @@ it('keeps operator Claude settings and login read-only in a proxied Room', async
   await writeFile(settings, 'protected');
   await writeFile(source, 'source');
   const overlay = await prepareRoomAgentCredentials({
-    root: join(root, 'thread', 'agent-home'), operatorHome, agentKind: 'claude',
+    root: join(root, 'thread', 'agent-home'),
+    operatorHome,
+    agentKind: 'claude',
   });
   try {
     const { stateDirs, tmpDir } = harnessStateDirsFromEnv(overlay);
@@ -172,7 +242,9 @@ it('keeps operator Claude settings and login read-only in a proxied Room', async
       bwrapPath: '/usr/bin/bwrap',
       spec: { mode: 'readonly', cwd: root, harnessStateDirs: stateDirs, tmpDir },
       command: process.execPath,
-      args: ['-e', `
+      args: [
+        '-e',
+        `
         const fs = require('node:fs');
         const assert = require('node:assert/strict');
         const loginDir = process.env.CLAUDE_CONFIG_DIR;
@@ -181,12 +253,15 @@ it('keeps operator Claude settings and login read-only in a proxied Room', async
         for (const path of ${JSON.stringify([settings, source, join(operatorHome, '.claude', '.credentials.json')])}) {
           assert.throws(() => fs.writeFileSync(path, 'escape'), { code: 'EROFS' });
         }
-      `],
+      `,
+      ],
     });
     await git(command.command, command.args, { env: { ...process.env, ...overlay } });
     expect(await readFile(settings, 'utf8')).toBe('protected');
     expect(await readFile(source, 'utf8')).toBe('source');
-    expect(await readFile(join(overlay.CLAUDE_CONFIG_DIR!, 'refresh-lock'), 'utf8')).toBe('private');
+    expect(await readFile(join(overlay.CLAUDE_CONFIG_DIR!, 'refresh-lock'), 'utf8')).toBe(
+      'private',
+    );
   } finally {
     await rm(overlay.TMPDIR!, { force: true });
   }

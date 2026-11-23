@@ -16,6 +16,11 @@ vi.mock('../wait.js', async (original) => ({
   watchChanges: boundary.watch,
   tryLock: async () => ({ held: true, release: boundary.release }),
   runOwned: boundary.send,
+  runOwnedFile: async (file: string, args: string[]) => {
+    const result = await boundary.send({ file, args });
+    if (result.code !== 0) throw Object.assign(new Error(`${file} exited ${result.code}`), result);
+    return result;
+  },
 }));
 vi.mock('./beeline-api.js', async (original) => ({
   ...(await original<typeof import('./beeline-api.js')>()),

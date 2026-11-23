@@ -31,7 +31,6 @@ import { readJsonObject, writePrivateFileAtomically } from './atomic-private-fil
 import { downloadBytes } from './update-download.js';
 import { answer, ask, listen, onEnd, runOwned } from './wait.js';
 
-const execFileAsync = runOwnedFile;
 const RELEASES = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
 const BINARY = 'cli-proxy-api';
 
@@ -145,7 +144,7 @@ export class CliProxy {
     );
     // A child left by a helper that died without its service manager would
     // refresh the same logins beside this one.
-    await execFileAsync('pkill', ['-f', `${BINARY} -config ${config}`]).catch(() => undefined);
+    await runOwnedFile('pkill', ['-f', `${BINARY} -config ${config}`]).catch(() => undefined);
     let output = '';
     let started!: () => void;
     const read = (chunk: Buffer) => {
