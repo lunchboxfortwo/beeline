@@ -1,9 +1,9 @@
-import { createConnection, createServer, type Server } from 'node:net';
+import { createServer } from 'node:net';
 import { chmodSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { shareChromiumPage, type ChromiumPage } from './browser-share.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
-import { ask } from './wait.js';
+import { answer, ask, listen, type Listening } from './wait.js';
 
 export function browserShareHostPath(stateRoot: string, agentId: string): string {
   return privateSocketPath(
@@ -21,97 +21,98 @@ type ShareRequest = {
 
 /** One socket per hosted agent, outside short lived model turn sandboxes. */
 export class BrowserShareHost {
-  private server?: Server;
+  private server?: Listening;
   constructor(readonly socketPath: string) {}
 
   async start(): Promise<void> {
     await preparePrivateSocketDirectory(this.socketPath);
     rmSync(this.socketPath, { force: true });
-    this.server = createServer({ allowHalfOpen: true }, (socket) => {
+    const server = createServer({ allowHalfOpen: true }, (socket) => {
       let text = '';
       socket.setEncoding('utf8');
-      socket.on('data', (chunk: string) => {
-        text += chunk;
-        if (text.length > 65_536) socket.destroy();
-      });
-      socket.once('end', () => {
-        void (async () => {
-          const request = JSON.parse(text) as ShareRequest;
-          if (
-            !request.page?.webSocketDebuggerUrl ||
-            !request.shareId ||
-            !request.roomId ||
-            !request.serverBaseUrl ||
-            !request.daemonToken
-          )
-            throw new Error('Invalid browser share request');
-          await shareChromiumPage({
-            page: request.page,
-            shareId: request.shareId,
-            serverBaseUrl: request.serverBaseUrl,
-            daemonToken: request.daemonToken,
-            // The hosted share can outlive its model/MCP process; this closed
-            // session-end receipt has its own lifetime, without a turn source.
-            onEnded: async () => {
-              await ask(
-                {
-                  url: new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl),
-                  peer: 'Beeline server',
-                },
-                {
-                  method: 'POST',
-                  headers: {
-                    authorization: `Bearer ${request.daemonToken}`,
-                    'content-type': 'application/json',
-                  },
-                  body: JSON.stringify({ roomId: request.roomId, sessionId: request.page.id }),
-                },
-              ).catch(() => {});
-            },
+      // The client's half-close is the whole request; a close or error before it is a lost one.
+      void answer<void>(
+        'browser share client',
+        [
+          [socket, 'end', 'answer'],
+          [socket, 'error'],
+          [socket, 'close'],
+        ],
+        ({ reject }) => {
+          socket.on('data', (chunk: string) => {
+            text += chunk;
+            if (text.length > 65_536) {
+              reject(new Error('browser share request too large'));
+              socket.destroy();
+            }
           });
-          socket.end(JSON.stringify({ ok: true }));
-        })().catch((error: unknown) =>
+        },
+      )
+        .then(
+          async () => {
+            const request = JSON.parse(text) as ShareRequest;
+            if (
+              !request.page?.webSocketDebuggerUrl ||
+              !request.shareId ||
+              !request.roomId ||
+              !request.serverBaseUrl ||
+              !request.daemonToken
+            )
+              throw new Error('Invalid browser share request');
+            await shareChromiumPage({
+              page: request.page,
+              shareId: request.shareId,
+              serverBaseUrl: request.serverBaseUrl,
+              daemonToken: request.daemonToken,
+              // The hosted share can outlive its model/MCP process; this closed
+              // session-end receipt has its own lifetime, without a turn source.
+              onEnded: async () => {
+                await ask(
+                  {
+                    url: new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl),
+                    peer: 'Beeline server',
+                  },
+                  {
+                    method: 'POST',
+                    headers: {
+                      authorization: `Bearer ${request.daemonToken}`,
+                      'content-type': 'application/json',
+                    },
+                    body: JSON.stringify({ roomId: request.roomId, sessionId: request.page.id }),
+                  },
+                ).catch(() => {});
+              },
+            });
+            socket.end(JSON.stringify({ ok: true }));
+          },
+          () => undefined,
+        )
+        .catch((error: unknown) =>
           socket.end(
             JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
           ),
         );
-      });
     });
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once('error', reject);
-      this.server!.listen(this.socketPath, () => {
-        this.server!.off('error', reject);
-        resolve();
-      });
-    });
+    this.server = await listen(server, this.socketPath);
     chmodSync(this.socketPath, 0o600);
   }
 
   async stop(): Promise<void> {
-    if (this.server) await new Promise<void>((resolve) => this.server!.close(() => resolve()));
+    const server = this.server;
     this.server = undefined;
+    await server?.close();
     rmSync(this.socketPath, { force: true });
   }
 }
 
-export function startHostedBrowserShare(socketPath: string, request: ShareRequest): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const socket = createConnection(socketPath);
-    let output = '';
-    socket.setEncoding('utf8');
-    socket.once('connect', () => socket.end(JSON.stringify(request)));
-    socket.on('data', (chunk: string) => {
-      output += chunk;
-    });
-    socket.once('error', reject);
-    socket.once('close', () => {
-      try {
-        const result = JSON.parse(output) as { ok?: boolean; error?: string };
-        if (!result.ok) throw new Error(result.error ?? 'Browser share host failed');
-        resolve();
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
+export async function startHostedBrowserShare(
+  socketPath: string,
+  request: ShareRequest,
+): Promise<void> {
+  const output = await ask<string>(
+    { socket: socketPath, peer: 'browser share host', framing: 'eof', machineRead: true },
+    JSON.stringify(request),
+  );
+  const result = JSON.parse(output) as { ok?: boolean; error?: string };
+  if (!result.ok) throw new Error(result.error ?? 'Browser share host failed');
 }

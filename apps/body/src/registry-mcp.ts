@@ -2,7 +2,7 @@ import { boundToolResponse } from './tool-output-budget.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createConnection, createServer, isIPv4, isIPv6, type Server } from 'node:net';
+import { createServer, isIPv4, isIPv6, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -14,6 +14,7 @@ import {
   NON_CONSUMING,
 } from './resource-mcp-facade.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
+import { ask, listen, type Listening } from './wait.js';
 
 export const REGISTRY_MCP_BROKER_FLAG = '--registry-mcp-broker';
 
@@ -672,6 +673,7 @@ export function registryMcpBrokerSocketPath(home = homedir(), agentId?: string):
 export class RegistryMcpHostBroker {
   readonly socketPath: string;
   private server?: Server;
+  private listening?: Listening;
   /** Sessions are PER CONNECTION: two Rooms initialized against the same
    * connector each hold their own provider session id. */
   private readonly sessions = new Map<string, string>();
@@ -796,49 +798,29 @@ export class RegistryMcpHostBroker {
         })();
       });
     });
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once('error', reject);
-      this.server!.listen(this.socketPath, () => {
-        this.server!.off('error', reject);
-        resolve();
-      });
-    });
+    this.listening = await listen(this.server, this.socketPath);
     chmodSync(this.socketPath, 0o600);
   }
 
   async stop(): Promise<void> {
-    const server = this.server;
+    const listening = this.listening;
     this.server = undefined;
-    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    this.listening = undefined;
+    await listening?.close();
     rmSync(this.socketPath, { force: true });
   }
 }
 
 export async function brokerRequest(socketPath: string, request: BrokerRequest): Promise<string[]> {
-  return new Promise<string[]>((resolve, reject) => {
-    const socket = createConnection(socketPath);
-    let output = '';
-    socket.setEncoding('utf8');
-    socket.on('connect', () => socket.end(JSON.stringify(request)));
-    socket.on('data', (chunk) => {
-      output += chunk;
-    });
-    socket.on('error', reject);
-    socket.on('close', () => {
-      try {
-        const parsed = JSON.parse(output) as { messages?: unknown; error?: unknown };
-        if (typeof parsed.error === 'string') throw new Error(parsed.error);
-        if (
-          !Array.isArray(parsed.messages) ||
-          !parsed.messages.every((entry) => typeof entry === 'string')
-        )
-          throw new Error('Registry MCP broker returned an invalid response');
-        resolve(parsed.messages);
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
+  const output = await ask<string>(
+    { socket: socketPath, peer: 'Registry MCP broker', framing: 'eof', machineRead: true },
+    JSON.stringify(request),
+  );
+  const parsed = JSON.parse(output) as { messages?: unknown; error?: unknown };
+  if (typeof parsed.error === 'string') throw new Error(parsed.error);
+  if (!Array.isArray(parsed.messages) || !parsed.messages.every((entry) => typeof entry === 'string'))
+    throw new Error('Registry MCP broker returned an invalid response');
+  return parsed.messages;
 }
 
 /**

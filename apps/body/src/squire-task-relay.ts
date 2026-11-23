@@ -15,7 +15,7 @@ import { sharedSquireMcpClient, type SquireMcpConnection } from './squire-mcp-cl
 import { SquireShareRenewals, type SquireShareLease } from './squire-share-renewals.js';
 import { squireApprovalFromMcp } from './resource-mcp-facade.js';
 import { squireSignedOutUrl } from './squire-sign-in.js';
-import { ask } from './wait.js';
+import { ask, listen } from './wait.js';
 import {
   forgetSquireSessions,
   registerSquireSession,
@@ -215,10 +215,7 @@ export class SquireTaskRelay {
           );
         }
       });
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', resolve);
-      });
+      await listen(server, { port: 0, host: '127.0.0.1' });
       this.server = server;
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Squire relay has no TCP port');

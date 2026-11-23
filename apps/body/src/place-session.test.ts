@@ -813,7 +813,8 @@ it.runIf(process.platform !== 'win32')('Stop kills granted commands and descenda
       for (const pid of [...pids.slice(0, 2), ...workers.slice(0, 2)]) expect(await running(pid)).toBe(false);
     });
     const stopped = await Promise.all(runs.slice(0, 2));
-    expect(stopped).toEqual([expect.objectContaining({ signal: 'SIGKILL' }), expect.objectContaining({ signal: 'SIGKILL' })]);
+    // A Stop is a cancel, never reported as the granted-command time limit.
+    expect(stopped).toEqual([expect.objectContaining({ signal: 'SIGKILL', timedOut: false }), expect.objectContaining({ signal: 'SIGKILL', timedOut: false })]);
     expect(await running(pids[2]!)).toBe(true);
     expect(await running(workers[2]!)).toBe(true);
   } finally {

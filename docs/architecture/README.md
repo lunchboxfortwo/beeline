@@ -38,12 +38,17 @@ forbidden calls and verifies the real architecture check rejects them.
 
 The strict `helper.waits` rule covers `apps/body/src`: a helper command or agent
 tool waits only for the answer to its own request or the exit of a child it owns,
-never for a condition, and arms no timer. `ask`, `runOwned` and `tryLock` in
+never for a condition, and arms no timer. `ask`, `runOwned`, `tryLock`, `answer`,
+`listen`, `connect`, `watchChanges`, `launchDetached` and `onEnd` in
 `apps/body/src/wait.ts` are the shared wait owners; the agent stay-warm countdown
-`AgentRunner.armIdle` is the one timer owned outside it. The sites outside them
-today are a strict one-way ratchet: CI rejects a raised `total`, so it only
-falls as areas move to the owner. `packages/scripts/helper-waits.test.mjs` plants
-waits and timers and verifies the real check rejects them.
+`AgentRunner.armIdle` and the granted-command limit `grantCommandLimit` are the
+only timers owned outside it. The owner approved the six newer `wait.ts` owners
+and the granted-command limit as one exact landing (`HELPER_WAIT_OWNER_LANDING`
+in `packages/scripts/architecture-invariants.mjs`); any other widening still
+fails. The sites outside them today are a strict one-way ratchet: CI rejects a
+raised `total`, so it only falls as areas move to the owner.
+`packages/scripts/helper-waits.test.mjs` plants waits and timers and verifies the
+real check rejects them.
 
 ## Storage registry (bloat inside a module)
 

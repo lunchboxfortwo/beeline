@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { GrantCommandRunner } from './grant-runner.js';
+import { listen, type Listening } from './wait.js';
 
 export interface GrantRunnerEndpoint {
   url: string;
@@ -14,7 +15,7 @@ export interface GrantRunnerEndpoint {
  * a per-process random bearer token keeps other local users out.
  */
 export class GrantRunnerServer {
-  private server?: Server;
+  private server?: Listening;
   private endpoint?: GrantRunnerEndpoint;
 
   constructor(
@@ -41,13 +42,10 @@ export class GrantRunnerServer {
     const server = createServer((request, response) => {
       void this.handle(request, response, token);
     });
-    await new Promise<void>((resolveListen, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => resolveListen());
-    });
+    const listening = await listen(server, { port: 0, host: '127.0.0.1' });
     server.unref?.();
     const address = server.address() as AddressInfo;
-    this.server = server;
+    this.server = listening;
     this.endpoint = { url: `http://127.0.0.1:${address.port}`, token };
     return this.endpoint;
   }
@@ -56,8 +54,7 @@ export class GrantRunnerServer {
     const server = this.server;
     this.server = undefined;
     this.endpoint = undefined;
-    if (!server) return;
-    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    await server?.close();
   }
 
   private async handle(

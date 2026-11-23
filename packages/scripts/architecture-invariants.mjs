@@ -459,6 +459,62 @@ function addsShutdownTimerOwner(was, rule) {
   );
 }
 
+/**
+ * The owner's D1 decision (2026-11-23) moves the remaining helper waits into
+ * named owners in one exact landing: the six wait.ts primitives and the D3
+ * granted-command limit, with exactly the owned sinks they hold. Only this
+ * before -> after pair is accepted; every other boundary stays frozen, so any
+ * later widening fails again.
+ */
+const HELPER_WAIT_OWNER_LANDING = {
+  before: {
+    owners: ['apps/body/src/wait.ts', 'apps/body/src/agent-runner.ts'],
+    ownerFunctions: {
+      'apps/body/src/wait.ts': ['ask', 'runOwned', 'tryLock'],
+      'apps/body/src/agent-runner.ts': ['armIdle'],
+    },
+    ownerSites: 18,
+  },
+  after: {
+    owners: [
+      'apps/body/src/wait.ts',
+      'apps/body/src/agent-runner.ts',
+      'apps/body/src/grant-runner.ts',
+    ],
+    ownerFunctions: {
+      'apps/body/src/wait.ts': [
+        'ask',
+        'runOwned',
+        'tryLock',
+        'answer',
+        'listen',
+        'connect',
+        'watchChanges',
+        'launchDetached',
+        'onEnd',
+      ],
+      'apps/body/src/agent-runner.ts': ['armIdle'],
+      'apps/body/src/grant-runner.ts': ['grantCommandLimit'],
+    },
+    ownerSites: 26,
+  },
+};
+const LANDING_KEYS = ['owners', 'ownerFunctions', 'ownerSites'];
+function landsHelperWaitOwners(was, rule) {
+  const matches = (candidate, manifest) =>
+    LANDING_KEYS.every(
+      (key) => JSON.stringify(candidate[key] ?? null) === JSON.stringify(manifest[key]),
+    );
+  return (
+    was.id === 'helper.waits' &&
+    matches(was, HELPER_WAIT_OWNER_LANDING.before) &&
+    matches(rule, HELPER_WAIT_OWNER_LANDING.after) &&
+    BOUNDARY_KEYS.filter((key) => !LANDING_KEYS.includes(key)).every(
+      (key) => JSON.stringify(was[key] ?? null) === JSON.stringify(rule[key] ?? null),
+    )
+  );
+}
+
 /** Strict capability owners cannot be weakened through a candidate-rule edit. */
 export function strictRelaxations(root, base, head, ref) {
   if (!base) return [];
@@ -485,9 +541,11 @@ export function strictRelaxations(root, base, head, ref) {
     const moved =
       unchangedOwners(root, was, rule, readBase) ||
       (typeof ref === 'string' && mechanicalOwnerMove(root, was, rule, ref));
+    const landed = landsHelperWaitOwners(was, rule);
     for (const key of BOUNDARY_KEYS) {
       if (moved && ['owners', 'ownerFunctions'].includes(key)) continue;
       if (key === 'owners' && addsShutdownTimerOwner(was, rule)) continue;
+      if (landed && LANDING_KEYS.includes(key)) continue;
       if (
         JSON.stringify(rule[key] ?? null) !== JSON.stringify(was[key] ?? null) &&
         !tighterBoundary(key, was[key], rule[key])

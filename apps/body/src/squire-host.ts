@@ -8,7 +8,6 @@
  * read-write, and elects the daemon from a host user unit outside that mount
  * namespace. A sandboxed façade never elects.
  */
-import { spawn } from 'node:child_process';
 import {
   accessSync,
   existsSync,
@@ -25,13 +24,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSquireBrokerLink } from './squire-broker-link.js';
 import { reclaimSquireBrokerSockets } from './squire-broker-squatter.js';
-import { runOwned } from './wait.js';
+import { connect, runOwned } from './wait.js';
 
 export const SQUIRE_BROKER_UNAVAILABLE = 'broker unavailable';
 export const TRUSTY_SQUIRE_BROKER_UNIT_NAME = 'trusty-squire-broker.service';
@@ -148,17 +146,9 @@ export function squireHostDirWritable(socketPath: string): boolean {
  * the only way to tell a live listener from an orphaned file.
  */
 export async function squireBrokerSocketReady(socketPath: string): Promise<boolean> {
-  return await new Promise((resolveReady) => {
-    const probe = createConnection(socketPath);
-    probe.once('connect', () => {
-      probe.destroy();
-      resolveReady(true);
-    });
-    probe.once('error', () => {
-      probe.destroy();
-      resolveReady(false);
-    });
-  });
+  const probe = await connect(socketPath, { peer: 'Trusty Squire broker' }).catch(() => undefined);
+  probe?.destroy();
+  return probe !== undefined;
 }
 
 /**
@@ -420,12 +410,24 @@ WantedBy=default.target
 `;
 }
 
-function spawnSquireBrokerProcess(entry: string, env: NodeJS.ProcessEnv): void {
-  const child = spawn(process.execPath, [entry, 'broker'], { env, stdio: 'inherit' });
-  child.on('exit', (code, signal) => {
-    if (signal) process.exit(1);
-    process.exit(code ?? 1);
+/**
+ * The unit's main process mirrors the broker it owns: its exit code, or 1 for
+ * a signal. The broker shares the unit's signals, so a stop reaches it
+ * directly and it closes its sockets itself.
+ */
+async function runSquireBrokerProcess(entry: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const result = await runOwned({
+    step: 'Trusty Squire broker',
+    file: process.execPath,
+    args: [entry, 'broker'],
+    env,
+    interactive: true,
+    sharedSignals: true,
+  }).catch((error: unknown) => {
+    process.stderr.write(`[beeline] Trusty Squire broker not started: ${String(error)}\n`);
+    return undefined;
   });
+  process.exit(!result || result.signal ? 1 : (result.code ?? 1));
 }
 
 /**
@@ -461,7 +463,7 @@ export async function runSquireBroker(env: NodeJS.ProcessEnv = process.env): Pro
     process.exit(1);
     return;
   }
-  spawnSquireBrokerProcess(entry, {
+  await runSquireBrokerProcess(entry, {
     ...env,
     ...squireHostRewriteEnv(home),
     TRUSTY_SQUIRE_BROKER_SOCKET: paths.brokerSocket,

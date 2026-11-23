@@ -233,15 +233,30 @@
       "invariant": "A helper command or agent tool waits only for the answer to its own request or the exit of a child it owns; it never waits for a condition, and arms no timer.",
       "pattern": "setTimeout\\(|setInterval\\(|new Promise\\b|\\bwatch\\(|\\.once\\(\\s*['\"](?:exit|close|end)['\"]|\\bfetch\\(|\\bspawn\\(|execFile(?:Sync)?\\(|createConnection\\(|\\.listen\\(",
       "scope": ["apps/body/src"],
-      "owners": ["apps/body/src/wait.ts", "apps/body/src/agent-runner.ts"],
+      "owners": [
+        "apps/body/src/wait.ts",
+        "apps/body/src/agent-runner.ts",
+        "apps/body/src/grant-runner.ts"
+      ],
       "ownerFunctions": {
-        "apps/body/src/wait.ts": ["ask", "runOwned", "tryLock"],
-        "apps/body/src/agent-runner.ts": ["armIdle"]
+        "apps/body/src/wait.ts": [
+          "ask",
+          "runOwned",
+          "tryLock",
+          "answer",
+          "listen",
+          "connect",
+          "watchChanges",
+          "launchDetached",
+          "onEnd"
+        ],
+        "apps/body/src/agent-runner.ts": ["armIdle"],
+        "apps/body/src/grant-runner.ts": ["grantCommandLimit"]
       },
-      "ownerSites": 18,
+      "ownerSites": 26,
       "strict": true,
-      "total": 112,
-      "fix": "use ask/runOwned/tryLock in apps/body/src/wait.ts: ask for one request and one answer (socket or HTTP), runOwned for a child you own and stream, tryLock for a lock that never queues. Do not wait for a condition and do not add a timer; the agent stay-warm countdown AgentRunner.armIdle is the only timer owned outside wait.ts."
+      "total": 75,
+      "fix": "use the owners in apps/body/src/wait.ts: ask for one request and one answer (socket or HTTP), runOwned for a child you own and stream, tryLock for a lock that never queues, answer for a reply that arrives later on a channel you already hold, listen to bind a server, connect to open a stream, watchChanges for a filesystem push subscription, launchDetached for a process that must outlive you, onEnd for teardown on a channel's end. Do not wait for a condition and do not add a timer; the agent stay-warm countdown AgentRunner.armIdle and the granted-command limit grantCommandLimit are the only timers owned outside wait.ts."
     },
     {
       "id": "access.membership-writes",
