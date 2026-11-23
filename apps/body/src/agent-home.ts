@@ -20,11 +20,8 @@
  * directory and regenerated on activation; operator UI/default settings stay
  * isolated.
  *
- * **Skills.** Every `<harness-home>/skills` is rebuilt on activation with the
- * explicit default allowlist plus narrow names stored on this agent's runtime
- * record. Shared skills are validated and copied as private ordinary
- * files, preserving owner execution permission for launchers; ambient
- * directories are never inherited. Ordinary operator MCP server
+ * Skill startup and optional preparation follow `docs/agent-body.md`.
+ * Ordinary operator MCP server
  * declarations are COPIED into the harness home so every Room/corner session
  * has the tools the host offers — without them a harness boots with a login but
  * nothing to advertise over ACP. Codex-acp
@@ -361,20 +358,28 @@ async function retireNativeLogins(root: string): Promise<void> {
 
 /**
  * Create the room-instance's harness state directories and prepare its proxy
- * routes, native Cursor links and private API-key copies. Return the harness
- * environment overlay. An unsafe or unavailable private home never falls back
- * to another credential or ambient harness state.
+ * routes, native Cursor links and private API-key copies. Skill lifecycle:
+ * `docs/agent-body.md`. Return the harness environment overlay. An unsafe or
+ * unavailable private home never falls back to another credential or ambient
+ * harness state.
  */
-export async function prepareRoomAgentCredentials(input: RoomAgentHomeInput): Promise<Record<string, string>> {
+export async function prepareRoomAgentCredentials(
+  input: RoomAgentHomeInput,
+): Promise<Record<string, string>> {
   let env: Record<string, string>;
-  try { env = await provisionRoomAgentCredentials(input); }
-  catch (error) {
+  try {
+    env = await provisionRoomAgentCredentials(input);
+  } catch (error) {
     // A broken configured folder never admits ambient credentials or prevents
     // delivery. A fresh private home starts empty and the session hears why.
     const root = await mkdtemp(resolve(tmpdir(), 'beeline-agent-private-'));
-    await Promise.all(HOME_SUBDIRS.map(dir => mkdir(resolve(root, dir), { recursive: true, mode: 0o700 })));
-    input.onDiagnostic?.(`Private home setup failed (${error instanceof Error ? error.message : String(error)}). ` +
-      `This session uses a fresh private home at ${root}; saved login and optional tools may be unavailable.`);
+    await Promise.all(
+      HOME_SUBDIRS.map((dir) => mkdir(resolve(root, dir), { recursive: true, mode: 0o700 })),
+    );
+    input.onDiagnostic?.(
+      `Private home setup failed (${error instanceof Error ? error.message : String(error)}). ` +
+        `This session uses a fresh private home at ${root}; saved login and optional tools may be unavailable.`,
+    );
     env = { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
   }
   const root = dirname(env.HOME!);

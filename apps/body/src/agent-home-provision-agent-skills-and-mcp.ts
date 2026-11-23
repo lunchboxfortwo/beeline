@@ -18,11 +18,8 @@ import { piRetrySettings } from './pi-retry-settings.js';
  * directory and regenerated on activation; operator UI/default settings stay
  * isolated.
  *
- * **Skills.** Every `<harness-home>/skills` is rebuilt on activation with the
- * explicit default allowlist plus narrow names stored on this agent's runtime
- * record. Shared skills are validated and copied as private ordinary
- * files, preserving owner execution permission for launchers; ambient
- * directories are never inherited. Ordinary operator MCP server
+ * Skill startup and optional preparation follow `docs/agent-body.md`.
+ * Ordinary operator MCP server
  * declarations are COPIED into the harness home so every Room/corner session
  * has the tools the host offers — without them a harness boots with a login but
  * nothing to advertise over ACP. Codex-acp
@@ -100,14 +97,9 @@ export async function provisionAgentSkills(
 
 
 /**
- * Provision each harness home's Beeline-managed skills directory and copy the
- * operator's MCP declarations into the home. Best-effort end to end: a missing
- * source is the common case (not every host has every harness), and any
- * failure degrades to a session with fewer skills rather than failing the
- * Room. Unlike credentials, BOTH the MCP copies and the managed skill are
- * REGENERATED on every prepare call so a daemon restart picks up operator
- * config edits and release upgrades; per-entry operator-skill links are
- * repaired when they point somewhere else.
+ * Optional skill and MCP preparation follows `docs/agent-body.md`.
+ * Operator skill trees and MCP declarations must remain private ordinary
+ * copies so harness writes cannot mutate the operator's originals.
  */
 export async function provisionAgentSkillsAndMcp(
   root: string,
