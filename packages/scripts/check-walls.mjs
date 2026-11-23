@@ -188,6 +188,8 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.hostedModel', 'this.writeContext', 'OwnedModelFiles.create', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
   // Owner-requested credential bootstrap refreshes retained thread launchers.
   'this.prepareGitHubLaunchers',
+  // Release-owned skills must exist before the harness starts; operator shares stay optional.
+  'provisionAgentSkills',
   // Owner-requested pre-turn steps: a thread checkout picks up the feature
   // branch before its turn, and received pictures ride inline as before.
   'this.refreshFeatureBranch', 'deliverAttachments',

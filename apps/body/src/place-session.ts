@@ -63,7 +63,12 @@ import { roomReplySteps } from './room-turn-steps.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
 import { SessionResources } from './session-resources.js';
-import { RunningModelReporter, reconcileStartupModel, switchLiveModel, type RunningModelReport } from './session-running-model.js';
+import {
+  RunningModelReporter,
+  reconcileStartupModel,
+  switchLiveModel,
+  type RunningModelReport,
+} from './session-running-model.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
@@ -76,6 +81,9 @@ import {
   roomCheckoutPath,
 } from './workspace-checkout.js';
 import { syncCornerBranch } from './corner-branch-sync.js';
+import { writeTurnContext } from './turn-context.js';
+
+export { writeTurnContext } from './turn-context.js';
 
 export interface PlaceSessionOptions {
   agent: { publicKey: string; name: string };
@@ -270,10 +278,17 @@ export class PlaceSession {
       return;
     }
     this.activeSelection = next;
-    console.log(`[body] place ${this.options.placeId}: model selection changed; switching the live session`);
+    console.log(
+      `[body] place ${this.options.placeId}: model selection changed; switching the live session`,
+    );
     switchLiveModel({
-      client, sessionId, selection, catalog: this.resources.context.modelCatalog ?? [],
-      applied: (options) => { if (this.client === client) this.resources.rememberModelCatalog(options); },
+      client,
+      sessionId,
+      selection,
+      catalog: this.resources.context.modelCatalog ?? [],
+      applied: (options) => {
+        if (this.client === client) this.resources.rememberModelCatalog(options);
+      },
       report: (report) => this.reportRunningModel(client, report),
     });
   }
@@ -286,7 +301,10 @@ export class PlaceSession {
   private queuedSelection(item: AgentCommand): void {
     if (!item.modelSelection) return;
     this.queued = item.modelSelection;
-    if (this.activeSelection !== undefined && this.activeSelection !== JSON.stringify(this.selectionFrom(undefined)))
+    if (
+      this.activeSelection !== undefined &&
+      this.activeSelection !== JSON.stringify(this.selectionFrom(undefined))
+    )
       this.stale = true;
   }
 
@@ -429,6 +447,8 @@ export class PlaceSession {
           root: config.agentHomeRoot,
           failClosed: true,
           agentKind: config.agentKind,
+          sharedSkills: config.sharedSkills,
+          isReviewer: configuration?.isReviewer === true,
           onDiagnostic: (message) => this.notes.push(message),
           operatorHome: config.operatorHome,
           agentEnv: config.agentEnv,
@@ -700,8 +720,13 @@ export class PlaceSession {
     // (22 Nov 2026): the first prompt after a model change follows the
     // harness's answer to the setter.
     const switching = reconcileStartupModel({
-      client, sessionId: opened.sessionId, raw: opened.raw, selection, notes: this.notes,
-      cached: Boolean(configuration), placeId,
+      client,
+      sessionId: opened.sessionId,
+      raw: opened.raw,
+      selection,
+      notes: this.notes,
+      cached: Boolean(configuration),
+      placeId,
       current: () => this.client === client,
       remember: (catalog) => this.resources.rememberModelCatalog(catalog),
       report: (report) => this.reportRunningModel(client, report),
@@ -800,8 +825,11 @@ export class PlaceSession {
       names: this.names,
       notes: this.notes,
       turnPrefix: this.turnPrefix,
-      threads: memberThreads(this.surface,
-        this.resources.threadsForDelivery(batch.length ? batch : [item]), this.options),
+      threads: memberThreads(
+        this.surface,
+        this.resources.threadsForDelivery(batch.length ? batch : [item]),
+        this.options,
+      ),
       fresh: !this.windowDelivered,
     };
     this.windowDelivered = true;
@@ -835,10 +863,14 @@ export class PlaceSession {
       commandId: item.id,
       label: `place ${item.roomId}`,
     });
-    const liveSteps = this.options.parentRoomId ? new LiveTurnSteps(this.options.api, {
-      agentId: this.options.agent.publicKey, roomId: item.roomId, requestId: item.turnRequestId,
-      invocationId: invocation?.id ?? item.id,
-    }) : undefined;
+    const liveSteps = this.options.parentRoomId
+      ? new LiveTurnSteps(this.options.api, {
+          agentId: this.options.agent.publicKey,
+          roomId: item.roomId,
+          requestId: item.turnRequestId,
+          invocationId: invocation?.id ?? item.id,
+        })
+      : undefined;
     let result: PromptResult;
     try {
       const answering = client.sessionPrompt(
@@ -955,42 +987,4 @@ export class PlaceSession {
         console.warn('[body] private home cleanup skipped:', error),
       );
   }
-}
-
-/** The file the agent's tools read to learn which item they serve. */
-export async function writeTurnContext(
-  path: string,
-  item:
-    | Pick<
-        AgentCommand,
-        'id' | 'roomId' | 'turnRequestId' | 'rootCommandId' | 'reason' | 'operatorAgent'
-      >
-    | undefined,
-  queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [],
-  ownedModelDirectory?: string,
-  invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
-): Promise<void> {
-  await writePrivateFileAtomically(
-    path,
-    JSON.stringify(
-      item
-        ? {
-            roomId: item.roomId,
-            requestId: item.turnRequestId,
-            taskId: item.rootCommandId,
-            commandReason: item.reason,
-            itemId: item.id,
-            ...(item.operatorAgent ? { operatorAgent: true } : {}),
-            commands: queued.map((command) => ({
-              requestId: command.turnRequestId,
-              commandReason: command.reason,
-              taskId: command.rootCommandId,
-            })),
-            startedAt: Date.now(),
-            ...(invocation ? { invocation } : {}),
-            ...(ownedModelDirectory ? { ownedModelDirectory } : {}),
-          }
-        : {},
-    ),
-  );
 }
