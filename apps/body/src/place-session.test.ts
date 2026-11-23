@@ -9,6 +9,7 @@ import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 import { runOwnedFile as execFileAsync } from './wait.js';
 import { fixture, pendingRead, roots } from './place-session.test-support.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 // Cache persistence is tested with real files by SessionResources; these prompt tests intentionally finish while optional background work is pending.
 vi.mock('./atomic-private-file.js', async (original) => {
@@ -129,7 +130,7 @@ it.each([false, true])(
   'keeps the operator Pi login out of the live session (thread=%s)',
   async (corner) => {
     const f = await fixture(corner);
-    f.config.operatorHome = await mkdtemp('/var/tmp/session-login-operator-');
+    f.config.operatorHome = await mkdtemp(`${testTmpDir()}/session-login-operator-`);
     roots.push(f.config.operatorHome);
     const loginDir = join(f.config.operatorHome!, '.pi', 'agent');
     await mkdir(loginDir, { recursive: true });

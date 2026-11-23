@@ -12,6 +12,7 @@ import {
 import { credentialMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { cliProxyDir, cliProxyHarnessEnv, machineCliProxy, machineCliProxyEndpoint } from './cliproxy.js';
 import { freeAgentPiConfig } from './free-agent-vm.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -39,7 +40,7 @@ it('points each proxied harness at the machine proxy with only the local key', a
       },
     },
   });
-  const root = await mkdtemp('/var/tmp/beeline-proxy-grok-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-grok-`);
   roots.push(root);
   expect(await cliProxyHarnessEnv({ kind: 'grok', root, proxy, env: {} })).toEqual({
     GROK_HOME: join(root, 'grok'),
@@ -57,7 +58,7 @@ it('points each proxied harness at the machine proxy with only the local key', a
 });
 
 it('routes only the subscription providers a multi-provider session holds no key for', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-proxy-routes-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-routes-`);
   roots.push(root);
   const opencode = await cliProxyHarnessEnv({
     kind: 'opencode',
@@ -106,7 +107,7 @@ it('routes only the subscription providers a multi-provider session holds no key
 it.each(['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'] as const)(
   'keeps operator %s native in fresh Goose homes and catalog overlays',
   async (key) => {
-    const root = await mkdtemp('/var/tmp/beeline-proxy-goose-cold-');
+    const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-goose-cold-`);
     roots.push(root);
     const operatorHome = join(root, 'operator');
     await mkdir(join(operatorHome, '.config/goose'), { recursive: true });
@@ -138,7 +139,7 @@ it.each(['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'] as const)(
 
 it('keeps Pi customizations while routing credential-free providers and Codex models', async () => {
   const { ModelRuntime } = await import('@earendil-works/pi-coding-agent');
-  const root = await mkdtemp('/var/tmp/beeline-proxy-pi-models-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-pi-models-`);
   roots.push(root);
   const operatorHome = join(root, 'operator');
   await mkdir(join(operatorHome, '.pi/agent'), { recursive: true });
@@ -185,7 +186,7 @@ it('keeps Pi customizations while routing credential-free providers and Codex mo
 });
 
 it('removes the login link a home kept from before the proxy', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-proxy-upgrade-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-upgrade-`);
   roots.push(root);
   const operatorHome = join(root, 'operator');
   await mkdir(join(operatorHome, '.claude'), { recursive: true });
@@ -209,7 +210,7 @@ it('removes the login link a home kept from before the proxy', async () => {
 });
 
 it('starts a session with no login at all while the proxy is down', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-proxy-down-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-down-`);
   roots.push(root);
   const env = await prepareRoomAgentCredentials({
     root: join(root, 'home'),
@@ -230,7 +231,7 @@ it('starts a session with no login at all while the proxy is down', async () => 
  * reach the store, so neither can overwrite the other's login.
  */
 it("two concurrent sessions on one account never overwrite each other's login", async () => {
-  const root = await mkdtemp('/var/tmp/beeline-proxy-sessions-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-sessions-`);
   roots.push(root);
   const operatorHome = join(root, 'operator');
   const login = join(cliProxyDir(operatorHome), 'auth', 'beeline-claude.json');
@@ -328,7 +329,7 @@ it("two concurrent sessions on one account never overwrite each other's login", 
 });
 
 it('scrubs migrated quarantine logins while preserving static keys and Cursor state', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-proxy-quarantine-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-quarantine-`);
   roots.push(root);
   const operatorHome = join(root, 'operator');
   const home = join(root, 'session');
@@ -387,7 +388,7 @@ it.each([
 ])(
   'hides native logins and proxy stores created after the sandbox starts ($existingParents, dependencies: $dependencies)',
   async ({ existingParents, dependencies }) => {
-    const root = await mkdtemp('/var/tmp/beeline-proxy-late-login-');
+    const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-late-login-`);
     roots.push(root);
     const operatorHome = join(root, 'operator');
     const session = join(operatorHome, 'session');
@@ -501,7 +502,7 @@ it('a free agent never reaches the proxy: its machine starts none and its hosted
   // Free-agent helpers never start the machine proxy, so nothing waits on it.
   expect(machineCliProxyEndpoint()).toBeUndefined();
   await expect(machineCliProxy()).resolves.toBeUndefined();
-  const root = await mkdtemp('/var/tmp/beeline-proxy-free-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-proxy-free-`);
   roots.push(root);
   const operatorHome = join(root, 'operator');
   const hosted = freeAgentPiConfig({ modelBaseUrl: 'https://beeline.test/v1/free-agents/model', upstreamModel: 'deepseek/deepseek-v4.1-flash' });

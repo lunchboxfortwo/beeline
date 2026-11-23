@@ -1,13 +1,30 @@
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { accessSync, constants, mkdtempSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { isolatedNativeProof } from '../../../apps/body/src/lifecycle-test-guard.js';
+
+/**
+ * Where tests make their temporary roots. /tmp disappears inside the Room's
+ * namespace; a long worktree path exceeds Unix socket limits. /var/tmp gives
+ * tests a short, private, visible home: an agent session's own writable folder
+ * there, or /var/tmp itself elsewhere. A sandbox from an older Beeline shows
+ * /var/tmp read-only with neither, so tests fall back to the system temp folder.
+ */
+export function testTmpDir(): string {
+  const tmp = process.env.TMPDIR;
+  if (tmp?.startsWith('/var/tmp/')) return tmp;
+  try {
+    accessSync('/var/tmp', constants.W_OK);
+    return '/var/tmp';
+  } catch {
+    return tmpdir();
+  }
+}
 
 // Every test and every child it launches inherits private paths and an unreachable
 // user bus. Native acceptance runs only in the separately supervised proof container.
 if (!isolatedNativeProof(process.env)) {
-  // /tmp disappears inside the Room's namespace; a long worktree path exceeds
-  // Unix socket limits. /var/tmp gives tests a short, private, visible home.
-  const home = mkdtempSync('/var/tmp/beeline-test-');
+  const home = mkdtempSync(resolve(testTmpDir(), 'beeline-test-'));
   process.env.HOME = home;
   process.env.XDG_CONFIG_HOME = resolve(home, '.config');
   process.env.XDG_STATE_HOME = resolve(home, '.local/state');

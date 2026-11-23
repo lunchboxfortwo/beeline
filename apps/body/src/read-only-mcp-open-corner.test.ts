@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { openCorner } from './read-only-mcp-open-corner.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -12,7 +13,7 @@ afterEach(async () => {
 });
 
 it('acknowledges creation without asserting that an unstartable worker is starting', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-thread-receipt-'); roots.push(root);
+  const root = await mkdtemp(`${testTmpDir()}/beeline-thread-receipt-`); roots.push(root);
   await writeFile(join(root, 'draft.txt'), 'draft');
   execFileSync('/usr/bin/git', ['init', '-b', 'main', root]);
   const wrapped = buildBwrapArgv({ bwrapPath: '/usr/bin/bwrap',

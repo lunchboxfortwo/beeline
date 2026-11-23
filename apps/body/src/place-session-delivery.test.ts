@@ -11,6 +11,7 @@ import { freeAgentPiConfig } from './free-agent-vm.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 import { runOwnedFile as execFileAsync } from './wait.js';
 import { fixture, pendingRead } from './place-session.test-support.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 // Cache persistence is tested with real files by SessionResources; these prompt tests intentionally finish while optional background work is pending.
 vi.mock('./atomic-private-file.js', async (original) => {
@@ -279,7 +280,7 @@ it('rejects a hosted item without its credential before launching ACP', async ()
 });
 
 it('admits the hosted model journal inside the live Room sandbox across cold and warm items', async () => {
-  const f = await fixture(false, '/var/tmp');
+  const f = await fixture(false, testTmpDir());
   f.config.bwrapPath = '/usr/bin/bwrap';
   const modelCredential = {
     v: 1 as const,
