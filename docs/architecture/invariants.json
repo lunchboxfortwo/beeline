@@ -3563,12 +3563,12 @@
       },
       "agent_invocations": {
         "module": "Work authority",
-        "reason": "Confirmed reply evidence belongs to a harness attempt, independently of its target and message lifetime.",
+        "reason": "Tracks active helper executions and claims on connector work.",
         "columns": {
           "command_id": "Executing command; cascade owns retention.",
           "invocation_id": "Fresh helper attempt nonce.",
-          "replied": "Committed explicit reply delivered during this attempt.",
-          "final_suppressed": "Accepted final suppression, distinct from an answer.",
+          "replied": { "reason": "Legacy reply receipt for serving and rollback images.", "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain" },
+          "final_suppressed": { "reason": "Legacy final receipt for serving and rollback images.", "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain" },
           "ended": "Harness return is independent of reply delivery; a person's Stop after the reply cancels the run until it ends."
         }
       }

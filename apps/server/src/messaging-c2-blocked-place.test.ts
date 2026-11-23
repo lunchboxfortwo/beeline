@@ -42,4 +42,20 @@ describe('C2: implementer blocks default to the opening commander', () => {
     await daemon.execute('reply', { id: task.id, text: 'blocked: need a decision', ask }, B);
     expect((await inbox()).map(row => [row.agent_id, row.room_id, Boolean(row.ask)])).toEqual([[A, PLACES[place], true]]);
   });
+
+  it('keeps the final in the thread when a reply to the current wake went to the commander’s parent chat', async () => {
+    await firstTask(PLACES.chat, true);
+    await settle();
+    const wake = await systemWake('corner_check');
+    const invocation = {id:'thread-with-blocker',requestId:wake.turn_request_id};
+    await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:invocation.requestId,invocationId:invocation.id},B);
+    const reply = await daemon.execute('reply',{roomId:THREAD,id:wake.id,text:'blocked: choose an output',ask,invocation},B);
+    const input = {roomId:THREAD,requestId:wake.id,text:'I found the issue and need a choice to continue.',harnessEnded:true,invocation};
+    const final = await daemon.execute('postRoomMessage',input,B);
+    expect(await daemon.execute('postRoomMessage',input,B)).toMatchObject({id:final.id});
+    expect((await db.query('SELECT id,room_id,text FROM messages WHERE author_id=$1 ORDER BY room_id',[B])).rows).toEqual([
+      {id:reply.id,room_id:PLACES.chat,text:'blocked: choose an output'},
+      {id:final.id,room_id:THREAD,text:input.text},
+    ]);
+  });
 });

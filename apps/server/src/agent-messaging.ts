@@ -140,8 +140,6 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   if (!item) refuseMessageMembership();
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true,replyFromPlace:input.roomId});
-  if (invocation && saved.delivered) await db.query(`UPDATE agent_invocations SET replied=true
-    WHERE command_id=$1 AND invocation_id=$2`,[invocation.command_id,input.invocation!.id]);
   if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);
   const owed = [...new Set(input.queuedRequestIds ?? [])];
   const completed = !input.ask && saved.delivered && input.roomId === item.room_id && owed.includes(item.turn_request_id) && owed.length
