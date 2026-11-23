@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { XStack, YStack, useThemeName } from 'tamagui';
-import { ArrowRight, CircleX, CornerDownRight, GitMerge, GitPullRequest, GitPullRequestClosed } from 'lucide-react-native';
+import { ArrowRight, CircleCheck, CircleDot, CircleX, CornerDownRight, GitMerge, GitPullRequest, GitPullRequestClosed } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { GitHubMark } from '@/components/buzz/GitHubMark';
@@ -16,7 +16,7 @@ const SYSTEM_MARK_SIZE = 14;
 const STOP_SQUARE_SIZE = 8;
 /** A folded run shows at most this many faces; opening it (and its label) shows everyone. */
 const RUN_FACES = 3;
-/** An opened group of GitHub events longer than this shows two and an "N more" row. */
+/** An opened group of events longer than this shows two and an "N more" row. */
 const EVENT_GROUP_SHOWN = 3;
 
 /** One end of a pill: the Beeline account, GitHub, a person or an agent. */
@@ -25,15 +25,17 @@ export type PillFace =
     | { kind: 'github'; name: string }
     | { kind: 'agent' | 'human'; seed: string; name: string; face?: string; avatarUrl?: string };
 
-/** A GitHub PR, issue, commit, check or thread-opened event, as one pill or one opened row. */
+/** A GitHub PR, issue, commit or check event, or a Beeline thread event, as one pill or one opened row. */
 export type PillEvent = {
-    /** The mark a lone event pill shows beside the GitHub ring. */
-    mark?: 'opened' | 'merged' | 'closed' | 'failed' | 'thread';
-    /** "Merged", in ink. Empty when `text` says it all. */
+    /** Who reports it: GitHub for PRs, issues, commits and checks; Beeline for threads, whether or not the Room has a repository. */
+    source: 'github' | 'beeline';
+    /** The mark a lone event pill shows beside its ring. */
+    mark?: 'opened' | 'merged' | 'closed' | 'failed' | 'thread' | 'issueOpened' | 'issueClosed';
+    /** "Merged". Empty when `text` says it all. */
     verb: string;
     /** The PR or issue number, in brass. */
     number?: string;
-    /** The PR, issue, check or thread title, in secondary. */
+    /** The PR, issue, check or thread title. */
     title: string;
     /** A whole repository line (commits pushed, checks passed), when GitHub phrased it. */
     text?: string;
@@ -55,7 +57,7 @@ export type PillRunEntry = {
     stop?: boolean;
     /** A system message: it puts the ringed Beeline logo on the folded pill. */
     system?: boolean;
-    /** A GitHub event: `from` is the GitHub face, and the row reads the event, not a message. */
+    /** A GitHub or Beeline event: `from` is that ring, and the row reads the event, not a message. */
     event?: PillEvent;
     body?: React.ReactNode;
 };
@@ -67,7 +69,7 @@ export type PillItem = {
     time: string;
     /** A stop of an agent's turn: face, stop glyph, face, with no text. */
     stop?: boolean;
-    /** A lone GitHub event: the GitHub ring and its state mark, with no text. */
+    /** A lone event: its GitHub or Beeline ring and its state mark, with no text. */
     event?: PillEvent;
     /** Consecutive pill messages (agent-to-agent messages, stops and GitHub events) folded into one pill: faces and a count. */
     run?: readonly PillRunEntry[];
@@ -88,6 +90,7 @@ function Ring({ children, testID }: { children: React.ReactNode; testID: string 
 
 const EVENT_MARKS = {
     opened: GitPullRequest, merged: GitMerge, closed: GitPullRequestClosed, failed: CircleX, thread: CornerDownRight,
+    issueOpened: CircleDot, issueClosed: CircleCheck,
 } as const;
 
 /**
@@ -152,7 +155,7 @@ function runFaces(run: readonly PillRunEntry[]): PillFace[] {
     return [...seen.values()];
 }
 
-const BEELINE_FACE: PillFace = { kind: 'system', name: 'Beeline' };
+export const BEELINE_FACE: PillFace = { kind: 'system', name: 'Beeline' };
 export const GITHUB_FACE: PillFace = { kind: 'github', name: 'GitHub' };
 
 /** A Beeline notice, a person's stop included; an agent's stop reads as part of the agents' talk. */
@@ -168,12 +171,13 @@ export function isNotice(entry: PillRunEntry): boolean {
 function foldedFaces(item: PillItem): PillFace[] {
     const run = item.run ?? [];
     const notice = (entry: PillRunEntry) => item.system || isNotice(entry);
-    // GitHub events lead with the GitHub ring, so a folded merge still shows.
-    const github = run.some((entry) => entry.event) ? [GITHUB_FACE] : [];
-    if (!run.some(notice) && !github.length) return runFaces(run).slice(0, RUN_FACES);
+    // Events lead with their rings (GitHub, then Beeline), so a folded merge or thread opening still shows.
+    const github = run.some((entry) => entry.event?.source === 'github') ? [GITHUB_FACE] : [];
+    const beeline = run.some((entry) => entry.event?.source === 'beeline' || notice(entry)) ? [BEELINE_FACE] : [];
+    if (!github.length && !beeline.length) return runFaces(run).slice(0, RUN_FACES);
     const stoppers = run.filter((entry) => entry.stop && notice(entry)).map((entry) => entry.from);
     const seen = new Set<string>();
-    const lead = run.some(notice) ? [BEELINE_FACE, ...github] : github;
+    const lead = [...github, ...beeline];
     const ordered = [...lead, ...stoppers, ...runFaces(run)].filter((face) => {
         const key = faceKey(face);
         if (seen.has(key)) return false;
@@ -192,30 +196,33 @@ function plural(count: number, noun: string): string {
     return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-/** A run's messages and its counted GitHub events. */
-function runCounts(run: readonly PillRunEntry[]): { messages: number; events: number } {
-    return {
-        messages: run.filter((entry) => !entry.event).length,
-        events: run.filter((entry) => entry.event?.counted).length,
-    };
+/** A run's messages and its counted events, by who reports them. */
+function runCounts(run: readonly PillRunEntry[]): { messages: number; github: number; beeline: number } {
+    const counted = (source: PillEvent['source']) => run.filter((entry) => entry.event?.counted && entry.event.source === source).length;
+    return { messages: run.filter((entry) => !entry.event).length, github: counted('github'), beeline: counted('beeline') };
 }
+
+const SOURCE_NAMES = { github: 'GitHub', beeline: 'Beeline' } as const;
 
 /** The folded run's visible count: "5 messages · 13 events", dropping an absent kind. */
 export function runCountLabel(run: readonly PillRunEntry[]): string {
-    const { messages, events } = runCounts(run);
+    const { messages, github, beeline } = runCounts(run);
+    const events = github + beeline;
     return [messages ? plural(messages, 'message') : '', events ? plural(events, 'event') : '']
         .filter(Boolean).join(' · ');
 }
 
 function pillLabel(item: PillItem, expanded: boolean): string {
     const verb = expanded ? 'Hide' : 'Read';
-    if (item.event) return `${verb} GitHub event: ${item.event.spoken}, ${item.time}`;
+    if (item.event) return `${verb} ${SOURCE_NAMES[item.event.source]} event: ${item.event.spoken}, ${item.time}`;
     if (item.run?.some((entry) => entry.event)) {
-        const { messages, events } = runCounts(item.run);
-        const parts = [messages ? plural(messages, 'message') : '', events ? plural(events, 'GitHub event') : ''].filter(Boolean);
+        const { messages, github, beeline } = runCounts(item.run);
+        const parts = [messages ? plural(messages, 'message') : '', github ? plural(github, 'GitHub event') : '',
+            beeline ? plural(beeline, 'Beeline event') : ''].filter(Boolean);
+        const spokenParts = parts.length > 2 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts.join(' and ');
         const between = names(runFaces(item.run).filter((face) => face.kind !== 'system' && face.kind !== 'github'));
         const notices = item.run.filter(isNotice).length;
-        return `${verb} ${parts.join(' and ')}${between ? ` between ${between}` : ''}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
+        return `${verb} ${spokenParts}${between ? ` between ${between}` : ''}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
     }
     if (item.run && item.system) {
         const about = runFaces(item.run).filter((face) => face.kind !== 'system');
@@ -245,25 +252,31 @@ function Pair({ from, to, stop }: { from: PillFace; to?: PillFace; stop?: boolea
     );
 }
 
-/** The ring pair of a lone event pill: GitHub, then the event's state mark. */
+const SOURCE_FACES = { github: GITHUB_FACE, beeline: BEELINE_FACE } as const;
+
+/** The ring pair of a lone event pill: its GitHub or Beeline ring, then the event's state mark. */
 function EventPair({ event }: { event: PillEvent }) {
     const Mark = event.mark ? EVENT_MARKS[event.mark] : undefined;
     return (
         <>
-            <Face face={GITHUB_FACE} />
+            <Face face={SOURCE_FACES[event.source]} />
             {Mark ? <Ring testID={`pill-event-mark-${event.mark}`}><Glyph icon={Mark} size={14} /></Ring> : null}
         </>
     );
 }
 
-/** One opened event in body type: verb in ink, #number in brass, title in secondary, and a brass chevron when it opens. */
+/**
+ * One opened event as a system line, the format an opened stop uses: meta at
+ * the quiet ink, #number in brass, and a brass chevron when it opens.
+ */
 function EventLine({ entry }: { entry: PillRunEntry & { event: PillEvent } }) {
     const { event } = entry;
     const copy = (
-        <T v="body" color="secondary" numberOfLines={2} ellipsizeMode="tail" testID={`pill-event-text-${entry.id}`}>
-            {event.text ? <T v="body" color="ink">{event.text}</T> : <>
-                {event.verb ? <T v="body" color="ink">{`${event.verb} `}</T> : null}
-                {event.number ? <T v="body" color="needsYou">{`#${event.number} `}</T> : null}
+        <T v="meta" color="secondary" numberOfLines={2} ellipsizeMode="tail" testID={`pill-event-text-${entry.id}`}>
+            {event.text ?? <>
+                {event.verb ? `${event.verb} ` : null}
+                {event.number ? <T v="meta" color="needsYou">{`#${event.number}`}</T> : null}
+                {event.number ? ' ' : null}
                 {event.title}
             </>}
         </T>
@@ -280,22 +293,23 @@ function EventLine({ entry }: { entry: PillRunEntry & { event: PillEvent } }) {
     );
 }
 
-/** Back-to-back GitHub events under one "GitHub ring · time" heading; more than three show two and "N more". */
+/** Back-to-back events from one source under one "ring · time" heading; more than three show two and "N more". */
 function EventGroup({ events }: { events: readonly (PillRunEntry & { event: PillEvent })[] }) {
     const [all, setAll] = useState(false);
     const first = events[0]!;
+    const source = SOURCE_NAMES[first.event.source];
     const shown = all || events.length <= EVENT_GROUP_SHOWN ? events : events.slice(0, 2);
     return (
         <YStack gap="1" minWidth={0} testID={`pill-event-group-${first.id}`}>
-            <XStack gap="1" alignItems="center" accessibilityLabel={`GitHub, ${first.time}`}>
-                <Face face={GITHUB_FACE} />
+            <XStack gap="1" alignItems="center" accessibilityLabel={`${source}, ${first.time}`}>
+                <Face face={SOURCE_FACES[first.event.source]} />
                 <Copy small quiet>{`· ${first.time}`}</Copy>
             </XStack>
             <YStack minWidth={0}>
                 {shown.map((entry) => <EventLine key={entry.id} entry={entry} />)}
                 {shown.length < events.length ? (
                     <LedgerDisclosure expanded={false} accessibilityState={{ expanded: false }}
-                        accessibilityLabel={`${events.length - shown.length} more GitHub events`} onPress={() => setAll(true)}
+                        accessibilityLabel={`${events.length - shown.length} more ${source} events`} onPress={() => setAll(true)}
                         rowTestID={`pill-event-more-${first.id}`}>{`${events.length - shown.length} more`}</LedgerDisclosure>
                 ) : null}
             </YStack>
@@ -307,14 +321,14 @@ type RunBlock =
     | { kind: 'message'; entry: PillRunEntry }
     | { kind: 'events'; events: (PillRunEntry & { event: PillEvent })[] };
 
-/** Send order, with back-to-back events gathered under one heading. */
+/** Send order, with back-to-back events from one source gathered under one heading. */
 function runBlocks(run: readonly PillRunEntry[]): RunBlock[] {
     const blocks: RunBlock[] = [];
     for (const entry of run) {
         const last = blocks.at(-1);
         if (entry.event) {
             const event = entry as PillRunEntry & { event: PillEvent };
-            if (last?.kind === 'events') last.events.push(event);
+            if (last?.kind === 'events' && last.events[0]!.event.source === event.event.source) last.events.push(event);
             else blocks.push({ kind: 'events', events: [event] });
         } else blocks.push({ kind: 'message', entry });
     }
@@ -339,7 +353,7 @@ function MessageEntry({ entry }: { entry: PillRunEntry }) {
 /**
  * The opened run: every message in send order under its own face → face
  * heading, in the transcript's text column (`TranscriptLine` with no sender).
- * Back-to-back GitHub events share one GitHub heading.
+ * Back-to-back events from one source share one GitHub or Beeline heading.
  * Rows sit the same-speaker 12 apart; a heading sits 4 above its body.
  */
 function RunList({ run }: { run: readonly PillRunEntry[] }) {
@@ -355,11 +369,11 @@ function RunList({ run }: { run: readonly PillRunEntry[] }) {
 }
 
 /**
- * Stops, agent-to-agent messages and GitHub events in one wrapping row. Every
+ * Stops, agent-to-agent messages and GitHub and thread events in one wrapping row. Every
  * pill is faces and marks only; a tap opens the full message under the row.
  * A run folds into one pill of faces and a count ("5 messages · 13 events"),
  * and opens as a plain list in send order. A stop is face, stop glyph, face. A
- * lone event is the GitHub ring and its state mark. A lone agent message has
+ * lone event is its GitHub or Beeline ring and its state mark. A lone agent message has
  * nothing to fold, so it reads as its open row with no pill.
  */
 export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?: string }) {

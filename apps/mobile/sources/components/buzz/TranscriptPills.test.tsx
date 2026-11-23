@@ -144,10 +144,12 @@ it('opens a thread event in its thread, and a check inside its own thread on Git
   const openCorner = vi.fn();
   const openUrl = vi.fn();
   const [item] = pillItems(rows, () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: openCorner, onOpenUrl: openUrl, cornerId: 'c2' });
-  expect(item!.run![0]).toMatchObject({ event: { verb: 'Opened', mark: 'thread', title: 'stop-path', spoken: 'Opened thread stop-path' } });
+  // A thread opening is Beeline's, never GitHub's.
+  expect(item!.run![0]).toMatchObject({ from: { kind: 'system', name: 'Beeline' },
+    event: { source: 'beeline', verb: 'Opened thread', mark: 'thread', title: 'stop-path', spoken: 'Opened thread stop-path' } });
   item!.run![0]!.event!.open!.onPress();
   expect(openCorner).toHaveBeenCalledWith('c1');
-  expect(item!.run![1]).toMatchObject({ event: { verb: 'Failed', mark: 'failed', number: '9' } });
+  expect(item!.run![1]).toMatchObject({ from: { kind: 'github' }, event: { source: 'github', verb: 'Failed', mark: 'failed', number: '9' } });
   item!.run![1]!.event!.open!.onPress();
   expect(openUrl).toHaveBeenCalledWith('https://github.com/o/r/pull/9');
 });
@@ -270,4 +272,13 @@ it('PR-CHAT-ONLY uses large PR cards and small failed-head lines with no PR titl
     : Array.isArray(value) ? value.map(words).join('') : value?.props ? words(value.props.children) : '';
   expect(words(text[0].props.children)).toBe('Failed check 82828a8');
   act(() => tree.unmount());
+});
+
+it('keeps a lone thread opening in a Room with no repository on the Beeline ring', () => {
+  const opened: ChatDisplayMessage = { id: 'open', text: '', isUser: false, timestamp: 1_800_000_000,
+    daemonFact: { type: 'corner-open', cornerId: 'c1', objective: 'Plan the launch', name: 'launch-plan' } as never };
+  const rows = foldPillRuns(foldPrLifecycleRuns([opened]));
+  const items = pillItems(rows[0]!.pillRun ?? [rows[0]!], () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: vi.fn() });
+  expect(items).toEqual([expect.objectContaining({ from: { kind: 'system', name: 'Beeline' },
+    event: expect.objectContaining({ source: 'beeline', mark: 'thread' }) })]);
 });

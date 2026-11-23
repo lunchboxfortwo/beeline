@@ -4,7 +4,7 @@ import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { isGitHubEventRun, stopNotice } from '@/buzz/transcript-pills';
 import { countedLifecycleItemIds, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
-import { GITHUB_FACE, isNotice, PillRow, type PillEvent, type PillFace, type PillItem, type PillRunEntry } from '@/ui/screens/transcript/PillRow';
+import { BEELINE_FACE, GITHUB_FACE, isNotice, PillRow, type PillEvent, type PillFace, type PillItem, type PillRunEntry } from '@/ui/screens/transcript/PillRow';
 import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
 import { NotificationLifecycleCard } from './PrLifecycleCard';
@@ -74,16 +74,21 @@ type LifecycleItem = NotificationLifecycleRun['items'][number];
 
 const NOUNS: Partial<Record<LifecycleItem['kind'], string>> = { 'pull-request': 'PR', issue: 'issue', check: 'check', corner: 'thread' };
 
-/** The lone pill's mark: opened, merged, closed, check failed or thread opened. */
+/** The lone pill's mark: opened, merged, closed, check failed, issue opened or closed, or thread opened. */
 function eventMark(item: LifecycleItem, verb: string): PillEvent['mark'] {
   if (item.kind === 'check') return /fail/i.test(item.state) ? 'failed' : undefined;
   if (item.kind === 'corner') return verb === 'Opened' ? 'thread' : verb === 'Merged' ? 'merged' : verb === 'Closed' ? 'closed' : undefined;
+  if (item.kind === 'issue' && !item.displayText) {
+    return ['Filed', 'Opened', 'Reopened'].includes(verb) ? 'issueOpened' : verb === 'Closed' ? 'issueClosed' : undefined;
+  }
   if (item.kind !== 'pull-request' || item.displayText) return undefined;
   return verb === 'Opened' ? 'opened' : verb === 'Merged' ? 'merged' : verb === 'Closed' ? 'closed' : undefined;
 }
 
 /**
- * One GitHub or thread event as a run entry. It opens its thread, or GitHub
+ * One GitHub or thread event as a run entry. GitHub reports PRs, issues,
+ * commits and checks; Beeline reports threads, in a Room with or without a
+ * repository. It opens its thread, or GitHub
  * when it has none. Inside its own thread a check or PR opens GitHub, since
  * the thread is already open.
  */
@@ -99,13 +104,16 @@ function eventEntry(item: LifecycleItem, time: string, counted: boolean, handler
     : item.url && handlers.onOpenUrl
       ? { label: 'Opens GitHub', onPress: () => handlers.onOpenUrl!(item.url!) }
       : undefined;
+  const source = item.kind === 'corner' ? 'beeline' : 'github';
   return {
     id: item.id,
-    from: GITHUB_FACE,
+    from: source === 'beeline' ? BEELINE_FACE : GITHUB_FACE,
     time,
     event: {
+      source,
       mark: eventMark(item, verb),
-      verb: item.displayText ? '' : verb,
+      // A thread event names its kind on the line: "Opened thread github-event-pills".
+      verb: item.displayText ? '' : item.kind === 'corner' ? `${verb} thread` : verb,
       ...(number && !item.displayText ? { number } : {}),
       title: item.displayText ? '' : item.title,
       ...(item.displayText ? { text: item.displayText } : {}),

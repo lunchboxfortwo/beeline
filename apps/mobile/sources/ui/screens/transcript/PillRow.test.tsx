@@ -189,7 +189,7 @@ describe('PillRow', () => {
         const alan = { kind: 'agent', seed: 'alan', name: 'Alan' } as const;
         const jimmy = { kind: 'agent', seed: 'jimmy', name: 'Jimmy' } as const;
         const event = (id: string, number: number, title: string, fields: Partial<PillEvent> = {}): PillRunEntry => ({
-            id, from: github, time: '21:02', event: { verb: 'Merged', number: String(number), title, mark: 'merged',
+            id, from: github, time: '21:02', event: { source: 'github', verb: 'Merged', number: String(number), title, mark: 'merged',
                 spoken: `Merged PR #${number} ${title}`, counted: true, open: { label: 'Opens GitHub', onPress: vi.fn() }, ...fields } });
         const message = (id: string): PillRunEntry => ({ id, from: alan, to: jimmy, time: '21:10', body: React.createElement('Text', null, `body ${id}`) });
         const strings = (node: any): string[] => node.findAll((child: any) => child.type === 'Text')
@@ -230,7 +230,7 @@ describe('PillRow', () => {
             expect(pill.props['aria-label']).toBe('Read 2 messages and 6 GitHub events between Alan and Jimmy, 21:11');
         });
 
-        it('opens messages and events in send order, back-to-back events under one GitHub heading in body type', () => {
+        it('opens messages and events in send order, back-to-back events under one GitHub heading as system lines', () => {
             let tree: any;
             act(() => { tree = create(<PillRow items={[mixed]} />); });
             act(() => tree.root.find((node: any) => node.type === 'Button').props.onPress());
@@ -241,18 +241,72 @@ describe('PillRow', () => {
             const group = open.find((node: any) => node.props.testID === 'pill-event-group-e1' && node.type === 'YStack');
             expect(group.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(1);
             expect(strings(group)).toContain('· 21:02');
-            // Every event reads in body type: verb in ink, #number in brass, title in secondary. No heading or strong role.
+            // Every event reads as a system line, the format an opened stop uses: meta at the quiet ink, #number in brass.
             const line = group.find((node: any) => node.type === T && node.props.testID === 'pill-event-text-e1');
-            expect(line.props).toMatchObject({ v: 'body', color: 'secondary' });
+            expect(line.props).toMatchObject({ v: 'meta', color: 'secondary' });
             const parts = line.findAll((node: any) => node.type === T).filter((node: any) => node !== line);
-            expect(parts.map((node: any) => [node.props.v, node.props.color, node.props.children])).toEqual([
-                ['body', 'ink', 'Merged '], ['body', 'needsYou', '#74 ']]);
+            expect(parts.map((node: any) => [node.props.v, node.props.color, node.props.children])).toEqual([['meta', 'needsYou', '#74']]);
+            const flat = (node: any): string => typeof node === 'string' ? node : (node.children ?? []).map(flat).join('');
+            expect(flat(line)).toBe('Merged #74 Stop ends a stale working line');
             expect(open.findAll((node: any) => node.type === T && ['heading', 'metaStrong'].includes(node.props.v))).toHaveLength(0);
             // A tap opens the event's destination.
             const target = open.find((node: any) => node.props.testID === 'pill-event-open-e1' && typeof node.type === 'string');
             expect(target.props.accessibilityLabel).toBe('Merged PR #74 Stop ends a stale working line. Opens GitHub');
             act(() => target.props.onPress());
             expect(mixed.run![0]!.event!.open!.onPress).toHaveBeenCalled();
+        });
+
+        const beeline = { kind: 'system', name: 'Beeline' } as const;
+        const thread = (id: string): PillRunEntry => ({ id, from: beeline, time: '20:45', event: { source: 'beeline', verb: 'Opened',
+            title: 'thread github-event-pills', mark: 'thread', spoken: 'Opened thread github-event-pills', counted: true,
+            open: { label: 'Opens its thread', onPress: vi.fn() } } });
+
+        it('draws a lone thread opening as the Beeline ring and the thread mark, never the GitHub ring', () => {
+            let tree: any;
+            const lone: PillItem = { ...thread('t1'), system: false, body: null };
+            act(() => { tree = create(<PillRow items={[lone]} />); });
+            const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'event-pill');
+            expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+            expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(0);
+            expect(pill.findAll((node: any) => node.type === 'Icon.CornerDownRight')).toHaveLength(1);
+            expect(strings(pill)).toEqual([]);
+            expect(pill.props['aria-label']).toBe('Read Beeline event: Opened thread github-event-pills, 20:45');
+            act(() => pill.props.onPress());
+            const group = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-event-group-t1');
+            expect(group.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(0);
+            expect(group.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+        });
+
+        it('leads a run with both rings, heads a thread opening with Beeline, and counts it as a Beeline event', () => {
+            let tree: any;
+            const run: PillItem = { id: 'e1', system: false, from: github, time: '20:47', body: null, run: [
+                event('e1', 74, 'Stop ends a stale working line'), thread('t1'), event('e2', 77, 'Delete the offline-host line'), message('m1'),
+            ] };
+            act(() => { tree = create(<PillRow items={[run]} />); });
+            const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+            const rings = pill.findAll((node: any) => node.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(node.props.testID));
+            expect(rings.map((node: any) => node.props.testID)).toEqual(['pill-github-face', 'pill-system-face']);
+            expect(strings(pill)).toEqual(['1 message · 3 events']);
+            expect(pill.props['aria-label']).toBe('Read 1 message, 2 GitHub events and 1 Beeline event between Alan and Jimmy, 20:47');
+            act(() => pill.props.onPress());
+            const groups = tree.root.findAll((node: any) => node.type === 'YStack' && /^pill-event-group-/.test(node.props.testID ?? ''));
+            expect(groups.map((node: any) => [node.props.testID,
+                node.findAll((face: any) => face.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(face.props.testID))
+                    .map((face: any) => face.props.testID)])).toEqual([
+                ['pill-event-group-e1', ['pill-github-face']], ['pill-event-group-t1', ['pill-system-face']], ['pill-event-group-e2', ['pill-github-face']]]);
+        });
+
+        it('opens a stop and an event in the same system-line format', () => {
+            let tree: any;
+            const stopLine = React.createElement(T, { v: 'meta', color: 'secondary', testID: 'stop-line' }, 'Claude stopped Jellybean');
+            const run: PillItem = { id: 's1', system: false, from: alan, time: '20:48', body: null, run: [
+                { id: 's1', from: alan, to: jimmy, stop: true, system: true, time: '20:48', body: stopLine }, event('e1', 77, 'Delete the offline-host line'),
+            ] };
+            act(() => { tree = create(<PillRow items={[run]} />); });
+            act(() => tree.root.find((node: any) => node.type === 'Button').props.onPress());
+            const stop = tree.root.find((node: any) => node.type === T && node.props.testID === 'stop-line');
+            const merge = tree.root.find((node: any) => node.type === T && node.props.testID === 'pill-event-text-e1');
+            expect([merge.props.v, merge.props.color]).toEqual([stop.props.v, stop.props.color]);
         });
 
         it('shows two events and "N more" when a group holds more than three', () => {
@@ -267,5 +321,22 @@ describe('PillRow', () => {
             act(() => more.props.onPress());
             expect(shown()).toEqual(['pill-event-e1', 'pill-event-e2', 'pill-event-e3', 'pill-event-e4', 'pill-event-e5', 'pill-event-e6', 'pill-event-e7']);
         });
+    });
+
+    it('draws a lone issue event with its opened or closed mark, from the stored line to the pill', async () => {
+        const { foldPrLifecycleRuns } = await import('@/buzz/pr-lifecycle');
+        const { pillItems } = await import('@/components/buzz/TranscriptPills');
+        const issue = (id: string, action: 'opened' | 'closed') => ({ id, text: '', isUser: false, timestamp: 1_800_000_000,
+            githubEvent: { type: 'issue', action, title: 'Pills hide merges', url: 'https://github.com/o/r/issues/12', actor: 'owner' } as never });
+        for (const [action, mark, icon] of [['opened', 'issueOpened', 'Icon.CircleDot'], ['closed', 'issueClosed', 'Icon.CircleCheck']] as const) {
+            const [row] = foldPrLifecycleRuns([issue(`i-${action}`, action)]);
+            const items = pillItems([row!], () => ({ kind: 'system', name: 'Beeline' }), {});
+            let tree: any;
+            act(() => { tree = create(<PillRow items={items} />); });
+            const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'event-pill');
+            expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === `pill-event-mark-${mark}`)).toHaveLength(1);
+            expect(pill.findAll((node: any) => node.type === icon)).toHaveLength(1);
+            act(() => tree.unmount());
+        }
     });
 });
