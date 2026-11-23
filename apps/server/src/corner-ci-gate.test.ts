@@ -1,4 +1,5 @@
 import { ciGateChecks } from './corner-ci-gate.js';
+import { advanceCorner } from './corner-lifecycle.js';
 import {
   cornerFeatureBranch, describe, expect, it, vi, C, R, REVIEWER, URL, SHA, gate, rootFixture,
 } from './test-support-pr-checks-status.test-support.js';
@@ -40,28 +41,40 @@ describe('CI gate from base-branch protection', () => {
     expect(await gate()).toMatchObject({ checks: 'pending', checkCount: 0, reviewerExists: false });
   });
 
-  it('NO-CI-2: an unprotected repo PR with a reviewer wakes the reviewer at once', async () => {
+  it('NO-CI-2: an unprotected repo PR wakes the reviewer when the whole rollup passes', async () => {
     await openPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     rootFixture.rollupState = null;
     rootFixture.workflowCount = 2;
     rootFixture.registeredCount = 0;
     await opened();
-    expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);
+    expect(await pendingCommands(REVIEWER)).toEqual([]);
     expect(await gate()).toMatchObject({
       checks: 'pending', checkCount: 0, mergeAllowed: false,
-      blockedReason: 'no yes on this head', reviewerWake: { status: 'dispatched' },
+      blockedReason: 'no yes on this head', reviewerWake: { status: 'waiting' },
     });
+    rootFixture.rollupState = 'PENDING';
+    expect(await gate()).toMatchObject({ checks: 'pending', reviewerWake: { status: 'waiting' } });
+    expect(await pendingCommands(REVIEWER)).toEqual([]);
+    rootFixture.rollupState = 'SUCCESS';
+    await opened();
+    await rootFixture.db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL)
+      FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`, [C, REVIEWER]);
+    await opened();
+    expect(await pendingCommands(REVIEWER)).toEqual([]);
+    expect((await rootFixture.db.query(`SELECT id FROM agent_commands
+      WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`, [C, REVIEWER])).rowCount).toBe(1);
     expect(rootFixture.operations.landCorner).not.toHaveBeenCalled();
   });
 
-  it('NO-CI-3: an explicit checks read releases a PR that was already waiting', async () => {
+  it('NO-CI-3: a legacy cached passing gate waits for an explicit green checks read', async () => {
     await openPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
-    rootFixture.rollupState = null;
-    rootFixture.workflowCount = 2;
-    rootFixture.registeredCount = 0;
-    expect(await gate()).toMatchObject({ checks: 'pending', checkCount: 0, reviewerWake: { status: 'dispatched' } });
+    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle || $2::jsonb WHERE corner_id=$1`,
+      [C, JSON.stringify({ checks: 'pending', ciGate: { headSha: SHA, checks: 'passing' } })]);
+    await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
+    expect(await pendingCommands(REVIEWER)).toEqual([]);
+    expect(await gate()).toMatchObject({ checks: 'passed', reviewerWake: { status: 'dispatched' } });
     expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);
   });
 

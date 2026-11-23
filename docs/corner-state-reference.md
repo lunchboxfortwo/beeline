@@ -21,14 +21,11 @@ Idle; an opening order, if present, supplies its first event:
   standing corner remains active after a merge.
 
 Red checks wake the implementer with the recorded failing jobs. Green checks wake
-only the independent configured reviewer, inside the corner. Completed findings
-and reviews without a usable verdict privately return ownership to the
-implementer once, scoped to the reviewed PR and head, only while a recorded
-implementer exists; they never automatically repeat that review. A missing verdict
-asks the implementer to arrange review or report the blocker to its commander,
-without posting a chat notice. A handback receipt requires its deterministic
-command to exist; missing commands are replanned, while completed commands still
-prove delivery.
+the independent configured reviewer inside the corner. Review uses the required
+checks when configured and the whole rollup otherwise. Completed findings go
+to the recorded implementer once per review. A completed request without a
+verdict ends that request. A new green check result, head or brief revision can
+request review again. A missing handback command is replanned using the same ID.
 Reports retain their current order-author return route.
 
 Pending approval grants also keep their recorded `room_id` corner in

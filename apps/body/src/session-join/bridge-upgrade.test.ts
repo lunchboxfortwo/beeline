@@ -36,22 +36,23 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 
-function changedFile(path: string, ready: () => boolean): Promise<void> {
-  return new Promise((resolve) => {
-    const watcher = watch(path, { recursive: true }, () => {
-      if (ready()) {
-        watcher.close();
-        resolve();
-      }
-    });
-    if (ready()) {
+function changedFile(path: string, ready: () => boolean, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => reject(signal?.reason);
+    const check = () => {
+      if (!ready()) return;
       watcher.close();
+      signal?.removeEventListener('abort', aborted);
       resolve();
-    }
+    };
+    const watcher = watch(path, { recursive: true, signal }, check);
+    signal?.addEventListener('abort', aborted, { once: true });
+    check();
   });
 }
 
-it('parks on a terminal stream response without rotating its permanent access token', async () => {
+it.each(['terminal frame', 'failed connection', 'two terminal frames'])(
+  'replaces the member stream once after %s without rotating its permanent access token', async (failure) => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-expiry-budget-'));
   folders.push(dir);
   const env = {
@@ -94,8 +95,19 @@ it('parks on a terminal stream response without rotating its permanent access to
       }
       if (init.method === 'POST') return Response.json({ result: { capabilities: { memberStreamV1: true } } });
       appendFileSync(${JSON.stringify(requests)}, 'stream\\n');
-      return new Response(JSON.stringify({ v: 1, type: 'ended', reason: ++streams > 3 ? 'unavailable' : 'expired' }) + '\\n',
-        { headers: { 'content-type': 'application/x-ndjson' } });
+      const attempt = ++streams;
+      if (attempt === 1 && ${failure === 'failed connection'}) return new Response(null, { status: 503 });
+      const frame = attempt === 1 || ${failure === 'two terminal frames'}
+        ? { v: 1, type: 'ended', reason: 'unavailable' }
+        : { v: 1, type: 'delivery', deliveryId: 'wake:pending', mentionCursor: '0', mentions: [],
+          wakes: [{ id: 'pending', address: 'room', reason: 'supervision',
+            text: 'Pending command', createdAt: new Date().toISOString() }] };
+      const line = JSON.stringify(frame) + '\\n';
+      const body = frame.type === 'ended' ? line : new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode(line));
+        init.signal.addEventListener('abort', () => controller.close(), { once: true });
+      } });
+      return new Response(body, { headers: { 'content-type': 'application/x-ndjson' } });
     };
     await runBridge(${JSON.stringify(stateDir)}, { node: process.execPath, bundle: ${JSON.stringify(bridge)} });`;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
@@ -103,11 +115,16 @@ it('parks on a terminal stream response without rotating its permanent access to
     stdio: 'ignore',
   });
   children.push(child);
-  await changedFile(dir, () => existsSync(requests));
-  // The replacement has ended synchronously; allow the credential/state file
-  // events to settle and prove they cannot admit a third connection.
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  expect(readFileSync(requests, 'utf8')).toBe('stream\n');
+  if (failure === 'two terminal frames') {
+    await changedFile(dir, () => existsSync(requests));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  } else {
+    const delivered = AbortSignal.timeout(6_000);
+    await changedFile(stateDir, () => readState(stateDir).sessions[0]?.deliveredWakes.includes('pending') === true,
+      delivered);
+    expect(readState(stateDir).sessions[0]?.deliveredWakes).toEqual(['pending']);
+  }
+  expect(readFileSync(requests, 'utf8')).toBe('stream\nstream\n');
 });
 
 it.each(['short', 'long'])(
