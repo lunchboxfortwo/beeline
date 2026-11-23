@@ -1,6 +1,7 @@
 import { harnessApprovalIntent } from '@beeline/api-contract/phone';
 import { agentMessageChunkText } from './acp-stderr-tail-max-chars.js';
 import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, SteerResult, AcpRequestError, parseAcpUsage, parseAvailableCommands, AcpPermissionRequest, AcpPermissionDecision } from './acp.js';
+import { answer } from './wait.js';
 
 
 
@@ -240,24 +241,28 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, S
     if (current) return Promise.resolve(current);
     if (!ctx.activePromptSessions.has(sessionId)) return Promise.reject(new Error('No active prompt to steer'));
 
-    return new Promise((resolve, reject) => {
-      const onUpdate = (update: SessionUpdate) => {
-        if (update.sessionId !== sessionId) return;
-        const runId = ctx.activeRunIdFromUpdate(update.update);
-        if (!runId) return;
-        cleanup();
-        resolve(runId);
-      };
-      const exited = () => { cleanup(); reject(new AcpRuntimeExitedError('runtime exited before an active run was advertised')); };
-      const ended = (event: { sessionId: string }) => { if (event.sessionId === sessionId) { cleanup(); reject(new Error('Prompt ended before an active run was advertised')); } };
-      const cleanup = () => {
-        ctx.off('session/update', onUpdate);
-        ctx.off('exit', exited);
-        ctx.off('prompt/end', ended);
-      };
-      ctx.on('prompt/end', ended);
-      ctx.once('exit', exited);
-      ctx.on('session/update', onUpdate);
+    // This session's advertised run; the runtime's exit, or this session's own
+    // prompt end, fails it (another session ending never does).
+    let onUpdate: ((update: SessionUpdate) => void) | undefined;
+    let ended: ((event: { sessionId: string }) => void) | undefined;
+    return answer<string>(
+      'ACP active run',
+      [[ctx, 'exit', () => new AcpRuntimeExitedError('runtime exited before an active run was advertised')]],
+      ({ resolve, reject }) => {
+        onUpdate = (update: SessionUpdate) => {
+          if (update.sessionId !== sessionId) return;
+          const runId = ctx.activeRunIdFromUpdate(update.update);
+          if (runId) resolve(runId);
+        };
+        ended = (event: { sessionId: string }) => {
+          if (event.sessionId === sessionId) reject(new Error('Prompt ended before an active run was advertised'));
+        };
+        ctx.on('prompt/end', ended);
+        ctx.on('session/update', onUpdate);
+      },
+    ).finally(() => {
+      if (onUpdate) ctx.off('session/update', onUpdate);
+      if (ended) ctx.off('prompt/end', ended);
     });
   }
 
@@ -335,7 +340,8 @@ import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, S
     if (!ctx.child || !ctx.alive)
       return Promise.reject(new AcpRuntimeExitedError('ACP process is not running'));
     const id = ctx.nextId++;
-    return new Promise((resolve, reject) => {
+    // The reply to this id; the runtime's exit or failure rejects every pending one.
+    return answer<unknown>('ACP agent', [], ({ resolve, reject }) => {
       const sessionId = (params as { sessionId?: string })?.sessionId;
       ctx.pending.set(id, { resolve, reject, ...(sessionId ? { sessionId } : {}) });
       ctx.write({ jsonrpc: '2.0', id, method, params });

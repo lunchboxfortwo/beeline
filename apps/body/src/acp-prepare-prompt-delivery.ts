@@ -1,7 +1,8 @@
 import { maskCredentialResult } from './mask-credential-result.js';
 import { CodexPromptDelivery } from './codex-prompt-delivery.js';
 
-import { watch, readFileSync, writeFileSync, type FSWatcher } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { answer, watchChanges } from './wait.js';
 
 import { explainAgentProgramFailure } from './agent-command.js';
 import { harnessTurnTokens } from './harness-turn-tokens.js';
@@ -272,7 +273,8 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     let completed = false;
     let terminalReason: string | undefined;
     let endTurn!: (result: { stopReason: string }) => void;
-    const terminal = new Promise<{ stopReason: string }>(resolve => { endTurn = resolve; });
+    // A terminal stop for this turn; it races the correlated prompt result below.
+    const terminal = answer<{ stopReason: string }>('ACP turn terminal', [], ({ resolve }) => { endTurn = resolve; });
     const contextPath = ctx.agentEnv.BEELINE_TURN_CONTEXT_FILE;
     const stop = (reason: string) => {
       if (terminalReason) return;
@@ -303,8 +305,13 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
         if (context.terminalReason) stop(context.terminalReason);
       } catch { /* A context rewrite can briefly be empty. */ }
     };
-    let watcher: FSWatcher | undefined;
-    if (contextPath) watcher = watch(contextPath, checkTerminalContext);
+    // A push subscription to the turn's context file, never awaited. If it fails,
+    // the turn still ends on its correlated prompt result.
+    const stopWatching = contextPath
+      ? watchChanges(contextPath, () => checkTerminalContext(), {
+          onError: (error) => ctx.emit('terminal/context-error', error),
+        })
+      : undefined;
     const onUpdate = (u: SessionUpdate) => {
       if (u.sessionId !== sessionId || terminalReason) return;
       if (['tool_call', 'tool_call_update', 'tool_result'].includes(String(u.update.sessionUpdate))) {
@@ -362,7 +369,7 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       };
     } finally {
       ctx.promptDeliveries.get(sessionId)?.complete(completed);
-      watcher?.close();
+      stopWatching?.();
       for (const [id, pending] of ctx.pending) {
         if (terminalReason && pending.sessionId === sessionId) {
           ctx.pending.delete(id);

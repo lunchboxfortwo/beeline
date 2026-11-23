@@ -158,3 +158,37 @@ it('the next socket registers again and serves work after a refusal', async () =
   });
   await expect(operation).resolves.toEqual({ id: 'ok' });
 });
+
+// Astra probe: a forced update left sent and unsent work pending after the link stopped for good.
+it('a forced update ends sent and unsent work and refuses later work on that channel', async () => {
+  const { machine, channel, sockets } = fixture();
+  sockets[0]!.open();
+  sockets[0]!.receive({ type: 'registered', capabilities: {} });
+  const sent = settled(channel.requestOperation('getAgentConfiguration', { agentId } as never));
+  machine.link.requireUpdate('v9.9.9');
+  expect(await sent).toMatchObject({ code: 'update_required' });
+  expect(((await sent) as { error: string }).error).toContain('outcome unknown');
+  const late = settled(channel.requestOperation('getAgentConfiguration', { agentId } as never));
+  expect(await late).toMatchObject({ code: 'update_required' });
+  expect(await settled(channel.operationReady())).toMatchObject({ code: 'update_required' });
+});
+
+it('a replaced or stopped channel refuses late work instead of queueing on it', async () => {
+  const { machine, channel, sockets } = fixture();
+  sockets[0]!.open();
+  sockets[0]!.receive({ type: 'registered', capabilities: {} });
+  const replacement = machine.attach(agentId, {
+    registration: () => ({ token: 'bdt_test' }),
+    onOpen: () => {},
+    onClose: () => {},
+    onMessage: () => {},
+    onUpdateRequired: () => {},
+  });
+  replacement.start();
+  expect(await settled(channel.operationReady())).toMatchObject({ code: 'runtime_ended' });
+  expect(
+    await settled(channel.requestOperation('getAgentConfiguration', { agentId } as never)),
+  ).toMatchObject({ code: 'runtime_ended' });
+  replacement.stop();
+  expect(await settled(replacement.operationReady())).toMatchObject({ code: 'runtime_ended' });
+});

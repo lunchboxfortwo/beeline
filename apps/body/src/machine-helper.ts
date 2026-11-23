@@ -1,5 +1,6 @@
 import { storageOperation } from './helper-storage.js';
 import { waitForProcessExit } from './process-exit.js';
+import { answer, watchChanges } from './wait.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -12,7 +13,7 @@ import {
 import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
 import { retireRemovedAgent } from './agent-retirement.js';
-import { existsSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { watchFreeAgentResume } from './free-agent-resume.js';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
@@ -91,7 +92,7 @@ interface AgentSlot {
   running: Promise<void> | undefined;
   established: boolean;
   enabled: boolean;
-  watcher?: FSWatcher;
+  stopWatching?: () => void;
   configDigest?: string;
   revision: number;
   attemptRevision: number;
@@ -669,7 +670,7 @@ async function serveMachineHelper(
   /** A deleted agent's runtime record is gone; its slot leaves status with it. */
   const forgetSlot = (slot: AgentSlot) => {
     if (slots.get(slot.configPath) !== slot || slot.running) return;
-    slot.watcher?.close();
+    slot.stopWatching?.();
     slots.delete(slot.configPath);
     writeStatus();
   };
@@ -715,24 +716,35 @@ async function serveMachineHelper(
           .update(await readFile(configPath))
           .digest('hex');
         if (controller.signal.aborted || slot.controller.signal.aborted) return;
-        if (!slot.watcher)
-          slot.watcher = watch(dirname(configPath), (_event, filename) => {
-            if (filename !== 'runtime.json') return;
-            void readFile(configPath)
-              .then((raw) => createHash('sha256').update(raw).digest('hex'))
-              .then((digest) => {
-                if (controller.signal.aborted || digest === slot.configDigest) return;
-                slot.configDigest = digest;
-                slot.revision += 1;
-                if (slot.state === 'needs-auth' || slot.state === 'needs-config') {
-                  if (slot.running) slot.controller.abort();
-                  else startSlot(configPath);
-                }
-              })
-              .catch((error) =>
-                console.error(`[helper] agent ${slot.agentId} configuration read failed:`, error),
-              );
-          });
+        // A push subscription; a duplicate change with the same digest restarts nothing.
+        if (!slot.stopWatching)
+          slot.stopWatching = watchChanges(
+            dirname(configPath),
+            (filename) => {
+              if (filename !== null && filename !== 'runtime.json') return;
+              void readFile(configPath)
+                .then((raw) => createHash('sha256').update(raw).digest('hex'))
+                .then((digest) => {
+                  if (controller.signal.aborted || digest === slot.configDigest) return;
+                  slot.configDigest = digest;
+                  slot.revision += 1;
+                  if (slot.state === 'needs-auth' || slot.state === 'needs-config') {
+                    if (slot.running) slot.controller.abort();
+                    else startSlot(configPath);
+                  }
+                })
+                .catch((error) =>
+                  console.error(`[helper] agent ${slot.agentId} configuration read failed:`, error),
+                );
+            },
+            {
+              onError: (error) =>
+                console.error(
+                  `[helper] agent ${slot.agentId} configuration watcher failed; changes apply at the next start:`,
+                  error,
+                ),
+            },
+          );
         const runtime = await readRuntimeRecord(configPath);
         slot.agentId = runtime.agent.publicKey;
         // Diagnostics are optional; their filesystem cannot gate intake.
@@ -834,12 +846,10 @@ async function serveMachineHelper(
         () => pruneHelperReleases(layout, loadedRelease),
         'release pruning',
       ).catch((error) => console.warn('[helper] release pruning deferred:', error));
-    if (!controller.signal.aborted)
-      await new Promise<void>((resolveAbort) =>
-        controller.signal.addEventListener('abort', () => resolveAbort(), { once: true }),
-      );
+    // Serve until the helper's stop aborts.
+    await answer<void>('helper stop', [controller.signal]).catch(() => undefined);
     for (const slot of slots.values()) {
-      slot.watcher?.close();
+      slot.stopWatching?.();
       slot.controller.abort();
     }
     // Native process exit never waits for this. Embedders can observe cleanup

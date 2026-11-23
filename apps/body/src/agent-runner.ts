@@ -3,6 +3,7 @@ import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { isBackgroundCommand } from '@beeline/api-contract/daemon';
 import { dirname,resolve } from 'node:path';
 import { resolveSessionIdleMs } from './agent-process.js';
+import { answer } from './wait.js';
 import { AnswerStore,type StoredAnswer } from './answer-store.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import type { BodyConfig } from './config.js';
@@ -503,11 +504,12 @@ export class AgentRunner {
           }
         }
         if (opts.signal?.aborted) break;
-        await new Promise<void>(done => {
-          this.wake = done;
-          opts.signal?.addEventListener('abort', () => done(), { once: true });
-          if (this.pendingBootstrap) done();
-        });
+        // Park until a wake (registered before the bootstrap recheck) or the
+        // stop's abort; an abort ends the park and the loop sees the signal.
+        await answer<void>('agent runner wake', opts.signal ? [opts.signal] : [], ({ resolve }) => {
+          this.wake = () => resolve();
+          if (this.pendingBootstrap) resolve();
+        }).catch(() => undefined);
         this.wake = undefined;
       }
       return 'aborted';

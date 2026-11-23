@@ -120,6 +120,10 @@ export class StdioSquireMcpClient {
       )
         throw error;
       if (error.outcome.reconnect === 'failed') throw error;
+      // The broker link answered "never sent" while the broker restarts: nothing
+      // can have happened, so no receipt is read and nothing is asked again.
+      if (error.outcome.accepted === false && error.outcome.reconnect === 'in-progress')
+        throw error;
       if (error.outcome.reconnect !== 'in-progress') this.reconnect();
       try {
         await this.ensureSession();

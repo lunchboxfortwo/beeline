@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { HELPER_OVERLAY_MAX_FRAME_BYTES, readHelperOverlayDemand, type HelperOverlayAck, type HelperOverlayDemand, type HelperOverlayFrame } from '@beeline/api-contract/helper-overlay';
 import type { HelperOverlayTransport } from './helper-overlay.js';
+import { answer } from './wait.js';
 
 /** The existing authenticated AgentChannel owns this capability and transport.
  * It never opens a socket, retries a frame, or performs an application read. */
@@ -44,7 +45,8 @@ export class HelperOverlayChannel implements HelperOverlayTransport {
   }
   send(frame:HelperOverlayFrame):Promise<HelperOverlayAck>{
     if(!this.enabled())return Promise.resolve({accepted:false,reason:'unavailable'});
-    return new Promise(resolve=>{
+    // The ack for this requestId; suspend (the link closed) answers every pending one unavailable.
+    return answer<HelperOverlayAck>('overlay ack',[],({resolve})=>{
       const requestId=randomUUID();
       const envelope={type:'overlay-update',requestId,frame};
       if(Buffer.byteLength(JSON.stringify({...envelope,agentId:frame.agentId}))>HELPER_OVERLAY_MAX_FRAME_BYTES){resolve({accepted:false,reason:'unavailable'});return;}
