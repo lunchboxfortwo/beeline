@@ -14,6 +14,7 @@ import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { moveStoredCornerHead } from './github-operations-begin-identity.js';
 import { recordCornerGithubFact, advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
+import { ciGateChecks, cornerCiGate, cornerGateChecks } from './corner-ci-gate.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
 
 
@@ -91,10 +92,13 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       await moveStoredCornerHead(ctx, input.cornerId, number, storedHead, pr.headSha);
       corner.lifecycle = await ctx.lifecycle(input.cornerId);
     }
+    // Branch protection on the base branch names the head's CI gate.
+    const baseBranch = pr.baseRef || corner.lifecycle.pr?.targetBranch || undefined;
     let rollup = await ctx.app.readCommitCheckRollup(
       target.token,
       target.repository,
       pr.headSha,
+      baseBranch,
     );
     let zeroChecksConfirmed = false;
     if (confirmZeroChecks && rollup.total === 0 && rollup.state === 'pending') {
@@ -102,8 +106,10 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       // Re-read after registration evidence: neither a new head nor a newly
       // registered status context can inherit the earlier empty rollup.
       const latestPr = await ctx.app.readPullRequest(target.token, target.repository, number);
-      rollup = await ctx.app.readCommitCheckRollup(target.token, target.repository, pr.headSha);
-      zeroChecksConfirmed = absent && !rollup.pendingRegistrations && latestPr.headSha === pr.headSha && rollup.total === 0;
+      rollup = await ctx.app.readCommitCheckRollup(target.token, target.repository, pr.headSha, baseBranch);
+      // Required checks are the CI gate, so their absence never confirms a finished head.
+      zeroChecksConfirmed = absent && !rollup.pendingRegistrations && latestPr.headSha === pr.headSha && rollup.total === 0 &&
+        !rollup.required?.length;
     }
     // A completed worker handoff can establish that this head genuinely has no
     // checks. Before that point a null rollup is only the ordinary race between
@@ -115,6 +121,12 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       corner.lifecycle.checksSummary?.total === 0 &&
       corner.lifecycle.pr?.headSha === pr.headSha;
     const checks = completedWithoutChecks ? ('passed' as const) : rollup.state;
+    // Review and merging wait only for the CI gate: exactly the base branch's
+    // required checks, and none when it requires none. `checks` stays as shown.
+    const gateChecks = rollup.required ? ciGateChecks(rollup) : checks;
+    // A confirmed zero-check completion records its own green after this read.
+    const gateChanged = Boolean(rollup.required) && !zeroChecksConfirmed &&
+      cornerGateChecks(corner.lifecycle, pr.headSha) !== cornerCiGate(rollup, pr.headSha)?.checks;
     const summaryStatus = checks === 'passed' ? 'passing' : checks === 'failed' ? 'failing' : 'pending';
     const mergeabilityChanged = corner.lifecycle.pr?.mergeability !== pr.mergeability;
     const refreshEmptyGreen = corner.lifecycle.checks === 'passing' &&
@@ -123,11 +135,12 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     // Reuse the event path, including its head/age guards and review transition,
     // without fetching GitHub again. Explicit reads of another PR cannot change
     // this corner, and zero-check completion retains its worker-only authority.
-    if (!corner.archived && !pr.merged && (rollup.total > 0 || refreshEmptyGreen) && corner.author_id &&
+    if (!corner.archived && !pr.merged && (rollup.total > 0 || refreshEmptyGreen || gateChanged) && corner.author_id &&
       corner.lifecycle.pr?.number === number && corner.lifecycle.pr.headSha === pr.headSha &&
       (mergeabilityChanged || corner.lifecycle.checksSummary?.total !== rollup.total ||
         JSON.stringify(corner.lifecycle.checksSummary?.checks) !== JSON.stringify(rollup.checks) ||
-        corner.lifecycle.checksSummary?.status !== summaryStatus || corner.lifecycle.checks !== summaryStatus)) {
+        corner.lifecycle.checksSummary?.status !== summaryStatus || corner.lifecycle.checks !== summaryStatus ||
+        gateChanged)) {
       await ctx.refreshCheckRollup({ ...target, corner_id: input.cornerId,
         parent_id: corner.parent_id, author_id: corner.author_id, corner_name: corner.corner_name,
         summary: '', has_pr: true, pr_number: String(number) }, target.repository,
@@ -152,11 +165,11 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     let reviewerWake = reviewerWakeFromFacts({
       configuredReviewerId,
       reviewerHandle: corner.reviewer_handle,
-      checks,
+      checks: gateChecks,
       reviewWoken: corner.review_woken,
     });
     const mergeDecision = cornerMergeability({
-      checks,
+      checks: gateChecks,
       approved: gate.approved,
       reviewerExists: gate.reviewerExists,
       held: gate.held,

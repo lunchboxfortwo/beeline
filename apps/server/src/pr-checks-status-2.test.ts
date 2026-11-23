@@ -33,6 +33,8 @@ const scope2 = fixtureScope2();
 
 
   it('does not transfer absence evidence to a head pushed during confirmation', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     rootFixture.rollupState = null;
     rootFixture.mergeableState = 'clean';
     rootFixture.pullBaseSha = rootFixture.mainHead;
@@ -44,6 +46,8 @@ const scope2 = fixtureScope2();
 
 
   it('does not overwrite a concurrent check webhook with an older empty read', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     rootFixture.rollupState = null;
     rootFixture.mergeableState = 'clean';
     rootFixture.pullBaseSha = rootFixture.mainHead;
@@ -83,6 +87,8 @@ const scope2 = fixtureScope2();
 
 
   it.each(['PENDING', 'FAILURE'])('keeps configured CI gated when checks are %s', async (state) => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     rootFixture.rollupState = state;
     rootFixture.mergeableState = 'clean';
     rootFixture.pullBaseSha = rootFixture.mainHead;

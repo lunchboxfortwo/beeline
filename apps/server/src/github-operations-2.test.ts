@@ -563,7 +563,8 @@ const scope1 = fixtureScope1();
     console.log(`Reproduction R10-1: checks=${checks}`);
     expect(checks).toBe('passing');
     expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(1);
-    expect(app.readCommitCheckRollup).toHaveBeenCalledWith('room-token', 'owner/widgets', headSha);
+    // This recorded PR has no target branch, so the read names no base branch.
+    expect(app.readCommitCheckRollup).toHaveBeenCalledWith('room-token', 'owner/widgets', headSha, undefined);
     expect(await operations.lifecycle(corner)).toMatchObject({ pr: { number: 4, headSha },
       checksSummary: { total: 1, checks: [{ name: 'build', status: 'passed' }] } });
     expect((await scope1.database.query(`SELECT text FROM messages WHERE room_id=$1

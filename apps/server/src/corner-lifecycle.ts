@@ -929,7 +929,7 @@ async function writeCornerGithubFact(db: SqlDatabase, cornerId: string,
         [cornerId, fact.headSha, fact.fetchStartedAt])).rowCount);
     case 'head-observed':
       return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(jsonb_set(
-          jsonb_set(lifecycle-'checksSummary','{pr,headSha}',to_jsonb($4::text)),
+          jsonb_set(lifecycle-'checksSummary'-'ciGate','{pr,headSha}',to_jsonb($4::text)),
           '{pr,mergeability}','"unknown"'),'{checks}','"pending"')
         WHERE corner_id=$1 AND lifecycle->'pr'->>'number'=$2
           AND lifecycle->'pr'->>'headSha'=$3 RETURNING corner_id`,
@@ -941,7 +941,7 @@ async function writeCornerGithubFact(db: SqlDatabase, cornerId: string,
         [cornerId, fact.branch, JSON.stringify({ lifecycle: 'in-review', pr: fact.pr })])).rowCount);
     case 'pr-forgotten': {
       const removed = await db.query<{ archived: boolean; locked: boolean }>(
-        `UPDATE corner_github_cache fact SET lifecycle=(fact.lifecycle-'pr'-'mergeQueue'-'checksSummary')||'{"checks":"unknown"}'::jsonb
+        `UPDATE corner_github_cache fact SET lifecycle=(fact.lifecycle-'pr'-'mergeQueue'-'checksSummary'-'ciGate')||'{"checks":"unknown"}'::jsonb
          FROM rooms corner,corner_facts state
          WHERE fact.corner_id=$1 AND corner.id=fact.corner_id AND state.corner_id=fact.corner_id
            AND ${cornerRunOutcomeSql('fact.corner_id')} IS DISTINCT FROM 'landed'

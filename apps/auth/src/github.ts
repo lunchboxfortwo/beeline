@@ -1,4 +1,4 @@
-import { gitHubAppClientInstallationUrl, gitHubAppClientFetchApp, gitHubAppClientAppJwt, gitHubAppClientMintInstallationToken, gitHubAppClientListDispatchableWorkflows, gitHubAppClientFileBlobSha, gitHubAppClientDispatchProductionWorkflow, gitHubAppClientDispatchWorkflow, gitHubAppClientReadPullRequest, gitHubAppClientReadPullRequestFiles, gitHubAppClientReadPullRequestDiscussion, gitHubAppClientReadBranchHead, gitHubAppClientOpenPullRequestsForBranch, gitHubAppClientReadCommitCheckRollup, gitHubAppClientHasUnfinishedChecks, gitHubAppClientMissingRequiredChecks, gitHubAppClientConfirmNoChecks } from './github-installation-url.js';
+import { gitHubAppClientInstallationUrl, gitHubAppClientFetchApp, gitHubAppClientAppJwt, gitHubAppClientMintInstallationToken, gitHubAppClientListDispatchableWorkflows, gitHubAppClientFileBlobSha, gitHubAppClientDispatchProductionWorkflow, gitHubAppClientDispatchWorkflow, gitHubAppClientReadPullRequest, gitHubAppClientReadPullRequestFiles, gitHubAppClientReadPullRequestDiscussion, gitHubAppClientReadBranchHead, gitHubAppClientOpenPullRequestsForBranch, gitHubAppClientReadCommitCheckRollup, gitHubAppClientHasUnfinishedChecks, gitHubAppClientMissingRequiredChecks, gitHubAppClientReadRequiredChecks, gitHubAppClientConfirmNoChecks } from './github-installation-url.js';
 import { gitHubAppClientReadJobLog, gitHubAppClientReadRepositoryJson, gitHubAppClientBranchDeletionSafety, gitHubAppClientDeleteBranch, gitHubAppClientReadPullRequestQueue, gitHubAppClientQueueGraphql, gitHubAppClientDequeuePullRequest, gitHubAppClientMergePullRequest, gitHubAppClientClosePullRequest, gitHubAppClientIssuesRequest, gitHubAppClientInstallationAccountId, gitHubAppClientListRepositories, gitHubAppClientCreateRepository, gitHubAppClientUserCanAccessInstallation, gitHubAppClientRepositoryByFullName, gitHubAppClientListUserInstallationIds, gitHubAppClientOrganizationAdmin, gitHubAppClientOrganizationMembership, gitHubAppClientRepositoryStarred, gitHubAppClientStarRepository, gitHubAppClientUserInstallationIds } from './github-read-job-log.js';
 import { ExternalServiceTimeoutError, githubFetch } from './external-fetch.js';
 import { createHash } from 'node:crypto';
@@ -346,7 +346,7 @@ export function suiteHasUnfinishedRuns(item: unknown): boolean {
 }
 
 /** A branch-protection requirement. `appId` null accepts the context from any GitHub App. */
-type RequiredCheck = { readonly name: string; readonly appId: number | null };
+export type RequiredCheck = { readonly name: string; readonly appId: number | null };
 
 /**
  * `checks` carries the GitHub App that must report each context. The legacy
@@ -405,6 +405,10 @@ export interface GitHubCheckRollup {
     readonly conclusion?: string;
     readonly url?: string;
   }[];
+  /** The base branch's required checks, present when the read named a base branch. */
+  readonly required?: readonly RequiredCheck[];
+  /** Passed contexts with the GitHub App that reported each one. */
+  readonly passedContexts?: readonly RequiredCheck[];
 }
 
 export function repositoryPath(fullName: string): string {
@@ -596,7 +600,8 @@ export class GitHubAppClient {
   /** A PR's changed files, reviews, inline review comments and conversation comments. */ async readPullRequestDiscussion(accessToken: string, fullName: string, number: number) { return gitHubAppClientReadPullRequestDiscussion({ service: this, config: this.#config }, accessToken, fullName, number); }
   /** Resolve a branch at GitHub now; push deliveries can arrive out of order. */ async readBranchHead(accessToken: string, fullName: string, branch: string): Promise<string> { return gitHubAppClientReadBranchHead({ service: this, config: this.#config }, accessToken, fullName, branch); }
   /** One repository-owned branch can have at most one open PR for repair. */ async openPullRequestsForBranch(accessToken: string, fullName: string, branch: string) { return gitHubAppClientOpenPullRequestsForBranch({ service: this, config: this.#config }, accessToken, fullName, branch); }
-  /** One admitted read of GitHub's combined verdict and registration pages. * Provider failure returns to the caller; no timer repeats the read. */ async readCommitCheckRollup(accessToken: string, fullName: string, headSha: string): Promise<GitHubCheckRollup> { return gitHubAppClientReadCommitCheckRollup({ service: this, config: this.#config }, accessToken, fullName, headSha); }
+  /** One admitted read of GitHub's combined verdict and registration pages. * Provider failure returns to the caller; no timer repeats the read. */ async readCommitCheckRollup(accessToken: string, fullName: string, headSha: string, baseBranch?: string): Promise<GitHubCheckRollup> { return gitHubAppClientReadCommitCheckRollup({ service: this, config: this.#config }, accessToken, fullName, headSha, baseBranch); }
+  /** The base branch's required status checks; an unprotected branch has none. */ async readRequiredChecks(accessToken: string, fullName: string, branch: string): Promise<RequiredCheck[]> { return gitHubAppClientReadRequiredChecks({ service: this, config: this.#config }, accessToken, fullName, branch); }
   async hasUnfinishedChecks(accessToken: string, fullName: string, headSha: string): Promise<boolean> { return gitHubAppClientHasUnfinishedChecks({ service: this, config: this.#config }, accessToken, fullName, headSha); }
   /** Branch-protection contexts whose required GitHub App has not passed on this head. */ async missingRequiredChecks(accessToken: string, fullName: string, headSha: string, reported: readonly { readonly name: string; readonly appId: number | null; }[]): Promise<string[]> { return gitHubAppClientMissingRequiredChecks({ service: this, config: this.#config }, accessToken, fullName, headSha, reported); }
   /** Empty rollups can precede registration; establish absence independently. */ async confirmNoChecks(accessToken: string, fullName: string, headSha: string): Promise<boolean> { return gitHubAppClientConfirmNoChecks({ service: this, config: this.#config }, accessToken, fullName, headSha); }
