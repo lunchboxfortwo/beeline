@@ -95,8 +95,12 @@ export class SessionResources {
   /** Open threads of this place's chat; also re-read after each turn, which may open one. */
   refreshThreads(): Promise<void> {
     const { api, placeId, parentRoomId } = this.options;
-    return this.load('threads', () =>
-      api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
+    const read = ++this.threadReads;
+    return this.load(
+      'threads',
+      () => api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
+      undefined,
+      () => read === this.threadReads,
     );
   }
 
@@ -114,23 +118,28 @@ export class SessionResources {
   }
 
   private configurationReads = 0;
+  private threadReads = 0;
 
   private load<K extends keyof Context>(
     key: K,
     read: () => Promise<Context[K]>,
     loaded?: (value: Context[K]) => void,
+    current: () => boolean = () => true,
   ): Promise<void> {
     this.status[key] = 'loading';
     return Promise.resolve()
       .then(read)
       .then((value) => {
-        this.context[key] = value;
-        this.status[key] = 'ready';
-        this.persist();
-        loaded?.(value);
+        if (current()) {
+          this.context[key] = value;
+          this.status[key] = 'ready';
+          this.persist();
+          loaded?.(value);
+        }
       })
       .catch((error) => {
-        this.status[key] = error instanceof Error ? error.message : String(error);
+        if (current())
+          this.status[key] = error instanceof Error ? error.message : String(error);
       });
   }
 
