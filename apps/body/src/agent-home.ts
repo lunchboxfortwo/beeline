@@ -363,9 +363,7 @@ export async function repairRoomAgentCredentialLinks(input: {
     if (credential.kind && credential.kind !== input.agentKind) {
       // Another harness's login: a home that changed harness drops the old link.
       await rm(target, { force: true });
-      continue;
-    }
-    if (
+    } else if (
       existsSync(source) &&
       resolve(dirname(target), await readlink(target).catch(() => '')) !== source
     ) {
