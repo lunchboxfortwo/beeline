@@ -186,7 +186,11 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
           const stopped = await stopDarwinProcesses(existing);
           console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
         } else {
-        const result = await exec('/usr/bin/python3', ['-c', STOP, JSON.stringify(existing), String(process.pid)], { maxBuffer: 1024 });
+        const result = await exec(
+          '/usr/bin/python3',
+          ['-c', STOP, JSON.stringify(existing), String(process.pid)],
+          { maxBuffer: 1024 },
+        );
         const { stopped } = JSON.parse(result.stdout) as { stopped: number };
         console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
         }

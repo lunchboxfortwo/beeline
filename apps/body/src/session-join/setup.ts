@@ -245,12 +245,25 @@ export function hermesRoot(env: NodeJS.ProcessEnv): string {
 async function hermes(context: SetupContext): Promise<string[]> {
   const dir = join(hermesRoot(context.env), 'plugins', NAME);
   const remove = Boolean(context.remove);
-  const lines = [...pluginFile(join(dir, '__init__.py'), fill(HERMES_PLUGIN, context.node, context.bundle), remove),
-    ...pluginFile(join(dir, 'plugin.yaml'), HERMES_MANIFEST, remove)];
+  const lines = [
+    ...pluginFile(
+      join(dir, '__init__.py'),
+      fill(HERMES_PLUGIN, context.node, context.bundle),
+      remove,
+    ),
+    ...pluginFile(join(dir, 'plugin.yaml'), HERMES_MANIFEST, remove),
+  ];
   if (remove) rmSync(dir, { recursive: true, force: true });
   // Hermes loads only plugins its person enabled: enable ours, so no manual step remains.
-  const done = await runOwned({ step: 'Hermes plugin setup', file: 'hermes', args: ['plugins', remove ? 'disable' : 'enable', NAME], env: context.env, machineRead: true }).catch(() => ({ code: 1 }));
-  if (!remove && done.code !== 0) lines.push(`Run "hermes plugins enable ${NAME}" once if Hermes does not load it.`);
+  const done = await runOwned({
+    step: 'Hermes plugin setup',
+    file: 'hermes',
+    args: ['plugins', remove ? 'disable' : 'enable', NAME],
+    env: context.env,
+    machineRead: true,
+  }).catch(() => ({ code: 1 }));
+  if (!remove && done.code !== 0)
+    lines.push(`Run "hermes plugins enable ${NAME}" once if Hermes does not load it.`);
   return lines;
 }
 
@@ -280,10 +293,16 @@ export function zcodeIn(homeDir: string, context: SetupContext): string[] {
 }
 
 const SETUP: Record<AgentId, (context: SetupContext) => string[] | Promise<string[]>> = {
-  'claude-code': claudeCode, codex, gemini, antigravity, opencode, pi, hermes,
+  'claude-code': claudeCode,
+  codex,
+  gemini,
+  antigravity,
+  opencode,
+  pi,
+  hermes,
   // Headless Grok joins on demand until its actual host supplies a proved inbound trigger.
-  grok:()=>[],
-  zcode: context => zcodeIn(home(context.env), context),
+  grok: () => [],
+  zcode: (context) => zcodeIn(home(context.env), context),
 };
 
 /** Wires (or with `remove`, unwires) one app. Returns what changed, for the person to see. */

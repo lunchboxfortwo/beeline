@@ -50,8 +50,17 @@ function clipped(value: string): string {
 }
 
 export const runTailscaleCommand: TailscaleCommandRunner = (command, args) =>
-  runOwned({ step: [command, ...args].join(' '), file: command, args, onLine: () => undefined }).then(
-    (result) => ({ code: result.code, stdout: clipped(result.stdout), stderr: clipped(result.stderr) }),
+  runOwned({
+    step: [command, ...args].join(' '),
+    file: command,
+    args,
+    onLine: () => undefined,
+  }).then(
+    (result) => ({
+      code: result.code,
+      stdout: clipped(result.stdout),
+      stderr: clipped(result.stderr),
+    }),
     () => ({ code: null, stdout: '', stderr: '' }),
   );
 

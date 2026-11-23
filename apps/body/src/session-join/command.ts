@@ -201,7 +201,11 @@ function runner(dir: string, env: NodeJS.ProcessEnv): Runner {
 }
 
 async function gitRoot(cwd: string): Promise<string | undefined> {
-  const result = await runOwned({ step: 'git root', file: 'git', args: ['rev-parse', '--show-toplevel'], machineRead: true,
+  const result = await runOwned({
+    step: 'git root',
+    file: 'git',
+    args: ['rev-parse', '--show-toplevel'],
+    machineRead: true,
     cwd,
   }).catch(() => ({ code: 1, stdout: '' }));
   return result.code === 0 ? result.stdout.trim() : undefined;

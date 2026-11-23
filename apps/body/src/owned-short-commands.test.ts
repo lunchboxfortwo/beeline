@@ -74,8 +74,8 @@ it('runs the standalone child owner emitted by a bundled helper', async () => {
   const result = await runOwned({
     step: 'bundled standalone owner', file: process.execPath,
     args: ['--input-type=module', '-e', bundled.outputFiles[0]!.text + `
-      const { runOwned } = await import(ownedCommandModule());
-      const result = await runOwned({step:'fixture',file:process.execPath,args:['-e',"console.log('owned'); console.error('progress');"],machineRead:true});
+      const { runOwned: runStandalone } = await import(ownedCommandModule());
+      const result = await runStandalone({step:'fixture',file:process.execPath,args:['-e',"console.log('owned'); console.error('progress');"],machineRead:true});
       console.log(JSON.stringify(result));`],
     machineRead: true,
   });

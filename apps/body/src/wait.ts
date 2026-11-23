@@ -6,7 +6,7 @@
  * idle", "a socket or result file appears", "a lock frees up", "stdin ends".
  * A wait also ends on its channel's explicit failure event (`error`,
  * close/EOF, ENOENT, ECONNREFUSED, child `exit`). Nothing here arms a timer,
- * retries, polls or caps; a silent remote peer is bounded only by its
+ * retries or polls; a silent remote peer is bounded only by its
  * transport's own read failure. `helper.waits` in
  * docs/architecture/invariants.json ratchets remaining sites outside these owners.
  */
@@ -124,6 +124,7 @@ export interface OwnedCommand extends WaitReport {
   ownerLink?: boolean;
   stdin?: 'pipe';
   captureOutput?: boolean;
+  /** Byte limit per output stream; exceeding it kills the child group and rejects. */
   maxBuffer?: number;
   onSpawn?: (child: ChildProcess) => void;
   /** Called for each output line as it arrives. By default stdout and stderr lines stream to the terminal. */
@@ -253,7 +254,9 @@ export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promi
       command.signal?.removeEventListener('abort', abort);
     };
     child.once('error', (error) => {
-      failure = Object.assign(new Error(`${command.step}: ${error.message}`), { code: (error as NodeJS.ErrnoException).code });
+      failure = Object.assign(new Error(`${command.step}: ${error.message}`), {
+        code: (error as NodeJS.ErrnoException).code,
+      });
       leave();
     });
     child.once('exit', (code, signal) => {
@@ -368,12 +371,21 @@ export async function runOwnedFile(
   options: ExecFileOptions = {},
 ): Promise<OwnedResult> {
   const result = await runOwned({
-    step: [file, ...args].join(' '), file, args,
+    step: [file, ...args].join(' '),
+    file,
+    args,
     cwd: options.cwd === undefined ? undefined : String(options.cwd),
-    env: options.env, signal: options.signal, machineRead: true,
+    env: options.env,
+    signal: options.signal,
+    machineRead: true,
     maxBuffer: options.maxBuffer,
   });
-  if (result.code !== 0) throw Object.assign(new Error(result.stderr.trim() || `${file} exited ${result.code ?? result.signal}`), result, { code: result.code });
+  if (result.code !== 0)
+    throw Object.assign(
+      new Error(result.stderr.trim() || `${file} exited ${result.code ?? result.signal}`),
+      result,
+      { code: result.code },
+    );
   return result;
 }
 

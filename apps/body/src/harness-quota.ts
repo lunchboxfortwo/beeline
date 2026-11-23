@@ -225,7 +225,13 @@ export function quotaAxiArgs(provider: string): string[] {
 
 /** Exit 1 still prints the report (every provider failed), so read stdout either way. */
 const runQuotaAxi: QuotaAxiRun = async (launch, env) => {
-  const result = await runOwned({ step: 'quota-axi', file: launch.command, args: launch.args, env, onLine: () => undefined });
+  const result = await runOwned({
+    step: 'quota-axi',
+    file: launch.command,
+    args: launch.args,
+    env,
+    onLine: () => undefined,
+  });
   if (result.stdout) return result.stdout;
   throw new Error(
     result.code === 0

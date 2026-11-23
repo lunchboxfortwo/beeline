@@ -99,7 +99,10 @@ export async function cornerGitHubCommandRefusal(
   argv: readonly string[],
   featureBranch: string,
   targetBranch: string,
-  resolvePushBranch: (source?: string) => { branch?: string; tag?: boolean } | Promise<{ branch?: string; tag?: boolean }> = () => ({}),
+  resolvePushBranch: (
+    source?: string,
+  ) =>
+    { branch?: string; tag?: boolean } | Promise<{ branch?: string; tag?: boolean }> = () => ({}),
   pushesOrigin: (remote?: string) => boolean | Promise<boolean> = () => true,
   onWrite: () => void = () => {},
 ): Promise<string | undefined> {
@@ -197,29 +200,31 @@ export async function cornerGitHubCommandRefusal(
   if (dangerous) return refusal;
   const refspecs = repositoryOption !== undefined ? positionals : positionals.slice(1);
   const destinations = refspecs.length
-    ? await Promise.all(refspecs.map(async (raw) => {
-        if (raw.startsWith('+')) return { refused: true };
-        const separator = raw.indexOf(':');
-        const source = separator >= 0 ? raw.slice(0, separator) : raw;
-        const explicitDestination = separator >= 0 ? raw.slice(separator + 1) : undefined;
-        if (!source || source === ':' || /(?:^|\/)refs\/tags\//.test(source))
-          return { refused: true };
-        // A bare `HEAD` refspec names the branch checked out right now, so it
-        // resolves to that branch rather than the literal string `HEAD`. A
-        // detached HEAD resolves to no branch and stays refused.
-        const resolved = await resolvePushBranch(source);
-        if (resolved.tag) return { refused: true };
-        const branch = explicitDestination
-          ? branchName(explicitDestination)
-          : resolved.branch
-            ? branchName(resolved.branch)
-            : undefined;
-        return {
-          branch,
-          refused:
-            explicitDestination !== undefined && explicitDestination.startsWith('refs/tags/'),
-        };
-      }))
+    ? await Promise.all(
+        refspecs.map(async (raw) => {
+          if (raw.startsWith('+')) return { refused: true };
+          const separator = raw.indexOf(':');
+          const source = separator >= 0 ? raw.slice(0, separator) : raw;
+          const explicitDestination = separator >= 0 ? raw.slice(separator + 1) : undefined;
+          if (!source || source === ':' || /(?:^|\/)refs\/tags\//.test(source))
+            return { refused: true };
+          // A bare `HEAD` refspec names the branch checked out right now, so it
+          // resolves to that branch rather than the literal string `HEAD`. A
+          // detached HEAD resolves to no branch and stays refused.
+          const resolved = await resolvePushBranch(source);
+          if (resolved.tag) return { refused: true };
+          const branch = explicitDestination
+            ? branchName(explicitDestination)
+            : resolved.branch
+              ? branchName(resolved.branch)
+              : undefined;
+          return {
+            branch,
+            refused:
+              explicitDestination !== undefined && explicitDestination.startsWith('refs/tags/'),
+          };
+        }),
+      )
     : [await resolvePushBranch()];
   if (
     destinations.some(

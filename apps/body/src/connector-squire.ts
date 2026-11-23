@@ -1,7 +1,7 @@
 import { squireHostPaths, squireHostRewriteEnv } from "./squire-host.js";
 import { homedir } from "node:os";
-import { spawn } from "node:child_process";
-import { runOwned } from "./wait.js";
+import { spawn } from 'node:child_process';
+import { runOwned } from './wait.js';
 import type { ConnectorStep, ConnectorBrowserLocation, ConnectorSignIn } from "@beeline/api-contract/daemon";
 import { PAGE_READY_TIMEOUT_MS, installSquireAttempt } from './connector-squire-install-squire-attempt.js';
 
@@ -123,7 +123,12 @@ export type ShellRunner = (
 
 
 export const defaultShellRunner: ShellRunner = (command, args) =>
-  runOwned({ step: [command, ...args].join(' '), file: command, args, onLine: () => undefined }).then(
+  runOwned({
+    step: [command, ...args].join(' '),
+    file: command,
+    args,
+    onLine: () => undefined,
+  }).then(
     (result) => ({ code: result.code ?? 1, stdout: result.stdout, stderr: result.stderr }),
     () => ({ code: 1, stdout: '', stderr: '' }),
   );

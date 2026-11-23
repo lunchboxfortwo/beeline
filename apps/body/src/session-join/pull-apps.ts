@@ -48,8 +48,14 @@ export type SendMessage = (sessionId: string, text: string) => Promise<void>;
 
 const agentapi: SendMessage = async (sessionId, text) => {
   const args = ['send-message', sessionId, text];
-  const result = await runOwned({ step: 'agentapi send-message', file: 'agentapi', args, onLine: () => undefined });
-  if (result.code !== 0) throw new Error(`Command failed: ${['agentapi', ...args].join(' ')}\n${result.stderr}`);
+  const result = await runOwned({
+    step: 'agentapi send-message',
+    file: 'agentapi',
+    args,
+    onLine: () => undefined,
+  });
+  if (result.code !== 0)
+    throw new Error(`Command failed: ${['agentapi', ...args].join(' ')}\n${result.stderr}`);
 };
 
 /** Hands what waits for each joined Antigravity conversation to the App; a failed handoff stays waiting. */

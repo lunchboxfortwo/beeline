@@ -45,7 +45,11 @@ function diagnosticText(error: unknown): string {
   return `${message}\n${stderr}`;
 }
 
-async function git(gitDir: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}) {
+async function git(
+  gitDir: string,
+  args: readonly string[],
+  options: { env?: NodeJS.ProcessEnv; input?: string } = {},
+) {
   const argv = [`--git-dir=${gitDir}`, ...args];
   const result = await runOwned({
     step: `git ${args[0] ?? ''}`.trim(),

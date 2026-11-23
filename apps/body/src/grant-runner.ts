@@ -857,7 +857,11 @@ async function gitShowPrintsFileContents(
   if (objects.length === 0) return false;
   if (!executable || !isAbsolute(executable)) return true;
   for (const word of objects) {
-    const probe = await runOwned({ step: 'git object type', file: executable, args: ['cat-file', '-t', '--', word], machineRead: true,
+    const probe = await runOwned({
+      step: 'git object type',
+      file: executable,
+      args: ['cat-file', '-t', '--', word],
+      machineRead: true,
       cwd,
       env,
     }).catch(() => ({ stdout: '' }));

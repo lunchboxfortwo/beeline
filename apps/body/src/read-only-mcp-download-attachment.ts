@@ -4,7 +4,7 @@ import { realpathSync, existsSync, statSync, readFileSync } from "node:fs";
 import { type ArtifactMimeType, ARTIFACT_MIME_TYPES, ARTIFACT_MIME_BY_EXTENSION } from "@beeline/api-contract/daemon";
 import { validateArtifact } from "./artifact-validation.js";
 import { fileURLToPath } from "node:url";
-import { runOwned } from "./wait.js";
+import { runOwned } from './wait.js';
 import { MESSAGE_REACTION_EMOJIS, type MessageReactionEmoji, SUBSCRIBABLE_EVENT_KINDS, isPerItemEventKind, perItemSubscriptionRefusal, isSubscribableEventKind, isServerEventKind, isAgentKind, AGENT_EVENT_SLUG_MAX_LENGTH, MAX_EVENT_CONSEQUENCE_LENGTH, MAX_MENTIONS_PER_EVENT } from "@beeline/api-contract/phone";
 import { JsonObject, requiredEnv, daemonUploadArtifact, daemonExecute, stringArg, MAX_ATTACH_BYTES, gitBinary, asObject } from './read-only-mcp.js';
 
@@ -255,7 +255,11 @@ export const NAMED_PATH = /(?:^|[\s(<[=:])(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`
 
 
 /** Recognize private paths even when missing or unreadable for delivery advice. */
-export async function namedPrivateFiles(roots: string[], text: string, includeRelative = false): Promise<{ named: string; resolved: string }[]> {
+export async function namedPrivateFiles(
+  roots: string[],
+  text: string,
+  includeRelative = false,
+): Promise<{ named: string; resolved: string }[]> {
   const home = process.env.HOME?.trim();
   const found: { named: string; resolved: string }[] = [];
   for (const match of text.matchAll(NAMED_PATH)) {
@@ -263,24 +267,59 @@ export async function namedPrivateFiles(roots: string[], text: string, includeRe
     const named = quoted ?? match[4]!.replace(/[.,;:!?*]+$/, '');
     let path = named;
     if (path.startsWith('file://')) {
-      try { path = fileURLToPath(path); } catch { continue; }
+      try {
+        path = fileURLToPath(path);
+      } catch {
+        continue;
+      }
     }
     if (!isAbsolute(path) && !path.startsWith('~/')) {
       // Source citations travel with the repository. Generated proof files do
       // not: only existing relative files inside this session are candidates.
-      if (!includeRelative || !/^(?:\.{1,2}\/)?[\w@ .-]+(?:\/[\w@ .-]+)*\.[a-zA-Z0-9]{1,12}$/.test(path)) continue;
+      if (
+        !includeRelative ||
+        !/^(?:\.{1,2}\/)?[\w@ .-]+(?:\/[\w@ .-]+)*\.[a-zA-Z0-9]{1,12}$/.test(path)
+      )
+        continue;
       let resolved: string;
-      try { resolved = resolveAttachPath(roots, path); } catch { continue; }
+      try {
+        resolved = resolveAttachPath(roots, path);
+      } catch {
+        continue;
+      }
       const checkout = roots[0];
       if (checkout && gitBinary && withinRoot(realpathSync(checkout), resolved)) {
         try {
-          const tracked = await runOwned({ step: 'git ls-files', file: gitBinary, args: ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
-            '--literal-pathspecs', '-C', checkout, 'ls-files', '--error-unmatch', '--', relative(realpathSync(checkout), resolved)],
-          env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' }, machineRead: true });
+          const tracked = await runOwned({
+            step: 'git ls-files',
+            file: gitBinary,
+            args: [
+              '-c',
+              'core.fsmonitor=false',
+              '-c',
+              'core.hooksPath=/dev/null',
+              '--literal-pathspecs',
+              '-C',
+              checkout,
+              'ls-files',
+              '--error-unmatch',
+              '--',
+              relative(realpathSync(checkout), resolved),
+            ],
+            env: {
+              PATH: '/usr/bin:/bin',
+              GIT_CONFIG_NOSYSTEM: '1',
+              GIT_CONFIG_GLOBAL: '/dev/null',
+              GIT_OPTIONAL_LOCKS: '0',
+            },
+            machineRead: true,
+          });
           if (tracked.code === 0) continue;
-        } catch { /* Untracked files (or unavailable index evidence) need attachments. */ }
+        } catch {
+          /* Untracked files (or unavailable index evidence) need attachments. */
+        }
       }
-      if (!found.some(file => file.resolved === resolved)) found.push({ named, resolved });
+      if (!found.some((file) => file.resolved === resolved)) found.push({ named, resolved });
       continue;
     }
     const absolute = path.startsWith('~/') ? (home ? join(home, path.slice(2)) : '') : path;
@@ -291,7 +330,8 @@ export async function namedPrivateFiles(roots: string[], text: string, includeRe
       resolved = resolveAttachPath(roots, absolute);
     } catch {
       // A named private path still needs advice if it cannot be read.
-      if (!inRoots && !/^(?:~\/|\/(?:tmp|var\/tmp|home|Users|root|private\/var)\/)/.test(path)) continue;
+      if (!inRoots && !/^(?:~\/|\/(?:tmp|var\/tmp|home|Users|root|private\/var)\/)/.test(path))
+        continue;
     }
     if (!found.some((file) => file.resolved === resolved)) found.push({ named, resolved });
   }
@@ -350,8 +390,9 @@ export async function bindBriefFiles(brief: JsonObject, given?: PostArtifactDeps
     const { path: _path, ...rest } = item;
     bound.push({ ...rest, objectId });
   }
-  const unattached = (await namedPrivateFiles(roots, typeof brief.spec === 'string' ? brief.spec : ''))
-    .filter((file) => !attached.has(file.resolved));
+  const unattached = (
+    await namedPrivateFiles(roots, typeof brief.spec === 'string' ? brief.spec : '')
+  ).filter((file) => !attached.has(file.resolved));
   if (unattached.length)
     throw new Error(
       `the brief names ${unattached.map((file) => file.named).join(', ')}, which only you can open; ` +

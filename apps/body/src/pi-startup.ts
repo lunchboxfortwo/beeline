@@ -102,7 +102,12 @@ export function piStartupEnvironment(
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   if (!/(^|[/\\])pi-acp(?:\.[a-z]+)?$/i.test(label)) return env;
-  const loader = LOADER.replace('__BEELINE_PREAMBLE__', JSON.stringify(VERSION_PREAMBLE.replace('__BEELINE_OWNED_MODULE__', JSON.stringify(ownedCommandModule()))));
+  const loader = LOADER.replace(
+    '__BEELINE_PREAMBLE__',
+    JSON.stringify(
+      VERSION_PREAMBLE.replace('__BEELINE_OWNED_MODULE__', JSON.stringify(ownedCommandModule())),
+    ),
+  );
   const preload = `
 import { register } from 'node:module';
 import { realpathSync, readFileSync } from 'node:fs';

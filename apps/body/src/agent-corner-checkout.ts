@@ -19,8 +19,7 @@ import { basename, dirname, relative, resolve } from 'node:path';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 
 const execFileAsync = runOwnedFile;
-const git = (args: string[], env?: NodeJS.ProcessEnv) =>
-  execFileAsync('git', args, { env, });
+const git = (args: string[], env?: NodeJS.ProcessEnv) => execFileAsync('git', args, { env });
 
 /** Private refs let agents check out the same public branch independently. */
 export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId: string) {

@@ -59,8 +59,16 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
     return tree;
   }
   let child!: ChildProcessWithoutNullStreams;
-  const completed = runOwned({ step: 'storage inventory', file: '/usr/bin/python3', args: ['-c', TREE_INVENTORY, root],
-    captureOutput: false, machineRead: true, onSpawn: started => { child = started as ChildProcessWithoutNullStreams; } });
+  const completed = runOwned({
+    step: 'storage inventory',
+    file: '/usr/bin/python3',
+    args: ['-c', TREE_INVENTORY, root],
+    captureOutput: false,
+    machineRead: true,
+    onSpawn: (started) => {
+      child = started as ChildProcessWithoutNullStreams;
+    },
+  });
   const tree = new Map<string, TreeEntry>();
   let pending = '', stderr = '';
   child.stderr.setEncoding('utf8');

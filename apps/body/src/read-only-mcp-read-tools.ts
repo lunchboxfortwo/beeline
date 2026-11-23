@@ -1,6 +1,6 @@
 import { readdirSync, statSync, type Dirent, lstatSync, realpathSync } from "node:fs";
 import { resolve, isAbsolute, relative, sep } from "node:path";
-import { runOwned } from "./wait.js";
+import { runOwned } from './wait.js';
 import { DEFAULT_IGNORED_DIRECTORIES, JsonObject, existingPath, stringArg, integerArg, displayPath, booleanArg, MAX_SEARCH_TOTAL_BYTES, MAX_SEARCH_FILE_BYTES, readTextFile, gitBinary, repositoryRoot, MAX_GIT_BYTES, approvedAgentRoots, revisionArg, optionalPath } from './read-only-mcp.js';
 
 
@@ -150,8 +150,7 @@ export async function runGit(args: string[]): Promise<string> {
   } catch {
     throw new Error('git inspection command failed');
   }
-  if (result.code !== 0)
-    throw new Error(result.stderr.trim() || 'git inspection command failed');
+  if (result.code !== 0) throw new Error(result.stderr.trim() || 'git inspection command failed');
   return result.stdout.trimEnd();
 }
 

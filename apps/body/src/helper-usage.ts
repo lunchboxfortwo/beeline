@@ -71,9 +71,14 @@ print(json.dumps({'categories':totals,'errors':errors}))
 `;
 
 export async function sampleHelperUsage(root: string, mode: 'disk' | 'process', signal?: AbortSignal): Promise<unknown> {
-  const { stdout } = await exec('/usr/bin/python3', ['-c', INVENTORY, root, mode, String(process.pid)], {
-    maxBuffer: 1024 * 1024, signal,
-  });
+  const { stdout } = await exec(
+    '/usr/bin/python3',
+    ['-c', INVENTORY, root, mode, String(process.pid)],
+    {
+      maxBuffer: 1024 * 1024,
+      signal,
+    },
+  );
   return JSON.parse(stdout);
 }
 
