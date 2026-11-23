@@ -1,10 +1,9 @@
 // Release gate: a free agent in the review proof Workspace answers a real tag.
 // The review identity owns "Play Review's team"; no owner Workspace is touched.
 // The live socket delivers the reply or the turn's failure. There is no
-// timer, poll or resend: the job's own timeout bounds the wait. A cancelled
-// execution whose command is still pending is not an outcome: the server
-// redelivers that owed command (2026-11-23: the first execution replied to an
-// older identical tag, and the redelivered execution answered this one).
+// timer, poll or resend: the job's own timeout bounds the wait. Cancellation
+// does not prove the command finished; the Room's oldest-pending-command
+// summary can hide owed work. See docs/free-agents.md for the proof contract.
 import { randomBytes } from 'node:crypto';
 
 const origin = process.env.BEELINE_PROOF_ORIGIN ?? 'https://server.usebeeline.app';
