@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync } from 'node:fs';
+import { accessSync, constants, mkdtempSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { isolatedNativeProof } from '../../../apps/body/src/lifecycle-test-guard.js';
 
@@ -6,11 +7,18 @@ import { isolatedNativeProof } from '../../../apps/body/src/lifecycle-test-guard
  * Where tests make their temporary roots. /tmp disappears inside the Room's
  * namespace; a long worktree path exceeds Unix socket limits. /var/tmp gives
  * tests a short, private, visible home: an agent session's own writable folder
- * there, or /var/tmp itself elsewhere.
+ * there, or /var/tmp itself elsewhere. A sandbox from an older Beeline shows
+ * /var/tmp read-only with neither, so tests fall back to the system temp folder.
  */
 export function testTmpDir(): string {
   const tmp = process.env.TMPDIR;
-  return tmp?.startsWith('/var/tmp/') ? tmp : '/var/tmp';
+  if (tmp?.startsWith('/var/tmp/')) return tmp;
+  try {
+    accessSync('/var/tmp', constants.W_OK);
+    return '/var/tmp';
+  } catch {
+    return tmpdir();
+  }
 }
 
 // Every test and every child it launches inherits private paths and an unreachable
