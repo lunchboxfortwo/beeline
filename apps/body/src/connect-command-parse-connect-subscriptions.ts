@@ -6,7 +6,6 @@ import { normalizeAgentPairingCode } from '@beeline/api-contract/phone';
 import { agentBehavior } from './agent-command.js';
 import { defaultSupervisorRoot, findAgentRuntimeConfigPaths } from './runtime.js';
 import { runOwned } from './wait.js';
-import { stopLiveAcpAdapters } from './acp.js';
 import * as clack from '@clack/prompts';
 import { clackPromptOutput } from './clack-support.js';
 import { type AgentAccessPolicy, isAgentAccessPolicy } from './access-policy.js';
@@ -264,11 +263,10 @@ export interface SpinnerStep {
 /**
  * One spinner over one wait. The wait's own lines (a child's output, the host
  * a request waits on) replace the message as they arrive. SIGINT or SIGTERM
- * reaches clack's spinner as a cancel: it aborts the wait's signal and stops
- * every ACP adapter this process is probing, whose exit fails the pending
- * request through the client's own exit path; the wizard then ends as
- * cancelled. Ctrl-C at the keyboard makes clack exit the process, and the
- * exit hook stops those adapters on the way out.
+ * reaches clack's spinner as a cancel: it aborts the wait's signal, and
+ * `runOwned`'s signal and exit hooks kill every adapter group this process
+ * owns, whose exit fails the pending request through the client's own exit
+ * path; the wizard then ends as cancelled.
  */
 export async function brassSpinner<T>(
   message: string,
@@ -279,12 +277,8 @@ export async function brassSpinner<T>(
   const cancel = new AbortController();
   const spinner = clack.spinner({
     output: clackPromptOutput(),
-    onCancel: () => {
-      cancel.abort();
-      stopLiveAcpAdapters();
-    },
+    onCancel: () => cancel.abort(),
   });
-  process.on('exit', stopLiveAcpAdapters);
   spinner.start(brass(message));
   try {
     const result = await action({
@@ -300,8 +294,6 @@ export async function brassSpinner<T>(
     if (cancel.signal.aborted) throw new ConnectFailureError('Connection cancelled.');
     spinner.stop(failure);
     throw error;
-  } finally {
-    process.removeListener('exit', stopLiveAcpAdapters);
   }
 }
 

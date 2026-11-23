@@ -191,7 +191,11 @@ test('the server leg ends by requiring a real free-agent reply in the review pro
 for (const [delivery, outcome] of [
   ['delta', 'reply'], ['delta', 'failure'],
   ['invalidate', 'reply'], ['invalidate', 'failure'],
-  ['failed-turn', 'failure'], ['cancelled-turn', 'failure'],
+  ['failed-turn', 'failure'],
+  // Production 2026-11-23: an execution ended after replying to an older tag,
+  // so the still-pending command was redelivered and then answered.
+  ['owed-turn', 'reply'], ['hidden-owed-turn', 'reply'], ['unlisted-owed-turn', 'reply'],
+  ['hidden-owed-turn', 'failure'],
 ]) test(`the free-agent reply proof ${outcome === 'reply' ? 'passes on' : 'fails on'} a ${outcome} via ${delivery}`, async () => {
   const { createServer } = await import('node:http');
   const { WebSocketServer } = await import('ws');
@@ -219,7 +223,7 @@ for (const [delivery, outcome] of [
         socket.send(JSON.stringify({ type: 'message-delta', roomId: room, message: unrelated }));
       socket.send(JSON.stringify(delivery === 'delta' ? { type: 'message-delta', roomId: room, message }
         : delivery.endsWith('-turn') ? { type: 'turn-delta', roomId: room,
-          turn: { agentPubkey: agent, requestId, status: delivery.split('-')[0] } }
+          turn: { agentPubkey: agent, requestId, status: delivery.endsWith('owed-turn') ? 'cancelled' : delivery.split('-')[0] } }
         : { type: 'invalidate', roomId: room, reason: 'delta-fallback:postgres:messages' }));
       response.end(JSON.stringify({ messageId: tagged.messageId,
         pendingAgentCommands: [{ requestId: 'other-command', agentPubkey: 'other-agent', createdAt: 1795017221 },
@@ -228,11 +232,15 @@ for (const [delivery, outcome] of [
     }
     if (request.url === `/v1/phone/rooms/${room}`) {
       roomReads++;
-      return response.end(JSON.stringify({ room: { id: room }, messages: [
+      response.end(JSON.stringify({ room: { id: room }, messages: [
         { ...message, id: 'old-reply', requestId: 'unrelated-command', text: 'Old answer' },
         { ...message, id: 'other-agent', author: { pubkey: 'other-agent' } },
         ...(delivery.endsWith('-turn') ? [] : [message]),
-      ] }));
+      ], ...(delivery === 'owed-turn' || delivery === 'hidden-owed-turn' ? { pendingAgentCommands: [{
+        requestId: delivery === 'hidden-owed-turn' ? 'older-command' : requestId, agentPubkey: agent, createdAt: 1795017221,
+      }] } : {}) }));
+      if (delivery.endsWith('owed-turn')) setTimeout(() => socket.send(JSON.stringify({ type: 'message-delta', roomId: room, message })), 50);
+      return;
     }
     response.statusCode = 404; response.end('{}');
   });
@@ -258,7 +266,7 @@ for (const [delivery, outcome] of [
     assert.notEqual(tagged.messageId, requestId);
     assert.equal(roomReads, delivery === 'delta' ? 0 : 1);
     if (outcome === 'reply') { assert.equal(code, 0, output); assert.match(output, /answered the release proof.*Release proof: Beebee is online/); }
-    else if (delivery.endsWith('-turn')) { assert.notEqual(code, 0); assert.match(output, new RegExp(`Free agent turn ${delivery.split('-')[0]} without a reply`)); }
+    else if (delivery === 'failed-turn') { assert.notEqual(code, 0); assert.match(output, new RegExp(`Free agent turn ${delivery.split('-')[0]} without a reply`)); }
     else { assert.notEqual(code, 0); assert.match(output, /Free agent turn failed: .*Model request did not complete/); }
   } finally { for (const client of live.clients) client.terminate(); live.close(); server.close(); }
 });

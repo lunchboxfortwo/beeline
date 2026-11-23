@@ -115,16 +115,6 @@ async function responseError(response: Response): Promise<DaemonApiError> {
   );
 }
 
-export type DaemonClientMetrics = {
-  readonly inFlight: number;
-  readonly requests: number;
-  readonly timeouts: number;
-  readonly reconnects: number;
-  readonly subscriptionsSent: number;
-  readonly readQueueDepth: number;
-  readonly readQueueWaitMs: number;
-};
-
 const DAEMON_LIVE_EVENT_TYPES = new Set<unknown>([
   'share-viewer-activity',
   'vault-save',
@@ -182,7 +172,6 @@ export class DaemonApiClient {
   private authorityRefusalListener?: (error: DaemonApiError) => void;
   private channelStateListener?: (connected: boolean, refusal?: string) => void;
   private inFlight = 0;
-  private requestCount = 0;
   private queueListener?: (
     commands: readonly AgentCommand[],
     completedCommandIds: readonly string[],
@@ -293,16 +282,8 @@ export class DaemonApiClient {
     this.channelStateListener = listener;
   }
 
-  metrics(): DaemonClientMetrics {
-    return {
-      inFlight: this.inFlight,
-      requests: this.requestCount,
-      timeouts: 0,
-      reconnects: this.#channel.reconnects,
-      subscriptionsSent: this.queueDemanded ? 1 : 0,
-      readQueueDepth: 0,
-      readQueueWaitMs: 0,
-    };
+  metrics(): { inFlight: number } {
+    return { inFlight: this.inFlight };
   }
 
   /** Called on every live socket open, after resubscription and the wakes. */
@@ -426,7 +407,6 @@ export class DaemonApiClient {
         this.agentId,
         (input as Input<'postAgentUsage'>).usage,
       ) as Promise<Output<Name>>;
-    this.requestCount++;
     this.inFlight++;
     try {
       const result = await this.#channel.requestOperation(name, input);
@@ -463,7 +443,6 @@ export class DaemonApiClient {
       (input as Input<'getRoomGitHubToken'>).roomId === this.#repositoryCredentialRoom;
     if (!repositoryCredential)
       throw new Error('HTTP daemon operation requires bootstrap or a registered old server');
-    this.requestCount += 1;
     this.inFlight += 1;
     try {
       // `corner-read-token` names the host and step on stderr before it waits.

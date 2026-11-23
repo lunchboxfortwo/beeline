@@ -1,9 +1,8 @@
-import { runOwnedFile } from './wait.js';
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { activeAdapterCommand } from './adapter-store.js';
-import { runOwned } from './wait.js';
+import { runOwned, runOwnedFile } from './wait.js';
 import type { AgentId } from './session-join/agents.js';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import { createRequire } from 'node:module';
@@ -496,8 +495,6 @@ export async function installLatestAgentAdapter(
   return updateAgentAdapter(kind, opts);
 }
 
-const execFileAsync = runOwnedFile;
-
 /** Older user CLIs can reject flags required by the latest adapter. */
 export async function explainAgentProgramFailure(
   error: unknown,
@@ -519,7 +516,7 @@ export async function explainAgentProgramFailure(
     )
   )
     return error;
-  const version = await execFileAsync(env.CLAUDE_CODE_EXECUTABLE, ['--version'], {
+  const version = await runOwnedFile(env.CLAUDE_CODE_EXECUTABLE, ['--version'], {
     env,
     maxBuffer: 4096,
   })

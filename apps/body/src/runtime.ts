@@ -20,7 +20,6 @@ import { activeAdapterCommand } from './adapter-store.js';
 import type { ExternalMcpCapability } from './external-mcp-capabilities.js';
 import type { SandboxPolicy } from './bwrap-sandbox.js';
 
-const execFileAsync = runOwnedFile;
 const DEFAULT_AGENT_IDENTITY_NAME = 'beeline-agent';
 const DEFAULT_BODY_IDENTITY_NAME = 'beeline-body';
 export const DEFAULT_DAEMON_MONOLITH_BASE_URL = 'https://server.usebeeline.app';
@@ -372,7 +371,7 @@ async function daemonIsThisRuntime(pid: number, configPath: string): Promise<boo
     );
   } catch {
     try {
-      const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command=']);
+      const { stdout } = await runOwnedFile('ps', ['-p', String(pid), '-o', 'command=']);
       return (
         stdout.includes(' daemon ') &&
         (stdout.includes(' --machine') || stdout.includes(resolve(configPath)))
@@ -437,7 +436,7 @@ export async function runningHelperPid(supervisorRoot: string): Promise<number |
   const liveBirth = processBirthIdentity(pid);
   if (recordedBirth && liveBirth) return recordedBirth === liveBirth ? pid : null;
   try {
-    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command=']);
+    const { stdout } = await runOwnedFile('ps', ['-p', String(pid), '-o', 'command=']);
     return stdout.includes(' daemon ') && stdout.includes(' --machine') ? pid : null;
   } catch {
     return null;

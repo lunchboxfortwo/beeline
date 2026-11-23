@@ -1,13 +1,12 @@
 import { runOwnedFile } from './wait.js';
 import { lstat } from 'node:fs/promises';
 
-const execFileAsync = runOwnedFile;
 export const CORNER_SCRATCH_BUDGET_BYTES = 5 * 1024 ** 3;
 
 /** du counts allocated blocks once per inode and never follows symlinks. */
 export async function allocatedDirectoryBytes(path: string): Promise<number> {
   if (!(await lstat(path).catch(() => undefined))) return 0;
-  const output = await execFileAsync('du', ['-s', '-B1', '--', path], {
+  const output = await runOwnedFile('du', ['-s', '-B1', '--', path], {
     maxBuffer: 1024 * 1024,
   }).then((result) => result.stdout);
   const bytes = Number(output.split(/\s+/)[0]);

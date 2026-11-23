@@ -6,6 +6,7 @@ import type { DaemonContext } from './context.js';
 import { Input, AccessDeniedError, id, markExpiredAttachments } from './values.js';
 import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach } from './corner-messages.js';
+import { deliveredMessage } from '../corner-brief.js';
 
 
 
@@ -26,6 +27,8 @@ import { daemonReach } from './corner-messages.js';
     const offset = input.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000_000)
       throw new Error('invalid message offset');
+    const delivered = await deliveredMessage(ctx.database, input.messageId, agentId);
+    if (delivered) input = { ...input, messageId: delivered.id };
     // Private hand-offs expose the command id as their message id. Only the
     // sender and recipient may reopen that payload, even in a shared Room.
     const handoff = (await ctx.database.query<{

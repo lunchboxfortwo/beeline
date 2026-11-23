@@ -2,6 +2,7 @@ import { chmod, rm } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import type { HelperStatusFile } from './helper-status.js';
+import { holderVanished } from './kernel-lock.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
 import { answer, ask, listen, onEnd, tryLock, type Listening } from './wait.js';
 
@@ -145,12 +146,8 @@ export async function followHelperExit(
   predecessor: Pick<MachineAnswer, 'pid' | 'generation'>,
 ): Promise<void> {
   const key = helperLockKey(stateRoot);
-  const vanished = (error: unknown) =>
-    ['ECONNRESET', 'ECONNREFUSED', 'ENOENT', 'EPIPE'].includes(
-      (error as NodeJS.ErrnoException)?.code ?? '',
-    );
   const lock = await tryLock(key).catch((error: unknown) => {
-    if (vanished(error)) return;
+    if (holderVanished(error)) return;
     throw error;
   });
   if (!lock) return;
@@ -173,12 +170,11 @@ export function helperAbsent(error: unknown): boolean {
 export async function askMachine(
   stateRoot: string,
   request: MachineRequest,
-  wait: { report?: (line: string) => void; machineRead?: boolean } = {},
 ): Promise<MachineAnswer> {
   const path = machineControlPath(stateRoot);
   await preparePrivateSocketDirectory(path);
   const answer = await ask<MachineAnswer>(
-    { socket: path, peer: `helper ${request.operation}`, ...wait },
+    { socket: path, peer: `helper ${request.operation}` },
     request,
   );
   if (

@@ -684,19 +684,25 @@ export async function prepareLatestRelease(
       options.logger?.(
         `already on ${installed?.version ?? active}; verifying content and repairing helper`,
       );
+    const holds = async (id: string | undefined) =>
+      Boolean(id) &&
+      (
+        await readFile(join(layout.releasesRoot, id!, '.stage-ok'), 'utf8').catch(() => '')
+      ).trim() === bundle.sha256;
     const pending = (await readUpdateState(layout)).stagedReleaseId;
-    const pendingDigest = pending
-      ? await readFile(join(layout.releasesRoot, pending, '.stage-ok'), 'utf8').catch(() => '')
-      : '';
+    // The active release may be a forced repair of these bytes; never hand back to the
+    // directory it replaced, whose marker can outlive damaged content.
     const releaseId =
-      !options.force && pending && pendingDigest.trim() === bundle.sha256
-        ? pending
-        : await stageRelease(layout, manifestUrl, bundle, {
-            fetchImpl,
-            logger: options.logger,
-            force: options.force,
-            signal: options.signal,
-          });
+      !options.force && (await holds(pending))
+        ? pending!
+        : !options.force && (await holds(active))
+          ? active!
+          : await stageRelease(layout, manifestUrl, bundle, {
+              fetchImpl,
+              logger: options.logger,
+              force: options.force,
+              signal: options.signal,
+            });
     options.signal?.throwIfAborted();
     await writeUpdateState(layout, {
       ...(await readUpdateState(layout)),

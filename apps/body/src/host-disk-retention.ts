@@ -2,7 +2,6 @@ import { runOwnedFile } from './wait.js';
 import { lstat, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-const execFileAsync = runOwnedFile;
 import {
   storageOperation,
   reclaimWholeStorageObject,
@@ -49,7 +48,7 @@ export async function pruneRepositoryCaches(
     const info = await lstat(path);
     if (!info.isDirectory()) continue;
     const published = async (): Promise<boolean> => {
-      const listing = await execFileAsync('git', [
+      const listing = await runOwnedFile('git', [
         `--git-dir=${path}`,
         'worktree',
         'list',
@@ -71,7 +70,7 @@ export async function pruneRepositoryCaches(
           return false;
       }
       // A remote tip advancing does not make its older local ancestor unpushed.
-      const unpublished = await execFileAsync('git', [
+      const unpublished = await runOwnedFile('git', [
         `--git-dir=${path}`,
         'rev-list',
         '--branches',

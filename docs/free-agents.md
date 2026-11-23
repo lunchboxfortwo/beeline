@@ -307,7 +307,9 @@ A failed observation does not skip the rest of that finite inventory.
 The server leg then tags `@beebee_26` in the review identity's own Play Review's
 team `#general` and requires its real reply before the release succeeds
 (`packages/scripts/release-steps/free-agent-reply-proof.mjs`); a failed turn
-fails the release with its reason. A successful signal or update POST alone is insufficient.
+fails the release with its reason. Execution cancellation alone does not end
+the proof; it keeps waiting for the command’s answer, regardless of the Room’s
+oldest-pending-command summary. A successful signal or update POST alone is insufficient.
 `free-agent-refresh.test.ts` covers all retired state values, deferred claimed
 work, partial failures and preserved unmapped machines.
 `packages/scripts/build-free-agent-image.sh` builds the

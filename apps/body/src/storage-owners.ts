@@ -20,7 +20,6 @@ import { canonicalStoragePath } from './storage-filesystem.js';
 import { removeArchivedCornerData } from './archived-corner-cleanup.js';
 import { ask } from './wait.js';
 
-const execFileAsync = storageChild;
 export interface StorageOwner {
   workspaceId: string;
   roomId: string;
@@ -60,6 +59,75 @@ export async function rememberStorageOwner(
   await writePrivateFileAtomically(path, JSON.stringify(owner));
 }
 
+/** Tracked edits or untracked files in a checkout. */
+async function hasLocalChanges(path: string, maxBuffer?: number): Promise<boolean> {
+  const status = await storageChild(
+    'git',
+    ['-C', path, 'status', '--porcelain=v1', '--untracked-files=all'],
+    { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, ...(maxBuffer ? { maxBuffer } : {}) },
+  );
+  return Boolean(status.stdout.trim());
+}
+
+/** HEAD is contained in a fetched origin branch. */
+async function headOnOrigin(path: string): Promise<boolean> {
+  const contained = await storageChild('git', [
+    '-C',
+    path,
+    'for-each-ref',
+    '--format=%(refname)',
+    '--contains=HEAD',
+    'refs/remotes/origin/',
+  ]);
+  return Boolean(contained.stdout.trim());
+}
+
+/** The checkout's shared Git directory and the ref its HEAD names. */
+async function checkoutBranch(path: string): Promise<string[]> {
+  const result = await storageChild('git', [
+    '-C',
+    path,
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+    '--symbolic-full-name',
+    'HEAD',
+  ]);
+  return result.stdout.trim().split('\n');
+}
+
+/** Retire a removed checkout's local branch too; otherwise a squash-merged head pins the clone. */
+async function retireCheckoutBranch(
+  supervisorRoot: string,
+  [commonDir, branch]: string[],
+  path: string,
+  what: string,
+): Promise<void> {
+  const repositories = canonicalStoragePath(resolve(supervisorRoot, 'beeline/repositories'));
+  if (
+    !commonDir ||
+    !canonicalStoragePath(commonDir).startsWith(`${repositories}/`) ||
+    !branch?.startsWith('refs/heads/')
+  )
+    return;
+  await storageChild('git', [`--git-dir=${commonDir}`, 'worktree', 'prune', '--expire=now']);
+  const head = await storageChild('git', [`--git-dir=${commonDir}`, 'symbolic-ref', 'HEAD']).then(
+    (result) => result.stdout.trim(),
+    () => undefined,
+  );
+  if (head !== branch)
+    await storageChild('git', [
+      `--git-dir=${commonDir}`,
+      'branch',
+      '--delete',
+      '--force',
+      '--',
+      branch.slice('refs/heads/'.length),
+    ]).catch((error) =>
+      console.warn(`[helper] ${what} local branch cleanup deferred ${path}:`, error),
+    );
+}
+
 /** Local publication evidence remains authoritative after the owner's token
  * is revoked. Failed reads, local changes and unpublished HEADs all preserve. */
 export async function reclaimOwnedCheckout(
@@ -82,25 +150,16 @@ export async function reclaimOwnedCheckout(
   const published = async () => {
     try {
       if (
-        await execFileAsync('git', ['-C', path, 'rev-parse', '--verify', 'refs/stash']).then(
+        await storageChild('git', ['-C', path, 'rev-parse', '--verify', 'refs/stash']).then(
           () => true,
           () => false,
         )
       )
         return false;
-      if (
-        (
-          await execFileAsync(
-            'git',
-            ['-C', path, 'status', '--porcelain=v1', '--untracked-files=all'],
-            { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
-          )
-        ).stdout.trim()
-      )
-        return false;
+      if (await hasLocalChanges(path)) return false;
       const landedHeadSha = options.landedHeadSha ?? owner.landedHeadSha;
       if (owner.agentId) {
-        const unpublished = await execFileAsync('git', [
+        const unpublished = await storageChild('git', [
           '-C',
           path,
           'rev-list',
@@ -115,35 +174,16 @@ export async function reclaimOwnedCheckout(
       if (
         landedHeadSha &&
         /^[a-f0-9]{40,64}$/.test(landedHeadSha) &&
-        (await execFileAsync('git', ['-C', path, 'rev-parse', 'HEAD'])).stdout.trim() ===
+        (await storageChild('git', ['-C', path, 'rev-parse', 'HEAD'])).stdout.trim() ===
           landedHeadSha
       )
         return true;
-      const contained = await execFileAsync('git', [
-        '-C',
-        path,
-        'for-each-ref',
-        '--format=%(refname)',
-        '--contains=HEAD',
-        'refs/remotes/origin/',
-      ]);
-      return Boolean(contained.stdout.trim());
+      return await headOnOrigin(path);
     } catch {
       return false;
     }
   };
-  const local = await execFileAsync('git', [
-    '-C',
-    path,
-    'rev-parse',
-    '--path-format=absolute',
-    '--git-common-dir',
-    '--symbolic-full-name',
-    'HEAD',
-  ]).then(
-    (result) => result.stdout.trim().split('\n'),
-    () => [],
-  );
+  const local = await checkoutBranch(path).catch(() => []);
   const entries =
     owner.kind === 'corners' && owner.archived === true
       ? await removeArchivedCornerData(supervisorRoot, owner.roomId, path, options)
@@ -154,42 +194,14 @@ export async function reclaimOwnedCheckout(
     !(await lstat(path).catch(() => undefined)) &&
     owner.kind === 'corners'
   ) {
-    // Retire the exact checkout's local branch as well as its registration.
-    // Otherwise a squash-merged head survives here and pins the entire clone.
-    const [commonDir, branch] = local;
-    const repositories = canonicalStoragePath(resolve(supervisorRoot, 'beeline/repositories'));
-    if (commonDir && canonicalStoragePath(commonDir).startsWith(`${repositories}/`)) {
-      if (
-        !/^agent-corner-[a-f0-9]{64}\.git$/.test(commonDir.split('/').pop() ?? '') &&
-        branch?.startsWith('refs/heads/')
-      ) {
-        await execFileAsync('git', [`--git-dir=${commonDir}`, 'worktree', 'prune', '--expire=now']);
-        const repoHead = await execFileAsync('git', [
-          `--git-dir=${commonDir}`,
-          'symbolic-ref',
-          'HEAD',
-        ]).then(
-          (result) => result.stdout.trim(),
-          () => undefined,
-        );
-        if (repoHead !== branch)
-          await execFileAsync('git', [
-            `--git-dir=${commonDir}`,
-            'branch',
-            '--delete',
-            '--force',
-            '--',
-            branch.slice('refs/heads/'.length),
-          ]).catch((error) =>
-            console.warn(`[helper] archived local branch cleanup deferred ${path}:`, error),
-          );
-      }
-    }
+    // An agent's private corner clone goes whole with its checkout.
+    if (!/^agent-corner-[a-f0-9]{64}\.git$/.test(local[0]?.split('/').pop() ?? ''))
+      await retireCheckoutBranch(supervisorRoot, local, path, 'archived');
     // Remove only now-stale worktree metadata. Published refs remain recoverable.
     const common = resolve(supervisorRoot, 'beeline', 'repositories');
     for (const repo of await readdir(common).catch(() => [])) {
       if (/^[a-f0-9]{24}\.git$/.test(repo))
-        await execFileAsync('git', [
+        await storageChild('git', [
           `--git-dir=${resolve(common, repo)}`,
           'worktree',
           'prune',
@@ -237,30 +249,10 @@ export async function inspectCheckoutPreservation(
     () => null,
   );
   try {
-    if (
-      (
-        await execFileAsync(
-          'git',
-          ['-C', path, 'status', '--porcelain=v1', '--untracked-files=all'],
-          { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, maxBuffer: 16 * 1024 * 1024 },
-        )
-      ).stdout.trim()
-    )
+    if (await hasLocalChanges(path, 16 * 1024 * 1024))
       return { path, allocatedBytes, reason: 'tracked edits or untracked files; preserved' };
-    const head = (await execFileAsync('git', ['-C', path, 'rev-parse', 'HEAD'])).stdout.trim();
-    if (
-      head !== landedHeadSha &&
-      !(
-        await execFileAsync('git', [
-          '-C',
-          path,
-          'for-each-ref',
-          '--format=%(refname)',
-          '--contains=HEAD',
-          'refs/remotes/origin/',
-        ])
-      ).stdout.trim()
-    )
+    const head = (await storageChild('git', ['-C', path, 'rev-parse', 'HEAD'])).stdout.trim();
+    if (head !== landedHeadSha && !(await headOnOrigin(path)))
       return { path, allocatedBytes, reason: 'HEAD has no local publication evidence; preserved' };
     return {
       path,
@@ -407,10 +399,10 @@ export async function discoverLegacyStorageOwners(
     const path = resolve(root, 'room-checkouts', itemId);
     try {
       const remote = (
-        await execFileAsync('git', ['-C', path, 'remote', 'get-url', 'origin'])
+        await storageChild('git', ['-C', path, 'remote', 'get-url', 'origin'])
       ).stdout.trim();
       const branches = (
-        await execFileAsync('git', [
+        await storageChild('git', [
           '-C',
           path,
           'for-each-ref',
@@ -637,7 +629,7 @@ export async function pruneOpenCheckoutObjects(
     const work = async () => {
       const inUse = options.inUse!;
       if (await inUse(root)) return;
-      const ignored = await execFileAsync(
+      const ignored = await storageChild(
         'git',
         [
           '-C',
@@ -668,7 +660,7 @@ export async function pruneOpenCheckoutObjects(
           ...options,
           inUse,
           beforeRemove: async () =>
-            !(await execFileAsync('git', ['-C', root, 'ls-files', '-z', '--', relative])).stdout,
+            !(await storageChild('git', ['-C', root, 'ls-files', '-z', '--', relative])).stdout,
         });
       }
     };
@@ -742,19 +734,10 @@ export async function pruneUnusedCheckoutStorage(
       ...options,
       beforeRemove: async () => {
         try {
-          if (
-            (
-              await execFileAsync(
-                'git',
-                ['-C', path, 'status', '--porcelain=v1', '--untracked-files=all'],
-                { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
-              )
-            ).stdout.trim()
-          )
-            return false;
+          if (await hasLocalChanges(path)) return false;
           if (clone) {
             const listing = (
-              await execFileAsync('git', ['-C', path, 'worktree', 'list', '--porcelain'])
+              await storageChild('git', ['-C', path, 'worktree', 'list', '--porcelain'])
             ).stdout;
             for (const line of listing.split('\n'))
               if (
@@ -768,7 +751,7 @@ export async function pruneUnusedCheckoutStorage(
                 return false;
             if (
               (
-                await execFileAsync('git', [
+                await storageChild('git', [
                   '-C',
                   path,
                   'rev-list',
@@ -780,68 +763,15 @@ export async function pruneUnusedCheckoutStorage(
             )
               return false;
           }
-          if (
-            !(
-              await execFileAsync('git', [
-                '-C',
-                path,
-                'for-each-ref',
-                '--format=%(refname)',
-                '--contains=HEAD',
-                'refs/remotes/origin/',
-              ])
-            ).stdout.trim()
-          )
-            return false;
-          local = (
-            await execFileAsync('git', [
-              '-C',
-              path,
-              'rev-parse',
-              '--path-format=absolute',
-              '--git-common-dir',
-              '--symbolic-full-name',
-              'HEAD',
-            ])
-          ).stdout
-            .trim()
-            .split('\n');
+          if (!(await headOnOrigin(path))) return false;
+          local = await checkoutBranch(path);
           return true;
         } catch {
           return false;
         }
       },
     });
-    if (entries.length && !options.dryRun && !clone) {
-      const [common, branch] = local;
-      if (
-        common &&
-        canonicalStoragePath(common).startsWith(
-          `${canonicalStoragePath(resolve(supervisorRoot, 'beeline/repositories'))}/`,
-        ) &&
-        branch?.startsWith('refs/heads/')
-      ) {
-        await execFileAsync('git', [`--git-dir=${common}`, 'worktree', 'prune', '--expire=now']);
-        const head = await execFileAsync('git', [
-          `--git-dir=${common}`,
-          'symbolic-ref',
-          'HEAD',
-        ]).then(
-          (result) => result.stdout.trim(),
-          () => undefined,
-        );
-        if (head !== branch)
-          await execFileAsync('git', [
-            `--git-dir=${common}`,
-            'branch',
-            '--delete',
-            '--force',
-            '--',
-            branch.slice(11),
-          ]).catch((error) =>
-            console.warn(`[helper] legacy local branch cleanup deferred ${path}:`, error),
-          );
-      }
-    }
+    if (entries.length && !options.dryRun && !clone)
+      await retireCheckoutBranch(supervisorRoot, local, path, 'legacy');
   }
 }

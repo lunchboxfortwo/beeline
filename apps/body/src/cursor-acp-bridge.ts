@@ -75,12 +75,6 @@ export type CursorStreamEvent = {
   message?: unknown;
 };
 
-export type CursorAgentSpawn = (input: {
-  argv: string[];
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-}) => ChildProcess;
-
 export type CursorAcpWriter = (message: Record<string, unknown>) => void;
 
 type JsonRpcMessage = {
@@ -371,7 +365,6 @@ function promptTextFromParams(params: unknown, systemPrompt?: string): string {
 
 export interface CursorAcpServerOptions {
   write: CursorAcpWriter;
-  spawnCursorAgent?: CursorAgentSpawn;
   enumerateModels?: (env?: NodeJS.ProcessEnv) => Promise<CursorModelCatalog | undefined>;
   env?: NodeJS.ProcessEnv;
 }
@@ -382,7 +375,6 @@ export interface CursorAcpServerOptions {
  */
 export class CursorAcpServer {
   private readonly write: CursorAcpWriter;
-  private readonly spawnCursorAgent?: CursorAgentSpawn;
   private readonly enumerateModels: (
     env?: NodeJS.ProcessEnv,
   ) => Promise<CursorModelCatalog | undefined>;
@@ -392,7 +384,6 @@ export class CursorAcpServer {
 
   constructor(options: CursorAcpServerOptions) {
     this.write = options.write;
-    this.spawnCursorAgent = options.spawnCursorAgent;
     this.enumerateModels = options.enumerateModels ?? enumerateCursorModels;
     this.env = options.env ?? process.env;
   }
@@ -554,55 +545,38 @@ export class CursorAcpServer {
       }
     };
 
-    const inject = this.spawnCursorAgent;
     // cursor-agent stays in this bridge's process group, so a hard kill of
     // the bridge's group also ends the turn it is running.
-    const run = runOwned(
-      {
-        step: 'cursor-agent',
-        file: 'cursor-agent',
-        args: argv,
-        cwd: session.cwd,
-        env: this.env,
-        group: 'caller',
-        captureOutput: false,
-        machineRead: true,
-        onSpawn: (child) => {
-          session.child = child;
-          child.once('error', (error) => {
-            spawnError = error instanceof Error ? error.message : String(error);
-          });
-          child.stderr?.setEncoding('utf8');
-          child.stderr?.on('data', (chunk: string) => {
-            stderr = `${stderr}${chunk}`.slice(-STDERR_TAIL_MAX_CHARS);
-          });
-          child.stdout?.setEncoding('utf8');
-          child.stdout?.on('data', (chunk: string) => {
-            pending.push(chunk);
-            const joined = pending.join('');
-            const lines = joined.split(/\r?\n/);
-            pending.length = 0;
-            const rest = lines.pop();
-            if (rest) pending.push(rest);
-            for (const line of lines) consumeLine(line);
-          });
-        },
+    const run = runOwned({
+      step: 'cursor-agent',
+      file: 'cursor-agent',
+      args: argv,
+      cwd: session.cwd,
+      env: this.env,
+      group: 'caller',
+      captureOutput: false,
+      machineRead: true,
+      onSpawn: (child) => {
+        session.child = child;
+        child.once('error', (error) => {
+          spawnError = error instanceof Error ? error.message : String(error);
+        });
+        child.stderr?.setEncoding('utf8');
+        child.stderr?.on('data', (chunk: string) => {
+          stderr = `${stderr}${chunk}`.slice(-STDERR_TAIL_MAX_CHARS);
+        });
+        child.stdout?.setEncoding('utf8');
+        child.stdout?.on('data', (chunk: string) => {
+          pending.push(chunk);
+          const joined = pending.join('');
+          const lines = joined.split(/\r?\n/);
+          pending.length = 0;
+          const rest = lines.pop();
+          if (rest) pending.push(rest);
+          for (const line of lines) consumeLine(line);
+        });
       },
-      inject
-        ? {
-            spawn: ((
-              _file: string,
-              args: readonly string[],
-              options: { cwd?: string; env?: NodeJS.ProcessEnv },
-            ) =>
-              inject({
-                argv: [...args],
-                cwd: options.cwd ?? session.cwd,
-                env: options.env ?? this.env,
-              })) as never,
-          }
-        : undefined,
-    );
+    });
 
     try {
       const { code, signal } = await run.then(
@@ -610,7 +584,6 @@ export class CursorAcpServer {
         (error: unknown) => {
           // Without a child the spawn itself threw; otherwise its error is spawnError.
           if (!session.child) throw error;
-          spawnError ??= error instanceof Error ? error.message : String(error);
           return { code: 1 as number | null, signal: null as NodeJS.Signals | null };
         },
       );

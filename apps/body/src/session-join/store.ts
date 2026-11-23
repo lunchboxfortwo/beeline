@@ -221,8 +221,9 @@ function safe(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 120);
 }
 
+const keyName = (key: string) => createHash('sha256').update(key).digest('hex').slice(0, 24);
 function inboxPath(dir: string, key: string): string {
-  return join(dir, 'inbox', `${createHash('sha256').update(key).digest('hex').slice(0, 24)}.txt`);
+  return join(dir, 'inbox', `${keyName(key)}.txt`);
 }
 
 /** Every new local or streamed message uses the same durable delivery queue. */
@@ -239,22 +240,23 @@ export function queueInbox(dir: string, key: string, text: string): string {
  * the input codec for those pre-stream files, never a second writer/consumer.
  */
 function adoptInboxText(dir: string, key: string): void {
-  const folder = ensureDir(
-    join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0, 24)),
-  );
   try {
-    renameSync(inboxPath(dir, key), join(folder, `${randomUUID()}.text.pending`));
+    renameSync(
+      inboxPath(dir, key),
+      join(ensureDir(deliveryFolder(dir, key)), `${randomUUID()}.text.pending`),
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 }
 let lastInboxOrder = 0;
 
+const deliveryFolder = (dir: string, key: string) => join(dir, 'deliveries', keyName(key));
 function deliveryStem(dir: string, key: string, deliveryId: string): string {
-  const folder = ensureDir(
-    join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0, 24)),
+  return join(
+    ensureDir(deliveryFolder(dir, key)),
+    createHash('sha256').update(deliveryId).digest('hex'),
   );
-  return join(folder, createHash('sha256').update(deliveryId).digest('hex'));
 }
 
 /** A stable delivery is stored before its transport cursor advances. A taken
@@ -284,11 +286,7 @@ function existsDelivery(path: string): boolean {
   }
 }
 function takeDeliveries(dir: string, key: string): string[] {
-  const folder = join(
-    dir,
-    'deliveries',
-    createHash('sha256').update(key).digest('hex').slice(0, 24),
-  );
+  const folder = deliveryFolder(dir, key);
   let names: string[];
   try {
     names = readdirSync(folder);

@@ -97,14 +97,24 @@ it('terminates and caps a granted command that floods output', async () => {
   expect(result.output.length).toBeLessThan(256);
 });
 
-// A killed process is gone or a zombie awaiting its (re)parent's reap.
+// A killed process is reaped, a zombie or dead, or still being torn down: the
+// kernel sets PF_EXITING (0x4) when it takes the SIGKILL, before closing the
+// process's files, so the run can settle on the pipes' close while the state
+// still reads R. A process nobody killed has none of these.
 const gone = (pid: number) => {
   try {
     process.kill(pid, 0);
   } catch {
     return true;
   }
-  return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+  let stat: string;
+  try {
+    stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+  } catch {
+    return true; // reaped between the two reads
+  }
+  const [state, , , , , , flags] = stat.slice(stat.lastIndexOf(') ') + 2).split(' ');
+  return state === 'Z' || state === 'X' || (Number(flags) & 0x4) !== 0;
 };
 // Repro G: the direct child exited at once while a grandchild held stdout, and
 // the runner waited for that grandchild's `close` (12 s in the audit).
