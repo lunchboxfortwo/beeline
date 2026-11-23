@@ -36,7 +36,6 @@ function toolsMatching(result: unknown, query: unknown): unknown {
   return { ...(result as object), tools };
 }
 
-/** Optional facts load beside the live session. No caller can wait for a refresh. */
 export class SessionResources {
   readonly context: Partial<Context> = {};
   readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
@@ -94,9 +93,9 @@ export class SessionResources {
   }
 
   /** Open threads of this place's chat; also re-read after each turn, which may open one. */
-  refreshThreads(): void {
+  refreshThreads(): Promise<void> {
     const { api, placeId, parentRoomId } = this.options;
-    this.load('threads', () =>
+    return this.load('threads', () =>
       api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
     );
   }
@@ -120,9 +119,9 @@ export class SessionResources {
     key: K,
     read: () => Promise<Context[K]>,
     loaded?: (value: Context[K]) => void,
-  ): void {
+  ): Promise<void> {
     this.status[key] = 'loading';
-    void Promise.resolve()
+    return Promise.resolve()
       .then(read)
       .then((value) => {
         this.context[key] = value;

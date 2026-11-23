@@ -36,6 +36,7 @@ vi.mock('./squire-mcp-client.js', async original => ({
   ...await original<typeof import('./squire-mcp-client.js')>(),
   sharedSquireMcpClient: vi.fn(),
 }));
+const pendingRead = (name: string) => name === 'listRoomCorners' ? Promise.resolve({ corners: [] }) : new Promise(() => {});
 const roots: string[] = [];
 afterEach(async () => { for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }); });
 
@@ -51,7 +52,7 @@ async function fixture(corner = false, temporaryRoot = tmpdir()) {
   });
   const execute = vi.fn((name: string) => {
     if (name.startsWith('get') || name === 'listAgentGrants') expect(delivered).toBe(true);
-    return new Promise(() => {});
+    return pendingRead(name);
   });
   const config = { workspaceRoot: root, agentHomeRoot: join(root, 'agent-home'), operatorHome: root,
     agentBinary: 'fixture', agentEnv: {}, readonlyMcpCommand: 'fixture', mcpBinary: 'fixture' } as BodyConfig;
@@ -67,7 +68,6 @@ async function fixture(corner = false, temporaryRoot = tmpdir()) {
     source: { id: 'message', authorId: 'human', body: 'Please answer', attachments: [], type: 'message' } } as AgentCommand;
   return { session, item, prompt, execute, config, spawn, client };
 }
-
 it('rewrites pruned-release git/gh launchers before reusing a retained thread', async () => {
   const f = await fixture(true);
   const root = f.config.workspaceRoot!;
@@ -112,8 +112,7 @@ it('rewrites pruned-release git/gh launchers before reusing a retained thread', 
     await f.session.dispose();
   }
 });
-
-it('starts and answers before optional reads begin, even if none of them resolve', async () => {
+it('answers after thread reconciliation while other optional reads remain pending', async () => {
   const f = await fixture();
   await f.session.start();
   expect(f.execute).not.toHaveBeenCalled();
@@ -223,7 +222,7 @@ it('discovers and calls Squire in the same cold session without a Registry insta
     await f.session.start();
     expect(sharedSquireMcpClient).not.toHaveBeenCalled();
     f.execute.mockImplementation((name: string) => name === 'authorizeResourceCall'
-      ? Promise.resolve({ allowed: true }) : new Promise(() => {}));
+      ? Promise.resolve({ allowed: true }) : pendingRead(name));
     // The live request remains the authority for tools; optional config can
     // stay pending, including its Registry routes and grants.
     f.prompt.mockImplementation(async () => {
@@ -240,7 +239,7 @@ it('discovers and calls Squire in the same cold session without a Registry insta
     expect(f.execute).toHaveBeenCalledWith('authorizeResourceCall', expect.objectContaining({ target: 'squire', requestId: f.item.turnRequestId }));
     expect(requestMcp).toHaveBeenCalledWith('tools/call', { name: 'list_credentials', arguments: { fields: 'summary' } });
     f.execute.mockImplementation((name: string) => name === 'authorizeResourceCall'
-      ? Promise.resolve({ allowed: false }) : new Promise(() => {}));
+      ? Promise.resolve({ allowed: false }) : pendingRead(name));
     f.prompt.mockImplementation(async () => {
       await expect(f.session.resources.mcp({ app: 'registry-mcp:squire', tool: 'list_credentials' },
         { roomId: f.item.roomId, requestId: f.item.turnRequestId })).rejects.toThrow('not authorized');
@@ -279,7 +278,7 @@ it('keeps a cold repository thread able to check out and push after session cont
     if (name === 'getRoomRepositoryState') return Promise.resolve(repository);
     if (name === 'getCornerRestoreState') return Promise.resolve(restore);
     if (name === 'postCornerRemoteState') return Promise.resolve({});
-    return new Promise(() => {});
+    return pendingRead(name);
   });
   await f.session.start();
   expect(f.execute).not.toHaveBeenCalled();
@@ -364,7 +363,7 @@ it('delivers a frozen reply pointer without waiting for a parent-message read', 
 
 it('an optional home/skills setup that never resolves cannot hold the answer', async () => {
   const f = await fixture();
-  f.execute.mockImplementation(() => Promise.resolve({ commands: [], yoloMode: false, isReviewer: true }));
+  f.execute.mockImplementation(name => Promise.resolve(name === 'listRoomCorners' ? { corners: [] } : { commands: [], yoloMode: false, isReviewer: true }));
   await f.session.start();
   expect(await f.session.deliver(f.item, [])).toMatchObject({ text: 'The answer' });
   const { prepareRoomAgentHome } = await import('./agent-home.js');
@@ -383,7 +382,7 @@ it('session prepare makes the Room checkout before it reports setup ready', asyn
   await execFileAsync('git', ['-C', source, 'add', 'README.md']);
   await execFileAsync('git', ['-C', source, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-m', 'initial']);
   const repository = { resolution: 'repository', key: 'owner/repo', remote: `file://${source}`, targetBranch: 'main' };
-  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : new Promise(() => {}));
+  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : pendingRead(name));
   const { prepareRoomAgentHome } = await import('./agent-home.js');
   vi.mocked(prepareRoomAgentHome).mockResolvedValueOnce({});
   await f.session.resources.prepare();
@@ -398,7 +397,7 @@ it('session prepare makes the Room checkout before it reports setup ready', asyn
 it('session prepare reports a failed checkout instead of setup ready', async () => {
   const f = await fixture();
   const repository = { resolution: 'repository', key: 'owner/missing', remote: `file://${join(f.config.workspaceRoot!, 'missing')}`, targetBranch: 'main' };
-  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : new Promise(() => {}));
+  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : pendingRead(name));
   const { prepareRoomAgentHome } = await import('./agent-home.js');
   vi.mocked(prepareRoomAgentHome).mockResolvedValueOnce({});
   await expect(f.session.resources.prepare()).rejects.toThrow();
@@ -738,7 +737,7 @@ it('mounts Room CodeGraph at the cached workspace checkout', async () => {
   await execFileAsync('git', ['-C', source, 'add', 'README.md']);
   await execFileAsync('git', ['-C', source, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '-m', 'initial']);
   const repository = { resolution: 'repository', key: 'owner/repo', remote: `file://${source}`, targetBranch: 'main' };
-  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : new Promise(() => {}));
+  f.execute.mockImplementation(name => name === 'getRoomRepositoryState' ? Promise.resolve(repository) : pendingRead(name));
   f.session.resources.context.repository = repository;
   const ready = await prepareWorkspace({ api: f.session.options.api, config: f.config,
     supervisorRoot: root, workspaceId: 'workspace', agent: f.session.options.agent, placeId: 'room' });
@@ -868,7 +867,7 @@ it('runs a changed model on the very next turn while the configuration read is s
   expect(setter).not.toHaveBeenCalled();
   // The owner picks Astra and a message follows at once. The configuration
   // read never answers; the queue item carries the choice.
-  f.execute.mockImplementation(() => new Promise(() => {}));
+  f.execute.mockImplementation(name => pendingRead(name));
   f.session.configurationChanged();
   const next = { ...f.item, id: 'next', turnRequestId: 'next', modelSelection: { model: 'astra' } } as AgentCommand;
   await f.session.start(next);
@@ -937,7 +936,7 @@ it('reports the refusal when a live session cannot switch to a newer selection',
   Object.assign(f.client, { setConfigOption: vi.fn(async () => { throw new Error('astra is not on this plan'); }) });
   let answer!: (value: unknown) => void;
   f.execute.mockImplementation((name: string) => name === 'getAgentConfiguration'
-    ? new Promise(resolve => { answer = resolve; }) : new Promise(() => {}));
+    ? new Promise(resolve => { answer = resolve; }) : pendingRead(name));
   await f.session.start(f.item);
   await f.session.deliver(f.item, []);
   answer({ model: 'astra', commands: [], yoloMode: false });
@@ -951,6 +950,7 @@ it('writes a completed thread tool while the harness prompt remains unresolved',
   let activityWritten!: () => void;
   const activity = new Promise<void>(resolve => { activityWritten = resolve; });
   f.execute.mockImplementation(async name => {
+    if (name === 'listRoomCorners') return { corners: [] };
     if (name === 'postAgentActivity') activityWritten();
     return {};
   });

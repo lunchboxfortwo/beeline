@@ -796,6 +796,7 @@ export class PlaceSession {
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
+    if (!this.windowDelivered) await this.resources.refreshThreads();
     const options = {
       names: this.names,
       notes: this.notes,
