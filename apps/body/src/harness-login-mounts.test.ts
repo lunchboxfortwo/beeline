@@ -6,7 +6,7 @@ import { afterEach, expect, it } from 'vitest';
 import type { AgentKind } from './agent-command.js';
 import { harnessLoginWritablePaths, harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome } from './agent-home.js';
 import { writeOpenCodeKey } from './agent-sign-in.js';
-import { wrapAgentCommand } from './bwrap-sandbox.js';
+import { harnessHomeStateDirs, wrapAgentCommand } from './bwrap-sandbox.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const run = promisify(execFile);
@@ -16,13 +16,14 @@ afterEach(async () => {
   await Promise.all(tmpLinks.splice(0).map(path => rm(path, { force: true })));
   await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
-const nativeLoginCases: Array<{ kind: AgentKind; source: string; privateFile: string }> = [
+const nativeLoginCases: Array<{ kind: AgentKind; source: string; privateFile: string; harness?: string }> = [
   { kind: 'cursor', source: '.config/cursor/auth.json', privateFile: 'user/.config/cursor/auth.json' },
   { kind: 'cursor', source: '.cursor/agent-cli-state.json', privateFile: 'cursor/agent-cli-state.json' },
   {
     kind: 'antigravity',
     source: '.gemini/antigravity-cli/antigravity-oauth-token',
     privateFile: 'user/.gemini/antigravity-cli/antigravity-oauth-token',
+    harness: '/usr/local/bin/agy',
   },
 ];
 const proxied: Array<{ kind: AgentKind; source: string; privateFile: string }> = [
@@ -33,10 +34,10 @@ const proxied: Array<{ kind: AgentKind; source: string; privateFile: string }> =
   { kind: 'opencode', source: '.local/share/opencode/auth.json', privateFile: 'user/.local/share/opencode/auth.json' },
 ];
 
-async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<string, string>, kind: AgentKind, operatorHome: string, script: string) {
+async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<string, string>, kind: AgentKind, operatorHome: string, script: string, harness?: string) {
   const { stateDirs, tmpDir } = harnessStateDirsFromEnv(env);
   const command = wrapAgentCommand({ bwrapPath: '/usr/bin/bwrap',
-    spec: { mode, cwd: root, harnessStateDirs: stateDirs, tmpDir,
+    spec: { mode, cwd: root, harnessStateDirs: stateDirs, tmpDir, harnessHomeStateDirs: harnessHomeStateDirs(harness, env.HOME),
       additionalWritablePaths: harnessLoginWritablePaths(kind, operatorHome) },
     command: process.execPath, args: ['--input-type=module', '-e',
       `import fs from 'node:fs';\nimport assert from 'node:assert/strict';\n${script}`] });
@@ -44,7 +45,7 @@ async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<st
 }
 
 for (const mode of ['readonly', 'edit'] as const) {
-  it.each(nativeLoginCases)('$kind native login store $source supports refresh in ' + mode + ' mode', async ({ kind, source, privateFile }) => {
+  it.each(nativeLoginCases)('$kind native login store $source supports refresh in ' + mode + ' mode', async ({ kind, source, privateFile, harness }) => {
     const root = await mkdtemp(`${testTmpDir()}/beeline-login-mounts-`); roots.push(root);
     const operatorHome = join(root, 'operator');
     const shared = join(operatorHome, source);
@@ -61,7 +62,9 @@ for (const mode of ['readonly', 'edit'] as const) {
       const target = fs.realpathSync(${JSON.stringify(credential)});
       fs.writeFileSync(target + '.next', JSON.stringify({ refreshed: true }));
       fs.renameSync(target + '.next', target);
-      assert.throws(() => fs.writeFileSync(${JSON.stringify(join(operatorHome, 'unrelated.json'))}, 'escape'), { code: 'EROFS' });`);
+      // The harness's own bookkeeping beside the link stays writable too.
+      fs.writeFileSync(${JSON.stringify(join(dirname(credential), 'state.next'))}, 'state');
+      assert.throws(() => fs.writeFileSync(${JSON.stringify(join(operatorHome, 'unrelated.json'))}, 'escape'), { code: 'EROFS' });`, harness);
     expect(JSON.parse(await readFile(shared, 'utf8'))).toEqual({ refreshed: true });
     expect(await readFile(join(operatorHome, 'unrelated.json'), 'utf8')).toBe('unrelated');
   });

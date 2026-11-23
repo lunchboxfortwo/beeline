@@ -72,6 +72,11 @@ export const HARNESS_HOME_STATE_DIRS: Array<{ match: RegExp; dirs: string[] }> =
     match: /(^|[/\\])opencode(\.[a-z]+)?$/i,
     dirs: ['.local/share/opencode', '.config/opencode'],
   },
+  {
+    // agy acp writes installation_id, logs and conversations here at start.
+    match: /(^|[/\\])agy(\.[a-z]+)?$/i,
+    dirs: ['.gemini/antigravity-cli'],
+  },
 ];
 
 
