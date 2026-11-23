@@ -50,14 +50,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/attachment-delivery.ts::fetch-impl",
-      "file": "apps/body/src/attachment-delivery.ts",
-      "kind": "fetch-impl",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/browser-share-host.ts::import:node:net",
       "file": "apps/body/src/browser-share-host.ts",
       "kind": "import:node:net",
@@ -82,14 +74,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/browser-share.ts::fetch",
-      "file": "apps/body/src/browser-share.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/browser-share.ts::websocket",
       "file": "apps/body/src/browser-share.ts",
       "kind": "websocket",
@@ -109,16 +93,7 @@
       "id": "apps/body/src/cliproxy.ts::fetch",
       "file": "apps/body/src/cliproxy.ts",
       "kind": "fetch",
-      "count": 2,
-      "compatibility": "legacy-only",
-      "phase": "M5",
-      "reason": "Local CLIProxyAPI the owner approved on 2026-11-17 (#4504): downloads the latest proxy release from GitHub and calls the proxy on 127.0.0.1 for shared provider logins."
-    },
-    {
-      "id": "apps/body/src/cliproxy.ts::fetch-impl",
-      "file": "apps/body/src/cliproxy.ts",
-      "kind": "fetch-impl",
-      "count": 2,
+      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5",
       "reason": "Local CLIProxyAPI the owner approved on 2026-11-17 (#4504): downloads the latest proxy release from GitHub and calls the proxy on 127.0.0.1 for shared provider logins."
@@ -131,14 +106,6 @@
       "compatibility": "legacy-only",
       "phase": "M5",
       "reason": "Local CLIProxyAPI the owner approved on 2026-11-17 (#4504): downloads the latest proxy release from GitHub and calls the proxy on 127.0.0.1 for shared provider logins."
-    },
-    {
-      "id": "apps/body/src/connect-command.ts::fetch-impl",
-      "file": "apps/body/src/connect-command.ts",
-      "kind": "fetch-impl",
-      "count": 2,
-      "compatibility": "legacy-only",
-      "phase": "M5"
     },
     {
       "id": "apps/body/src/connect-command.ts::fetch",
@@ -168,7 +135,7 @@
       "id": "apps/body/src/daemon-api-client.ts::fetch-impl",
       "file": "apps/body/src/daemon-api-client.ts",
       "kind": "fetch-impl",
-      "count": 3,
+      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -192,22 +159,6 @@
       "id": "apps/body/src/free-agent-vm.ts::fetch-impl",
       "file": "apps/body/src/free-agent-vm.ts",
       "kind": "fetch-impl",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/grant-runner.ts::import:node:http",
-      "file": "apps/body/src/grant-runner.ts",
-      "kind": "import:node:http",
-      "count": 3,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/kernel-lock.ts::import:node:net",
-      "file": "apps/body/src/kernel-lock.ts",
-      "kind": "import:node:net",
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
@@ -285,14 +236,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/provider-key-check.ts::fetch",
-      "file": "apps/body/src/provider-key-check.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/provider-webhooks.ts::fetch",
       "file": "apps/body/src/provider-webhooks.ts",
       "kind": "fetch",
@@ -304,7 +247,7 @@
       "id": "apps/body/src/read-only-mcp.ts::fetch",
       "file": "apps/body/src/read-only-mcp.ts",
       "kind": "fetch",
-      "count": 6,
+      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -381,14 +324,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/session-join/beeline-api.ts::fetch",
-      "file": "apps/body/src/session-join/beeline-api.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/session-join/bridge.ts::import:node:net",
       "file": "apps/body/src/session-join/bridge.ts",
       "kind": "import:node:net",
@@ -400,14 +335,6 @@
       "id": "apps/body/src/session-join/claude.ts::import:node:net",
       "file": "apps/body/src/session-join/claude.ts",
       "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/session-join/command.ts::fetch",
-      "file": "apps/body/src/session-join/command.ts",
-      "kind": "fetch",
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
@@ -441,22 +368,6 @@
       "file": "apps/body/src/squire-task-relay.ts",
       "kind": "fetch",
       "count": 2,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/storage-owners.ts::fetch",
-      "file": "apps/body/src/storage-owners.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/storage-report.ts::fetch",
-      "file": "apps/body/src/storage-report.ts",
-      "kind": "fetch",
-      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -1150,15 +1061,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/body/src/session-tool-connection.ts::fetch",
-      "file": "apps/body/src/session-tool-connection.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5",
-      "reason": "Consolidates existing sandbox loopback session/workspace calls; conversational tools forward through the parent helper native connection instead of another server HTTP credential check."
-    },
-    {
       "id": "apps/body/src/update-download.ts::fetch",
       "file": "apps/body/src/update-download.ts",
       "kind": "fetch",
@@ -1168,13 +1070,40 @@
       "reason": "Moves existing manifest/archive download calls from self-update.ts into the approved update progress and inactivity observer; no additional destination or credential access."
     },
     {
-      "id": "apps/body/src/update-download.ts::fetch-impl",
-      "file": "apps/body/src/update-download.ts",
-      "kind": "fetch-impl",
+      "id": "apps/body/src/grant-runner-server.ts::import:node:http",
+      "file": "apps/body/src/grant-runner-server.ts",
+      "kind": "import:node:http",
+      "count": 3,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Move the existing loopback grant HTTP server into its streaming response owner."
+    },
+    {
+      "id": "apps/body/src/session-join/beeline-api.ts::import:undici",
+      "file": "apps/body/src/session-join/beeline-api.ts",
+      "kind": "import:undici",
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5",
-      "reason": "Moves existing manifest/archive download calls from self-update.ts into the approved update progress and inactivity observer; no additional destination or credential access."
+      "reason": "Configure the joined member stream transport while routing requests through ask."
+    },
+    {
+      "id": "apps/body/src/wait.ts::fetch",
+      "file": "apps/body/src/wait.ts",
+      "kind": "fetch",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Centralize existing helper HTTP requests in ask."
+    },
+    {
+      "id": "apps/body/src/wait.ts::import:node:net",
+      "file": "apps/body/src/wait.ts",
+      "kind": "import:node:net",
+      "count": 1,
+      "compatibility": "legacy-only",
+      "phase": "M5",
+      "reason": "Centralize existing helper socket requests and kernel locks in ask and tryLock."
     }
   ]
 }

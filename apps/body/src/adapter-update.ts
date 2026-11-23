@@ -83,7 +83,9 @@ async function publishedAdapters(
     args: ['view', packageName, 'dist-tags', 'time', '--json'],
     env,
     ...(signal ? { signal } : {}),
-    onLine: output,
+    onLine: (line, stream) => {
+      if (stream === 'stderr') output(line);
+    },
   });
   if (result.code !== 0)
     throw new Error(`npm view ${packageName} exited with status ${result.code ?? result.signal}`);
