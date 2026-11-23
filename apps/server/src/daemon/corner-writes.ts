@@ -7,7 +7,6 @@ import { assertCornerCommandTarget,CommandRefusalError } from '../commander.js';
 import { deleteCornerBranchBestEffort } from '../corner-branch-cleanup.js';
 import { cornerBriefRevisionHash,currentCornerBrief,resolveCornerBriefApproval,resolveCornerBriefAttachments,resolvePendingCornerBriefAttachments,validateCornerBrief } from '../corner-brief.js';
 import { closeCornerPullRequestBestEffort,closeCornerState,lockCornerArchivalAuthority } from '../corner-close.js';
-import { cornerCommanderIdSql } from '../corner-commander.js';
 import { setCornerHold } from '../corner-holds.js';
 import { advanceCorner,createCornerFacts,lockCornerLifecycle } from '../corner-lifecycle.js';
 import { cornerObjectiveSql,readCornerObjective } from '../corner-objective.js';
@@ -348,10 +347,9 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           owner_agent_id: string | null;
           implementer_agent_id: string | null;
           kind: string;
-          created_by: string;
         }>(
           `SELECT room.parent_id,${cornerOwnerSql('room.id')} owner_agent_id,${cornerImplementerSql('fact', 'room')} implementer_agent_id,
-             ${cornerKindSql('room.id')} kind,${cornerCommanderIdSql('room')} created_by,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
+             ${cornerKindSql('room.id')} kind,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
                AND (parent.repository_resolution='repository' OR parent.repository_key IS NOT NULL)) repository_backed FROM rooms room
          JOIN corner_facts fact ON fact.corner_id=room.id
          WHERE room.id=$1 AND room.archived_at IS NULL FOR UPDATE OF room`,
@@ -363,19 +361,10 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
       await daemonReach(ctx, input.cornerId, agentId, db).catch(() => {
         throw new CommandRefusalError('thread brief revision denied', 403);
       });
-      // Read projections of commander-direct approvals have no message citation.
-      // Only normalize that projection against the locked, server-owned approval.
+      // A copied read projection with no message citation reads as no citation.
       if (draft.approval && (draft.approval.sourceMessageId === '' ||
-          draft.approval.sourceMessageId === undefined)) {
-        const stored = (await db.query<{ approval_basis: { kind?: string; approvedBy?: string } }>(
-          `SELECT approval_basis FROM corner_brief_revisions
-           WHERE corner_id=$1 ORDER BY revision DESC LIMIT 1`, [input.cornerId],
-        )).rows[0]?.approval_basis;
-        if (corner.created_by !== agentId || stored?.kind !== 'commander-direct' ||
-            stored.approvedBy !== agentId)
-          throw new CommandRefusalError('brief.approval.sourceMessageId is required; cite the approving human message or active private commander order ID', 403);
+          draft.approval.sourceMessageId === undefined))
         draft = { ...draft, approval: undefined };
-      }
       validateCornerBrief(draft);
       const commandRoomId = input.roomId ?? input.cornerId;
       const command = await authorizeCommandOutput(db, commandRoomId, agentId, input.requestId);

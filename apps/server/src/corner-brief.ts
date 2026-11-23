@@ -321,11 +321,11 @@ export async function resolveCornerBriefApproval(
   revisionHash: string;
   sourceRoomId: string;
 }> {
+  const commander = revision ? (await db.query<{ parent_id: string }>(
+    `SELECT parent_id FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,
+    [revision.cornerId, revision.agentId],
+  )).rows[0] : undefined;
   if (revision && !draft.approval) {
-    const commander = (await db.query<{ parent_id: string }>(
-      `SELECT parent_id FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,
-      [revision.cornerId, revision.agentId],
-    )).rows[0];
     if (commander) {
       const directDraft = { ...draft, approval: undefined };
       validateCornerBrief(directDraft);
@@ -340,9 +340,22 @@ export async function resolveCornerBriefApproval(
     }
   }
   if (!humanCitation) validateCornerBrief(draft);
-  if (revision && !draft.approval)
+  // A delivery addressed to the reviser stands for the human message that asked
+  // for it. An uncited revision cites this turn's delivery when the thread's
+  // human commander sent it; the commander may cite any chat it was addressed in.
+  let sourceMessageId = draft.approval?.sourceMessageId ?? revision?.command?.id ?? '';
+  const delivered = revision && sourceMessageId ? (await db.query<{ id: string; room_id: string; from_commander: boolean }>(
+    `SELECT message.id,message.room_id,message.author_id=${cornerCommanderIdSql('corner')} from_commander
+     FROM agent_commands command JOIN messages message ON message.id=command.source_message_id
+     JOIN rooms corner ON corner.id=$3
+     WHERE command.id=$1 AND command.agent_id=$2 AND command.private_payload IS NULL`,
+    [sourceMessageId, revision.agentId, revision.cornerId],
+  )).rows[0] : undefined;
+  if (revision && !draft.approval && !delivered?.from_commander)
     throw new CommandRefusalError('brief.approval.sourceMessageId is required; cite the approving human message or active private commander order ID', 403);
-  let sourceMessageId = draft.approval?.sourceMessageId ?? '';
+  if (delivered) sourceMessageId = delivered.id;
+  const requestedId = sourceMessageId;
+  const citedRoomIds = delivered && commander ? [...sourceRoomIds, delivered.room_id] : sourceRoomIds;
   const initiating = sourceMessageId === initiatingMessageId;
   // Holds use this same message resolver, with live human/readability checks and
   // no stored-approval or commander-order fallback.
@@ -357,7 +370,7 @@ export async function resolveCornerBriefApproval(
                 AND member.removed_at IS NULL) readable
      FROM messages message JOIN identities identity ON identity.id=message.author_id
      WHERE message.id=$2 AND ($4::boolean OR message.room_id=ANY($1::uuid[]))`,
-    [sourceRoomIds, sourceMessageId, humanCitation?.agentId ?? null, Boolean(humanCitation)],
+    [citedRoomIds, sourceMessageId, humanCitation?.agentId ?? null, Boolean(humanCitation)],
   )).rows[0];
   if (humanCitation) {
     const failure = !sourceMessageId ? 'sourceMessageId is required' : !cited ? 'cited message does not exist' :
@@ -443,7 +456,7 @@ export async function resolveCornerBriefApproval(
       };
     }
     if (later) {
-      sourceMessageId = draft.approval!.sourceMessageId;
+      sourceMessageId = requestedId;
       ({ message, commanderOrder } = later);
     }
   }
