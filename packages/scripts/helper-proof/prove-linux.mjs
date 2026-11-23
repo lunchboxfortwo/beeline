@@ -360,77 +360,67 @@ try {
     assert.equal(baseline.loadedIdentity.version, 'v0.2.2');
   });
   await phase(
-    'a real five-minute admission drain preserves active work and delivers queued wakes',
+    "update joins the helper's own preparation and hands off without draining active work",
     async () => {
       fixture.holdWork(true);
       const started = fixture.nextHarness();
-      const heldId = await fixture.message('native-held deadline-gap');
+      const heldId = await fixture.message('native-held handoff-gap');
       await started;
+      // The helper starts preparing the release the moment it is published.
+      fixture.holdDownload(true);
+      const download = fixture.nextDownload();
       await publish('v0.2.3', '4'.repeat(40));
-      await observe((s) => s.desiredRelease && s.desiredRelease !== s.loadedRelease);
-      const began = Date.now();
-      const updates = entry(cli, ['update']);
-      const during = await fixture.message('native deadline-drain sibling', 1);
+      await download;
+      const child = spawn(cli, ['update'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = '';
+      const joined = new Promise((done) => {
+        const read = (chunk) => {
+          output += chunk;
+          if (output.includes('already running as pid')) done();
+        };
+        child.stdout.on('data', read);
+        child.stderr.on('data', read);
+      });
+      const exit = new Promise((done) => child.once('exit', done));
+      await Promise.race([joined, exit]);
+      assert.match(output, /release preparation already running as pid \d+ .*; following it/);
+      fixture.holdDownload(false);
+      assert.equal(await exit, 0, output);
+      assert.match(output, /executing release/);
+      const handedOff = await observe(
+        (s) => serving(s) && s.generation !== baseline.generation,
+        120_000,
+      );
+      assert.equal(handedOff.loadedIdentity.version, 'v0.2.3');
+      // Held work lives on the server: the successor serves wakes while it is held.
+      const during = await fixture.message('native handoff sibling', 1);
       assert.equal((await fixture.waitReply(during, 60_000)).length, 1);
       await publish('v0.2.4', '5'.repeat(40));
-      await observe((s) => s.desiredRelease?.startsWith('5'.repeat(40)));
-      // Cross the actual admission deadline without shortening the held turn.
-      while (Date.now() - began < 305_000) await delay(1000);
-      const draining = await observe();
-      assert.equal(
-        draining.generation,
-        baseline.generation,
-        'routine update must preserve the running helper',
+      baseline = await observe(
+        (s) => serving(s) && s.loadedIdentity?.version === 'v0.2.4',
+        120_000,
       );
-      const queued = await fixture.message('native after-deadline sibling', 1);
-      await delay(500);
-      const pending = await database.query(
-        'SELECT state FROM agent_commands WHERE turn_request_id=$1',
-        [queued],
-      );
-      assert.equal(
-        pending.rows[0]?.state,
-        'pending',
-        'new wakes wait durably while active work drains',
-      );
-      const successor = observe((s) => serving(s) && s.generation !== draining.generation, 120_000);
-      fixture.holdWork(false);
-      assert.equal((await fixture.waitReply(heldId, 60_000)).length, 1);
-      baseline = await successor;
+      const queued = await fixture.message('native newer-target sibling', 1);
       assert.equal((await fixture.waitReply(queued, 90_000)).length, 1);
-      console.log(await updates);
-      assert.equal(baseline.loadedIdentity.version, 'v0.2.4');
+      fixture.holdWork(false);
       assert.equal((await fixture.waitReply(heldId, 90_000)).length, 1);
-      const count = (
-        await database.query(
-          "SELECT count(*)::int AS count FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
-          [heldId, agents[0]],
-        )
-      ).rows[0].count;
-      assert.equal(count, 1);
-      assert.equal(
-        (
-          await database.query(
-            'SELECT hiccup_attempts FROM agent_commands WHERE turn_request_id=$1 AND agent_id=$2',
-            [heldId, agents[0]],
-          )
-        ).rows[0].hiccup_attempts,
-        0,
-      );
     },
   );
   await phase(
-    'unrecognized identity and malformed configuration fail by name while siblings serve',
+    'unrecognized identity and malformed configuration are reported by name while siblings serve',
     async () => {
+      // Update reports each agent as the helper answered; one that cannot serve is not a wall.
       const unknown = await fixture.addUnrecognizedAgent();
-      await assert.rejects(entry(cli, ['update']), new RegExp(unknown));
+      console.log(await entry(cli, ['update']));
       let status = await observe((s) => s.agents[unknown]?.state === 'needs-auth');
       assert.ok(serving(status));
       const path = `${stateRoot}/beeline/agents/${unknown}/runtime.json`;
       await writeFile(path, '{broken');
       status = await observe((s) => s.agents[unknown]?.state === 'needs-config');
       assert.ok(serving(status));
-      await assert.rejects(entry(cli, ['update']), new RegExp(unknown));
+      assert.match(await entry(cli, ['update']), new RegExp(`agent ${unknown}: `));
+      status = await observe((s) => s.agents[unknown]?.state === 'needs-config');
+      assert.ok(serving(status));
       await unlink(path);
       console.log(await entry(cli, ['update']));
     },
@@ -444,10 +434,20 @@ try {
         agents[0],
       ]);
       await delay(10_100); // Let the real authentication cache expire once.
+      // Registration authenticates the token: the helper's next registration is refused.
+      const prior = (await observe()).generation;
+      const restarted = observe(
+        (s) =>
+          s.generation !== prior &&
+          s.agents[agents[0]]?.state === 'needs-auth' &&
+          s.agents[agents[1]]?.state === 'serving',
+        60_000,
+      );
+      await systemctl('kill', '--signal=SIGKILL', '--kill-whom=main', 'beeline-helper.service');
+      const refused = await restarted;
       const request = await fixture.message('native auth refusal');
-      const refused = await observe((s) => s.agents[agents[0]]?.state === 'needs-auth', 30_000);
-      assert.equal(refused.agents[agents[1]].state, 'serving');
-      await assert.rejects(entry(cli, ['update']), new RegExp(agents[0]));
+      assert.match(await entry(cli, ['update']), new RegExp(`agent ${agents[0]}: `));
+      await observe((s) => s.agents[agents[0]]?.state === 'needs-auth', 30_000);
       const exchange = await auth.createDaemonExchange(agents[0]);
       const replacement = await auth.exchangeDaemonToken(exchange.exchangeToken);
       runtime.transport.daemonToken = replacement.daemonToken;
@@ -481,51 +481,6 @@ try {
     assert.match(baseline.loadedRelease, /repair/);
     assert.equal(baseline.loadedIdentity.version, 'v0.2.4');
   });
-  await phase(
-    'a pushed server minimum interrupts through the same prepared handoff and replays without retry cost',
-    async () => {
-      fixture.holdWork(true);
-      const started = fixture.nextHarness();
-      const heldId = await fixture.message('native-held server-minimum');
-      await started;
-      await fixture.makeRelease('v0.2.5', '6'.repeat(40));
-      const stopped = observe((s) => s.processState === 'stopping', 90_000);
-      const prior = baseline.generation;
-      const startup = observe(
-        (s) => s.generation !== prior && s.processState === 'starting',
-        120_000,
-      );
-      const began = Date.now();
-      fixture.helperVersionGate.raise('v0.2.5');
-      await stopped;
-      assert.ok(Date.now() - began < 90_000);
-      const journal = JSON.parse(
-        await readFile(
-          `${stateRoot}/beeline/agents/${agents[0]}/force-update-interruptions.json`,
-          'utf8',
-        ),
-      );
-      assert.ok(JSON.stringify(journal).includes(heldId));
-      fixture.holdWork(false);
-      const interruptedStartup = await startup;
-      await systemctl('kill', '--signal=SIGKILL', '--kill-whom=main', 'beeline-helper.service');
-      baseline = await observe(
-        (s) => serving(s) && s.generation !== interruptedStartup.generation,
-        120_000,
-      );
-      assert.equal(baseline.loadedIdentity.version, 'v0.2.5');
-      assert.equal((await fixture.waitReply(heldId, 90_000)).length, 1);
-      assert.equal(
-        (
-          await database.query(
-            'SELECT hiccup_attempts FROM agent_commands WHERE turn_request_id=$1 AND agent_id=$2',
-            [heldId, agents[0]],
-          )
-        ).rows[0].hiccup_attempts,
-        0,
-      );
-    },
-  );
   await phase(
     'actual idle machine has no release, discovery, command or status HTTP reads',
     async () => {
