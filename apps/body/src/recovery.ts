@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { askMachine, followHelperExit, helperAbsent, type MachineAnswer } from './machine-control.js';
+import { askMachine, followHelperExit, helperAbsent, type MachineAnswer, type OlderHelperStarted } from './machine-control.js';
 import {
   convergeNativeHelper,
   nativeHelperStatus,
@@ -21,6 +21,7 @@ import {
   writeUpdateState,
   readInstalledBundleIdentity,
   resolveBundleEntrypoint,
+  selectBootRelease,
   type BeelineInstallLayout,
 } from './self-update.js';
 import { runtimeConfigPath } from './runtime.js';
@@ -67,7 +68,7 @@ export async function convergeMachine(
     /** Update reports agents as a snapshot; start and pairing refuse agents that cannot serve. */
     reportAgentsOnly?: boolean;
   } = {},
-): Promise<MachineAnswer> {
+): Promise<MachineAnswer | OlderHelperStarted> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   const layout = options.layout ?? beelineInstallLayout(env) ?? discoveredBeelineInstallLayout(env);
@@ -83,12 +84,13 @@ export async function convergeMachine(
   // A live helper can pick up one paired runtime directly. Avoid rewriting its
   // native service from a potentially older connect bundle.
   if (!hasControl || !options.agentIds) {
-    await convergeNativeHelper({
+    const started = await convergeNativeHelper({
       env: { ...env, BEELINE_LIB_DIR: layout.libDir },
       ...(options.run ? { run: options.run } : {}),
       // A pre-control helper cannot acknowledge this protocol. Its first forward migration replaces it once.
       restart: !hasControl,
     });
+    if (typeof started === 'object') return started;
     if (options.releaseId && hasControl) current = await askMachine(stateRoot, { operation: 'status' });
   }
   let status: MachineAnswer;
@@ -107,7 +109,10 @@ export async function convergeMachine(
         (legacy ? ' (this helper predates one-answer control; Ctrl-C stops waiting, the helper continues)' : ''));
       await followHelperExit(stateRoot, answer);
       if (options.run) await options.run(['start', SYSTEMD_HELPER_UNIT_NAME]);
-      else await startNativeHelper(env);
+      else {
+        const started = await startNativeHelper(env);
+        if (started) return started;
+      }
       status = await askMachine(stateRoot, { operation: 'status' });
       if (status.generation === answer.generation)
         throw new Error(`helper pid ${status.pid} did not hand off to release ${options.releaseId}`);
@@ -174,16 +179,7 @@ export async function bootstrapMachine(env: NodeJS.ProcessEnv = process.env): Pr
     if (current.stagedReleaseId === state.stagedReleaseId)
       await writeUpdateState(layout, { ...current, stagedReleaseId: undefined });
   }, 'helper boot selection');
-  let releaseId: string | undefined;
-  for (const id of [state.stagedReleaseId, active]) {
-    if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) continue;
-    const digest = await readFile(resolve(layout.releasesRoot, id, '.stage-ok'), 'utf8').catch(() => '');
-    if (/^[0-9a-f]{64}$/i.test(digest.trim()) &&
-        await resolveBundleEntrypoint(resolve(layout.releasesRoot, id))) {
-      releaseId = id;
-      break;
-    }
-  }
+  let releaseId = await selectBootRelease(layout, [state.stagedReleaseId, active]);
   if (!releaseId) {
     // Recovery of a missing/broken install still prepares before importing code.
     releaseId = (await prepareMachineRelease(layout, {

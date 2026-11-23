@@ -5,6 +5,7 @@ import type { HelperStatusFile } from './helper-status.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
 import { ask, tryLock } from './wait.js';
 import { waitForProcessExit } from './process-exit.js';
+import { versionAtLeast } from './self-update-manifest.js';
 
 export interface MachineRequest {
   operation: 'status' | 'converge' | 'stop' | 'update';
@@ -220,7 +221,15 @@ export async function reportHelperStartup(stateRoot: string, startup: HelperStat
     { operation: 'status', startup: answer }).catch(() => undefined);
 }
 
-export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<number>): Promise<HelperStatusFile> {
+export interface OlderHelperStarted { readonly pid: number; readonly older: true }
+
+export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<number>, version: string): Promise<HelperStatusFile | OlderHelperStarted> {
+  if (!versionAtLeast(version, 'v0.1.245-rc.1')) {
+    const pid = await start();
+    if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('launchd start completed without a process');
+    process.stderr.write(`started older helper pid ${pid}\n`);
+    return { pid, older: true };
+  }
   let channel: MachineControl | undefined;
   const controller = new AbortController();
   return ask<HelperStatusFile>({ peer: 'launchd helper startup acknowledgment', send: async (ready, failed) => {
@@ -250,14 +259,6 @@ export async function startHelperWithAcknowledgment(stateRoot: string, start: ()
       () => { if (!controller.signal.aborted) failed(new Error(`helper pid ${pid} exited before its startup acknowledgment`)); },
       error => { if (!controller.signal.aborted) failed(error); },
     );
-    if (!status) {
-      const current = await askMachine(stateRoot, { operation: 'status' }).catch(error => {
-        if (helperAbsent(error)) return undefined;
-        throw error;
-      });
-      if (current?.processState === 'serving') status = current;
-    }
-    if (!status) throw new Error('helper startup was not acknowledged; the started helper may not support startup acknowledgments');
     complete();
   } }).finally(async () => { controller.abort(); await channel?.stop(); });
 }

@@ -95,3 +95,22 @@ it('never restarts a helper after a protocol failure', async () => {
   await expect(convergeMachine({ run: async () => ({ stdout: '' }) })).rejects.toThrow('invalid helper answer');
   expect(convergeNativeHelper).not.toHaveBeenCalled();
 });
+
+it('returns an older helper startup without a subsequent control request', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'beeline-older-recovery-'));
+  const older = { pid: process.pid, older: true as const };
+  vi.mocked(askMachine).mockRejectedValue(Object.assign(new Error('absent'), { code: 'ENOENT' }));
+  vi.mocked(convergeNativeHelper).mockResolvedValueOnce(older);
+  try {
+    const result = await convergeMachine({
+      layout: { libDir: join(home, 'lib'), binDir: join(home, 'bin'), releasesRoot: join(home, 'releases') },
+      env: { ...process.env, HOME: home, XDG_STATE_HOME: join(home, 'state') },
+      run: async () => ({ stdout: '' }),
+    });
+    expect(result).toEqual(older);
+    expect(askMachine).toHaveBeenCalledTimes(1);
+    expect(askMachine).toHaveBeenCalledWith(join(home, 'state'), { operation: 'status' });
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

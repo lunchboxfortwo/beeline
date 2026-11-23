@@ -5,8 +5,18 @@ import { resolve } from 'node:path';
 import { withKernelLock } from './kernel-lock.js';
 import { assertLifecycleTestIsolation } from './lifecycle-test-guard.js';
 import { runOwned } from './wait.js';
-import { startHelperWithAcknowledgment } from './machine-control.js';
+import { startHelperWithAcknowledgment, type OlderHelperStarted } from './machine-control.js';
 import { defaultSupervisorRoot } from './runtime.js';
+import { activeReleaseId, anchorLayout, readBundleJson, readUpdateState, selectBootRelease } from './self-update.js';
+
+async function launchdBundleVersion(env: NodeJS.ProcessEnv): Promise<string> {
+  const layout = anchorLayout(resolve(homeFor(env), '.local/lib/beeline'));
+  const state = await readUpdateState(layout);
+  const selected = await selectBootRelease(layout, [state.stagedReleaseId, await activeReleaseId(layout)]);
+  const identity = await readBundleJson(selected ? resolve(layout.releasesRoot, selected) : layout.libDir);
+  if (!identity?.version) throw new Error('selected helper bundle has no version for startup acknowledgment');
+  return identity.version;
+}
 
 /** A native manager command is an owned child; its nonzero exit carries stdout/stderr like execFile's error. */
 async function native(
@@ -131,7 +141,7 @@ interface NativeConvergenceOptions {
  * exits (systemd's own job timeouts bound `start`), its progress streams, and
  * it dies with this command.
  */
-export async function convergeNativeHelper(options: NativeConvergenceOptions = {}): Promise<number> {
+export async function convergeNativeHelper(options: NativeConvergenceOptions = {}): Promise<number | OlderHelperStarted> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   progress('native service convergence');
@@ -148,12 +158,13 @@ export async function convergeNativeHelper(options: NativeConvergenceOptions = {
     ownerLink: true,
   });
   if (worker.code !== 0) throw new Error(`${step}: worker exited ${worker.code ?? worker.signal}`);
-  const pid = JSON.parse(worker.stdout).pid as number;
-  if (!Number.isSafeInteger(pid) || pid < 0) throw new Error('native convergence returned an invalid pid');
+  const pid = JSON.parse(worker.stdout).pid as number | OlderHelperStarted;
+  if (typeof pid === 'object' && pid?.older === true && Number.isSafeInteger(pid.pid) && pid.pid > 0) return pid;
+  if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid < 0) throw new Error('native convergence returned an invalid pid');
   return pid;
 }
 
-export async function runNativeConvergenceWorker(): Promise<number> {
+export async function runNativeConvergenceWorker(): Promise<number | OlderHelperStarted> {
   if (process.env.BEELINE_INTERNAL_NATIVE_WORKER !== '1')
     throw new Error('native convergence worker requires its recovery owner');
   const options = JSON.parse(process.env.BEELINE_NATIVE_CONVERGENCE || '{}') as NativeConvergenceOptions;
@@ -163,7 +174,7 @@ export async function runNativeConvergenceWorker(): Promise<number> {
 
 async function convergeNativeHelperOwned(
   options: NativeConvergenceOptions = {},
-): Promise<number> {
+): Promise<number | OlderHelperStarted> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   const kind = options.platform ?? nativeSupervisor(env);
@@ -275,6 +286,7 @@ async function convergeNativeHelperOwned(
         await run(['reload', SYSTEMD_HELPER_UNIT_NAME]);
         return pid;
       }
+      const version = await launchdBundleVersion(env);
       const ready = await startHelperWithAcknowledgment(defaultSupervisorRoot(env), async () => {
         const domain = `gui/${process.getuid!()}`;
         const target = `${domain}/${LAUNCHD_HELPER_LABEL}`;
@@ -311,11 +323,11 @@ async function convergeNativeHelperOwned(
         });
         await run(['enable', target]);
         if (changed || !before.stdout) await run(['bootstrap', domain, path]);
-        const started = await run(['kickstart', ...(options.restart ? ['-k'] : []), '-p', target]);
+        const started = await run(['kickstart', '-k', '-p', target]);
         if (options.legacyCaller) await retire();
         return Number(started.stdout.trim());
-      });
-      return ready.pid;
+      }, version);
+      return 'older' in ready ? ready : ready.pid;
     },
     { step: 'native service convergence' },
   );
@@ -324,19 +336,21 @@ async function convergeNativeHelperOwned(
 export async function startNativeHelper(
   env: NodeJS.ProcessEnv = process.env,
   options: { run?: NativeRunner; platform?: 'systemd' | 'launchd' } = {},
-): Promise<void> {
+): Promise<void | OlderHelperStarted> {
   const kind = options.platform ?? nativeSupervisor(env);
   assertLifecycleTestIsolation(env, Boolean(options.run));
   progress(`native ${kind}: starting the helper successor`);
   if (kind === 'systemd') {
     if (options.run) await options.run(['start', SYSTEMD_HELPER_UNIT_NAME]);
     else await native('systemctl', ['--user', 'start', SYSTEMD_HELPER_UNIT_NAME], env);
-  } else await withKernelLock(`native-helper:${homeFor(env)}`, async () => {
-    await startHelperWithAcknowledgment(defaultSupervisorRoot(env), async () => {
-      const args = ['kickstart', '-p', `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`];
+  } else return withKernelLock(`native-helper:${homeFor(env)}`, async () => {
+    const version = await launchdBundleVersion(env);
+    const ready = await startHelperWithAcknowledgment(defaultSupervisorRoot(env), async () => {
+      const args = ['kickstart', '-k', '-p', `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`];
       const started = options.run ? await options.run(args) : await native('launchctl', args, env);
       return Number(started.stdout.trim());
-    });
+    }, version);
+    if ('older' in ready) return ready;
   }, { step: 'native service convergence' });
 }
 
