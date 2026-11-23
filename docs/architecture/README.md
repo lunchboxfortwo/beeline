@@ -47,8 +47,9 @@ expansion; any other widening still fails. No site outside those owners
 remains: `total` is 0, and CI rejects any raised `total`. Zero sites is not
 "nothing can wait": a silent connected peer, a live lock holder, an owned child
 that never exits, and the machine link's unsent work until its next registration
-still wait without a bound of their own, ending on the channel's failure, the
-holder's or child's exit, or the caller's cancel.
+still wait without a bound of their own. Each wait ends on its owner's answer
+or terminal event; unsent machine work survives a plain disconnect but ends
+on registration refusal, unregistration, channel retirement or a forced update.
 `packages/scripts/helper-waits.test.mjs` plants waits and timers and verifies the
 real check rejects them.
 
