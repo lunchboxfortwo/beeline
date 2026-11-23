@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { buildBwrapArgv, sandboxMountPlan } from './bwrap-sandbox.js';
 import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(root => {
@@ -13,7 +14,7 @@ afterEach(() => roots.splice(0).forEach(root => {
 }));
 
 it.each([false, true])('runs thread commands as the host user without capabilities (overlay: %s)', overlay => {
-  const root = mkdtempSync('/var/tmp/beeline-corner-user-');
+  const root = mkdtempSync(`${testTmpDir()}/beeline-corner-user-`);
   roots.push(root);
   const tree = resolve(root, 'node_modules');
   mkdirSync(tree);
@@ -42,7 +43,7 @@ it.each([false, true])('runs thread commands as the host user without capabiliti
 
 it.each(['missing', 'dangling', 'loop', 'symlink'] as const)(
   'starts a thread with a %s saved path grant', shape => {
-    const root = mkdtempSync('/var/tmp/beeline-corner-start-');
+    const root = mkdtempSync(`${testTmpDir()}/beeline-corner-start-`);
     roots.push(root);
     const grant = resolve(root, '.corner-artifacts/threads-refresh');
     const target = resolve(root, 'target');
@@ -64,7 +65,7 @@ it.each(['missing', 'dangling', 'loop', 'symlink'] as const)(
 );
 
 it('retains writable grants through a symlink under a read-only root', () => {
-  const root = mkdtempSync('/var/tmp/beeline-corner-start-');
+  const root = mkdtempSync(`${testTmpDir()}/beeline-corner-start-`);
   roots.push(root);
   const target = resolve(root, 'target'), alias = resolve(root, 'alias');
   mkdirSync(target); symlinkSync(target, alias);

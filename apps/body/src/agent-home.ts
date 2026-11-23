@@ -48,9 +48,9 @@
  * otherwise-implicit reads from the operator's `~/.pi` and `~/.agents` trees.
  */
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readlink, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readlink, realpath, rm, symlink } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import {
   AGENT_BEHAVIORS,
   agentBehavior,
@@ -466,7 +466,9 @@ async function provisionRoomAgentCredentials(
   // the long real path below.
   try {
     const tmpLink = roomSessionTmpDir(root);
-    const tmpTarget = resolve(root, 'tmp');
+    // Relative, so the sandbox can bind the scratch folder onto the link itself.
+    // Measured from the real folder: macOS /var/tmp is a link to /private/var/tmp.
+    const tmpTarget = relative(await realpath(dirname(tmpLink)), resolve(root, 'tmp'));
     if ((await readlink(tmpLink).catch(() => undefined)) !== tmpTarget) {
       await rm(tmpLink, { recursive: true, force: true });
       await symlink(tmpTarget, tmpLink);

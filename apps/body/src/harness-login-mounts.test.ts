@@ -7,6 +7,7 @@ import type { AgentKind } from './agent-command.js';
 import { harnessLoginWritablePaths, harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome } from './agent-home.js';
 import { writeOpenCodeKey } from './agent-sign-in.js';
 import { wrapAgentCommand } from './bwrap-sandbox.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const run = promisify(execFile);
 const roots: string[] = [];
@@ -39,7 +40,7 @@ async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<st
 
 for (const mode of ['readonly', 'edit'] as const) {
   it.each(cursorCases)('Cursor native login store $source supports refresh in ' + mode + ' mode', async ({ source, privateFile }) => {
-    const root = await mkdtemp('/var/tmp/beeline-login-mounts-'); roots.push(root);
+    const root = await mkdtemp(`${testTmpDir()}/beeline-login-mounts-`); roots.push(root);
     const operatorHome = join(root, 'operator');
     const shared = join(operatorHome, source);
     await mkdir(dirname(shared), { recursive: true });
@@ -61,7 +62,7 @@ for (const mode of ['readonly', 'edit'] as const) {
   });
 
   it.each(proxied)('$kind session holds no provider login and cannot write the operator store in ' + mode + ' mode', async ({ kind, source, privateFile }) => {
-    const root = await mkdtemp('/var/tmp/beeline-login-mounts-'); roots.push(root);
+    const root = await mkdtemp(`${testTmpDir()}/beeline-login-mounts-`); roots.push(root);
     const operatorHome = join(root, 'operator');
     const shared = join(operatorHome, source);
     await mkdir(dirname(shared), { recursive: true });
@@ -88,7 +89,7 @@ it.each([
   { kind: 'pi' as const, source: '.pi/agent/auth.json', target: 'pi/auth.json', key: { type: 'api_key', key: 'sk-pi' } },
   { kind: 'opencode' as const, source: '.local/share/opencode/auth.json', target: 'user/.local/share/opencode/auth.json', key: { type: 'api', key: 'sk-oc' } },
 ])('$kind keeps its API keys and drops OAuth entries', async ({ kind, source, target, key }) => {
-  const root = await mkdtemp('/var/tmp/beeline-login-keys-'); roots.push(root);
+  const root = await mkdtemp(`${testTmpDir()}/beeline-login-keys-`); roots.push(root);
   const operatorHome = join(root, 'operator');
   await mkdir(dirname(join(operatorHome, source)), { recursive: true });
   await writeFile(join(operatorHome, source), JSON.stringify({ openrouter: key, anthropic: { type: 'oauth', refresh: 'r' } }));
@@ -103,7 +104,7 @@ it.each([
 
 for (const mode of ['readonly', 'edit'] as const) {
   it('keeps Goose operator config read-only and private login files writable in ' + mode + ' mode', async () => {
-    const root = await mkdtemp('/var/tmp/beeline-goose-login-'); roots.push(root);
+    const root = await mkdtemp(`${testTmpDir()}/beeline-goose-login-`); roots.push(root);
     const operatorHome = join(root, 'operator');
     const configDir = join(operatorHome, '.config', 'goose');
     await mkdir(configDir, { recursive: true });
@@ -135,7 +136,7 @@ for (const mode of ['readonly', 'edit'] as const) {
 }
 
 it('does not mount absent or unrelated operator stores writable', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-login-missing-'); roots.push(root);
+  const root = await mkdtemp(`${testTmpDir()}/beeline-login-missing-`); roots.push(root);
   for (const kind of ['claude', 'codex', 'pi', 'cursor', 'opencode', 'grok', 'goose', 'custom', 'reference', undefined] as const)
     expect(harnessLoginWritablePaths(kind, root)).toEqual([]);
 });

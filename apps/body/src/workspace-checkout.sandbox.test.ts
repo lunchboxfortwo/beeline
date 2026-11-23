@@ -14,6 +14,7 @@ import { wrapAgentCommand } from './bwrap-sandbox.js';
 import { PlaceSession } from './place-session.js';
 import { runtimeDirectory, type AgentRuntimeRecord } from './runtime.js';
 import { materializeCornerWorktree } from './workspace-checkout.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 import { agentCornerCheckoutPaths as cornerCheckoutFolders } from './agent-corner-checkout.js';
 
 const git = promisify(execFile);
@@ -32,7 +33,7 @@ afterEach(async () => {
 it.each([false, true])(
   'commits from the live thread sandbox after workspace setup (warm=%s)',
   async (warm) => {
-    const root = await mkdtemp('/var/tmp/beeline-thread-checkout-');
+    const root = await mkdtemp(`${testTmpDir()}/beeline-thread-checkout-`);
     roots.push(root);
     const source = join(root, 'source');
     await mkdir(source);
@@ -221,7 +222,7 @@ it.each([false, true])(
 );
 
 it('keeps operator Claude settings and login read-only in a proxied Room', async () => {
-  const root = await mkdtemp('/var/tmp/beeline-room-login-');
+  const root = await mkdtemp(`${testTmpDir()}/beeline-room-login-`);
   roots.push(root);
   const operatorHome = join(root, 'operator');
   const settings = join(operatorHome, '.claude', 'settings.json');

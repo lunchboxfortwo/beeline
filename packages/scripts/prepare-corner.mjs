@@ -20,21 +20,31 @@ const allowed = new Set(['--mobile', '--build', '--help']);
 for (const flag of flags) {
   if (!allowed.has(flag)) throw new Error(`Unknown preparation option: ${flag}`);
 }
+// Beeline passes the thread brief; the root install covers every other workspace.
+if (/\bmobile\b/i.test(process.env.BEELINE_BRIEF ?? '')) flags.add('--mobile');
 if (flags.has('--help')) {
   console.log('Usage: npm run corner:prepare -- [--mobile] [--build] | --extra <path>\nRoot dependencies and shared exports are prepared by default. Add --mobile for mobile work and --build for the full application build.');
 } else {
-  const run = (args) => {
-    const result = spawnSync('npm', args, { stdio: 'inherit' });
+  const run = (args, cwd) => {
+    const result = spawnSync('npm', args, { stdio: 'inherit', cwd });
     if (result.error) throw result.error;
     if (result.status !== 0) process.exit(result.status ?? 1);
   };
   if (process.env.BEELINE_READONLY_DEPENDENCIES !== '1') run(['ci']);
+  let mobileReady = false;
   if (flags.has('--mobile')) {
     if (process.env.BEELINE_READONLY_DEPENDENCIES === '1') {
       writeFileSync('.beeline-dependency-request', 'mobile');
       console.log('Mobile dependencies requested. Beeline prepares and mounts them when this reply ends, and this turn continues with them.');
-    } else run(['run', 'mobile:install']);
+    } else {
+      run(['run', 'mobile:install']);
+      mobileReady = true;
+    }
   }
   run(['exec', '--', 'turbo', 'run', 'build', '--filter=@beeline/body^...', '--filter=@beeline/server^...']);
   if (flags.has('--build')) run(['run', 'build']);
+  // Prepared means tests run: one test file in each prepared workspace.
+  run(['exec', '--workspace=@beeline/body', '--', 'vitest', 'run', 'src/pi-retry-settings.test.ts']);
+  if (mobileReady)
+    run(['exec', '--', 'vitest', 'run', 'sources/buzz/agent-model-picker.test.ts'], 'apps/mobile');
 }
