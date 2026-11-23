@@ -105,6 +105,29 @@ it('still refuses other install work at once, naming its holder', async () => {
   }
 });
 
+it('preserves a pending forced repair while the damaged original is still active', async () => {
+  const { layout, bytes, manifest } = await published();
+  const fetchImpl = vi.fn(async () => new Response(bytes));
+  const original = await prepareLatestRelease(layout, { manifest, fetchImpl, logger: () => {} });
+  await symlink(join(layout.releasesRoot, original.releaseId), layout.libDir);
+  await writeFile(
+    join(layout.releasesRoot, original.releaseId, 'lib/beeline/beeline-cli.mjs'),
+    "throw new Error('damaged installed body');\n",
+  );
+  const repair = await prepareLatestRelease(layout, {
+    manifest,
+    fetchImpl,
+    force: true,
+    logger: () => {},
+  });
+  expect(repair.releaseId).not.toBe(original.releaseId);
+  fetchImpl.mockClear();
+  const next = await prepareMachineRelease(layout, { manifest, fetchImpl, logger: () => {} });
+  expect(next.releaseId).toBe(repair.releaseId);
+  expect((await readUpdateState(layout)).stagedReleaseId).toBe(repair.releaseId);
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
 it('keeps a forced repair of the published bytes instead of handing back to the release it replaced', async () => {
   // Linux helper proof: after `update --force` repaired a damaged body, the repaired
   // helper's next preparation selected the damaged directory and crash-looped on it.

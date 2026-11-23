@@ -693,10 +693,10 @@ export async function prepareLatestRelease(
     // The active release may be a forced repair of these bytes; never hand back to the
     // directory it replaced, whose marker can outlive damaged content.
     const releaseId =
-      !options.force && (await holds(active))
-        ? active!
-        : !options.force && (await holds(pending))
-          ? pending!
+      !options.force && (await holds(pending))
+        ? pending!
+        : !options.force && (await holds(active))
+          ? active!
           : await stageRelease(layout, manifestUrl, bundle, {
               fetchImpl,
               logger: options.logger,
