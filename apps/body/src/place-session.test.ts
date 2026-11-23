@@ -20,7 +20,6 @@ import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
-
 // Cache persistence is tested with real files by SessionResources. These
 // prompt tests intentionally finish while optional background work is pending.
 vi.mock('./atomic-private-file.js', async original => {
