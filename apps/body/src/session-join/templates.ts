@@ -5,8 +5,8 @@ import { ownedCommandModule } from '../wait.js';
 
 /** opencode 1.x and 2.x: reports busy/idle, and puts Beeline messages into idle sessions within seconds. */
 export const OPENCODE_PLUGIN = `// Beeline for opencode: written by \`usebeeline join\`, removed by \`usebeeline session leave\`.
-import { runOwned } from ${JSON.stringify(ownedCommandModule())}
-import { watch, mkdirSync } from "node:fs"
+import { runOwned, watchChanges } from __OWNED__
+import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 
@@ -25,8 +25,11 @@ const network = (prompt: (id: string, text: string) => Promise<unknown>) => {
   const subagents = new Set<string>()
   const delivering = new Set<string>()
   const dirs = new Map<string, string>()
-  const deliver = async (id: string) => {
-    if (delivering.has(id) || subagents.has(id)) return
+  // A wake during a delivery runs one more poll after it, so none is lost.
+  const again = new Set<string>()
+  const deliver = async (id: string): Promise<void> => {
+    if (subagents.has(id)) return
+    if (delivering.has(id)) { again.add(id); return }
     delivering.add(id)
     try {
       const text = await run(["poll", "--session", id], dirs.get(id)!)
@@ -35,11 +38,17 @@ const network = (prompt: (id: string, text: string) => Promise<unknown>) => {
       await prompt(id, text)
     } finally {
       delivering.delete(id)
+      if (again.delete(id) && idle.has(id)) void deliver(id)
     }
   }
-  const inbox=join(process.env.XDG_STATE_HOME||join(process.env.HOME||homedir(),".local/state"),"beeline-sessions","inbox")
-  mkdirSync(inbox,{recursive:true})
-  const watcher=watch(inbox,()=>idle.forEach((id)=>void deliver(id)))
+  // A delivery is written under deliveries/ (older helpers wrote inbox/); a
+  // change without a name is any change. If the watcher fails, deliveries
+  // still arrive on each session's next idle status.
+  const sessions=join(process.env.XDG_STATE_HOME||join(process.env.HOME||homedir(),".local/state"),"beeline-sessions")
+  mkdirSync(sessions,{recursive:true})
+  const stopWatching=watchChanges(sessions,(name: string | null)=>{
+    if(name===null||/^(?:deliveries|inbox)(?:\\/|$)/.test(name)) idle.forEach((id)=>void deliver(id))
+  },{recursive:true,onError:()=>{}})
   return {
     subagent: (id: string) => subagents.add(id),
     status: async (id: string, state: string, dir: string) => {
@@ -51,7 +60,7 @@ const network = (prompt: (id: string, text: string) => Promise<unknown>) => {
         await deliver(id)
       } else idle.delete(id)
     },
-    stop: () => watcher.close(),
+    stop: () => stopWatching(),
     end: (id?: string) => {
       for (const [s, dir] of [...dirs]) {
         if (id && s !== id) continue
@@ -117,8 +126,8 @@ export default {
 /** pi: reports busy/idle and delivers Beeline messages, steering a running turn and starting one when idle. */
 export const PI_EXTENSION = `// Beeline for pi: written by \`usebeeline join\`, removed by \`usebeeline session leave\`.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { runOwned } from ${JSON.stringify(ownedCommandModule())}
-import { watch, mkdirSync } from "node:fs"
+import { runOwned, watchChanges } from ${JSON.stringify(ownedCommandModule())}
+import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 
@@ -130,30 +139,40 @@ export default function (pi: ExtensionAPI) {
   let cwd = process.cwd()
   let busy = false
   let delivering = false
-  let watcher: ReturnType<typeof watch> | undefined
+  let again = false
+  let stopWatching: (() => void) | undefined
   const hook = async (args: string[]) => {
     try {
       const result = await runOwned({ step: "pi hook", file: NODE, args: [BUNDLE, "session", "hook", "pi", ...args, "--session", id], cwd, machineRead: true })
       return result.code === 0 ? result.stdout.trim() : ""
     } catch { return "" }
   }
-  const deliver = async (event: "post-tool-use" | "poll") => {
-    if (!id || delivering) return
+  // A wake during a delivery runs one more poll after it, so none is lost.
+  const deliver = async (event: "post-tool-use" | "poll"): Promise<void> => {
+    if (!id) return
+    if (delivering) { again = true; return }
     delivering = true
     try {
       const text = await hook([event])
       if (text) pi.sendUserMessage(text, busy ? { deliverAs: "steer" } : undefined)
     } finally {
       delivering = false
+      if (again) { again = false; void deliver("poll") }
     }
   }
   pi.on("session_start", async (_event, ctx) => {
     id = ctx.sessionManager.getSessionId()
     cwd = ctx.cwd
+    // A delivery is written under deliveries/ (older helpers wrote inbox/); a
+    // change without a name is any change. If the watcher fails, deliveries
+    // still arrive at the next turn end or settle.
+    const sessions=join(process.env.XDG_STATE_HOME||join(process.env.HOME||homedir(),".local/state"),"beeline-sessions")
+    mkdirSync(sessions,{recursive:true})
+    stopWatching??=watchChanges(sessions,(name: string | null)=>{
+      if(name===null||/^(?:deliveries|inbox)(?:\\/|$)/.test(name)) void deliver("poll")
+    },{recursive:true,onError:()=>{}})
     await hook(["status", "--state", "idle"])
-    const inbox=join(process.env.XDG_STATE_HOME||join(process.env.HOME||homedir(),".local/state"),"beeline-sessions","inbox")
-    mkdirSync(inbox,{recursive:true})
-    watcher??=watch(inbox,()=>{void deliver("poll")})
+    await deliver("poll")
   })
   pi.on("agent_start", async () => {
     busy = true
@@ -168,8 +187,8 @@ export default function (pi: ExtensionAPI) {
     await deliver("poll")
   })
   pi.on("session_shutdown", async () => {
-    watcher?.close()
-    watcher = undefined
+    stopWatching?.()
+    stopWatching = undefined
     await hook(["session-end"])
   })
 }
@@ -229,8 +248,24 @@ def register(ctx):
         description=schema["description"])
 `;
 
-export function fill(template: string, node: string, bundle: string): string {
+/**
+ * `owned` is where the plugin imports runOwned and watchChanges from: the
+ * standalone module as a data URL by default, or a file written beside the
+ * bundle. Bun (opencode) cannot import a data URL of this size.
+ */
+export function fill(
+  template: string,
+  node: string,
+  bundle: string,
+  owned: string = ownedCommandModule(),
+): string {
   return template
     .replaceAll('__NODE__', node.replace(/\\/g, '\\\\'))
-    .replaceAll('__BUNDLE__', bundle.replace(/\\/g, '\\\\'));
+    .replaceAll('__BUNDLE__', bundle.replace(/\\/g, '\\\\'))
+    .replaceAll('__OWNED__', JSON.stringify(owned));
+}
+
+/** The standalone runOwned/ask/answer/watchChanges module as plain source, for a plugin's own file. */
+export function ownedCommandSource(): string {
+  return decodeURIComponent(ownedCommandModule().slice('data:text/javascript,'.length));
 }

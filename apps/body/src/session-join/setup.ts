@@ -24,6 +24,7 @@ import {
   OPENCODE_PLUGIN,
   PI_EXTENSION,
   fill,
+  ownedCommandSource,
 } from './templates.js';
 
 export const NAME = 'beeline';
@@ -340,12 +341,21 @@ function pluginFile(path: string, content: string, remove: boolean): string[] {
   return writeFile(path, content) ? [`updated ${path}`] : [];
 }
 
+/**
+ * opencode runs plugins under Bun, which cannot import the standalone module
+ * as a data URL of its size, so it is a file beside the bundle the plugin runs.
+ */
 function opencode(context: SetupContext): string[] {
-  return pluginFile(
-    join(home(context.env), '.config/opencode/plugins', `${NAME}.ts`),
-    fill(OPENCODE_PLUGIN, context.node, context.bundle),
-    Boolean(context.remove),
-  );
+  const owned = join(dirname(context.bundle), `${NAME}-opencode-owned.mjs`);
+  const remove = Boolean(context.remove);
+  return [
+    ...pluginFile(owned, ownedCommandSource(), remove),
+    ...pluginFile(
+      join(home(context.env), '.config/opencode/plugins', `${NAME}.ts`),
+      fill(OPENCODE_PLUGIN, context.node, context.bundle, owned),
+      remove,
+    ),
+  ];
 }
 
 export function piHome(env: NodeJS.ProcessEnv): string {

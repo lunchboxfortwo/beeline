@@ -70,20 +70,35 @@ joins into its current recovery bundle, and join/SessionStart also check bridge
 identity. `bridge-launch.ts` stages the replacement outside the serving bridge's
 watched tree. The candidate binds its private tool socket and opens every joined
 member's stream before reporting ready over IPC. It buffers delivery until the
-old bridge drains its in-flight work and exits; only then does the launcher
-publish the stable bundle and activate the successor. The member cursor and
-durable delivery identities join overlapping stream replay without duplicate
+old bridge drains its in-flight deliveries and accepted tool requests and exits;
+only then does the launcher publish the stable bundle and activate the successor.
+The candidate claims the PID file and owner lock before publishing its public
+socket. The member cursor and durable delivery identities join overlapping stream replay without duplicate
 wakes. A startup failure preserves the serving bridge and stable bundle; if the
-old process was already dead, the launcher starts the candidate through the same
-IPC readiness contract. A serving legacy bridge with no followable owner lock
-refuses takeover explicitly. Failure still reaches the helper's upgrade warning and `bridge.log`. No timer, polling,
+old process was already dead, recovery uses the retained bundle's IPC handshake
+when supported. A marker-only retained bundle launches without a readiness wait.
+A recovery failure is logged without replacing the original upgrade error.
+A serving legacy bridge with no followable owner lock refuses takeover explicitly.
+Failure still reaches the helper's upgrade warning and `bridge.log`. No timer, polling,
 or retry loop owns this handoff. Claude's in-session MCP
-receiver wakes on the durable state commit as well as legacy inbox writes;
-its own failure requeue does not create another delivery attempt. Regressions:
+receiver subscribes before its initial drain and wakes on durable state commits,
+new pending deliveries under `deliveries/`, legacy inbox writes and nameless
+invalidations; its own failure requeue does not create another delivery attempt.
+Watcher failure removes its receiver registration, waking the bridge to resume
+delivery. The Antigravity sidecar finishes its active drain before propagating
+watcher failure and releasing ownership. Regressions:
 `apps/body/src/session-join/bridge-upgrade.test.ts` and
 `apps/body/src/session-join/bridge-resilience.test.ts`. The resilience suite builds
 real recovery bundles and proves good/broken refresh with both serving and dead
 bridges against a local member-stream server and Claude receiver socket.
+
+Session-state writes retain the legacy `state.lock` directory during mixed-version
+operation alongside the kernel lock. Age never permits takeover. An empty or
+foreign marker refuses immediately with its path, leaving the work uncommitted;
+remove a leftover directory only after confirming no Beeline process is running.
+`store.ts` owns marker recovery; `kernel-lock.ts` documents contention and
+starvation limits. Regression:
+`apps/body/src/shared-file-locks.test.ts`.
 
 | App          | Channel                                                                                                                                       | Idle session                             |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
@@ -111,7 +126,7 @@ Each change is additive, backed up once as `<file>.bak-beeline`, and removed by 
 
 - Claude Code: Beeline's stdio MCP server in the user's `.claude.json` (`CLAUDE_CONFIG_DIR/.claude.json` with a custom config directory), plus one `SessionStart` hook in its `settings.json`. New sessions post with their own `CLAUDE_CODE_MESSAGING_TOKEN`; it stays in the MCP child's memory and never enters Beeline state, Room text or logs. The hook restarts the bridge after a reboot and reminds a reopened session who it is.
 - Codex: one `SessionStart` hook in `$CODEX_HOME/hooks.json`. After Allow, Beeline asks Codex's config API for the installed hook's hash and trusts only that exact Beeline declaration. This file-based trust was verified on Codex (0.165.0). An unknown API or hash format keeps Codex's one review prompt: open `/hooks` and trust only Beeline. No other hook is trusted.
-- Gemini CLI: hooks in `settings.json`. Antigravity: `hooks.json`, a sidecar and its `config.json` entry. OpenCode, Pi, Hermes: one plugin file each (Hermes is enabled with `hermes plugins enable beeline`). ZCode: one MCP server where ZCode reads servers.
+- Gemini CLI: hooks in `settings.json`. Antigravity: `hooks.json`, a sidecar and its `config.json` entry. OpenCode: one plugin file plus `beeline-opencode-owned.mjs` beside the Beeline bundle, so Bun can load the shared wait owners from a file. Pi and Hermes: one plugin file each (Hermes is enabled with `hermes plugins enable beeline`). ZCode: one MCP server where ZCode reads servers.
 
 An already-open Claude Code session in skip-permissions mode cannot load the new MCP server immediately. Only that case uses the fallback: the Allow page names the machine-wide user-level `"crossSessionInbound": "accept"` setting, and Beeline saves its exact old value (or absence) before changing it after Allow. Leaving the last joined session on the machine restores the old value, preserving unrelated settings and a person's later explicit inbound choice. Normal-mode sessions and sessions with a live in-session server do not change this setting. Managed `hold` or `refuse` policy blocks join with an explanation and no app config writes. Cancelling Allow also writes no app config.
 
