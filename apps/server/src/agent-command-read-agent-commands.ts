@@ -8,6 +8,7 @@ import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } fr
 import { advanceCorner } from './corner-lifecycle.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
+import { daemonCorners } from './daemon/corner-reads.js';
 import { savedScheduleCommand } from './scheduled-command-authority.js';
 
 
@@ -51,6 +52,10 @@ export async function readAgentCommands(
   roomId?: string,
 ): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
   const rows = await readAgentQueueRows(db,agentId,roomId);
+  const threads = new Map(await Promise.all(
+    [...new Set(rows.rows.map(item => item.parent_room_id ?? item.room_id))]
+      .map(async placeId => [placeId, await daemonCorners({ database: db }, placeId, agentId, true)] as const),
+  ));
   const credentials = await db.ownedModelCredentials?.forCommands(db, rows.rows.map(item => item.id));
   return {
     commandProtocol: 2,
@@ -70,6 +75,7 @@ export async function readAgentCommands(
           ...(item.selected_effort ? { effort: item.selected_effort } : {}),
           ...(item.fast_mode != null ? { fastMode: item.fast_mode } : {}),
         } } : {}),
+        threads: threads.get(item.parent_room_id ?? item.room_id),
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.room_name ? { roomName: item.room_name } : {}),
         ...(item.return_room_name ? { returnRoomName: item.return_room_name } : {}),

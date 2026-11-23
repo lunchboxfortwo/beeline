@@ -45,7 +45,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
    * derivations must agree.
    */
   /** `reachable` lists every corner under the Room instead of only the caller's own. */
-  export async function daemonCorners(ctx: DaemonContext, roomId: string, agentId: string, activeOnly = false, reachable = false) {
+  export async function daemonCorners(ctx: Pick<DaemonContext, 'database'>, roomId: string, agentId: string, activeOnly = false, reachable = false) {
     const rows = await ctx.database.query<{
       id: string;
       parent_id: string;

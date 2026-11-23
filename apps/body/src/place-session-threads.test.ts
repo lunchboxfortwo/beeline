@@ -73,28 +73,32 @@ it.each([
     await f.session.start();
     expect(f.session.resources.context.threads).toBeUndefined();
     const next = { ...f.item, id: 'second', turnRequestId: 'second' };
-    const delivery = f.session.deliver(f.item, batch ? [f.item, next] : []);
+    const command = { ...f.item, threads: { corners: [{
+      cornerId: 'open-thread', parentRoomId: parent ?? 'room', name: 'Game fix',
+      createdBy: f.agent.publicKey, archived: false, objective: 'Repair the start button',
+    }] } };
+    const delivery = f.session.deliver(command, batch ? [command, next] : []);
     await request;
-    expect(f.prompt).not.toHaveBeenCalled();
-    expect(f.execute).toHaveBeenCalledTimes(1);
+    await expect(delivery).resolves.toMatchObject({ text: 'Done' });
+    expect(f.prompt).toHaveBeenCalledOnce();
     expect(f.execute).toHaveBeenCalledWith('listRoomCorners', { roomId: parent ?? 'room', activeOnly: true });
-    reconcile({ corners: [{ cornerId: 'open-thread', parentRoomId: parent ?? 'room', name: 'Game fix',
-      createdBy: f.agent.publicKey, archived: false, objective: 'Repair the start button' }] });
-    await delivery;
     const emitted = f.prompt.mock.calls[0]![1];
     expect(emitted).toContain('Current threads you belong to');
     expect(emitted).toContain('Game fix (open-thread)');
     expect(emitted).toContain(`checkout ${checkout}`);
+    reconcile(command.threads);
+    await vi.waitFor(() => expect(f.session.resources.context.threads).toEqual(command.threads));
     f.execute.mockImplementation(() => new Promise(() => {}));
     await expect(f.session.deliver(next)).resolves.toMatchObject({ text: 'Done' });
     expect(f.prompt.mock.calls[1]![1]).toContain(`checkout ${checkout}`);
   } finally { await f.session.dispose(); }
 });
 
-it('delivers the first turn when thread reconciliation fails', async () => {
+it.each(['pending', 'failed'])('delivers legacy commands when optional thread reconciliation is %s', async outcome => {
   const f = await fixture();
   f.execute.mockImplementation(name => name === 'listRoomCorners'
-    ? Promise.reject(new Error('offline')) : new Promise(() => {}));
+    ? (outcome === 'failed' ? Promise.reject(new Error('offline')) : new Promise(() => {}))
+    : new Promise(() => {}));
   try {
     await f.session.start();
     await expect(f.session.deliver(f.item)).resolves.toMatchObject({ text: 'Done' });

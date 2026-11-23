@@ -115,6 +115,8 @@ export function isBackgroundCommand(reason: string): boolean {
  * The helper may deliver it more than once; the answer is idempotent.
  */
 export type AgentCommand = {
+  /** Active threads at queue delivery, before any optional helper refresh. */
+  readonly threads?: CornerListResult;
   /** Hosted model authority issued atomically with this queue item. */
   readonly modelCredential?: OwnedModelCredential;
   /**
