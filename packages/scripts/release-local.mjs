@@ -314,12 +314,6 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         context.env.FLY_API_TOKEN = engine.secrets.FLY_API_TOKEN || '';
         context.env.DOCKER_CONFIG = join(context.runner.temp, 'docker');
       }
-      if (context.github.job === 'helper' && engine.secrets.NPM_AUTOMATION_TOKEN) {
-        const npmrc = join(context.runner.temp, 'npmrc');
-        privateWrite(npmrc, '//registry.npmjs.org/:_authToken=${NPM_AUTOMATION_TOKEN}\n');
-        context.env.NPM_CONFIG_USERCONFIG = npmrc;
-        context.env.NPM_AUTOMATION_TOKEN = engine.secrets.NPM_AUTOMATION_TOKEN;
-      }
     },
     step: async ({ step, context, env, result }) => {
       if (context?.github?.job === 'initialize' && step.id === 'identity' && step.run?.includes('node packages/scripts/release-record.mjs identity')) {

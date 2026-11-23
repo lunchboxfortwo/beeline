@@ -1,5 +1,5 @@
 name: Unified production release
-run-name: ${{ inputs.channel || 'next' }} release · @${{ fromJSON(inputs.dispatched_by || '{}').handle || 'unknown' }} · ${{ fromJSON(inputs.dispatched_by || '{}').auditMessageId }}
+run-name: ${{ inputs.selection == 'npm-publish' && format('npm publish {0}', inputs.release_version) || format('{0} release', inputs.channel || 'next') }} · @${{ fromJSON(inputs.dispatched_by || '{}').handle || 'unknown' }} · ${{ fromJSON(inputs.dispatched_by || '{}').auditMessageId }}
 on:
   workflow_dispatch:
     inputs:
@@ -24,7 +24,7 @@ on:
         type: string
         required: false
       selection:
-        description: Recovery only - routine releases keep auto
+        description: Recovery only - routine releases keep auto; npm-publish is the local release's publish-only path
         type: string
         default: auto
         required: true
@@ -65,10 +65,12 @@ permissions:
   issues: write
   packages: read
 concurrency:
-  group: unified-production-release
+  # A local release's publish-only run must not queue behind a hosted release.
+  group: ${{ inputs.selection == 'npm-publish' && 'usebeeline-npm-publish' || 'unified-production-release' }}
   cancel-in-progress: false
 jobs:
   initialize:
+    if: inputs.selection != 'npm-publish'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -579,7 +581,7 @@ jobs:
     runs-on:
       - self-hosted
       - beeline-prod-host
-    timeout-minutes: 20
+    timeout-minutes: 35
     permissions:
       actions: read
       contents: write
@@ -659,19 +661,70 @@ jobs:
           node packages/scripts/smoke-helper-package.mjs "$tarball" "${RELEASE_VERSION#v}"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
       - name: Publish the exact helper CLI package
-        # npm publishes only through trusted publishing from GitHub Actions; a
-        # local release skips it until Actions returns (captain, 14 Nov).
-        if: env.SKIP_HELPER_NPM != 'true'
+        # npm accepts usebeeline only through trusted publishing (OIDC) from
+        # this workflow on GitHub Actions. A local release attaches its exact
+        # smoked tarball to the draft release, has the npm_publish job below
+        # publish those bytes, and fails this leg unless that run succeeds.
+        timeout-minutes: 15
         env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCHED_BY: ${{ inputs.dispatched_by }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
           HELPER_TARBALL: ${{ steps.helper_package.outputs.tarball }}
           CHANNEL: ${{ needs.initialize.outputs.channel }}
         run: |
           set -euo pipefail
+          if [ "${BEELINE_LOCAL_RELEASE:-}" = true ]; then
+            . packages/scripts/gh-release-retry.sh
+            ghr_upload_verified "$RELEASE_VERSION" "$HELPER_TARBALL"
+            dispatched=$(gh workflow run unified-release.yml -R "$GITHUB_REPOSITORY" --ref main -f selection=npm-publish \
+              -f channel="$CHANNEL" -f release_version="$RELEASE_VERSION" -f dispatched_by="$DISPATCHED_BY")
+            run_url=$(grep -Eo 'https://github\.com/[^ ]+/actions/runs/[0-9]+' <<< "$dispatched" | tail -n 1 || true)
+            [ -n "$run_url" ] || { echo "npm publish dispatch returned no run URL: $dispatched" >&2; exit 1; }
+            echo "npm publish on GitHub: $run_url"
+            deadline=$((SECONDS + 12 * 60))
+            while :; do
+              conclusion=$(gh run view "${run_url##*/}" -R "$GITHUB_REPOSITORY" --json status,conclusion \
+                --jq 'select(.status == "completed") | .conclusion' || true)
+              [ -z "$conclusion" ] || break
+              [ "$SECONDS" -lt "$deadline" ] || { echo "npm publish did not finish within 12 minutes: $run_url" >&2; exit 1; }
+              sleep 10
+            done
+            [ "$conclusion" = success ] || { echo "npm publish failed ($conclusion): $run_url" >&2; exit 1; }
+            exit 0
+          fi
           npm install --global npm@^11.15.0
           publish_args=(--no-provenance)
           if [ "$CHANNEL" = next ]; then publish_args+=(--tag next); fi
           npm view "usebeeline@${RELEASE_VERSION#v}" version >/dev/null 2>&1 || npm publish "${publish_args[@]}" "$HELPER_TARBALL"
+  npm_publish:
+    # Publish-only path (selection=npm-publish) that a local release's helper
+    # leg dispatches: npm's trusted publisher for usebeeline is this workflow.
+    if: inputs.selection == 'npm-publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # reads the draft release's asset
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish the local release's exact helper CLI package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          tarball="$RUNNER_TEMP/usebeeline-${RELEASE_VERSION#v}.tgz"
+          gh release download "$RELEASE_VERSION" -R "$GITHUB_REPOSITORY" --pattern "${tarball##*/}" --dir "$RUNNER_TEMP"
+          sha256sum "$tarball"
+          npm install --global npm@^11.15.0
+          publish_args=(--no-provenance)
+          if [ "$CHANNEL" = next ]; then publish_args+=(--tag next); fi
+          npm view "usebeeline@${RELEASE_VERSION#v}" version >/dev/null 2>&1 || npm publish "${publish_args[@]}" "$tarball"
   release_proof:
     needs: [initialize, release_validation]
     if: needs.release_validation.result == 'success' && needs.initialize.outputs.run_mobile_ota == 'true' && inputs.run_release_proof == true
