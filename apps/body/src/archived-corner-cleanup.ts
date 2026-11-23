@@ -11,7 +11,6 @@ import {
 } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 import { DEPENDENCY_LAYERS_DIR, openDependencyLayer } from './dependency-generation.js';
-const exec = runOwnedFile;
 
 // pidfds fence PID reuse. No environment values, arbitrary shell commands or
 // process-group signals. Attribution requires an open file, cwd or an absolute argument
@@ -107,7 +106,7 @@ print(json.dumps(result))
 async function stopDarwinProcesses(roots: string[]): Promise<number> {
   roots = roots.map(canonicalStoragePath);
   const snapshot = async () => {
-    const { stdout } = await exec('/bin/ps', ['-axo', 'pid=,ppid=,uid=,lstart=,command=']);
+    const { stdout } = await runOwnedFile('/bin/ps', ['-axo', 'pid=,ppid=,uid=,lstart=,command=']);
     return stdout.split('\n').flatMap((line) => {
       const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+((?:\S+\s+){4}\S+)\s+(.+)$/);
       return match
@@ -125,7 +124,7 @@ async function stopDarwinProcesses(roots: string[]): Promise<number> {
   };
   const files = async (pid: number): Promise<string[]> => {
     try {
-      const { stdout } = await exec('/usr/sbin/lsof', ['-a', '-p', String(pid), '-Fn']);
+      const { stdout } = await runOwnedFile('/usr/sbin/lsof', ['-a', '-p', String(pid), '-Fn']);
       return stdout
         .split('\n')
         .filter((line) => line.startsWith('n/'))
@@ -139,7 +138,11 @@ async function stopDarwinProcesses(roots: string[]): Promise<number> {
   const attributed = async (pid: number): Promise<boolean> => {
     if ((await files(pid)).some(inside)) return true;
     try {
-      const { stdout } = await exec('/usr/bin/python3', ['-c', DARWIN_ARGV, JSON.stringify([pid])]);
+      const { stdout } = await runOwnedFile('/usr/bin/python3', [
+        '-c',
+        DARWIN_ARGV,
+        JSON.stringify([pid]),
+      ]);
       const args = (JSON.parse(stdout) as Record<string, string[]>)[pid] ?? [];
       return args.some((arg) => arg.startsWith('/') && inside(canonicalStoragePath(arg)));
     } catch {
@@ -179,7 +182,7 @@ async function stopDarwinProcesses(roots: string[]): Promise<number> {
   if (!candidates.length) return 0;
   const fileOwners = new Set<number>();
   {
-    const { stdout } = await exec(
+    const { stdout } = await runOwnedFile(
       '/usr/sbin/lsof',
       ['-nP', '-a', '-u', String(process.getuid!()), '-Fpn'],
       { maxBuffer: 32 * 1024 * 1024 },
@@ -195,7 +198,7 @@ async function stopDarwinProcesses(roots: string[]): Promise<number> {
         fileOwners.add(pid);
     }
   }
-  const { stdout: argvOutput } = await exec(
+  const { stdout: argvOutput } = await runOwnedFile(
     '/usr/bin/python3',
     ['-c', DARWIN_ARGV, JSON.stringify(candidates.map((row) => row.pid))],
     { maxBuffer: 32 * 1024 * 1024 },
@@ -264,7 +267,7 @@ export async function removeArchivedCornerData(
             `[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`,
           );
         } else {
-          const result = await exec(
+          const result = await runOwnedFile(
             '/usr/bin/python3',
             ['-c', STOP, JSON.stringify(existing), String(process.pid)],
             { maxBuffer: 1024 },

@@ -2,8 +2,6 @@ import { runOwnedFile } from './wait.js';
 import { access, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const execFileAsync = runOwnedFile;
-
 /**
  * Two agents, one branch. The branch on GitHub, not any one helper's
  * checkout, is the shared artifact, so before a thread turn the remote branch
@@ -23,7 +21,7 @@ export async function syncCornerBranch(input: {
 }): Promise<'unchanged' | 'fast-forwarded' | 'rebased'> {
   const git = async (args: readonly string[]) =>
     (
-      await execFileAsync('git', ['-C', input.worktreePath, ...args], {
+      await runOwnedFile('git', ['-C', input.worktreePath, ...args], {
         ...(input.env ? { env: input.env } : {}),
         maxBuffer: 4 * 1024 * 1024,
       })

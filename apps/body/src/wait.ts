@@ -10,7 +10,7 @@
  * transport's own read failure. `helper.waits` in
  * docs/architecture/invariants.json ratchets remaining sites outside these owners.
  */
-import { spawn, type ChildProcess, type ExecFileOptions } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { watch } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
@@ -433,16 +433,17 @@ export async function tryLock(
   });
 }
 
+/** A short machine-read child: resolves with its output on exit 0, otherwise throws with it. */
 export async function runOwnedFile(
   file: string,
   args: readonly string[],
-  options: ExecFileOptions & { input?: string } = {},
+  options: Pick<OwnedCommand, 'cwd' | 'env' | 'input' | 'signal' | 'maxBuffer'> = {},
 ): Promise<OwnedResult> {
   const result = await runOwned({
     step: [file, ...args].join(' '),
     file,
     args,
-    cwd: options.cwd === undefined ? undefined : String(options.cwd),
+    cwd: options.cwd,
     env: options.env,
     input: options.input,
     signal: options.signal,
@@ -699,7 +700,6 @@ export interface DetachedCommand {
   file: string;
   args: readonly string[];
   env?: NodeJS.ProcessEnv;
-  cwd?: string;
   /** stdin, stdout, stderr: `ignore` or an open file descriptor. Default all `ignore`. */
   stdio?: readonly ['ignore' | number, 'ignore' | number, 'ignore' | number];
   /** Keep an IPC channel for a startup handshake; `release()` drops it. */
@@ -719,12 +719,11 @@ export interface Detached {
  * session bridge, a background finisher). It runs in its own session with no
  * owner hooks. Without `ipc` it is released at once.
  */
-export function launchDetached(command: DetachedCommand, childProcess = { spawn }): Detached {
+export function launchDetached(command: DetachedCommand): Detached {
   const stdio = command.stdio ?? ['ignore', 'ignore', 'ignore'];
-  const child = childProcess.spawn(command.file, [...command.args], {
+  const child = spawn(command.file, [...command.args], {
     detached: true,
     env: command.env ?? process.env,
-    ...(command.cwd ? { cwd: command.cwd } : {}),
     stdio: command.ipc ? [...stdio, 'ipc'] : [...stdio],
   });
   const exited = answer<DetachedEnd>(command.file, [], (settle) => {

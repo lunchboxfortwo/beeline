@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { runOwned } from './wait.js';
+import { runWorker } from './owner-link.js';
 import { withKernelLock } from './kernel-lock.js';
 import {
   beelineInstallLayout,
@@ -250,20 +250,14 @@ export async function prepareReleaseInWorker(
 ): Promise<{ releaseId: string; identity: { version?: string; commit?: string } }> {
   const layout = beelineInstallLayout(env)!;
   const bootstrap = entrypoint ?? resolve(layout.libDir, '../beeline-bootstrap.mjs');
-  const step = 'preparing verified release';
-  const child = await runOwned({
-    step,
-    file: process.execPath,
-    args: [bootstrap, 'managed-update-worker'],
-    env: { ...env, BEELINE_INTERNAL_UPDATE_WORKER: '1', BEELINE_UPDATE_GROUP_OWNER: '1' },
-    ownerLink: true,
-    ...(signal ? { signal } : {}),
-  });
-  if (child.code !== 0)
-    throw new Error(
-      `${step}: worker exited ${child.code ?? child.signal}${child.stderr ? `: ${child.stderr.trim().split('\n').at(-1)}` : ''}`,
-    );
-  const result = JSON.parse(child.stdout);
+  const stdout = await runWorker(
+    'preparing verified release',
+    bootstrap,
+    'managed-update-worker',
+    { ...env, BEELINE_INTERNAL_UPDATE_WORKER: '1', BEELINE_UPDATE_GROUP_OWNER: '1' },
+    signal,
+  );
+  const result = JSON.parse(stdout);
   if (!result.releaseId) throw new Error('release preparation: no verified release');
   return result;
 }

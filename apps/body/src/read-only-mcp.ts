@@ -451,16 +451,10 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
         body,
       },
     );
-    if (!response.ok) {
-      let code = 'request_failed';
-      try {
-        const parsed = (await response.json()) as { error?: unknown };
-        if (typeof parsed.error === 'string') code = parsed.error;
-      } catch {
-        // Never reflect a server body into the model-facing tool error.
-      }
-      throw new Error(`daemon operation ${name} failed (${response.status}: ${code})`);
-    }
+    if (!response.ok)
+      throw new Error(
+        `daemon operation ${name} failed (${response.status}: ${await serverErrorCode(response)})`,
+      );
     return (await response.json()) as JsonObject;
   } catch (error) {
     if (!isDaemonNetworkFailure(error)) throw error;
@@ -612,6 +606,28 @@ function sessionSquireCall(tool: string, args: Record<string, unknown>): Promise
   });
 }
 
+/** One Squire tool call through the turn's relay, carrying the active command context. */
+async function squireRelayCall(
+  relayUrl: string,
+  relayToken: string,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<Response> {
+  const context = await activeCommandContext();
+  return ask(
+    { url: new URL('/mcp', relayUrl), machineRead: true },
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...context,
+        method: 'tools/call',
+        params: { name: tool, arguments: args },
+      }),
+    },
+  );
+}
+
 export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
   const relayUrl = process.env.BEELINE_SQUIRE_RELAY_URL;
   const relayToken = process.env.BEELINE_SQUIRE_RELAY_TOKEN;
@@ -625,23 +641,7 @@ export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
           if (!relayUrl || !relayToken)
             result = (await sessionSquireCall(tool, args)) as typeof result;
           else {
-            const context = await activeCommandContext();
-            const response = await ask(
-              { url: new URL('/mcp', relayUrl), machineRead: true },
-              {
-                method: 'POST',
-                headers: {
-                  authorization: `Bearer ${relayToken}`,
-                  'content-type': 'application/json',
-                },
-                body: JSON.stringify({
-                  ...context,
-                  method: 'tools/call',
-                  params: { name: tool, arguments: args },
-                }),
-                signal: undefined,
-              },
-            );
+            const response = await squireRelayCall(relayUrl, relayToken, tool, args);
             const body = (await response.json().catch((error) => {
               if (!response.ok) throw new Error(`Squire relay HTTP ${response.status}`);
               throw error;
@@ -699,19 +699,9 @@ export async function squireShareEndpoint(
       body = { result: await sessionSquireCall('operate_share', { session_id: sessionId }) };
       response = { ok: true, status: 200 };
     } else {
-      const upstream = await ask(
-        { url: new URL('/mcp', relayUrl), machineRead: true },
-        {
-          method: 'POST',
-          headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            ...(await activeCommandContext()),
-            method: 'tools/call',
-            params: { name: 'operate_share', arguments: { session_id: sessionId } },
-          }),
-          signal: undefined,
-        },
-      );
+      const upstream = await squireRelayCall(relayUrl, relayToken, 'operate_share', {
+        session_id: sessionId,
+      });
       // Only an unparseable body is tolerated; a failed read of it is not.
       response = upstream;
       body = await upstream.json().catch((error: unknown) => {
@@ -763,6 +753,12 @@ export function grantRunDepsFromEnv(): GrantRunDeps {
 
 /** The small-object pass-through: the server validates and streams the
  *  bytes to storage in one step and answers with the stored artifact url. */
+/** The refusal's error code only: never reflect a server body into the model-facing tool error. */
+async function serverErrorCode(response: Response): Promise<string> {
+  const body = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
+  return typeof body?.error === 'string' ? body.error : 'request_failed';
+}
+
 export async function daemonUploadArtifact(
   bytes: Buffer,
   mime: string,
@@ -784,16 +780,10 @@ export async function daemonUploadArtifact(
       body: bytes,
     },
   );
-  if (!response.ok) {
-    let code = 'request_failed';
-    try {
-      const body = (await response.json()) as { error?: unknown };
-      if (typeof body.error === 'string') code = body.error;
-    } catch {
-      // Never reflect a server body into the model-facing tool error.
-    }
-    throw new Error(`artifact upload failed (${response.status}: ${code})`);
-  }
+  if (!response.ok)
+    throw new Error(
+      `artifact upload failed (${response.status}: ${await serverErrorCode(response)})`,
+    );
   const body = (await response.json()) as JsonObject;
   return {
     url: typeof body.url === 'string' ? body.url : '',
@@ -856,14 +846,7 @@ export async function callCommandTool(
     );
     if (!replaced) throw result.reason;
   }
-  return executeAgentTool(
-    name,
-    args,
-    toolCallId,
-    uploads
-      .filter((_, index) => results[index]?.status === 'fulfilled')
-      .map((upload) => upload.name),
-  );
+  return executeAgentTool(name, args, toolCallId);
 }
 
 /** Keep concurrent calls isolated; footer metadata rides on their existing operation responses. */

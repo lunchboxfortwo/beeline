@@ -173,16 +173,9 @@ export async function removeStoragePath(
   // so after an EACCES its other children can still be disappearing. A second
   // inventory then races those removals (observed on macOS as ENOENT).
   const prefix = `${root}/`;
-  let low = 0,
-    high = directories.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if (directories[middle]! < prefix) low = middle + 1;
-    else high = middle;
-  }
   const ownedDirectories = original.get(root)?.directory ? [root] : [];
   for (
-    let cursor = low;
+    let cursor = firstAtOrAfter(directories, prefix);
     cursor < directories.length && directories[cursor]!.startsWith(prefix);
     cursor++
   )
@@ -197,4 +190,16 @@ export async function removeStoragePath(
       await chmod(path, info.mode | 0o700);
   }
   await rm(root, { recursive: true, force: true, maxRetries: 3 });
+}
+
+/** The first index of sorted `paths` at or after `prefix`; every path under it follows there. */
+export function firstAtOrAfter(paths: readonly string[], prefix: string): number {
+  let low = 0,
+    high = paths.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (paths[middle]! < prefix) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }

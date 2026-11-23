@@ -9,21 +9,23 @@ export class KernelLockBusyError extends Error {
   }
 }
 
+async function holding<T>(lock: { release: () => Promise<void> }, work: () => Promise<T>) {
+  try {
+    return await work();
+  } finally {
+    await lock.release();
+  }
+}
+
 /** Cache reuse is optional: never queue a serving agent behind its owner. */
 export async function tryWithKernelLock<T>(
   key: string,
   work: () => Promise<T>,
 ): Promise<T | undefined> {
   const lock = await tryLock(key);
-  if (!lock.held) {
-    lock.close();
-    return undefined;
-  }
-  try {
-    return await work();
-  } finally {
-    await lock.release();
-  }
+  if (lock.held) return holding(lock, work);
+  lock.close();
+  return undefined;
 }
 
 /** A kernel-owned local socket is released on process death; a busy lock fails at once with its holder. */
@@ -33,19 +35,13 @@ export async function withKernelLock<T>(
   about: { step?: string; log?: string; generation?: string } = {},
 ): Promise<T> {
   const lock = await tryLock(key, about);
-  if (!lock.held) {
-    lock.close();
-    throw new KernelLockBusyError(lock.holder);
-  }
-  try {
-    return await work();
-  } finally {
-    await lock.release();
-  }
+  if (lock.held) return holding(lock, work);
+  lock.close();
+  throw new KernelLockBusyError(lock.holder);
 }
 
 /** The holder's socket was refused or reset before its record: it is gone, not busy. */
-function holderVanished(error: unknown): boolean {
+export function holderVanished(error: unknown): boolean {
   return ['ECONNRESET', 'ECONNREFUSED', 'ENOENT', 'EPIPE'].includes(
     (error as NodeJS.ErrnoException)?.code ?? '',
   );
@@ -71,13 +67,7 @@ export async function withKernelLockWhenFree<T>(
       throw error;
     });
     if (!lock) continue;
-    if (lock.held) {
-      try {
-        return await work();
-      } finally {
-        await lock.release();
-      }
-    }
+    if (lock.held) return holding(lock, work);
     // A different key on the same address (a Darwin port collision) is never followed.
     if (lock.holder.key !== key) {
       lock.close();

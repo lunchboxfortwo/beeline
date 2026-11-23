@@ -132,7 +132,7 @@ describe('JOIN-DELIVERY local hosts', () => {
     await flush(dir, sources);
     expect(setup).toHaveBeenCalledWith(expect.anything(), 'fixture-token', 'setup_delivery', {
       mechanism: 'local', host: 'codex', surface: 'local_session', conversation: session.sessionId, installed: true,
-    });
+    }, 'set up delivery');
     expect(readState(dir).sessions[0]).toMatchObject({ deliveryGeneration: 'bound-generation', deliveryMechanism: 'local' });
     await flush(dir, sources);
     expect(setup).toHaveBeenCalledOnce();

@@ -17,7 +17,7 @@ import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
 import { notifyBridgeSessions } from './bridge.js';
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
-import { answer, launchDetached, runOwned, tryLock } from '../wait.js';
+import { answer, launchDetached, runOwnedFile, tryLock } from '../wait.js';
 
 export function bridgeRunning(dir: string): boolean {
   try {
@@ -53,14 +53,9 @@ async function isBridgeProcess(pid: number): Promise<boolean> {
         args[3] === 'bridge'
       );
     }
-    const listed = await runOwned({
-      step: 'ps',
-      file: 'ps',
-      args: ['-ww', '-p', String(pid), '-o', 'args='],
-      onLine: () => undefined,
-    });
-    if (listed.code !== 0) return false;
-    const args = listed.stdout.trim();
+    const args = (
+      await runOwnedFile('ps', ['-ww', '-p', String(pid), '-o', 'args='])
+    ).stdout.trim();
     return /(?:^|\/)node\s+.*\/(?:beeline|usebeeline\.mjs|recovery-cli\.mjs) session bridge$/.test(
       args,
     );

@@ -157,15 +157,7 @@ export type StreamedShellRunner = (
 /** Safety bound for the connect process, and the life of the ceremony it prints. */
 export const CONNECT_TIMEOUT_MS = 300_000;
 
-/** How long a connect that reported `connected` may keep running before it is ended. */
-
-/**
- * Default streamed runner: spawns the process, reads its NEWLINE-DELIMITED
- * `--json` reports line by line, and resolves with the last one read as soon
- * as it is publishable — a sign-in that names its placement, or a terminal
- * report — or when the process exits. Keeps the process alive until the
- * safety timeout or an explicit `abort()`.
- */
+/** End the connect process and, when it leads one, its process group. */
 export function killConnectTree(child: { pid?: number; kill: () => boolean }): void {
   const pid = child.pid;
   if (pid !== undefined) {
@@ -178,6 +170,13 @@ export function killConnectTree(child: { pid?: number; kill: () => boolean }): v
   child.kill();
 }
 
+/**
+ * Default streamed runner: spawns the process, reads its NEWLINE-DELIMITED
+ * `--json` reports line by line, and resolves with the last one read as soon
+ * as it is publishable — a sign-in that names its placement, or a terminal
+ * report — or when the process exits. Keeps the process alive until it exits
+ * or an explicit `abort()`.
+ */
 export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, owner = '') =>
   answer<StreamedCommandResult>('Trusty Squire connect', [], ({ resolve }) => {
     let stdout = '';
@@ -249,10 +248,6 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
       }
     };
 
-    const settle = (result: StreamedCommandResult) => {
-      finish(result);
-    };
-
     // Only COMPLETE lines that have been read so far: a chunk can end in the
     // middle of a report, and half a JSON line must never be parsed (or
     // remembered) as one.
@@ -293,7 +288,7 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
       () => {
         notifyExit();
         consumeReports(true);
-        settle({
+        finish({
           stdout,
           stderr,
           pid: child.pid ?? undefined,
@@ -303,7 +298,7 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
       },
       () => {
         notifyExit();
-        settle({ stdout, stderr, pid: child?.pid ?? undefined, report, abort: () => {} });
+        finish({ stdout, stderr, pid: child?.pid ?? undefined, report, abort: () => {} });
       },
     );
   });

@@ -18,10 +18,10 @@ import { PlaceSession } from './place-session.js';
 import { distillTurnFailureReason } from './turn-failure-reason.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
-import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
+import { prepareWorkspace } from './workspace-checkout.js';
+import { runOwnedFile as execFileAsync } from './wait.js';
 
-// Cache persistence is tested with real files by SessionResources. These
-// prompt tests intentionally finish while optional background work is pending.
+// Cache persistence is tested with real files by SessionResources; these prompt tests intentionally finish while optional background work is pending.
 vi.mock('./atomic-private-file.js', async original => {
   const actual = await original<typeof import('./atomic-private-file.js')>();
   return { ...actual, writePrivateFileAtomically: vi.fn(async (path: string, contents: string) => {

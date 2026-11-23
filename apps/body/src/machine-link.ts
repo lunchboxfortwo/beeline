@@ -172,7 +172,7 @@ export class AgentChannel {
     // Sent work gets "<cause>; outcome unknown"; waiters and unsent work get the cause.
     this.#retired = true;
     this.#end(cause);
-    this.socketClosed(false, cause);
+    this.socketClosed(cause);
   }
   send(frame: Record<string, unknown>): boolean {
     return this.isOpen() && this.machine.send({ ...frame, agentId: this.agentId });
@@ -224,13 +224,11 @@ export class AgentChannel {
     if (event.type === 'unregistered') {
       // A newer connection owns this agent; this socket never answers its work.
       const reason = typeof event.reason === 'string' ? event.reason : 'unregistered';
-      this.socketClosed(
-        false,
-        Object.assign(new Error(`Agent registration ended: ${reason}`), { code: 'unregistered' }),
-      );
-      this.#end(
-        Object.assign(new Error(`Agent registration ended: ${reason}`), { code: 'unregistered' }),
-      );
+      const cause = Object.assign(new Error(`Agent registration ended: ${reason}`), {
+        code: 'unregistered',
+      });
+      this.socketClosed(cause);
+      this.#end(cause);
       return;
     }
     if (event.type === 'daemon-operation-result' && typeof event.requestId === 'string') {
@@ -271,7 +269,6 @@ export class AgentChannel {
     }
   }
   socketClosed(
-    ended = false,
     cause = Object.assign(new Error('Agent connection closed'), { code: 'connection_closed' }),
   ): void {
     const registered = this.#registered;
@@ -286,13 +283,6 @@ export class AgentChannel {
       pending.reject(
         Object.assign(new Error(`${cause.message}; outcome unknown`), { code: cause.code }),
       );
-    }
-    if (ended) {
-      for (const waiter of this.#waiters) waiter.reject(new Error('Agent runtime ended'));
-      this.#waiters.clear();
-      for (const pending of this.#requests.values())
-        pending.reject(new Error('Agent runtime ended'));
-      this.#requests.clear();
     }
     if (registered) this.handlers.onClose();
   }

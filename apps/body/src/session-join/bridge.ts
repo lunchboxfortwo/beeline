@@ -28,6 +28,7 @@ import {
 import { externalAgentRules } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
+import { quote } from './setup.js';
 import { createHash } from 'node:crypto';
 import { codexQueue, turnRunning } from './codex.js';
 import { postToClaude } from './claude.js';
@@ -89,9 +90,7 @@ export interface Runner {
 }
 
 function command(runner: Runner, joined: JoinedSession, args: string): string {
-  const q = (v: string) =>
-    /^[A-Za-z0-9_./:@=-]+$/.test(v) ? v : `"${v.replace(/(["\\$`])/g, '\\$1')}"`;
-  return `${q(runner.node)} ${q(runner.bundle)} session ${args} --as ${q(joined.key)}`;
+  return `${quote(runner.node)} ${quote(runner.bundle)} session ${args} --as ${quote(joined.key)}`;
 }
 
 export function renderAttachments(attachments: readonly DaemonAttachment[] = []): string[] {
@@ -160,6 +159,30 @@ export async function recordDeliveryFailure(
   } catch {
     /* The durable inbox stays owed if the server is unreachable. */
   }
+}
+
+/** Binds the joined session's receiver for one host conversation on the server. */
+export async function setupDelivery(
+  joined: JoinedSession,
+  token: string,
+  mechanism: 'local' | 'on_demand',
+  conversation: string,
+): Promise<void> {
+  const { delivery } = (await callTool(
+    joined,
+    token,
+    'setup_delivery',
+    {
+      mechanism,
+      host: joined.agent,
+      surface: joined.agent === 'antigravity' ? 'app' : 'local_session',
+      conversation,
+      installed: true,
+    },
+    'set up delivery',
+  )) as { delivery: { generation?: string; mechanism?: JoinedSession['deliveryMechanism'] } };
+  joined.deliveryGeneration = delivery.generation;
+  joined.deliveryMechanism = delivery.mechanism ?? mechanism;
 }
 
 export interface DeliverDeps {
@@ -285,22 +308,8 @@ export async function flush(
       if (
         hasLocalDelivery(joined) &&
         (!joined.deliveryGeneration || session.sessionId !== joined.sessionId)
-      ) {
-        const binding = (await callTool(
-          joined,
-          await accessToken(dir, joined.key),
-          'setup_delivery',
-          {
-            mechanism: 'local',
-            host: joined.agent,
-            surface: joined.agent === 'antigravity' ? 'app' : 'local_session',
-            conversation: session.sessionId,
-            installed: true,
-          },
-        )) as { delivery: { generation: string } };
-        joined.deliveryGeneration = binding.delivery.generation;
-        joined.deliveryMechanism = 'local';
-      }
+      )
+        await setupDelivery(joined, await accessToken(dir, joined.key), 'local', session.sessionId);
       await updateState(dir, (s) => {
         const current = s.sessions.find((x) => x.key === joined.key);
         if (current) {

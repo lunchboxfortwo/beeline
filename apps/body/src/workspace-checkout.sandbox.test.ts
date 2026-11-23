@@ -13,7 +13,8 @@ import { harnessStateDirsFromEnv, prepareRoomAgentCredentials } from './agent-ho
 import { wrapAgentCommand } from './bwrap-sandbox.js';
 import { PlaceSession } from './place-session.js';
 import { runtimeDirectory, type AgentRuntimeRecord } from './runtime.js';
-import { cornerCheckoutFolders, materializeCornerWorktree } from './workspace-checkout.js';
+import { materializeCornerWorktree } from './workspace-checkout.js';
+import { agentCornerCheckoutPaths as cornerCheckoutFolders } from './agent-corner-checkout.js';
 
 const git = promisify(execFile);
 const roots: string[] = [];

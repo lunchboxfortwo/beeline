@@ -386,7 +386,6 @@ export async function executeAgentTool(
   name: string,
   args: JsonObject,
   toolCallId: string,
-  _attachmentNames: string[] = [],
 ): Promise<string> {
   if (name === 'post') return executeConversationOperation(name, args);
   return executeResourceTool(name, args, toolCallId);

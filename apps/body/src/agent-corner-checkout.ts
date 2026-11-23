@@ -1,9 +1,8 @@
 import { runOwnedFile } from './wait.js';
 import { createHash } from 'node:crypto';
-import { constants, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import {
   copyFile,
-  cp,
   link,
   lstat,
   mkdir,
@@ -15,11 +14,10 @@ import {
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 
-const execFileAsync = runOwnedFile;
-const git = (args: string[], env?: NodeJS.ProcessEnv) => execFileAsync('git', args, { env });
+const git = (args: string[], env?: NodeJS.ProcessEnv) => runOwnedFile('git', args, { env });
 
 /** Private refs let agents check out the same public branch independently. */
 export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId: string) {
@@ -31,20 +29,6 @@ export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId
     path: resolve(root, 'beeline', 'corners', key),
     gitCommonDir: resolve(root, 'beeline', 'repositories', `agent-corner-${key}.git`),
   };
-}
-
-/** Preserve legacy work privately; dependency sharing begins at sealed activation. */
-async function copyLegacy(source: string, target: string): Promise<void> {
-  for (const entry of await readdir(source)) {
-    if (entry === '.git') continue;
-    const from = resolve(source, entry),
-      to = resolve(target, entry);
-    const stat = await lstat(from);
-    if (stat.isDirectory()) {
-      await mkdir(to, { recursive: true });
-      await copyLegacy(from, to);
-    } else await cp(from, to, { verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE });
-  }
 }
 
 /**
@@ -113,28 +97,11 @@ export async function materializeAgentCornerCheckout(input: {
   startRef: string;
   targetBranch?: string;
   env?: NodeJS.ProcessEnv;
-  /** Only the server's current implementer receives the old shared work. */
-  legacyPath?: string;
 }): Promise<{ path: string; gitCommonDir: string }> {
   const paths = agentCornerCheckoutPaths(input.root, input.cornerId, input.agentId);
   await mkdir(dirname(paths.gitCommonDir), { recursive: true });
   if ((await lstat(paths.path).catch(() => undefined))?.isSymbolicLink())
     throw new Error('refusing symlinked agent checkout');
-  let legacy =
-    input.legacyPath && existsSync(resolve(input.legacyPath, '.git'))
-      ? input.legacyPath
-      : undefined;
-  const transferRecord = legacy
-    ? resolve(
-        (await git(['-C', legacy, 'rev-parse', '--absolute-git-dir'])).stdout.trim(),
-        'beeline-agent-checkout',
-      )
-    : undefined;
-  const transferred = transferRecord
-    ? await readFile(transferRecord, 'utf8').catch(() => undefined)
-    : undefined;
-  if (transferred && transferred !== paths.path) legacy = undefined;
-  const pending = resolve(paths.gitCommonDir, 'beeline-legacy-pending');
   const creating = !existsSync(resolve(paths.gitCommonDir, 'HEAD'));
   const label = `repositories/${basename(paths.gitCommonDir)}`;
   if (creating) {
@@ -153,10 +120,6 @@ export async function materializeAgentCornerCheckout(input: {
           ['clone', '--mirror', ...CRASH_SAFE_CLONE_ARGS, input.remote, staging],
           input.env,
         );
-        if (legacy) {
-          const localHead = (await git(['-C', legacy, 'rev-parse', 'HEAD'])).stdout.trim();
-          await git([`--git-dir=${staging}`, 'fetch', input.sourceGitDir, localHead]);
-        }
       }
       await git([`--git-dir=${staging}`, 'config', '--unset', 'remote.origin.mirror']);
       await git([`--git-dir=${staging}`, 'remote', 'set-url', 'origin', input.remote]);
@@ -192,11 +155,7 @@ export async function materializeAgentCornerCheckout(input: {
         startRef = `refs/remotes/origin/${published ? input.branch : input.targetBranch}`;
       }
       const head = (
-        await git(
-          legacy
-            ? ['-C', legacy, 'rev-parse', '--verify', 'HEAD']
-            : [`--git-dir=${staging}`, 'rev-parse', '--verify', startRef],
-        )
+        await git([`--git-dir=${staging}`, 'rev-parse', '--verify', startRef])
       ).stdout.trim();
       await git([`--git-dir=${staging}`, 'update-ref', `refs/heads/${input.branch}`, head]);
       await git([`--git-dir=${staging}`, 'symbolic-ref', 'HEAD', `refs/heads/${input.branch}`]);
@@ -209,12 +168,11 @@ export async function materializeAgentCornerCheckout(input: {
         .trim()
         .split('\n')
         .filter((ref) => ref && ref !== `refs/heads/${input.branch}`);
-      if (!legacy) inherited.push('refs/stash');
-      await execFileAsync('git', [`--git-dir=${staging}`, 'update-ref', '--stdin'], {
+      inherited.push('refs/stash');
+      await runOwnedFile('git', [`--git-dir=${staging}`, 'update-ref', '--stdin'], {
         input: inherited.map((ref) => `delete ${ref}\n`).join(''),
       });
 
-      if (legacy) await writeFile(resolve(staging, 'beeline-legacy-pending'), legacy);
       // PlaceSession may already bind this directory into a live sandbox.
       // Replacing its inode loses that writable mount, exposing the new Git
       // storage through the read-only parent instead. Populate it in place;
@@ -304,27 +262,9 @@ export async function materializeAgentCornerCheckout(input: {
     if (!hasFiles) await git(['-C', paths.path, 'checkout-index', '--all']);
   }
   await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
-  const source = await readFile(pending, 'utf8').catch(() => undefined);
-  if (source) {
-    // A pending copy has never been handed to a harness. Rebuilding it also
-    // preserves staged deletions, which overlaying a fresh checkout would undo.
-    if (
-      source !== legacy ||
-      relative(resolve(input.root, 'beeline/corners'), source) !== input.cornerId
-    )
-      throw new Error('legacy thread import source changed');
-    for (const entry of await readdir(paths.path)) {
-      if (entry !== '.git') await rm(resolve(paths.path, entry), { recursive: true, force: true });
-    }
-    await copyLegacy(source, paths.path);
-    const index = async (path: string) =>
-      (
-        await git(['-C', path, 'rev-parse', '--path-format=absolute', '--git-path', 'index'])
-      ).stdout.trim();
-    await copyFile(await index(source), await index(paths.path));
-    await rename(pending, resolve(paths.gitCommonDir, 'beeline-legacy-imported'));
-    if (transferRecord) await writeFile(transferRecord, paths.path);
-  }
+  // An import an older helper left unfinished is never resumed from here.
+  if (await readFile(resolve(paths.gitCommonDir, 'beeline-legacy-pending'), 'utf8').catch(() => ''))
+    throw new Error('legacy thread import source changed');
   // Git must identify exactly this checkout, including when root is symlinked.
   const top = (await git(['-C', paths.path, 'rev-parse', '--show-toplevel'])).stdout.trim();
   if ((await realpath(top)) !== (await realpath(paths.path)))

@@ -73,13 +73,9 @@ import { SquireTaskRelay } from './squire-task-relay.js';
 import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
-import {
-  cornerCheckoutFolders,
-  execFileAsync,
-  githubGitEnv,
-  prepareWorkspace,
-  roomCheckoutPath,
-} from './workspace-checkout.js';
+import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
+import { runOwnedFile } from './wait.js';
+import { githubGitEnv, prepareWorkspace, roomCheckoutPath } from './workspace-checkout.js';
 import { syncCornerBranch } from './corner-branch-sync.js';
 import { writeTurnContext } from './turn-context.js';
 
@@ -338,7 +334,7 @@ export class PlaceSession {
   folder(): string {
     const { config, runtime, placeId, parentRoomId, agent } = this.options;
     if (parentRoomId)
-      return cornerCheckoutFolders(runtime.supervisorRoot, placeId, agent.publicKey).path;
+      return agentCornerCheckoutPaths(runtime.supervisorRoot, placeId, agent.publicKey).path;
     return config.workspaceRoot!;
   }
 
@@ -433,7 +429,7 @@ export class PlaceSession {
     const folder = this.folder();
     await mkdir(folder, { recursive: true, mode: 0o700 });
     const gitCommonDir = corner
-      ? cornerCheckoutFolders(runtime.supervisorRoot, placeId, agent.publicKey).gitCommonDir
+      ? agentCornerCheckoutPaths(runtime.supervisorRoot, placeId, agent.publicKey).gitCommonDir
       : undefined;
     if (gitCommonDir) await mkdir(gitCommonDir, { recursive: true, mode: 0o700 });
     const { configuration, roster, repository, restore } = this.resources.context;
@@ -777,9 +773,8 @@ export class PlaceSession {
     const { config, parentRoomId, placeId } = this.options;
     const homeRoot = this.privateHomeRoot ?? config.agentHomeRoot;
     if (parentRoomId && config.runtimeConfigPath && homeRoot) {
-      const { execFileAsync } = await import('./workspace-checkout.js');
       const which = (name: string) =>
-        execFileAsync('which', [name])
+        runOwnedFile('which', [name])
           .then((result) => String(result.stdout).trim())
           .catch(() => undefined);
       const gitBinary = await which('git');
@@ -926,7 +921,7 @@ export class PlaceSession {
       `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`;
     try {
       const remote = (
-        await execFileAsync('git', ['-C', folder, 'remote', 'get-url', 'origin'])
+        await runOwnedFile('git', ['-C', folder, 'remote', 'get-url', 'origin'])
       ).stdout
         .toString()
         .trim();
