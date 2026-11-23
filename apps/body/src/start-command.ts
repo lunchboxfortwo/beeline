@@ -57,7 +57,10 @@ async function startRuntime(
   // `start` undoes `stop`: the helper hosts this agent again on its next scan.
   await setAgentStopped(configPath, false);
   const status = await convergeMachine({ agentIds: [runtime.agent.publicKey] });
-  report(`[beeline] agent serving in machine helper (pid ${status.pid})`);
+  const agent = status.agents[runtime.agent.publicKey];
+  report(
+    `[beeline] agent ${agent?.state ?? 'requested'} in machine helper (pid ${status.pid})${agent?.status ? `: ${agent.status}` : ''}`,
+  );
   return { status: 'started', pid: status.pid };
 }
 

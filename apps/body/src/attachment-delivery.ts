@@ -18,8 +18,9 @@
  * that is not coming.
  */
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
-import { mkdir,writeFile } from 'node:fs/promises';
-import { basename,extname,join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
+import { ask } from './wait.js';
 
 /** Same ceiling as the artifact path (`read-only-mcp.ts`). */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -32,9 +33,6 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
  * "not found", which reads like a bug it should retry.
  */
 export const EXPIRED_REASON = 'expired: these attachment bytes are past their retention window';
-/** One download may not wedge a turn; a slow media read degrades to the URL line. */
-export const FETCH_TIMEOUT_MS = 30_000;
-
 /** A Content-Length or body past `MAX_ATTACHMENT_BYTES`. */
 export class BoundedSizeError extends Error {
   readonly bytes: number;
@@ -53,7 +51,8 @@ export interface BoundedFetchResult {
 }
 
 /**
- * The one daemon-side download: 30 s timeout, 25 MB ceiling. A 410 or other
+ * The one daemon-side download: 25 MB ceiling and no timer of its own (a silent
+ * server ends on the transport's own read failure). A 410 or other
  * non-OK status returns without reading the body so callers can name expiry
  * separately from a failed fetch. Size is refused from Content-Length before
  * the body is read. The stream is cancelled as soon as its byte count exceeds
@@ -63,9 +62,7 @@ export async function fetchBoundedBytes(
   url: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<BoundedFetchResult> {
-  const response = await fetchImpl(url, {
-    signal: undefined,
-  });
+  const response = await ask({ url, fetch: fetchImpl, machineRead: true });
   if (response.status === 410 || !response.ok) {
     await response.body?.cancel();
     return { status: response.status, ok: response.ok, bytes: Buffer.alloc(0), mimeType: '' };
@@ -170,7 +167,9 @@ export async function deliverAttachments(
       if (attachment.size && attachment.size > MAX_ATTACHMENT_BYTES)
         return tooLarge(attachment.size);
       if (attachment.expired) return { attachment, reason: EXPIRED_REASON };
-      const previous = cached.find((entry) => entry.path && entry.attachment.url === attachment.url);
+      const previous = cached.find(
+        (entry) => entry.path && entry.attachment.url === attachment.url,
+      );
       if (previous) return previous;
       try {
         await mkdir(dir, { recursive: true });

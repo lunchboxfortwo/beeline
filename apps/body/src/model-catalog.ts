@@ -61,13 +61,27 @@ async function withAgentModelCatalog<T>(
     raw: AgentModelConfigOption[];
     catalog: AgentModelConfigOption[];
   }) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
   const scratchCwd = await mkdtemp(resolve(tmpdir(), 'beeline-pair-model-check-'));
   const cliProxy = (await machineCliProxy())?.endpoint;
-  const probeEnv = cliProxy ? { ...agentEnv, ...await prepareRoomAgentCredentials({
-    root: scratchCwd, operatorHome: agentEnv.HOME, agentKind: agent.kind, agentEnv, cliProxy,
-  }) } : agentBehavior(agent.kind).probeProviderRootEnv && agentEnv.GOOSE_PROVIDER
-    ? { ...agentEnv, [agentBehavior(agent.kind).probeProviderRootEnv!]: resolve(scratchCwd, 'goose') } : agentEnv;
+  const probeEnv = cliProxy
+    ? {
+        ...agentEnv,
+        ...(await prepareRoomAgentCredentials({
+          root: scratchCwd,
+          operatorHome: agentEnv.HOME,
+          agentKind: agent.kind,
+          agentEnv,
+          cliProxy,
+        })),
+      }
+    : agentBehavior(agent.kind).probeProviderRootEnv && agentEnv.GOOSE_PROVIDER
+      ? {
+          ...agentEnv,
+          [agentBehavior(agent.kind).probeProviderRootEnv!]: resolve(scratchCwd, 'goose'),
+        }
+      : agentEnv;
   const client = new AcpClient({
     agentCommand: agent.command,
     agentArgs: agentArgsWithModelSelection(agent, selection),
@@ -80,29 +94,33 @@ async function withAgentModelCatalog<T>(
     // probe opts in.
     inheritProcessEnv: true,
   });
+  const abort = () => {
+    void stopAgentProcess(client).catch(() => undefined);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    await startAgentProcess(client);
+    signal?.throwIfAborted();
+    await startAgentProcess(client, signal);
+    signal?.throwIfAborted();
     const { sessionId, raw: sessionRaw } = await client.sessionNew({
       cwd: scratchCwd,
     });
-    let raw = parseAdvertisedConfigOptions(
-      sessionRaw,
-      selection?.model,
-      isGrokAgentCommand(agent),
-    );
+    let raw = parseAdvertisedConfigOptions(sessionRaw, selection?.model, isGrokAgentCommand(agent));
     // Session defaults need not match the requested model. Select it before
     // filtering: custom Pi providers can authenticate outside the env filter.
     // A successful live setter is authoritative for this selected candidate.
     if (selection?.model) {
-      raw = (await applyAgentModelSelectionWithUpdatedCatalog(
-        client, sessionId, raw, { model: selection.model },
-      )).options;
+      raw = (
+        await applyAgentModelSelectionWithUpdatedCatalog(client, sessionId, raw, {
+          model: selection.model,
+        })
+      ).options;
     }
     const catalog = filterAgentModelCatalog(agent, raw, probeEnv);
     if (selection?.model) {
-      const selected = raw.find((axis) => axis.category === 'model')?.options.find(
-        (choice) => choice.id === selection.model,
-      );
+      const selected = raw
+        .find((axis) => axis.category === 'model')
+        ?.options.find((choice) => choice.id === selection.model);
       const model = catalog.find((axis) => axis.category === 'model');
       if (selected && model && !model.options.some((choice) => choice.id === selected.id)) {
         model.options = [...model.options, selected];
@@ -111,6 +129,7 @@ async function withAgentModelCatalog<T>(
     const inspected = inspect({ client, sessionId, raw, catalog });
     return await inspected;
   } finally {
+    signal?.removeEventListener('abort', abort);
     await stopAgentProcess(client).catch(() => undefined);
     await rm(roomSessionTmpDir(scratchCwd), { force: true }).catch(() => undefined);
     await rm(scratchCwd, { recursive: true, force: true }).catch(() => undefined);
@@ -126,6 +145,7 @@ export async function fetchAgentModelCatalog(
   agent: ModelCatalogAgent,
   agentEnv: Record<string, string>,
   selection?: { model?: string; effort?: string },
+  signal?: AbortSignal,
 ): Promise<{ raw: AgentModelConfigOption[]; catalog: AgentModelConfigOption[] }> {
   return withAgentModelCatalog(
     agent,
@@ -140,6 +160,7 @@ export async function fetchAgentModelCatalog(
         selection?.model,
       ),
     }),
+    signal,
   );
 }
 
@@ -188,6 +209,7 @@ export async function validateAgentModelSelection(
   agent: ModelCatalogAgent,
   agentEnv: Record<string, string>,
   selection: { model?: string; effort?: string },
+  signal?: AbortSignal,
 ): Promise<{ raw: AgentModelConfigOption[]; catalog: AgentModelConfigOption[] }> {
   return withAgentModelCatalog(
     agent,
@@ -202,5 +224,6 @@ export async function validateAgentModelSelection(
       );
       return { raw, catalog: applied.options };
     },
+    signal,
   );
 }

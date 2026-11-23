@@ -1,3 +1,4 @@
+import { withCallerSignal } from './owner-link.js';
 import { convergeDependencies } from './recovery-dependencies.js';
 import { progress } from './update-progress.js';
 import { convergeMachine, prepareMachineRelease } from './recovery.js';
@@ -11,7 +12,6 @@ import { convergeMachine, prepareMachineRelease } from './recovery.js';
 import pc from 'picocolors';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import {
-  formatAdapterInstallCommand,
   installLatestAgentAdapter,
   latestAdapterInstallCommand,
   type AgentKind,
@@ -55,29 +55,35 @@ interface RuntimeAdapterRefreshOptions extends AdapterUpdateOptions {
 export async function refreshRuntimeHarnessAdapters(
   options: RuntimeAdapterRefreshOptions = {},
 ): Promise<void> {
-  const log = options.log ?? console.log;
-  const readRuntime = options.readRuntime ?? readRuntimeRecord;
-  const configPaths = options.configPaths ?? [
-    ...(await findRuntimeConfigPaths(process.cwd()).catch(() => [] as string[])),
-    ...(await findAgentRuntimeConfigPaths(process.env, process.cwd()).catch(() => [] as string[])),
-  ];
-  const kinds = new Set<AgentKind>();
-  for (const path of new Set(configPaths)) {
-    const runtime = await readRuntime(path).catch(() => undefined);
-    if (runtime?.agentKind) kinds.add(runtime.agentKind);
-  }
-  for (const kind of kinds) {
-    const command = latestAdapterInstallCommand(kind);
-    if (!command) continue;
-    log(`[beeline] refreshing ${kind} adapter: ${formatAdapterInstallCommand(command)}`);
-    try {
-      await installLatestAgentAdapter(kind, options);
-    } catch (error) {
-      log(
-        `[beeline] ${kind} adapter refresh failed; keeping the installed copy (${error instanceof Error ? error.message : String(error)})`,
-      );
+  return withCallerSignal(async (signal) => {
+    signal.throwIfAborted();
+    const log = options.log ?? console.log;
+    const readRuntime = options.readRuntime ?? readRuntimeRecord;
+    const configPaths = options.configPaths ?? [
+      ...(await findRuntimeConfigPaths(process.cwd()).catch(() => [] as string[])),
+      ...(await findAgentRuntimeConfigPaths(process.env, process.cwd()).catch(
+        () => [] as string[],
+      )),
+    ];
+    const kinds = new Set<AgentKind>();
+    for (const path of new Set(configPaths)) {
+      const runtime = await readRuntime(path).catch(() => undefined);
+      if (runtime?.agentKind) kinds.add(runtime.agentKind);
     }
-  }
+    for (const kind of kinds) {
+      if (!latestAdapterInstallCommand(kind)) continue;
+      // updateAgentAdapter logs its real decision: current, or the exact prefix install.
+      try {
+        await installLatestAgentAdapter(kind, { ...options, log, signal });
+        signal.throwIfAborted();
+      } catch (error) {
+        signal.throwIfAborted();
+        log(
+          `[beeline] ${kind} adapter refresh failed; keeping the installed copy (${error instanceof Error ? error.message : String(error)})`,
+        );
+      }
+    }
+  }, options.signal);
 }
 
 function updateUsage(): void {
@@ -132,78 +138,88 @@ async function printStatus(layout: BeelineInstallLayout): Promise<void> {
   }
 }
 
-export async function runUpdateCommand(args: string[]): Promise<void> {
-  if (args.includes('--help') || args.includes('-h')) {
-    updateUsage();
-    return;
-  }
-
-  const supported = new Set(['update', '--check', '--status', '--force', '--manifest-url']);
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index]!;
-    if (!supported.has(arg)) throw new Error(`unknown update argument: ${arg}`);
-    if (arg === '--manifest-url') {
-      if (!args[++index]) throw new Error('--manifest-url requires a URL');
+export async function runUpdateCommand(args: string[], signal?: AbortSignal): Promise<void> {
+  return withCallerSignal(async (signal) => {
+    signal.throwIfAborted();
+    if (args.includes('--help') || args.includes('-h')) {
+      updateUsage();
+      return;
     }
-  }
 
-  const layout = await requireLayout();
-  const manifestUrlFlag = args.indexOf('--manifest-url');
-  const manifestUrl =
-    manifestUrlFlag >= 0 && args[manifestUrlFlag + 1]
-      ? args[manifestUrlFlag + 1]!
-      : resolveManifestUrl(process.env);
-  const checkOnly = args.includes('--check');
-  const force = args.includes('--force');
+    const supported = new Set(['update', '--check', '--status', '--force', '--manifest-url']);
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index]!;
+      if (!supported.has(arg)) throw new Error(`unknown update argument: ${arg}`);
+      if (arg === '--manifest-url') {
+        if (!args[++index]) throw new Error('--manifest-url requires a URL');
+      }
+    }
 
-  if (args.includes('--status')) {
-    await printStatus(layout);
-    return;
-  }
+    const layout = await requireLayout();
+    const manifestUrlFlag = args.indexOf('--manifest-url');
+    const manifestUrl =
+      manifestUrlFlag >= 0 && args[manifestUrlFlag + 1]
+        ? args[manifestUrlFlag + 1]!
+        : resolveManifestUrl(process.env);
+    const checkOnly = args.includes('--check');
+    const force = args.includes('--force');
 
-  const installed = await readInstalledBundleIdentity(layout);
-  console.log(`[beeline] installed bundle: ${describeIdentity(installed)}`);
+    if (args.includes('--status')) {
+      await printStatus(layout);
+      return;
+    }
 
-  if (checkOnly) {
-    const raw = await fetchText(manifestUrl, fetch);
-    const { bundle } = parseUpdateManifest(raw, hostPlatformKey());
-    const verdict = compareBundleIdentity(installed, bundle);
-    if (verdict.kind === 'update-available') {
-      console.log(
-        `[beeline] update available: ${describeIdentity({ commit: bundle.commit, version: bundle.version })}`,
+    const installed = await readInstalledBundleIdentity(layout);
+    console.log(`[beeline] installed bundle: ${describeIdentity(installed)}`);
+
+    if (checkOnly) {
+      const raw = await fetchText(manifestUrl, fetch);
+      const { bundle } = parseUpdateManifest(raw, hostPlatformKey());
+      const verdict = compareBundleIdentity(installed, bundle);
+      if (verdict.kind === 'update-available') {
+        console.log(
+          `[beeline] update available: ${describeIdentity({ commit: bundle.commit, version: bundle.version })}`,
+        );
+        console.log(`[beeline] archive: ${archiveUrlFor(manifestUrl, bundle.file)}`);
+      } else
+        console.log(
+          `[beeline] ${verdict.kind === 'current' ? 'installed bundle is current.' : `cannot compare: ${verdict.reason}`}`,
+        );
+      return;
+    }
+    let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
+    try {
+      target = await prepareMachineRelease(layout, {
+        env: {
+          ...process.env,
+          BEELINE_LIB_DIR: layout.libDir,
+          BEELINE_UPDATE_MANIFEST_URL: manifestUrl,
+        },
+        force,
+        signal,
+      });
+    } catch (error) {
+      signal.throwIfAborted();
+      await convergeMachine({ layout, reportAgentsOnly: true });
+      throw new Error(
+        `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
       );
-      console.log(`[beeline] archive: ${archiveUrlFor(manifestUrl, bundle.file)}`);
-    } else
-      console.log(
-        `[beeline] ${verdict.kind === 'current' ? 'installed bundle is current.' : `cannot compare: ${verdict.reason}`}`,
-      );
-    return;
-  }
-  let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
-  try {
-    target = await prepareMachineRelease(layout, {
-    env: {
-      ...process.env,
-      BEELINE_LIB_DIR: layout.libDir,
-      BEELINE_UPDATE_MANIFEST_URL: manifestUrl,
-    },
-    force,
+    }
+    await convergeDependencies(layout, target.releaseId, undefined, signal);
+    signal.throwIfAborted();
+    const status = await convergeMachine({
+      layout,
+      env: { ...process.env, BEELINE_LIB_DIR: layout.libDir },
+      releaseId: target.releaseId,
+      reportAgentsOnly: true,
+      force,
     });
-  } catch (error) {
-    await convergeMachine({ layout, waitForAgents: false });
-    throw new Error(`helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`);
-  }
-  await convergeDependencies(layout, target.releaseId);
-  const status = await convergeMachine({
-    layout,
-    env: { ...process.env, BEELINE_LIB_DIR: layout.libDir },
-    releaseId: target.releaseId,
-    waitForAgents: false,
-    force,
-  });
-  for (const [id, agent] of Object.entries(status.agents))
-    progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
-  console.log(
-    `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid}; target release serving`,
-  );
+    for (const [id, agent] of Object.entries(status.agents))
+      progress(
+        `agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`,
+      );
+    console.log(
+      `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid} ${status.processState}`,
+    );
+  }, signal);
 }

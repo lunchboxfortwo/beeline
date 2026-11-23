@@ -17,7 +17,18 @@ const SKIP_FILE = /\.(test|spec|test-support)\.[^.]+$|\.d\.ts$/;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '__tests__', 'test-fixtures']);
 const RULE_KEYS = ['id', 'module', 'invariant', 'pattern', 'scope', 'owners', 'total', 'fix'];
 /** Fields whose change moves what a rule catches; any change to them is a relaxation. */
-const BOUNDARY_KEYS = ['pattern', 'flags', 'scope', 'owners', 'distinct', 'ownerFunctions', 'ownerSites', 'strict', 'filePattern', 'insertColumnValue'];
+const BOUNDARY_KEYS = [
+  'pattern',
+  'flags',
+  'scope',
+  'owners',
+  'distinct',
+  'ownerFunctions',
+  'ownerSites',
+  'strict',
+  'filePattern',
+  'insertColumnValue',
+];
 
 export function readInvariants(root) {
   return JSON.parse(readFileSync(path.join(root, INVARIANTS_PATH), 'utf8'));
@@ -25,9 +36,13 @@ export function readInvariants(root) {
 
 export function invariantsAtRef(root, ref) {
   try {
-    return JSON.parse(execFileSync('git', ['show', `${ref}:${INVARIANTS_PATH}`], {
-      cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
-    }));
+    return JSON.parse(
+      execFileSync('git', ['show', `${ref}:${INVARIANTS_PATH}`], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }),
+    );
   } catch {
     return undefined; // the file did not exist at base: this is the change that adds it
   }
@@ -52,68 +67,107 @@ function walk(root, relative, out) {
  * template interpolations as column separators. Unknown expressions fail closed.
  */
 function sqlItems(source) {
-  const items=[];let start=0,depth=0,index=0;
-  while(index<source.length) {
-    const char=source[index];
-    if(source.startsWith('${',index)) {
-      let braces=1;index+=2;
-      while(index<source.length&&braces) {if(source[index]==='{')braces++;if(source[index]==='}')braces--;index++;}
-      continue;
-    }
-    if(char==="'"||char==='"') {
-      const quote=char;index++;
-      while(index<source.length) {
-        if(source[index++]===quote) {if(source[index]===quote)index++;else break;}
+  const items = [];
+  let start = 0,
+    depth = 0,
+    index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (source.startsWith('${', index)) {
+      let braces = 1;
+      index += 2;
+      while (index < source.length && braces) {
+        if (source[index] === '{') braces++;
+        if (source[index] === '}') braces--;
+        index++;
       }
       continue;
     }
-    if(char==='(')depth++;
-    if(char===')') {if(!depth)break;depth--;}
-    if(!depth&&(char===';'||char==='`'||(!index||!/[\w]/.test(source[index-1]))&&/^(?:FROM|ON|RETURNING)\b/i.test(source.slice(index))))break;
-    if(!depth&&char===',') {items.push(source.slice(start,index).trim());start=index+1;}
+    if (char === "'" || char === '"') {
+      const quote = char;
+      index++;
+      while (index < source.length) {
+        if (source[index++] === quote) {
+          if (source[index] === quote) index++;
+          else break;
+        }
+      }
+      continue;
+    }
+    if (char === '(') depth++;
+    if (char === ')') {
+      if (!depth) break;
+      depth--;
+    }
+    if (
+      !depth &&
+      (char === ';' ||
+        char === '`' ||
+        ((!index || !/[\w]/.test(source[index - 1])) &&
+          /^(?:FROM|ON|RETURNING)\b/i.test(source.slice(index))))
+    )
+      break;
+    if (!depth && char === ',') {
+      items.push(source.slice(start, index).trim());
+      start = index + 1;
+    }
     index++;
   }
-  items.push(source.slice(start,index).trim());items.end=index;return items;
+  items.push(source.slice(start, index).trim());
+  items.end = index;
+  return items;
 }
 
 /** Find another top-level SELECT arm before this INSERT's enclosing query ends. */
 function unionSelectTail(source) {
-  let depth=0,index=0;
-  while(index<source.length) {
-    const char=source[index];
-    if(char==="'"||char==='"') {
-      const quote=char;index++;
-      while(index<source.length) {if(source[index++]===quote) {if(source[index]===quote)index++;else break;}}
+  let depth = 0,
+    index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "'" || char === '"') {
+      const quote = char;
+      index++;
+      while (index < source.length) {
+        if (source[index++] === quote) {
+          if (source[index] === quote) index++;
+          else break;
+        }
+      }
       continue;
     }
-    if(char==='(')depth++;
-    if(char===')') {if(!depth)return;depth--;}
-    if(!depth) {
-      if(char===';'||char==='`')return;
-      const next=/^UNION(?:\s+ALL)?\s+SELECT\s+/i.exec(source.slice(index));
-      if(next)return source.slice(index+next[0].length);
+    if (char === '(') depth++;
+    if (char === ')') {
+      if (!depth) return;
+      depth--;
+    }
+    if (!depth) {
+      if (char === ';' || char === '`') return;
+      const next = /^UNION(?:\s+ALL)?\s+SELECT\s+/i.exec(source.slice(index));
+      if (next) return source.slice(index + next[0].length);
     }
     index++;
   }
 }
 
 function hasLiteralInsertValue(source, match, contract) {
-  const columns=sqlItems(match[0].slice(match[0].indexOf('(')+1));
-  const ordinal=columns.findIndex(column=>column.replaceAll('"','').toLowerCase()===contract.column);
-  if (ordinal<0) return false;
-  let tail=source.slice(match.index+match[0].length);
+  const columns = sqlItems(match[0].slice(match[0].indexOf('(') + 1));
+  const ordinal = columns.findIndex(
+    (column) => column.replaceAll('"', '').toLowerCase() === contract.column,
+  );
+  if (ordinal < 0) return false;
+  let tail = source.slice(match.index + match[0].length);
   while (true) {
-    const values=sqlItems(tail);
-    if (values[ordinal]!==contract.value) return false;
-    tail=tail.slice(values.end);
+    const values = sqlItems(tail);
+    if (values[ordinal] !== contract.value) return false;
+    tail = tail.slice(values.end);
     if (/VALUES\s*\($/i.test(match[0])) {
-      const next=/^\)\s*,\s*\(/.exec(tail);
+      const next = /^\)\s*,\s*\(/.exec(tail);
       if (!next) return true;
-      tail=tail.slice(next[0].length);
+      tail = tail.slice(next[0].length);
     } else {
-      const next=unionSelectTail(tail);
-      if (next===undefined) return true;
-      tail=next;
+      const next = unionSelectTail(tail);
+      if (next === undefined) return true;
+      tail = next;
     }
   }
 }
@@ -130,17 +184,27 @@ function findSites(root, rule) {
     if (owners.has(file) && !rule.ownerFunctions) continue;
     const source = readFileSync(path.join(root, file), 'utf8');
     const pattern = new RegExp(rule.pattern, `g${rule.flags ?? ''}`);
-    const parsed = owners.has(file) && rule.ownerFunctions ? ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true) : undefined;
+    const parsed =
+      owners.has(file) && rule.ownerFunctions
+        ? ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+        : undefined;
     for (const match of source.matchAll(pattern)) {
-      if(rule.insertColumnValue&&hasLiteralInsertValue(source,match,rule.insertColumnValue))continue;
+      if (rule.insertColumnValue && hasLiteralInsertValue(source, match, rule.insertColumnValue))
+        continue;
       const site = `${file}:${source.slice(0, match.index).split('\n').length}`;
       if (owners.has(file) && rule.ownerFunctions) {
         let enclosing;
-        const visit = node => {
+        const visit = (node) => {
           if (node.pos > match.index || node.end <= match.index) return;
-          if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
-              (ts.isVariableDeclaration(node) && node.initializer &&
-                (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)))) && node.name)
+          if (
+            (ts.isFunctionDeclaration(node) ||
+              ts.isMethodDeclaration(node) ||
+              (ts.isVariableDeclaration(node) &&
+                node.initializer &&
+                (ts.isArrowFunction(node.initializer) ||
+                  ts.isFunctionExpression(node.initializer)))) &&
+            node.name
+          )
             enclosing = node.name.getText(parsed);
           else if (!enclosing && ts.isVariableDeclaration(node) && node.name)
             enclosing = node.name.getText(parsed);
@@ -172,7 +236,7 @@ export function validateRules(invariants) {
       if (rule[key] === undefined) errors.push(`${INVARIANTS_PATH}: rule ${name} needs "${key}"`);
     if (ids.has(rule.id)) errors.push(`${INVARIANTS_PATH}: rule ${name} is listed twice`);
     ids.add(rule.id);
-    if (rule.strict && rule.total !== 0) errors.push(`${INVARIANTS_PATH}: strict rule ${name} must have zero allowance`);
+    // A strict rule may start a one-way ratchet: strictRelaxations rejects any raise.
     if (!Number.isInteger(rule.total) || rule.total < 0)
       errors.push(`${INVARIANTS_PATH}: rule ${name} total must be a whole number`);
     try {
@@ -189,21 +253,28 @@ export function validateRules(invariants) {
 export function judgeTree(root, invariants) {
   const errors = [];
   for (const rule of invariants.rules) {
-    if (rule.kind === 'file-lines') { errors.push(...judgeFileLines(root, rule)); continue; }
+    if (rule.kind === 'file-lines') {
+      errors.push(...judgeFileLines(root, rule));
+      continue;
+    }
     const sites = findSites(root, rule);
     if (rule.ownerSites !== undefined) {
       const all = findSites(root, { ...rule, owners: [], ownerFunctions: undefined });
       if (all.length - sites.length !== rule.ownerSites)
-        errors.push(`[${rule.id}] expected exactly ${rule.ownerSites} owned sink(s), found ${all.length - sites.length}. ${rule.fix}`);
+        errors.push(
+          `[${rule.id}] expected exactly ${rule.ownerSites} owned sink(s), found ${all.length - sites.length}. ${rule.fix}`,
+        );
     }
     if (sites.length > rule.total)
-      errors.push([
-        `[${rule.id}] ${rule.invariant}`,
-        `  Found ${sites.length} site(s) outside ${rule.owners.join(', ') || 'any owner file'}; at most ${rule.total} are allowed:`,
-        ...sites.map((site) => `    ${site}`),
-        `  Fix: ${rule.fix}`,
-        '  Moving an existing site between files is fine. Update the declared invariant for an intentional change; the owner reviews rule changes weekly.',
-      ].join('\n'));
+      errors.push(
+        [
+          `[${rule.id}] ${rule.invariant}`,
+          `  Found ${sites.length} site(s) outside ${rule.owners.join(', ') || 'any owner file'}; at most ${rule.total} are allowed:`,
+          ...sites.map((site) => `    ${site}`),
+          `  Fix: ${rule.fix}`,
+          '  Moving an existing site between files is fine. Update the declared invariant for an intentional change; the owner reviews rule changes weekly.',
+        ].join('\n'),
+      );
   }
   return errors;
 }
@@ -221,7 +292,8 @@ export function relaxations(root, base, head) {
       if (findSites(root, { ...was, owners: [] }).length) found.push(`rule ${was.id} removed`);
       continue;
     }
-    if (rule.total > was.total) found.push(`rule ${was.id} total raised from ${was.total} to ${rule.total}`);
+    if (rule.total > was.total)
+      found.push(`rule ${was.id} total raised from ${was.total} to ${rule.total}`);
     for (const key of BOUNDARY_KEYS)
       if (JSON.stringify(rule[key] ?? null) !== JSON.stringify(was[key] ?? null))
         found.push(`rule ${was.id} ${key} changed`);
@@ -231,52 +303,86 @@ export function relaxations(root, base, head) {
 
 function tighterBoundary(key, before, after) {
   if (key === 'ownerSites') return Number.isInteger(after) && after < before;
-  if (key === 'owners') return after.every(owner => before.includes(owner));
+  if (key === 'owners') return after.every((owner) => before.includes(owner));
   if (key === 'ownerFunctions' && before && after)
-    return Object.entries(after).every(([file, names]) => names.every(name => before[file]?.includes(name)));
+    return Object.entries(after).every(([file, names]) =>
+      names.every((name) => before[file]?.includes(name)),
+    );
   return false;
 }
 
 /** Owner paths may follow a split only when every owned sink statement is unchanged. */
 function mechanicalOwnerMove(root, was, rule, ref) {
   if (!ref || was.ownerSites !== rule.ownerSites || !rule.ownerSites) return false;
-  for (const key of BOUNDARY_KEYS.filter(key => !['owners', 'ownerFunctions'].includes(key)))
+  for (const key of BOUNDARY_KEYS.filter((key) => !['owners', 'ownerFunctions'].includes(key)))
     if (JSON.stringify(was[key] ?? null) !== JSON.stringify(rule[key] ?? null)) return false;
   const printer = ts.createPrinter({ removeComments: true });
   const collect = (candidate, atRef) => {
-    const statements = [], sites = new Map();
+    const statements = [],
+      sites = new Map();
     for (const file of candidate.owners) {
       let source;
       try {
         source = atRef
-          ? execFileSync('git', ['show', `${ref}:${file}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+          ? execFileSync('git', ['show', `${ref}:${file}`], {
+              cwd: root,
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'ignore'],
+            })
           : readFileSync(path.join(root, file), 'utf8');
-      } catch { return undefined; }
+      } catch {
+        return undefined;
+      }
       const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-      for (const match of source.matchAll(new RegExp(candidate.pattern, `g${candidate.flags ?? ''}`))) {
+      for (const match of source.matchAll(
+        new RegExp(candidate.pattern, `g${candidate.flags ?? ''}`),
+      )) {
         let enclosing, statement;
-        const visit = node => {
+        const visit = (node) => {
           if (node.pos > match.index || node.end < match.index + match[0].length) return;
           if (ts.isStatement(node) && !ts.isBlock(node)) statement = node;
-          if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
-              (ts.isVariableDeclaration(node) && node.initializer &&
-                (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)))) && node.name)
+          if (
+            (ts.isFunctionDeclaration(node) ||
+              ts.isMethodDeclaration(node) ||
+              (ts.isVariableDeclaration(node) &&
+                node.initializer &&
+                (ts.isArrowFunction(node.initializer) ||
+                  ts.isFunctionExpression(node.initializer)))) &&
+            node.name
+          )
             enclosing = node.name.getText(parsed);
-          else if (!enclosing && ts.isVariableDeclaration(node) && node.name) enclosing = node.name.getText(parsed);
+          else if (!enclosing && ts.isVariableDeclaration(node) && node.name)
+            enclosing = node.name.getText(parsed);
           ts.forEachChild(node, visit);
         };
         visit(parsed);
-        if (candidate.ownerFunctions && !(candidate.ownerFunctions[file] ?? []).includes(enclosing)) continue;
+        if (candidate.ownerFunctions && !(candidate.ownerFunctions[file] ?? []).includes(enclosing))
+          continue;
         if (!statement) return undefined;
-        const moved = ts.transform(statement, [context => {
-          const visit = node => ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'ctx'
-            ? ts.factory.updatePropertyAccessExpression(node, ts.factory.createThis(), node.name)
-            : ts.visitEachChild(node, visit, context);
-          return visit;
-        }]);
+        const moved = ts.transform(statement, [
+          (context) => {
+            const visit = (node) =>
+              ts.isPropertyAccessExpression(node) &&
+              ts.isIdentifier(node.expression) &&
+              node.expression.text === 'ctx'
+                ? ts.factory.updatePropertyAccessExpression(
+                    node,
+                    ts.factory.createThis(),
+                    node.name,
+                  )
+                : ts.visitEachChild(node, visit, context);
+            return visit;
+          },
+        ]);
         const text = printer.printNode(ts.EmitHint.Unspecified, moved.transformed[0], parsed);
         moved.dispose();
-        const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, ts.LanguageVariant.Standard, text), tokens = [];
+        const scanner = ts.createScanner(
+            ts.ScriptTarget.Latest,
+            true,
+            ts.LanguageVariant.Standard,
+            text,
+          ),
+          tokens = [];
         while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken) tokens.push(scanner.getTokenText());
         statements.push(JSON.stringify(tokens));
         sites.set(file, (sites.get(file) ?? 0) + 1);
@@ -285,13 +391,20 @@ function mechanicalOwnerMove(root, was, rule, ref) {
     }
     return { statements: statements.sort(), sites };
   };
-  const before = collect(was, true), after = collect(rule, false);
-  if (!before || !after || before.statements.length !== was.ownerSites ||
-      JSON.stringify(before.statements) !== JSON.stringify(after.statements)) return false;
+  const before = collect(was, true),
+    after = collect(rule, false);
+  if (
+    !before ||
+    !after ||
+    before.statements.length !== was.ownerSites ||
+    JSON.stringify(before.statements) !== JSON.stringify(after.statements)
+  )
+    return false;
   for (const file of rule.owners) {
     if (!was.owners.includes(file) && !after.sites.has(file)) return false;
     for (const name of rule.ownerFunctions?.[file] ?? [])
-      if (!(was.ownerFunctions?.[file] ?? []).includes(name) && !after.sites.has(`${file}:${name}`)) return false;
+      if (!(was.ownerFunctions?.[file] ?? []).includes(name) && !after.sites.has(`${file}:${name}`))
+        return false;
   }
   return true;
 }
@@ -299,49 +412,86 @@ function mechanicalOwnerMove(root, was, rule, ref) {
 /** A capability may move only with its complete, unchanged function bodies.
  * Counts and every matching boundary remain frozen; there is no relocation list. */
 function unchangedOwners(root, before, after, readBase) {
-  if (!readBase || !Number.isInteger(before.ownerSites) || !before.ownerFunctions || !after.ownerFunctions ||
-      before.owners.length !== after.owners.length || before.ownerSites !== after.ownerSites) return false;
+  if (
+    !readBase ||
+    !Number.isInteger(before.ownerSites) ||
+    !before.ownerFunctions ||
+    !after.ownerFunctions ||
+    before.owners.length !== after.owners.length ||
+    before.ownerSites !== after.ownerSites
+  )
+    return false;
   const bodies = (rule, read) => {
     const result = [];
     const printer = ts.createPrinter({ removeComments: true });
     for (const [file, names] of Object.entries(rule.ownerFunctions)) {
       const source = ts.createSourceFile(file, read(file), ts.ScriptTarget.Latest, true);
       for (const name of names) {
-        const matches = source.statements.filter(node => ts.isFunctionDeclaration(node) && node.name?.text === name && node.body);
+        const matches = source.statements.filter(
+          (node) => ts.isFunctionDeclaration(node) && node.name?.text === name && node.body,
+        );
         if (matches.length !== 1) throw new Error('owner is not one named function');
         result.push(printer.printNode(ts.EmitHint.Unspecified, matches[0].body, source));
       }
     }
     return result.sort();
   };
-  try { return JSON.stringify(bodies(before, readBase)) === JSON.stringify(bodies(after, file => readFileSync(path.join(root, file), 'utf8'))); }
-  catch { return false; }
+  try {
+    return (
+      JSON.stringify(bodies(before, readBase)) ===
+      JSON.stringify(bodies(after, (file) => readFileSync(path.join(root, file), 'utf8')))
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** The deploy-drain fix adds one timer owner; every other boundary stays frozen. */
 function addsShutdownTimerOwner(was, rule) {
-  return was.id === 'timers.server-timeout' &&
+  return (
+    was.id === 'timers.server-timeout' &&
     JSON.stringify(was.owners) === JSON.stringify(['apps/server/src/owner-schedule-clock.ts']) &&
-    JSON.stringify(rule.owners) === JSON.stringify([...was.owners, 'apps/server/src/shutdown.ts']) &&
-    BOUNDARY_KEYS.filter(key => key !== 'owners').every(key =>
-      JSON.stringify(was[key] ?? null) === JSON.stringify(rule[key] ?? null));
+    JSON.stringify(rule.owners) ===
+      JSON.stringify([...was.owners, 'apps/server/src/shutdown.ts']) &&
+    BOUNDARY_KEYS.filter((key) => key !== 'owners').every(
+      (key) => JSON.stringify(was[key] ?? null) === JSON.stringify(rule[key] ?? null),
+    )
+  );
 }
 
 /** Strict capability owners cannot be weakened through a candidate-rule edit. */
 export function strictRelaxations(root, base, head, ref) {
   if (!base) return [];
-  const current = new Map(head.rules.map(rule => [rule.id, rule]));
+  const current = new Map(head.rules.map((rule) => [rule.id, rule]));
   const found = [];
-  for (const was of base.rules.filter(rule => rule.strict)) {
+  for (const was of base.rules.filter((rule) => rule.strict)) {
     const rule = current.get(was.id);
-    if (!rule) { found.push(`rule ${was.id} removed`); continue; }
+    if (!rule) {
+      found.push(`rule ${was.id} removed`);
+      continue;
+    }
     if (rule.total > was.total) found.push(`rule ${was.id} allowance increased`);
-    const readBase = typeof ref === 'function' ? ref : ref ? file => execFileSync('git', ['show', `${ref}:${file}`], { cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','ignore'] }) : undefined;
-    const moved = unchangedOwners(root, was, rule, readBase) || (typeof ref === 'string' && mechanicalOwnerMove(root, was, rule, ref));
+    const readBase =
+      typeof ref === 'function'
+        ? ref
+        : ref
+          ? (file) =>
+              execFileSync('git', ['show', `${ref}:${file}`], {
+                cwd: root,
+                encoding: 'utf8',
+                stdio: ['ignore', 'pipe', 'ignore'],
+              })
+          : undefined;
+    const moved =
+      unchangedOwners(root, was, rule, readBase) ||
+      (typeof ref === 'string' && mechanicalOwnerMove(root, was, rule, ref));
     for (const key of BOUNDARY_KEYS) {
       if (moved && ['owners', 'ownerFunctions'].includes(key)) continue;
       if (key === 'owners' && addsShutdownTimerOwner(was, rule)) continue;
-      if (JSON.stringify(rule[key] ?? null) !== JSON.stringify(was[key] ?? null) && !tighterBoundary(key, was[key], rule[key]))
+      if (
+        JSON.stringify(rule[key] ?? null) !== JSON.stringify(was[key] ?? null) &&
+        !tighterBoundary(key, was[key], rule[key])
+      )
         found.push(`rule ${was.id} ${key} changed`);
     }
   }

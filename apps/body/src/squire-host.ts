@@ -10,27 +10,28 @@
  */
 import { spawn } from 'node:child_process';
 import {
-accessSync,
-existsSync,
-constants as fsConstants,
-lstatSync,
-mkdirSync,
-mkdtempSync,
-readFileSync,
-realpathSync,
-renameSync,
-rmSync,
-statSync,
-symlinkSync,
-writeFileSync,
+  accessSync,
+  existsSync,
+  constants as fsConstants,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
-import { basename,dirname,join,resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSquireBrokerLink } from './squire-broker-link.js';
 import { reclaimSquireBrokerSockets } from './squire-broker-squatter.js';
+import { runOwned } from './wait.js';
 
 export const SQUIRE_BROKER_UNAVAILABLE = 'broker unavailable';
 export const TRUSTY_SQUIRE_BROKER_UNIT_NAME = 'trusty-squire-broker.service';
@@ -171,7 +172,10 @@ export type SquireAgentScope = {
   readonly relay?: { readonly url: string; readonly token: string; readonly contextFile: string };
 };
 
-export function squireFacadeLaunch(home: string, scope: SquireAgentScope): {
+export function squireFacadeLaunch(
+  home: string,
+  scope: SquireAgentScope,
+): {
   command: string;
   args: string[];
   env: Record<string, string>;
@@ -231,20 +235,20 @@ export type SquireInstallRunner = (
   options: { cwd: string },
 ) => Promise<{ code: number | null; stderr: string; stdout?: string }>;
 
+/** Settles on npm's exit (its group is then killed); npm's stderr streams as it runs. */
 const defaultSquireInstallRunner: SquireInstallRunner = (command, args, options) =>
-  new Promise((resolveRun) => {
-    const child = spawn(command, [...args], { cwd: options.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    let stdout = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
-    });
-    child.once('error', (error) => resolveRun({ code: 1, stderr: error.message }));
-    child.once('close', (code) => resolveRun({ code, stderr, stdout }));
-  });
+  runOwned({
+    step: `Trusty Squire ${command} ${args[0] ?? ''}`.trim(),
+    file: command,
+    args,
+    cwd: options.cwd,
+  }).then(
+    ({ code, stderr, stdout }) => ({ code, stderr, stdout }),
+    (error: unknown) => ({
+      code: 1,
+      stderr: error instanceof Error ? error.message : String(error),
+    }),
+  );
 
 const squirePackagePath = (dir: string) =>
   join(dir, 'node_modules', '@trusty-squire', 'mcp', 'package.json');
@@ -269,7 +273,11 @@ function compareSquireVersions(left: string, right: string): number {
 export function squireBrokerInstalledVersion(home: string): string | undefined {
   if (!existsSync(squireBrokerInstallEntry(home))) return undefined;
   try {
-    const version = (JSON.parse(readFileSync(squirePackagePath(squireBrokerInstallDir(home)), 'utf8')) as { version?: unknown }).version;
+    const version = (
+      JSON.parse(readFileSync(squirePackagePath(squireBrokerInstallDir(home)), 'utf8')) as {
+        version?: unknown;
+      }
+    ).version;
     return typeof version === 'string' && versionParts(version) ? version : undefined;
   } catch {
     return undefined;
@@ -278,7 +286,9 @@ export function squireBrokerInstalledVersion(home: string): string | undefined {
 
 export function squireBrokerMeetsComputerUseMinimum(home: string): boolean {
   const version = squireBrokerInstalledVersion(home);
-  return version !== undefined && compareSquireVersions(version, SQUIRE_COMPUTER_USE_MIN_VERSION) >= 0;
+  return (
+    version !== undefined && compareSquireVersions(version, SQUIRE_COMPUTER_USE_MIN_VERSION) >= 0
+  );
 }
 
 /**
@@ -292,18 +302,27 @@ export async function updateSquireBrokerInstall(
 ): Promise<{ entry: string; changed: boolean }> {
   const entry = squireBrokerInstallEntry(home);
   const installed = squireBrokerInstalledVersion(home);
-  if (options.mode === 'minimum' && installed &&
-      compareSquireVersions(installed, SQUIRE_COMPUTER_USE_MIN_VERSION) >= 0)
+  if (
+    options.mode === 'minimum' &&
+    installed &&
+    compareSquireVersions(installed, SQUIRE_COMPUTER_USE_MIN_VERSION) >= 0
+  )
     return { entry, changed: false };
   const dir = squireBrokerInstallDir(home);
   mkdirSync(dirname(dir), { recursive: true, mode: 0o700 });
   const run = options.run ?? defaultSquireInstallRunner;
-  const view = await run('npm', ['view', `${SQUIRE_MCP_PACKAGE_NAME}@latest`, 'version'], { cwd: dirname(dir) });
+  const view = await run('npm', ['view', `${SQUIRE_MCP_PACKAGE_NAME}@latest`, 'version'], {
+    cwd: dirname(dir),
+  });
   const latest = view.stdout?.trim() ?? '';
   if (view.code !== 0 || !versionParts(latest))
-    throw new Error(`Trusty Squire version lookup failed: ${view.stderr.trim() || latest || 'no version returned'}`);
+    throw new Error(
+      `Trusty Squire version lookup failed: ${view.stderr.trim() || latest || 'no version returned'}`,
+    );
   if (compareSquireVersions(latest, SQUIRE_COMPUTER_USE_MIN_VERSION) < 0)
-    throw new Error(`Trusty Squire ${latest} is older than required ${SQUIRE_COMPUTER_USE_MIN_VERSION}`);
+    throw new Error(
+      `Trusty Squire ${latest} is older than required ${SQUIRE_COMPUTER_USE_MIN_VERSION}`,
+    );
   if (installed && compareSquireVersions(installed, latest) >= 0) return { entry, changed: false };
 
   const candidate = mkdtempSync(join(dirname(dir), `${SQUIRE_BROKER_INSTALL_DIRNAME}-next-`));
@@ -312,25 +331,52 @@ export async function updateSquireBrokerInstall(
   try {
     const install = await run(
       'npm',
-      ['install', '--prefix', candidate, `${SQUIRE_MCP_PACKAGE_NAME}@${latest}`, '--no-save', '--no-audit', '--no-fund', '--no-package-lock'],
+      [
+        'install',
+        '--prefix',
+        candidate,
+        `${SQUIRE_MCP_PACKAGE_NAME}@${latest}`,
+        '--no-save',
+        '--no-audit',
+        '--no-fund',
+        '--no-package-lock',
+      ],
       { cwd: candidate },
     );
     let candidateVersion: string | undefined;
     try {
-      candidateVersion = (JSON.parse(readFileSync(squirePackagePath(candidate), 'utf8')) as { version?: string }).version;
-    } catch { /* incomplete install */ }
-    if (install.code !== 0 || !existsSync(squireEntryPath(candidate)) || candidateVersion !== latest)
-      throw new Error(`Trusty Squire broker install failed: ${install.stderr.trim() || 'candidate entry or version is missing'}`);
+      candidateVersion = (
+        JSON.parse(readFileSync(squirePackagePath(candidate), 'utf8')) as { version?: string }
+      ).version;
+    } catch {
+      /* incomplete install */
+    }
+    if (
+      install.code !== 0 ||
+      !existsSync(squireEntryPath(candidate)) ||
+      candidateVersion !== latest
+    )
+      throw new Error(
+        `Trusty Squire broker install failed: ${install.stderr.trim() || 'candidate entry or version is missing'}`,
+      );
 
     symlinkSync(basename(candidate), link);
     if (existsSync(dir)) {
       const previous = realpathSync(dir);
-      const backup = join(dirname(dir), `${SQUIRE_BROKER_INSTALL_DIRNAME}.bak-${installed ?? 'unknown'}-${basename(candidate)}`);
+      const backup = join(
+        dirname(dir),
+        `${SQUIRE_BROKER_INSTALL_DIRNAME}.bak-${installed ?? 'unknown'}-${basename(candidate)}`,
+      );
       if (!lstatSync(dir).isSymbolicLink()) {
         // One-time migration from the original directory layout. A failed
         // activation puts the original directory back.
         renameSync(dir, backup);
-        try { renameSync(link, dir); } catch (error) { renameSync(backup, dir); throw error; }
+        try {
+          renameSync(link, dir);
+        } catch (error) {
+          renameSync(backup, dir);
+          throw error;
+        }
       } else {
         symlinkSync(previous, backup);
         renameSync(link, dir); // replacing a symlink is atomic

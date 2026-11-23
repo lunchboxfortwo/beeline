@@ -9,10 +9,13 @@ import { credentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './
 import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { agentGitIdentity } from './agent-git-identity.js';
-import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
+import {
+  agentCornerCheckoutPaths,
+  materializeAgentCornerCheckout,
+} from './agent-corner-checkout.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { rememberStorageOwner } from './storage-owners.js';
-import { withKernelLock } from './kernel-lock.js';
+import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
 
@@ -27,7 +30,12 @@ export function githubHttpsRemote(remote: string): string {
     throw new Error('thread repository must be a GitHub HTTPS identity');
   url.username = '';
   url.password = '';
-  return url.toString().replace(/\/$/, '').replace(/\.git$/i, '') + '.git';
+  return (
+    url
+      .toString()
+      .replace(/\/$/, '')
+      .replace(/\.git$/i, '') + '.git'
+  );
 }
 
 /** Repository remotes are server-stamped; local file remotes support isolated proofs. */
@@ -47,7 +55,10 @@ export function githubGitEnv(token: string): NodeJS.ProcessEnv {
 }
 
 export function cornerRepositoryCacheDir(supervisorRoot: string, remote: string): string {
-  const repositoryHash = createHash('sha256').update(roomCheckoutRemote(remote)).digest('hex').slice(0, 24);
+  const repositoryHash = createHash('sha256')
+    .update(roomCheckoutRemote(remote))
+    .digest('hex')
+    .slice(0, 24);
   return resolve(supervisorRoot, 'beeline', 'repositories', `${repositoryHash}.git`);
 }
 
@@ -70,7 +81,12 @@ export async function materializeCornerWorktree(input: {
   committer: { name: string; publicKey: string };
 }): Promise<{ path: string; gitCommonDir: string }> {
   const git = (args: string[], options: ExecFileOptions = {}) =>
-    execFileAsync('git', args, { ...options, encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL' });
+    execFileAsync('git', args, {
+      ...options,
+      encoding: 'utf8',
+      timeout: 120_000,
+      killSignal: 'SIGKILL',
+    });
   const remote = roomCheckoutRemote(input.remote);
   const sourceGitDir = cornerRepositoryCacheDir(input.supervisorRoot, remote);
   await mkdir(dirname(sourceGitDir), { recursive: true, mode: 0o700 });
@@ -78,22 +94,41 @@ export async function materializeCornerWorktree(input: {
     const staging = `${sourceGitDir}.creating-${randomUUID()}`;
     try {
       await git(['clone', '--bare', ...CRASH_SAFE_CLONE_ARGS, remote, staging], {
-        env: githubGitEnv(input.token), maxBuffer: 4 * 1024 * 1024,
+        env: githubGitEnv(input.token),
+        maxBuffer: 4 * 1024 * 1024,
       });
       await rename(staging, sourceGitDir).catch((error: NodeJS.ErrnoException) => {
-        if (!['EEXIST', 'ENOTEMPTY'].includes(error.code ?? '') || !existsSync(resolve(sourceGitDir, 'HEAD'))) throw error;
+        if (
+          !['EEXIST', 'ENOTEMPTY'].includes(error.code ?? '') ||
+          !existsSync(resolve(sourceGitDir, 'HEAD'))
+        )
+          throw error;
       });
-    } finally { await rm(staging, { recursive: true, force: true }); }
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
   }
   const { path, gitCommonDir } = await materializeAgentCornerCheckout({
-    root: input.supervisorRoot, cornerId: input.cornerId, agentId: input.committer.publicKey, sourceGitDir, remote,
-    branch: input.featureBranch, startRef: `refs/heads/${input.targetBranch}`, targetBranch: input.targetBranch,
+    root: input.supervisorRoot,
+    cornerId: input.cornerId,
+    agentId: input.committer.publicKey,
+    sourceGitDir,
+    remote,
+    branch: input.featureBranch,
+    startRef: `refs/heads/${input.targetBranch}`,
+    targetBranch: input.targetBranch,
     env: githubGitEnv(input.token),
   });
   await git([`--git-dir=${gitCommonDir}`, 'config', 'extensions.worktreeConfig', 'true']);
   await git(['-C', path, 'config', '--worktree', 'core.bare', 'false']);
-  await git(['-C', path, 'config', '--worktree', 'credential.https://github.com.helper',
-    '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f']);
+  await git([
+    '-C',
+    path,
+    'config',
+    '--worktree',
+    'credential.https://github.com.helper',
+    '!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f',
+  ]);
   const identity = agentGitIdentity(input.committer);
   await git(['-C', path, 'config', '--worktree', 'user.name', identity.name]);
   await git(['-C', path, 'config', '--worktree', 'user.email', identity.email]);
@@ -103,33 +138,63 @@ export async function materializeCornerWorktree(input: {
   return { path, gitCommonDir };
 }
 
-export function roomCheckoutPath(input: { roomId: string; supervisorRoot: string; remote: string; targetBranch: string }): string {
+export function roomCheckoutPath(input: {
+  roomId: string;
+  supervisorRoot: string;
+  remote: string;
+  targetBranch: string;
+}): string {
   const remote = roomCheckoutRemote(input.remote);
-  const checkoutId = createHash('sha256').update(`${input.roomId}\0${remote}\0${input.targetBranch}`).digest('hex').slice(0, 24);
+  const checkoutId = createHash('sha256')
+    .update(`${input.roomId}\0${remote}\0${input.targetBranch}`)
+    .digest('hex')
+    .slice(0, 24);
   return resolve(input.supervisorRoot, 'beeline', 'room-checkouts', checkoutId);
 }
 
 /** A read-only copy of a Room's repository at its target branch. */
 export async function materializeRoomCheckout(input: {
-  roomId: string; workspaceId: string; supervisorRoot: string; remote: string; targetBranch: string; token?: string;
+  roomId: string;
+  workspaceId: string;
+  supervisorRoot: string;
+  remote: string;
+  targetBranch: string;
+  token?: string;
 }): Promise<string> {
   const remote = roomCheckoutRemote(input.remote);
   const path = roomCheckoutPath(input);
   const checkoutId = basename(path);
   await rememberStorageOwner(input.supervisorRoot, {
-    workspaceId: input.workspaceId, roomId: input.roomId, kind: 'room-checkouts', itemId: checkoutId,
+    workspaceId: input.workspaceId,
+    roomId: input.roomId,
+    kind: 'room-checkouts',
+    itemId: checkoutId,
   });
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   return withKernelLock(`room-checkout:${path}`, async () => {
     const env = input.token ? githubGitEnv(input.token) : process.env;
     if (!existsSync(resolve(path, '.git')))
-      await execFileAsync('git', ['clone', '--no-checkout', ...CRASH_SAFE_CLONE_ARGS, remote, path], { env, maxBuffer: 4 * 1024 * 1024 });
+      await execFileAsync(
+        'git',
+        ['clone', '--no-checkout', ...CRASH_SAFE_CLONE_ARGS, remote, path],
+        { env, maxBuffer: 4 * 1024 * 1024 },
+      );
     await execFileAsync('git', ['-C', path, 'config', 'gc.pruneExpire', 'never']);
     await fetchRepositoryCache({
-      gitDir: resolve(path, '.git'), label: `room-checkouts/${checkoutId}`,
-      args: ['--prune', 'origin', `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`], env,
+      gitDir: resolve(path, '.git'),
+      label: `room-checkouts/${checkoutId}`,
+      args: [
+        '--prune',
+        'origin',
+        `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`,
+      ],
+      env,
     });
-    await execFileAsync('git', ['-C', path, 'checkout', '--detach', '--force', `origin/${input.targetBranch}`], { env, maxBuffer: 4 * 1024 * 1024 });
+    await execFileAsync(
+      'git',
+      ['-C', path, 'checkout', '--detach', '--force', `origin/${input.targetBranch}`],
+      { env, maxBuffer: 4 * 1024 * 1024 },
+    );
     return path;
   });
 }
@@ -235,11 +300,19 @@ export async function prepareWorkspace(input: {
   let branch = targetBranch;
   if (input.parentRoomId) {
     const restore = await input.api.execute('getCornerRestoreState', { cornerId: input.placeId });
-    branch = restore.featureBranch ?? `feature/corner-${input.placeId.replaceAll('-', '').slice(0, 12)}`;
-    path = (await materializeCornerWorktree({
-      cornerId: input.placeId, remote: repository.remote, targetBranch, featureBranch: branch,
-      token: token ?? '', supervisorRoot: input.supervisorRoot, committer: input.agent,
-    })).path;
+    branch =
+      restore.featureBranch ?? `feature/corner-${input.placeId.replaceAll('-', '').slice(0, 12)}`;
+    path = (
+      await materializeCornerWorktree({
+        cornerId: input.placeId,
+        remote: repository.remote,
+        targetBranch,
+        featureBranch: branch,
+        token: token ?? '',
+        supervisorRoot: input.supervisorRoot,
+        committer: input.agent,
+      })
+    ).path;
     // A checkout with no work of its own moves to the base just fetched.
     const base = `refs/remotes/origin/${targetBranch}`;
     if (
@@ -249,16 +322,48 @@ export async function prepareWorkspace(input: {
       )
     )
       await execFileAsync('git', ['-C', path, 'merge', '--ff-only', '--quiet', base]);
-    await rememberStorageOwner(input.supervisorRoot, { workspaceId: input.workspaceId, roomId: input.placeId,
-      kind: 'corners', itemId: basename(path), agentId: input.agent.publicKey, ended: false });
-    if (!restore.lifecycle?.branch && !restore.lifecycle?.pr)
-      await input.api.execute('postCornerRemoteState', { cornerId: input.placeId, branch, state: 'working', checks: 'unknown' })
-        .catch(error => console.warn(`[body] thread ${input.placeId} working state not posted:`, error));
-  } else {
-    path = await materializeRoomCheckout({
-      roomId: input.placeId, workspaceId: input.workspaceId, supervisorRoot: input.supervisorRoot,
-      remote: repository.remote, targetBranch, ...(token ? { token } : {}),
+    await rememberStorageOwner(input.supervisorRoot, {
+      workspaceId: input.workspaceId,
+      roomId: input.placeId,
+      kind: 'corners',
+      itemId: basename(path),
+      agentId: input.agent.publicKey,
+      ended: false,
     });
+    if (!restore.lifecycle?.branch && !restore.lifecycle?.pr)
+      await input.api
+        .execute('postCornerRemoteState', {
+          cornerId: input.placeId,
+          branch,
+          state: 'working',
+          checks: 'unknown',
+        })
+        .catch((error) =>
+          console.warn(`[body] thread ${input.placeId} working state not posted:`, error),
+        );
+  } else {
+    try {
+      path = await materializeRoomCheckout({
+        roomId: input.placeId,
+        workspaceId: input.workspaceId,
+        supervisorRoot: input.supervisorRoot,
+        remote: repository.remote,
+        targetBranch,
+        ...(token ? { token } : {}),
+      });
+    } catch (error) {
+      if (error instanceof KernelLockBusyError)
+        return checkoutBusy(
+          roomCheckoutPath({
+            ...input,
+            roomId: input.placeId,
+            remote: repository.remote,
+            targetBranch,
+          }),
+          error,
+        );
+      throw error;
+    }
   }
   const ready = () =>
     readyCheckout({
@@ -268,9 +373,17 @@ export async function prepareWorkspace(input: {
       agentId: input.agent.publicKey,
     });
   // Agents in one Room share its checkout; one prepares it at a time.
-  const notReady = input.parentRoomId
-    ? await ready()
-    : await withKernelLock(`room-checkout:${path}`, ready);
+  let notReady: string | undefined;
+  try {
+    notReady = input.parentRoomId
+      ? await ready()
+      : await withKernelLock(`room-checkout:${path}`, ready, {
+          step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the Room checkout`,
+        });
+  } catch (error) {
+    if (error instanceof KernelLockBusyError) return checkoutBusy(path, error);
+    throw error;
+  }
   const indexed = await prepareCodegraphIndex(input.config, path);
   const where = input.parentRoomId
     ? `branch ${branch} (target ${targetBranch})`
@@ -279,6 +392,13 @@ export async function prepareWorkspace(input: {
     notReady
       ? `Checkout at ${path} on ${where} is not ready: ${notReady}`
       : `Checkout ready at ${path} on ${where}.`,
-    indexed ? 'The code index is ready.' : 'The code index was not built; use the shell and file tools.',
+    indexed
+      ? 'The code index is ready.'
+      : 'The code index was not built; use the shell and file tools.',
   ].join(' ');
+}
+
+/** Agents in one Room share its checkout; one prepares it at a time and the others are told so at once. */
+function checkoutBusy(path: string, error: KernelLockBusyError): string {
+  return `Checkout at ${path} is being prepared by another agent (pid ${error.holder.pid || 'unknown'}, since ${error.holder.since}). Call workspace again to read it once that finishes.`;
 }

@@ -1,25 +1,46 @@
 import { WebSocket } from 'ws';
 import { unknownServerEventLogger } from './unknown-server-event.js';
+import { ask } from './wait.js';
 
-export type ChromiumPage = { id: string; type: string; title?: string; url?: string; webSocketDebuggerUrl?: string };
+export type ChromiumPage = {
+  id: string;
+  type: string;
+  title?: string;
+  url?: string;
+  webSocketDebuggerUrl?: string;
+};
 const COMPUTER_ACTIVITY_NAMES = [
-  'viewer-opened', 'viewer-closed', 'takeover', 'input', 'navigation', 'handback',
+  'viewer-opened',
+  'viewer-closed',
+  'takeover',
+  'input',
+  'navigation',
+  'handback',
 ] as const;
 export type ComputerActivityEvent = {
-  type: 'event'; seq: number; at: string;
-  name: typeof COMPUTER_ACTIVITY_NAMES[number];
+  type: 'event';
+  seq: number;
+  at: string;
+  name: (typeof COMPUTER_ACTIVITY_NAMES)[number];
   detail?: string;
 };
 
 /** Choose an existing page; this never launches a browser or a fresh tab. */
 export async function findChromiumPage(debugUrl: string, target?: string): Promise<ChromiumPage> {
   const origin = new URL(debugUrl);
-  if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('Chromium debug URL is invalid');
-  const response = await fetch(new URL('/json/list', origin), { signal: undefined });
+  if (!['http:', 'https:'].includes(origin.protocol))
+    throw new Error('Chromium debug URL is invalid');
+  const response = await ask({
+    url: new URL('/json/list', origin),
+    peer: 'Chromium debugging endpoint',
+  });
   if (!response.ok) throw new Error('Chromium debugging endpoint is unavailable');
   const pages = (await response.json()) as ChromiumPage[];
-  const page = pages.find((item) => item.type === 'page' &&
-    (!target || item.id === target || item.url?.includes(target) || item.title?.includes(target)));
+  const page = pages.find(
+    (item) =>
+      item.type === 'page' &&
+      (!target || item.id === target || item.url?.includes(target) || item.title?.includes(target)),
+  );
   if (!page?.webSocketDebuggerUrl) throw new Error('No matching open Chromium tab');
   return page;
 }
@@ -54,8 +75,15 @@ export async function shareChromiumPage(input: {
   await opened(cdp);
   const source = new URL(`/s/${input.shareId}/source`, input.serverBaseUrl);
   source.protocol = source.protocol === 'https:' ? 'wss:' : 'ws:';
-  const relay = new WebSocket(source, { headers: { authorization: `Bearer ${input.daemonToken}` } });
-  try { await opened(relay); } catch (error) { cdp.close(); throw error; }
+  const relay = new WebSocket(source, {
+    headers: { authorization: `Bearer ${input.daemonToken}` },
+  });
+  try {
+    await opened(relay);
+  } catch (error) {
+    cdp.close();
+    throw error;
+  }
   const share: Share = { cdp, relay, controlled: false };
   const logUnknown = unknownServerEventLogger('computer-share');
   shares.get(input.page.id)?.cdp.close();
@@ -74,41 +102,81 @@ export async function shareChromiumPage(input: {
   let screenshotStartedAt = 0;
   const capture = () => {
     if (screenshotId !== undefined && Date.now() - screenshotStartedAt < 5_000) return;
-    screenshotId = sendCdp('Page.captureScreenshot', { format: 'jpeg', quality: 65, captureBeyondViewport: false });
+    screenshotId = sendCdp('Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 65,
+      captureBeyondViewport: false,
+    });
     screenshotStartedAt = Date.now();
   };
   cdp.on('message', (data) => {
-    let message: { id?: number; method?: string; params?: { sessionId?: number; frame?: { url?: string } }; result?: { data?: string; result?: { value?: unknown } }; error?: { message?: string } };
-    try { message = JSON.parse(data.toString()) as typeof message; } catch { return; }
+    let message: {
+      id?: number;
+      method?: string;
+      params?: { sessionId?: number; frame?: { url?: string } };
+      result?: { data?: string; result?: { value?: unknown } };
+      error?: { message?: string };
+    };
+    try {
+      message = JSON.parse(data.toString()) as typeof message;
+    } catch {
+      return;
+    }
     if (message.id === screencastId)
-      console.error(`[computer-share] screencast start ${message.error?.message ? `failed: ${message.error.message}` : 'accepted'}`);
+      console.error(
+        `[computer-share] screencast start ${message.error?.message ? `failed: ${message.error.message}` : 'accepted'}`,
+      );
     if (copyId !== undefined && message.id === copyId) {
       copyId = undefined;
       const text = message.result?.result?.value;
       if (relay.readyState === WebSocket.OPEN)
-        relay.send(JSON.stringify({ type: 'clipboard', text: typeof text === 'string' ? text.slice(0, 500_000) : '' }));
+        relay.send(
+          JSON.stringify({
+            type: 'clipboard',
+            text: typeof text === 'string' ? text.slice(0, 500_000) : '',
+          }),
+        );
       return;
     }
     if (screenshotId !== undefined && message.id === screenshotId) {
       screenshotId = undefined;
-      if (message.result?.data && relay.readyState === WebSocket.OPEN && relay.bufferedAmount < 4 * 1024 * 1024) {
-        if (!firstFrameLogged) { firstFrameLogged = true; console.error('[computer-share] first JPEG forwarded from screenshot'); }
-        relay.send(JSON.stringify({ method: 'Page.screencastFrame', params: { data: message.result.data, sessionId: 0 } }));
-      } else if (message.error?.message) console.error(`[computer-share] screenshot failed: ${message.error.message}`);
+      if (
+        message.result?.data &&
+        relay.readyState === WebSocket.OPEN &&
+        relay.bufferedAmount < 4 * 1024 * 1024
+      ) {
+        if (!firstFrameLogged) {
+          firstFrameLogged = true;
+          console.error('[computer-share] first JPEG forwarded from screenshot');
+        }
+        relay.send(
+          JSON.stringify({
+            method: 'Page.screencastFrame',
+            params: { data: message.result.data, sessionId: 0 },
+          }),
+        );
+      } else if (message.error?.message)
+        console.error(`[computer-share] screenshot failed: ${message.error.message}`);
       return;
     }
     if (message.method === 'Page.frameNavigated' && message.params?.frame?.url) {
       try {
         const url = new URL(message.params.frame.url);
         if (['http:', 'https:'].includes(url.protocol) && relay.readyState === WebSocket.OPEN) {
-          url.username = ''; url.password = '';
+          url.username = '';
+          url.password = '';
           relay.send(JSON.stringify({ type: 'share-event', name: 'navigation', detail: url.href }));
         }
-      } catch { /* Internal browser URLs are not shared. */ }
+      } catch {
+        /* Internal browser URLs are not shared. */
+      }
       return;
     }
     if (message.method !== 'Page.screencastFrame') return;
-    if (!firstFrameLogged) { firstFrameLogged = true; console.error('[computer-share] first JPEG forwarded from screencast'); }
+    if (!firstFrameLogged) {
+      firstFrameLogged = true;
+      console.error('[computer-share] first JPEG forwarded from screencast');
+    }
     // CDP frames are JSON text. `ws` passes incoming text as a Buffer, but
     // sending that Buffer makes the viewer receive a binary Blob instead.
     if (relay.readyState === WebSocket.OPEN && relay.bufferedAmount < 4 * 1024 * 1024)
@@ -118,32 +186,48 @@ export async function shareChromiumPage(input: {
   });
   relay.on('message', (data) => {
     let message: { type?: string; method?: string; params?: Record<string, unknown> };
-    try { message = JSON.parse(data.toString()) as typeof message; } catch { return; }
-    if(message.type==='frame'){capture();return;}
-    if (message.type === 'takeover') { share.controlled = true; console.error('[computer-share] viewer took control'); }
-    else if (message.type === 'release') { share.controlled = false; console.error('[computer-share] viewer released control'); }
-    else if (share.controlled && message.type === 'copy')
+    try {
+      message = JSON.parse(data.toString()) as typeof message;
+    } catch {
+      return;
+    }
+    if (message.type === 'frame') {
+      capture();
+      return;
+    }
+    if (message.type === 'takeover') {
+      share.controlled = true;
+      console.error('[computer-share] viewer took control');
+    } else if (message.type === 'release') {
+      share.controlled = false;
+      console.error('[computer-share] viewer released control');
+    } else if (share.controlled && message.type === 'copy')
       copyId = sendCdp('Runtime.evaluate', { expression: SELECTED_TEXT, returnByValue: true });
     else if (share.controlled && message.method?.startsWith('Input.')) {
       if (inputCount++ < 5) console.error(`[computer-share] forwarded ${message.method}`);
       sendCdp(message.method, message.params ?? {});
-    }
-    else if (message.type !== 'takeover' && message.type !== 'release') logUnknown(message.type);
+    } else if (message.type !== 'takeover' && message.type !== 'release') logUnknown(message.type);
   });
   const finish = () => {
     if (shares.get(input.page.id) !== share) return;
     shares.delete(input.page.id);
-    cdp.close(); relay.close();
+    cdp.close();
+    relay.close();
     void input.onEnded();
   };
   cdp.once('close', finish);
   relay.once('close', finish);
   sendCdp('Page.enable');
-  const screencastId = sendCdp('Page.startScreencast', { format: 'jpeg', quality: 65, maxWidth: 1280, maxHeight: 900, everyNthFrame: 1 });
+  const screencastId = sendCdp('Page.startScreencast', {
+    format: 'jpeg',
+    quality: 65,
+    maxWidth: 1280,
+    maxHeight: 900,
+    everyNthFrame: 1,
+  });
   // A static or externally driven tab may never deliver a screencast frame.
   // Capture one immediately, then keep a slow fallback only while it is quiet.
   capture();
-
 }
 
 /** One live event wait, with one authoritative reconcile if the socket reconnects. */
@@ -160,26 +244,45 @@ export async function waitForComputerHandback(input: {
   for (let attempt = 0; attempt < 2; attempt++) {
     const url = new URL(`/s/${input.shareId}/wait?since=${since}`, input.serverBaseUrl);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const result = await new Promise<{ type: 'handoff' | 'ended'; note?: string; events: ComputerActivityEvent[] } | undefined>((resolve, reject) => {
-      const socket = new WebSocket(url, { headers: { authorization: `Bearer ${input.daemonToken}` } });
+    const result = await new Promise<
+      { type: 'handoff' | 'ended'; note?: string; events: ComputerActivityEvent[] } | undefined
+    >((resolve, reject) => {
+      const socket = new WebSocket(url, {
+        headers: { authorization: `Bearer ${input.daemonToken}` },
+      });
       let settled = false;
       socket.on('message', (data) => {
         try {
           const value = JSON.parse(data.toString()) as {
-            type?: string; note?: string; seq?: number; at?: string;
-            name?: ComputerActivityEvent['name']; detail?: string;
+            type?: string;
+            note?: string;
+            seq?: number;
+            at?: string;
+            name?: ComputerActivityEvent['name'];
+            detail?: string;
           };
-          if (!value || typeof value.type !== 'string' || !value.type) throw new Error('invalid handback event');
+          if (!value || typeof value.type !== 'string' || !value.type)
+            throw new Error('invalid handback event');
           if (value.type === 'event') {
-            if (typeof value.seq === 'number' && Number.isSafeInteger(value.seq) && value.seq > since &&
-                typeof value.at === 'string' && value.name) {
+            if (
+              typeof value.seq === 'number' &&
+              Number.isSafeInteger(value.seq) &&
+              value.seq > since &&
+              typeof value.at === 'string' &&
+              value.name
+            ) {
               since = value.seq;
               if (!COMPUTER_ACTIVITY_NAMES.includes(value.name)) {
                 logUnknown(value.name);
                 return;
               }
-              const event: ComputerActivityEvent = { type: 'event', seq: value.seq, at: value.at,
-                name: value.name, ...(value.detail ? { detail: value.detail } : {}) };
+              const event: ComputerActivityEvent = {
+                type: 'event',
+                seq: value.seq,
+                at: value.at,
+                name: value.name,
+                ...(value.detail ? { detail: value.detail } : {}),
+              };
               events.push(event);
               input.onEvent?.(event);
             }
@@ -192,10 +295,17 @@ export async function waitForComputerHandback(input: {
           settled = true;
           resolve({ type: value.type, ...(value.note ? { note: value.note } : {}), events });
           socket.close();
-        } catch (error) { reject(error); socket.close(); }
+        } catch (error) {
+          reject(error);
+          socket.close();
+        }
       });
-      socket.once('close', () => { if (!settled) resolve(undefined); });
-      socket.once('error', () => { if (!settled) resolve(undefined); });
+      socket.once('close', () => {
+        if (!settled) resolve(undefined);
+      });
+      socket.once('error', () => {
+        if (!settled) resolve(undefined);
+      });
     });
     if (result) return result;
   }

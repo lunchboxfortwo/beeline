@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { progress } from './update-progress.js';
 import { convergeDependencies } from './recovery-dependencies.js';
-import { spawn } from 'node:child_process';
 import { readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { bootstrapMachine, convergeMachine, prepareMachineRelease } from './recovery.js';
@@ -21,7 +20,9 @@ import {
   parseUpdateManifest,
   compareBundleIdentity,
 } from './self-update-manifest.js';
-import { helperAbsent, requestMachine } from './machine-control.js';
+import { askMachine, helperAbsent, type MachineAnswer } from './machine-control.js';
+import { runOwned } from './wait.js';
+import { exitWithOwner } from './owner-link.js';
 import { nativeHelperStatus } from './native-helper.js';
 import { runManagedUpdateWorker, withInstallLock } from './managed-update.js';
 
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
   }
   if (command === 'helper-bootstrap')
     throw new Error('helper-bootstrap must run through the installed native launcher');
+  if (command === 'native-converge-worker' || command === 'managed-update-worker') exitWithOwner();
   if (command === 'native-converge-worker') {
     const { runNativeConvergenceWorker } = await import('./native-helper.js');
     console.log(JSON.stringify({ pid: await runNativeConvergenceWorker() }));
@@ -84,7 +86,7 @@ async function main(): Promise<void> {
     if (args.includes('--status')) {
       const [native, helper] = await Promise.all([
         nativeHelperStatus(),
-        requestMachine(stateRoot, { operation: 'status' }, () => true, 2000).catch(error => {
+        askMachine(stateRoot, { operation: 'status' }).catch((error) => {
           if (helperAbsent(error)) return undefined;
           throw error;
         }),
@@ -136,7 +138,7 @@ async function main(): Promise<void> {
       });
     } catch (error) {
       if (command === 'install-only') throw error;
-      await convergeMachine({ layout, waitForAgents: false });
+      await convergeMachine({ layout, reportAgentsOnly: true });
       throw new Error(
         `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
       );
@@ -151,12 +153,15 @@ async function main(): Promise<void> {
       return;
     }
     await convergeDependencies(layout, target.releaseId);
-    const status = await convergeMachine({ layout, releaseId: target.releaseId,
-      waitForAgents: false, force: args.includes('--force') });
-    for (const [id, agent] of Object.entries(status.agents))
-      progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
+    const status = await convergeMachine({
+      layout,
+      releaseId: target.releaseId,
+      reportAgentsOnly: true,
+      force: args.includes('--force'),
+    });
+    reportAgents(status);
     console.log(
-      `[beeline] executing release ${status.loadedRelease}; helper ${status.pid}; target release serving`,
+      `[beeline] executing release ${status.loadedRelease}; helper ${status.pid} ${status.processState}`,
     );
     return;
   }
@@ -204,13 +209,18 @@ async function main(): Promise<void> {
     }
     await convergeDependencies(layout, target.releaseId);
     const status = await convergeMachine({ layout, releaseId: target.releaseId });
+    reportAgents(status);
     console.log(
-      `[beeline] executing release ${status.loadedRelease}; helper ${status.pid}; every enabled agent serving`,
+      `[beeline] executing release ${status.loadedRelease}; helper ${status.pid} ${status.processState}`,
     );
     return;
   }
-  if (command === 'connect' && !args.includes('--help') && !args.includes('-h') &&
-      !(await resolveBundleEntrypoint(layout.libDir))) {
+  if (
+    command === 'connect' &&
+    !args.includes('--help') &&
+    !args.includes('-h') &&
+    !(await resolveBundleEntrypoint(layout.libDir))
+  ) {
     // Install only on a new machine. Pairing starts/converges the helper after
     // writing the new agent's configuration, without selecting a release.
     const target = await prepareMachineRelease(layout);
@@ -218,17 +228,22 @@ async function main(): Promise<void> {
   }
   const entry = await resolveBundleEntrypoint(layout.libDir);
   if (!entry) throw new Error('no installed Beeline body; run npx usebeeline connect');
-  const child = spawn(process.execPath, [entry, ...args], {
-    env: {
-      ...process.env,
-      BEELINE_LIB_DIR: layout.libDir,
-    },
-    stdio: 'inherit',
+  const child = await runOwned({
+    step: `beeline ${command ?? ''}`.trim(),
+    file: process.execPath,
+    args: [entry, ...args],
+    env: { ...process.env, BEELINE_LIB_DIR: layout.libDir },
+    interactive: true,
   });
-  process.exitCode = await new Promise<number>((done, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code) => done(code ?? 1));
-  });
+  process.exitCode = child.code ?? 1;
+}
+
+/** The helper's one answer: each agent as it is now. Nothing waits for an agent to serve. */
+function reportAgents(status: MachineAnswer): void {
+  for (const [id, agent] of Object.entries(status.agents))
+    progress(
+      `agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`,
+    );
 }
 main().catch((error) => {
   console.error(`[beeline] ${error instanceof Error ? error.message : String(error)}`);

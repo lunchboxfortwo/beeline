@@ -1,12 +1,18 @@
 import { type AcpClient } from './acp.js';
 
 /** All production ACP process starts and stops pass through this module. */
-export async function startAgentProcess(client: AcpClient): Promise<void> {
+export async function startAgentProcess(client: AcpClient, signal?: AbortSignal): Promise<void> {
+  const abort = () => {
+    void stopAgentProcess(client).catch(() => undefined);
+  };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    await client.startProcess();
+    await client.startProcess(signal);
   } catch (error) {
     await client.stopProcess().catch(() => undefined);
     throw error;
+  } finally {
+    signal?.removeEventListener('abort', abort);
   }
 }
 export async function stopAgentProcess(client: AcpClient): Promise<void> {
@@ -29,26 +35,39 @@ export class HostPlaces {
   private static readonly maintained = new Set<string>();
   private static hostSweep = false;
 
-  static enter(key: string): void { this.live.set(key, (this.live.get(key) ?? 0) + 1); }
+  static enter(key: string): void {
+    this.live.set(key, (this.live.get(key) ?? 0) + 1);
+  }
   static leave(key: string): void {
     const count = (this.live.get(key) ?? 0) - 1;
-    if (count > 0) this.live.set(key, count); else this.live.delete(key);
+    if (count > 0) this.live.set(key, count);
+    else this.live.delete(key);
   }
-  static get hostStoragePaused(): boolean { return this.hostSweep; }
+  static get hostStoragePaused(): boolean {
+    return this.hostSweep;
+  }
 
   /** Run `task` only while no session serves `key`. */
   static async withIdleHostRoom(key: string, task: () => Promise<void>): Promise<boolean> {
     if (this.live.has(key) || this.maintained.has(key)) return false;
     this.maintained.add(key);
-    try { await task(); return true; }
-    finally { this.maintained.delete(key); }
+    try {
+      await task();
+      return true;
+    } finally {
+      this.maintained.delete(key);
+    }
   }
 
   /** One whole-host sweep at a time; live sessions keep running beside it. */
   static async withIdleHostStorage(task: () => Promise<void>): Promise<boolean> {
     if (this.hostSweep) return false;
     this.hostSweep = true;
-    try { await task(); return true; }
-    finally { this.hostSweep = false; }
+    try {
+      await task();
+      return true;
+    } finally {
+      this.hostSweep = false;
+    }
   }
 }

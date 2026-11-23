@@ -6,6 +6,8 @@
  * bogus key into one specific, actionable sentence while the human is still
  * at the keyboard.
  */
+import { ask } from './wait.js';
+
 export type ConnectKeyProvider = 'openrouter' | 'openai' | 'anthropic' | 'google' | 'xai';
 
 export const PROVIDER_LABELS: Record<ConnectKeyProvider, string> = {
@@ -61,16 +63,24 @@ export async function verifyProviderKey(input: {
   provider: ConnectKeyProvider;
   apiKey: string;
   fetchImpl?: typeof fetch;
-  timeoutMs?: number;
+  /** Where the one "waiting for <host>" line goes; stderr by default. */
+  report?: (line: string) => void;
+  /** The caller left (SIGINT or cancel): abort the request. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const label = PROVIDER_LABELS[input.provider];
   const { url, headers } = keyCheckEndpoint(input.provider, input.apiKey);
   let response: Response;
   try {
-    response = await (input.fetchImpl ?? fetch)(url, {
-      headers,
-      signal: undefined,
-    });
+    response = await ask(
+      {
+        url,
+        peer: `${new URL(url).host} to verify the ${label} key`,
+        ...(input.fetchImpl ? { fetch: input.fetchImpl } : {}),
+        ...(input.report ? { report: input.report } : {}),
+      },
+      { headers, ...(input.signal ? { signal: input.signal } : {}) },
+    );
   } catch (error) {
     const cause = error instanceof Error ? error.message.split('\n')[0] : String(error);
     throw new Error(

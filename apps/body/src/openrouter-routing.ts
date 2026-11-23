@@ -43,6 +43,9 @@
  * endpoint accepts that much output). A model the listing names no endpoints
  * for (a `~vendor/model-latest` router alias) still gets the output cap.
  */
+export { withOpenRouterModelRouting, openRouterModelId } from './openrouter-model-routing.js';
+import { openRouterModelId } from './openrouter-model-routing.js';
+
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { readOpenRouterTraffic, type OpenRouterProviderTraffic } from './openrouter-history.js';
@@ -158,26 +161,6 @@ export interface OpenRouterProbeResult {
 }
 
 /**
- * The OpenRouter model id behind a catalog selection: `openrouter/<id>` from
- * pi's namespaced catalog, or a bare `<vendor>/<model>` id when the runtime's
- * only provider credential is an OpenRouter key (the connect wizard stores the
- * bare id). Anything else is not an OpenRouter model.
- */
-export function openRouterModelId(
-  model: string | undefined,
-  env: Record<string, string | undefined> = {},
-): string | undefined {
-  const trimmed = model?.trim();
-  if (!trimmed) return undefined;
-  if (trimmed.startsWith('openrouter/')) {
-    const id = trimmed.slice('openrouter/'.length);
-    return id.includes('/') ? id : undefined;
-  }
-  if (env.OPENROUTER_API_KEY?.trim() && /^[^/\s]+\/[^/\s][^\s]*$/.test(trimmed)) return trimmed;
-  return undefined;
-}
-
-/**
  * Reduce the public endpoints payload to the per-endpoint reliability and
  * cache-pricing facts, plus the model's advertised input modalities (`undefined` when the listing does not name them).
  */
@@ -203,9 +186,10 @@ export function parseOpenRouterEndpoints(payload: unknown): {
     const supported = Array.isArray(endpoint.supported_parameters)
       ? endpoint.supported_parameters
       : [];
-    const pricing = endpoint.pricing && typeof endpoint.pricing === 'object'
-      ? endpoint.pricing as Record<string, unknown>
-      : {};
+    const pricing =
+      endpoint.pricing && typeof endpoint.pricing === 'object'
+        ? (endpoint.pricing as Record<string, unknown>)
+        : {};
     const promptPrice = tokenPrice(pricing.prompt);
     const cacheReadPrice = tokenPrice(pricing.input_cache_read);
     endpoints.push({
@@ -214,7 +198,9 @@ export function parseOpenRouterEndpoints(payload: unknown): {
       contextLength,
       maxCompletionTokens,
       tools: supported.includes('tools'),
-      ...(typeof endpoint.provider_name === 'string' ? { providerName: endpoint.provider_name } : {}),
+      ...(typeof endpoint.provider_name === 'string'
+        ? { providerName: endpoint.provider_name }
+        : {}),
       ...(promptPrice === undefined ? {} : { promptPrice }),
       ...(cacheReadPrice === undefined ? {} : { cacheReadPrice }),
       discountedCacheRead:
@@ -255,24 +241,48 @@ export function rankOpenRouterProviders(
   traffic: readonly OpenRouterProviderTraffic[],
   answered: readonly string[],
 ): OpenRouterProviderCost[] {
-  const shares = traffic.filter((row) => row.promptTokens > 0).map((row) => row.cacheShare).sort((a, b) => a - b);
+  const shares = traffic
+    .filter((row) => row.promptTokens > 0)
+    .map((row) => row.cacheShare)
+    .sort((a, b) => a - b);
   const middle = Math.floor(shares.length / 2);
   // With no observations, assume a cold prompt rather than inventing savings.
-  const medianShare = shares.length ? (shares[middle]! + shares[Math.floor((shares.length - 1) / 2)]!) / 2 : 0;
+  const medianShare = shares.length
+    ? (shares[middle]! + shares[Math.floor((shares.length - 1) / 2)]!) / 2
+    : 0;
   const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
   const ranked = new Map<string, OpenRouterProviderCost>();
   for (const endpoint of endpoints) {
-    if (!endpoint.tools || endpoint.uptime < OPENROUTER_UPTIME_BAR_RELAXED ||
-        (contextLength !== undefined && endpoint.contextLength < contextLength) ||
-        !answered.includes(endpoint.provider) || endpoint.promptPrice === undefined) continue;
-    const measured = traffic.find((row) => normalize(row.provider) === normalize(endpoint.providerName ?? endpoint.provider));
+    if (
+      !endpoint.tools ||
+      endpoint.uptime < OPENROUTER_UPTIME_BAR_RELAXED ||
+      (contextLength !== undefined && endpoint.contextLength < contextLength) ||
+      !answered.includes(endpoint.provider) ||
+      endpoint.promptPrice === undefined
+    )
+      continue;
+    const measured = traffic.find(
+      (row) => normalize(row.provider) === normalize(endpoint.providerName ?? endpoint.provider),
+    );
     const cacheShare = measured?.cacheShare ?? medianShare;
-    const effectiveInputPrice = endpoint.promptPrice * (1 - cacheShare) +
+    const effectiveInputPrice =
+      endpoint.promptPrice * (1 - cacheShare) +
       (endpoint.cacheReadPrice ?? endpoint.promptPrice) * cacheShare;
-    const row = { provider: endpoint.provider, cacheShare, measuredCalls: measured?.calls ?? 0, effectiveInputPrice };
-    if (!ranked.has(row.provider) || effectiveInputPrice < ranked.get(row.provider)!.effectiveInputPrice) ranked.set(row.provider, row);
+    const row = {
+      provider: endpoint.provider,
+      cacheShare,
+      measuredCalls: measured?.calls ?? 0,
+      effectiveInputPrice,
+    };
+    if (
+      !ranked.has(row.provider) ||
+      effectiveInputPrice < ranked.get(row.provider)!.effectiveInputPrice
+    )
+      ranked.set(row.provider, row);
   }
-  return [...ranked.values()].sort((a, b) => a.effectiveInputPrice - b.effectiveInputPrice || a.provider.localeCompare(b.provider));
+  return [...ranked.values()].sort(
+    (a, b) => a.effectiveInputPrice - b.effectiveInputPrice || a.provider.localeCompare(b.provider),
+  );
 }
 
 /** Missing/blank prices must not become zero through Number(null) or Number(''). */
@@ -505,7 +515,6 @@ export async function probeOpenRouterProvider(input: {
   apiKey: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  timeoutMs?: number;
 }): Promise<OpenRouterProbeResult> {
   const now = input.now ?? Date.now;
   const started = now();
@@ -562,7 +571,6 @@ export async function probeOpenRouterProviders(input: {
   apiKey: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  timeoutMs?: number;
   maxCandidates?: number;
 }): Promise<OpenRouterProbeResult[]> {
   const candidates = input.providers.slice(
@@ -577,7 +585,6 @@ export async function probeOpenRouterProviders(input: {
         apiKey: input.apiKey,
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         ...(input.now ? { now: input.now } : {}),
-        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       }),
     ),
   );
@@ -596,7 +603,8 @@ function decision(
   const criteria = bar === null ? 'fallback pair' : `uptime ≥${bar}%, tools`;
   const suffix = [
     bar === OPENROUTER_UPTIME_BAR_RELAXED && !note?.startsWith('daily')
-      ? 'bar lowered: reliability fallback or cache continuity' : '',
+      ? 'bar lowered: reliability fallback or cache continuity'
+      : '',
     source === 'cache' ? 'cached' : '',
     source === 'stale-cache' ? 'stale cache' : '',
     note ?? '',
@@ -627,7 +635,6 @@ export interface ResolveOpenRouterRoutingInput {
   cacheDir: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  timeoutMs?: number;
   /**
    * OpenRouter key for the answer probe. Without it only the uptime/tools
    * filter runs — the pin is then no worse than it was before C92.
@@ -641,7 +648,6 @@ export interface ResolveOpenRouterRoutingInput {
   providerOverride?: string;
   /** Bound on the probe; tests pass a smaller one. */
   probeMaxCandidates?: number;
-  probeTimeoutMs?: number;
   /** This agent's Room homes; read-only session IDs for seven-day generation facts. */
   historyRoomsDir?: string;
 }
@@ -771,83 +777,181 @@ function dailyCachePath(input: ResolveOpenRouterRoutingInput): string {
   return resolve(input.cacheDir, `${input.model.replace(/[^A-Za-z0-9._-]+/g, '_')}.daily.json`);
 }
 
-async function readDailyRouting(input: ResolveOpenRouterRoutingInput): Promise<DailyRouting | undefined> {
+async function readDailyRouting(
+  input: ResolveOpenRouterRoutingInput,
+): Promise<DailyRouting | undefined> {
   try {
     const row = JSON.parse(await readFile(dailyCachePath(input), 'utf8')) as DailyRouting;
-    if (row.policy !== 'cost-daily-v1' || row.model !== input.model || !Number.isFinite(row.fetchedAt) ||
-        !Array.isArray(row.providers) || !row.providers.length || row.providers.length > 3 ||
-        !row.providers.every((provider) => typeof provider === 'string' && provider.length > 0) ||
-        !Array.isArray(row.ranking) || !row.ranking.every((entry) => entry &&
-          typeof entry.provider === 'string' && Number.isFinite(entry.effectiveInputPrice) && entry.effectiveInputPrice >= 0 &&
-          Number.isFinite(entry.cacheShare) && entry.cacheShare >= 0 && entry.cacheShare <= 1) ||
-        !row.providers.every((provider) => row.ranking.some((entry) => entry.provider === provider))) return undefined;
-    return { policy: 'cost-daily-v1', model: row.model, fetchedAt: row.fetchedAt, providers: row.providers, ranking: row.ranking,
-      ...(Array.isArray(row.input) ? { input: row.input.filter((value) => value === 'text' || value === 'image') } : {}),
-      ...(cachedLimits(row.limits) ? { limits: cachedLimits(row.limits) } : {}) };
-  } catch { return undefined; }
+    if (
+      row.policy !== 'cost-daily-v1' ||
+      row.model !== input.model ||
+      !Number.isFinite(row.fetchedAt) ||
+      !Array.isArray(row.providers) ||
+      !row.providers.length ||
+      row.providers.length > 3 ||
+      !row.providers.every((provider) => typeof provider === 'string' && provider.length > 0) ||
+      !Array.isArray(row.ranking) ||
+      !row.ranking.every(
+        (entry) =>
+          entry &&
+          typeof entry.provider === 'string' &&
+          Number.isFinite(entry.effectiveInputPrice) &&
+          entry.effectiveInputPrice >= 0 &&
+          Number.isFinite(entry.cacheShare) &&
+          entry.cacheShare >= 0 &&
+          entry.cacheShare <= 1,
+      ) ||
+      !row.providers.every((provider) => row.ranking.some((entry) => entry.provider === provider))
+    )
+      return undefined;
+    return {
+      policy: 'cost-daily-v1',
+      model: row.model,
+      fetchedAt: row.fetchedAt,
+      providers: row.providers,
+      ranking: row.ranking,
+      ...(Array.isArray(row.input)
+        ? { input: row.input.filter((value) => value === 'text' || value === 'image') }
+        : {}),
+      ...(cachedLimits(row.limits) ? { limits: cachedLimits(row.limits) } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
-function dailyDecision(row: DailyRouting, source: OpenRouterRoutingSource): OpenRouterRoutingDecision {
-  return decision(row.model, row.providers, OPENROUTER_UPTIME_BAR_RELAXED, source,
-    'daily effective input cost; seven-day cache shares; answer-probed', true, row.input, row.limits);
+function dailyDecision(
+  row: DailyRouting,
+  source: OpenRouterRoutingSource,
+): OpenRouterRoutingDecision {
+  return decision(
+    row.model,
+    row.providers,
+    OPENROUTER_UPTIME_BAR_RELAXED,
+    source,
+    'daily effective input cost; seven-day cache shares; answer-probed',
+    true,
+    row.input,
+    row.limits,
+  );
 }
 
 /** A cold agent qualifies once; expired decisions refresh in the background for new activations. */
 async function buildDailyRouting(input: ResolveOpenRouterRoutingInput): Promise<DailyRouting> {
   const now = input.now ?? Date.now;
-  const response = await (input.fetchImpl ?? fetch)(`${OPENROUTER_ENDPOINTS_BASE_URL}/${input.model}/endpoints`, {
-    signal: undefined,
-  });
+  const response = await (input.fetchImpl ?? fetch)(
+    `${OPENROUTER_ENDPOINTS_BASE_URL}/${input.model}/endpoints`,
+    {
+      signal: undefined,
+    },
+  );
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const { endpoints, contextLength, inputModalities } = parseOpenRouterEndpoints(await response.json());
-  const eligible = [...new Set(endpoints.filter((endpoint) => endpoint.tools &&
-    endpoint.uptime >= OPENROUTER_UPTIME_BAR_RELAXED && endpoint.promptPrice !== undefined &&
-    (contextLength === undefined || endpoint.contextLength >= contextLength)).map((endpoint) => endpoint.provider))];
+  const { endpoints, contextLength, inputModalities } = parseOpenRouterEndpoints(
+    await response.json(),
+  );
+  const eligible = [
+    ...new Set(
+      endpoints
+        .filter(
+          (endpoint) =>
+            endpoint.tools &&
+            endpoint.uptime >= OPENROUTER_UPTIME_BAR_RELAXED &&
+            endpoint.promptPrice !== undefined &&
+            (contextLength === undefined || endpoint.contextLength >= contextLength),
+        )
+        .map((endpoint) => endpoint.provider),
+    ),
+  ];
   if (!eligible.length) throw new Error('no priced provider met the tools/context/95% gate');
   const [traffic, probes] = await Promise.all([
-    readOpenRouterTraffic({ model: input.model, cacheDir: input.cacheDir,
+    readOpenRouterTraffic({
+      model: input.model,
+      cacheDir: input.cacheDir,
       ...(input.historyRoomsDir ? { roomsDir: input.historyRoomsDir } : {}),
-      apiKey: input.apiKey!, now: now(), fetchImpl: input.fetchImpl, timeoutMs: input.timeoutMs }),
-    probeOpenRouterProviders({ model: input.model, providers: eligible, apiKey: input.apiKey!,
-      fetchImpl: input.fetchImpl, now: input.now, timeoutMs: input.probeTimeoutMs,
+      apiKey: input.apiKey!,
+      now: now(),
+      fetchImpl: input.fetchImpl,
+    }),
+    probeOpenRouterProviders({
+      model: input.model,
+      providers: eligible,
+      apiKey: input.apiKey!,
+      fetchImpl: input.fetchImpl,
+      now: input.now,
       // Gate every eligible provider once per day, rather than using the old
       // uptime-first six as a proxy for the cheapest qualified set.
-      maxCandidates: input.probeMaxCandidates ?? eligible.length }),
+      maxCandidates: input.probeMaxCandidates ?? eligible.length,
+    }),
   ]);
-  const ranking = rankOpenRouterProviders(endpoints, contextLength, traffic,
-    probes.filter((probe) => probe.answered).map((probe) => probe.provider));
+  const ranking = rankOpenRouterProviders(
+    endpoints,
+    contextLength,
+    traffic,
+    probes.filter((probe) => probe.answered).map((probe) => probe.provider),
+  );
   if (!ranking.length) throw new Error('no eligible provider answered the text probe');
   const providers = ranking.slice(0, 3).map((row) => row.provider);
-  const row: DailyRouting = { policy: 'cost-daily-v1', model: input.model, fetchedAt: now(), providers, ranking,
-    input: piInputModalities(inputModalities), limits: openRouterModelLimits(endpoints, providers) };
-  await writePrivateFileAtomically(dailyCachePath(input), `${JSON.stringify(row, null, 2)}\n`).catch(() => undefined);
+  const row: DailyRouting = {
+    policy: 'cost-daily-v1',
+    model: input.model,
+    fetchedAt: now(),
+    providers,
+    ranking,
+    input: piInputModalities(inputModalities),
+    limits: openRouterModelLimits(endpoints, providers),
+  };
+  await writePrivateFileAtomically(
+    dailyCachePath(input),
+    `${JSON.stringify(row, null, 2)}\n`,
+  ).catch(() => undefined);
   return row;
 }
 
 // Keep completed attempts too: an unreachable API or unwritable disk must not
 // turn the daily ranking into a per-activation retry/purchase loop.
-const dailyAttempts = new Map<string, { startedAt: number; result: Promise<OpenRouterRoutingDecision> }>();
+const dailyAttempts = new Map<
+  string,
+  { startedAt: number; result: Promise<OpenRouterRoutingDecision> }
+>();
 
-export async function resolveOpenRouterRouting(input: ResolveOpenRouterRoutingInput): Promise<OpenRouterRoutingDecision> {
+export async function resolveOpenRouterRouting(
+  input: ResolveOpenRouterRoutingInput,
+): Promise<OpenRouterRoutingDecision> {
   const cached = await readDailyRouting(input);
   const override = input.providerOverride?.trim();
   if (override) {
     const base = cached ? dailyDecision(cached, 'cache') : await resolveUptimeRouting(input);
-    return decision(input.model, [override], base.bar, base.source,
-      'pinned to one provider after an empty completion', false, base.input, base.limits);
+    return decision(
+      input.model,
+      [override],
+      base.bar,
+      base.source,
+      'pinned to one provider after an empty completion',
+      false,
+      base.input,
+      base.limits,
+    );
   }
   // Without a credential we cannot buy the answer probe or read account
   // generations. Preserve the legacy reliability fallback for standalone use.
   if (!input.apiKey?.trim()) return resolveUptimeRouting(input);
   const now = input.now ?? Date.now;
-  if (cached && now() - cached.fetchedAt < OPENROUTER_ROUTING_CACHE_TTL_MS) return dailyDecision(cached, 'cache');
+  if (cached && now() - cached.fetchedAt < OPENROUTER_ROUTING_CACHE_TTL_MS)
+    return dailyDecision(cached, 'cache');
   const key = `${input.cacheDir}\u0000${input.model}`;
   let attempt = dailyAttempts.get(key);
   if (!attempt || now() - attempt.startedAt >= OPENROUTER_ROUTING_CACHE_TTL_MS) {
-    const result = buildDailyRouting(input).then((row) => dailyDecision(row, 'live')).catch(async (error) => {
-      const base = cached ? dailyDecision(cached, 'stale-cache') : await resolveUptimeRouting(input);
-      return { ...base, line: `${base.line}; daily ranking unavailable: ${error instanceof Error ? error.message : String(error)}` };
-    });
+    const result = buildDailyRouting(input)
+      .then((row) => dailyDecision(row, 'live'))
+      .catch(async (error) => {
+        const base = cached
+          ? dailyDecision(cached, 'stale-cache')
+          : await resolveUptimeRouting(input);
+        return {
+          ...base,
+          line: `${base.line}; daily ranking unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      });
     attempt = { startedAt: now(), result };
     dailyAttempts.set(key, attempt);
   }
@@ -855,92 +959,6 @@ export async function resolveOpenRouterRouting(input: ResolveOpenRouterRoutingIn
   // The first pin needs real price/traffic facts and an affirmative probe.
   // Only this cold activation waits; retained sessions are never rewritten.
   return attempt.result;
-}
-
-/**
- * Pin ONE model inside pi's `models.json` without touching operator custom
- * providers or any other model: the routing lands on
- * `providers.openrouter.modelOverrides[<model>].compat.openRouterRouting`,
- * pi's topmost per-model layer, and the model's live input modalities land
- * beside it on the same override as `input` (C87 — without it a custom-model
- * entry defaults the model to text and pi strips every image from the prompt),
- * and the routed endpoints' `contextWindow` and `maxTokens` land there too.
- * With no model to pin, the object form still gains an empty `providers` map
- * (pi's schema requires the key).
- */
-export function withOpenRouterModelRouting(
-  value: unknown,
-  pin:
-    | {
-        model: string;
-        routing: OpenRouterRouting;
-        input?: Array<'text' | 'image'>;
-        /** `contextWindow` is absent when the listing named no window. */
-        limits?: { contextWindow?: number; maxTokens: number };
-      }
-    | undefined,
-): Record<string, unknown> {
-  const root =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? { ...(value as Record<string, unknown>) }
-      : {};
-  const applyOverride = (provider: Record<string, unknown>): Record<string, unknown> => {
-    if (!pin) return provider;
-    const overrides =
-      provider.modelOverrides &&
-      typeof provider.modelOverrides === 'object' &&
-      !Array.isArray(provider.modelOverrides)
-        ? { ...(provider.modelOverrides as Record<string, unknown>) }
-        : {};
-    const existing = overrides[pin.model];
-    const override =
-      existing && typeof existing === 'object' && !Array.isArray(existing)
-        ? { ...(existing as Record<string, unknown>) }
-        : {};
-    const compat =
-      override.compat && typeof override.compat === 'object' && !Array.isArray(override.compat)
-        ? { ...(override.compat as Record<string, unknown>) }
-        : {};
-    override.compat = { ...compat, openRouterRouting: pin.routing };
-    if (pin.input) override.input = pin.input;
-    if (pin.limits?.contextWindow) override.contextWindow = pin.limits.contextWindow;
-    if (pin.limits) override.maxTokens = pin.limits.maxTokens;
-    overrides[pin.model] = override;
-    return { ...provider, modelOverrides: overrides };
-  };
-  if (Array.isArray(root.providers)) {
-    if (!pin) return root;
-    const providers = root.providers.map((provider) =>
-      provider && typeof provider === 'object'
-        ? { ...(provider as Record<string, unknown>) }
-        : provider,
-    );
-    const index = providers.findIndex(
-      (provider) => provider && typeof provider === 'object' && provider.name === 'openrouter',
-    );
-    const current = applyOverride(
-      index >= 0 ? (providers[index] as Record<string, unknown>) : { name: 'openrouter' },
-    );
-    if (index >= 0) providers[index] = current;
-    else providers.push(current);
-    root.providers = providers;
-    return root;
-  }
-  const providers =
-    root.providers && typeof root.providers === 'object'
-      ? { ...(root.providers as Record<string, unknown>) }
-      : {};
-  if (pin) {
-    const current =
-      providers.openrouter &&
-      typeof providers.openrouter === 'object' &&
-      !Array.isArray(providers.openrouter)
-        ? { ...(providers.openrouter as Record<string, unknown>) }
-        : {};
-    providers.openrouter = applyOverride(current);
-  }
-  root.providers = providers;
-  return root;
 }
 
 /**
@@ -966,7 +984,9 @@ export function openRouterRoutingInput(
     openRouterRouting: {
       model,
       cacheDir: config.openRouterRoutingCacheDir,
-      ...(apiKey ? { apiKey, historyRoomsDir: resolve(config.openRouterRoutingCacheDir, '../rooms') } : {}),
+      ...(apiKey
+        ? { apiKey, historyRoomsDir: resolve(config.openRouterRoutingCacheDir, '../rooms') }
+        : {}),
       ...(fetchImpl ? { fetchImpl } : {}),
       ...(extra?.providerOverride ? { providerOverride: extra.providerOverride } : {}),
       ...(extra?.onDecision ? { onDecision: extra.onDecision } : {}),

@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -82,3 +83,39 @@ it('terminates and caps a granted command that floods output', async () => {
   expect(result.output).toContain('bytes omitted');
   expect(result.output.length).toBeLessThan(256);
 });
+
+// A killed process is gone or a zombie awaiting its (re)parent's reap.
+const gone = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return true;
+  }
+  return /\) Z /.test(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+};
+// Repro G: the direct child exited at once while a grandchild held stdout, and
+// the runner waited for that grandchild's `close` (12 s in the audit).
+it.skipIf(process.platform !== 'linux')(
+  'settles when the granted command exits, killing a grandchild that holds its output',
+  async () => {
+    const started = Date.now();
+    const result = await run(
+      'const c = require("node:child_process").spawn("sleep", ["30"], { stdio: ["ignore", "inherit", "inherit"] }); c.unref(); console.log(c.pid);',
+    );
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+    expect(gone(Number(result.output.trim()))).toBe(true);
+  },
+);
+
+it.skipIf(process.platform !== 'linux')(
+  'the time limit kills the whole process group, not only the direct child',
+  async () => {
+    const result = await run(
+      'const c = require("node:child_process").spawn("sleep", ["30"], { stdio: ["ignore", "inherit", "inherit"] }); console.log(c.pid); setInterval(() => {}, 1000);',
+      { timeoutMs: 300 },
+    );
+    expect(result).toMatchObject({ exitCode: null, signal: 'SIGKILL', timedOut: true });
+    expect(gone(Number(result.output.trim()))).toBe(true);
+  },
+);

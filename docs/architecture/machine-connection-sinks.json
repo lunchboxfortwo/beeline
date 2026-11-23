@@ -24,7 +24,7 @@
     "reason": "Machine registration, request correlation, and explicit process stop."
   },
   "apps/body/src/machine-link.ts::#dispatch::send": {
-    "count": 2,
+    "count": 1,
     "reason": "Machine registration, request correlation, and explicit process stop."
   },
   "apps/body/src/machine-link.ts::stop::send": {

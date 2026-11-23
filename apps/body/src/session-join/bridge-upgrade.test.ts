@@ -2,11 +2,24 @@ import { afterEach, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  watch,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { acceptMemberDelivery, deliver, ensureBridge, refreshJoinedSessionBridge } from './bridge.js';
+import {
+  acceptMemberDelivery,
+  deliver,
+  ensureBridge,
+  refreshJoinedSessionBridge,
+} from './bridge.js';
 import { readState, updateState, type JoinedSession } from './store.js';
 import { bridgeSocketPath } from './bridge-socket.js';
 
@@ -15,28 +28,61 @@ const folders: string[] = [];
 afterEach(async () => {
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) {
-      const ended = once(child, 'exit'); child.kill(); await ended;
+      const ended = once(child, 'exit');
+      child.kill();
+      await ended;
     }
   }
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 
 function changedFile(path: string, ready: () => boolean): Promise<void> {
-  return new Promise(resolve => {
-    const watcher = watch(path, { recursive: true }, () => { if (ready()) { watcher.close(); resolve(); } });
-    if (ready()) { watcher.close(); resolve(); }
+  return new Promise((resolve) => {
+    const watcher = watch(path, { recursive: true }, () => {
+      if (ready()) {
+        watcher.close();
+        resolve();
+      }
+    });
+    if (ready()) {
+      watcher.close();
+      resolve();
+    }
   });
 }
 
 it('parks on a terminal stream response without rotating its permanent access token', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bridge-expiry-budget-')); folders.push(dir);
-  const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir, XDG_STATE_HOME: dir,
-    CLAUDE_CONFIG_DIR: join(dir, '.claude'), CODEX_HOME: join(dir, '.codex') };
-  const stateDir = join(dir, 'state'); mkdirSync(stateDir);
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-expiry-budget-'));
+  folders.push(dir);
+  const env = {
+    ...process.env,
+    HOME: dir,
+    XDG_CONFIG_HOME: dir,
+    XDG_STATE_HOME: dir,
+    CLAUDE_CONFIG_DIR: join(dir, '.claude'),
+    CODEX_HOME: join(dir, '.codex'),
+  };
+  const stateDir = join(dir, 'state');
+  mkdirSync(stateDir);
   const requests = join(dir, 'requests');
-  await updateState(stateDir, state => { state.sessions = [{ key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir,
-    name: 'Claude', server: 'https://synthetic.invalid', clientId: 'client', refreshToken: 'original-refresh',
-    accessToken: 'original-access', accessExpiresAt: Date.now() + 3_600_000, cursor: '0', deliveredWakes: [], joinedAt: '' }]; });
+  await updateState(stateDir, (state) => {
+    state.sessions = [
+      {
+        key: `claude-code:${dir}`,
+        agent: 'claude-code',
+        cwd: dir,
+        name: 'Claude',
+        server: 'https://synthetic.invalid',
+        clientId: 'client',
+        refreshToken: 'original-refresh',
+        accessToken: 'original-access',
+        accessExpiresAt: Date.now() + 3_600_000,
+        cursor: '0',
+        deliveredWakes: [],
+        joinedAt: '',
+      },
+    ];
+  });
   const bridge = resolve('src/session-join/bridge.ts');
   const script = `import { runBridge } from ${JSON.stringify(bridge)};
     import { appendFileSync } from 'node:fs';
@@ -52,49 +98,110 @@ it('parks on a terminal stream response without rotating its permanent access to
         { headers: { 'content-type': 'application/x-ndjson' } });
     };
     await runBridge(${JSON.stringify(stateDir)}, { node: process.execPath, bundle: ${JSON.stringify(bridge)} });`;
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { env, stdio: 'ignore' }); children.push(child);
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    env,
+    stdio: 'ignore',
+  });
+  children.push(child);
   await changedFile(dir, () => existsSync(requests));
   // The replacement has ended synchronously; allow the credential/state file
   // events to settle and prove they cannot admit a third connection.
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   expect(readFileSync(requests, 'utf8')).toBe('stream\n');
 });
 
-it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path and catches up before delivering live Claude tags', async length => {
-  const dir = mkdtempSync(join(tmpdir(), 'bridge-upgrade-')); folders.push(dir);
-  const stateRoot = length === 'long' ? join(dir, 'state-'.repeat(30)) : dir;
-  const env = { ...process.env, HOME: dir, XDG_STATE_HOME: stateRoot, CLAUDE_CONFIG_DIR: join(dir, '.claude') };
-  const stateDir = join(stateRoot, 'beeline-sessions'); mkdirSync(stateDir, { recursive: true });
-  if (dirname(bridgeSocketPath(stateDir)) !== stateDir) folders.push(dirname(bridgeSocketPath(stateDir)));
-  const joined: JoinedSession = { key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir,
-    name: 'Claude', server: 'https://synthetic.invalid', clientId: 'client', refreshToken: 'synthetic',
-    accessToken: 'synthetic', accessExpiresAt: Date.now() + 3_600_000, cursor: '437', deliveredWakes: [],
-    sessionId: 'synthetic-session', pid: process.pid, joinedAt: '', deliveryGeneration:'bound-upgrade',deliveryMechanism:'local' };
-  await updateState(stateDir, state => { state.sessions = [joined]; });
-  const oldBundle = join(dir, 'usebeeline.mjs');
-  writeFileSync(oldBundle, `import { createServer } from 'node:net';
+it.each(['short', 'long'])(
+  'replaces a living channel-owned bridge at a %s state path and catches up before delivering live Claude tags',
+  async (length) => {
+    const dir = mkdtempSync(join(tmpdir(), 'bridge-upgrade-'));
+    folders.push(dir);
+    const stateRoot = length === 'long' ? join(dir, 'state-'.repeat(30)) : dir;
+    const env = {
+      ...process.env,
+      HOME: dir,
+      XDG_STATE_HOME: stateRoot,
+      CLAUDE_CONFIG_DIR: join(dir, '.claude'),
+    };
+    const stateDir = join(stateRoot, 'beeline-sessions');
+    mkdirSync(stateDir, { recursive: true });
+    if (dirname(bridgeSocketPath(stateDir)) !== stateDir)
+      folders.push(dirname(bridgeSocketPath(stateDir)));
+    const joined: JoinedSession = {
+      key: `claude-code:${dir}`,
+      agent: 'claude-code',
+      cwd: dir,
+      name: 'Claude',
+      server: 'https://synthetic.invalid',
+      clientId: 'client',
+      refreshToken: 'synthetic',
+      accessToken: 'synthetic',
+      accessExpiresAt: Date.now() + 3_600_000,
+      cursor: '437',
+      deliveredWakes: [],
+      sessionId: 'synthetic-session',
+      pid: process.pid,
+      joinedAt: '',
+      deliveryGeneration: 'bound-upgrade',
+      deliveryMechanism: 'local',
+    };
+    await updateState(stateDir, (state) => {
+      state.sessions = [joined];
+    });
+    const oldBundle = join(dir, 'usebeeline.mjs');
+    writeFileSync(
+      oldBundle,
+      `import { tsImport } from ${JSON.stringify(createRequire(import.meta.url).resolve('tsx/esm/api'))};
+    const { tryLock } = await tsImport(${JSON.stringify(resolve('src/wait.ts'))}, import.meta.url);
+    await tryLock(${JSON.stringify('beeline-session-bridge-owner:' + resolve(stateDir))});
+    import { createServer } from 'node:net';
     import { writeFileSync } from 'node:fs';
     createServer().listen(${JSON.stringify(join(dir, 'old.sock'))}, () => {
       writeFileSync(${JSON.stringify(join(stateDir, 'bridge.pid'))}, String(process.pid));
-    });`);
-  const old = spawn(process.execPath, [oldBundle, 'session', 'bridge'], { env, stdio: 'ignore' }); children.push(old);
-  await changedFile(stateDir, () => { try { return Number(readFileSync(join(stateDir, 'bridge.pid'))) === old.pid; } catch { return false; } });
+    });`,
+    );
+    const old = spawn(process.execPath, [oldBundle, 'session', 'bridge'], { env, stdio: 'ignore' });
+    children.push(old);
+    await changedFile(stateDir, () => {
+      try {
+        return Number(readFileSync(join(stateDir, 'bridge.pid'))) === old.pid;
+      } catch {
+        return false;
+      }
+    });
 
-  const socket = join(dir, 'claude.sock');
-  const messages: string[] = [];
-  let received!: () => void;
-  const delivered = new Promise<void>(done => { received = done; });
-  const server = createServer(peer => {
-    let text = ''; peer.on('data', chunk => { text += chunk; });
-    peer.on('end', () => { messages.push(JSON.parse(text).message.content); if (messages.length === 2) received(); });
-  });
-  server.listen(socket); await once(server, 'listening');
-  mkdirSync(join(env.CLAUDE_CONFIG_DIR, 'sessions'), { recursive: true });
-  writeFileSync(join(env.CLAUDE_CONFIG_DIR, 'sessions', `${process.pid}.json`), JSON.stringify({
-    pid: process.pid, sessionId: joined.sessionId, cwd: joined.cwd, messagingSocketPath: socket,
-  }));
-  const bundle = join(dir, 'new', 'usebeeline.mjs'); mkdirSync(join(dir, 'new'));
-  writeFileSync(bundle, `import { tsImport } from ${JSON.stringify(createRequire(import.meta.url).resolve('tsx/esm/api'))};
+    const socket = join(dir, 'claude.sock');
+    const messages: string[] = [];
+    let received!: () => void;
+    const delivered = new Promise<void>((done) => {
+      received = done;
+    });
+    const server = createServer((peer) => {
+      let text = '';
+      peer.on('data', (chunk) => {
+        text += chunk;
+      });
+      peer.on('end', () => {
+        messages.push(JSON.parse(text).message.content);
+        if (messages.length === 2) received();
+      });
+    });
+    server.listen(socket);
+    await once(server, 'listening');
+    mkdirSync(join(env.CLAUDE_CONFIG_DIR, 'sessions'), { recursive: true });
+    writeFileSync(
+      join(env.CLAUDE_CONFIG_DIR, 'sessions', `${process.pid}.json`),
+      JSON.stringify({
+        pid: process.pid,
+        sessionId: joined.sessionId,
+        cwd: joined.cwd,
+        messagingSocketPath: socket,
+      }),
+    );
+    const bundle = join(dir, 'new', 'usebeeline.mjs');
+    mkdirSync(join(dir, 'new'));
+    writeFileSync(
+      bundle,
+      `import { tsImport } from ${JSON.stringify(createRequire(import.meta.url).resolve('tsx/esm/api'))};
     import { appendFileSync } from 'node:fs';
     const { runBridge } = await tsImport(${JSON.stringify(resolve('src/session-join/bridge.ts'))}, import.meta.url);
     let streams = 0;
@@ -107,64 +214,124 @@ it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path a
           mentions: [{ id: 'tag-' + n, room_id: 'synthetic-room', text: n === 1 ? 'missed while old bridge lived' : 'committed after reconnect' }],
           wakes: [], mentionCursor: String(459 + n) }) + '\\n'));
         if (n === 1) controller.close();
+        // Like undici, an aborted request fails its body read, so a stopping bridge's stream job settles.
+        else init.signal?.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
       } }), { headers: { 'content-type': 'application/x-ndjson' } });
     };
-    await runBridge(${JSON.stringify(stateDir)}, { node: process.execPath, bundle: ${JSON.stringify(bundle)} });`);
-  try {
-    await refreshJoinedSessionBridge(bundle, env);
-    expect(old.exitCode !== null || old.signalCode !== null).toBe(true);
-    await delivered;
-    expect(messages[0]).toContain('missed while old bridge lived');
-    expect(messages[1]).toContain('committed after reconnect');
-    expect(readState(stateDir).sessions[0]?.cursor).toBe('461');
-    expect(readFileSync(join(dir, 'connections'), 'utf8')).toBe('437\n460\n');
-    const pid = Number(readFileSync(join(stateDir, 'bridge.pid')));
-    await ensureBridge(stateDir, { node: process.execPath, bundle: join(stateDir, 'usebeeline.mjs') }, env);
-    expect(Number(readFileSync(join(stateDir, 'bridge.pid')))).toBe(pid);
-  } finally {
-    const pid = Number(readFileSync(join(stateDir, 'bridge.pid')));
-    if (pid !== old.pid) {
-      const { waitForProcessExit } = await import('../process-exit.js');
-      try { process.kill(pid); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
-      await waitForProcessExit(pid);
+    await runBridge(${JSON.stringify(stateDir)}, { node: process.execPath, bundle: ${JSON.stringify(bundle)} });`,
+    );
+    try {
+      await refreshJoinedSessionBridge(bundle, env);
+      expect(old.exitCode !== null || old.signalCode !== null).toBe(true);
+      await delivered;
+      expect(messages[0]).toContain('missed while old bridge lived');
+      expect(messages[1]).toContain('committed after reconnect');
+      expect(readState(stateDir).sessions[0]?.cursor).toBe('461');
+      expect(readFileSync(join(dir, 'connections'), 'utf8')).toBe('437\n460\n');
+      const pid = Number(readFileSync(join(stateDir, 'bridge.pid')));
+      await ensureBridge(
+        stateDir,
+        { node: process.execPath, bundle: join(stateDir, 'usebeeline.mjs') },
+        env,
+      );
+      expect(Number(readFileSync(join(stateDir, 'bridge.pid')))).toBe(pid);
+    } finally {
+      const pid = Number(readFileSync(join(stateDir, 'bridge.pid')));
+      if (pid !== old.pid) {
+        const { waitForProcessExit } = await import('../process-exit.js');
+        try {
+          process.kill(pid);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+        }
+        await waitForProcessExit(pid);
+      }
+      await new Promise<void>((done) => server.close(() => done()));
     }
-    await new Promise<void>(done => server.close(() => done()));
-  }
-}, 20_000);
+  },
+  20_000,
+);
 
 it('refuses to signal an unrelated process named by a stale bridge PID file', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bridge-pid-')); folders.push(dir);
-  const bundle = join(dir, 'unrelated.mjs'); writeFileSync(bundle, 'process.stdin.resume();');
-  const child = spawn(process.execPath, [bundle, 'session', 'bridge'], { stdio: ['pipe', 'ignore', 'ignore'] }); children.push(child);
-  await once(child, 'spawn'); writeFileSync(join(dir, 'bridge.pid'), String(child.pid));
-  await expect(ensureBridge(dir, { node: process.execPath, bundle })).rejects.toThrow('refusing takeover');
-  expect(child.exitCode).toBe(null); expect(child.signalCode).toBe(null);
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-pid-'));
+  folders.push(dir);
+  const bundle = join(dir, 'unrelated.mjs');
+  writeFileSync(bundle, 'process.stdin.resume();');
+  const child = spawn(process.execPath, [bundle, 'session', 'bridge'], {
+    stdio: ['pipe', 'ignore', 'ignore'],
+  });
+  children.push(child);
+  await once(child, 'spawn');
+  writeFileSync(join(dir, 'bridge.pid'), String(child.pid));
+  await expect(ensureBridge(dir, { node: process.execPath, bundle })).rejects.toThrow(
+    'refusing takeover',
+  );
+  expect(child.exitCode).toBe(null);
+  expect(child.signalCode).toBe(null);
 });
 
 it('wakes Claude’s authenticated in-session receiver on a committed durable delivery', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'claude-commit-')); folders.push(dir);
-  const env = { ...process.env, HOME: dir, XDG_STATE_HOME: dir, CLAUDE_CONFIG_DIR: join(dir, '.claude'),
-    CLAUDE_CODE_MESSAGING_TOKEN: 'synthetic-session-token' };
+  const dir = mkdtempSync(join(tmpdir(), 'claude-commit-'));
+  folders.push(dir);
+  const env = {
+    ...process.env,
+    HOME: dir,
+    XDG_STATE_HOME: dir,
+    CLAUDE_CONFIG_DIR: join(dir, '.claude'),
+    CLAUDE_CODE_MESSAGING_TOKEN: 'synthetic-session-token',
+  };
   const socket = join(dir, 'claude.sock');
-  const joined: JoinedSession = { key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir, name: 'Claude',
-    server: 'https://synthetic.invalid', clientId: 'client', refreshToken: 'synthetic', cursor: '437',
-    deliveredWakes: [], sessionId: 'claude-commit', pid: process.pid, joinedAt: '', deliveryGeneration:'bound-commit',deliveryMechanism:'local' };
-  await updateState(dir, state => { state.sessions = [joined]; });
+  const joined: JoinedSession = {
+    key: `claude-code:${dir}`,
+    agent: 'claude-code',
+    cwd: dir,
+    name: 'Claude',
+    server: 'https://synthetic.invalid',
+    clientId: 'client',
+    refreshToken: 'synthetic',
+    cursor: '437',
+    deliveredWakes: [],
+    sessionId: 'claude-commit',
+    pid: process.pid,
+    joinedAt: '',
+    deliveryGeneration: 'bound-commit',
+    deliveryMechanism: 'local',
+  };
+  await updateState(dir, (state) => {
+    state.sessions = [joined];
+  });
   mkdirSync(join(env.CLAUDE_CONFIG_DIR, 'sessions'), { recursive: true });
-  writeFileSync(join(env.CLAUDE_CONFIG_DIR, 'sessions', `${process.pid}.json`), JSON.stringify({
-    pid: process.pid, sessionId: joined.sessionId, cwd: dir, messagingSocketPath: socket,
-  }));
+  writeFileSync(
+    join(env.CLAUDE_CONFIG_DIR, 'sessions', `${process.pid}.json`),
+    JSON.stringify({
+      pid: process.pid,
+      sessionId: joined.sessionId,
+      cwd: dir,
+      messagingSocketPath: socket,
+    }),
+  );
   let receive!: (frames: { type: string; token?: string; message?: { content: string } }[]) => void;
-  const received = new Promise<Parameters<typeof receive>[0]>(done => { receive = done; });
+  const received = new Promise<Parameters<typeof receive>[0]>((done) => {
+    receive = done;
+  });
   const connections: Parameters<typeof receive>[0] = [];
-  const server = createServer(peer => {
-    let text = ''; peer.on('data', chunk => { text += chunk; });
+  const server = createServer((peer) => {
+    let text = '';
+    peer.on('data', (chunk) => {
+      text += chunk;
+    });
     peer.on('end', () => {
-      connections.push(...text.trim().split('\n').map(line => JSON.parse(line)));
+      connections.push(
+        ...text
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line)),
+      );
       if (connections.length === 4) receive(connections);
     });
   });
-  server.listen(socket); await once(server, 'listening');
+  server.listen(socket);
+  await once(server, 'listening');
   const script = `import { runClaudeMcp } from ${JSON.stringify(resolve('src/session-join/claude-mcp.ts'))};
     import { postToClaude } from ${JSON.stringify(resolve('src/session-join/claude.ts'))};
     import { watch } from 'node:fs';
@@ -181,32 +348,71 @@ it('wakes Claude’s authenticated in-session receiver on a committed durable de
         });
       }
     });`;
-  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { env, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+    env,
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
   children.push(child);
   try {
     child.stdin!.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) + '\n');
     await once(child.stdout!, 'data');
     const firstPost = once(child.stdout!, 'data');
-    await acceptMemberDelivery(dir, joined.key, { node: '/node', bundle: '/synthetic' }, { v: 1, type: 'delivery',
-      deliveryId: 'mention:missed', mentions: [{ id: 'missed', room_id: 'room', text: 'committed tag for Claude' }], wakes: [], mentionCursor: '460' });
-    expect(await deliver(dir, joined, { agent: 'claude-code', sessionId: joined.sessionId!, pid: process.pid, socket }))
-      .toBe('waiting for the in-session MCP server');
+    await acceptMemberDelivery(
+      dir,
+      joined.key,
+      { node: '/node', bundle: '/synthetic' },
+      {
+        v: 1,
+        type: 'delivery',
+        deliveryId: 'mention:missed',
+        mentions: [{ id: 'missed', room_id: 'room', text: 'committed tag for Claude' }],
+        wakes: [],
+        mentionCursor: '460',
+      },
+    );
+    expect(
+      await deliver(dir, joined, {
+        agent: 'claude-code',
+        sessionId: joined.sessionId!,
+        pid: process.pid,
+        socket,
+      }),
+    ).toBe('waiting for the in-session MCP server');
     await firstPost;
     // A second commit while a post awaits completion must not disappear behind
     // the in-flight guard. Releasing the first post is a filesystem event.
-    await acceptMemberDelivery(dir, joined.key, { node: '/node', bundle: '/synthetic' }, { v: 1, type: 'delivery',
-      deliveryId: 'mention:next', mentions: [{ id: 'next', room_id: 'room', text: 'tag committed during the first post' }], wakes: [], mentionCursor: '461' });
+    await acceptMemberDelivery(
+      dir,
+      joined.key,
+      { node: '/node', bundle: '/synthetic' },
+      {
+        v: 1,
+        type: 'delivery',
+        deliveryId: 'mention:next',
+        mentions: [{ id: 'next', room_id: 'room', text: 'tag committed during the first post' }],
+        wakes: [],
+        mentionCursor: '461',
+      },
+    );
     writeFileSync(join(dir, 'release-post'), '');
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    const frames = await Promise.race([received, new Promise<never>((_done, fail) => {
-      timeout = setTimeout(() => fail(new Error('Claude receiver missed the durable delivery commit')), 2000);
-    })]).finally(() => clearTimeout(timeout));
+    const frames = await Promise.race([
+      received,
+      new Promise<never>((_done, fail) => {
+        timeout = setTimeout(
+          () => fail(new Error('Claude receiver missed the durable delivery commit')),
+          2000,
+        );
+      }),
+    ]).finally(() => clearTimeout(timeout));
     expect(frames[0]).toEqual({ type: 'auth', token: 'synthetic-session-token' });
     expect(frames[1]?.message?.content).toContain('committed tag for Claude');
     expect(frames[3]?.message?.content).toContain('tag committed during the first post');
     expect(readState(dir).sessions[0]?.cursor).toBe('461');
   } finally {
-    const ended = once(child, 'exit'); child.stdin!.end(); await ended;
-    await new Promise<void>(done => server.close(() => done()));
+    const ended = once(child, 'exit');
+    child.stdin!.end();
+    await ended;
+    await new Promise<void>((done) => server.close(() => done()));
   }
 }, 20_000);

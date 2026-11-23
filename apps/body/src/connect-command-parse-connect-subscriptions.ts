@@ -1,24 +1,40 @@
-import { resolve, dirname } from "node:path";
-import { homedir, hostname } from "node:os";
-import { readFile, mkdir, writeFile, chmod, unlink } from "node:fs/promises";
-import { randomUUID, createHash } from "node:crypto";
-import { normalizeAgentPairingCode } from "@beeline/api-contract/phone";
-import { agentBehavior } from "./agent-command.js";
-import { defaultSupervisorRoot, findAgentRuntimeConfigPaths } from "./runtime.js";
-import { spawn } from "node:child_process";
-import * as clack from "@clack/prompts";
-import { clackPromptOutput } from "./clack-support.js";
-import { type AgentAccessPolicy, isAgentAccessPolicy } from "./access-policy.js";
-import { verifyProviderKey } from "./provider-key-check.js";
-import { agentComputeWarning } from "./agent-compute-warning.js";
-import { type DevicePairingGrant, completeDevicePairing } from "./device-pairing.js";
-import { isCanonicalInstalledLauncher } from "./systemd.js";
-import { openRouterModelId, resolveOpenRouterRouting, openRouterRoutingCacheDir } from "./openrouter-routing.js";
-import { ConnectWizardResult, DeviceGrantResponse, jsonRequest, ConnectProvider, brass, clackPrompts, collectConnectWizard, loadConnectModelCatalog, fileConnectKeyStore, installCurrentRelease, ConnectPrompts, isReasonableAgentName, AGENT_NAME_MAX_LENGTH, CONNECT_HARNESSES } from './connect-command.js';
-
-
-
-
+import { resolve, dirname } from 'node:path';
+import { homedir, hostname } from 'node:os';
+import { readFile, mkdir, writeFile, chmod, unlink } from 'node:fs/promises';
+import { randomUUID, createHash } from 'node:crypto';
+import { normalizeAgentPairingCode } from '@beeline/api-contract/phone';
+import { agentBehavior } from './agent-command.js';
+import { defaultSupervisorRoot, findAgentRuntimeConfigPaths } from './runtime.js';
+import { runOwned } from './wait.js';
+import { stopLiveAcpAdapters } from './acp.js';
+import * as clack from '@clack/prompts';
+import { clackPromptOutput } from './clack-support.js';
+import { type AgentAccessPolicy, isAgentAccessPolicy } from './access-policy.js';
+import { verifyProviderKey } from './provider-key-check.js';
+import { agentComputeWarning } from './agent-compute-warning.js';
+import { type DevicePairingGrant, completeDevicePairing } from './device-pairing.js';
+import { isCanonicalInstalledLauncher } from './systemd.js';
+import {
+  openRouterModelId,
+  resolveOpenRouterRouting,
+  openRouterRoutingCacheDir,
+} from './openrouter-routing.js';
+import {
+  ConnectWizardResult,
+  DeviceGrantResponse,
+  jsonRequest,
+  ConnectProvider,
+  brass,
+  clackPrompts,
+  collectConnectWizard,
+  loadConnectModelCatalog,
+  fileConnectKeyStore,
+  installCurrentRelease,
+  ConnectPrompts,
+  isReasonableAgentName,
+  AGENT_NAME_MAX_LENGTH,
+  CONNECT_HARNESSES,
+} from './connect-command.js';
 
 /**
  * The kinds `--subscribe` accepts. Parsed here only to keep an obvious typo out
@@ -34,8 +50,6 @@ export function parseConnectSubscriptions(value: string | undefined): string[] {
     ),
   ];
 }
-
-
 
 /**
  * Resolve a stable MACHINE identifier for this host. Uses a persisted UUID in
@@ -69,14 +83,13 @@ export async function readMachineId(
   return { machineId, machineName };
 }
 
-
-
 export function requestConnectGrant(
   baseUrl: string,
   pairingCode: string,
   selection: ConnectWizardResult,
   fetchImpl: typeof fetch,
   machineInfo?: { machineId: string; machineName: string },
+  step?: SpinnerStep,
 ): Promise<DeviceGrantResponse> {
   const normalizedPairingCode = normalizeAgentPairingCode(pairingCode);
   if (!normalizedPairingCode) throw new Error('invalid pairing code');
@@ -105,10 +118,9 @@ export function requestConnectGrant(
         : {}),
     },
     fetchImpl,
+    step,
   );
 }
-
-
 
 /**
  * The one rename the terminal may make, right after the seeded identity is
@@ -130,8 +142,6 @@ export async function renameConnectedAgent(
   );
   return renamed.agent_name;
 }
-
-
 
 /**
  * The wizard's last step: joins the agent to the Workspace's live top-level
@@ -160,14 +170,10 @@ export async function finishConnectedAgentPairing(
   return finished.agent_handle;
 }
 
-
-
 /** `Foxy the fox` — one line naming what to look for in the app. */
 export function seededIdentityLine(grant: { agent_name: string; agent_face?: string }): string {
   return grant.agent_face ? `${grant.agent_name} the ${grant.agent_face}` : grant.agent_name;
 }
-
-
 
 export function providerEnvironment(
   selection: Pick<ConnectWizardResult, 'harness' | 'provider' | 'apiKey' | 'model'>,
@@ -191,15 +197,11 @@ export function providerEnvironment(
   };
 }
 
-
-
 export async function writePrivateJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
-
-
 
 export async function writeProviderEnv(
   selection: ConnectWizardResult,
@@ -222,52 +224,86 @@ export async function writeProviderEnv(
   return path;
 }
 
-
-
-export async function runInstalledFinish(binary: string, grantPath: string): Promise<void> {
-  await new Promise<void>((resolveRun, rejectRun) => {
-    const child = spawn(binary, ['connect-finish', grantPath], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let diagnostic = '';
-    const retainDiagnostic = (chunk: Buffer): void => {
-      diagnostic = `${diagnostic}${chunk.toString('utf8')}`.slice(-16_000);
-    };
-    child.stdout?.on('data', retainDiagnostic);
-    child.stderr?.on('data', retainDiagnostic);
-    child.once('error', rejectRun);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolveRun();
-      else {
-        const outcome = signal
-          ? `installed Beeline exited on ${signal}`
-          : `installed Beeline exited ${code}`;
-        rejectRun(new Error(`${outcome}${diagnostic.trim() ? `: ${diagnostic.trim()}` : ''}`));
-      }
-    });
+/**
+ * Run the installed `connect-finish` as an owned child until it exits. Each
+ * output line it prints is shown as it arrives (the covering spinner's
+ * message), and the tail is kept for the failure message. Cancelling or
+ * leaving the wizard kills the child's process group.
+ */
+export async function runInstalledFinish(
+  binary: string,
+  grantPath: string,
+  step?: SpinnerStep,
+): Promise<void> {
+  let diagnostic = '';
+  const result = await runOwned({
+    step: 'installed Beeline connect-finish',
+    file: binary,
+    args: ['connect-finish', grantPath],
+    ...(step ? { signal: step.signal } : {}),
+    onLine: (line) => {
+      diagnostic = `${diagnostic}${line}\n`.slice(-16_000);
+      if (line.trim()) step?.say(line.trim());
+    },
   });
+  if (result.code === 0) return;
+  const outcome = result.signal
+    ? `installed Beeline exited on ${result.signal}`
+    : `installed Beeline exited ${result.code}`;
+  throw new Error(`${outcome}${diagnostic.trim() ? `: ${diagnostic.trim()}` : ''}`);
 }
 
+/** What a spinner hands the wait it covers. */
+export interface SpinnerStep {
+  /** Replace the spinner's message with the wait's latest line. */
+  say: (line: string) => void;
+  /** Aborted when SIGINT or SIGTERM cancels the spinner. */
+  signal: AbortSignal;
+}
 
-
+/**
+ * One spinner over one wait. The wait's own lines (a child's output, the host
+ * a request waits on) replace the message as they arrive. SIGINT or SIGTERM
+ * reaches clack's spinner as a cancel: it aborts the wait's signal and stops
+ * every ACP adapter this process is probing, whose exit fails the pending
+ * request through the client's own exit path; the wizard then ends as
+ * cancelled. Ctrl-C at the keyboard makes clack exit the process, and the
+ * exit hook stops those adapters on the way out.
+ */
 export async function brassSpinner<T>(
   message: string,
-  action: () => Promise<T>,
-  completion: (result: T) => string,
+  action: (step: SpinnerStep) => Promise<T>,
+  completion: (result: T) => string | undefined,
+  failure: string | undefined = 'Failed',
 ): Promise<T> {
-  const spinner = clack.spinner({ output: clackPromptOutput() });
+  const cancel = new AbortController();
+  const spinner = clack.spinner({
+    output: clackPromptOutput(),
+    onCancel: () => {
+      cancel.abort();
+      stopLiveAcpAdapters();
+    },
+  });
+  process.on('exit', stopLiveAcpAdapters);
   spinner.start(brass(message));
   try {
-    const result = await action();
-    spinner.stop(brass(completion(result)));
+    const result = await action({
+      say: (line) => spinner.message(brass(line)),
+      signal: cancel.signal,
+    });
+    if (cancel.signal.aborted) throw new ConnectFailureError('Connection cancelled.');
+    const done = completion(result);
+    spinner.stop(done === undefined ? undefined : brass(done));
     return result;
   } catch (error) {
-    spinner.stop('Failed');
+    // Clack has already stopped a cancelled spinner with its own line.
+    if (cancel.signal.aborted) throw new ConnectFailureError('Connection cancelled.');
+    spinner.stop(failure);
     throw error;
+  } finally {
+    process.removeListener('exit', stopLiveAcpAdapters);
   }
 }
-
-
 
 export async function runConnectWizard(
   code: string | undefined,
@@ -288,7 +324,12 @@ export async function runConnectWizard(
     loadConnectModelCatalog,
     fileConnectKeyStore,
     process.env,
-    (input) => verifyProviderKey({ ...input, fetchImpl }),
+    (input, step) =>
+      verifyProviderKey({
+        ...input,
+        fetchImpl,
+        ...(step ? { report: step.say, signal: step.signal } : {}),
+      }),
   );
   const baseUrl = (process.env.BEELINE_AUTH_URL ?? 'https://server.usebeeline.app').replace(
     /\/$/,
@@ -296,13 +337,13 @@ export async function runConnectWizard(
   );
   const installedRelease = await brassSpinner(
     'Installing the Beeline daemon…',
-    () => installCurrentRelease(fetchImpl),
+    (step) => installCurrentRelease(fetchImpl, step),
     (release) => `Installed Beeline helper ${release.version}`,
   );
   const machineInfo = await readMachineId(process.env);
   const claimed = await brassSpinner(
     'Connecting to your Beeline Workspace…',
-    () => requestConnectGrant(baseUrl, pairingCode, selection, fetchImpl, machineInfo),
+    (step) => requestConnectGrant(baseUrl, pairingCode, selection, fetchImpl, machineInfo, step),
     (connectedGrant) => `Connected to ${connectedGrant.workspace_name}`,
   );
   try {
@@ -343,11 +384,15 @@ export async function runConnectWizard(
     } satisfies DevicePairingGrant);
     await brassSpinner(
       'Starting your agent…',
-      () => runInstalledFinish(installedRelease.binary, grantPath),
+      (step) => runInstalledFinish(installedRelease.binary, grantPath, step),
       () => `Started ${grant.agent_name}`,
     );
     const assignedHandle = await finishConnectedAgentPairing(
-      baseUrl, pairingCode, grant.workspace_joined, eventSubscriptions, fetchImpl,
+      baseUrl,
+      pairingCode,
+      grant.workspace_joined,
+      eventSubscriptions,
+      fetchImpl,
     );
     console.log('');
     console.log(`${brass('Agent')}      ${seededIdentityLine(grant)}`);
@@ -357,27 +402,36 @@ export async function runConnectWizard(
   } catch (error) {
     // Covers every failure after claiming, including local writes and helper
     // startup. The server refuses rollback once this agent has done real work.
-    await jsonRequest(`${baseUrl}/v1/auth/daemon/rollback`, {
-      exchangeToken: claimed.daemon_exchange_token,
-    }, fetchImpl).catch(() => undefined);
+    await jsonRequest(
+      `${baseUrl}/v1/auth/daemon/rollback`,
+      {
+        exchangeToken: claimed.daemon_exchange_token,
+      },
+      fetchImpl,
+    ).catch(() => undefined);
     throw error;
   }
 }
 
-
-
 // After a remote claim, cancellation must unwind through the wizard's rollback.
 // Ordinary setup prompts can still exit directly before anything is registered.
 const connectNamePrompts: Pick<ConnectPrompts, 'select' | 'text'> = {
-  async select<T extends string>(input: { message: string; options: Array<{ value: T; label: string; hint?: string }>; initialValue?: T }) {
+  async select<T extends string>(input: {
+    message: string;
+    options: Array<{ value: T; label: string; hint?: string }>;
+    initialValue?: T;
+  }) {
     clackPromptOutput();
     const result = await clack.select<T>(input as clack.SelectOptions<T>);
     if (clack.isCancel(result)) throw new ConnectFailureError('Connection cancelled.');
     return result;
   },
   async text(input) {
-    const result = await clack.text({ ...input, output: clackPromptOutput(),
-      validate: input.validate ? value => input.validate!(value ?? '') : undefined });
+    const result = await clack.text({
+      ...input,
+      output: clackPromptOutput(),
+      validate: input.validate ? (value) => input.validate!(value ?? '') : undefined,
+    });
     if (clack.isCancel(result)) throw new ConnectFailureError('Connection cancelled.');
     return result;
   },
@@ -430,8 +484,6 @@ export async function confirmSeededName(
   }
 }
 
-
-
 export function isDevicePairingGrant(value: unknown): value is DevicePairingGrant {
   if (!value || typeof value !== 'object') return false;
   const grant = value as Partial<DevicePairingGrant>;
@@ -464,8 +516,6 @@ export function isDevicePairingGrant(value: unknown): value is DevicePairingGran
   );
 }
 
-
-
 /**
  * One plain sentence for a human at the end of a terminal — no stacks, no
  * multi-frame ACP dumps. Keeps the first line of the message and drops any
@@ -480,16 +530,12 @@ export function connectPlainFailure(error: unknown): string {
   return `Connecting your agent failed: ${firstLine ?? 'unknown error'}`;
 }
 
-
-
 export class ConnectFailureError extends Error {
   constructor(sentence: string) {
     super(sentence);
     this.name = 'ConnectFailureError';
   }
 }
-
-
 
 export async function runConnectFinishCommand(path: string | undefined): Promise<void> {
   if (!path) throw new Error('connect-finish requires a grant path');
@@ -517,7 +563,6 @@ export async function runConnectFinishCommand(path: string | undefined): Promise
         model,
         cacheDir: openRouterRoutingCacheDir(dirname(connected.configPath)),
         ...(apiKey ? { apiKey } : {}),
-        probeTimeoutMs: 10_000,
       });
       console.log(decision.line);
       // Connect is the one place the answer probe MAY block: warming it here

@@ -24,12 +24,19 @@ export async function checkAdapterSession(options: {
   agentKind?: ManagedAdapterKind;
   onStage?: (stage: 'initialize' | 'session/new') => void;
   onInitialized?: (result: AdapterSessionCheckResult) => void;
+  /** The candidate adapter's stderr, as it arrives. */
+  onStderr?: (chunk: string) => void;
+  /** The caller left: kill the candidate's process group, so its exit fails the pending request. */
+  signal?: AbortSignal;
 }): Promise<AdapterSessionCheckResult> {
   const cwd = await mkdtemp(join(options.scratchRoot ?? tmpdir(), 'beeline-adapter-session-'));
   const homeRoot = join(cwd, 'agent-home');
   let client: AcpClient | undefined;
   let negotiated: Record<string, unknown> | undefined;
   const cliProxy = options.agentKind ? (await machineCliProxy())?.endpoint : undefined;
+  const abort = () => {
+    if (client) void stopAgentProcess(client).catch(() => undefined);
+  };
   try {
     const homeOverlay = cliProxy
       ? await prepareRoomAgentHome({
@@ -52,8 +59,11 @@ export async function checkAdapterSession(options: {
     client.once('initialized', (result: Record<string, unknown>) => {
       negotiated = result;
     });
+    if (options.onStderr) client.on('stderr', options.onStderr);
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) throw new Error('adapter session check cancelled before start');
     options.onStage?.('initialize');
-    await startAgentProcess(client);
+    await startAgentProcess(client, options.signal);
     if (negotiated?.protocolVersion !== 1) {
       throw new Error(`Unsupported ACP protocolVersion: ${String(negotiated?.protocolVersion)}`);
     }
@@ -103,6 +113,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:r.id,result})+'\\n'); });`
     }
     return { ...result, sessionStart: 'created' };
   } finally {
+    options.signal?.removeEventListener('abort', abort);
     try {
       if (client) await stopAgentProcess(client);
     } finally {

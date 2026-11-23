@@ -1,14 +1,34 @@
-import { assertInstallTestIsolation } from "./lifecycle-test-guard.js";
-import { join, dirname, resolve } from "node:path";
-import { access, mkdir, rename, rm, symlink, copyFile, readFile, readdir, lstat } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
-import { ordinaryDirectory, removeStoragePath } from "./storage-filesystem.js";
-import { BeelineInstallLayout, activeReleaseId, BUNDLE_ENTRYPOINT, pathKind, readBundleJson, sanitizeReleaseId, fsyncDir, readUpdateState, writeUpdateState, replaceFile, FORWARDER_TOOLS, FORWARDER_ALIASES, forwarderScript } from './self-update.js';
+import { assertInstallTestIsolation } from './lifecycle-test-guard.js';
+import { join, dirname, resolve } from 'node:path';
+import {
+  access,
+  mkdir,
+  rename,
+  rm,
+  symlink,
+  copyFile,
+  readFile,
+  readdir,
+  lstat,
+} from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { ordinaryDirectory, removeStoragePath } from './storage-filesystem.js';
+import {
+  BeelineInstallLayout,
+  activeReleaseId,
+  BUNDLE_ENTRYPOINT,
+  pathKind,
+  readBundleJson,
+  sanitizeReleaseId,
+  fsyncDir,
+  readUpdateState,
+  writeUpdateState,
+  replaceFile,
+  FORWARDER_TOOLS,
+  FORWARDER_ALIASES,
+  forwarderScript,
+} from './self-update.js';
 import { type InstalledBundleIdentity } from './self-update-manifest.js';
-
-
-
-
 
 /**
  * Point the live install at `releaseId` with a single atomic rename.
@@ -27,9 +47,10 @@ import { type InstalledBundleIdentity } from './self-update-manifest.js';
 export async function activateRelease(
   layout: BeelineInstallLayout,
   releaseId: string,
-  options: { deferPruning?: boolean } = {},
+  options: { deferPruning?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
   assertInstallTestIsolation(layout);
+  options.signal?.throwIfAborted();
   let releaseDir = join(layout.releasesRoot, releaseId);
   let previousReleaseId = await activeReleaseId(layout);
   await access(join(releaseDir, BUNDLE_ENTRYPOINT), fsConstants.F_OK);
@@ -38,6 +59,7 @@ export async function activateRelease(
   await mkdir(layout.binDir, { recursive: true });
 
   const kind = await pathKind(layout.libDir);
+  options.signal?.throwIfAborted();
   if (kind === 'directory') {
     // Legacy migration. Name the preserved copy after its own identity when
     // it carries one.
@@ -50,10 +72,12 @@ export async function activateRelease(
       await access(legacyDir, fsConstants.F_OK);
       // Collision (same id already staged): keep both, suffix this one.
       const preservedId = `${legacyId}-${Date.now()}`;
+      options.signal?.throwIfAborted();
       await rename(layout.libDir, join(layout.releasesRoot, preservedId));
       await normalizeLegacyBundleShape(join(layout.releasesRoot, preservedId));
       previousReleaseId = preservedId;
     } catch {
+      options.signal?.throwIfAborted();
       await rename(layout.libDir, legacyDir);
       await normalizeLegacyBundleShape(legacyDir);
       previousReleaseId = legacyId;
@@ -63,6 +87,10 @@ export async function activateRelease(
   const tempLink = `${layout.libDir}.new-${process.pid}`;
   await rm(tempLink, { force: true });
   await symlink(join('beeline-releases', releaseId), tempLink);
+  if (kind !== 'directory' && options.signal?.aborted) {
+    await rm(tempLink, { force: true });
+    options.signal.throwIfAborted();
+  }
   await rename(tempLink, layout.libDir);
   await fsyncDir(dirname(layout.libDir));
 
@@ -71,12 +99,16 @@ export async function activateRelease(
   await installRecoveryLauncher(layout, releaseDir);
   await writeBinForwarders(layout, releaseDir);
   const state = await readUpdateState(layout);
-  await writeUpdateState(layout, { ...state, stagedReleaseId: undefined,
-    previousReleaseId: previousReleaseId && previousReleaseId !== releaseId ? previousReleaseId : state.previousReleaseId });
+  await writeUpdateState(layout, {
+    ...state,
+    stagedReleaseId: undefined,
+    previousReleaseId:
+      previousReleaseId && previousReleaseId !== releaseId
+        ? previousReleaseId
+        : state.previousReleaseId,
+  });
   if (!options.deferPruning) await pruneHelperReleases(layout);
 }
-
-
 
 export async function installRecoveryLauncher(
   layout: BeelineInstallLayout,
@@ -101,8 +133,6 @@ export async function installRecoveryLauncher(
   }
 }
 
-
-
 /** Files a legacy-flat bundle keeps at its root; migration moves them into lib/beeline/. */
 export const LEGACY_FLAT_BUNDLE_FILES = [
   'beeline-cli.mjs',
@@ -110,8 +140,6 @@ export const LEGACY_FLAT_BUNDLE_FILES = [
   'pi-mcp-adapter.mjs',
   'bundle.json',
 ];
-
-
 
 /**
  * A real-directory install preserved from before self-update existed may hold
@@ -148,8 +176,6 @@ export async function normalizeLegacyBundleShape(bundleDir: string): Promise<voi
   }
 }
 
-
-
 /**
  * Rewrite `<prefix>/bin/*` as stable forwarders into the ACTIVE bundle root
  * (`<prefix>/lib/beeline/bin/<tool>` — through the anchor, never a resolved
@@ -183,8 +209,6 @@ export async function writeBinForwarders(
     );
   }
 }
-
-
 
 /**
  * Heal `<prefix>/bin/*` on installs where a stale or foreign writer left
@@ -238,8 +262,6 @@ export async function repairInstallForwarders(
   return true;
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Compatibility entry for one explicit preparation
 // ---------------------------------------------------------------------------
@@ -254,8 +276,6 @@ export interface SelfUpdateManagerOptions {
   stageOnly?: boolean;
 }
 
-
-
 export function describeIdentity(identity: InstalledBundleIdentity | undefined): string {
   if (!identity) return 'unknown';
   const parts: string[] = [];
@@ -264,14 +284,15 @@ export function describeIdentity(identity: InstalledBundleIdentity | undefined):
   return parts.join(' ') || 'unknown';
 }
 
-
-
 /** Caller holds the install lock. Startup also repairs installations predating
  * rollback metadata. Only current + previous are durable; a staged update and
  * a still-loaded predecessor remain protected during the handoff. */
-export async function pruneHelperReleases(layout: BeelineInstallLayout, loadedRelease?: string): Promise<string[]> {
+export async function pruneHelperReleases(
+  layout: BeelineInstallLayout,
+  loadedRelease?: string,
+): Promise<string[]> {
   assertInstallTestIsolation(layout);
-  if (!await ordinaryDirectory(layout.releasesRoot)) return [];
+  if (!(await ordinaryDirectory(layout.releasesRoot))) return [];
   const active = await activeReleaseId(layout);
   if (!active) return [];
   const state = await readUpdateState(layout);
@@ -280,19 +301,36 @@ export async function pruneHelperReleases(layout: BeelineInstallLayout, loadedRe
     if (entry.name.startsWith('.')) continue;
     if (entry.isSymbolicLink()) {
       // Unlink historical install litter without following its target.
-      if (![active, state.previousReleaseId, state.stagedReleaseId, loadedRelease].includes(entry.name))
+      if (
+        ![active, state.previousReleaseId, state.stagedReleaseId, loadedRelease].includes(
+          entry.name,
+        )
+      )
         await rm(join(layout.releasesRoot, entry.name), { force: true });
       continue;
     }
     if (!entry.isDirectory()) continue;
     const path = join(layout.releasesRoot, entry.name);
-    if (!await ordinaryDirectory(path)) continue;
-    candidates.push({ id: entry.name, modified: (await lstat(path)).mtimeMs,
-      bootable: await access(join(path, BUNDLE_ENTRYPOINT)).then(() => true, () => false) });
+    if (!(await ordinaryDirectory(path))) continue;
+    candidates.push({
+      id: entry.name,
+      modified: (await lstat(path)).mtimeMs,
+      bootable: await access(join(path, BUNDLE_ENTRYPOINT)).then(
+        () => true,
+        () => false,
+      ),
+    });
   }
-  const recordedPrevious = candidates.find(entry => entry.id === state.previousReleaseId && entry.id !== active && entry.bootable)?.id;
-  const previous = recordedPrevious ?? candidates.filter(entry => entry.bootable && entry.id !== active && entry.id !== state.stagedReleaseId)
-    .sort((a, b) => b.modified - a.modified)[0]?.id;
+  const recordedPrevious = candidates.find(
+    (entry) => entry.id === state.previousReleaseId && entry.id !== active && entry.bootable,
+  )?.id;
+  const previous =
+    recordedPrevious ??
+    candidates
+      .filter(
+        (entry) => entry.bootable && entry.id !== active && entry.id !== state.stagedReleaseId,
+      )
+      .sort((a, b) => b.modified - a.modified)[0]?.id;
   const keep = new Set([active, previous, loadedRelease, state.stagedReleaseId]);
   const removed: string[] = [];
   for (const entry of candidates) {
@@ -300,6 +338,7 @@ export async function pruneHelperReleases(layout: BeelineInstallLayout, loadedRe
     await removeStoragePath(join(layout.releasesRoot, entry.id));
     removed.push(entry.id);
   }
-  if (previous !== state.previousReleaseId) await writeUpdateState(layout, { ...state, previousReleaseId: previous });
+  if (previous !== state.previousReleaseId)
+    await writeUpdateState(layout, { ...state, previousReleaseId: previous });
   return removed;
 }

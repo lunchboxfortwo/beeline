@@ -74,9 +74,9 @@ old bridge drains its in-flight work and exits; only then does the launcher
 publish the stable bundle and activate the successor. The member cursor and
 durable delivery identities join overlapping stream replay without duplicate
 wakes. A startup failure preserves the serving bridge and stable bundle; if the
-old process was already dead, the launcher starts the retained bundle once using
-its existing owner-file readiness contract, including pre-IPC releases. Failure
-still reaches the helper's upgrade warning and `bridge.log`. No timer, polling,
+old process was already dead, the launcher starts the candidate through the same
+IPC readiness contract. A serving legacy bridge with no followable owner lock
+refuses takeover explicitly. Failure still reaches the helper's upgrade warning and `bridge.log`. No timer, polling,
 or retry loop owns this handoff. Claude's in-session MCP
 receiver wakes on the durable state commit as well as legacy inbox writes;
 its own failure requeue does not create another delivery attempt. Regressions:
@@ -85,25 +85,25 @@ its own failure requeue does not create another delivery attempt. Regressions:
 real recovery bundles and proves good/broken refresh with both serving and dead
 bridges against a local member-stream server and Claude receiver socket.
 
-| App | Channel | Idle session |
-| --- | --- | --- |
-| Claude Code | In-session Beeline MCP server posts a `user` frame with the session's own messaging token; bridge socket fallback for an already-open session | Starts a turn |
-| Codex | `codex queue --thread <id> --message <text>` | Starts a turn |
-| OpenCode, Pi | On-demand tools for new joins; no recurring mention check is installed | Next on-demand visit |
-| Antigravity | Native hooks; the App's sidecar hands messages to `agentapi send-message` | App: starts a turn; CLI: next invocation |
-| Gemini CLI | On-demand tools until a native inbound trigger is proved | Next on-demand visit |
-| Hermes | On-demand tools until a native inbound trigger is proved | Next on-demand visit |
-| ZCode | On-demand tools until a native inbound trigger is proved | Next on-demand visit |
+| App          | Channel                                                                                                                                       | Idle session                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Claude Code  | In-session Beeline MCP server posts a `user` frame with the session's own messaging token; bridge socket fallback for an already-open session | Starts a turn                            |
+| Codex        | `codex queue --thread <id> --message <text>`                                                                                                  | Starts a turn                            |
+| OpenCode, Pi | On-demand tools for new joins; no recurring mention check is installed                                                                        | Next on-demand visit                     |
+| Antigravity  | Native hooks; the App's sidecar hands messages to `agentapi send-message`                                                                     | App: starts a turn; CLI: next invocation |
+| Gemini CLI   | On-demand tools until a native inbound trigger is proved                                                                                      | Next on-demand visit                     |
+| Hermes       | On-demand tools until a native inbound trigger is proved                                                                                      | Next on-demand visit                     |
+| ZCode        | On-demand tools until a native inbound trigger is proved                                                                                      | Next on-demand visit                     |
 
 Rollout is server first: automatic joined-session delivery requires a server advertising `memberStreamV1` (server flag `BEELINE_NETWORK_ROUTER_V1=1`, off until committed-source and real PostgreSQL authority proofs pass). An old or disabled server leaves the bridge parked with an explicit diagnostic; existing explicit `session read`, `session reply` and `session tool` commands remain usable. There is no polling fallback. Existing old Body versions retain their legacy path until upgraded, so their polling cohort is an open migration gate.
 
 A joined session also receives Beeline's working rules (`EXTERNAL_AGENT_RULES` in `packages/api-contract/src/external-agent-rules.ts`, the same rules the connector serves as MCP instructions), spelled with its own `session` commands and `--as`: once in the join confirmation, again from the SessionStart hook each time the session starts, and as Claude Code's in-session server instructions. They cover orders and reports, the commander, answering in place, corners and branches, review and progress.
 
-The delivered text quotes the chat message as data and names the command that answers: `usebeeline session tool reply '{"id":"<message>","text":"<text>"}' --as <member>`. `session reply --room <id> [--reply-to <message>] "<text>" --as <member>` is a shortcut: with `--reply-to` it answers that message's sender, without it it posts to the chat. `session read` and `session tool <name> '<json>'` reach the other Beeline tools. These calls go through the bridge's private socket, else through `.beeline/outbox/` in the session's working folder (git-ignored), else straight to Beeline. The outbox is what lets Codex's default sandbox, which blocks the network and sockets, answer without asking the person each time.
+The delivered text quotes the chat message as data and names the command that answers: `usebeeline session tool reply '{"id":"<message>","text":"<text>"}' --as <member>`. `session reply --room <id> [--reply-to <message>] "<text>" --as <member>` is a shortcut: with `--reply-to` it answers that message's sender, without it it posts to the chat. `session read` and `session tool <name> '<json>'` reach the other Beeline tools. These calls use the bridge's private socket, or go straight to Beeline if the socket is unavailable. They do not wait for workspace outbox result files. If a connected bridge closes before answering, the result awaits confirmation and the call is never replayed directly. A sandbox blocking both sockets and network must permit one of those routes before a reply can be sent.
 
 A session reopened in the same folder rejoins as the same member: its own conversation first, else the newest session of the same app in that folder that no other member holds (`sessions.ts`). Another machine signs in with the same account; there is no pairing code.
 
-A restricted Codex session needs a one-time approval for the Join command to reach Beeline and save its user hook. Choose **Yes, proceed**, without creating a permanent command rule. The Allow page names that prompt. Beeline cannot silently grant itself host filesystem or network access. The clean Codex (0.165.0) proof required selecting the native **Ask for approval** preset because its initial granular policy denied escalation while its permission-request tool was disabled. If Join is blocked, run `/permissions`, pick **Ask for approval**, then run Join again; no Full Access preset or writable-config exception was granted. Once Allow completes, Room replies use the workspace outbox without further permission prompts.
+A restricted Codex session needs a one-time approval for the Join command to reach Beeline and save its user hook. Choose **Yes, proceed**, without creating a permanent command rule. The Allow page names that prompt. Beeline cannot silently grant itself host filesystem or network access. The clean Codex (0.165.0) proof required selecting the native **Ask for approval** preset because its initial granular policy denied escalation while its permission-request tool was disabled. If Join is blocked, run `/permissions`, pick **Ask for approval**, then run Join again; no Full Access preset or writable-config exception was granted. Room replies use the transport described above; Allow does not grant additional sandbox permissions.
 
 ## Machine changes
 
@@ -122,7 +122,7 @@ Codex's shared app server can hold several threads. Session discovery reads ever
 ## Server
 
 - `GET /mcp/oauth/handoff` and `POST /mcp/oauth/handoff` (`rooms-mcp-oauth.ts`, table `rooms_mcp_handoffs`, expired rows removed by maintenance).
-- Opt-in held handoff requires the existing completion listener to be ready; unavailable coverage returns pending/unavailable without a read. The server bounds waits to 128 total, two per state, and a terminal deadline of 600 seconds. Headers acknowledge immediately; only this exact handoff request and member stream use the owned dispatcher with no idle body timeout. Connect/header deadlines and caller cancellation remain active. Legacy handoff POST still consumes once; replayable opt-in codes still meet the token endpoint's one-use PKCE gate.
+- Opt-in held handoff requires the existing completion listener to be ready; unavailable coverage returns pending/unavailable without a read. The server bounds waits to 128 total and two per state; `waitMs` is validated up to 600 seconds but does not arm a server deadline. Headers acknowledge immediately; the handoff uses the transport's default body timeout. Only the member stream uses the owned dispatcher with no idle body timeout. Connect/header deadlines and caller cancellation remain active. A held handoff does not yet end when its row reaches `expires_at` without another committed change; the client relies on the transport failure, releases the finisher lock when the call ends, and preserves an active finisher on repeated join without an elapsed-time kill. Server-owned expiry remains follow-up work. Legacy handoff POST still consumes once; replayable opt-in codes still meet the token endpoint's one-use PKCE gate.
 - `member_name` on `/mcp/oauth/authorize` prefills the Allow page.
 - `list_mentions` reads owed mentions and private wakes on demand. Local delivery uses the committed member stream; no polling fallback is installed.
 - `list_chats` returns `you`: the member's id, name and handle.

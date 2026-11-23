@@ -1,9 +1,10 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { activeAdapterCommand } from './adapter-store.js';
+import { runOwned } from './wait.js';
 import type { AgentId } from './session-join/agents.js';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import { createRequire } from 'node:module';
@@ -35,8 +36,13 @@ interface AgentBehavior {
    * a multi-provider one routes `providers` it holds no key for (env, or
    * `keyStore` under the operator's home) and signs in to that provider's login.
    */
-  cliProxy?: { route: 'claude-env' | 'codex-env' | 'grok-env' | 'pi-models' | 'opencode-env' | 'goose-env'; login?: ProxiedProvider;
-    providers?: readonly string[]; keyStore?: string; providerConfig?: string };
+  cliProxy?: {
+    route: 'claude-env' | 'codex-env' | 'grok-env' | 'pi-models' | 'opencode-env' | 'goose-env';
+    login?: ProxiedProvider;
+    providers?: readonly string[];
+    keyStore?: string;
+    providerConfig?: string;
+  };
   probeProviderRootEnv?: string;
   codexCacheBindings?: boolean;
   modelCatalogOwnsCredentials?: boolean;
@@ -48,13 +54,21 @@ interface AgentBehavior {
   cliModelCatalog?: boolean;
   providerModelEnv?: { provider: string; model: string };
   roomTomlDefaults?: boolean;
-  nativeShellHook?: { config: 'launch-config' | 'hooks-file'; output: 'updated-input' | 'hook-specific' };
-  importedMcp?: { format: 'toml' | 'json' | 'extensions'; source: string; homeEnv: string; file: string };
+  nativeShellHook?: {
+    config: 'launch-config' | 'hooks-file';
+    output: 'updated-input' | 'hook-specific';
+  };
+  importedMcp?: {
+    format: 'toml' | 'json' | 'extensions';
+    source: string;
+    homeEnv: string;
+    file: string;
+  };
   session?: SessionAgentBehavior;
 }
 
 interface SessionAgentBehavior {
-  joinDelivery?: 'local'|'on_demand';
+  joinDelivery?: 'local' | 'on_demand';
   delivery?: 'socket' | 'queue';
   processNames?: readonly string[];
   clientNames?: readonly string[];
@@ -90,43 +104,134 @@ export function cursorAcpBridgeLaunch(): { command: string; args: string[] } {
   throw new Error('Cursor ACP bridge entry not found next to the Beeline helper');
 }
 
-
 export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
   codex: {
-    label: 'Codex', roomTomlDefaults: true, codexCacheBindings: true, fastMode: true,
+    label: 'Codex',
+    roomTomlDefaults: true,
+    codexCacheBindings: true,
+    fastMode: true,
     cliProxy: { route: 'codex-env', login: 'codex' },
-    importedMcp: { format: 'toml', source: '.codex/config.toml', homeEnv: 'CODEX_HOME', file: 'config.toml' },
-    session: { joinDelivery:'local', delivery: 'queue', memberPerSession: true, processNames: ['codex', 'codex-tui'], clientNames: ['codex'],
-      hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', tool: 'PostToolUse', stop: 'block' } },
+    importedMcp: {
+      format: 'toml',
+      source: '.codex/config.toml',
+      homeEnv: 'CODEX_HOME',
+      file: 'config.toml',
+    },
+    session: {
+      joinDelivery: 'local',
+      delivery: 'queue',
+      memberPerSession: true,
+      processNames: ['codex', 'codex-tui'],
+      clientNames: ['codex'],
+      hookOutput: {
+        start: 'SessionStart',
+        prompt: 'UserPromptSubmit',
+        tool: 'PostToolUse',
+        stop: 'block',
+      },
+    },
   },
   claude: {
-    label: 'Claude', cliProxy: { route: 'claude-env', login: 'claude' },
-    importedMcp: { format: 'json', source: '.claude.json', homeEnv: 'CLAUDE_CONFIG_DIR', file: '.claude.json' },
-    session: { joinDelivery:'local', delivery: 'socket', processNames: ['claude'], clientNames: ['claude-code', 'claude code'], clientExactNames: ['claude'],
-      hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', stop: 'block' } },
+    label: 'Claude',
+    cliProxy: { route: 'claude-env', login: 'claude' },
+    importedMcp: {
+      format: 'json',
+      source: '.claude.json',
+      homeEnv: 'CLAUDE_CONFIG_DIR',
+      file: '.claude.json',
+    },
+    session: {
+      joinDelivery: 'local',
+      delivery: 'socket',
+      processNames: ['claude'],
+      clientNames: ['claude-code', 'claude code'],
+      clientExactNames: ['claude'],
+      hookOutput: { start: 'SessionStart', prompt: 'UserPromptSubmit', stop: 'block' },
+    },
   },
   goose: {
-    label: 'Goose', providerKeyStore: 'env', probeProviderRootEnv: 'GOOSE_PATH_ROOT', modelCatalogOwnsCredentials: true,
-    cliProxy: { route: 'goose-env', providers: ['anthropic', 'openai'], keyStore: '.config/goose/secrets.yaml', providerConfig: '.config/goose/config.yaml' },
+    label: 'Goose',
+    providerKeyStore: 'env',
+    probeProviderRootEnv: 'GOOSE_PATH_ROOT',
+    modelCatalogOwnsCredentials: true,
+    cliProxy: {
+      route: 'goose-env',
+      providers: ['anthropic', 'openai'],
+      keyStore: '.config/goose/secrets.yaml',
+      providerConfig: '.config/goose/config.yaml',
+    },
     providerModelEnv: { provider: 'GOOSE_PROVIDER', model: 'GOOSE_MODEL' },
-    importedMcp: { format: 'extensions', source: '.config/goose/config.yaml', homeEnv: 'GOOSE_PATH_ROOT', file: 'config/config.yaml' },
+    importedMcp: {
+      format: 'extensions',
+      source: '.config/goose/config.yaml',
+      homeEnv: 'GOOSE_PATH_ROOT',
+      file: 'config/config.yaml',
+    },
   },
   pi: {
-    label: 'Pi', providerKeyStore: 'env', hostedModelConfig: 'model-file',
-    cliProxy: { route: 'pi-models', providers: ['anthropic', 'openai', 'xai', 'openai-codex'], keyStore: '.pi/agent/auth.json' },
-    importedMcp: { format: 'json', source: '.pi/agent/mcp.json', homeEnv: 'PI_CODING_AGENT_DIR', file: 'mcp.json' },
-    session: { processNames: ['pi'], clientPrefix: 'pi', mailEvents: ['poll', 'post-tool-use'], pollText: true },
+    label: 'Pi',
+    providerKeyStore: 'env',
+    hostedModelConfig: 'model-file',
+    cliProxy: {
+      route: 'pi-models',
+      providers: ['anthropic', 'openai', 'xai', 'openai-codex'],
+      keyStore: '.pi/agent/auth.json',
+    },
+    importedMcp: {
+      format: 'json',
+      source: '.pi/agent/mcp.json',
+      homeEnv: 'PI_CODING_AGENT_DIR',
+      file: 'mcp.json',
+    },
+    session: {
+      processNames: ['pi'],
+      clientPrefix: 'pi',
+      mailEvents: ['poll', 'post-tool-use'],
+      pollText: true,
+    },
   },
   grok: {
-    session: {joinDelivery:'on_demand',processNames:['grok'],clientExactNames:['grok','grok cli','grok build']},
-    label: 'Grok', modelLaunch: 'native-args', cliProxy: { route: 'grok-env', login: 'xai' },
-    importedMcp: { format: 'toml', source: '.grok/config.toml', homeEnv: 'GROK_HOME', file: 'config.toml' },
+    session: {
+      joinDelivery: 'on_demand',
+      processNames: ['grok'],
+      clientExactNames: ['grok', 'grok cli', 'grok build'],
+    },
+    label: 'Grok',
+    modelLaunch: 'native-args',
+    cliProxy: { route: 'grok-env', login: 'xai' },
+    importedMcp: {
+      format: 'toml',
+      source: '.grok/config.toml',
+      homeEnv: 'GROK_HOME',
+      file: 'config.toml',
+    },
   },
-  cursor: { nativeShellHook: { config: 'hooks-file', output: 'updated-input' }, label: 'Cursor', cliSignIn: 'cursor', resolveCommandOnStart: true, identityLabel: CURSOR_ACP_BRIDGE_LABEL, cliModelCatalog: true,
-    nativeLoginDirs: ['.cursor', '.config/cursor'] },
-  opencode: { label: 'OpenCode', providerKeyStore: 'auth-file', modelCatalogOwnsCredentials: true, hostedModelConfig: 'inline-provider',
-    cliProxy: { route: 'opencode-env', providers: ['anthropic', 'openai', 'xai'], keyStore: '.local/share/opencode/auth.json' },
-    session: { processNames: ['opencode'], clientNames: ['opencode'], mailEvents: ['poll'], pollText: true } },
+  cursor: {
+    nativeShellHook: { config: 'hooks-file', output: 'updated-input' },
+    label: 'Cursor',
+    cliSignIn: 'cursor',
+    resolveCommandOnStart: true,
+    identityLabel: CURSOR_ACP_BRIDGE_LABEL,
+    cliModelCatalog: true,
+    nativeLoginDirs: ['.cursor', '.config/cursor'],
+  },
+  opencode: {
+    label: 'OpenCode',
+    providerKeyStore: 'auth-file',
+    modelCatalogOwnsCredentials: true,
+    hostedModelConfig: 'inline-provider',
+    cliProxy: {
+      route: 'opencode-env',
+      providers: ['anthropic', 'openai', 'xai'],
+      keyStore: '.local/share/opencode/auth.json',
+    },
+    session: {
+      processNames: ['opencode'],
+      clientNames: ['opencode'],
+      mailEvents: ['poll'],
+      pollText: true,
+    },
+  },
   reference: {},
   custom: { modelLaunch: 'command' },
 };
@@ -145,17 +250,42 @@ export const SESSION_AGENT_BEHAVIORS = {
   grok: AGENT_BEHAVIORS.grok.session!,
   opencode: AGENT_BEHAVIORS.opencode.session!,
   pi: AGENT_BEHAVIORS.pi.session!,
-  antigravity: { joinDelivery:'local', processNames: ['antigravity', 'agy'], clientNames: ['antigravity'],
-    mailEvents: ['session-start', 'user-prompt-submit', 'stop'], hookOutput: { start: 'inject', prompt: 'inject', stop: 'continue' } },
-  gemini: { processNames: ['gemini'], clientNames: ['gemini'],
-    hookOutput: { start: 'SessionStart', prompt: 'BeforeAgent', tool: 'AfterTool', stop: 'deny' } },
-  hermes: { processNames: ['hermes'], clientNames: ['hermes'], mailEvents: ['poll'], pollText: true },
+  antigravity: {
+    joinDelivery: 'local',
+    processNames: ['antigravity', 'agy'],
+    clientNames: ['antigravity'],
+    mailEvents: ['session-start', 'user-prompt-submit', 'stop'],
+    hookOutput: { start: 'inject', prompt: 'inject', stop: 'continue' },
+  },
+  gemini: {
+    processNames: ['gemini'],
+    clientNames: ['gemini'],
+    hookOutput: { start: 'SessionStart', prompt: 'BeforeAgent', tool: 'AfterTool', stop: 'deny' },
+  },
+  hermes: {
+    processNames: ['hermes'],
+    clientNames: ['hermes'],
+    mailEvents: ['poll'],
+    pollText: true,
+  },
   zcode: { processNames: ['zcode'], clientPrefix: 'zcode', mailEvents: ['poll'], pollText: true },
 } satisfies Record<AgentId, SessionAgentBehavior>;
 
-export const SESSION_CLIENT_ORDER = ['claude-code', 'codex', 'antigravity', 'gemini', 'opencode', 'pi', 'hermes', 'zcode', 'grok'] as const;
+export const SESSION_CLIENT_ORDER = [
+  'claude-code',
+  'codex',
+  'antigravity',
+  'gemini',
+  'opencode',
+  'pi',
+  'hermes',
+  'zcode',
+  'grok',
+] as const;
 
-export function sessionAgentBehavior(agent: keyof typeof SESSION_AGENT_BEHAVIORS | undefined): SessionAgentBehavior {
+export function sessionAgentBehavior(
+  agent: keyof typeof SESSION_AGENT_BEHAVIORS | undefined,
+): SessionAgentBehavior {
   return agent ? SESSION_AGENT_BEHAVIORS[agent] : {};
 }
 
@@ -165,12 +295,13 @@ export function sessionAgentBehavior(agent: keyof typeof SESSION_AGENT_BEHAVIORS
  * relative to the operator's real `$HOME`; `target` to the isolated dir.
  * Every other harness login lives only in the machine's CLIProxyAPI.
  */
-export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string; target: string }> = [
-  // cursor-agent keeps chat/MCP state under CURSOR_HOME but reads its login
-  // from ~/.config/cursor/auth.json, so the isolated HOME needs it linked.
-  { dir: 'cursor', source: '.cursor/agent-cli-state.json', target: 'agent-cli-state.json' },
-  { dir: 'user', source: '.config/cursor/auth.json', target: '.config/cursor/auth.json' },
-];
+export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string; target: string }> =
+  [
+    // cursor-agent keeps chat/MCP state under CURSOR_HOME but reads its login
+    // from ~/.config/cursor/auth.json, so the isolated HOME needs it linked.
+    { dir: 'cursor', source: '.cursor/agent-cli-state.json', target: 'agent-cli-state.json' },
+    { dir: 'user', source: '.config/cursor/auth.json', target: '.config/cursor/auth.json' },
+  ];
 
 /**
  * Provider API keys a session copies from a native store it no longer links:
@@ -178,7 +309,12 @@ export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string;
  */
 export const API_KEY_STORES = [
   { dir: 'pi', source: '.pi/agent/auth.json', target: 'auth.json', type: 'api_key' },
-  { dir: 'user', source: '.local/share/opencode/auth.json', target: '.local/share/opencode/auth.json', type: 'api' },
+  {
+    dir: 'user',
+    source: '.local/share/opencode/auth.json',
+    target: '.local/share/opencode/auth.json',
+    type: 'api',
+  },
 ] as const;
 
 export const AUTO_DETECT_AGENT_KINDS = [
@@ -227,11 +363,24 @@ const AGENT_EXECUTABLES: Record<(typeof AUTO_DETECT_AGENT_KINDS)[number], string
 /** Install hints verified against the upstream docs; see docs/agent-programs.md. */
 const AGENT_PROGRAMS = {
   codex: { name: 'Codex', binary: 'codex', install: 'npm install -g @openai/codex' },
-  claude: { name: 'Claude Code', binary: 'claude', install: 'curl -fsSL https://claude.ai/install.sh | bash' },
-  goose: { name: 'Goose', binary: 'goose', install: 'curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash' },
+  claude: {
+    name: 'Claude Code',
+    binary: 'claude',
+    install: 'curl -fsSL https://claude.ai/install.sh | bash',
+  },
+  goose: {
+    name: 'Goose',
+    binary: 'goose',
+    install:
+      'curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash',
+  },
   pi: { name: 'Pi', binary: 'pi', install: 'curl -fsSL https://pi.dev/install.sh | sh' },
   grok: { name: 'Grok', binary: 'grok', install: 'curl -fsSL https://x.ai/cli/install.sh | bash' },
-  cursor: { name: 'Cursor', binary: 'cursor-agent', install: 'curl https://cursor.com/install -fsS | bash' },
+  cursor: {
+    name: 'Cursor',
+    binary: 'cursor-agent',
+    install: 'curl https://cursor.com/install -fsS | bash',
+  },
   opencode: { name: 'OpenCode', binary: 'opencode', install: 'npm install -g opencode-ai' },
 } as const;
 
@@ -240,7 +389,10 @@ export function missingAgentProgramMessage(kind: keyof typeof AGENT_PROGRAMS): s
   return `${program.name} is not installed on this machine (${program.binary}). Install it with \`${program.install}\`, then try again.`;
 }
 
-export function requireInstalledAgentProgram(kind: AgentKind, env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function requireInstalledAgentProgram(
+  kind: AgentKind,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
   if (!(kind in AGENT_PROGRAMS)) return undefined;
   const key = kind as keyof typeof AGENT_PROGRAMS;
   const path = executableOnPath(AGENT_PROGRAMS[key].binary, env);
@@ -249,8 +401,18 @@ export function requireInstalledAgentProgram(kind: AgentKind, env: NodeJS.Proces
 }
 
 /** Explicit upstream overrides keep adapters on the operator's program. */
-export function installedAgentProgramEnvironment(kind: AgentKind, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const variable = kind === 'claude' ? 'CLAUDE_CODE_EXECUTABLE' : kind === 'codex' ? 'CODEX_PATH' : kind === 'pi' ? 'PI_ACP_PI_COMMAND' : undefined;
+export function installedAgentProgramEnvironment(
+  kind: AgentKind,
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const variable =
+    kind === 'claude'
+      ? 'CLAUDE_CODE_EXECUTABLE'
+      : kind === 'codex'
+        ? 'CODEX_PATH'
+        : kind === 'pi'
+          ? 'PI_ACP_PI_COMMAND'
+          : undefined;
   if (!variable) return {};
   const path = executableOnPath(AGENT_PROGRAMS[kind as 'claude' | 'codex' | 'pi'].binary, env);
   return path ? { [variable]: path } : {};
@@ -277,34 +439,52 @@ export function latestAdapterInstallCommand(kind: AgentKind): AdapterInstallComm
     : undefined;
 }
 
+/** The exact argv `runAdapterInstall` runs, so callers can log the real command. */
+export function adapterInstallArgs(install: AdapterInstallCommand): AdapterInstallCommand['args'] {
+  // Codex's Linux executable is shipped as an optional platform package.
+  const linuxCodex =
+    process.platform === 'linux' &&
+    install.args.some((arg) => /^@agentclientprotocol\/codex-acp(?:@|$)/.test(arg));
+  // npm's own progress (every registry request and lifecycle script) streams as it happens.
+  return [
+    ...install.args,
+    linuxCodex ? '--include=optional' : '--omit=optional',
+    '--loglevel=http',
+    '--foreground-scripts',
+  ];
+}
+
+/** npm is an owned child: its lines stream, it settles on exit, and its group dies with the caller. */
 export async function runAdapterInstall(
   install: AdapterInstallCommand,
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: 'inherit' | 'ignore' } = {},
+  opts: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    stdio?: 'inherit' | 'ignore';
+    onLine?: (line: string) => void;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<void> {
-  await new Promise<void>((resolveInstall, rejectInstall) => {
-    // Codex's Linux executable is shipped as an optional platform package.
-    const linuxCodex = process.platform === 'linux' && install.args.some(
-      (arg) => /^@agentclientprotocol\/codex-acp(?:@|$)/.test(arg),
-    );
-    const child = spawn(install.command, [...install.args, linuxCodex ? '--include=optional' : '--omit=optional'], {
-      ...(opts.cwd ? { cwd: opts.cwd } : {}),
-      env: opts.env ?? process.env,
-      stdio: opts.stdio ?? 'inherit',
-    });
-    child.once('error', rejectInstall);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolveInstall();
-      else {
-        rejectInstall(
-          new Error(
-            signal
-              ? `${install.command} was terminated by ${signal}`
-              : `${install.command} exited with status ${code ?? 'unknown'}`,
-          ),
-        );
-      }
-    });
+  const onLine =
+    opts.stdio === 'ignore'
+      ? () => undefined
+      : (opts.onLine ?? ((line: string) => process.stderr.write(`${line}\n`)));
+  const result = await runOwned({
+    step: install.command,
+    file: install.command,
+    args: adapterInstallArgs(install),
+    env: opts.env ?? process.env,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    onLine,
   });
+  if (result.code !== 0) {
+    throw new Error(
+      result.signal
+        ? `${install.command} was terminated by ${result.signal}`
+        : `${install.command} exited with status ${result.code ?? 'unknown'}`,
+    );
+  }
 }
 
 /** Install beside the working adapter and promote only after session-start validation. */
@@ -320,16 +500,37 @@ export async function installLatestAgentAdapter(
 const execFileAsync = promisify(execFile);
 
 /** Older user CLIs can reject flags required by the latest adapter. */
-export async function explainAgentProgramFailure(error: unknown, env: NodeJS.ProcessEnv): Promise<unknown> {
-  const missingCodexPackage = /(?:Cannot find module|Missing optional dependency)[^\n]*?(@(?:openai|zed-industries)\/codex[^\s'"`]*)/i.exec(String(error));
-  if (missingCodexPackage) return new Error(
-    `Codex could not start: missing platform package ${missingCodexPackage[1]}. Reinstall the package that owns this executable with npm optional dependencies enabled (--include=optional), then retry. ${String(error)}`,
+export async function explainAgentProgramFailure(
+  error: unknown,
+  env: NodeJS.ProcessEnv,
+): Promise<unknown> {
+  const missingCodexPackage =
+    /(?:Cannot find module|Missing optional dependency)[^\n]*?(@(?:openai|zed-industries)\/codex[^\s'"`]*)/i.exec(
+      String(error),
+    );
+  if (missingCodexPackage)
+    return new Error(
+      `Codex could not start: missing platform package ${missingCodexPackage[1]}. Reinstall the package that owns this executable with npm optional dependencies enabled (--include=optional), then retry. ${String(error)}`,
+      { cause: error },
+    );
+  if (
+    !env.CLAUDE_CODE_EXECUTABLE ||
+    !/unknown option|unrecognized (?:option|argument)|unsupported.*version|requires.*version/i.test(
+      String(error),
+    )
+  )
+    return error;
+  const version = await execFileAsync(env.CLAUDE_CODE_EXECUTABLE, ['--version'], {
+    env,
+    timeout: 3000,
+    maxBuffer: 4096,
+  })
+    .then((result) => result.stdout.trim().replace(/\s+/g, ' ').slice(0, 80))
+    .catch(() => 'version unavailable');
+  return new Error(
+    `Claude Code ${version} could not start. Install it with \`${AGENT_PROGRAMS.claude.install}\`, then try again. ${String(error)}`,
     { cause: error },
   );
-  if (!env.CLAUDE_CODE_EXECUTABLE || !/unknown option|unrecognized (?:option|argument)|unsupported.*version|requires.*version/i.test(String(error))) return error;
-  const version = await execFileAsync(env.CLAUDE_CODE_EXECUTABLE, ['--version'], { env, timeout: 3000, maxBuffer: 4096 })
-    .then(result => result.stdout.trim().replace(/\s+/g, ' ').slice(0, 80)).catch(() => 'version unavailable');
-  return new Error(`Claude Code ${version} could not start. Install it with \`${AGENT_PROGRAMS.claude.install}\`, then try again. ${String(error)}`, { cause: error });
 }
 
 function adapterInstallHint(kind: keyof typeof ADAPTER_INSTALL_COMMANDS): string {
@@ -548,7 +749,9 @@ export function resolveAgentCommand(opts: {
       'Claude Code not found. Install Claude Code, then retry with `--agent claude`.',
     );
     const command =
-      activeAdapterCommand('claude', env) ?? executableOnPath('claude-agent-acp', env) ?? executableOnPath('claude-code-acp', env);
+      activeAdapterCommand('claude', env) ??
+      executableOnPath('claude-agent-acp', env) ??
+      executableOnPath('claude-code-acp', env);
     if (!command) {
       throw new Error(
         `Claude Code needs an ACP adapter. Install it with \`${adapterInstallHint('claude')}\`, then retry with \`--agent claude\`.`,

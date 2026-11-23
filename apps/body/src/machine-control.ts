@@ -1,10 +1,9 @@
-import { progress } from './update-progress.js';
-import { watch } from 'node:fs';
 import { chmod, rm } from 'node:fs/promises';
 import { createConnection, createServer, type Socket } from 'node:net';
-import { basename, dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import type { HelperStatusFile } from './helper-status.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
+import { ask, tryLock } from './wait.js';
 
 export interface MachineRequest {
   operation: 'status' | 'converge' | 'stop' | 'update';
@@ -14,6 +13,14 @@ export interface MachineRequest {
   force?: boolean;
 }
 
+/**
+ * The helper's one answer to one request. An `update` answer names its
+ * outcome: `handoff` means the helper is exiting for the requested release,
+ * `current` means the loaded release already satisfies it. A helper that
+ * predates one-answer control omits it.
+ */
+export type MachineAnswer = HelperStatusFile & { readonly outcome?: 'handoff' | 'current' };
+
 export function machineControlPath(stateRoot: string): string {
   // Darwin truncates Unix socket paths at 104 bytes. Neither the install/home
   // path nor os.tmpdir() (usually /var/folders/.../T on macOS) is bounded.
@@ -22,14 +29,31 @@ export function machineControlPath(stateRoot: string): string {
   return privateSocketPath(resolve(stateRoot));
 }
 
-/** The live connection, rather than a PID or a disk snapshot, proves the process generation. */
+/** The serving helper holds this kernel lock for its whole life; the kernel releases it on exit. */
+export function helperLockKey(stateRoot: string): string {
+  return `beeline-helper:${resolve(stateRoot)}`;
+}
+
+/** Marks an update request the helper answers later, when its handoff starts or fails. */
+const HELD = Symbol('held');
+export type HeldAnswer = typeof HELD;
+
+/** One request, one answer: the live connection, not a PID or a snapshot on disk, proves the generation. */
 export class MachineControl {
-  readonly #clients = new Set<Socket>();
+  readonly #held = new Set<Socket>();
+  readonly #peers = new Set<Socket>();
   readonly #server = createServer((socket) => {
+    this.#peers.add(socket);
     socket.setEncoding('utf8');
     socket.on('error', () => undefined);
+    socket.once('close', () => {
+      this.#held.delete(socket);
+      this.#peers.delete(socket);
+    });
     let input = '';
+    let received = false;
     socket.on('data', (chunk: string) => {
+      if (received) return;
       input += chunk;
       if (input.length > 4096) {
         socket.destroy();
@@ -38,23 +62,34 @@ export class MachineControl {
       const end = input.indexOf('\n');
       if (end < 0) return;
       const line = input.slice(0, end);
-      input = input.slice(end + 1);
+      received = true;
       void (async () => {
         const request = JSON.parse(line) as MachineRequest;
         if (!['status', 'converge', 'stop', 'update'].includes(request.operation))
           throw new Error('invalid helper operation');
-        this.#clients.add(socket);
-        await this.onRequest(request);
-        this.send(socket);
-      })().catch((error) => socket.end(`${JSON.stringify({ error: String(error) })}\n`));
+        const answer = await this.onRequest(request, () => {
+          this.#held.add(socket);
+          return HELD;
+        });
+        if (answer === HELD) return;
+        this.#held.delete(socket);
+        if (!socket.writableEnded) socket.end(`${JSON.stringify(answer)}\n`);
+      })().catch((error) => {
+        this.#held.delete(socket);
+        if (!socket.writableEnded)
+          socket.end(
+            `${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`,
+          );
+      });
     });
-    socket.once('close', () => this.#clients.delete(socket));
   });
-  #status: HelperStatusFile | undefined;
 
   constructor(
     readonly path: string,
-    readonly onRequest: (request: MachineRequest) => Promise<void>,
+    readonly onRequest: (
+      request: MachineRequest,
+      hold: () => HeldAnswer,
+    ) => Promise<MachineAnswer | HeldAnswer>,
   ) {}
 
   async start(): Promise<void> {
@@ -68,142 +103,108 @@ export class MachineControl {
     await chmod(this.path, 0o600);
   }
 
-  publish(status: HelperStatusFile): void {
-    this.#status = status;
-    for (const socket of this.#clients) this.send(socket);
-  }
-
-  private send(socket: Socket): void {
-    if (this.#status && !socket.destroyed) socket.write(`${JSON.stringify(this.#status)}\n`);
+  /** Answer every held update request; resolves once each answer has been written. */
+  settleHeld(answer: MachineAnswer | { error: string }): Promise<void> {
+    const line = `${JSON.stringify(answer)}\n`;
+    const sockets = [...this.#held];
+    this.#held.clear();
+    return Promise.all(
+      sockets.map(
+        (socket) =>
+          new Promise<void>((done) => {
+            if (socket.destroyed) done();
+            else socket.end(line, () => done());
+          }),
+      ),
+    ).then(() => undefined);
   }
 
   async stop(): Promise<void> {
     if (!this.#server.listening) return;
-    for (const socket of this.#clients) socket.destroy();
+    await this.settleHeld({ error: 'helper stopped before answering the update' });
+    for (const peer of this.#peers) {
+      if (!peer.writableEnded)
+        peer.end(`${JSON.stringify({ error: 'helper control stopped before answering' })}\n`);
+      peer.destroySoon();
+    }
     await new Promise<void>((done) => this.#server.close(() => done()));
     await rm(this.path, { force: true });
   }
 }
 
-export class MachineObservationError extends Error {
-  constructor(message: string, readonly responded: boolean) { super(message); }
-}
-export function helperAbsent(error: unknown): boolean {
-  return error instanceof MachineObservationError && !error.responded ||
-    ['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException)?.code ?? '');
+/** Follow the serving helper's kernel lock until the kernel releases it on that process's exit. */
+export async function followHelperExit(
+  stateRoot: string,
+  predecessor: Pick<MachineAnswer, 'pid' | 'generation'>,
+): Promise<void> {
+  const lock = await tryLock(helperLockKey(stateRoot));
+  if (lock.held) await lock.release();
+  else if (
+    lock.holder.key === helperLockKey(stateRoot) &&
+    lock.holder.pid === predecessor.pid &&
+    (lock.holder.generation === undefined || lock.holder.generation === predecessor.generation)
+  )
+    await lock.released();
+  else lock.close();
 }
 
-/** Subscribe once; readiness changes and successor socket creation drive completion. */
-export async function requestMachine(
+/** No helper is listening: its socket is missing or refused. Any other failure is reported as is. */
+export function helperAbsent(error: unknown): boolean {
+  return ['ENOENT', 'ECONNREFUSED'].includes((error as NodeJS.ErrnoException)?.code ?? '');
+}
+
+/** Ask the helper once. It answers what it did or why it refused; nothing here waits for a state. */
+export async function askMachine(
   stateRoot: string,
   request: MachineRequest,
-  accept: (status: HelperStatusFile) => boolean,
-  timeoutMs = 600_000,
-): Promise<HelperStatusFile> {
+  wait: { report?: (line: string) => void; machineRead?: boolean } = {},
+): Promise<MachineAnswer> {
   const path = machineControlPath(stateRoot);
   await preparePrivateSocketDirectory(path);
-  return new Promise((done, reject) => {
-    let responded = false;
-    let latest = 'no acknowledgment';
-    progress(`helper ${request.operation}: waiting for acknowledgment`);
-    const heartbeat = setInterval(() => progress(`helper ${request.operation}: ${latest}`), 5000);
-    const timer = setTimeout(() => finish(new MachineObservationError(
-      `helper ${request.operation}: observer expired (${latest}); helper was not stopped`, responded,
-    )), timeoutMs);
-    let socket: Socket | undefined;
-    let connecting = false;
-    let reconnectNeeded = false;
-    let settled = false;
-    const watcher = watch(dirname(path), (_event, filename) => {
-      if (filename === basename(path)) {
-        reconnectNeeded = true;
-        if (!socket && !connecting) connect();
-      }
-    });
-
-    function finish(error?: Error, status?: HelperStatusFile) {
-      if (settled) return;
-      settled = true;
-      clearInterval(heartbeat);
-      clearTimeout(timer);
-      watcher.close();
-      socket?.destroy();
-      if (error) reject(error);
-      else done(status!);
-    }
-    function connect() {
-      if (settled) return;
-      connecting = true;
-      reconnectNeeded = false;
-      const peer = createConnection(path);
-      socket = peer;
-      let input = '';
-      peer.setEncoding('utf8');
-      peer.once('connect', () => {
-        connecting = false;
-        peer.write(`${JSON.stringify(request)}\n`);
-      });
-      peer.on('data', (chunk: string) => {
-        input += chunk;
-        if (input.length > 1_000_000) return finish(new Error('invalid helper acknowledgment'));
-        let end: number;
-        while ((end = input.indexOf('\n')) >= 0) {
-          const line = input.slice(0, end);
-          input = input.slice(end + 1);
-          try {
-            const status = JSON.parse(line) as HelperStatusFile & { error?: string };
-            if (status.error) throw new Error(status.error);
-            if (
-              typeof status.generation !== 'string' ||
-              !status.generation ||
-              !Number.isSafeInteger(status.pid) ||
-              status.pid <= 0 ||
-              !['starting', 'serving', 'stopping'].includes(status.processState) ||
-              !status.agents ||
-              typeof status.agents !== 'object' ||
-              Array.isArray(status.agents)
-            )
-              throw new Error('invalid helper acknowledgment');
-            responded = true;
-            latest = `pid ${status.pid}, generation ${status.generation}, release ${status.loadedRelease ?? 'unknown'}, ${status.processState}${status.lastError ? `; last error: ${status.lastError}` : ''}`;
-            progress(`helper ${request.operation}: ${latest}`);
-            if (accept(status)) finish(undefined, status);
-          } catch (error) {
-            finish(error instanceof Error ? error : new Error(String(error)));
-          }
-        }
-      });
-      peer.once('error', (error: NodeJS.ErrnoException) => {
-        // A status read probes the current helper. It must return absence so
-        // connect can start a new install before waiting for convergence.
-        if (request.operation === 'status' || !['ENOENT', 'ECONNREFUSED', 'ECONNRESET'].includes(error.code ?? '')) finish(error);
-      });
-      peer.once('close', () => {
-        if (socket === peer) socket = undefined;
-        connecting = false;
-        if (reconnectNeeded) connect();
-      });
-    }
-    connect();
-  });
+  const answer = await ask<MachineAnswer>(
+    { socket: path, peer: `helper ${request.operation}`, ...wait },
+    request,
+  );
+  if (
+    typeof answer.generation !== 'string' ||
+    !answer.generation ||
+    !Number.isSafeInteger(answer.pid) ||
+    answer.pid <= 0 ||
+    !['starting', 'serving', 'stopping'].includes(answer.processState) ||
+    !answer.agents ||
+    typeof answer.agents !== 'object' ||
+    Array.isArray(answer.agents)
+  )
+    throw new Error('invalid helper answer');
+  return answer;
 }
 
 /** Read the existing host adb server directly: invoking adb could start a server. */
-export async function hostEmulatorSerials(connect = () => createConnection({ host: '127.0.0.1', port: 5037 })): Promise<string[]> {
+export async function hostEmulatorSerials(
+  connect = () => createConnection({ host: '127.0.0.1', port: 5037 }),
+): Promise<string[]> {
   const devices = await hostAdbQuery('host:devices', connect);
   const serials = devices.split('\n').flatMap((line) => {
     const [serial, state] = line.trim().split(/\s+/);
     return serial && /^emulator-\d+$/.test(serial) && state === 'device' ? [serial] : [];
   });
   // A transport can disappear after enumeration. Confirm each serial before offering it.
-  const ready = await Promise.all(serials.map(async serial => {
-    try { return await hostAdbQuery(`host-serial:${serial}:get-state`, connect) === 'device'; }
-    catch { return false; }
-  }));
+  const ready = await Promise.all(
+    serials.map(async (serial) => {
+      try {
+        return (await hostAdbQuery(`host-serial:${serial}:get-state`, connect)) === 'device';
+      } catch {
+        return false;
+      }
+    }),
+  );
   return serials.filter((_, index) => ready[index]);
 }
 
-function hostAdbQuery(query: string, connect: () => ReturnType<typeof createConnection>): Promise<string> {
+function hostAdbQuery(
+  query: string,
+  connect: () => ReturnType<typeof createConnection>,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect();
     let bytes = Buffer.alloc(0);

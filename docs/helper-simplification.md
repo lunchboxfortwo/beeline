@@ -7,21 +7,8 @@ is a serving machine. Each enabled agent has its own retry loop and diagnostic;
 ordinary failures retry indefinitely at capped backoff. An authority or
 configuration refusal remains visible until a revision or explicit start.
 
-The independent recovery entry selects verified code before importing the
-body. Installed `beeline update`/`start`, `npx usebeeline@latest update`/`start`,
-and the shell installer use the same preparation, installation lock and native
-convergence. Completion requires a live generation and every enabled agent's
-successful discovery and live registration. Local PID files and native READY
-alone cannot satisfy that result. A refused agent makes the command fail with
-its identity and reason while its siblings keep serving.
-
-The release transaction keeps intake open during preparation and while waiting
-for a quiet gap. After five minutes, admission pauses without cancelling active
-turns; the helper restarts after they finish. A newer target or failed handoff
-does not renew that deadline. Routine updates can wait longer for active work.
-Server minimums still interrupt immediately: command journals are flushed before
-shutdown and replayed without spending retry budget. Checksum, import, engine
-and embedded identity checks precede activation.
+Current preparation, command completion, release handoff and failure behavior
+are owned by the [CLI bundle runbook](cli-bundle-channel.md#recovery-and-the-first-update-from-an-old-release).
 
 ## The first update on an old machine
 
@@ -32,7 +19,7 @@ helper jobs with the sole native helper. Retirement uses native process groups
 and a common 90-second shutdown ceiling. A legacy per-agent entry queues its
 own native successor before retiring its calling job. That first topology
 replacement cannot rely on the old process's absent control protocol; subsequent
-updates pause admission and wait for active work before handoff.
+updates use the runbook's shared release handoff.
 
 The already-running CLI of an old release still contains its old behavior. A
 dead or damaged old install should use `npx usebeeline@latest update`. After
@@ -57,8 +44,8 @@ machine is current. Dependency convergence failures also remain visible.
 
 ## Recorded validation (2026-10-12)
 
-This historical run predates the WAKE-UPDATE-1 change from deadline interruption
-to admission drain; current behavior and proof are in the CLI bundle runbook.
+This historical run predates the current update wait boundary; current behavior
+and proof are in the CLI bundle runbook.
 
 The final isolated Linux run passed all 18 native phases on the built fixture
 archive (SHA-256 `f8f0c13a1b3db53b76d3c2fcb1bf03ee63feabbff7af821b53381f8ee11da379`).
@@ -102,9 +89,9 @@ container afterward.
 
 | Audit criterion                | Native fixture and supplementary regression coverage                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Current bundle, dead helper | Exit-79 suppressed unit recovered by real npx update; installed repeat converges without a new generation; installed update and both installed/npx start recover disabled and stopped services.                                                                                                                                                                                                                                         |
+| 1. Current bundle, dead helper | Exit-79 suppressed unit recovered by real npx update; installed repeat converges without a new generation; installed update and both installed/npx start recover disabled and stopped services.                                                                                                                                                                                                                |
 | 2. Old topology                | Real anchor directory, broken forwarding, pinned ExecStart, active old per-agent instances and the caller's own legacy handoff; flat/mixed layout, aliases and recorded Node covered by `self-update-layout.test.ts`; old launchd labels by `launchd.test.ts`.                                                                                                                                                 |
-| 3. Legacy helper                | Signed migration with deliberately lost credential reply; preserved identity/home/policy; unknown identity and revoked sign-in fail by name while the sibling answers. HTTP authority/replay/removal tests: `legacy-daemon-migration.test.ts` in the server.                                                                                                                                                   |
+| 3. Legacy helper               | Signed migration with deliberately lost credential reply; preserved identity/home/policy; unknown identity and revoked sign-in fail by name while the sibling answers. HTTP authority/replay/removal tests: `legacy-daemon-migration.test.ts` in the server.                                                                                                                                                   |
 | 4. Empty and explicit stop     | Both fixture agents stopped while the machine remains alive; update preserves stops; start restores them in the same generation. Empty machine, new pairing and start racing a draining stop: `machine-helper.test.ts`.                                                                                                                                                                                        |
 | 5. Crash containment           | Native SIGKILL and watchdog recovery; revoked agent restored by its runtime revision without a machine restart. Three ordinary failures followed by success with a live sibling: `machine-helper.test.ts`; continued Room retries: `room-supervisor.test.ts`.                                                                                                                                                  |
 | 6. Actual readiness            | Native replies plus live generation acknowledgment; malformed and unknown agents cannot pass convergence. Invalid acknowledgment rejection and stale/recycled PID behavior: machine control/status and runtime regression tests.                                                                                                                                                                               |

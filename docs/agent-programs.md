@@ -38,8 +38,12 @@ names the adapter, exact version and redacted cause. It uses the existing Sentry
 alert route (`/api/webhooks/sentry`) to the configured Telegram channel. Repeated
 starts and concurrent helpers sharing the adapter store do not repeat that alert
 or retry that version; the next published version gets a fresh check. A
-kernel-owned lock serializes installations and pointer writes, including Connect
-and pairing. Candidate installation does not block sessions on the working copy.
+kernel-owned lock protects state reads and pointer writes, including Connect
+and pairing; contention fails immediately with the holder's identity. Each
+candidate has its own installation lock, so installation and session checks run
+outside the shared lock. Candidate installation does not block sessions on the
+working copy. Promotion retains the new and previous active prefixes and prunes
+other tracked candidates only when no installer or live session uses them.
 Registry and npm failures leave the active command intact. No compatibility
 allowlist, package-version pin, or manual adoption gate is used.
 

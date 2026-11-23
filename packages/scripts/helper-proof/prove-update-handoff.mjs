@@ -6,7 +6,7 @@ import { createConnection } from 'node:net';
 import { promisify } from 'node:util';
 import { isolatedNativeProof } from '../../../apps/body/src/lifecycle-test-guard.ts';
 import { privateSocketPath } from '../../../apps/body/src/local-socket.ts';
-import { requestMachine } from '../../../apps/body/src/machine-control.ts';
+import { observeHelper } from './observe-helper.mjs';
 import { convergeNativeHelper } from '../../../apps/body/src/native-helper.ts';
 
 if (!isolatedNativeProof(process.env))
@@ -40,7 +40,7 @@ async function within(work) {
     clearTimeout(timer);
   }
 }
-const observe = (accept) => within(requestMachine(stateRoot, { operation: 'status' }, accept));
+const observe = (accept) => within(observeHelper(stateRoot, accept, 60_000));
 const statePath = '/home/proof/.local/lib/beeline-releases/.state/update-state.json';
 async function failedPreparation(announce) {
   const controller = new AbortController();

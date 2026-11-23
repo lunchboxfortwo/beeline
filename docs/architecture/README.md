@@ -36,6 +36,14 @@ additional timer owners still fail. There are no connection timer chains, retry 
 retention sweeps or expiry wake loops. `packages/scripts/server-timers.test.mjs` plants
 forbidden calls and verifies the real architecture check rejects them.
 
+The strict `helper.waits` rule covers `apps/body/src`: a helper command or agent
+tool waits only for the answer to its own request or the exit of a child it owns,
+never for a condition, and arms no timer. `ask`, `runOwned` and `tryLock` in
+`apps/body/src/wait.ts` are the shared wait owners; the agent stay-warm countdown
+`AgentRunner.armIdle` is the one timer owned outside it. The sites outside them
+today are a strict one-way ratchet: CI rejects a raised `total`, so it only
+falls as areas move to the owner. `packages/scripts/helper-waits.test.mjs` plants
+waits and timers and verifies the real check rejects them.
 
 ## Storage registry (bloat inside a module)
 
@@ -48,7 +56,7 @@ each with its owner module and a one-line reason it cannot be derived:
   registered under `storage.jsonb.<col>`, and on a registered column with no
   writer or no reader in non-test code (`unusedTotal` ratchets today's 197).
 - Today's storage carries the reason `existing before the registry; weekly
-  audit reviews`, counted by `bootstrapTotal`; a new entry needs its own reason.
+audit reviews`, counted by `bootstrapTotal`; a new entry needs its own reason.
 
 For a column scheduled for deletion, replace its reason string with an object:
 `{ "reason": "The existing reason.", "drop": "release 1.2.3" }`. A table can
@@ -67,15 +75,15 @@ each app so a module cannot grow a second path for the same job.
 
 ## Changing a rule
 
-| Change | Review |
-| --- | --- |
-| Lower a `total`, add a rule, reword `invariant`/`fix`/`module`, register storage or mark it for deletion, lower `bootstrapTotal`/`unusedTotal` | Normal CI and merge authority. |
-| Remove a rule whose pattern matches nothing any more | None. |
+| Change                                                                                                                                                                           | Review                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Lower a `total`, add a rule, reword `invariant`/`fix`/`module`, register storage or mark it for deletion, lower `bootstrapTotal`/`unusedTotal`                                   | Normal CI and merge authority.                                                  |
+| Remove a rule whose pattern matches nothing any more                                                                                                                             | None.                                                                           |
 | Raise a `total`, `bootstrapTotal` or `unusedTotal`, remove a live rule, change `pattern`/`flags`/`scope`/`owners`/`distinct` or the storage `scope`, or change the guard scripts | Candidate invariants must pass CI; owner reviews the diff weekly after merging. |
 
 Non-strict invariant changes pass CI when the candidate satisfies its declared
 rules. Strict capability boundaries reject changes to their matching scope,
-owner functions, owned sink count or zero allowance; they cannot use the weekly
+owner functions, owned sink count or a raised allowance; they cannot use the weekly
 warning path to reopen a second owner. A one-for-one relocation or rename is
 allowed only when the complete owning function bodies are unchanged against the
 base, with the same owned sink count and matching boundary. `--base` reports those changes for the weekly audit;
@@ -101,9 +109,9 @@ The helper physical connection belongs to `apps/body/src/live-link.ts`; server
 machine output and login/version changes belong to `machine-connection.ts`.
 `machine-connection-sinks.json` pins owned sink counts and can only shrink.
 A helper cannot acquire another reconnect/close/send path. Helper timers have
-zero inventory allowance, including generated child code and timer aliases.
-The session exception is one stay-warm countdown in `AgentRunner.armIdle`
-in `apps/body/src/agent-runner.ts`; the existing release handoff deadline remains in `ReleaseTransaction.begin`. The mutation suite plants a second
-reconnect and timer and requires both to fail; TYPECHECK runs that suite.
+zero inventory allowance, including generated child code and timer aliases;
+the exception is defined in the [helper wait boundary](#architecture-invariants).
+The mutation suite plants a second reconnect and timer and requires both to fail;
+TYPECHECK runs that suite.
 
 The `code.file-lines` rule caps every tracked `.ts`, `.tsx`, `.js` and `.mjs` file under `apps/`, `packages/`, `packages/scripts/` and `tools/` at 1,000 lines, including tests. Only exact generated paths declared in the rule are exempt. New files must meet the cap when staged; there is no oversized-file allowlist. `--base` rejects relaxing the cap, its scope or its generated exclusions. Split by existing domain boundaries while preserving behavior.
