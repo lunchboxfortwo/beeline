@@ -1,22 +1,53 @@
 import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
-import { reportMessageAsk,validateMessageAsk,type MessageAsk } from '@beeline/api-contract/daemon';
-import { INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,REPOSITORY_SUBSCRIPTION_EVENTS,fixCornerText } from "@beeline/api-contract/daemon";
-import { SUBSCRIBABLE_EVENT_KINDS } from "@beeline/api-contract/phone";
-import { builtinBeelineApp } from "@beeline/api-contract/workbench";
-import { Check,Errors } from "typebox/value";
-import { CAPABILITY_ROUTES,CAPABILITY_TOOLS,SCRATCH_ROUTES,agentToolsFor,placeBeelineApps,toolValidationSchema } from "./minimal-tool-surface.js";
-import { AgentGrantDeps,agentGrantDepsFromEnv,choiceOptionArgs } from './read-only-mcp-agent-grant-deps.js';
-import { agentScheduleDepsFromEnv,agentScheduleRoomId,createSchedule,deleteSchedule,subscribeEvents,updateSchedule } from './read-only-mcp-download-attachment.js';
-import { executeAgentOperation,executeConversationOperation } from './read-only-mcp-execute-agent-operation.js';
-import { JsonObject,ToolDefinition,asObject,callCommandTool,commandRequest,daemonExecute,grantRunDepsFromEnv,requiredEnv,operatorAgentTools } from './read-only-mcp.js';
-
-
-
-
-
-
-
-
+import {
+  reportMessageAsk,
+  validateMessageAsk,
+  type MessageAsk,
+} from '@beeline/api-contract/daemon';
+import {
+  INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,
+  REPOSITORY_SUBSCRIPTION_EVENTS,
+  fixCornerText,
+} from '@beeline/api-contract/daemon';
+import { SUBSCRIBABLE_EVENT_KINDS } from '@beeline/api-contract/phone';
+import { builtinBeelineApp } from '@beeline/api-contract/workbench';
+import { Check, Errors } from 'typebox/value';
+import {
+  CAPABILITY_ROUTES,
+  CAPABILITY_TOOLS,
+  SCRATCH_ROUTES,
+  agentToolsFor,
+  placeBeelineApps,
+  toolValidationSchema,
+} from './minimal-tool-surface.js';
+import {
+  AgentGrantDeps,
+  agentGrantDepsFromEnv,
+  choiceOptionArgs,
+} from './read-only-mcp-agent-grant-deps.js';
+import {
+  agentScheduleDepsFromEnv,
+  agentScheduleRoomId,
+  createSchedule,
+  deleteSchedule,
+  subscribeEvents,
+  updateSchedule,
+} from './read-only-mcp-download-attachment.js';
+import {
+  executeAgentOperation,
+  executeConversationOperation,
+} from './read-only-mcp-execute-agent-operation.js';
+import {
+  JsonObject,
+  ToolDefinition,
+  asObject,
+  callCommandTool,
+  commandRequest,
+  daemonExecute,
+  grantRunDepsFromEnv,
+  requiredEnv,
+  operatorAgentTools,
+} from './read-only-mcp.js';
 
 /** open_poll: Room/corner only; a plurality is a fact, never a mandate. */
 export async function openPoll(
@@ -44,16 +75,15 @@ export async function openPoll(
   );
 }
 
-
-
-
 export interface GrantRunDeps {
   roomId: string;
-  run: (input: { roomId: string; argv: string[]; stdin?: string; secrets?: string[] }) => Promise<JsonObject>;
+  run: (input: {
+    roomId: string;
+    argv: string[];
+    stdin?: string;
+    secrets?: string[];
+  }) => Promise<JsonObject>;
 }
-
-
-
 
 /** run_granted_command: the daemon checks the rule and runs outside the sandbox. */
 export async function runGrantedCommand(
@@ -68,9 +98,13 @@ export async function runGrantedCommand(
   ) {
     throw new Error('argv must be a non-empty array of words');
   }
-  if (args.stdin !== undefined && typeof args.stdin !== 'string') throw new Error('stdin must be text');
+  if (args.stdin !== undefined && typeof args.stdin !== 'string')
+    throw new Error('stdin must be text');
   const secrets = args.secrets;
-  if (secrets !== undefined && (!Array.isArray(secrets) || !secrets.every((name) => typeof name === 'string')))
+  if (
+    secrets !== undefined &&
+    (!Array.isArray(secrets) || !secrets.every((name) => typeof name === 'string'))
+  )
     throw new Error('secrets must be an array of secret names');
   const result = await deps.run({
     roomId: deps.roomId,
@@ -90,37 +124,48 @@ export async function runGrantedCommand(
   const output = typeof result.output === 'string' && result.output ? result.output : '(no output)';
   const refused =
     result.writeRefused === true
-      ? (process.env.BEELINE_DAEMON_CORNER_ID ? '\nA write was refused outside your scratch directory.' : '\nThis chat is read-only outside your scratch directory. Open a thread with open_thread to change files;') + ' For host work, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
+      ? (process.env.BEELINE_DAEMON_CORNER_ID
+          ? '\nA write was refused outside your scratch directory.'
+          : '\nThis chat is read-only outside your scratch directory. Open a thread with open_thread to change files;') +
+        ' For host work, ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
       : '';
-  const recovery = result.sandboxFailure === true
-    ? '\nFor host work, open a thread and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
-    : '';
+  const recovery =
+    result.sandboxFailure === true
+      ? '\nFor host work, open a thread and ask with request_grant(mode:request, kind:command, target, action, purpose, reason), then use run_granted_command.'
+      : '';
   return `ran under grant ${grantId}: ${verdict}\n${output}${refused}${recovery}`;
 }
 
-
-
-
 export function advertisedAgentTool(name: string): ToolDefinition {
-  const tool = agentToolsFor(true, process.env.BEELINE_AGENT_DM === '1', Boolean(process.env.BEELINE_DAEMON_CORNER_ID), process.env.BEELINE_CORNER_REPOSITORY === '1', Boolean(process.env.BEELINE_GRANT_RUNNER_URL), true, process.env.BEELINE_NATIVE_IO_PROVEN === '1',false,operatorAgentTools()).find(tool => tool.name === name);
+  const tool = agentToolsFor(
+    true,
+    process.env.BEELINE_AGENT_DM === '1',
+    Boolean(process.env.BEELINE_DAEMON_CORNER_ID),
+    process.env.BEELINE_CORNER_REPOSITORY === '1',
+    Boolean(process.env.BEELINE_GRANT_RUNNER_URL),
+    true,
+    process.env.BEELINE_NATIVE_IO_PROVEN === '1',
+    false,
+    operatorAgentTools(),
+  ).find((tool) => tool.name === name);
   if (!tool) throw new Error(`unknown or unavailable tool: ${name}; use only advertised tools`);
   return tool;
 }
 
-
-
 export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObject): void {
-  if (tool.name==='message'||tool.name==='reply') reportMessageAsk(args as import('@beeline/api-contract/daemon').MessageDigest);
-  if ((tool.name==='message'||tool.name==='reply') && args.ask!==undefined)
+  if (tool.name === 'message' || tool.name === 'reply')
+    reportMessageAsk(args as import('@beeline/api-contract/daemon').MessageDigest);
+  if ((tool.name === 'message' || tool.name === 'reply') && args.ask !== undefined)
     validateMessageAsk(args.ask as MessageAsk);
-  if (tool.name==='post') return;
+  if (tool.name === 'post') return;
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
   // and may share a name (e.g. workflow read) with an ordinary tool.
-  validateToolInput({ ...tool, inputSchema: { ...toolValidationSchema(tool.name), ...tool.inputSchema } }, args);
+  validateToolInput(
+    { ...tool, inputSchema: { ...toolValidationSchema(tool.name), ...tool.inputSchema } },
+    args,
+  );
 }
-
-
 
 /** Name a string that misses its advertised length, including a matching allOf branch. */
 function fieldLimitDetails(schema: JsonObject, value: unknown, path = ''): string[] {
@@ -137,7 +182,8 @@ function fieldLimitDetails(schema: JsonObject, value: unknown, path = ''): strin
     const properties = asObject(schema.properties);
     for (const [field, raw] of Object.entries(properties)) {
       const child = (value as JsonObject)[field];
-      if (child !== undefined) details.push(...fieldLimitDetails(asObject(raw), child, path ? `${path}.${field}` : field));
+      if (child !== undefined)
+        details.push(...fieldLimitDetails(asObject(raw), child, path ? `${path}.${field}` : field));
     }
   }
   const branches = schema.allOf;
@@ -154,7 +200,11 @@ function fieldLimitDetails(schema: JsonObject, value: unknown, path = ''): strin
 /** Fix tool input that should succeed: drop a broken reply link and lowercase memory keywords. */
 export function normalizeAgentToolArgs(name: string, args: JsonObject): string[] {
   const removed: string[] = [];
-  if (name === 'post' && 'replyTo' in args && (typeof args.replyTo !== 'string' || !/^[0-9a-f]{64}$/.test(args.replyTo))) {
+  if (
+    name === 'post' &&
+    'replyTo' in args &&
+    (typeof args.replyTo !== 'string' || !/^[0-9a-f]{64}$/.test(args.replyTo))
+  ) {
     delete args.replyTo;
     removed.push('reply link');
   }
@@ -175,7 +225,10 @@ export function normalizeAgentToolArgs(name: string, args: JsonObject): string[]
       return next;
     });
     args.keywords = keywords;
-    if (changed) removed.push(`keywords saved as ${keywords.filter((word) => typeof word === 'string').join(', ')}`);
+    if (changed)
+      removed.push(
+        `keywords saved as ${keywords.filter((word) => typeof word === 'string').join(', ')}`,
+      );
   }
   return removed;
 }
@@ -186,23 +239,39 @@ function withAdjustments(result: string, removed: string[]): string {
   try {
     const parsed = JSON.parse(result) as JsonObject;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      parsed.receipt = typeof parsed.receipt === 'string' && parsed.receipt ? `${parsed.receipt}\n${note}` : note;
+      parsed.receipt =
+        typeof parsed.receipt === 'string' && parsed.receipt ? `${parsed.receipt}\n${note}` : note;
       return JSON.stringify(parsed);
     }
-  } catch { /* The tool result is plain text. */ }
+  } catch {
+    /* The tool result is plain text. */
+  }
   return `${result}\n${note}`;
 }
 
 export function validateToolInput(tool: ToolDefinition, args: JsonObject): void {
-  if (tool.name === 'request_grant' && args.mode === undefined && (args.action === 'request' || args.action === 'list'))
+  if (
+    tool.name === 'request_grant' &&
+    args.mode === undefined &&
+    (args.action === 'request' || args.action === 'list')
+  )
     args = { ...args, mode: args.action };
   const requestedAction = args.action;
   const requestedMode = args.mode;
   if (tool.name === 'link_request') normalizeApprovalIntent(args);
-  if ((tool.name === 'request_grant' && args.mode !== 'list') || (tool.name === 'connect' && args.mode === 'ensure')) normalizeApprovalIntent(args);
-  if (tool.name === 'search' && typeof args.query === 'string'
-    && [...args.query].length > INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS) {
-    throw new Error(`search: query: at most ${INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS} characters`);
+  if (
+    (tool.name === 'request_grant' && args.mode !== 'list') ||
+    (tool.name === 'connect' && args.mode === 'ensure')
+  )
+    normalizeApprovalIntent(args);
+  if (
+    tool.name === 'search' &&
+    typeof args.query === 'string' &&
+    [...args.query].length > INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS
+  ) {
+    throw new Error(
+      `search: query: at most ${INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS} characters`,
+    );
   }
   if (!Check(tool.inputSchema, args)) {
     if (tool.name === 'search') {
@@ -212,19 +281,29 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
         if (args[field] === undefined) return required.has(field) ? [`${field}: required`] : [];
         const rule = asObject(rawSchema);
         if (Check(rule, args[field])) return [];
-        if (Array.isArray(rule.enum)) return [`${field}: expected one of ${(rule.enum as string[]).join(', ')}`];
-        if (field === 'query') return [`${field}: expected a non-whitespace string of 1–500 characters without NUL`];
-        if (field === 'limit') return [`${field}: expected an integer from ${rule.minimum} to ${rule.maximum}`];
+        if (Array.isArray(rule.enum))
+          return [`${field}: expected one of ${(rule.enum as string[]).join(', ')}`];
+        if (field === 'query')
+          return [`${field}: expected a non-whitespace string of 1–500 characters without NUL`];
+        if (field === 'limit')
+          return [`${field}: expected an integer from ${rule.minimum} to ${rule.maximum}`];
         return [`${field}: invalid value`];
       });
-      const extra = Object.keys(args).filter(field => !Object.hasOwn(properties, field));
-      if (extra.length) details.push(`unknown fields: ${extra.join(', ')}; allowed fields: ${Object.keys(properties).join(', ')}`);
-      throw new Error(`search: invalid arguments; ${details.join('; ')}; follow the advertised schema`);
+      const extra = Object.keys(args).filter((field) => !Object.hasOwn(properties, field));
+      if (extra.length)
+        details.push(
+          `unknown fields: ${extra.join(', ')}; allowed fields: ${Object.keys(properties).join(', ')}`,
+        );
+      throw new Error(
+        `search: invalid arguments; ${details.join('; ')}; follow the advertised schema`,
+      );
     }
     if (tool.name === 'request_grant') {
       const properties = asObject(tool.inputSchema.properties);
       const branches = tool.inputSchema.anyOf as JsonObject[];
-      const branch = branches.find(schema => Check(asObject(asObject(schema.properties).mode), requestedMode ?? 'request'));
+      const branch = branches.find((schema) =>
+        Check(asObject(asObject(schema.properties).mode), requestedMode ?? 'request'),
+      );
       const required = new Set([
         ...(tool.inputSchema.required as string[]),
         ...((branch?.required as string[] | undefined) ?? []),
@@ -239,106 +318,179 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
           rule.minLength !== undefined ? `at least ${rule.minLength} characters` : undefined,
           rule.maxLength !== undefined ? `at most ${rule.maxLength} characters` : undefined,
           rule.minimum !== undefined ? `at least ${rule.minimum}` : undefined,
-        ].filter(Boolean).join(', ');
+        ]
+          .filter(Boolean)
+          .join(', ');
         return [`${field}: expected ${expectation}`];
       });
-      if (Object.keys(args).some(field => !Object.hasOwn(properties, field)))
+      if (Object.keys(args).some((field) => !Object.hasOwn(properties, field)))
         details.push('input: expected only advertised fields');
-      throw new Error(`${tool.name}: invalid arguments; ${details.join('; ')}; follow the advertised schema`);
+      throw new Error(
+        `${tool.name}: invalid arguments; ${details.join('; ')}; follow the advertised schema`,
+      );
     }
     const required = tool.inputSchema.required as string[] | undefined;
-    const missing = required?.filter(field => args[field] === undefined);
-    const extra = Object.keys(args).filter(field => !(field in asObject(tool.inputSchema.properties)));
-    const branches = tool.name === 'revise_thread'
-      ? (tool.inputSchema.allOf as JsonObject[]).filter(schema => Check(asObject(schema.if), args)).map(schema => schema.then)
-      : tool.inputSchema.anyOf;
-    const diagnosticSchema = tool.name === 'wake' || tool.name === 'revise_thread'
-      ? { ...tool.inputSchema, allOf: undefined, anyOf: (branches as JsonObject[]).filter(schema => {
-        const action = asObject(schema.properties).action;
-        return !action || Check(action, requestedAction);
-      }) }
-      : tool.inputSchema;
-    const details = tool.name === 'wake' || tool.name === 'revise_thread' || tool.name === 'search'
-      ? Errors(diagnosticSchema, args).filter(error => error.keyword !== 'anyOf')
-        .map(error => `${error.instancePath || 'input'}: ${error.message}`).join('; ')
-      : '';
+    const missing = required?.filter((field) => args[field] === undefined);
+    const extra = Object.keys(args).filter(
+      (field) => !(field in asObject(tool.inputSchema.properties)),
+    );
+    const branches =
+      tool.name === 'revise_thread'
+        ? (tool.inputSchema.allOf as JsonObject[])
+            .filter((schema) => Check(asObject(schema.if), args))
+            .map((schema) => schema.then)
+        : tool.inputSchema.anyOf;
+    const diagnosticSchema =
+      tool.name === 'wake' || tool.name === 'revise_thread'
+        ? {
+            ...tool.inputSchema,
+            allOf: undefined,
+            anyOf: (branches as JsonObject[]).filter((schema) => {
+              const action = asObject(schema.properties).action;
+              return !action || Check(action, requestedAction);
+            }),
+          }
+        : tool.inputSchema;
+    const details =
+      tool.name === 'wake' || tool.name === 'revise_thread' || tool.name === 'search'
+        ? Errors(diagnosticSchema, args)
+            .filter((error) => error.keyword !== 'anyOf')
+            .map((error) => `${error.instancePath || 'input'}: ${error.message}`)
+            .join('; ')
+        : '';
     const limits = fieldLimitDetails(tool.inputSchema, args);
-    throw new Error(`${tool.name}: invalid arguments${details ? `; ${details}` : ''}${limits.length ? `; ${limits.join('; ')}` : ''}${missing?.length ? `; required: ${missing.join(', ')}` : ''}${extra.length ? `; unknown fields: ${extra.join(', ')}` : ''}; follow the advertised schema`);
+    throw new Error(
+      `${tool.name}: invalid arguments${details ? `; ${details}` : ''}${limits.length ? `; ${limits.join('; ')}` : ''}${missing?.length ? `; required: ${missing.join(', ')}` : ''}${extra.length ? `; unknown fields: ${extra.join(', ')}` : ''}; follow the advertised schema`,
+    );
   }
 }
 
+export const turnArtifacts = new Map<
+  string,
+  { uploads: { name: string; result: Promise<string> }[] }
+>();
 
-
-export const turnArtifacts = new Map<string, { uploads: { name: string; result: Promise<string> }[] }>();
-
-
-
-
-export async function callAgentTool(name: string, args: JsonObject, toolCallId: string): Promise<string> {
-  const {requestId,...input}=args;
-  return commandRequest.run(typeof requestId==='string'?requestId:undefined,
-    () => callCommandTool(name, input, toolCallId));
+export async function callAgentTool(
+  name: string,
+  args: JsonObject,
+  toolCallId: string,
+): Promise<string> {
+  const { requestId, ...input } = args;
+  return commandRequest.run(typeof requestId === 'string' ? requestId : undefined, () =>
+    callCommandTool(name, input, toolCallId),
+  );
 }
-
-
-
 
 /** Execute only the advertised vocabulary; internal operations retain server authority. */
-export async function executeAgentTool(name:string,args:JsonObject,toolCallId:string,_attachmentNames:string[]=[]):Promise<string> {
-  if (name==='post') return executeConversationOperation(name,args);
-  return executeResourceTool(name,args,toolCallId);
+export async function executeAgentTool(
+  name: string,
+  args: JsonObject,
+  toolCallId: string,
+  _attachmentNames: string[] = [],
+): Promise<string> {
+  if (name === 'post') return executeConversationOperation(name, args);
+  return executeResourceTool(name, args, toolCallId);
 }
 
-async function executeResourceTool(name: string, args: JsonObject, toolCallId: string): Promise<string> {
-  if (name === 'read' && args.cursor !== undefined &&
-      (!args.cursor || typeof args.cursor !== 'object' || Array.isArray(args.cursor)))
+async function executeResourceTool(
+  name: string,
+  args: JsonObject,
+  toolCallId: string,
+): Promise<string> {
+  if (
+    name === 'read' &&
+    args.cursor !== undefined &&
+    (!args.cursor || typeof args.cursor !== 'object' || Array.isArray(args.cursor))
+  )
     throw new Error('read: pass the returned next object unchanged as cursor');
   const removed = normalizeAgentToolArgs(name, args);
   validateAdvertisedToolInput(advertisedAgentTool(name), args);
-  const addressed = { ...args, ...(typeof args.address === 'string' ? { cornerId: args.address } : {}) };
+  const addressed = {
+    ...args,
+    ...(typeof args.address === 'string' ? { cornerId: args.address } : {}),
+  };
   const execute = async (operation: string, input = args) => {
     const result = await executeAgentOperation(operation, input, toolCallId);
-    return withAdjustments(result,removed);
+    return withAdjustments(result, removed);
   };
   switch (name) {
     case 'message':
-    case 'reply': return execute(name);
+    case 'reply':
+      return execute(name);
     case 'create_work_item':
     case 'update_work':
-    case 'close_ask': return execute(name);
+    case 'close_ask':
+      return execute(name);
     case 'read': {
       const facet = args.facet;
       if (facet === 'procedure' && args.slug === undefined) args.slug = args.name;
-      const requiredField = facet === 'message' ? 'messageId' : facet === 'attachment' ? 'attachmentId' : facet === 'procedure' ? 'slug' : undefined;
-      if (requiredField && !args[requiredField]) throw new Error(`read: ${requiredField} is required for facet ${facet}`);
-      const address = args.address ?? (process.env.BEELINE_DAEMON_CORNER_ID?.trim() || process.env.BEELINE_DAEMON_ROOM_ID);
+      const requiredField =
+        facet === 'message'
+          ? 'messageId'
+          : facet === 'attachment'
+            ? 'attachmentId'
+            : facet === 'procedure'
+              ? 'slug'
+              : undefined;
+      if (requiredField && !args[requiredField])
+        throw new Error(`read: ${requiredField} is required for facet ${facet}`);
+      const address =
+        args.address ??
+        (process.env.BEELINE_DAEMON_CORNER_ID?.trim() || process.env.BEELINE_DAEMON_ROOM_ID);
       const input = { ...args, ...asObject(args.cursor), address, cornerId: address };
       switch (facet) {
-        case 'addresses': return execute('list_chats', input);
-        case 'threads': return execute('list_threads', input);
-        case 'members': return execute('list_chat_members', input);
+        case 'addresses':
+          return execute('list_chats', input);
+        case 'threads':
+          return execute('list_threads', input);
+        case 'members':
+          return execute('list_chat_members', input);
         case 'messages':
           // Every message read uses the same bounded cursor contract.
-          return execute('inspect_thread', { ...input, from: args.from ?? (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined ? 'oldest' : 'newest'), mode: 'transcript' });
-        case 'message': return execute('get_chat_message', { ...input, messageId: args.messageId });
-        case 'attachment': return execute('download_attachment', input);
-        case 'brief': return execute('read_thread_brief', input);
-        case 'status': return execute('inspect_thread', { ...input, mode: 'status' });
-        case 'checks': return execute('pr_checks_status', input);
-        case 'pr': return execute('read_pull_request', input);
-        case 'procedure': return execute('load_workspace_skill', { ...input, slug: args.slug });
-        case 'usage': return execute('read_agent_usage', {});
-        case 'session': return execute('read_session_context', { prepare: args.name === 'prepare' });
-        default: throw new Error('unknown read facet');
+          return execute('inspect_thread', {
+            ...input,
+            from:
+              args.from ??
+              (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined
+                ? 'oldest'
+                : 'newest'),
+            mode: 'transcript',
+          });
+        case 'message':
+          return execute('get_chat_message', { ...input, messageId: args.messageId });
+        case 'attachment':
+          return execute('download_attachment', input);
+        case 'brief':
+          return execute('read_thread_brief', input);
+        case 'status':
+          return execute('inspect_thread', { ...input, mode: 'status' });
+        case 'checks':
+          return execute('pr_checks_status', input);
+        case 'pr':
+          return execute('read_pull_request', input);
+        case 'procedure':
+          return execute('load_workspace_skill', { ...input, slug: args.slug });
+        case 'usage':
+          return execute('read_agent_usage', {});
+        case 'session':
+          return execute('read_session_context', { prepare: args.name === 'prepare' });
+        default:
+          throw new Error('unknown read facet');
       }
     }
     case 'search': {
-      if (args.scope !== 'history' && args.scope !== 'memory') throw new Error('scope must be history or memory');
+      if (args.scope !== 'history' && args.scope !== 'memory')
+        throw new Error('scope must be history or memory');
       return execute(args.scope === 'history' ? 'search_history' : 'search_memory');
     }
     case 'remember': {
       const routes: Record<string, Record<string, string>> = {
-        fact: { save: 'save_memory', update: 'update_memory', delete: 'delete_memory', used: 'report_memory_used' },
+        fact: {
+          save: 'save_memory',
+          update: 'update_memory',
+          delete: 'delete_memory',
+          used: 'report_memory_used',
+        },
         procedure: { save: 'save_skill', delete: 'delete_skill' },
       };
       const operation = routes[String(args.kind)]?.[String(args.action)];
@@ -347,54 +499,95 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     }
     case 'revise_thread': {
       if (args.action === 'metadata') return execute('rename_thread', addressed);
-      if (args.action !== 'brief' && args.action !== 'install_brief') throw new Error('action must be metadata, install_brief or brief');
+      if (args.action !== 'brief' && args.action !== 'install_brief')
+        throw new Error('action must be metadata, install_brief or brief');
       const copied = asObject(args.brief);
       // Projection metadata is read-only. Keep revision and change from the call,
       // and let the server resolve the approval and attachment metadata again.
-      const input = { ...addressed, spec: copied.spec, repositoryWork: copied.repositoryWork,
-        approval: copied.approval === undefined ? undefined : {
-          sourceMessageId: asObject(copied.approval).sourceMessageId,
-        },
-        attachments: Array.isArray(copied.attachments) ? copied.attachments.map(item => {
-          const file = asObject(item);
-          return { ...(file.objectId !== undefined ? { objectId: file.objectId } : {}),
-            ...(file.path !== undefined ? { path: file.path } : {}),
-            purpose: file.purpose, required: file.required };
-        }) : undefined,
+      const input = {
+        ...addressed,
+        spec: copied.spec,
+        repositoryWork: copied.repositoryWork,
+        approval:
+          copied.approval === undefined
+            ? undefined
+            : {
+                sourceMessageId: asObject(copied.approval).sourceMessageId,
+              },
+        attachments: Array.isArray(copied.attachments)
+          ? copied.attachments.map((item) => {
+              const file = asObject(item);
+              return {
+                ...(file.objectId !== undefined ? { objectId: file.objectId } : {}),
+                ...(file.path !== undefined ? { path: file.path } : {}),
+                purpose: file.purpose,
+                required: file.required,
+              };
+            })
+          : undefined,
       };
       if (args.action === 'install_brief') {
         const { spec, repositoryWork, approval, attachments } = input;
-        return execute('rename_thread', { ...addressed, brief: { spec, repositoryWork, approval, attachments } });
+        return execute('rename_thread', {
+          ...addressed,
+          brief: { spec, repositoryWork, approval, attachments },
+        });
       }
       return execute('revise_thread_brief', input);
     }
-    case 'claim_thread': return execute(name, addressed);
+    case 'claim_thread':
+      return execute(name, addressed);
     case 'report_feedback':
     case 'send_operator_system_dm':
-    case 'read_operator_system_dm': return execute(name);
-    case 'dispatch_release': return execute(name);
+    case 'read_operator_system_dm':
+      return execute(name);
+    case 'dispatch_release':
+      return execute(name);
     case 'approve_merge':
     case 'set_thread_hold':
-    case 'close_thread': return execute(name, addressed);
+    case 'close_thread':
+      return execute(name, addressed);
     case 'request_grant':
       if ((args.mode ?? args.action) === 'list') return execute('list_grants');
-      if (args.mode !== undefined && args.mode !== 'request') throw new Error('mode must be request or list');
+      if (args.mode !== undefined && args.mode !== 'request')
+        throw new Error('mode must be request or list');
       return execute(name);
     case 'connect': {
-      const builtin = builtinBeelineApp(String(args.service ?? args.query ?? ''),
-        `${args.reason ?? ''} ${args.continuation ?? ''}`);
-      const capabilities = builtin || args.mode === 'discover' || args.mode === 'status'
-        ? await availableCapabilities(!builtin || builtin === 'beeline:onboarding') : [];
+      const builtin = builtinBeelineApp(
+        String(args.service ?? args.query ?? ''),
+        `${args.reason ?? ''} ${args.continuation ?? ''}`,
+      );
+      const capabilities =
+        builtin || args.mode === 'discover' || args.mode === 'status'
+          ? await availableCapabilities(!builtin || builtin === 'beeline:onboarding')
+          : [];
       if (builtin === 'beeline:onboarding' && !capabilities.includes(builtin))
-        return JSON.stringify({ status: 'unavailable', app: builtin, next: 'Repository cards are unavailable on this surface. Use an active chat with current members and retry the repository card.' });
-      if (builtin && capabilities.includes(builtin) && (args.mode === undefined || ['status', 'ensure', 'discover'].includes(String(args.mode))))
-        return JSON.stringify({ status: 'ready', app: builtin,
-          next: `Use app_tool(app:${builtin}) to discover its tools. Existing tool permissions still apply.` });
+        return JSON.stringify({
+          status: 'unavailable',
+          app: builtin,
+          next: 'Repository cards are unavailable on this surface. Use an active chat with current members and retry the repository card.',
+        });
+      if (
+        builtin &&
+        capabilities.includes(builtin) &&
+        (args.mode === undefined || ['status', 'ensure', 'discover'].includes(String(args.mode)))
+      )
+        return JSON.stringify({
+          status: 'ready',
+          app: builtin,
+          next: `Use app_tool(app:${builtin}) to discover its tools. Existing tool permissions still apply.`,
+        });
       if (builtin && !capabilities.includes(builtin))
         return JSON.stringify({ status: 'unavailable', app: builtin, next: placeRefusal(builtin) });
-      if (args.mode === 'status') return JSON.stringify({ readiness: await execute('connectors_status'), capabilities });
-      if (args.mode === 'discover') return JSON.stringify({ integrations: args.query ? JSON.parse(await execute('find_connectors')) : [], capabilities });
-      if (args.mode !== undefined && args.mode !== 'ensure') throw new Error('mode must be discover, status or ensure');
+      if (args.mode === 'status')
+        return JSON.stringify({ readiness: await execute('connectors_status'), capabilities });
+      if (args.mode === 'discover')
+        return JSON.stringify({
+          integrations: args.query ? JSON.parse(await execute('find_connectors')) : [],
+          capabilities,
+        });
+      if (args.mode !== undefined && args.mode !== 'ensure')
+        throw new Error('mode must be discover, status or ensure');
       return execute(name);
     }
     case 'app_tool': {
@@ -408,23 +601,35 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
         });
       if (app.startsWith('beeline:')) {
         const capability = app.slice('beeline:'.length);
-        if (!(await availableCapabilities(app === 'beeline:onboarding')).includes(app)) throw new Error(placeRefusal(app));
+        if (!(await availableCapabilities(app === 'beeline:onboarding')).includes(app))
+          throw new Error(placeRefusal(app));
         const routes = CAPABILITY_ROUTES[capability]!;
-        if (args.tool === undefined) return JSON.stringify({ app, tools: Object.entries(routes).map(([action]) => {
-          const definition = CAPABILITY_TOOLS[capability]![action]!;
-          return { ...definition, name: action, description: definition.description };
-        }) });
+        if (args.tool === undefined)
+          return JSON.stringify({
+            app,
+            tools: Object.entries(routes).map(([action]) => {
+              const definition = CAPABILITY_TOOLS[capability]![action]!;
+              return { ...definition, name: action, description: definition.description };
+            }),
+          });
         const operation = routes[String(args.tool)];
         if (!operation) throw new Error('unknown capability operation; discover its schema first');
         const input = { ...asObject(args.args ?? args.arguments) };
         const definition = CAPABILITY_TOOLS[capability]![String(args.tool)]!;
         validateToolInput(definition, input);
-        if (capability === 'workflow' && args.tool === 'rebind') { input.agentId = input.agent; delete input.agent; }
+        if (capability === 'workflow' && args.tool === 'rebind') {
+          input.agentId = input.agent;
+          delete input.agent;
+        }
         return execute(operation, input);
       }
       return args.tool === undefined
         ? execute('list_app_tools', { appId: app, query: args.query })
-        : execute('execute_app_tool', { appId: app, tool: args.tool, arguments: args.args ?? args.arguments });
+        : execute('execute_app_tool', {
+            appId: app,
+            tool: args.tool,
+            arguments: args.args ?? args.arguments,
+          });
     }
     case 'scratch_io': {
       if (process.env.BEELINE_NATIVE_IO_PROVEN === '1') throw new Error('native IO is available');
@@ -436,17 +641,46 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       if (args.action === 'delete' && args.trigger === undefined && args.scheduleId !== undefined)
         args = { ...args, trigger: 'schedule' };
       // Explicit allowlist: no payload can select an arbitrary daemon operation or recipient.
-      const allowed = new Set(['action', 'trigger', 'address', 'scheduleId', 'subscriptionId', 'prompt', 'cadence', 'maxRuns', 'title', 'when', 'workflowName', 'source', 'event', 'repository', 'channelId', 'channelName', 'kinds']);
-      if (Object.keys(args).some(key => !allowed.has(key))) throw new Error('wake only manages this agent’s own wake sources');
-      if (args.trigger !== 'lifecycle' && args.address !== undefined) throw new Error('address is only supported for lifecycle wakes; schedules and events belong to this place');
-      if (args.trigger === 'lifecycle' && !args.address) throw new Error('lifecycle wake requires address');
+      const allowed = new Set([
+        'action',
+        'trigger',
+        'address',
+        'scheduleId',
+        'subscriptionId',
+        'prompt',
+        'cadence',
+        'maxRuns',
+        'title',
+        'when',
+        'workflowName',
+        'source',
+        'event',
+        'repository',
+        'channelId',
+        'channelName',
+        'kinds',
+      ]);
+      if (Object.keys(args).some((key) => !allowed.has(key)))
+        throw new Error('wake only manages this agent’s own wake sources');
+      if (args.trigger !== 'lifecycle' && args.address !== undefined)
+        throw new Error(
+          'address is only supported for lifecycle wakes; schedules and events belong to this place',
+        );
+      if (args.trigger === 'lifecycle' && !args.address)
+        throw new Error('lifecycle wake requires address');
       const roomId = agentScheduleRoomId();
       const deps = { ...agentScheduleDepsFromEnv(), selfOnly: true };
       if (args.action === 'pause' || args.action === 'resume') {
-        if (args.trigger === 'lifecycle') throw new Error('pause and resume apply to schedules and subscriptions');
-        return JSON.stringify(await daemonExecute('setAgentWakePaused', { roomId,
-          scheduleId: args.scheduleId as string | undefined, subscriptionId: args.subscriptionId as string | undefined,
-          paused: args.action === 'pause' }));
+        if (args.trigger === 'lifecycle')
+          throw new Error('pause and resume apply to schedules and subscriptions');
+        return JSON.stringify(
+          await daemonExecute('setAgentWakePaused', {
+            roomId,
+            scheduleId: args.scheduleId as string | undefined,
+            subscriptionId: args.subscriptionId as string | undefined,
+            paused: args.action === 'pause',
+          }),
+        );
       }
       if (args.action === 'list') {
         const [schedules, subscriptions, watches, events] = await Promise.all([
@@ -457,9 +691,12 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
         ]);
         return JSON.stringify({ ...schedules, subscriptions, ...watches, events });
       }
-      if (args.action === 'events') return JSON.stringify({ room: SUBSCRIBABLE_EVENT_KINDS,
-        repository: REPOSITORY_SUBSCRIPTION_EVENTS,
-        service: await daemonExecute('listServiceSubscriptionEvents', { roomId }) });
+      if (args.action === 'events')
+        return JSON.stringify({
+          room: SUBSCRIBABLE_EVENT_KINDS,
+          repository: REPOSITORY_SUBSCRIPTION_EVENTS,
+          service: await daemonExecute('listServiceSubscriptionEvents', { roomId }),
+        });
       if (args.action === 'replace_events') return subscribeEvents(args, deps);
       if (args.trigger === 'schedule') {
         if (args.action === 'create') return createSchedule(args, deps);
@@ -472,7 +709,10 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
       }
       if (args.trigger === 'lifecycle') {
         if (args.action === 'create') return execute('watch');
-        if (args.action === 'delete') return JSON.stringify(await daemonExecute('watchCorner', { roomId, cornerId: args.address, kinds: [] }));
+        if (args.action === 'delete')
+          return JSON.stringify(
+            await daemonExecute('watchCorner', { roomId, cornerId: args.address, kinds: [] }),
+          );
       }
       throw new Error('unknown wake action/trigger');
     }
@@ -491,30 +731,31 @@ async function executeResourceTool(name: string, args: JsonObject, toolCallId: s
     case 'run_granted_command':
     case 'workspace':
     case 'store_secret':
-    case 'no_reply_needed': return execute(name);
-    default: throw new Error(`unknown tool: ${name}; use only tools/list names`);
+    case 'no_reply_needed':
+      return execute(name);
+    default:
+      throw new Error(`unknown tool: ${name}; use only tools/list names`);
   }
 }
-
-
-
 
 export async function availableCapabilities(checkOnboarding = true): Promise<string[]> {
   let onboarding = false;
   try {
     if (checkOnboarding) {
-      const state = await daemonExecute('getRoomRepositoryState', { roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID') });
+      const state = await daemonExecute('getRoomRepositoryState', {
+        roomId: requiredEnv('BEELINE_DAEMON_ROOM_ID'),
+      });
       onboarding = state.repositoryOnboarding === true;
     }
-  } catch { /* Missing server eligibility always leaves the feature dark. */ }
+  } catch {
+    /* Missing server eligibility always leaves the feature dark. */
+  }
 
   const apps = placeBeelineApps(Boolean(process.env.BEELINE_DAEMON_CORNER_ID), onboarding);
   return process.env.BEELINE_FREE_AGENT_ID || process.env.BEELINE_FREE_AGENT_MODEL_TOKEN
-    ? apps.filter(app => app !== 'beeline:browser_share') : apps;
+    ? apps.filter((app) => app !== 'beeline:browser_share')
+    : apps;
 }
-
-
-
 
 /** The refusal for a Beeline app that does not work here names the apps that do. */
 export function placeRefusal(app: string): string {

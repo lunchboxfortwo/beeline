@@ -1,41 +1,61 @@
-import { encodeArtifactTitleHeader,fixCornerText } from "@beeline/api-contract/daemon";
-import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash } from "node:crypto";
-import { existsSync,lstatSync,readFileSync,realpathSync,statSync,writeFileSync } from "node:fs";
-import { basename,isAbsolute,join,relative,resolve,sep } from "node:path";
-import { createInterface } from "node:readline";
-import { BoundedSizeError,EXPIRED_REASON,fetchBoundedBytes,MAX_ATTACHMENT_BYTES } from "./attachment-delivery.js";
-import { readVault } from "./connector-squire.js";
-import { describeTailscaleReach } from "./connector-tailscale.js";
-import { agentToolsFor,REPOSITORY_ROUTES,repositoryTools } from "./minimal-tool-surface.js";
-import { isNetworkFailure } from "./network-failure.js";
-import { ConnectorOfferDeps,squireShareFailure } from './read-only-mcp-agent-grant-deps.js';
-import { agentScheduleRoomId,DaemonArtifactUploadResult } from './read-only-mcp-download-attachment.js';
-import { AttachmentDownloadError,DownloadAttachmentDeps,downloadAttachmentDepsFromEnv,fetchedImageFileName,FetchImageDeps,fetchImageDepsFromEnv,parseImageUrl,resolveDownloadAttachment,resolveFetchedImageMime,resolveWriteScratchPath } from './read-only-mcp-open-corner.js';
-import { executeAgentTool,GrantRunDeps,turnArtifacts } from './read-only-mcp-open-poll.js';
-import { gitDiff,gitLog,gitShow,gitStatus,listFiles,readAgentFile,searchText } from './read-only-mcp-read-tools.js';
+import { encodeArtifactTitleHeader, fixCornerText } from '@beeline/api-contract/daemon';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { createInterface } from 'node:readline';
+import {
+  BoundedSizeError,
+  EXPIRED_REASON,
+  fetchBoundedBytes,
+  MAX_ATTACHMENT_BYTES,
+} from './attachment-delivery.js';
+import { readVault } from './connector-squire.js';
+import { describeTailscaleReach } from './connector-tailscale.js';
+import { agentToolsFor, REPOSITORY_ROUTES, repositoryTools } from './minimal-tool-surface.js';
+import { isNetworkFailure } from './network-failure.js';
+import { ConnectorOfferDeps, squireShareFailure } from './read-only-mcp-agent-grant-deps.js';
+import {
+  agentScheduleRoomId,
+  DaemonArtifactUploadResult,
+} from './read-only-mcp-download-attachment.js';
+import {
+  AttachmentDownloadError,
+  DownloadAttachmentDeps,
+  downloadAttachmentDepsFromEnv,
+  fetchedImageFileName,
+  FetchImageDeps,
+  fetchImageDepsFromEnv,
+  parseImageUrl,
+  resolveDownloadAttachment,
+  resolveFetchedImageMime,
+  resolveWriteScratchPath,
+} from './read-only-mcp-open-corner.js';
+import { executeAgentTool, GrantRunDeps, turnArtifacts } from './read-only-mcp-open-poll.js';
+import {
+  gitDiff,
+  gitLog,
+  gitShow,
+  gitStatus,
+  listFiles,
+  readAgentFile,
+  searchText,
+} from './read-only-mcp-read-tools.js';
 import { handleLine } from './read-only-mcp-tool-call-id.js';
-import { READ_ONLY_TOOL_NAMES } from "./read-only-policy.js";
-import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
-import { sessionToolRequest,transportCause } from './session-tool-connection.js';
-import { squireReachCause } from "./squire-status.js";
-import { ask } from "./wait.js";
-
-
-
-
-
-
-
-
-
-
-
+import { READ_ONLY_TOOL_NAMES } from './read-only-policy.js';
+import { assertScratchWriteBudget } from './scratch-lifecycle.js';
+import { sessionToolRequest, transportCause } from './session-tool-connection.js';
+import { squireReachCause } from './squire-status.js';
+import { ask } from './wait.js';
 
 export type JsonObject = Record<string, unknown>;
-
-
-
 
 export interface JsonRpcRequest {
   jsonrpc?: string;
@@ -44,33 +64,19 @@ export interface JsonRpcRequest {
   params?: unknown;
 }
 
-
-
-
 export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: JsonObject;
 }
 
-
-
-
 export const MAX_READ_BYTES = 2 * 1024 * 1024;
-
-
 
 export const MAX_GIT_BYTES = 2 * 1024 * 1024;
 
-
-
 export const MAX_SEARCH_FILE_BYTES = 1024 * 1024;
 
-
-
 export const MAX_SEARCH_TOTAL_BYTES = 64 * 1024 * 1024;
-
-
 
 export const DEFAULT_IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -83,26 +89,24 @@ export const DEFAULT_IGNORED_DIRECTORIES = new Set([
   'target',
 ]);
 
-
-
-
 export function memorySources(args: JsonObject): unknown[] {
-  if (!Array.isArray(args.source_message_ids)) throw new Error('source_message_ids must be an array');
+  if (!Array.isArray(args.source_message_ids))
+    throw new Error('source_message_ids must be an array');
   return args.source_message_ids;
 }
 
-
-
-
 export const agentSurface = process.env.BEELINE_MCP_SURFACE === 'agent';
-export function operatorAgentTools():boolean {
+export function operatorAgentTools(): boolean {
   try {
-    return Boolean(process.env.BEELINE_TURN_CONTEXT_FILE &&
-      JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE,'utf8')).operatorAgent===true);
-  } catch { return false; }
+    return Boolean(
+      process.env.BEELINE_TURN_CONTEXT_FILE &&
+      JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE, 'utf8')).operatorAgent ===
+        true,
+    );
+  } catch {
+    return false;
+  }
 }
-
-
 
 export const TOOLS = agentToolsFor(
   agentSurface,
@@ -116,21 +120,12 @@ export const TOOLS = agentToolsFor(
   operatorAgentTools(),
 );
 
-
-
-
 export const MAX_ATTACH_BYTES = 25 * 1024 * 1024;
-
-
-
 
 export function configuredRoot(): string {
   const candidate = process.env.BEELINE_READONLY_ROOT?.trim() || process.cwd();
   return realpathSync(candidate);
 }
-
-
-
 
 /** Additional daemon-derived paths (e.g. corner worktrees) the read tools may
  *  access. Never model-supplied. Semicolon-separated absolute paths. */
@@ -147,12 +142,7 @@ export const EXTRA_ROOTS: string[] = (process.env.BEELINE_READONLY_EXTRA_ROOTS?.
   })
   .filter(Boolean);
 
-
-
-
 export const repositoryRoot = configuredRoot();
-
-
 
 export const approvedAgentRoots = Object.fromEntries(
   [['skills', process.env.BEELINE_READONLY_AGENT_SKILLS_ROOT]].flatMap(([area, value]) => {
@@ -169,12 +159,7 @@ export const approvedAgentRoots = Object.fromEntries(
   }),
 ) as Partial<Record<'skills', string>>;
 
-
-
 export const gitBinary = ['/usr/bin/git', '/bin/git'].find((candidate) => existsSync(candidate));
-
-
-
 
 export function asObject(value: unknown): JsonObject {
   if (value === undefined) return {};
@@ -184,9 +169,6 @@ export function asObject(value: unknown): JsonObject {
   return value as JsonObject;
 }
 
-
-
-
 export function stringArg(args: JsonObject, name: string, fallback?: string): string | undefined {
   const value = args[name];
   if (value === undefined) return fallback;
@@ -194,18 +176,12 @@ export function stringArg(args: JsonObject, name: string, fallback?: string): st
   return value;
 }
 
-
-
-
 export function booleanArg(args: JsonObject, name: string, fallback: boolean): boolean {
   const value = args[name];
   if (value === undefined) return fallback;
   if (typeof value !== 'boolean') throw new Error(`${name} must be a boolean`);
   return value;
 }
-
-
-
 
 export function integerArg(
   args: JsonObject,
@@ -222,9 +198,6 @@ export function integerArg(
   return value as number;
 }
 
-
-
-
 export function assertRelativePath(input: string): string {
   if (!input || input.includes('\0') || isAbsolute(input)) {
     throw new Error('path must be a non-empty repository-relative path');
@@ -237,18 +210,12 @@ export function assertRelativePath(input: string): string {
   return normalized;
 }
 
-
-
-
 export function withinRepository(realPath: string): boolean {
   const rel = relative(repositoryRoot, realPath);
   if (rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))) return true;
   // Also allow paths under any daemon-derived extra root (e.g. corner worktrees).
   return EXTRA_ROOTS.some((extra) => realPath.startsWith(extra + sep) || realPath === extra);
 }
-
-
-
 
 export function existingPath(input: string, expected: 'file' | 'directory' | 'either'): string {
   const relativePath = assertRelativePath(input);
@@ -264,16 +231,10 @@ export function existingPath(input: string, expected: 'file' | 'directory' | 'ei
   return resolved;
 }
 
-
-
-
 export function displayPath(path: string): string {
   const shown = relative(repositoryRoot, path).replaceAll('\\', '/');
   return shown || '.';
 }
-
-
-
 
 export function readTextFile(path: string, maximumBytes = MAX_READ_BYTES): string {
   const details = statSync(path);
@@ -286,9 +247,6 @@ export function readTextFile(path: string, maximumBytes = MAX_READ_BYTES): strin
   }
   return bytes.toString('utf8');
 }
-
-
-
 
 export function readFile(args: JsonObject): string {
   const path = existingPath(stringArg(args, 'path') ?? '', 'file');
@@ -310,9 +268,6 @@ export function readFile(args: JsonObject): string {
   return `${displayPath(path)} (${lines.length} lines)\n${body}${requestedEnd > endLine ? '\n[truncated at 1000 lines]' : ''}`;
 }
 
-
-
-
 export function revisionArg(args: JsonObject, name: string, fallback: string): string {
   const revision = stringArg(args, name, fallback)!;
   const valid =
@@ -323,18 +278,12 @@ export function revisionArg(args: JsonObject, name: string, fallback: string): s
   return revision;
 }
 
-
-
-
 export function optionalPath(args: JsonObject): string | undefined {
   const input = stringArg(args, 'path');
   if (input === undefined) return undefined;
   const path = existingPath(input, 'either');
   return displayPath(path);
 }
-
-
-
 
 export function callTool(name: string, args: JsonObject): string {
   if (name === 'repository_io') {
@@ -364,22 +313,13 @@ export function callTool(name: string, args: JsonObject): string {
   }
 }
 
-
-
-
 export function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`agent tool is missing host context: ${name}`);
   return value;
 }
 
-
-
-
 export const commandRequest = new AsyncLocalStorage<string | undefined>();
-
-
-
 
 export async function activeCommandContext(): Promise<{
   roomId: string;
@@ -389,24 +329,25 @@ export async function activeCommandContext(): Promise<{
 }> {
   const value = await readTurnContextFile();
   const requestId = commandRequest.getStore() ?? value.requestId;
-  const commands = value.commands as {requestId:string;commandReason:string;taskId:string}[] | undefined;
+  const commands = value.commands as
+    { requestId: string; commandReason: string; taskId: string }[] | undefined;
   if (!value.roomId || !requestId) throw new Error('no item is being answered here');
-  const taskId = commands?.find(command => command.requestId === requestId)?.taskId ?? value.taskId;
-  return {roomId:String(value.roomId),requestId:String(requestId),
-    ...(value.invocation ? {invocation:value.invocation as import('@beeline/api-contract/daemon').AgentInvocation} : {}),
-    ...(typeof taskId === 'string' ? {taskId} : {})};
+  const taskId =
+    commands?.find((command) => command.requestId === requestId)?.taskId ?? value.taskId;
+  return {
+    roomId: String(value.roomId),
+    requestId: String(requestId),
+    ...(value.invocation
+      ? { invocation: value.invocation as import('@beeline/api-contract/daemon').AgentInvocation }
+      : {}),
+    ...(typeof taskId === 'string' ? { taskId } : {}),
+  };
 }
-
-
-
 
 export async function readTurnContextFile(): Promise<Record<string, unknown>> {
   const { readFile } = await import('node:fs/promises');
   return JSON.parse(await readFile(requiredEnv('BEELINE_TURN_CONTEXT_FILE'), 'utf8'));
 }
-
-
-
 
 /** This turn's assembled prompt section ids, written by the Body; never the agent's. */
 export async function turnPromptSectionIds(): Promise<string[]> {
@@ -418,9 +359,6 @@ export async function turnPromptSectionIds(): Promise<string[]> {
     return [];
   }
 }
-
-
-
 
 /**
  * Daemon operations this helper may safely send again after a network-level
@@ -455,18 +393,12 @@ export const SAFE_TO_REPEAT_DAEMON_OPERATIONS: ReadonlySet<string> = new Set([
   'searchInstitutionalMemory',
 ]);
 
-
-
-
 /** Whether a failed daemon call may be sent again: a read, or any call
  *  that carries its own idempotency key. */
 export function daemonOperationIsSafeToRepeat(name: string, input: JsonObject): boolean {
   if (SAFE_TO_REPEAT_DAEMON_OPERATIONS.has(name)) return true;
   return typeof input.idempotencyKey === 'string' && input.idempotencyKey.length > 0;
 }
-
-
-
 
 /** A rejected fetch whose request never produced a response is retryable.
  *  A bare `TypeError: fetch failed` is undici's wrapper for exactly that and
@@ -479,32 +411,37 @@ export function isDaemonNetworkFailure(error: unknown): boolean {
   return error instanceof Error && error.cause !== undefined && isDaemonNetworkFailure(error.cause);
 }
 
-
-
-
-
-
-
-
 // Conversational tools share the parent helper's bound native connection.
 // Optional resource tools and installed older helpers retain the HTTP adapter.
 export async function daemonExecute(name: string, input: JsonObject): Promise<JsonObject> {
   const body = JSON.stringify({
     ...input,
     ...(process.env.BEELINE_TURN_CONTEXT_FILE &&
-    ((!name.startsWith('get') || name.startsWith('getWallet')) &&
-      !name.startsWith('list') && name !== 'searchInstitutionalHistory')
+    (!name.startsWith('get') || name.startsWith('getWallet')) &&
+    !name.startsWith('list') &&
+    name !== 'searchInstitutionalHistory'
       ? await activeCommandContext()
       : {}),
   });
   try {
-      if (['postRoomMessage','postCornerMessage','message','reply'].includes(name) &&
-          (process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL)) {
-        const input = JSON.parse(body) as JsonObject;
-        return await sessionToolRequest('session',{placeId:input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
-          action:'operation',operation:name,input}) as JsonObject;
-      }
-      const response = await ask({ url: new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), machineRead: true }, {
+    if (
+      ['postRoomMessage', 'postCornerMessage', 'message', 'reply'].includes(name) &&
+      (process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL)
+    ) {
+      const input = JSON.parse(body) as JsonObject;
+      return (await sessionToolRequest('session', {
+        placeId: input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
+        action: 'operation',
+        operation: name,
+        input,
+      })) as JsonObject;
+    }
+    const response = await ask(
+      {
+        url: new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`),
+        machineRead: true,
+      },
+      {
         method: 'POST',
         headers: {
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
@@ -512,30 +449,34 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
           'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
         },
         body,
-      });
-      if (!response.ok) {
-        let code = 'request_failed';
-        try {
-          const parsed = (await response.json()) as { error?: unknown };
-          if (typeof parsed.error === 'string') code = parsed.error;
-        } catch {
-          // Never reflect a server body into the model-facing tool error.
-        }
-        throw new Error(`daemon operation ${name} failed (${response.status}: ${code})`);
+      },
+    );
+    if (!response.ok) {
+      let code = 'request_failed';
+      try {
+        const parsed = (await response.json()) as { error?: unknown };
+        if (typeof parsed.error === 'string') code = parsed.error;
+      } catch {
+        // Never reflect a server body into the model-facing tool error.
       }
-      return await response.json() as JsonObject;
-  } catch(error){
-    if(!isDaemonNetworkFailure(error))throw error;
-    throw new Error(`daemon operation ${name} failed before the server answered (${transportCause(error)}); await a new action or recovery boundary${daemonOperationIsSafeToRepeat(name,input)?'':'; the write outcome is unknown'}`);
+      throw new Error(`daemon operation ${name} failed (${response.status}: ${code})`);
+    }
+    return (await response.json()) as JsonObject;
+  } catch (error) {
+    if (!isDaemonNetworkFailure(error)) throw error;
+    throw new Error(
+      `daemon operation ${name} failed before the server answered (${transportCause(error)}); await a new action or recovery boundary${daemonOperationIsSafeToRepeat(name, input) ? '' : '; the write outcome is unknown'}`,
+    );
   }
 }
 
-
-
-
 /** The corner's two texts, flattened. Spaces in a name become hyphens. A long
  *  objective is cut on a word boundary. Empty text still throws. */
-export function cornerCallText(args: JsonObject): { name: string; objective: string; notes?: string[] } {
+export function cornerCallText(args: JsonObject): {
+  name: string;
+  objective: string;
+  notes?: string[];
+} {
   const name = fixCornerText('name', args.name);
   const objective = fixCornerText('objective', args.objective);
   const notes = [name.note, objective.note].filter((note): note is string => Boolean(note));
@@ -545,9 +486,6 @@ export function cornerCallText(args: JsonObject): { name: string; objective: str
     ...(notes.length ? { notes } : {}),
   };
 }
-
-
-
 
 /** fetch_image: daemon-side photograph download into session scratch. */
 export async function fetchImage(
@@ -586,10 +524,6 @@ export async function fetchImage(
   return JSON.stringify({ path: resolved, mime, size: fetched.bytes.length });
 }
 
-
-
-
-
 /**
  * download_attachment: authorize through the same getRoomMessage read the
  * agent already has, or through a readable brief, then copy the bytes from the server into
@@ -617,11 +551,7 @@ export async function downloadAttachment(
   try {
     path = resolveWriteScratchPath(
       deps.root,
-      join(
-        'attachments',
-        attachment.key.replace(/[^\w-]/g, '_'),
-        attachment.safeName,
-      ),
+      join('attachments', attachment.key.replace(/[^\w-]/g, '_'), attachment.safeName),
     );
   } catch (error) {
     throw new AttachmentDownloadError(
@@ -671,71 +601,95 @@ export async function downloadAttachment(
   });
 }
 
-
-
-
 /** The live session owns Squire even before optional Registry routes load. */
 function sessionSquireCall(tool: string, args: Record<string, unknown>): Promise<unknown> {
   return sessionToolRequest('/session', {
     placeId: process.env.BEELINE_DAEMON_CORNER_ID || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
-    action: 'mcp', app: 'registry-mcp:squire', tool, args,
+    action: 'mcp',
+    app: 'registry-mcp:squire',
+    tool,
+    args,
   });
 }
 
 export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
   const relayUrl = process.env.BEELINE_SQUIRE_RELAY_URL;
   const relayToken = process.env.BEELINE_SQUIRE_RELAY_TOKEN;
-  const squireCall = (relayUrl && relayToken) || process.env.BEELINE_GRANT_RUNNER_URL || process.env.BEELINE_GRANT_RUNNER_FILE ? async (tool: string, args: Record<string, unknown> = {}) => {
-    let result: { isError?: boolean; content?: Array<{ type: string; text?: string }> } | undefined;
-    if (!relayUrl || !relayToken) result = await sessionSquireCall(tool, args) as typeof result;
-    else {
-      const context = await activeCommandContext();
-      const response = await ask({ url: new URL('/mcp', relayUrl), machineRead: true }, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ ...context, method: 'tools/call',
-          params: { name: tool, arguments: args } }),
-        signal: undefined,
-      });
-      const body = await response.json().catch((error) => {
-        if (!response.ok) throw new Error(`Squire relay HTTP ${response.status}`);
-        throw error;
-      }) as { error?: string; result?: {
-        isError?: boolean; content?: Array<{ type: string; text?: string }>;
-      } };
-      if (!response.ok) throw new Error(body.error ?? `Squire relay HTTP ${response.status}`);
-      result = body.result;
-    }
-    const text = result?.content?.find((entry) => entry.type === 'text')?.text;
-    if (result?.isError) throw new Error(text ?? 'Squire MCP tool error');
-    if (text) return JSON.parse(text);
-    throw new Error(`Squire MCP returned no result for ${tool}`);
-  } : undefined;
+  const squireCall =
+    (relayUrl && relayToken) ||
+    process.env.BEELINE_GRANT_RUNNER_URL ||
+    process.env.BEELINE_GRANT_RUNNER_FILE
+      ? async (tool: string, args: Record<string, unknown> = {}) => {
+          let result:
+            { isError?: boolean; content?: Array<{ type: string; text?: string }> } | undefined;
+          if (!relayUrl || !relayToken)
+            result = (await sessionSquireCall(tool, args)) as typeof result;
+          else {
+            const context = await activeCommandContext();
+            const response = await ask(
+              { url: new URL('/mcp', relayUrl), machineRead: true },
+              {
+                method: 'POST',
+                headers: {
+                  authorization: `Bearer ${relayToken}`,
+                  'content-type': 'application/json',
+                },
+                body: JSON.stringify({
+                  ...context,
+                  method: 'tools/call',
+                  params: { name: tool, arguments: args },
+                }),
+                signal: undefined,
+              },
+            );
+            const body = (await response.json().catch((error) => {
+              if (!response.ok) throw new Error(`Squire relay HTTP ${response.status}`);
+              throw error;
+            })) as {
+              error?: string;
+              result?: {
+                isError?: boolean;
+                content?: Array<{ type: string; text?: string }>;
+              };
+            };
+            if (!response.ok) throw new Error(body.error ?? `Squire relay HTTP ${response.status}`);
+            result = body.result;
+          }
+          const text = result?.content?.find((entry) => entry.type === 'text')?.text;
+          if (result?.isError) throw new Error(text ?? 'Squire MCP tool error');
+          if (text) return JSON.parse(text);
+          throw new Error(`Squire MCP returned no result for ${tool}`);
+        }
+      : undefined;
   return {
     squireCall,
     roomId: agentScheduleRoomId(),
     execute: daemonExecute,
     tailscaleReach: (enabled) => describeTailscaleReach({ enabled, installIfMissing: enabled }),
     // This task relay reaches only the broker on this agent's own machine.
-    squireReach: squireCall ? async () => {
-      try {
-        await readVault({ call: squireCall! });
-      } catch (error) {
-        // Task authorization and stale turns are not machine failures.
-        if (/not authorized|active task|active server command|Squire relay HTTP 403/i.test(
-          error instanceof Error ? error.message : ''))
-          return { reachable: false, cause: 'Squire status probe was not authorized' };
-        return { reachable: false, cause: squireReachCause(error) };
-      }
-      return { reachable: true };
-    } : undefined,
+    squireReach: squireCall
+      ? async () => {
+          try {
+            await readVault({ call: squireCall! });
+          } catch (error) {
+            // Task authorization and stale turns are not machine failures.
+            if (
+              /not authorized|active task|active server command|Squire relay HTTP 403/i.test(
+                error instanceof Error ? error.message : '',
+              )
+            )
+              return { reachable: false, cause: 'Squire status probe was not authorized' };
+            return { reachable: false, cause: squireReachCause(error) };
+          }
+          return { reachable: true };
+        }
+      : undefined,
   };
 }
 
-
-
-
-export async function squireShareEndpoint(sessionId: string): Promise<{ url: string; expiresAt: number }> {
+export async function squireShareEndpoint(
+  sessionId: string,
+): Promise<{ url: string; expiresAt: number }> {
   const relayUrl = process.env.BEELINE_SQUIRE_RELAY_URL;
   const relayToken = process.env.BEELINE_SQUIRE_RELAY_TOKEN;
   let response: Pick<Response, 'ok' | 'status'>;
@@ -745,13 +699,19 @@ export async function squireShareEndpoint(sessionId: string): Promise<{ url: str
       body = { result: await sessionSquireCall('operate_share', { session_id: sessionId }) };
       response = { ok: true, status: 200 };
     } else {
-      const upstream = await ask({ url: new URL('/mcp', relayUrl), machineRead: true }, {
-        method: 'POST',
-        headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ ...await activeCommandContext(), method: 'tools/call',
-          params: { name: 'operate_share', arguments: { session_id: sessionId } } }),
-        signal: undefined,
-      });
+      const upstream = await ask(
+        { url: new URL('/mcp', relayUrl), machineRead: true },
+        {
+          method: 'POST',
+          headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            ...(await activeCommandContext()),
+            method: 'tools/call',
+            params: { name: 'operate_share', arguments: { session_id: sessionId } },
+          }),
+          signal: undefined,
+        },
+      );
       // Only an unparseable body is tolerated; a failed read of it is not.
       response = upstream;
       body = await upstream.json().catch((error: unknown) => {
@@ -767,14 +727,22 @@ export async function squireShareEndpoint(sessionId: string): Promise<{ url: str
   if (response.status === 403 && body === undefined)
     throw new Error('Squire relay refused authorization (HTTP 403); this turn may have ended');
   if (!response.ok) throw squireShareFailure(response.status, body);
-  const result = (body as { result?: { isError?: unknown; content?: unknown } } | undefined)?.result;
+  const result = (body as { result?: { isError?: unknown; content?: unknown } } | undefined)
+    ?.result;
   if (result?.isError) throw squireShareFailure(response.status, body);
   const text = Array.isArray(result?.content)
-    ? (result.content as Array<{ type?: unknown; text?: unknown }>)
-      .find((entry) => entry?.type === 'text')?.text : undefined;
+    ? (result.content as Array<{ type?: unknown; text?: unknown }>).find(
+        (entry) => entry?.type === 'text',
+      )?.text
+    : undefined;
   let shared: Record<string, unknown> | undefined;
-  try { shared = typeof text === 'string' ? JSON.parse(text) as Record<string, unknown> : undefined; } catch { /* Reported below. */ }
-  if (!shared || typeof shared !== 'object') throw new Error('Squire share returned a malformed response');
+  try {
+    shared = typeof text === 'string' ? (JSON.parse(text) as Record<string, unknown>) : undefined;
+  } catch {
+    /* Reported below. */
+  }
+  if (!shared || typeof shared !== 'object')
+    throw new Error('Squire share returned a malformed response');
   const endpoint = shared.url;
   if (typeof endpoint !== 'string' || !/^https?:\/\/[^/]+\/s\/[A-Za-z0-9_-]{43}\/$/.test(endpoint))
     throw new Error('Squire share returned no valid live page URL');
@@ -784,20 +752,14 @@ export async function squireShareEndpoint(sessionId: string): Promise<{ url: str
   return { url: endpoint, expiresAt };
 }
 
-
-
-
 export function grantRunDepsFromEnv(): GrantRunDeps {
   return {
     roomId: agentScheduleRoomId(),
     run: async (input) => {
-      return await sessionToolRequest('/run', input) as JsonObject;
+      return (await sessionToolRequest('/run', input)) as JsonObject;
     },
   };
 }
-
-
-
 
 /** The small-object pass-through: the server validates and streams the
  *  bytes to storage in one step and answers with the stored artifact url. */
@@ -806,16 +768,22 @@ export async function daemonUploadArtifact(
   mime: string,
   title: string,
 ): Promise<DaemonArtifactUploadResult> {
-  const response = await ask({ url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), machineRead: true }, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
-      'content-type': mime,
-      'x-artifact-title': encodeArtifactTitleHeader(title),
-      'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
+  const response = await ask(
+    {
+      url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`),
+      machineRead: true,
     },
-    body: bytes,
-  });
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
+        'content-type': mime,
+        'x-artifact-title': encodeArtifactTitleHeader(title),
+        'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
+      },
+      body: bytes,
+    },
+  );
   if (!response.ok) {
     let code = 'request_failed';
     try {
@@ -835,68 +803,94 @@ export async function daemonUploadArtifact(
   };
 }
 
-
-
-
 // MCP requests may run concurrently. Register artifact work before the first
 // await so an immediately following report cannot overtake its upload/queue.
 export let artifactItem: unknown;
 
-
-
-export async function callCommandTool(name: string, args: JsonObject, toolCallId: string): Promise<string> {
-  if (name !== 'post_artifact' && name !== 'reply' && name !== 'message' && name !== 'post') return executeAgentTool(name, args, toolCallId);
+export async function callCommandTool(
+  name: string,
+  args: JsonObject,
+  toolCallId: string,
+): Promise<string> {
+  if (name !== 'post_artifact' && name !== 'reply' && name !== 'message' && name !== 'post')
+    return executeAgentTool(name, args, toolCallId);
   const contextFile = process.env.BEELINE_TURN_CONTEXT_FILE;
-  const context = contextFile ? JSON.parse(readFileSync(contextFile, 'utf8')) as Record<string, unknown> : {};
-  const key = JSON.stringify([process.env.BEELINE_DAEMON_BASE_URL, process.env.BEELINE_DAEMON_ROOM_ID,
-    context.roomId, commandRequest.getStore() ?? context.requestId, context.itemId]);
-  if (artifactItem !== context.itemId) { turnArtifacts.clear(); artifactItem = context.itemId; }
-  const artifacts = turnArtifacts.get(key) ?? {uploads: []};
+  const context = contextFile
+    ? (JSON.parse(readFileSync(contextFile, 'utf8')) as Record<string, unknown>)
+    : {};
+  const key = JSON.stringify([
+    process.env.BEELINE_DAEMON_BASE_URL,
+    process.env.BEELINE_DAEMON_ROOM_ID,
+    context.roomId,
+    commandRequest.getStore() ?? context.requestId,
+    context.itemId,
+  ]);
+  if (artifactItem !== context.itemId) {
+    turnArtifacts.clear();
+    artifactItem = context.itemId;
+  }
+  const artifacts = turnArtifacts.get(key) ?? { uploads: [] };
   turnArtifacts.set(key, artifacts);
   if (name === 'post_artifact') {
     const upload = executeAgentTool(name, args, toolCallId);
-    const artifactName = typeof args.title === 'string' && args.title.trim()
-      ? args.title.trim() : typeof args.path === 'string' ? basename(args.path) : '';
+    const artifactName =
+      typeof args.title === 'string' && args.title.trim()
+        ? args.title.trim()
+        : typeof args.path === 'string'
+          ? basename(args.path)
+          : '';
     artifacts.uploads.push({ name: artifactName, result: upload });
     // Retain failures until a later upload has successfully queued a replacement.
     void upload.catch(() => {});
     return upload;
   }
   const uploads = [...artifacts.uploads];
-  const results = await Promise.allSettled(uploads.map(upload => upload.result));
+  const results = await Promise.allSettled(uploads.map((upload) => upload.result));
   for (const [index, result] of results.entries()) {
     if (result.status !== 'rejected') continue;
-    const replaced = results.some((later, laterIndex) => laterIndex > index &&
-      later.status === 'fulfilled' && uploads[laterIndex]!.name === uploads[index]!.name);
+    const replaced = results.some(
+      (later, laterIndex) =>
+        laterIndex > index &&
+        later.status === 'fulfilled' &&
+        uploads[laterIndex]!.name === uploads[index]!.name,
+    );
     if (!replaced) throw result.reason;
   }
-  return executeAgentTool(name, args, toolCallId, uploads.filter((_, index) => results[index]?.status === 'fulfilled').map(upload => upload.name));
+  return executeAgentTool(
+    name,
+    args,
+    toolCallId,
+    uploads
+      .filter((_, index) => results[index]?.status === 'fulfilled')
+      .map((upload) => upload.name),
+  );
 }
-
-
-
 
 /** Keep concurrent calls isolated; footer metadata rides on their existing operation responses. */
 /** Every tool returns only its own result. Owed mentions are listed once, at turn start. */
 export async function withToolResult(work: () => Promise<string>) {
-  try { return { content: [{ type: 'text' as const, text: await work() }] }; }
-  catch (error) {
-    return { isError: true, content: [{ type: 'text' as const, text: error instanceof Error ? error.message : String(error) }] };
+  try {
+    return { content: [{ type: 'text' as const, text: await work() }] };
+  } catch (error) {
+    return {
+      isError: true,
+      content: [
+        { type: 'text' as const, text: error instanceof Error ? error.message : String(error) },
+      ],
+    };
   }
 }
 
-
-
-
 export const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
-
-
 
 // Nothing else ties TOOLS' names to READ_ONLY_TOOL_NAMES (the auto-allow
 // permission check's canonical list) — assert they match so the two can't
 // silently drift apart the way they did before this check existed.
 {
-  const declaredNames = new Set([...repositoryTools().map((tool) => tool.name), ...Object.values(REPOSITORY_ROUTES)]);
+  const declaredNames = new Set([
+    ...repositoryTools().map((tool) => tool.name),
+    ...Object.values(REPOSITORY_ROUTES),
+  ]);
   const policyNames = new Set<string>(READ_ONLY_TOOL_NAMES);
   const mismatched =
     declaredNames.size !== policyNames.size ||
@@ -909,15 +903,50 @@ export const lines = createInterface({ input: process.stdin, crlfDelay: Infinity
   }
 }
 
-
-
 lines.on('line', (line) => void handleLine(line));
 export { agentToolsFor } from './minimal-tool-surface.js';
-export { agentGrantDepsFromEnv,askChoice,listGrants,offerConnector,readGrantScript,requestGrant,requestSharedAssetIsolation,storeSecret,workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
-export type { AgentGrantDeps,ConnectorOfferDeps } from './read-only-mcp-agent-grant-deps.js';
-export { agentScheduleDepsFromEnv,bindBriefFiles,createSchedule,deleteSchedule,emitEvent,listEventSubscriptions,listSchedules,namedPrivateFiles,postArtifact,postArtifactDepsFromEnv,reactToMessage,resolveAttachPath,subscribeEvents,updateSchedule } from './read-only-mcp-download-attachment.js';
-export type { AgentScheduleDeps,DaemonArtifactUploadResult,PostArtifactDeps } from './read-only-mcp-download-attachment.js';
-export { approveMerge,fetchImageDepsFromEnv,prChecksStatus,reportFeedback,resolveWriteScratchPath,writeScratchFile,writeScratchFileDepsFromEnv } from './read-only-mcp-open-corner.js';
-export type { FetchImageDeps,WriteScratchFileDeps } from './read-only-mcp-open-corner.js';
-export { callAgentTool,openPoll,runGrantedCommand } from './read-only-mcp-open-poll.js';
+export {
+  agentGrantDepsFromEnv,
+  askChoice,
+  listGrants,
+  offerConnector,
+  readGrantScript,
+  requestGrant,
+  requestSharedAssetIsolation,
+  storeSecret,
+  workbenchStatus,
+} from './read-only-mcp-agent-grant-deps.js';
+export type { AgentGrantDeps, ConnectorOfferDeps } from './read-only-mcp-agent-grant-deps.js';
+export {
+  agentScheduleDepsFromEnv,
+  bindBriefFiles,
+  createSchedule,
+  deleteSchedule,
+  emitEvent,
+  listEventSubscriptions,
+  listSchedules,
+  namedPrivateFiles,
+  postArtifact,
+  postArtifactDepsFromEnv,
+  reactToMessage,
+  resolveAttachPath,
+  subscribeEvents,
+  updateSchedule,
+} from './read-only-mcp-download-attachment.js';
+export type {
+  AgentScheduleDeps,
+  DaemonArtifactUploadResult,
+  PostArtifactDeps,
+} from './read-only-mcp-download-attachment.js';
+export {
+  approveMerge,
+  fetchImageDepsFromEnv,
+  prChecksStatus,
+  reportFeedback,
+  resolveWriteScratchPath,
+  writeScratchFile,
+  writeScratchFileDepsFromEnv,
+} from './read-only-mcp-open-corner.js';
+export type { FetchImageDeps, WriteScratchFileDeps } from './read-only-mcp-open-corner.js';
+export { callAgentTool, openPoll, runGrantedCommand } from './read-only-mcp-open-poll.js';
 export type { GrantRunDeps } from './read-only-mcp-open-poll.js';

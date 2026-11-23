@@ -2,7 +2,13 @@ import { storageOperation } from './helper-storage.js';
 import { waitForProcessExit } from './process-exit.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { helperLockKey, MachineControl, machineControlPath, type HeldAnswer, type MachineAnswer } from './machine-control.js';
+import {
+  helperLockKey,
+  MachineControl,
+  machineControlPath,
+  type HeldAnswer,
+  type MachineAnswer,
+} from './machine-control.js';
 import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
 import { retireRemovedAgent } from './agent-retirement.js';
@@ -12,11 +18,7 @@ import { watchFreeAgentResume } from './free-agent-resume.js';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import {
-  runAgentRuntime,
-  type AgentRuntimeHost,
-  type HostedAgent,
-} from './agent-runtime.js';
+import { runAgentRuntime, type AgentRuntimeHost, type HostedAgent } from './agent-runtime.js';
 import { daemonFailurePath, settleDaemonStartFailure } from './daemon-failure.js';
 import { helperStatusPath, type AgentSlotState, type HelperStatusFile } from './helper-status.js';
 import {
@@ -45,18 +47,34 @@ import {
   runningReleaseId,
 } from './self-update.js';
 import type { InstalledBundleIdentity } from './self-update-manifest.js';
+import { installTrustySquireBrokerService, SystemdNotifier } from './systemd.js';
 import {
-  installTrustySquireBrokerService,
-  SystemdNotifier,
-} from './systemd.js';
-import { squireBrokerMeetsComputerUseMinimum, squireBrokerInstallEntry, squireHostPaths } from './squire-host.js';
+  squireBrokerMeetsComputerUseMinimum,
+  squireBrokerInstallEntry,
+  squireHostPaths,
+} from './squire-host.js';
 import { readVault } from './connector-squire.js';
 import { readPersonalGitHubRepositories } from './github-account-repositories.js';
-import { sharedSquireMcpClient, closeHelperSquireTransports, type SquireMcpConnection } from './squire-mcp-client.js';
-import { pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
+import {
+  sharedSquireMcpClient,
+  closeHelperSquireTransports,
+  type SquireMcpConnection,
+} from './squire-mcp-client.js';
+import {
+  pruneDeletedRuntimes,
+  pruneRepositoryCaches,
+  pruneMachineStorage,
+} from './host-disk-retention.js';
 import { HostPlaces } from './agent-process.js';
 import { refreshSystemdHelperUnit } from './native-helper.js';
-import { reclaimArchivedMemberStorage, watchStorageFacts, pruneStoppedAgentStorage, pruneEndedOwnerStorage, pruneArchivedCheckoutStorage, pruneUnusedCheckoutStorage } from './storage-owners.js';
+import {
+  reclaimArchivedMemberStorage,
+  watchStorageFacts,
+  pruneStoppedAgentStorage,
+  pruneEndedOwnerStorage,
+  pruneArchivedCheckoutStorage,
+  pruneUnusedCheckoutStorage,
+} from './storage-owners.js';
 import { monitorHelperUsage } from './helper-usage.js';
 import { startMachineCliProxy, stopMachineCliProxy } from './cliproxy.js';
 
@@ -123,17 +141,22 @@ async function serveMachineHelper(
   });
   const signals = options.signals ?? process;
   const disposeSignals = lifecycle.installSignals(signals);
-  const usage = !options.freeAgent && managedBy !== 'lab' && process.platform === 'linux'
-    ? monitorHelperUsage(supervisorRoot) : undefined;
+  const usage =
+    !options.freeAgent && managedBy !== 'lab' && process.platform === 'linux'
+      ? monitorHelperUsage(supervisorRoot)
+      : undefined;
   const notifier = new SystemdNotifier();
   const slots = new Map<string, AgentSlot>();
   const hosted = new Map<string, HostedAgent>();
   const links = new Map<string, MachineLink>();
-  const resumes = options.freeAgent && env.FLY_MACHINE_ID && process.platform === 'linux' ? new EventEmitter() : undefined;
+  const resumes =
+    options.freeAgent && env.FLY_MACHINE_ID && process.platform === 'linux'
+      ? new EventEmitter()
+      : undefined;
   let disposeResume: (() => void) | undefined;
   const archiveStoragePending = new Map<string, import('./helper-storage.js').StorageRoomState>();
   let archiveStorageRunning = false;
-  const stopStorageFacts = watchStorageFacts(supervisorRoot, states => {
+  const stopStorageFacts = watchStorageFacts(supervisorRoot, (states) => {
     usage?.observe(states);
     for (const state of states) if (state.archived) archiveStoragePending.set(state.roomId, state);
     if (archiveStorageRunning || !archiveStoragePending.size) return;
@@ -144,11 +167,19 @@ async function serveMachineHelper(
           const batch = [...archiveStoragePending.values()];
           archiveStoragePending.clear();
           await reclaimArchivedMemberStorage(supervisorRoot, batch, {
-            log: entry => { usage?.cleanup(entry); console.log(`[helper] chat ${entry.roomId} private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`); },
+            log: (entry) => {
+              usage?.cleanup(entry);
+              console.log(
+                `[helper] chat ${entry.roomId} private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`,
+              );
+            },
           });
         }
-      } catch (error) { console.warn('[helper] archived member cleanup deferred:', error); }
-      finally { archiveStorageRunning = false; }
+      } catch (error) {
+        console.warn('[helper] archived member cleanup deferred:', error);
+      } finally {
+        archiveStorageRunning = false;
+      }
     })();
   });
   controller.signal.addEventListener('abort', stopStorageFacts, { once: true });
@@ -157,8 +188,12 @@ async function serveMachineHelper(
   let lastRetentionSweepAt = 0;
   const sweepHostDisk = async () => {
     const now = Date.now();
-    if (controller.signal.aborted || diskSweepRunning ||
-        now - lastRetentionSweepAt < 6 * 60 * 60_000) return;
+    if (
+      controller.signal.aborted ||
+      diskSweepRunning ||
+      now - lastRetentionSweepAt < 6 * 60 * 60_000
+    )
+      return;
     diskSweepRunning = true;
     try {
       const log = (entry: import('./helper-storage.js').StorageReclaimEntry) => {
@@ -176,17 +211,22 @@ async function serveMachineHelper(
         await pruneMachineStorage(supervisorRoot, options);
       });
       if (swept) lastRetentionSweepAt = now;
-    } catch (error) { console.warn('[helper] idle disk sweep deferred:', error); }
-    finally { diskSweepRunning = false; }
+    } catch (error) {
+      console.warn('[helper] idle disk sweep deferred:', error);
+    } finally {
+      diskSweepRunning = false;
+    }
   };
   if (!options.configPaths) await writeHelperPidRecord(supervisorRoot, process.pid);
 
   const layout = beelineInstallLayout(env);
   // Self-updates do not rerun CLI installation. Upgrade the persistent unit
   // in place so its restart counter cannot lengthen subsequent handovers.
-  const nativeConfiguration = layout && managedBy === 'systemd'
-    ? refreshSystemdHelperUnit({ env }) : Promise.resolve();
-  void nativeConfiguration.catch(error => console.error('[helper] native unit refresh failed:', error));
+  const nativeConfiguration =
+    layout && managedBy === 'systemd' ? refreshSystemdHelperUnit({ env }) : Promise.resolve();
+  void nativeConfiguration.catch((error) =>
+    console.error('[helper] native unit refresh failed:', error),
+  );
   let loadedRelease: string | undefined;
   let loadedReleaseIdentity: InstalledBundleIdentity | undefined;
   let update: ReleaseTransaction | undefined;
@@ -197,7 +237,8 @@ async function serveMachineHelper(
   let helperError: string | undefined;
   let settled = Promise.resolve();
 
-  const hostedRuntimes = async () => options.configPaths ?? await findAgentRuntimeConfigPaths(env);
+  const hostedRuntimes = async () =>
+    options.configPaths ?? (await findAgentRuntimeConfigPaths(env));
 
   const finish = async (reason: HelperExitReason) => {
     disposeSignals();
@@ -293,8 +334,11 @@ async function serveMachineHelper(
           await writeFile(staged, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });
           await rename(staged, path);
         }
-      } catch (error) { console.error('[helper] status not written:', error); }
-      finally { statusWriting = false; }
+      } catch (error) {
+        console.error('[helper] status not written:', error);
+      } finally {
+        statusWriting = false;
+      }
     })();
   };
   const setState = (slot: AgentSlot, state: AgentSlotState, status = slot.status) => {
@@ -327,14 +371,17 @@ async function serveMachineHelper(
       ...(options.runUpdateWorker ? { prepare: options.runUpdateWorker } : {}),
       ownWork: () => pruning,
       changed: () => writeStatus(),
-      settled: outcome => {
-        void control?.settleHeld(outcome === 'current'
-          ? { ...snapshot(), outcome: 'current' }
-          : { error: 'helper update cancelled before handoff' });
+      settled: (outcome) => {
+        void control?.settleHeld(
+          outcome === 'current'
+            ? { ...snapshot(), outcome: 'current' }
+            : { error: 'helper update cancelled before handoff' },
+        );
       },
       handoff: async (desiredRelease, signal) => {
         await nativeConfiguration;
-        if (signal.aborted || controller.signal.aborted) throw new Error('helper update cancelled before handoff');
+        if (signal.aborted || controller.signal.aborted)
+          throw new Error('helper update cancelled before handoff');
         stoppingStatus = `loaded_release=${loadedRelease}; desired_release=${desiredRelease}; handoff`;
         // The requester follows this process's exit, then starts the native successor job.
         await control?.settleHeld({ ...snapshot(), outcome: 'handoff' });
@@ -367,28 +414,48 @@ async function serveMachineHelper(
         const home = env.HOME?.trim() || homedir();
         link = new MachineLink({
           baseUrl,
-          ...(resumes ? { subscribeResume: (listener: () => void) => {
-            resumes.on('resume', listener);
-            return () => { resumes.off('resume', listener); };
-          } } : {}),
+          ...(resumes
+            ? {
+                subscribeResume: (listener: () => void) => {
+                  resumes.on('resume', listener);
+                  return () => {
+                    resumes.off('resume', listener);
+                  };
+                },
+              }
+            : {}),
           readVault: async (agentId, githubReference) => {
-            if (!existsSync(squireBrokerInstallEntry(home)) && !existsSync(squireHostPaths(home).mcpSocket))
+            if (
+              !existsSync(squireBrokerInstallEntry(home)) &&
+              !existsSync(squireHostPaths(home).mcpSocket)
+            )
               return { connections: [], notAdded: true };
-            vaultClient ??= sharedSquireMcpClient({ home, scope: { agentId, roomId: 'machine-vault' } });
+            vaultClient ??= sharedSquireMcpClient({
+              home,
+              scope: { agentId, roomId: 'machine-vault' },
+            });
             const connections = await readVault(vaultClient);
-            const github = connections.find(connection => connection.reference === githubReference && connection.state === 'active');
+            const github = connections.find(
+              (connection) =>
+                connection.reference === githubReference && connection.state === 'active',
+            );
             if (github) {
               try {
                 const repositories = await readPersonalGitHubRepositories(vaultClient, github);
-                return { connections: connections.map(connection => connection === github
-                  ? { ...connection, githubRepositories: repositories } : connection) };
+                return {
+                  connections: connections.map((connection) =>
+                    connection === github
+                      ? { ...connection, githubRepositories: repositories }
+                      : connection,
+                  ),
+                };
               } catch {
                 // A failed provider read never replaces the last complete catalog.
               }
             }
             return { connections };
           },
-          log: message => console.warn(`[helper] ${message}`),
+          log: (message) => console.warn(`[helper] ${message}`),
           onRegistered: () => {
             update?.notify();
           },
@@ -430,8 +497,15 @@ async function serveMachineHelper(
         !(fault instanceof DaemonApiError && (fault.status === 401 || fault.status === 403))
       )
         return;
-      if (slot && fault instanceof DaemonApiError && !fault.retryable &&
-          fault.status >= 400 && fault.status < 500 && fault.status !== 401 && fault.status !== 403) {
+      if (
+        slot &&
+        fault instanceof DaemonApiError &&
+        !fault.retryable &&
+        fault.status >= 400 &&
+        fault.status < 500 &&
+        fault.status !== 401 &&
+        fault.status !== 403
+      ) {
         setState(slot, 'needs-config', status);
         return;
       }
@@ -497,14 +571,16 @@ async function serveMachineHelper(
             // Re-read identity immediately before each signal; records and PIDs can change.
             previous = await runtimeDaemonPid(slot.configPath);
             if (!previous || previous === process.pid || slot.controller.signal.aborted) return;
-            try { process.kill(previous, signal); }
-            catch {
+            try {
+              process.kill(previous, signal);
+            } catch {
               // Judge the handoff by the process exit notification.
             }
           };
           await signalOwner('SIGKILL');
-          if(previous&&previous!==process.pid)await waitForProcessExit(previous,slot.controller.signal);
-          previous=await runtimeDaemonPid(slot.configPath);
+          if (previous && previous !== process.pid)
+            await waitForProcessExit(previous, slot.controller.signal);
+          previous = await runtimeDaemonPid(slot.configPath);
           if (slot.controller.signal.aborted) break;
           if (previous && previous !== process.pid) {
             reportError = reportedPreviousOwner !== previous;
@@ -515,7 +591,11 @@ async function serveMachineHelper(
         }
         migrationReleaseChecked = false;
         reportedPreviousOwner = undefined;
-        if (await stat(resolve(supervisorRoot, 'beeline/storage-owners', `ended-agent-${slot.agentId}.json`)).catch(() => undefined)) {
+        if (
+          await stat(
+            resolve(supervisorRoot, 'beeline/storage-owners', `ended-agent-${slot.agentId}.json`),
+          ).catch(() => undefined)
+        ) {
           await pruneEndedOwnerStorage(supervisorRoot);
           slot.enabled = false;
           setState(slot, 'removed', 'server-confirmed retired agent');
@@ -525,8 +605,9 @@ async function serveMachineHelper(
       } catch (error) {
         if (reportError) captureHelperError(error);
         console.error(`[helper] agent ${slot.agentId} failed:`, error);
-        void settleDaemonStartFailure(dirname(slot.configPath), error)
-          .catch(fault => console.error(`[helper] agent ${slot.agentId} failure not recorded:`, fault));
+        void settleDaemonStartFailure(dirname(slot.configPath), error).catch((fault) =>
+          console.error(`[helper] agent ${slot.agentId} failure not recorded:`, fault),
+        );
         slot.established = false;
         slot.status =
           error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
@@ -548,7 +629,10 @@ async function serveMachineHelper(
           break; // Only this refused revision waits; an explicit start/config event resumes it.
         }
         if (
-          (error instanceof DaemonApiError && !error.retryable && error.status >= 400 && error.status < 500) ||
+          (error instanceof DaemonApiError &&
+            !error.retryable &&
+            error.status >= 400 &&
+            error.status < 500) ||
           error instanceof SyntaxError ||
           /invalid agent runtime|stored identity public key mismatch/.test(slot.status)
         ) {
@@ -570,8 +654,12 @@ async function serveMachineHelper(
       }
       // A failed activation cannot schedule another activation/read. The
       // existing runtime revision watcher or explicit start admits one retry.
-      if(slot.revision!==slot.attemptRevision)continue;
-      setState(slot,'needs-config',slot.status || 'agent failed; awaiting configuration or explicit start');
+      if (slot.revision !== slot.attemptRevision) continue;
+      setState(
+        slot,
+        'needs-config',
+        slot.status || 'agent failed; awaiting configuration or explicit start',
+      );
       break;
     }
     if (slot.state !== 'removed' && slot.state !== 'needs-auth' && slot.state !== 'needs-config')
@@ -589,9 +677,13 @@ async function serveMachineHelper(
   const startSlot = (configPath: string) => {
     const existing = slots.get(configPath);
     if (existing?.running) {
-      void isAgentStopped(configPath).then(stopped => {
-        if (stopped) existing.controller.abort();
-      }).catch(error => console.error(`[helper] agent ${existing.agentId} desired state failed:`, error));
+      void isAgentStopped(configPath)
+        .then((stopped) => {
+          if (stopped) existing.controller.abort();
+        })
+        .catch((error) =>
+          console.error(`[helper] agent ${existing.agentId} desired state failed:`, error),
+        );
       return;
     }
     const slot: AgentSlot = existing ?? {
@@ -612,53 +704,67 @@ async function serveMachineHelper(
     slot.enabled = true;
     slot.established = false;
     setState(slot, 'starting', '');
-    slot.running = Promise.resolve().then(async () => {
-      if (await isAgentStopped(configPath)) {
-        slot.enabled = false;
-        setState(slot, 'stopped');
-        return;
-      }
-      slot.configDigest = createHash('sha256').update(await readFile(configPath)).digest('hex');
-      if (controller.signal.aborted || slot.controller.signal.aborted) return;
-      if (!slot.watcher)
-        slot.watcher = watch(dirname(configPath), (_event, filename) => {
-          if (filename !== 'runtime.json') return;
-          void readFile(configPath)
-            .then(raw => createHash('sha256').update(raw).digest('hex'))
-            .then(digest => {
-              if (controller.signal.aborted || digest === slot.configDigest) return;
-              slot.configDigest = digest;
-              slot.revision += 1;
-              if (slot.state === 'needs-auth' || slot.state === 'needs-config') {
-                if (slot.running) slot.controller.abort();
-                else startSlot(configPath);
-              }
-            }).catch(error => console.error(`[helper] agent ${slot.agentId} configuration read failed:`, error));
-        });
-      const runtime = await readRuntimeRecord(configPath);
-      slot.agentId = runtime.agent.publicKey;
-      // Diagnostics are optional; their filesystem cannot gate intake.
-      void readFile(daemonFailurePath(dirname(configPath)), 'utf8')
-        .then(raw => { slot.lastError ??= JSON.parse(raw).lastError?.slice(0, 500); })
-        .catch(() => undefined);
-      if (!controller.signal.aborted && !slot.controller.signal.aborted) await supervise(slot);
-    }).catch(error => {
-      captureHelperError(error);
-      slot.lastError = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
-      setState(slot, 'needs-config', slot.lastError);
-      console.error(`[helper] agent ${slot.agentId} startup failed:`, error);
-    }).finally(() => {
-      slot.running = undefined;
-      // A start racing an in-flight scoped stop is remembered in the durable desired set.
-      if (!controller.signal.aborted && slot.controller.signal.aborted)
-        void rescan().catch((error) =>
-          console.error('[helper] desired-set reconciliation failed:', error),
-        );
-      else if (slot.state === 'removed')
-        void stat(configPath).then(() => undefined, (error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') forgetSlot(slot);
-        });
-    });
+    slot.running = Promise.resolve()
+      .then(async () => {
+        if (await isAgentStopped(configPath)) {
+          slot.enabled = false;
+          setState(slot, 'stopped');
+          return;
+        }
+        slot.configDigest = createHash('sha256')
+          .update(await readFile(configPath))
+          .digest('hex');
+        if (controller.signal.aborted || slot.controller.signal.aborted) return;
+        if (!slot.watcher)
+          slot.watcher = watch(dirname(configPath), (_event, filename) => {
+            if (filename !== 'runtime.json') return;
+            void readFile(configPath)
+              .then((raw) => createHash('sha256').update(raw).digest('hex'))
+              .then((digest) => {
+                if (controller.signal.aborted || digest === slot.configDigest) return;
+                slot.configDigest = digest;
+                slot.revision += 1;
+                if (slot.state === 'needs-auth' || slot.state === 'needs-config') {
+                  if (slot.running) slot.controller.abort();
+                  else startSlot(configPath);
+                }
+              })
+              .catch((error) =>
+                console.error(`[helper] agent ${slot.agentId} configuration read failed:`, error),
+              );
+          });
+        const runtime = await readRuntimeRecord(configPath);
+        slot.agentId = runtime.agent.publicKey;
+        // Diagnostics are optional; their filesystem cannot gate intake.
+        void readFile(daemonFailurePath(dirname(configPath)), 'utf8')
+          .then((raw) => {
+            slot.lastError ??= JSON.parse(raw).lastError?.slice(0, 500);
+          })
+          .catch(() => undefined);
+        if (!controller.signal.aborted && !slot.controller.signal.aborted) await supervise(slot);
+      })
+      .catch((error) => {
+        captureHelperError(error);
+        slot.lastError =
+          error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
+        setState(slot, 'needs-config', slot.lastError);
+        console.error(`[helper] agent ${slot.agentId} startup failed:`, error);
+      })
+      .finally(() => {
+        slot.running = undefined;
+        // A start racing an in-flight scoped stop is remembered in the durable desired set.
+        if (!controller.signal.aborted && slot.controller.signal.aborted)
+          void rescan().catch((error) =>
+            console.error('[helper] desired-set reconciliation failed:', error),
+          );
+        else if (slot.state === 'removed')
+          void stat(configPath).then(
+            () => undefined,
+            (error: NodeJS.ErrnoException) => {
+              if (error.code === 'ENOENT') forgetSlot(slot);
+            },
+          );
+      });
   };
 
   /** Host every paired, not-stopped agent; stop the ones that were stopped or removed. */
@@ -680,31 +786,39 @@ async function serveMachineHelper(
     console.log('[helper] rescanning paired agents');
     void rescan().catch((error) => console.error('[helper] rescan failed:', error));
   };
-  control = new MachineControl(machineControlPath(supervisorRoot), async (request, hold): Promise<MachineAnswer | HeldAnswer> => {
-    if (request.operation === 'converge' || request.operation === 'stop') {
-      console.log('[helper] rescanning paired agents');
-      await rescan();
-    }
-    if (request.operation === 'update') {
-      if (!update || !request.releaseId) throw new Error('this helper does not manage releases');
-      if (request.sourceGeneration && request.sourceGeneration !== generation)
-        throw new Error(`helper generation ${generation} is not the requested source ${request.sourceGeneration}`);
-      // Answered when the handoff starts or the transaction fails.
-      const held: HeldAnswer = hold();
-      const outcome = await update.prepared(request.releaseId);
-      if (outcome === 'pending') return held;
-      return { ...snapshot(), outcome: outcome === 'handed-off' ? 'handoff' : 'current' };
-    }
-    writeStatus();
-    return snapshot();
-  });
+  control = new MachineControl(
+    machineControlPath(supervisorRoot),
+    async (request, hold): Promise<MachineAnswer | HeldAnswer> => {
+      if (request.operation === 'converge' || request.operation === 'stop') {
+        console.log('[helper] rescanning paired agents');
+        await rescan();
+      }
+      if (request.operation === 'update') {
+        if (!update || !request.releaseId) throw new Error('this helper does not manage releases');
+        if (request.sourceGeneration && request.sourceGeneration !== generation)
+          throw new Error(
+            `helper generation ${generation} is not the requested source ${request.sourceGeneration}`,
+          );
+        // Answered when the handoff starts or the transaction fails.
+        const held: HeldAnswer = hold();
+        const outcome = await update.prepared(request.releaseId);
+        if (outcome === 'pending') return held;
+        return { ...snapshot(), outcome: outcome === 'handed-off' ? 'handoff' : 'current' };
+      }
+      writeStatus();
+      return snapshot();
+    },
+  );
   await control.start();
   signals.on('SIGHUP', onHangup);
 
   // The one owner of this machine's provider logins; sessions start on it.
   if (!options.runAgent && !options.freeAgent) void startMachineCliProxy(env.HOME || homedir());
   try {
-    if (resumes) disposeResume = watchFreeAgentResume(() => { resumes.emit('resume'); });
+    if (resumes)
+      disposeResume = watchFreeAgentResume(() => {
+        resumes.emit('resume');
+      });
     console.log(`[helper] hosting ${initial.length} agent(s) on one machine socket per server`);
     for (const configPath of initial) startSlot(configPath);
     lifecycle.beginServing();
@@ -715,8 +829,11 @@ async function serveMachineHelper(
         .ready(`ready; ${statusLine()}`)
         .catch((error) => console.error('[helper] ready notification failed:', error));
     if (layout && !controller.signal.aborted)
-      pruning = withInstallLock(layout, () => pruneHelperReleases(layout, loadedRelease), 'release pruning')
-        .catch(error => console.warn('[helper] release pruning deferred:', error));
+      pruning = withInstallLock(
+        layout,
+        () => pruneHelperReleases(layout, loadedRelease),
+        'release pruning',
+      ).catch((error) => console.warn('[helper] release pruning deferred:', error));
     if (!controller.signal.aborted)
       await new Promise<void>((resolveAbort) =>
         controller.signal.addEventListener('abort', () => resolveAbort(), { once: true }),
@@ -727,8 +844,7 @@ async function serveMachineHelper(
     }
     // Native process exit never waits for this. Embedders can observe cleanup
     // before reclaiming their isolated state directory.
-    settled = Promise.all([...slots.values()].map(slot => slot.running))
-      .then(() => statusWrite);
+    settled = Promise.all([...slots.values()].map((slot) => slot.running)).then(() => statusWrite);
   } finally {
     stopMachineCliProxy();
     disposeResume?.();
@@ -744,8 +860,9 @@ export async function runMachineHelper(
   options: Parameters<typeof serveMachineHelper>[0] = {},
 ): ReturnType<typeof serveMachineHelper> {
   const generation = randomUUID();
-  return withKernelLock(helperLockKey(defaultSupervisorRoot(options?.env)), () =>
-    serveMachineHelper(options, generation),
-  { step: 'machine helper', generation });
+  return withKernelLock(
+    helperLockKey(defaultSupervisorRoot(options?.env)),
+    () => serveMachineHelper(options, generation),
+    { step: 'machine helper', generation },
+  );
 }
-

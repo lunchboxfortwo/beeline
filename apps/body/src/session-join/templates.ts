@@ -232,5 +232,7 @@ def register(ctx):
 `;
 
 export function fill(template: string, node: string, bundle: string): string {
-  return template.replaceAll('__NODE__', node.replace(/\\/g, '\\\\')).replaceAll('__BUNDLE__', bundle.replace(/\\/g, '\\\\'));
+  return template
+    .replaceAll('__NODE__', node.replace(/\\/g, '\\\\'))
+    .replaceAll('__BUNDLE__', bundle.replace(/\\/g, '\\\\'));
 }

@@ -1,14 +1,18 @@
 import { runOwned } from './wait.js';
 import { useAdapterCommand } from './adapter-install-lock.js';
-import { AcpRuntimeExitedError,flattenHarnessCause,isPiAcpHarness,killChildProcessGroup,STDERR_TAIL_MAX_CHARS } from './acp-stderr-tail-max-chars.js';
+import {
+  AcpRuntimeExitedError,
+  flattenHarnessCause,
+  isPiAcpHarness,
+  killChildProcessGroup,
+  STDERR_TAIL_MAX_CHARS,
+} from './acp-stderr-tail-max-chars.js';
 import { maskCredentialResult } from './mask-credential-result.js';
-
-
 
 import { piStartupEnvironment } from './pi-startup.js';
 
 import { realpathSync } from 'node:fs';
-import { delimiter,dirname,isAbsolute } from 'node:path';
+import { delimiter, dirname, isAbsolute } from 'node:path';
 import { explainAgentProgramFailure } from './agent-command.js';
 /**
  * Minimal ACP client over stdio for an ACP coding agent.
@@ -25,22 +29,92 @@ import { explainAgentProgramFailure } from './agent-command.js';
  * therefore drives the selected ACP server directly so session modes/MCP mounts
  * stay enforceable and multi-user activity projection remains possible.
  */
-import { readUsageWindow,type AgentUsage,type UsageWindow } from '@beeline/api-contract/daemon';
+import { readUsageWindow, type AgentUsage, type UsageWindow } from '@beeline/api-contract/daemon';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { acpClientApplySessionMode,acpClientCanLoadSession,acpClientCanPromptWithImages,acpClientFailRuntime,acpClientHandleChildExit,acpClientPreparePromptDelivery,acpClientProcessPid,acpClientPromptDelivery,acpClientSessionCommandsFor,acpClientSessionLoad,acpClientSessionNew,acpClientSessionPrompt } from './acp-prepare-prompt-delivery.js';
+import {
+  acpClientApplySessionMode,
+  acpClientCanLoadSession,
+  acpClientCanPromptWithImages,
+  acpClientFailRuntime,
+  acpClientHandleChildExit,
+  acpClientPreparePromptDelivery,
+  acpClientProcessPid,
+  acpClientPromptDelivery,
+  acpClientSessionCommandsFor,
+  acpClientSessionLoad,
+  acpClientSessionNew,
+  acpClientSessionPrompt,
+} from './acp-prepare-prompt-delivery.js';
 import { AcpResourceScope } from './acp-resource-scope.js';
-import { acpClientActiveRunId,acpClientActiveRunIdFromUpdate,acpClientHandleMessage,acpClientHandlePermission,acpClientNotify,acpClientOnData,acpClientRequest,acpClientSessionCancel,acpClientSessionSteer,acpClientSetConfigOption,acpClientSetModel,acpClientWaitForActiveRun,acpClientWrite } from './acp-session-steer.js';
-import { AcpAvailableCommand,AcpPermissionAllowlist,AcpPermissionHandler,AcpPermissionRequest,AcpPromptBlock,AcpStreamHandler,AcpTextChunkHandler,McpServerWire,PromptResult,SessionUpdate,SteerResult,ToolCallEntry } from './acp-stderr-tail-max-chars.js';
+import {
+  acpClientActiveRunId,
+  acpClientActiveRunIdFromUpdate,
+  acpClientHandleMessage,
+  acpClientHandlePermission,
+  acpClientNotify,
+  acpClientOnData,
+  acpClientRequest,
+  acpClientSessionCancel,
+  acpClientSessionSteer,
+  acpClientSetConfigOption,
+  acpClientSetModel,
+  acpClientWaitForActiveRun,
+  acpClientWrite,
+} from './acp-session-steer.js';
+import {
+  AcpAvailableCommand,
+  AcpPermissionAllowlist,
+  AcpPermissionHandler,
+  AcpPermissionRequest,
+  AcpPromptBlock,
+  AcpStreamHandler,
+  AcpTextChunkHandler,
+  McpServerWire,
+  PromptResult,
+  SessionUpdate,
+  SteerResult,
+  ToolCallEntry,
+} from './acp-stderr-tail-max-chars.js';
 import { CodexPromptDelivery } from './codex-prompt-delivery.js';
 import type { SessionMode } from './config.js';
 import { harnessSupportsNativeSessionResume } from './harness-capabilities.js';
 import { McpLaunchFiles } from './mcp-launch-files.js';
-import { cgroupOomKillProbe,OomKillTracker,type OomKillDetector } from './oom-kill.js';
-export { AcpRequestError,AcpResourceLimitError,AcpRuntimeExitedError,agentMessageChunkText,agentMessageRuns,agentStreamSnapshot,agentTurnSteps,finalAgentMessageText,flattenHarnessCause,isPiAcpHarness,isPureRetryNarration,killChildProcessGroup,meaningfulHarnessStderr,parseAvailableCommands,STDERR_TAIL_MAX_CHARS,type AcpAvailableCommand,type AcpPermissionAllowlist,type AcpPermissionDecision,type AcpPermissionHandler,type AcpPermissionOption,type AcpPermissionRequest,type AcpPromptBlock,type AcpStreamHandler,type AcpStreamSnapshot,type AcpTextChunkHandler,type AgentTurnStep,type McpServerWire,type PromptResult,type SessionUpdate,type SteerResult,type ToolCallEntry } from './acp-stderr-tail-max-chars.js';
-
-
+import { cgroupOomKillProbe, OomKillTracker, type OomKillDetector } from './oom-kill.js';
+export {
+  AcpRequestError,
+  AcpResourceLimitError,
+  AcpRuntimeExitedError,
+  agentMessageChunkText,
+  agentMessageRuns,
+  agentStreamSnapshot,
+  agentTurnSteps,
+  finalAgentMessageText,
+  flattenHarnessCause,
+  isPiAcpHarness,
+  isPureRetryNarration,
+  killChildProcessGroup,
+  meaningfulHarnessStderr,
+  parseAvailableCommands,
+  STDERR_TAIL_MAX_CHARS,
+  type AcpAvailableCommand,
+  type AcpPermissionAllowlist,
+  type AcpPermissionDecision,
+  type AcpPermissionHandler,
+  type AcpPermissionOption,
+  type AcpPermissionRequest,
+  type AcpPromptBlock,
+  type AcpStreamHandler,
+  type AcpStreamSnapshot,
+  type AcpTextChunkHandler,
+  type AgentTurnStep,
+  type McpServerWire,
+  type PromptResult,
+  type SessionUpdate,
+  type SteerResult,
+  type ToolCallEntry,
+} from './acp-stderr-tail-max-chars.js';
 
 /** Unscoped adapter process groups this process started that have not exited. */
 const liveAdapterGroups = new Set<ChildProcessWithoutNullStreams>();
@@ -52,7 +126,11 @@ const liveAdapterGroups = new Set<ChildProcessWithoutNullStreams>();
  */
 export function stopLiveAcpAdapters(): void {
   for (const child of liveAdapterGroups) {
-    try { killChildProcessGroup(child, 'SIGKILL'); } catch { /* already gone */ }
+    try {
+      killChildProcessGroup(child, 'SIGKILL');
+    } catch {
+      /* already gone */
+    }
   }
 }
 
@@ -77,24 +155,26 @@ export function toolCallEntries(updates: readonly SessionUpdate[]): ToolCallEntr
     }
     const key = id ?? activeAnonymous!;
     const previous = calls.get(key);
-    calls.set(key, maskCredentialResult({
-      ...previous,
-      id: key,
-      ...(typeof update.name === 'string' ? { name: update.name } : {}),
-      ...(typeof update.title === 'string' ? { title: update.title } : {}),
-      ...(typeof update.kind === 'string' ? { kind: update.kind } : {}),
-      ...(typeof update.status === 'string' ? { status: update.status } : {}),
-      ...(sessionUpdate === 'tool_result' ? { resultReceived: true } : {}),
-      ...('rawInput' in update ? { rawInput: update.rawInput } : {}),
-      ...('content' in update ? { content: update.content } : {}),
-      ...('rawOutput' in update ? { rawOutput: update.rawOutput } : {}),
-      ...('locations' in update ? { locations: update.locations } : {}),
-    }));
+    calls.set(
+      key,
+      maskCredentialResult({
+        ...previous,
+        id: key,
+        ...(typeof update.name === 'string' ? { name: update.name } : {}),
+        ...(typeof update.title === 'string' ? { title: update.title } : {}),
+        ...(typeof update.kind === 'string' ? { kind: update.kind } : {}),
+        ...(typeof update.status === 'string' ? { status: update.status } : {}),
+        ...(sessionUpdate === 'tool_result' ? { resultReceived: true } : {}),
+        ...('rawInput' in update ? { rawInput: update.rawInput } : {}),
+        ...('content' in update ? { content: update.content } : {}),
+        ...('rawOutput' in update ? { rawOutput: update.rawOutput } : {}),
+        ...('locations' in update ? { locations: update.locations } : {}),
+      }),
+    );
     if (!id && sessionUpdate === 'tool_result') activeAnonymous = undefined;
   }
   return [...calls.values()];
 }
-
 
 export interface Pending {
   resolve: (v: unknown) => void;
@@ -102,62 +182,71 @@ export interface Pending {
   sessionId?: string;
 }
 
-
 /** Claude ACP's negotiated asyncTasks extension keeps background Bash lifecycle
  * separate from the tool call, which is already completed once Bash detaches. */
 export function asyncTaskCall(update: Record<string, unknown>): ToolCallEntry | undefined {
-  if (typeof update.asyncTaskId !== 'string' || !update.asyncTaskId ||
-      !['async_task_spawned', 'async_task_progress', 'async_task_state_update'].includes(String(update.sessionUpdate)))
+  if (
+    typeof update.asyncTaskId !== 'string' ||
+    !update.asyncTaskId ||
+    !['async_task_spawned', 'async_task_progress', 'async_task_state_update'].includes(
+      String(update.sessionUpdate),
+    )
+  )
     return undefined;
   const state = update.state;
   return {
     id: `async:${update.asyncTaskId}`,
-    ...(typeof update.name === 'string' ? { title: update.name } :
-      typeof update.description === 'string' ? { title: update.description } : {}),
+    ...(typeof update.name === 'string'
+      ? { title: update.name }
+      : typeof update.description === 'string'
+        ? { title: update.description }
+        : {}),
     ...(update.sessionUpdate === 'async_task_spawned' ? { status: 'in_progress' } : {}),
     ...(typeof state === 'string' ? { status: state === 'stopped' ? 'failed' : state } : {}),
   };
 }
 
-
 export class AcpClient extends EventEmitter {
+  child: ChildProcessWithoutNullStreams | null = null;
 
-   child: ChildProcessWithoutNullStreams | null = null;
+  buf = '';
 
-   buf = '';
+  nextId = 1;
 
-   nextId = 1;
+  pending = new Map<number, Pending>();
 
-   pending = new Map<number, Pending>();
+  activeRunIds = new Map<string, string>();
 
-   activeRunIds = new Map<string, string>();
-
-   activePromptSessions = new Set<string>();
+  activePromptSessions = new Set<string>();
 
   /** Tool metadata arrives in session/update just before a sparse permission request. */
-   permissionNarration = new Map<string, string>();
-   toolCallMetadata = new Map<string, AcpPermissionRequest['toolCall']>();
+  permissionNarration = new Map<string, string>();
+  toolCallMetadata = new Map<string, AcpPermissionRequest['toolCall']>();
 
   /** Latest `available_commands_update` per session, keyed by sessionId. */
-   sessionCommands = new Map<string, AcpAvailableCommand[]>();
+  sessionCommands = new Map<string, AcpAvailableCommand[]>();
 
-   supportsStandardSteering = false;
+  supportsStandardSteering = false;
 
-   supportsSessionLoading = false;
+  supportsSessionLoading = false;
 
-   supportsImagePrompts = false;
+  supportsImagePrompts = false;
 
-   supportsStructuredSystemPrompt = false;
+  supportsStructuredSystemPrompt = false;
 
-   codexBlockDelivery = false;
+  codexBlockDelivery = false;
 
-   piDeliveryMarkers = new Map<string, string>();
+  piDeliveryMarkers = new Map<string, string>();
 
-   readonly promptDeliveries = new Map<string, CodexPromptDelivery>();
-  async preparePromptDelivery(sessionId: string | undefined): Promise<void> { return acpClientPreparePromptDelivery(this, sessionId); }
-  promptDelivery(sessionId: string | undefined): CodexPromptDelivery | undefined { return acpClientPromptDelivery(this, sessionId); }
+  readonly promptDeliveries = new Map<string, CodexPromptDelivery>();
+  async preparePromptDelivery(sessionId: string | undefined): Promise<void> {
+    return acpClientPreparePromptDelivery(this, sessionId);
+  }
+  promptDelivery(sessionId: string | undefined): CodexPromptDelivery | undefined {
+    return acpClientPromptDelivery(this, sessionId);
+  }
 
-   alive = false;
+  alive = false;
 
   /**
    * Byte length of the last prompt handed to the harness, measured here because
@@ -166,56 +255,55 @@ export class AcpClient extends EventEmitter {
    * by dividing through this exact figure, so it may not be estimated anywhere
    * else.
    */
-   lastPromptByteCount: number | undefined;
+  lastPromptByteCount: number | undefined;
 
   /** Bounded tail of recent stderr, so a spawn/exit failure's rejection text
    *  carries the real reason (e.g. a harness's own "missing API key" notice)
    *  instead of just the bare exit code, in the daemon's log. */
-   stderrTail = '';
+  stderrTail = '';
 
-   agentEnv: Record<string, string>;
+  agentEnv: Record<string, string>;
 
-   harnessCommand: string;
+  harnessCommand: string;
 
-   agentCommand: string;
+  agentCommand: string;
 
-   agentLabel: string;
+  agentLabel: string;
 
-   agentArgs: string[];
+  agentArgs: string[];
 
-   agentCwd?: string;
+  agentCwd?: string;
 
-   inheritProcessEnv: boolean;
+  inheritProcessEnv: boolean;
 
-   autoApprove: boolean;
+  autoApprove: boolean;
 
-   backgroundTasks: boolean;
+  backgroundTasks: boolean;
 
-   osSandbox: boolean;
+  osSandbox: boolean;
 
-   permissionHandler?: AcpPermissionHandler;
+  permissionHandler?: AcpPermissionHandler;
 
-   permissionAllowlist?: AcpPermissionAllowlist;
+  permissionAllowlist?: AcpPermissionAllowlist;
 
-   usageHandler?: (usage: AgentUsage) => void;
+  usageHandler?: (usage: AgentUsage) => void;
 
-   sessionUsage = new Map<string, AgentUsage>();
+  sessionUsage = new Map<string, AgentUsage>();
 
-   commandsHandler?: (commands: readonly AcpAvailableCommand[]) => void;
+  commandsHandler?: (commands: readonly AcpAvailableCommand[]) => void;
 
-   oomKills: OomKillDetector;
+  oomKills: OomKillDetector;
 
-   readonly useResourceScope: boolean;
+  readonly useResourceScope: boolean;
 
-   readonly resourceScopeMemoryMaxBytes?: number;
+  readonly resourceScopeMemoryMaxBytes?: number;
 
-   resourceScope?: AcpResourceScope;
+  resourceScope?: AcpResourceScope;
 
   /** A deliberate stop owns its SIGKILL; that exit is never labelled OOM. */
-   stopping = false;
+  stopping = false;
 
-   readonly mcpLaunchFiles = new McpLaunchFiles();
-
+  readonly mcpLaunchFiles = new McpLaunchFiles();
 
   constructor(opts: {
     /** Legacy bare-binary option. Prefer agentCommand + agentArgs. */
@@ -291,8 +379,10 @@ export class AcpClient extends EventEmitter {
     this.commandsHandler = opts.onCommands;
     this.usageHandler = opts.onUsage;
     this.oomKills = opts.oomKills ?? new OomKillTracker(cgroupOomKillProbe());
-    this.useResourceScope = opts.resourceScope === 'systemd' ||
-      (opts.resourceScope === undefined && process.platform === 'linux' &&
+    this.useResourceScope =
+      opts.resourceScope === 'systemd' ||
+      (opts.resourceScope === undefined &&
+        process.platform === 'linux' &&
         process.env.BEELINE_MANAGED_BY_SYSTEMD === '1');
     this.resourceScopeMemoryMaxBytes = opts.resourceScopeMemoryMaxBytes;
   }
@@ -317,49 +407,76 @@ export class AcpClient extends EventEmitter {
     if (this.osSandbox && /(^|[/\\])codex-acp(\.[a-z]+)?$/i.test(this.agentLabel)) {
       childEnv = { ...childEnv, INITIAL_AGENT_MODE: 'agent-full-access' };
     }
-    if (isAbsolute(this.harnessCommand) &&
-        !childEnv.BEELINE_FREE_AGENT_ID && !childEnv.BEELINE_FREE_AGENT_MODEL_TOKEN) {
+    if (
+      isAbsolute(this.harnessCommand) &&
+      !childEnv.BEELINE_FREE_AGENT_ID &&
+      !childEnv.BEELINE_FREE_AGENT_MODEL_TOKEN
+    ) {
       try {
         // npm links point into node_modules, while Node lives beside the bin
         // link. Prefer the real entry's directory, then its invoked directory,
         // before the inherited PATH so version-manager siblings stay together.
-        const directories = [dirname(realpathSync(this.harnessCommand)), dirname(this.harnessCommand)];
-        const pathKey = process.platform === 'win32'
-          ? Object.keys(childEnv).find(key => key.toLowerCase() === 'path') ?? 'PATH'
-          : 'PATH';
+        const directories = [
+          dirname(realpathSync(this.harnessCommand)),
+          dirname(this.harnessCommand),
+        ];
+        const pathKey =
+          process.platform === 'win32'
+            ? (Object.keys(childEnv).find((key) => key.toLowerCase() === 'path') ?? 'PATH')
+            : 'PATH';
         const previous = childEnv[pathKey];
         // POSIX exec uses this default search path when PATH is absent.
         // Adding the harness directory must preserve that implicit fallback.
-        const entries = previous === undefined
-          ? (process.platform === 'win32' ? [] : ['/usr/bin', '/bin'])
-          : previous.split(delimiter);
-        const additions = [...new Set(directories)].filter(dir => !entries.includes(dir));
-        if (additions.length) childEnv = { ...childEnv, [pathKey]: [...additions, ...entries].join(delimiter) };
+        const entries =
+          previous === undefined
+            ? process.platform === 'win32'
+              ? []
+              : ['/usr/bin', '/bin']
+            : previous.split(delimiter);
+        const additions = [...new Set(directories)].filter((dir) => !entries.includes(dir));
+        if (additions.length)
+          childEnv = { ...childEnv, [pathKey]: [...additions, ...entries].join(delimiter) };
       } catch {
         // Preserve the spawn error for a missing or inaccessible executable.
       }
     }
     this.resourceScope = this.useResourceScope
-      ? new AcpResourceScope(this.resourceScopeMemoryMaxBytes) : undefined;
+      ? new AcpResourceScope(this.resourceScopeMemoryMaxBytes)
+      : undefined;
     const launch = this.resourceScope?.launch(this.agentCommand, this.agentArgs, childEnv);
     const releaseAdapter = useAdapterCommand(this.harnessCommand);
     try {
-      if (launch) this.child = spawn(launch.command, launch.args, {
-        env: launch.env,
-        ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      if (launch)
+        this.child = spawn(launch.command, launch.args, {
+          env: launch.env,
+          ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
       else {
         this.child = null;
-        const operation = runOwned({ step: `ACP agent ${this.agentLabel}`, file: this.agentCommand,
-          args: this.agentArgs, env: childEnv, ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
-          stdin: 'pipe', captureOutput: false, ...(signal ? { signal } : {}),
-          onSpawn: child => { this.child = child as ChildProcessWithoutNullStreams; },
+        const operation = runOwned({
+          step: `ACP agent ${this.agentLabel}`,
+          file: this.agentCommand,
+          args: this.agentArgs,
+          env: childEnv,
+          ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
+          stdin: 'pipe',
+          captureOutput: false,
+          ...(signal ? { signal } : {}),
+          onSpawn: (child) => {
+            this.child = child as ChildProcessWithoutNullStreams;
+          },
         });
         void operation.catch(() => undefined);
-        if (!this.child) { await operation; throw new Error(`ACP agent ${this.agentLabel} did not start`); }
+        if (!this.child) {
+          await operation;
+          throw new Error(`ACP agent ${this.agentLabel} did not start`);
+        }
       }
-    } catch (error) { releaseAdapter(); throw error; }
+    } catch (error) {
+      releaseAdapter();
+      throw error;
+    }
     this.alive = true;
 
     this.stderrTail = '';
@@ -376,7 +493,9 @@ export class AcpClient extends EventEmitter {
     const pipeClosed = (pipe: string) => {
       if (this.child === child && this.alive) {
         const stderr = flattenHarnessCause(this.stderrTail);
-        this.failRuntime(`ACP agent ${this.agentLabel} ${pipe} pipe closed${stderr ? `: ${stderr}` : ''}`);
+        this.failRuntime(
+          `ACP agent ${this.agentLabel} ${pipe} pipe closed${stderr ? `: ${stderr}` : ''}`,
+        );
       }
     };
     this.child.stdout.on('end', () => pipeClosed('stdout'));
@@ -412,21 +531,25 @@ export class AcpClient extends EventEmitter {
     // ACP handshake: initialize, then send initialized notification.
     let initResult: Record<string, unknown>;
     try {
-      initResult = (await this.request(
-        'initialize',
-        {
-          protocolVersion: 1,
-          clientCapabilities: {
-            ...(/(^|[/\\])(?:codex-acp|claude-(?:agent|code)-acp)(\.[a-z]+)?$/i.test(this.agentLabel)
-              ? { session: { compaction: {} } } : {}),
-            ...(this.backgroundTasks
-              ? { _meta: { jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } } : {}),
-          },
+      initResult = (await this.request('initialize', {
+        protocolVersion: 1,
+        clientCapabilities: {
+          ...(/(^|[/\\])(?:codex-acp|claude-(?:agent|code)-acp)(\.[a-z]+)?$/i.test(this.agentLabel)
+            ? { session: { compaction: {} } }
+            : {}),
+          ...(this.backgroundTasks
+            ? { _meta: { jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } }
+            : {}),
         },
-      )) as Record<string, unknown>;
+      })) as Record<string, unknown>;
     } catch (error) {
       if (/EPIPE/.test(String(error)) && this.stderrTail.trim()) {
-        throw await explainAgentProgramFailure(new AcpRuntimeExitedError(`ACP agent ${this.agentLabel}: ${String(error)}: ${flattenHarnessCause(this.stderrTail)}`), this.agentEnv);
+        throw await explainAgentProgramFailure(
+          new AcpRuntimeExitedError(
+            `ACP agent ${this.agentLabel}: ${String(error)}: ${flattenHarnessCause(this.stderrTail)}`,
+          ),
+          this.agentEnv,
+        );
       }
       throw await explainAgentProgramFailure(error, this.agentEnv);
     }
@@ -442,14 +565,18 @@ export class AcpClient extends EventEmitter {
       | undefined;
     this.supportsSessionLoading = agentCapabilities?.loadSession === true;
     this.supportsImagePrompts = agentCapabilities?.promptCapabilities?.image === true;
-    this.supportsStructuredSystemPrompt = agentCapabilities?.sessionCapabilities?.systemPrompt != null;
+    this.supportsStructuredSystemPrompt =
+      agentCapabilities?.sessionCapabilities?.systemPrompt != null;
     const info = initResult.agentInfo as { version?: string } | undefined;
     // This adapter version was verified to emit all automatic and manual
     // compactions when the client advertises session.compaction. Unknown
     // adapters keep full delivery until their behavior is measured.
-    this.codexBlockDelivery = (/(^|[/\\])codex-acp(\.[a-z]+)?$/i.test(this.agentLabel) &&
-      this.supportsStructuredSystemPrompt && info?.version === '2.3.0') ||
-      (/(^|[/\\])claude-(agent|code)-acp(\.[a-z]+)?$/i.test(this.agentLabel) && info?.version === '0.97.0') ||
+    this.codexBlockDelivery =
+      (/(^|[/\\])codex-acp(\.[a-z]+)?$/i.test(this.agentLabel) &&
+        this.supportsStructuredSystemPrompt &&
+        info?.version === '2.3.0') ||
+      (/(^|[/\\])claude-(agent|code)-acp(\.[a-z]+)?$/i.test(this.agentLabel) &&
+        info?.version === '0.97.0') ||
       isPiAcpHarness(this.agentLabel);
     this.emit('initialized', initResult);
     // ACP defines no `initialized` notification; pi-acp answers it with -32601
@@ -458,17 +585,24 @@ export class AcpClient extends EventEmitter {
     if (!isPiAcpHarness(this.agentLabel)) this.notify('notifications/initialized', {});
   }
   /**
- * One child exit: reject every in-flight request so the turn fails and is
- * reported instead of hanging, then publish the exit. A scoped SIGKILL/137
- * is a likely memory-limit hit, while an unscoped SIGKILL uses the daemon
- * cgroup's OOM counter to distinguish it from a deliberate kill.
- */
-async handleChildExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> { return acpClientHandleChildExit(this, code, signal); }
-  failRuntime(detail: string): void { return acpClientFailRuntime(this, detail); }
+   * One child exit: reject every in-flight request so the turn fails and is
+   * reported instead of hanging, then publish the exit. A scoped SIGKILL/137
+   * is a likely memory-limit hit, while an unscoped SIGKILL uses the daemon
+   * cgroup's OOM counter to distinguish it from a deliberate kill.
+   */
+  async handleChildExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
+    return acpClientHandleChildExit(this, code, signal);
+  }
+  failRuntime(detail: string): void {
+    return acpClientFailRuntime(this, detail);
+  }
   async stopProcess(): Promise<void> {
     const child = this.child;
     const scope = this.resourceScope;
-    if (!child && !scope) { this.mcpLaunchFiles.clear(); return; }
+    if (!child && !scope) {
+      this.mcpLaunchFiles.clear();
+      return;
+    }
     this.stopping = true;
     try {
       // Send shutdown if child is still alive.
@@ -484,9 +618,15 @@ async handleChildExit(code: number | null, signal: NodeJS.Signals | null): Promi
       await scope.stop();
       if (this.resourceScope === scope) this.resourceScope = undefined;
     } else if (child) {
-      const exited = !child.pid || child.exitCode !== null || child.signalCode !== null
-        ? Promise.resolve() : new Promise<void>(resolve => child.once('exit', () => resolve()));
-      try { killChildProcessGroup(child, 'SIGKILL'); } catch { /* ignore */ }
+      const exited =
+        !child.pid || child.exitCode !== null || child.signalCode !== null
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      try {
+        killChildProcessGroup(child, 'SIGKILL');
+      } catch {
+        /* ignore */
+      }
       await exited;
     }
     this.mcpLaunchFiles.clear();
@@ -497,97 +637,153 @@ async handleChildExit(code: number | null, signal: NodeJS.Signals | null): Promi
     this.toolCallMetadata.clear();
   }
 
-
   get isAlive(): boolean {
     return this.alive;
   }
   /** Host pid of the harness wrapper (bwrap when enabled). */
-processPid(): number | undefined { return acpClientProcessPid(this); }
+  processPid(): number | undefined {
+    return acpClientProcessPid(this);
+  }
   /** The latest command list this harness advertised for a session, if any. */
-sessionCommandsFor(sessionId: string): AcpAvailableCommand[] { return acpClientSessionCommandsFor(this, sessionId); }
+  sessionCommandsFor(sessionId: string): AcpAvailableCommand[] {
+    return acpClientSessionCommandsFor(this, sessionId);
+  }
   /** Whether this live ACP process advertised the stable `session/load` method. */
-canLoadSession(): boolean { return acpClientCanLoadSession(this); }
+  canLoadSession(): boolean {
+    return acpClientCanLoadSession(this);
+  }
   /** Whether this live ACP process accepts `image` prompt blocks (`promptCapabilities.image`). */
-canPromptWithImages(): boolean { return acpClientCanPromptWithImages(this); }
+  canPromptWithImages(): boolean {
+    return acpClientCanPromptWithImages(this);
+  }
   async sessionNew(opts: {
     cwd: string;
     mcpServers?: McpServerWire[];
     systemPrompt?: string;
     /** Ask agents with ACP modes to enforce the Body session boundary. */
     mode?: SessionMode;
-}): Promise<{
+  }): Promise<{
     sessionId: string;
     raw: unknown;
-}> { return acpClientSessionNew(this, opts); }
+  }> {
+    return acpClientSessionNew(this, opts);
+  }
   /**
- * Reopen a provider-persisted logical conversation in this new ACP process.
- * Unlike `session/new`, load accepts no system prompt: the harness restores
- * its own conversation and instructions instead of receiving transcript
- * text from Body again.
- */
-async sessionLoad(opts: {
+   * Reopen a provider-persisted logical conversation in this new ACP process.
+   * Unlike `session/new`, load accepts no system prompt: the harness restores
+   * its own conversation and instructions instead of receiving transcript
+   * text from Body again.
+   */
+  async sessionLoad(opts: {
     sessionId: string;
     cwd: string;
     mcpServers?: McpServerWire[];
     mode?: SessionMode;
-}): Promise<{
+  }): Promise<{
     sessionId: string;
     raw: unknown;
-}> { return acpClientSessionLoad(this, opts); }
-  async applySessionMode(sessionId: string, raw: Record<string, unknown>, mode: SessionMode | undefined): Promise<void> { return acpClientApplySessionMode(this, sessionId, raw, mode); }
-
+  }> {
+    return acpClientSessionLoad(this, opts);
+  }
+  async applySessionMode(
+    sessionId: string,
+    raw: Record<string, unknown>,
+    mode: SessionMode | undefined,
+  ): Promise<void> {
+    return acpClientApplySessionMode(this, sessionId, raw, mode);
+  }
 
   /** Tool progress and process exit arrive through the ACP stream. */
   get hasBackgroundTools(): boolean {
     return this.activePromptSessions.size > 0;
   }
 
-
   get lastPromptBytes(): number | undefined {
     return this.lastPromptByteCount;
   }
-  async sessionPrompt(sessionId: string, text: string | readonly AcpPromptBlock[], onChunk?: AcpTextChunkHandler, onActivity?: AcpStreamHandler, onToolCalls?: (calls: readonly ToolCallEntry[]) => void, onBackgroundToolCompletion?: (call: ToolCallEntry) => void): Promise<PromptResult> { return acpClientSessionPrompt(this, sessionId, text, onChunk, onActivity, onToolCalls, onBackgroundToolCompletion); }
+  async sessionPrompt(
+    sessionId: string,
+    text: string | readonly AcpPromptBlock[],
+    onChunk?: AcpTextChunkHandler,
+    onActivity?: AcpStreamHandler,
+    onToolCalls?: (calls: readonly ToolCallEntry[]) => void,
+    onBackgroundToolCompletion?: (call: ToolCallEntry) => void,
+  ): Promise<PromptResult> {
+    return acpClientSessionPrompt(
+      this,
+      sessionId,
+      text,
+      onChunk,
+      onActivity,
+      onToolCalls,
+      onBackgroundToolCompletion,
+    );
+  }
   /**
- * Inject follow-up input into the prompt currently running for this session.
- * buzz-agent advertises the target run through ACP session metadata; binding
- * the request to that id prevents a late message from steering a newer turn.
- */
-async sessionSteer(sessionId: string, text: string): Promise<SteerResult> { return acpClientSessionSteer(this, sessionId, text); }
+   * Inject follow-up input into the prompt currently running for this session.
+   * buzz-agent advertises the target run through ACP session metadata; binding
+   * the request to that id prevents a late message from steering a newer turn.
+   */
+  async sessionSteer(sessionId: string, text: string): Promise<SteerResult> {
+    return acpClientSessionSteer(this, sessionId, text);
+  }
   /** Active ACP run for a session, if the agent has advertised one. */
-activeRunId(sessionId: string): string | undefined { return acpClientActiveRunId(this, sessionId); }
-  sessionCancel(sessionId: string): void { return acpClientSessionCancel(this, sessionId); }
+  activeRunId(sessionId: string): string | undefined {
+    return acpClientActiveRunId(this, sessionId);
+  }
+  sessionCancel(sessionId: string): void {
+    return acpClientSessionCancel(this, sessionId);
+  }
   /**
- * The portable model/effort setter, confirmed round-tripping on pi/codex/
- * claude (runtime audit §3.2). The
- * param is `configId`, not `optionId`. Harnesses that advertise this shape
- * must use it; `session/set_model` is reserved for the distinct standard
- * `session/new.models` shape. Returns the runtime's updated `configOptions`.
- * Callers must validate `configId`/`value` against the
- * allow-listed catalog before calling this — see
- * `apps/body/src/model-config.ts`'s `assertModelConfigOptionAllowed`; this
- * method performs no policy checks of its own.
- */
-async setConfigOption(sessionId: string, configId: string, value: string): Promise<unknown> { return acpClientSetConfigOption(this, sessionId, configId, value); }
+   * The portable model/effort setter, confirmed round-tripping on pi/codex/
+   * claude (runtime audit §3.2). The
+   * param is `configId`, not `optionId`. Harnesses that advertise this shape
+   * must use it; `session/set_model` is reserved for the distinct standard
+   * `session/new.models` shape. Returns the runtime's updated `configOptions`.
+   * Callers must validate `configId`/`value` against the
+   * allow-listed catalog before calling this — see
+   * `apps/body/src/model-config.ts`'s `assertModelConfigOptionAllowed`; this
+   * method performs no policy checks of its own.
+   */
+  async setConfigOption(sessionId: string, configId: string, value: string): Promise<unknown> {
+    return acpClientSetConfigOption(this, sessionId, configId, value);
+  }
   /**
- * Standard ACP model setter used only when `session/new.models` supplied the
- * corresponding safe model axis. Most Beeline harnesses use configOptions;
- * Grok currently exposes models through this standard method instead.
- */
-async setModel(sessionId: string, modelId: string): Promise<unknown> { return acpClientSetModel(this, sessionId, modelId); }
-  onData(chunk: string): void { return acpClientOnData(this, chunk); }
-  handleMessage(msg: Record<string, unknown>): void { return acpClientHandleMessage(this, msg); }
-  activeRunIdFromUpdate(update: Record<string, unknown>): string | undefined { return acpClientActiveRunIdFromUpdate(this, update); }
-  waitForActiveRun(sessionId: string): Promise<string> { return acpClientWaitForActiveRun(this, sessionId); }
+   * Standard ACP model setter used only when `session/new.models` supplied the
+   * corresponding safe model axis. Most Beeline harnesses use configOptions;
+   * Grok currently exposes models through this standard method instead.
+   */
+  async setModel(sessionId: string, modelId: string): Promise<unknown> {
+    return acpClientSetModel(this, sessionId, modelId);
+  }
+  onData(chunk: string): void {
+    return acpClientOnData(this, chunk);
+  }
+  handleMessage(msg: Record<string, unknown>): void {
+    return acpClientHandleMessage(this, msg);
+  }
+  activeRunIdFromUpdate(update: Record<string, unknown>): string | undefined {
+    return acpClientActiveRunIdFromUpdate(this, update);
+  }
+  waitForActiveRun(sessionId: string): Promise<string> {
+    return acpClientWaitForActiveRun(this, sessionId);
+  }
 
-
-   readonly terminalSessions = new Set<string>();
-  async handlePermission(id: unknown, params: unknown): Promise<void> { return acpClientHandlePermission(this, id, params); }
+  readonly terminalSessions = new Set<string>();
+  async handlePermission(id: unknown, params: unknown): Promise<void> {
+    return acpClientHandlePermission(this, id, params);
+  }
   /** Responses and transport loss settle requests; silence never starts a retry. */
-request(method: string, params: unknown): Promise<unknown> { return acpClientRequest(this, method, params); }
-  notify(method: string, params: unknown): void { return acpClientNotify(this, method, params); }
-  write(obj: unknown): void { return acpClientWrite(this, obj); }
+  request(method: string, params: unknown): Promise<unknown> {
+    return acpClientRequest(this, method, params);
+  }
+  notify(method: string, params: unknown): void {
+    return acpClientNotify(this, method, params);
+  }
+  write(obj: unknown): void {
+    return acpClientWrite(this, obj);
+  }
 }
-
 
 export interface OpenAcpConversationOptions {
   client: AcpClient;
@@ -603,13 +799,11 @@ export interface OpenAcpConversationOptions {
   onResumeFailure?(error: unknown): void;
 }
 
-
 export type OpenAcpConversationResult = {
   sessionId: string;
   raw: unknown;
   kind: 'resumed' | 'created';
 };
-
 
 /**
  * Prefer the harness's own persisted conversation on an idle wake or helper restart.
@@ -642,9 +836,11 @@ export async function openAcpConversation(
   return { ...created, kind: 'created' };
 }
 
-
 /** claude-agent-acp forwards SDK rate_limit_event.rate_limit_info here. */
-export function parseAcpUsage(update: Record<string, unknown>, previous?: AgentUsage): AgentUsage | undefined {
+export function parseAcpUsage(
+  update: Record<string, unknown>,
+  previous?: AgentUsage,
+): AgentUsage | undefined {
   if (update.sessionUpdate !== 'usage_update') return;
   const updatedAt = Date.now() / 1000;
   const meta = update._meta as Record<string, unknown> | undefined;
@@ -654,19 +850,40 @@ export function parseAcpUsage(update: Record<string, unknown>, previous?: AgentU
   if (info?.unifiedWindows && typeof info.unifiedWindows === 'object') {
     for (const [rateLimitType, value] of Object.entries(info.unifiedWindows)) {
       if (!value || typeof value !== 'object') continue;
-      const parsed = readUsageWindow({ ...value, rateLimitType,
-        status: rateLimitType === info.rateLimitType ? info.status : 'allowed' }, updatedAt);
+      const parsed = readUsageWindow(
+        {
+          ...value,
+          rateLimitType,
+          status: rateLimitType === info.rateLimitType ? info.status : 'allowed',
+        },
+        updatedAt,
+      );
       if (parsed) unified.push(parsed);
     }
   }
   const used = update.used;
   const size = update.size;
-  const context = typeof used === 'number' && Number.isFinite(used) && used >= 0 &&
-    typeof size === 'number' && Number.isFinite(size) && size > 0 ? { used, size } : undefined;
+  const context =
+    typeof used === 'number' &&
+    Number.isFinite(used) &&
+    used >= 0 &&
+    typeof size === 'number' &&
+    Number.isFinite(size) &&
+    size > 0
+      ? { used, size }
+      : undefined;
   if (!window && !unified.length && !context) return;
-  const windows = new Map(previous?.windows.map(w => [w.rateLimitType, w]));
+  const windows = new Map(previous?.windows.map((w) => [w.rateLimitType, w]));
   for (const w of unified) windows.set(w.rateLimitType, w);
-  if (window) windows.set(window.rateLimitType, { ...unified.find(w => w.rateLimitType === window.rateLimitType), ...window });
+  if (window)
+    windows.set(window.rateLimitType, {
+      ...unified.find((w) => w.rateLimitType === window.rateLimitType),
+      ...window,
+    });
   const retainedContext = context ?? previous?.context;
-  return { updatedAt, windows: [...windows.values()], ...(retainedContext ? { context: retainedContext } : {}) };
+  return {
+    updatedAt,
+    windows: [...windows.values()],
+    ...(retainedContext ? { context: retainedContext } : {}),
+  };
 }

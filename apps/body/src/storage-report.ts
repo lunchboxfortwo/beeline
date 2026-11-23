@@ -3,14 +3,37 @@
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { DaemonBootstrapResult, CornerListResult } from '@beeline/api-contract/daemon';
-import { capturePrivateProcessUse, hasNonSquirePayload, reclaimWholeStorageObject, reclaimHelperStorage, reportStorageChildren, type StorageReclaimEntry, type StorageRoomState } from './helper-storage.js';
-import { isDeletedRuntimeName, pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
-import { pruneEndedOwnerStorage, pruneUnusedCheckoutStorage, pruneOpenCheckoutObjects, discoverLegacyStorageOwners, readStorageOwners, reclaimOwnedCheckout } from './storage-owners.js';
+import {
+  capturePrivateProcessUse,
+  hasNonSquirePayload,
+  reclaimWholeStorageObject,
+  reclaimHelperStorage,
+  reportStorageChildren,
+  type StorageReclaimEntry,
+  type StorageRoomState,
+} from './helper-storage.js';
+import {
+  isDeletedRuntimeName,
+  pruneDeletedRuntimes,
+  pruneRepositoryCaches,
+  pruneMachineStorage,
+} from './host-disk-retention.js';
+import {
+  pruneEndedOwnerStorage,
+  pruneUnusedCheckoutStorage,
+  pruneOpenCheckoutObjects,
+  discoverLegacyStorageOwners,
+  readStorageOwners,
+  reclaimOwnedCheckout,
+} from './storage-owners.js';
 import { defaultSupervisorRoot, type AgentRuntimeRecord } from './runtime.js';
 import { inspectCheckoutPreservation } from './storage-owners.js';
 import { ask } from './wait.js';
 
-export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot(), input: { orphanOnly?: boolean } = {}) {
+export async function helperStorageReport(
+  supervisorRoot = defaultSupervisorRoot(),
+  input: { orphanOnly?: boolean } = {},
+) {
   const processUse = input.orphanOnly ? () => true : await capturePrivateProcessUse();
   const entries: Array<StorageReclaimEntry & { rule: string }> = [];
   const orphans: Array<{ path: string; owner: string; reason: string }> = [];
@@ -19,120 +42,287 @@ export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot
   const states = new Map<string, StorageRoomState>();
   const legacyOwners: Awaited<ReturnType<typeof readStorageOwners>> = [];
   const root = resolve(supervisorRoot, 'beeline');
-  const options = (rule: string) => ({ dryRun: true, onError: (path: string, _error: unknown) => { unknown.push({ path, reason: 'filesystem inventory unavailable; retained' }); }, inUse: async (path: string) => processUse(path),
-    log: (entry: StorageReclaimEntry) => entries.push({ ...entry, rule }) });
-  for (const agent of await readdir(resolve(root, 'agents'), { withFileTypes: true }).catch(() => [])) {
+  const options = (rule: string) => ({
+    dryRun: true,
+    onError: (path: string, _error: unknown) => {
+      unknown.push({ path, reason: 'filesystem inventory unavailable; retained' });
+    },
+    inUse: async (path: string) => processUse(path),
+    log: (entry: StorageReclaimEntry) => entries.push({ ...entry, rule }),
+  });
+  for (const agent of await readdir(resolve(root, 'agents'), { withFileTypes: true }).catch(
+    () => [],
+  )) {
     if (!agent.isDirectory() || !/^[0-9a-f]{64}$/i.test(agent.name)) continue;
     const runtimeDir = resolve(root, 'agents', agent.name);
     try {
-      const runtime = JSON.parse(await readFile(resolve(runtimeDir, 'runtime.json'), 'utf8')) as AgentRuntimeRecord;
-      if (!runtime.transport?.daemonToken) throw new Error('no existing daemon token; no exchange attempted');
+      const runtime = JSON.parse(
+        await readFile(resolve(runtimeDir, 'runtime.json'), 'utf8'),
+      ) as AgentRuntimeRecord;
+      if (!runtime.transport?.daemonToken)
+        throw new Error('no existing daemon token; no exchange attempted');
       // Operator storage inspection must also work with the helper stopped.
       // Only these two lifecycle reads may use the existing token, never a claim.
       // Each read names its host and step on stderr before it waits; Ctrl-C ends it.
-      const operation = async <T>(name: 'getDaemonBootstrap' | 'listRoomCorners', operationInput: unknown, about: string): Promise<T> => {
+      const operation = async <T>(
+        name: 'getDaemonBootstrap' | 'listRoomCorners',
+        operationInput: unknown,
+        about: string,
+      ): Promise<T> => {
         const url = new URL(`/v1/daemon/operations/${name}`, runtime.transport!.baseUrl);
-        const response = await ask({ url, peer: `${url.host} for ${about}` }, {
-          method: 'POST', headers: { authorization: `Bearer ${runtime.transport!.daemonToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify(operationInput),
-        });
+        const response = await ask(
+          { url, peer: `${url.host} for ${about}` },
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${runtime.transport!.daemonToken}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify(operationInput),
+          },
+        );
         if (!response.ok) {
-          const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
+          const payload = (await response.json().catch(() => ({}))) as {
+            error?: string;
+            code?: string;
+          };
           if (response.status === 403 && [payload.code, payload.error].includes('agent_removed')) {
-            orphans.push({ path: runtimeDir, owner: agent.name, reason: 'server-confirmed removed agent' });
-            if (!input.orphanOnly) await reclaimWholeStorageObject(runtimeDir, true, options('deleted-agent-runtime'));
+            orphans.push({
+              path: runtimeDir,
+              owner: agent.name,
+              reason: 'server-confirmed removed agent',
+            });
+            if (!input.orphanOnly)
+              await reclaimWholeStorageObject(runtimeDir, true, options('deleted-agent-runtime'));
           }
           throw new Error(`${name} refused (${response.status})`);
         }
-        return await response.json() as T;
+        return (await response.json()) as T;
       };
-      const bootstrap = await operation<DaemonBootstrapResult>('getDaemonBootstrap', { agentId: runtime.agent.publicKey }, `agent ${agent.name.slice(0, 12)}`);
+      const bootstrap = await operation<DaemonBootstrapResult>(
+        'getDaemonBootstrap',
+        { agentId: runtime.agent.publicKey },
+        `agent ${agent.name.slice(0, 12)}`,
+      );
       let agentStates: readonly StorageRoomState[] = bootstrap.storageRooms ?? [];
       if (!bootstrap.storageRooms) {
-        const byId = new Map<string, StorageRoomState>(bootstrap.rooms.map(room => [room.roomId, room]));
+        const byId = new Map<string, StorageRoomState>(
+          bootstrap.rooms.map((room) => [room.roomId, room]),
+        );
         for (const room of bootstrap.rooms) {
           try {
-            const listed = await operation<CornerListResult>('listRoomCorners', { roomId: room.roomId }, `room ${room.roomId}`);
-            for (const corner of listed.corners) if (typeof corner.archived === 'boolean')
-              byId.set(corner.cornerId, { roomId: corner.cornerId, archived: corner.archived });
-          } catch { /* No archive inference from a failed read. */ }
+            const listed = await operation<CornerListResult>(
+              'listRoomCorners',
+              { roomId: room.roomId },
+              `room ${room.roomId}`,
+            );
+            for (const corner of listed.corners)
+              if (typeof corner.archived === 'boolean')
+                byId.set(corner.cornerId, { roomId: corner.cornerId, archived: corner.archived });
+          } catch {
+            /* No archive inference from a failed read. */
+          }
         }
         agentStates = [...byId.values()];
       }
-      legacyOwners.push(...await discoverLegacyStorageOwners(supervisorRoot, runtime.communityId, agentStates));
-      const byId = new Map(agentStates.map(state => [state.roomId, state]));
+      legacyOwners.push(
+        ...(await discoverLegacyStorageOwners(supervisorRoot, runtime.communityId, agentStates)),
+      );
+      const byId = new Map(agentStates.map((state) => [state.roomId, state]));
       for (const state of agentStates) states.set(state.roomId, state);
-      for (const room of await readdir(resolve(runtimeDir, 'rooms'), { withFileTypes: true }).catch(() => [])) {
+      for (const room of await readdir(resolve(runtimeDir, 'rooms'), { withFileTypes: true }).catch(
+        () => [],
+      )) {
         if (!room.isDirectory()) continue;
         const state = byId.get(room.name);
         const path = resolve(runtimeDir, 'rooms', room.name);
-        if (state?.archived && await hasNonSquirePayload(path)) orphans.push({ path, owner: room.name, reason: 'server-confirmed archived Room/corner' });
+        if (state?.archived && (await hasNonSquirePayload(path)))
+          orphans.push({ path, owner: room.name, reason: 'server-confirmed archived Room/corner' });
         else if (!state) unknown.push({ path, reason: 'no settled lifecycle answer' });
       }
       if (!bootstrap.workspaceIds.includes(runtime.communityId)) {
-        orphans.push({ path: runtimeDir, owner: runtime.communityId, reason: 'server-confirmed Workspace removed from agent' });
+        orphans.push({
+          path: runtimeDir,
+          owner: runtime.communityId,
+          reason: 'server-confirmed Workspace removed from agent',
+        });
       }
-      if (!input.orphanOnly) await reclaimHelperStorage({ runtimeDir, readStates: async () => agentStates,
-        relatedRoots: roomId => [resolve(root, 'corners', roomId), ...legacyOwners.filter(owner => owner.roomId === roomId).map(owner => resolve(root, owner.kind, owner.itemId))],
-        ...options('room-private'), withIdleRoom: async (_id, task) => { await task(); return true; },
-        log: entry => entries.push({ ...entry, rule: entry.kind === 'archived' ? 'archived-room-private' : 'unused-open-room-object' }),
-        onError: (roomId, error) => unknown.push({ path: resolve(runtimeDir, 'rooms', roomId), reason: error instanceof Error ? error.message : 'inventory unavailable' }),
-      });
+      if (!input.orphanOnly)
+        await reclaimHelperStorage({
+          runtimeDir,
+          readStates: async () => agentStates,
+          relatedRoots: (roomId) => [
+            resolve(root, 'corners', roomId),
+            ...legacyOwners
+              .filter((owner) => owner.roomId === roomId)
+              .map((owner) => resolve(root, owner.kind, owner.itemId)),
+          ],
+          ...options('room-private'),
+          withIdleRoom: async (_id, task) => {
+            await task();
+            return true;
+          },
+          log: (entry) =>
+            entries.push({
+              ...entry,
+              rule: entry.kind === 'archived' ? 'archived-room-private' : 'unused-open-room-object',
+            }),
+          onError: (roomId, error) =>
+            unknown.push({
+              path: resolve(runtimeDir, 'rooms', roomId),
+              reason: error instanceof Error ? error.message : 'inventory unavailable',
+            }),
+        });
     } catch (error) {
-      if (!await hasNonSquirePayload(runtimeDir)) continue;
-      unknown.push({ path: runtimeDir, reason: error instanceof SyntaxError ? 'invalid runtime/lifecycle JSON; retained' : error instanceof Error ? error.message : 'read failed' });
+      if (!(await hasNonSquirePayload(runtimeDir))) continue;
+      unknown.push({
+        path: runtimeDir,
+        reason:
+          error instanceof SyntaxError
+            ? 'invalid runtime/lifecycle JSON; retained'
+            : error instanceof Error
+              ? error.message
+              : 'read failed',
+      });
     } finally {
-      console.error(`[storage dry-run] inspected agent ${agent.name}; ${entries.length} eligible objects, ${orphans.length} confirmed orphan folders`);
+      console.error(
+        `[storage dry-run] inspected agent ${agent.name}; ${entries.length} eligible objects, ${orphans.length} confirmed orphan folders`,
+      );
     }
   }
-  const checkoutOwners = [...new Map([...legacyOwners, ...(await readStorageOwners(supervisorRoot))].map(owner => [`${owner.kind}/${owner.itemId}`, owner])).values()];
+  const checkoutOwners = [
+    ...new Map(
+      [...legacyOwners, ...(await readStorageOwners(supervisorRoot))].map((owner) => [
+        `${owner.kind}/${owner.itemId}`,
+        owner,
+      ]),
+    ).values(),
+  ];
   for (const owner of checkoutOwners) {
     if (states.get(owner.roomId)?.archived || owner.ended) {
       const path = resolve(root, owner.kind, owner.itemId);
-      if (!await lstat(path).catch(() => undefined)) continue;
-      const preservation = await inspectCheckoutPreservation(path, states.get(owner.roomId)?.landedHeadSha ?? owner.landedHeadSha);
-      if (owner.kind === 'corners') preservation.reason = 'confirmed archived corner: stop attributed processes and delete all data';
-      else if (!input.orphanOnly && processUse(path)) preservation.reason = 'live process or unavailable process evidence; preserved';
+      if (!(await lstat(path).catch(() => undefined))) continue;
+      const preservation = await inspectCheckoutPreservation(
+        path,
+        states.get(owner.roomId)?.landedHeadSha ?? owner.landedHeadSha,
+      );
+      if (owner.kind === 'corners')
+        preservation.reason =
+          'confirmed archived corner: stop attributed processes and delete all data';
+      else if (!input.orphanOnly && processUse(path))
+        preservation.reason = 'live process or unavailable process evidence; preserved';
       archivedCheckouts.push(preservation);
-      orphans.push({ path, owner: owner.roomId, reason: 'server-confirmed archived checkout owner' });
-      if (!input.orphanOnly) await reclaimOwnedCheckout(supervisorRoot, { ...owner, ended: true }, { ...options('archived-checkout'), landedHeadSha: states.get(owner.roomId)?.landedHeadSha });
+      orphans.push({
+        path,
+        owner: owner.roomId,
+        reason: 'server-confirmed archived checkout owner',
+      });
+      if (!input.orphanOnly)
+        await reclaimOwnedCheckout(
+          supervisorRoot,
+          { ...owner, ended: true },
+          {
+            ...options('archived-checkout'),
+            landedHeadSha: states.get(owner.roomId)?.landedHeadSha,
+          },
+        );
     }
   }
-  if (!input.orphanOnly) await pruneOpenCheckoutObjects(supervisorRoot, [...states.values()], options('unused-open-checkout-object'), legacyOwners);
+  if (!input.orphanOnly)
+    await pruneOpenCheckoutObjects(
+      supervisorRoot,
+      [...states.values()],
+      options('unused-open-checkout-object'),
+      legacyOwners,
+    );
   for (const kind of ['corners', 'room-checkouts'] as const) {
     for (const id of await readdir(resolve(root, kind)).catch(() => [])) {
-      if (!checkoutOwners.some(owner => owner.kind === kind && owner.itemId === id))
-        unknown.push({ path: resolve(root, kind, id), reason: 'legacy checkout has no persisted owner record' });
+      if (!checkoutOwners.some((owner) => owner.kind === kind && owner.itemId === id))
+        unknown.push({
+          path: resolve(root, kind, id),
+          reason: 'legacy checkout has no persisted owner record',
+        });
     }
   }
   for (const entry of await readdir(resolve(root, 'deleted-runtimes')).catch(() => [])) {
-    if (isDeletedRuntimeName(entry) && await hasNonSquirePayload(resolve(root, 'deleted-runtimes', entry))) orphans.push({ path: resolve(root, 'deleted-runtimes', entry), owner: 'retired agent', reason: 'recorded ended-agent tombstone' });
+    if (
+      isDeletedRuntimeName(entry) &&
+      (await hasNonSquirePayload(resolve(root, 'deleted-runtimes', entry)))
+    )
+      orphans.push({
+        path: resolve(root, 'deleted-runtimes', entry),
+        owner: 'retired agent',
+        reason: 'recorded ended-agent tombstone',
+      });
   }
-  if (!input.orphanOnly) await pruneDeletedRuntimes(supervisorRoot, Date.now(), options('deleted-agent-runtime'));
-  if (!input.orphanOnly) await pruneEndedOwnerStorage(supervisorRoot, { ...options('ended-owner'),
-    log: entry => entries.push({ ...entry, rule: entry.path.includes('/workspaces/') ? 'ended-workspace' : entry.path.includes('/agents/') ? 'deleted-agent-runtime' : 'ended-checkout' }),
-  });
-  if (!input.orphanOnly) await pruneUnusedCheckoutStorage(supervisorRoot, options('unused-code-copy'));
-  if (!input.orphanOnly) await pruneRepositoryCaches(supervisorRoot, Date.now(), options('unused-bare-clone'));
-  if (!input.orphanOnly) await pruneMachineStorage(supervisorRoot, { ...options('unused-machine-object'),
-    log: entry => entries.push({ ...entry, rule: entry.path.includes('/workspaces/') ? 'unused-workspace-object' : 'unused-machine-object' }),
-  });
+  if (!input.orphanOnly)
+    await pruneDeletedRuntimes(supervisorRoot, Date.now(), options('deleted-agent-runtime'));
+  if (!input.orphanOnly)
+    await pruneEndedOwnerStorage(supervisorRoot, {
+      ...options('ended-owner'),
+      log: (entry) =>
+        entries.push({
+          ...entry,
+          rule: entry.path.includes('/workspaces/')
+            ? 'ended-workspace'
+            : entry.path.includes('/agents/')
+              ? 'deleted-agent-runtime'
+              : 'ended-checkout',
+        }),
+    });
+  if (!input.orphanOnly)
+    await pruneUnusedCheckoutStorage(supervisorRoot, options('unused-code-copy'));
+  if (!input.orphanOnly)
+    await pruneRepositoryCaches(supervisorRoot, Date.now(), options('unused-bare-clone'));
+  if (!input.orphanOnly)
+    await pruneMachineStorage(supervisorRoot, {
+      ...options('unused-machine-object'),
+      log: (entry) =>
+        entries.push({
+          ...entry,
+          rule: entry.path.includes('/workspaces/')
+            ? 'unused-workspace-object'
+            : 'unused-machine-object',
+        }),
+    });
   const rules: Record<string, { objects: number; GB: number }> = {};
   for (const entry of entries) {
-    const total = rules[entry.rule] ??= { objects: 0, GB: 0 };
+    const total = (rules[entry.rule] ??= { objects: 0, GB: 0 });
     total.objects++;
     total.GB += entry.freedBytes / 1e9;
   }
-  return { mode: 'dry-run', capturedAt: new Date().toISOString(), rules,
+  return {
+    mode: 'dry-run',
+    capturedAt: new Date().toISOString(),
+    rules,
     reclaimableGB: entries.reduce((sum, entry) => sum + entry.freedBytes, 0) / 1e9,
-    orphans, unknown, archivedCheckouts, entries };
+    orphans,
+    unknown,
+    archivedCheckouts,
+    entries,
+  };
 }
 
 export async function runStorageReportCommand(args: string[]): Promise<void> {
-  if (args.some(arg => !['--dry-run', '--orphans'].includes(arg)))
+  if (args.some((arg) => !['--dry-run', '--orphans'].includes(arg)))
     throw new Error('Usage: beeline storage [--dry-run|--orphans] (read-only)');
   // stderr names every local child before it is awaited; stdout stays the one JSON report.
-  reportStorageChildren(line => console.error(`[storage dry-run] running ${line}`));
-  const report = await helperStorageReport(defaultSupervisorRoot(), { orphanOnly: args.includes('--orphans') });
-  console.log(JSON.stringify(args.includes('--orphans') ? { mode: report.mode, orphans: report.orphans, unknown: report.unknown, archivedCheckouts: report.archivedCheckouts } : report, null, 2));
+  reportStorageChildren((line) => console.error(`[storage dry-run] running ${line}`));
+  const report = await helperStorageReport(defaultSupervisorRoot(), {
+    orphanOnly: args.includes('--orphans'),
+  });
+  console.log(
+    JSON.stringify(
+      args.includes('--orphans')
+        ? {
+            mode: report.mode,
+            orphans: report.orphans,
+            unknown: report.unknown,
+            archivedCheckouts: report.archivedCheckouts,
+          }
+        : report,
+      null,
+      2,
+    ),
+  );
 }

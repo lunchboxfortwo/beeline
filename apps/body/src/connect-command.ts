@@ -1,31 +1,53 @@
-import { activateRelease, defaultBeelineInstallLayout, hostPlatformKey, readInstalledBundleIdentity, resolveBundleEntrypoint } from "./self-update.js";
-import { resolve } from "node:path";
-import { resolveManifestUrl, parseUpdateManifest } from "./self-update-manifest.js";
-import { prepareMachineRelease } from "./recovery.js";
+import {
+  activateRelease,
+  defaultBeelineInstallLayout,
+  hostPlatformKey,
+  readInstalledBundleIdentity,
+  resolveBundleEntrypoint,
+} from './self-update.js';
+import { resolve } from 'node:path';
+import { resolveManifestUrl, parseUpdateManifest } from './self-update-manifest.js';
+import { prepareMachineRelease } from './recovery.js';
 import { withInstallLock } from './managed-update.js';
-import type { AgentAccessPolicy } from "./access-policy.js";
-import { AUTO_DETECT_AGENT_KINDS, type AgentKind, type AgentCommand, installLatestAgentAdapter, requireInstalledAgentProgram, resolveAgentCommand, installedAgentProgramEnvironment, agentBehavior, type DetectedAgentCommand, detectInstalledAgentCommands } from "./agent-command.js";
-import { stdin, stdout } from "node:process";
-import { fstatSync } from "node:fs";
-import { type ProviderKeyProvider, readSavedProviderKey, saveProviderKey, providerKeyFromEnvironment, maskProviderKey, PROVIDER_KEY_ENV_VARS } from "./provider-key-store.js";
-import { clackPromptOutput, unwrapPrompt } from "./clack-support.js";
-import * as clack from "@clack/prompts";
-import { fetchAgentModelCatalog } from "./model-catalog.js";
-import { enumerateCursorModels } from "./cursor-models.js";
-import { verifyProviderKey, type ConnectKeyProvider } from "./provider-key-check.js";
-import { runConnectWizard, providerEnvironment, brassSpinner, type SpinnerStep } from './connect-command-parse-connect-subscriptions.js';
+import type { AgentAccessPolicy } from './access-policy.js';
+import {
+  AUTO_DETECT_AGENT_KINDS,
+  type AgentKind,
+  type AgentCommand,
+  installLatestAgentAdapter,
+  requireInstalledAgentProgram,
+  resolveAgentCommand,
+  installedAgentProgramEnvironment,
+  agentBehavior,
+  type DetectedAgentCommand,
+  detectInstalledAgentCommands,
+} from './agent-command.js';
+import { stdin, stdout } from 'node:process';
+import { fstatSync } from 'node:fs';
+import {
+  type ProviderKeyProvider,
+  readSavedProviderKey,
+  saveProviderKey,
+  providerKeyFromEnvironment,
+  maskProviderKey,
+  PROVIDER_KEY_ENV_VARS,
+} from './provider-key-store.js';
+import { clackPromptOutput, unwrapPrompt } from './clack-support.js';
+import * as clack from '@clack/prompts';
+import { fetchAgentModelCatalog } from './model-catalog.js';
+import { enumerateCursorModels } from './cursor-models.js';
+import { verifyProviderKey, type ConnectKeyProvider } from './provider-key-check.js';
+import {
+  runConnectWizard,
+  providerEnvironment,
+  brassSpinner,
+  type SpinnerStep,
+} from './connect-command-parse-connect-subscriptions.js';
 import { ask } from './wait.js';
-
-
-
-
 
 export const CONNECT_HARNESSES = AUTO_DETECT_AGENT_KINDS;
 
-
 export const AGENT_NAME_MAX_LENGTH = 32;
-
-
 
 /**
  * Connect needs a keyboard-backed input stream and an output someone reads.
@@ -48,8 +70,6 @@ export function isInteractiveConnectTerminal(
   }
 }
 
-
-
 export function isReasonableAgentName(value: string): boolean {
   const normalized = value.trim().replace(/\s+/g, ' ');
   return (
@@ -59,16 +79,11 @@ export function isReasonableAgentName(value: string): boolean {
   );
 }
 
-
 export const CONNECT_PROVIDER_HARNESSES = new Set<AgentKind>(['goose', 'pi']);
-
 
 export const CONNECT_PROVIDERS = ['openrouter', 'openai', 'anthropic', 'google', 'xai'] as const;
 
-
 export type ConnectProvider = (typeof CONNECT_PROVIDERS)[number];
-
-
 
 /** Saved-key access seam so tests can stub the on-disk store. */
 export interface ConnectKeyStore {
@@ -76,14 +91,10 @@ export interface ConnectKeyStore {
   save(provider: ConnectProvider, key: string): Promise<void>;
 }
 
-
-
 export const fileConnectKeyStore: ConnectKeyStore = {
   read: (provider: ProviderKeyProvider) => readSavedProviderKey(provider),
   save: (provider: ProviderKeyProvider, key: string) => saveProviderKey(provider, key),
 };
-
-
 
 export const DEFAULT_MODELS: Record<
   ConnectProvider | 'codex' | 'claude' | 'grok' | 'cursor' | 'opencode',
@@ -103,8 +114,6 @@ export const DEFAULT_MODELS: Record<
   opencode: 'opencode/big-pickle',
 };
 
-
-
 /**
  * What the wizard still asks for. Name and soul are NOT here: the server seeds
  * both from the animal it assigns the agent, so nobody types them.
@@ -117,8 +126,6 @@ export interface ConnectWizardResult {
   /** Only set when the harness advertises a reasoning-effort axis to choose from. */
   effort?: string;
 }
-
-
 
 export interface ConnectPrompts {
   select<T extends string>(input: {
@@ -144,13 +151,9 @@ export interface ConnectPrompts {
   }): Promise<string>;
 }
 
-
-
 export function connectHarnessNeedsProvider(harness: AgentKind): boolean {
   return CONNECT_PROVIDER_HARNESSES.has(harness);
 }
-
-
 
 export function defaultConnectModel(
   harness: (typeof CONNECT_HARNESSES)[number],
@@ -160,8 +163,6 @@ export function defaultConnectModel(
     ? DEFAULT_MODELS[provider]
     : (DEFAULT_MODELS[harness as 'codex' | 'claude' | 'grok' | 'cursor' | 'opencode'] ?? 'default');
 }
-
-
 
 export function brassEnabled(
   env: NodeJS.ProcessEnv,
@@ -173,15 +174,10 @@ export function brassEnabled(
   return 'plain';
 }
 
-
-
 /** The one brand brass, #D7AF5F — the app's accent, and xterm 179 exactly. */
 export const BRASS_TRUECOLOR = '\u001b[38;2;215;175;95m';
 
-
 export const BRASS_256 = '\u001b[38;5;179m';
-
-
 
 export function brass(
   value: string,
@@ -193,8 +189,6 @@ export function brass(
   if (level === '256') return `${BRASS_256}${value}\u001b[39m`;
   return value;
 }
-
-
 
 /**
  * Clack paints its rails — the active step symbol, the selected option, the
@@ -212,8 +206,6 @@ export function brassRails(
   return text.replace(/\u001b\[(?:36|96)m/g, level === 'truecolor' ? BRASS_TRUECOLOR : BRASS_256);
 }
 
-
-
 /** Hold the repaint for the life of the wizard; the return restores the stream. */
 export function paintWizardBrass(output: NodeJS.WriteStream = stdout): () => void {
   const original = output.write;
@@ -229,8 +221,6 @@ export function paintWizardBrass(output: NodeJS.WriteStream = stdout): () => voi
     output.write = original;
   };
 }
-
-
 
 export const clackPrompts: ConnectPrompts = {
   async select<T extends string>(input: {
@@ -279,14 +269,10 @@ export const clackPrompts: ConnectPrompts = {
   },
 };
 
-
-
 export type ConnectAxisPicker = {
   currentValue?: string;
   options: Array<{ id: string; name?: string }>;
 };
-
-
 
 export type ConnectModelCatalog = ConnectAxisPicker & {
   note?: string;
@@ -294,16 +280,12 @@ export type ConnectModelCatalog = ConnectAxisPicker & {
   effort?: ConnectAxisPicker;
 };
 
-
-
 /**
  * The categories a harness spells its reasoning-effort axis with. Codex says
  * `effort`, Claude says `thought_level`, others say `reasoning_effort`; all
  * three are the same question to a person.
  */
 export const CONNECT_EFFORT_CATEGORIES = ['effort', 'reasoning_effort', 'thought_level'];
-
-
 
 /**
  * The effort picker, from the safe view when it kept the axis and the raw
@@ -316,12 +298,13 @@ export function connectEffortPickerFromAxes(
 ): ConnectAxisPicker | undefined {
   const isEffort = (axis: { category: string; options: Array<{ id: string }> }): boolean =>
     CONNECT_EFFORT_CATEGORIES.includes(axis.category) && axis.options.length > 0;
-  const axis = axes.find((axis) => CONNECT_EFFORT_CATEGORIES.includes(axis.category)) ?? rawAxes.find(isEffort);
+  const axis =
+    axes.find((axis) => CONNECT_EFFORT_CATEGORIES.includes(axis.category)) ??
+    rawAxes.find(isEffort);
   return axis?.options.some((choice) => choice.id !== 'off')
-    ? { currentValue: axis.currentValue, options: axis.options } : undefined;
+    ? { currentValue: axis.currentValue, options: axis.options }
+    : undefined;
 }
-
-
 
 /**
  * Derive the wizard's model picker from the harness's advertised axes —
@@ -353,8 +336,6 @@ export function connectModelPickerFromAxes(
   };
 }
 
-
-
 export interface ConnectModelCatalogRequest {
   harness: ConnectWizardResult['harness'];
   provider?: ConnectProvider;
@@ -371,8 +352,6 @@ export interface ConnectModelCatalogRequest {
   say?: (line: string) => void;
 }
 
-
-
 export interface ConnectModelCatalogDependencies {
   refreshAdapter?: (
     kind: AgentKind,
@@ -382,11 +361,7 @@ export interface ConnectModelCatalogDependencies {
   fetchCatalog?: typeof fetchAgentModelCatalog;
 }
 
-
-
 export const refreshedConnectAdapters = new Map<AgentKind, Promise<unknown>>();
-
-
 
 export function refreshConnectAdapter(
   kind: AgentKind,
@@ -401,8 +376,6 @@ export function refreshConnectAdapter(
   refreshedConnectAdapters.set(kind, refresh);
   return refresh;
 }
-
-
 
 export async function loadConnectModelCatalog(
   input: ConnectModelCatalogRequest,
@@ -424,12 +397,15 @@ export async function loadConnectModelCatalog(
   const model = input.model ?? defaultConnectModel(input.harness, input.provider);
   const catalog = await (dependencies.fetchCatalog ?? fetchAgentModelCatalog)(
     agent,
-    { ...installedAgentProgramEnvironment(input.harness), ...providerEnvironment({
-      harness: input.harness,
-      ...(input.provider ? { provider: input.provider } : {}),
-      ...(input.apiKey ? { apiKey: input.apiKey } : {}),
-      model,
-    }) },
+    {
+      ...installedAgentProgramEnvironment(input.harness),
+      ...providerEnvironment({
+        harness: input.harness,
+        ...(input.provider ? { provider: input.provider } : {}),
+        ...(input.apiKey ? { apiKey: input.apiKey } : {}),
+        model,
+      }),
+    },
     input.model ? { model: input.model } : undefined,
     input.signal,
   );
@@ -457,8 +433,6 @@ export async function loadConnectModelCatalog(
   };
 }
 
-
-
 /**
  * A catalog is evidence that a harness is already configured only when the
  * harness itself enumerated models. `connectModelPickerFromAxes` synthesises
@@ -469,8 +443,6 @@ export async function loadConnectModelCatalog(
 export function connectProbeFoundModels(catalog: ConnectModelCatalog): boolean {
   return catalog.note === undefined && catalog.options.length > 0;
 }
-
-
 
 /**
  * The one harness worth auto-selecting: the only supported harness actually
@@ -484,13 +456,9 @@ export function soleInstalledConnectHarness(
   return ready.length === 1 ? ready[0]!.kind : undefined;
 }
 
-
-
 export function connectHarnessLabel(harness: (typeof CONNECT_HARNESSES)[number]): string {
   return agentBehavior(harness).label ?? harness[0]!.toUpperCase() + harness.slice(1);
 }
-
-
 
 /**
  * What the probe found, said once: it stands in for the provider and key
@@ -509,8 +477,6 @@ export function connectFoundLine(input: {
   return input.model ? `${found}, running ${input.model}.` : `${found}.`;
 }
 
-
-
 export interface ConnectWizardSeams {
   /** Supported harnesses installed on this machine; defaults to a real scan. */
   detect?: () => DetectedAgentCommand[];
@@ -518,8 +484,6 @@ export interface ConnectWizardSeams {
   /** Where the wizard says what it found instead of asking for it. */
   announce?: (line: string) => void;
 }
-
-
 
 /**
  * Ask before assuming — except about what the agent will think with. Setup
@@ -646,7 +610,7 @@ export async function collectConnectWizard(
   const sole = soleInstalledConnectHarness(detected);
   const harness = await prompts.select<(typeof CONNECT_HARNESSES)[number]>({
     message: brass('Choose harness'),
-    options: CONNECT_HARNESSES.map(value => ({ value, label: connectHarnessLabel(value) })),
+    options: CONNECT_HARNESSES.map((value) => ({ value, label: connectHarnessLabel(value) })),
     ...(sole ? { initialValue: sole } : {}),
   });
   const checkProgram = seams.checkProgram ?? requireInstalledAgentProgram;
@@ -745,8 +709,6 @@ export async function collectConnectWizard(
   };
 }
 
-
-
 export interface DeviceGrantResponse {
   agent_secret_key: string;
   agent_pubkey: string;
@@ -764,8 +726,6 @@ export interface DeviceGrantResponse {
   effort?: string;
   soul: string;
 }
-
-
 
 /**
  * One wizard POST through `ask`: it names the host and path it waits on (in
@@ -797,8 +757,6 @@ export async function jsonRequest<T>(
   return response.json() as Promise<T>;
 }
 
-
-
 export async function installCurrentRelease(
   fetchImpl: typeof fetch,
   step?: SpinnerStep,
@@ -824,7 +782,12 @@ export async function installCurrentRelease(
     throw new Error(`fetching the Beeline release manifest failed: HTTP ${response.status}`);
   const published = parseUpdateManifest(await response.text(), hostPlatformKey()).bundle;
   step?.signal.throwIfAborted();
-  const { releaseId } = await prepareMachineRelease(layout, { manifest: { url: manifestUrl, bundle: published }, fetchImpl, logger: step?.say ?? (() => {}), ...(step ? { signal: step.signal } : {}) });
+  const { releaseId } = await prepareMachineRelease(layout, {
+    manifest: { url: manifestUrl, bundle: published },
+    fetchImpl,
+    logger: step?.say ?? (() => {}),
+    ...(step ? { signal: step.signal } : {}),
+  });
   step?.signal.throwIfAborted();
   await withInstallLock(layout, () => {
     step?.signal.throwIfAborted();
@@ -835,8 +798,6 @@ export async function installCurrentRelease(
     version: published.version ?? releaseId,
   };
 }
-
-
 
 export async function runConnectCommand(
   code: string | undefined,

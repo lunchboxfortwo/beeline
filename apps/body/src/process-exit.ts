@@ -14,8 +14,14 @@ try:
   finally: queue.close()
 except ProcessLookupError: pass
 `;
-export async function waitForProcessExit(pid:number,signal?:AbortSignal):Promise<void>{
-  const child = await runOwned({ step: 'process exit observer', file: '/usr/bin/python3',
-    args: ['-c', WAIT, String(pid)], ownerLink: true, ...(signal ? { signal } : {}) });
-  if (child.code !== 0) throw new Error(`process exit observer failed (${child.code ?? child.signal})`);
+export async function waitForProcessExit(pid: number, signal?: AbortSignal): Promise<void> {
+  const child = await runOwned({
+    step: 'process exit observer',
+    file: '/usr/bin/python3',
+    args: ['-c', WAIT, String(pid)],
+    ownerLink: true,
+    ...(signal ? { signal } : {}),
+  });
+  if (child.code !== 0)
+    throw new Error(`process exit observer failed (${child.code ?? child.signal})`);
 }

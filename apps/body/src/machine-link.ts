@@ -27,12 +27,20 @@ export interface AgentChannelHandlers {
 /** Agent identity and request correlation on the machine connection. Registration
  * metadata is immutable until the next handshake, never a capability lifecycle. */
 export class AgentChannel {
-  readonly overlay = new HelperOverlayChannel(frame => this.send(frame), () => this.isOpen());
-  readonly #waiters = new Set<{resolve:()=>void;reject:(error:Error)=>void}>();
-  readonly #requests = new Map<string, {
-    frame: Record<string, unknown>; sent: boolean;
-    resolve: (value: unknown) => void; reject: (error: Error) => void;
-  }>();
+  readonly overlay = new HelperOverlayChannel(
+    (frame) => this.send(frame),
+    () => this.isOpen(),
+  );
+  readonly #waiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
+  readonly #requests = new Map<
+    string,
+    {
+      frame: Record<string, unknown>;
+      sent: boolean;
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+    }
+  >();
   readonly #openListeners = new Set<() => void>();
   #wanted = false;
   #registered = false;
@@ -41,45 +49,95 @@ export class AgentChannel {
   /** Why this socket will not register the agent again; cleared by the next socket. */
   #ended: Error | undefined;
   initialSnapshotsV1 = true;
-  constructor(private readonly machine: MachineLink, readonly agentId: string, private readonly handlers: AgentChannelHandlers) {}
-  isOpen(): boolean { return this.#registered && this.machine.link.isOpen(); }
-  get reconnects(): number { return this.machine.link.reconnects; }
-  usageAccountScope(): {origin:string;ownerId:string;generation:number;source:{connectionId:string;epoch:number}} | undefined {
+  constructor(
+    private readonly machine: MachineLink,
+    readonly agentId: string,
+    private readonly handlers: AgentChannelHandlers,
+  ) {}
+  isOpen(): boolean {
+    return this.#registered && this.machine.link.isOpen();
+  }
+  get reconnects(): number {
+    return this.machine.link.reconnects;
+  }
+  usageAccountScope():
+    | {
+        origin: string;
+        ownerId: string;
+        generation: number;
+        source: { connectionId: string; epoch: number };
+      }
+    | undefined {
     const c = this.#capabilities;
-    return typeof c.usageOwnerId === 'string' && typeof c.usageConnectionId === 'string' && typeof c.usageConnectionEpoch === 'number'
-      ? {origin:this.machine.origin,ownerId:c.usageOwnerId,generation:this.reconnects,source:{connectionId:c.usageConnectionId,epoch:c.usageConnectionEpoch}} : undefined;
+    return typeof c.usageOwnerId === 'string' &&
+      typeof c.usageConnectionId === 'string' &&
+      typeof c.usageConnectionEpoch === 'number'
+      ? {
+          origin: this.machine.origin,
+          ownerId: c.usageOwnerId,
+          generation: this.reconnects,
+          source: { connectionId: c.usageConnectionId, epoch: c.usageConnectionEpoch },
+        }
+      : undefined;
   }
   async operationReady(): Promise<void> {
     if (this.isOpen()) return;
     // A refused or replaced registration is not retried on this socket.
     if (this.#ended) throw this.#ended;
-    await new Promise<void>((resolve,reject) => { this.#waiters.add({resolve,reject}); this.start(); });
+    await new Promise<void>((resolve, reject) => {
+      this.#waiters.add({ resolve, reject });
+      this.start();
+    });
   }
-  requestOperation<N extends keyof DaemonOperationMap>(operation: N, input: DaemonOperationMap[N]['input']): Promise<DaemonOperationMap[N]['output']> {
+  requestOperation<N extends keyof DaemonOperationMap>(
+    operation: N,
+    input: DaemonOperationMap[N]['input'],
+  ): Promise<DaemonOperationMap[N]['output']> {
     const requestId = randomUUID();
-    const frame = {type:'daemon-operation',requestId,operation,input};
-    return new Promise((resolve,reject) => {
-      if (!this.isOpen() && this.#ended) { reject(this.#ended); return; }
-      const pending = {frame,sent:false,resolve:(value:unknown) => resolve(value as DaemonOperationMap[N]['output']),reject};
-      this.#requests.set(requestId,pending);
+    const frame = { type: 'daemon-operation', requestId, operation, input };
+    return new Promise((resolve, reject) => {
+      if (!this.isOpen() && this.#ended) {
+        reject(this.#ended);
+        return;
+      }
+      const pending = {
+        frame,
+        sent: false,
+        resolve: (value: unknown) => resolve(value as DaemonOperationMap[N]['output']),
+        reject,
+      };
+      this.#requests.set(requestId, pending);
       this.start();
       this.#dispatch(pending);
     });
   }
-  #dispatch(pending: {frame:Record<string,unknown>;sent:boolean}): void {
+  #dispatch(pending: { frame: Record<string, unknown>; sent: boolean }): void {
     if (!this.isOpen()) return;
     if (pending.sent) return;
-    const input = {...pending.frame.input as Record<string,unknown>};
-    if (['publishAgentUsageAccount','attachAgentUsageAccount'].includes(String(pending.frame.operation))) input.source = this.usageAccountScope()?.source;
+    const input = { ...(pending.frame.input as Record<string, unknown>) };
+    if (
+      ['publishAgentUsageAccount', 'attachAgentUsageAccount'].includes(
+        String(pending.frame.operation),
+      )
+    )
+      input.source = this.usageAccountScope()?.source;
     if (pending.frame.operation === 'postAgentUsage' && input.usageSource)
-      input.usageSource = {...input.usageSource as object,source:this.usageAccountScope()?.source};
+      input.usageSource = {
+        ...(input.usageSource as object),
+        source: this.usageAccountScope()?.source,
+      };
     pending.frame.input = input;
     // Mark before send: test transports and local adapters can answer inline.
     pending.sent = true;
     if (!this.send(pending.frame)) pending.sent = false;
   }
-  onOpen(listener: () => void): () => void { this.#openListeners.add(listener); return () => this.#openListeners.delete(listener); }
-  reconnect(): void { this.machine.link.reconnect(); }
+  onOpen(listener: () => void): () => void {
+    this.#openListeners.add(listener);
+    return () => this.#openListeners.delete(listener);
+  }
+  reconnect(): void {
+    this.machine.link.reconnect();
+  }
   start(): void {
     if (this.#wanted) return;
     this.#wanted = true;
@@ -87,28 +145,38 @@ export class AgentChannel {
   }
   stop(): void {
     if (!this.#wanted) return;
-    if (this.isOpen()) this.send({type:'unregister'});
+    if (this.isOpen()) this.send({ type: 'unregister' });
     this.#wanted = false;
     this.socketClosed(true);
     this.machine.unwant(this);
   }
-  send(frame: Record<string,unknown>): boolean {
-    return this.isOpen() && this.machine.send({...frame,agentId:this.agentId});
+  send(frame: Record<string, unknown>): boolean {
+    return this.isOpen() && this.machine.send({ ...frame, agentId: this.agentId });
   }
-  reportVault(report: Omit<PostConnectorVaultInput,'agentId'>): Promise<unknown> | undefined { return this.handlers.reportVault?.(report); }
-  requireUpdate(minVersion:string):void { this.machine.link.requireUpdate(minVersion); }
-  registration(): Record<string,unknown> | undefined {
-    if(!this.#wanted||this.#registered||this.#registrationSent)return;
-    this.#registrationSent=true;
-    return {...this.handlers.registration(),agentId:this.agentId,
-      overlayV1:true,usageAccountV1:true,queueV1:true,daemonOperationsV1:true};
+  reportVault(report: Omit<PostConnectorVaultInput, 'agentId'>): Promise<unknown> | undefined {
+    return this.handlers.reportVault?.(report);
   }
-  receive(event:Record<string,unknown>):void {
+  requireUpdate(minVersion: string): void {
+    this.machine.link.requireUpdate(minVersion);
+  }
+  registration(): Record<string, unknown> | undefined {
+    if (!this.#wanted || this.#registered || this.#registrationSent) return;
+    this.#registrationSent = true;
+    return {
+      ...this.handlers.registration(),
+      agentId: this.agentId,
+      overlayV1: true,
+      usageAccountV1: true,
+      queueV1: true,
+      daemonOperationsV1: true,
+    };
+  }
+  receive(event: Record<string, unknown>): void {
     if (event.type === 'registered') {
       if (!this.#wanted || this.#registered) return;
       this.#registered = true;
       this.#ended = undefined;
-      this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
+      this.#capabilities = (event.capabilities as Record<string, unknown>) ?? {};
       const c = this.#capabilities;
       if (typeof c.ownerId === 'string') setHelperErrorUser(c.ownerId);
       this.overlay.negotiate(c.overlayV1 === true);
@@ -125,46 +193,62 @@ export class AgentChannel {
       this.handlers.onRefused?.(code);
       // A refusal never replaces the machine connection, but nothing registers
       // this agent again on it: its waiting work ends now with the code.
-      this.#end(Object.assign(new Error(`Agent registration refused: ${code}`), {code}));
+      this.#end(Object.assign(new Error(`Agent registration refused: ${code}`), { code }));
       return;
     }
     if (event.type === 'unregistered') {
       // A newer connection owns this agent; this socket never answers its work.
       const reason = typeof event.reason === 'string' ? event.reason : 'unregistered';
-      this.socketClosed(false, Object.assign(new Error(`Agent registration ended: ${reason}`), {code:'unregistered'}));
-      this.#end(Object.assign(new Error(`Agent registration ended: ${reason}`), {code:'unregistered'}));
+      this.socketClosed(
+        false,
+        Object.assign(new Error(`Agent registration ended: ${reason}`), { code: 'unregistered' }),
+      );
+      this.#end(
+        Object.assign(new Error(`Agent registration ended: ${reason}`), { code: 'unregistered' }),
+      );
       return;
     }
     if (event.type === 'daemon-operation-result' && typeof event.requestId === 'string') {
       const pending = this.#requests.get(event.requestId);
       if (!pending) return;
       this.#requests.delete(event.requestId);
-      if (typeof event.error === 'string') pending.reject(Object.assign(new Error(event.error),{status:event.status,code:event.error}));
+      if (typeof event.error === 'string')
+        pending.reject(
+          Object.assign(new Error(event.error), { status: event.status, code: event.error }),
+        );
       else {
         const input = pending.frame.input as Record<string, unknown>;
-        if (pending.frame.operation === 'installConnector' &&
-            typeof input.connectorId === 'string' && input.connectorId.startsWith('squire:'))
+        if (
+          pending.frame.operation === 'installConnector' &&
+          typeof input.connectorId === 'string' &&
+          input.connectorId.startsWith('squire:')
+        )
           this.machine.squireInstalled();
         pending.resolve(event.result);
       }
-      this.send({type:'request-ack',requestId:event.requestId});
+      this.send({ type: 'request-ack', requestId: event.requestId });
       return;
     }
     if (this.#registered && !this.overlay.receive(event)) this.handlers.onMessage(event);
   }
   /** Unsent work is refused with the cause; sent work has no answer coming, so its outcome is unknown. */
-  #end(cause: Error & {code: string}): void {
+  #end(cause: Error & { code: string }): void {
     this.#ended = cause;
     for (const waiter of this.#waiters) waiter.reject(cause);
     this.#waiters.clear();
     for (const [requestId, pending] of this.#requests) {
       this.#requests.delete(requestId);
-      pending.reject(pending.sent
-        ? Object.assign(new Error(`${cause.message}; outcome unknown`), {code:cause.code})
-        : cause);
+      pending.reject(
+        pending.sent
+          ? Object.assign(new Error(`${cause.message}; outcome unknown`), { code: cause.code })
+          : cause,
+      );
     }
   }
-  socketClosed(ended = false, cause = Object.assign(new Error('Agent connection closed'), {code:'connection_closed'})):void {
+  socketClosed(
+    ended = false,
+    cause = Object.assign(new Error('Agent connection closed'), { code: 'connection_closed' }),
+  ): void {
     const registered = this.#registered;
     this.#registered = false;
     this.#registrationSent = false;
@@ -173,18 +257,25 @@ export class AgentChannel {
     for (const [requestId, pending] of this.#requests) {
       if (!pending.sent) continue;
       this.#requests.delete(requestId);
-      pending.reject(Object.assign(new Error(`${cause.message}; outcome unknown`), {code:cause.code}));
+      pending.reject(
+        Object.assign(new Error(`${cause.message}; outcome unknown`), { code: cause.code }),
+      );
     }
     if (ended) {
-      for(const waiter of this.#waiters)waiter.reject(new Error('Agent runtime ended'));
+      for (const waiter of this.#waiters) waiter.reject(new Error('Agent runtime ended'));
       this.#waiters.clear();
-      for (const pending of this.#requests.values()) pending.reject(new Error('Agent runtime ended'));
+      for (const pending of this.#requests.values())
+        pending.reject(new Error('Agent runtime ended'));
       this.#requests.clear();
     }
     if (registered) this.handlers.onClose();
   }
-  broadcast(event:Record<string,unknown>):void { this.handlers.onMessage(event); }
-  updateRequired(minVersion:string):void { this.handlers.onUpdateRequired(minVersion); }
+  broadcast(event: Record<string, unknown>): void {
+    this.handlers.onMessage(event);
+  }
+  updateRequired(minVersion: string): void {
+    this.handlers.onUpdateRequired(minVersion);
+  }
 }
 
 /**
@@ -211,7 +302,10 @@ export class MachineLink {
       random?: () => number;
       onRegistered?: () => void;
       subscribeResume?: (listener: () => void) => () => void;
-      readVault?: (agentId: string, githubReference?: string) => Promise<Omit<PostConnectorVaultInput, 'agentId'>>;
+      readVault?: (
+        agentId: string,
+        githubReference?: string,
+      ) => Promise<Omit<PostConnectorVaultInput, 'agentId'>>;
       log?: (message: string) => void;
     },
   ) {
@@ -219,7 +313,7 @@ export class MachineLink {
     this.link = new LiveLink({
       url: () => this.#url(),
       protocols: () => [MACHINE_SOCKET_PROTOCOL],
-      ...(options.factory ? {factory:options.factory} : {}),
+      ...(options.factory ? { factory: options.factory } : {}),
       ...(options.subscribeResume ? { subscribeResume: options.subscribeResume } : {}),
       onOpen: () => {
         this.#reconciledOnSocket = false;
@@ -240,7 +334,9 @@ export class MachineLink {
     });
   }
 
-  get origin():string{return new URL(this.options.baseUrl).origin;}
+  get origin(): string {
+    return new URL(this.options.baseUrl).origin;
+  }
 
   setHelperIdentity(identity: { releaseVersion?: string; sourceSha?: string }): void {
     this.#identity = {
@@ -264,7 +360,9 @@ export class MachineLink {
 
   /** Re-pair replaces server state even when the broker's keys are unchanged.
    * Keep an in-flight observation in its old cache so its ack cannot undo this. */
-  squireInstalled(): void { this.#vaultSnapshot = {}; }
+  squireInstalled(): void {
+    this.#vaultSnapshot = {};
+  }
 
   /** One observation at a time for the whole machine, including reconnects. */
   #githubReference?: string;
@@ -272,7 +370,9 @@ export class MachineLink {
     if (githubReference) this.#githubReference = githubReference;
     if (!this.options.readVault) return Promise.resolve();
     this.#vaultRefreshRequested = true;
-    this.#vaultRefresh ??= this.#drainVaultRefreshes().finally(() => { this.#vaultRefresh = undefined; });
+    this.#vaultRefresh ??= this.#drainVaultRefreshes().finally(() => {
+      this.#vaultRefresh = undefined;
+    });
     return this.#vaultRefresh;
   }
 
@@ -288,18 +388,25 @@ export class MachineLink {
   }
 
   async #reportVault(githubReference?: string): Promise<void> {
-    const channel = [...this.#channels.values()].find(channel => channel.isOpen());
+    const channel = [...this.#channels.values()].find((channel) => channel.isOpen());
     if (!channel) return;
     const snapshot = this.#vaultSnapshot;
     try {
       const report = await this.options.readVault!(channel.agentId, githubReference);
       // The list and host/field sets have no ordering semantics.
-      const content = JSON.stringify({ ...report, connections: report.connections.map(item => ({
-        ...item, fieldNames: [...item.fieldNames].sort(), allowedHosts: [...item.allowedHosts].sort(),
-        ...(item.loginHosts ? { loginHosts: [...item.loginHosts].sort() } : {}),
-      })).sort((a, b) => a.reference.localeCompare(b.reference)) });
+      const content = JSON.stringify({
+        ...report,
+        connections: report.connections
+          .map((item) => ({
+            ...item,
+            fieldNames: [...item.fieldNames].sort(),
+            allowedHosts: [...item.allowedHosts].sort(),
+            ...(item.loginHosts ? { loginHosts: [...item.loginHosts].sort() } : {}),
+          }))
+          .sort((a, b) => a.reference.localeCompare(b.reference)),
+      });
       if (content === snapshot.content) return;
-      const current = [...this.#channels.values()].find(channel => channel.isOpen());
+      const current = [...this.#channels.values()].find((channel) => channel.isOpen());
       if (!current) return;
       const sent = current.reportVault(report);
       if (!sent) return;
@@ -307,7 +414,9 @@ export class MachineLink {
       snapshot.content = content;
     } catch (error) {
       // A failed observation/delivery preserves the last broker verdict.
-      this.options.log?.(`Squire machine report unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      this.options.log?.(
+        `Squire machine report unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -331,10 +440,15 @@ export class MachineLink {
     if (!this.#channels.size) this.link.stop();
   }
 
-  send(frame: Record<string,unknown>): boolean { return this.link.send(JSON.stringify(frame)); }
-  #register():void {
-    const agents = [...this.#channels.values()].flatMap(channel => { const frame=channel.registration(); return frame ? [frame] : []; });
-    if (agents.length) this.send({type:'register-machine',agents});
+  send(frame: Record<string, unknown>): boolean {
+    return this.link.send(JSON.stringify(frame));
+  }
+  #register(): void {
+    const agents = [...this.#channels.values()].flatMap((channel) => {
+      const frame = channel.registration();
+      return frame ? [frame] : [];
+    });
+    if (agents.length) this.send({ type: 'register-machine', agents });
   }
 
   stop(forUpdate = false): void {
@@ -371,8 +485,9 @@ export class MachineLink {
       return;
     }
     if (event.type === 'registered-machine' && Array.isArray(event.agents)) {
-      for (const agent of event.agents) if (agent && typeof agent === 'object' && typeof agent.agentId === 'string')
-        this.#channels.get(agent.agentId)?.receive(agent);
+      for (const agent of event.agents)
+        if (agent && typeof agent === 'object' && typeof agent.agentId === 'string')
+          this.#channels.get(agent.agentId)?.receive(agent);
       return;
     }
     if (typeof event.agentId === 'string' && event.agentId.length > 0) {

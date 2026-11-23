@@ -48,15 +48,20 @@ async function clackSelectAgent(candidates: DetectedAgentCommand[]): Promise<Age
   return unwrapPrompt(picked, 'Pairing cancelled.');
 }
 
-type InstallOptions = { cwd?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; signal?: AbortSignal };
+type InstallOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  log?: (line: string) => void;
+  signal?: AbortSignal;
+};
 
 /** `updateAgentAdapter` logs its own decision (current version, or the exact install). */
-async function installAdapter(
-  install: AdapterInstallCommand,
-  opts: InstallOptions,
-): Promise<void> {
-  const kind = install.args.at(-1)?.includes('codex-acp') ? 'codex'
-    : install.args.at(-1)?.includes('claude-agent-acp') ? 'claude' : 'pi';
+async function installAdapter(install: AdapterInstallCommand, opts: InstallOptions): Promise<void> {
+  const kind = install.args.at(-1)?.includes('codex-acp')
+    ? 'codex'
+    : install.args.at(-1)?.includes('claude-agent-acp')
+      ? 'claude'
+      : 'pi';
   await installLatestAgentAdapter(kind, opts);
 }
 
@@ -82,12 +87,9 @@ export async function selectPairAgentCommand(opts: {
   selectAgent?: (candidates: DetectedAgentCommand[]) => Promise<AgentKind>;
   /** Interactive "install this adapter now?" prompt; defaults to clack.confirm. */
   confirmInstall?: (message: string) => Promise<boolean>;
-  install?: (
-    command: AdapterInstallCommand,
-    opts: InstallOptions,
-  ) => Promise<void>;
+  install?: (command: AdapterInstallCommand, opts: InstallOptions) => Promise<void>;
 }): Promise<AgentCommand> {
-  return withCallerSignal(async signal => {
+  return withCallerSignal(async (signal) => {
     signal.throwIfAborted();
     const output = opts.output ?? stdout;
     const interactive = opts.interactive ?? Boolean(stdin.isTTY && stdout.isTTY);
@@ -136,7 +138,8 @@ export async function selectPairAgentCommand(opts: {
       } catch (resolutionError) {
         signal.throwIfAborted();
         const candidate = detectInstalledAgentCommands({ env: opts.env, cwd: opts.cwd }).find(
-          (detected) => detected.kind === opts.explicitKind && detected.status === 'missing-adapter',
+          (detected) =>
+            detected.kind === opts.explicitKind && detected.status === 'missing-adapter',
         );
         if (!candidate || candidate.status !== 'missing-adapter') throw resolutionError;
 

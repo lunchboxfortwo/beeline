@@ -25,7 +25,9 @@ export function parseCursorModelsOutput(output: string): CursorModelCatalog | un
   }
   if (!options.length) return undefined;
   return {
-    currentValue: options.some((option) => option.id === 'auto') ? 'auto' : (options[0] as { id: string }).id,
+    currentValue: options.some((option) => option.id === 'auto')
+      ? 'auto'
+      : (options[0] as { id: string }).id,
     options,
   };
 }
@@ -40,7 +42,13 @@ export async function enumerateCursorModels(
   signal?: AbortSignal,
 ): Promise<CursorModelCatalog | undefined> {
   try {
-    const result = await runOwned({ step: 'cursor-agent models', file: 'cursor-agent', args: ['models'], env, signal });
+    const result = await runOwned({
+      step: 'cursor-agent models',
+      file: 'cursor-agent',
+      args: ['models'],
+      env,
+      signal,
+    });
     return result.code === 0 ? parseCursorModelsOutput(result.stdout) : undefined;
   } catch (error) {
     if (signal?.aborted) throw error;

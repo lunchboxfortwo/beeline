@@ -34,7 +34,9 @@ export async function checkAdapterSession(options: {
   let client: AcpClient | undefined;
   let negotiated: Record<string, unknown> | undefined;
   const cliProxy = options.agentKind ? (await machineCliProxy())?.endpoint : undefined;
-  const abort = () => { if (client) void stopAgentProcess(client).catch(() => undefined); };
+  const abort = () => {
+    if (client) void stopAgentProcess(client).catch(() => undefined);
+  };
   try {
     const homeOverlay = cliProxy
       ? await prepareRoomAgentHome({

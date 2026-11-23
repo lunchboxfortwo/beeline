@@ -18,8 +18,8 @@
  * that is not coming.
  */
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
-import { mkdir,writeFile } from 'node:fs/promises';
-import { basename,extname,join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { basename, extname, join } from 'node:path';
 import { ask } from './wait.js';
 
 /** Same ceiling as the artifact path (`read-only-mcp.ts`). */
@@ -167,7 +167,9 @@ export async function deliverAttachments(
       if (attachment.size && attachment.size > MAX_ATTACHMENT_BYTES)
         return tooLarge(attachment.size);
       if (attachment.expired) return { attachment, reason: EXPIRED_REASON };
-      const previous = cached.find((entry) => entry.path && entry.attachment.url === attachment.url);
+      const previous = cached.find(
+        (entry) => entry.path && entry.attachment.url === attachment.url,
+      );
       if (previous) return previous;
       try {
         await mkdir(dir, { recursive: true });

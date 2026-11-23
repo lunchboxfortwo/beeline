@@ -1,5 +1,5 @@
 /**
- * The only place a helper command or agent tool waits.
+ * Shared wait primitives for helper commands and agent tools.
  *
  * A wait ends on (a) the answer to its own request, or (b) the exit of a child
  * it owns. It never waits for a condition: "every agent serving", "agents
@@ -8,7 +8,7 @@
  * close/EOF, ENOENT, ECONNREFUSED, child `exit`). Nothing here arms a timer,
  * retries, polls or caps; a silent remote peer is bounded only by its
  * transport's own read failure. `helper.waits` in
- * docs/architecture/invariants.json keeps every other wait out of apps/body/src.
+ * docs/architecture/invariants.json ratchets remaining sites outside these owners.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -17,7 +17,9 @@ import { createConnection, createServer, type Socket } from 'node:net';
 const say = (line: string) => process.stderr.write(`[beeline] ${line}\n`);
 
 let machineReadOutput = false;
-export function setMachineReadOutput(machineRead: boolean): void { machineReadOutput = machineRead; }
+export function setMachineReadOutput(machineRead: boolean): void {
+  machineReadOutput = machineRead;
+}
 
 /**
  * The one switch for wait lines. Every wait prints one stderr line naming the
@@ -181,9 +183,11 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
     }
   }
   const report = reporter(command);
-  const onLine = command.onLine ?? ((line: string) => {
-    if (report) process.stderr.write(`${line}\n`);
-  });
+  const onLine =
+    command.onLine ??
+    ((line: string) => {
+      if (report) process.stderr.write(`${line}\n`);
+    });
   return new Promise((resolve, reject) => {
     if (command.signal?.aborted) {
       reject(new Error(`${command.step}: cancelled before start`));

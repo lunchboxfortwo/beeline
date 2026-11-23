@@ -76,7 +76,10 @@ export class MachineControl {
         if (!socket.writableEnded) socket.end(`${JSON.stringify(answer)}\n`);
       })().catch((error) => {
         this.#held.delete(socket);
-        if (!socket.writableEnded) socket.end(`${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`);
+        if (!socket.writableEnded)
+          socket.end(
+            `${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`,
+          );
       });
     });
   });
@@ -105,17 +108,23 @@ export class MachineControl {
     const line = `${JSON.stringify(answer)}\n`;
     const sockets = [...this.#held];
     this.#held.clear();
-    return Promise.all(sockets.map((socket) => new Promise<void>((done) => {
-      if (socket.destroyed) done();
-      else socket.end(line, () => done());
-    }))).then(() => undefined);
+    return Promise.all(
+      sockets.map(
+        (socket) =>
+          new Promise<void>((done) => {
+            if (socket.destroyed) done();
+            else socket.end(line, () => done());
+          }),
+      ),
+    ).then(() => undefined);
   }
 
   async stop(): Promise<void> {
     if (!this.#server.listening) return;
     await this.settleHeld({ error: 'helper stopped before answering the update' });
     for (const peer of this.#peers) {
-      if (!peer.writableEnded) peer.end(`${JSON.stringify({ error: 'helper control stopped before answering' })}\n`);
+      if (!peer.writableEnded)
+        peer.end(`${JSON.stringify({ error: 'helper control stopped before answering' })}\n`);
       peer.destroySoon();
     }
     await new Promise<void>((done) => this.#server.close(() => done()));
@@ -124,11 +133,18 @@ export class MachineControl {
 }
 
 /** Follow the serving helper's kernel lock until the kernel releases it on that process's exit. */
-export async function followHelperExit(stateRoot: string, predecessor: Pick<MachineAnswer, 'pid' | 'generation'>): Promise<void> {
+export async function followHelperExit(
+  stateRoot: string,
+  predecessor: Pick<MachineAnswer, 'pid' | 'generation'>,
+): Promise<void> {
   const lock = await tryLock(helperLockKey(stateRoot));
   if (lock.held) await lock.release();
-  else if (lock.holder.key === helperLockKey(stateRoot) && lock.holder.pid === predecessor.pid &&
-      (lock.holder.generation === undefined || lock.holder.generation === predecessor.generation)) await lock.released();
+  else if (
+    lock.holder.key === helperLockKey(stateRoot) &&
+    lock.holder.pid === predecessor.pid &&
+    (lock.holder.generation === undefined || lock.holder.generation === predecessor.generation)
+  )
+    await lock.released();
   else lock.close();
 }
 
@@ -164,21 +180,31 @@ export async function askMachine(
 }
 
 /** Read the existing host adb server directly: invoking adb could start a server. */
-export async function hostEmulatorSerials(connect = () => createConnection({ host: '127.0.0.1', port: 5037 })): Promise<string[]> {
+export async function hostEmulatorSerials(
+  connect = () => createConnection({ host: '127.0.0.1', port: 5037 }),
+): Promise<string[]> {
   const devices = await hostAdbQuery('host:devices', connect);
   const serials = devices.split('\n').flatMap((line) => {
     const [serial, state] = line.trim().split(/\s+/);
     return serial && /^emulator-\d+$/.test(serial) && state === 'device' ? [serial] : [];
   });
   // A transport can disappear after enumeration. Confirm each serial before offering it.
-  const ready = await Promise.all(serials.map(async serial => {
-    try { return await hostAdbQuery(`host-serial:${serial}:get-state`, connect) === 'device'; }
-    catch { return false; }
-  }));
+  const ready = await Promise.all(
+    serials.map(async (serial) => {
+      try {
+        return (await hostAdbQuery(`host-serial:${serial}:get-state`, connect)) === 'device';
+      } catch {
+        return false;
+      }
+    }),
+  );
   return serials.filter((_, index) => ready[index]);
 }
 
-function hostAdbQuery(query: string, connect: () => ReturnType<typeof createConnection>): Promise<string> {
+function hostAdbQuery(
+  query: string,
+  connect: () => ReturnType<typeof createConnection>,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect();
     let bytes = Buffer.alloc(0);
@@ -203,4 +229,3 @@ function hostAdbQuery(query: string, connect: () => ReturnType<typeof createConn
     socket.once('close', () => reject(new Error('host adb server closed')));
   });
 }
-

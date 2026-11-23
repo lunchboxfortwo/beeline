@@ -15,9 +15,14 @@ async function native(
   const step = `${file} ${args.join(' ')}`;
   const result = await runOwned({ step, file, args, env });
   if (result.code !== 0)
-    throw Object.assign(new Error(`${step} exited ${result.code ?? result.signal}: ${result.stderr.trim()}`), {
-      code: result.code, stdout: result.stdout, stderr: result.stderr,
-    });
+    throw Object.assign(
+      new Error(`${step} exited ${result.code ?? result.signal}: ${result.stderr.trim()}`),
+      {
+        code: result.code,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      },
+    );
   return { stdout: result.stdout };
 }
 export const SYSTEMD_HELPER_UNIT_NAME = 'beeline-helper.service';
@@ -63,12 +68,18 @@ WantedBy=default.target
 }
 
 /** Converge an already-running install's restart policy without a lifecycle action. */
-export async function refreshSystemdHelperUnit(options: {
-  env?: NodeJS.ProcessEnv; run?: NativeRunner;
-} = {}): Promise<void> {
+export async function refreshSystemdHelperUnit(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    run?: NativeRunner;
+  } = {},
+): Promise<void> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
-  const directory = resolve(env.XDG_CONFIG_HOME || resolve(homeFor(env), '.config'), 'systemd/user');
+  const directory = resolve(
+    env.XDG_CONFIG_HOME || resolve(homeFor(env), '.config'),
+    'systemd/user',
+  );
   const path = resolve(directory, SYSTEMD_HELPER_UNIT_NAME);
   if ((await readFile(path, 'utf8').catch(() => '')) !== helperServiceUnit()) {
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -129,7 +140,9 @@ interface NativeConvergenceOptions {
  * exits (systemd's own job timeouts bound `start`), its progress streams, and
  * it dies with this command.
  */
-export async function convergeNativeHelper(options: NativeConvergenceOptions = {}): Promise<number> {
+export async function convergeNativeHelper(
+  options: NativeConvergenceOptions = {},
+): Promise<number> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   progress('native service convergence');
@@ -141,27 +154,39 @@ export async function convergeNativeHelper(options: NativeConvergenceOptions = {
     step,
     file: process.execPath,
     args: [entry, 'native-converge-worker'],
-    env: { ...env, BEELINE_NATIVE_CONVERGENCE: JSON.stringify({ platform: options.platform,
-      restart: options.restart, legacyCaller: options.legacyCaller }), BEELINE_INTERNAL_NATIVE_WORKER: '1' },
+    env: {
+      ...env,
+      BEELINE_NATIVE_CONVERGENCE: JSON.stringify({
+        platform: options.platform,
+        restart: options.restart,
+        legacyCaller: options.legacyCaller,
+      }),
+      BEELINE_INTERNAL_NATIVE_WORKER: '1',
+    },
     ownerLink: true,
   });
   if (worker.code !== 0) throw new Error(`${step}: worker exited ${worker.code ?? worker.signal}`);
   const pid = JSON.parse(worker.stdout).pid as number;
-  if (!Number.isSafeInteger(pid) || pid < 0) throw new Error('native convergence returned an invalid pid');
+  if (!Number.isSafeInteger(pid) || pid < 0)
+    throw new Error('native convergence returned an invalid pid');
   return pid;
 }
 
 export async function runNativeConvergenceWorker(): Promise<number> {
   if (process.env.BEELINE_INTERNAL_NATIVE_WORKER !== '1')
     throw new Error('native convergence worker requires its recovery owner');
-  const options = JSON.parse(process.env.BEELINE_NATIVE_CONVERGENCE || '{}') as NativeConvergenceOptions;
-  return convergeNativeHelperOwned({ platform: options.platform, restart: options.restart,
-    legacyCaller: options.legacyCaller, env: process.env });
+  const options = JSON.parse(
+    process.env.BEELINE_NATIVE_CONVERGENCE || '{}',
+  ) as NativeConvergenceOptions;
+  return convergeNativeHelperOwned({
+    platform: options.platform,
+    restart: options.restart,
+    legacyCaller: options.legacyCaller,
+    env: process.env,
+  });
 }
 
-async function convergeNativeHelperOwned(
-  options: NativeConvergenceOptions = {},
-): Promise<number> {
+async function convergeNativeHelperOwned(options: NativeConvergenceOptions = {}): Promise<number> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   const kind = options.platform ?? nativeSupervisor(env);
@@ -183,8 +208,14 @@ async function convergeNativeHelperOwned(
   return withKernelLock(
     `native-helper:${home}`,
     async () => {
-      const execute: NativeRunner = options.run ?? (args =>
-        native(kind === 'systemd' ? 'systemctl' : 'launchctl', kind === 'systemd' ? ['--user', ...args] : args, env));
+      const execute: NativeRunner =
+        options.run ??
+        ((args) =>
+          native(
+            kind === 'systemd' ? 'systemctl' : 'launchctl',
+            kind === 'systemd' ? ['--user', ...args] : args,
+            env,
+          ));
       const run: NativeRunner = (args) => {
         progress(`native ${kind}: ${args.join(' ')}`);
         return execute(args);
@@ -327,8 +358,10 @@ async function convergeNativeHelperOwned(
 export async function startNativeHelper(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const kind = nativeSupervisor(env);
   progress(`native ${kind}: starting the helper successor`);
-  if (kind === 'systemd') await native('systemctl', ['--user', 'start', SYSTEMD_HELPER_UNIT_NAME], env);
-  else await native('launchctl', ['print', `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`], env);
+  if (kind === 'systemd')
+    await native('systemctl', ['--user', 'start', SYSTEMD_HELPER_UNIT_NAME], env);
+  else
+    await native('launchctl', ['print', `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`], env);
 }
 
 /** Local observation only. A native active state is separate from per-agent readiness. */

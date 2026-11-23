@@ -55,13 +55,15 @@ interface RuntimeAdapterRefreshOptions extends AdapterUpdateOptions {
 export async function refreshRuntimeHarnessAdapters(
   options: RuntimeAdapterRefreshOptions = {},
 ): Promise<void> {
-  return withCallerSignal(async signal => {
+  return withCallerSignal(async (signal) => {
     signal.throwIfAborted();
     const log = options.log ?? console.log;
     const readRuntime = options.readRuntime ?? readRuntimeRecord;
     const configPaths = options.configPaths ?? [
       ...(await findRuntimeConfigPaths(process.cwd()).catch(() => [] as string[])),
-      ...(await findAgentRuntimeConfigPaths(process.env, process.cwd()).catch(() => [] as string[])),
+      ...(await findAgentRuntimeConfigPaths(process.env, process.cwd()).catch(
+        () => [] as string[],
+      )),
     ];
     const kinds = new Set<AgentKind>();
     for (const path of new Set(configPaths)) {
@@ -137,7 +139,7 @@ async function printStatus(layout: BeelineInstallLayout): Promise<void> {
 }
 
 export async function runUpdateCommand(args: string[], signal?: AbortSignal): Promise<void> {
-  return withCallerSignal(async signal => {
+  return withCallerSignal(async (signal) => {
     signal.throwIfAborted();
     if (args.includes('--help') || args.includes('-h')) {
       updateUsage();
@@ -188,18 +190,20 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
     let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
     try {
       target = await prepareMachineRelease(layout, {
-      env: {
-        ...process.env,
-        BEELINE_LIB_DIR: layout.libDir,
-        BEELINE_UPDATE_MANIFEST_URL: manifestUrl,
-      },
-      force,
-      signal,
+        env: {
+          ...process.env,
+          BEELINE_LIB_DIR: layout.libDir,
+          BEELINE_UPDATE_MANIFEST_URL: manifestUrl,
+        },
+        force,
+        signal,
       });
     } catch (error) {
       signal.throwIfAborted();
       await convergeMachine({ layout, reportAgentsOnly: true });
-      throw new Error(`helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`);
+      throw new Error(
+        `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
+      );
     }
     await convergeDependencies(layout, target.releaseId, undefined, signal);
     signal.throwIfAborted();
@@ -211,7 +215,9 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
       force,
     });
     for (const [id, agent] of Object.entries(status.agents))
-      progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
+      progress(
+        `agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`,
+      );
     console.log(
       `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid} ${status.processState}`,
     );

@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     if (args.includes('--status')) {
       const [native, helper] = await Promise.all([
         nativeHelperStatus(),
-        askMachine(stateRoot, { operation: 'status' }).catch(error => {
+        askMachine(stateRoot, { operation: 'status' }).catch((error) => {
           if (helperAbsent(error)) return undefined;
           throw error;
         }),
@@ -153,8 +153,12 @@ async function main(): Promise<void> {
       return;
     }
     await convergeDependencies(layout, target.releaseId);
-    const status = await convergeMachine({ layout, releaseId: target.releaseId,
-      reportAgentsOnly: true, force: args.includes('--force') });
+    const status = await convergeMachine({
+      layout,
+      releaseId: target.releaseId,
+      reportAgentsOnly: true,
+      force: args.includes('--force'),
+    });
     reportAgents(status);
     console.log(
       `[beeline] executing release ${status.loadedRelease}; helper ${status.pid} ${status.processState}`,
@@ -211,8 +215,12 @@ async function main(): Promise<void> {
     );
     return;
   }
-  if (command === 'connect' && !args.includes('--help') && !args.includes('-h') &&
-      !(await resolveBundleEntrypoint(layout.libDir))) {
+  if (
+    command === 'connect' &&
+    !args.includes('--help') &&
+    !args.includes('-h') &&
+    !(await resolveBundleEntrypoint(layout.libDir))
+  ) {
     // Install only on a new machine. Pairing starts/converges the helper after
     // writing the new agent's configuration, without selecting a release.
     const target = await prepareMachineRelease(layout);
@@ -233,7 +241,9 @@ async function main(): Promise<void> {
 /** The helper's one answer: each agent as it is now. Nothing waits for an agent to serve. */
 function reportAgents(status: MachineAnswer): void {
   for (const [id, agent] of Object.entries(status.agents))
-    progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
+    progress(
+      `agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`,
+    );
 }
 main().catch((error) => {
   console.error(`[beeline] ${error instanceof Error ? error.message : String(error)}`);

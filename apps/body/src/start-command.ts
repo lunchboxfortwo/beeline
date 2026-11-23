@@ -58,7 +58,9 @@ async function startRuntime(
   await setAgentStopped(configPath, false);
   const status = await convergeMachine({ agentIds: [runtime.agent.publicKey] });
   const agent = status.agents[runtime.agent.publicKey];
-  report(`[beeline] agent ${agent?.state ?? 'requested'} in machine helper (pid ${status.pid})${agent?.status ? `: ${agent.status}` : ''}`);
+  report(
+    `[beeline] agent ${agent?.state ?? 'requested'} in machine helper (pid ${status.pid})${agent?.status ? `: ${agent.status}` : ''}`,
+  );
   return { status: 'started', pid: status.pid };
 }
 

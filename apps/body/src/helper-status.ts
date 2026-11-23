@@ -76,7 +76,7 @@ export async function readMachineStatus(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<HelperStatusFile | undefined> {
   const { askMachine, helperAbsent } = await import('./machine-control.js');
-  return askMachine(defaultSupervisorRoot(env), { operation: 'status' }).catch(error => {
+  return askMachine(defaultSupervisorRoot(env), { operation: 'status' }).catch((error) => {
     if (helperAbsent(error)) return undefined;
     throw error;
   });

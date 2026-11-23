@@ -48,11 +48,15 @@ export class ReleaseTransaction {
       settled?: (outcome: 'current' | 'cancelled') => void;
     },
   ) {}
-  get desiredRelease(): string | undefined { return this.#prepared; }
-  get pending(): Promise<void> | undefined { return this.#preparing ?? this.#handingOff; }
+  get desiredRelease(): string | undefined {
+    return this.#prepared;
+  }
+  get pending(): Promise<void> | undefined {
+    return this.#preparing ?? this.#handingOff;
+  }
 
   private begin() {
-    return this.#attempt ??= { controller: new AbortController() };
+    return (this.#attempt ??= { controller: new AbortController() });
   }
 
   private fail(signal: AbortSignal, error: unknown, releaseId = this.#prepared): void {
@@ -68,13 +72,19 @@ export class ReleaseTransaction {
       const cleanup = withInstallLock(this.options.layout, async () => {
         const state = await readUpdateState(this.options.layout);
         if (state.stagedReleaseId === releaseId)
-          await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
-            lastCheckResult: 'failed', lastCheckError: String(error) });
-      }).catch(cleanupError => this.options.failed(cleanupError, this.#minimum)).finally(() => {
-        if (this.#preparing !== cleanup) return;
-        this.#preparing = undefined;
-        if (this.#pendingCheck) this.notify();
-      });
+          await writeUpdateState(this.options.layout, {
+            ...state,
+            stagedReleaseId: undefined,
+            lastCheckResult: 'failed',
+            lastCheckError: String(error),
+          });
+      })
+        .catch((cleanupError) => this.options.failed(cleanupError, this.#minimum))
+        .finally(() => {
+          if (this.#preparing !== cleanup) return;
+          this.#preparing = undefined;
+          if (this.#pendingCheck) this.notify();
+        });
       this.#preparing = cleanup;
     }
   }
@@ -83,26 +93,32 @@ export class ReleaseTransaction {
     if (minimum && (!this.#minimum || !versionAtLeast(this.#minimum, minimum)))
       this.#minimum = minimum;
     if (this.#completed) return;
-    if (this.#preparing || this.#handingOff) { this.#pendingCheck = true; return; }
+    if (this.#preparing || this.#handingOff) {
+      this.#pendingCheck = true;
+      return;
+    }
     this.#pendingCheck = false;
     const { controller } = this.begin();
     const { signal } = controller;
-    const operation = Promise.resolve().then(async () => {
-      await this.options.ownWork?.().catch(() => undefined);
-      if (signal.aborted) return;
-      if (this.options.prepare) await this.options.prepare(signal);
-      else await prepareReleaseInWorker(this.options.env, undefined, signal);
-      if (signal.aborted) return;
-      const target = (await readUpdateState(this.options.layout)).stagedReleaseId;
-      if (!signal.aborted && target) await this.prepared(target);
-      else if (!signal.aborted && !this.#pendingCheck) this.dispose();
-    }).catch(error => this.fail(signal, error)).finally(() => {
-      if (this.#preparing !== operation) return;
-      this.#preparing = undefined;
-      if (signal.aborted) return;
-      if (this.#pendingCheck) this.notify();
-      else this.handoff();
-    });
+    const operation = Promise.resolve()
+      .then(async () => {
+        await this.options.ownWork?.().catch(() => undefined);
+        if (signal.aborted) return;
+        if (this.options.prepare) await this.options.prepare(signal);
+        else await prepareReleaseInWorker(this.options.env, undefined, signal);
+        if (signal.aborted) return;
+        const target = (await readUpdateState(this.options.layout)).stagedReleaseId;
+        if (!signal.aborted && target) await this.prepared(target);
+        else if (!signal.aborted && !this.#pendingCheck) this.dispose();
+      })
+      .catch((error) => this.fail(signal, error))
+      .finally(() => {
+        if (this.#preparing !== operation) return;
+        this.#preparing = undefined;
+        if (signal.aborted) return;
+        if (this.#pendingCheck) this.notify();
+        else this.handoff();
+      });
     this.#preparing = operation;
   }
 
@@ -114,22 +130,34 @@ export class ReleaseTransaction {
     if (this.#completed) return 'handed-off';
     const { signal } = this.begin().controller;
     try {
-      const targetLayout = { ...this.options.layout,
-        libDir: resolve(this.options.layout.releasesRoot, releaseId) };
+      const targetLayout = {
+        ...this.options.layout,
+        libDir: resolve(this.options.layout.releasesRoot, releaseId),
+      };
       const identity = await readInstalledBundleIdentity(targetLayout);
       signal.throwIfAborted();
-      const loaded = this.options.loadedRelease ? await readInstalledBundleIdentity({
-        ...this.options.layout, libDir: resolve(this.options.layout.releasesRoot, this.options.loadedRelease),
-      }) : undefined;
+      const loaded = this.options.loadedRelease
+        ? await readInstalledBundleIdentity({
+            ...this.options.layout,
+            libDir: resolve(this.options.layout.releasesRoot, this.options.loadedRelease),
+          })
+        : undefined;
       signal.throwIfAborted();
-      if (identity?.version && loaded?.version && identity.version !== loaded.version &&
-          versionAtLeast(loaded.version, identity.version) && !versionAtLeast(identity.version, loaded.version))
-      {
+      if (
+        identity?.version &&
+        loaded?.version &&
+        identity.version !== loaded.version &&
+        versionAtLeast(loaded.version, identity.version) &&
+        !versionAtLeast(identity.version, loaded.version)
+      ) {
         await withInstallLock(this.options.layout, async () => {
           const state = await readUpdateState(this.options.layout);
           if (state.stagedReleaseId === releaseId)
-            await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
-              lastCheckResult: 'current' });
+            await writeUpdateState(this.options.layout, {
+              ...state,
+              stagedReleaseId: undefined,
+              lastCheckResult: 'current',
+            });
         });
         signal.throwIfAborted();
         this.#prepared = undefined;
@@ -139,7 +167,9 @@ export class ReleaseTransaction {
       }
       if (this.#minimum) {
         if (!identity?.version || !versionAtLeast(identity.version, this.#minimum))
-          throw new Error(`published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`);
+          throw new Error(
+            `published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`,
+          );
       }
       signal.throwIfAborted();
       if (releaseId === this.options.loadedRelease) {
@@ -151,7 +181,10 @@ export class ReleaseTransaction {
       this.#prepared = releaseId;
       this.options.changed(releaseId);
       this.handoff();
-    } catch (error) { if (signal.aborted) throw error; this.fail(signal, error, releaseId); }
+    } catch (error) {
+      if (signal.aborted) throw error;
+      this.fail(signal, error, releaseId);
+    }
     return 'pending';
   }
 
@@ -159,22 +192,27 @@ export class ReleaseTransaction {
   private handoff(): void {
     if (this.#completed || !this.#prepared || this.#preparing || this.#handingOff) return;
     const { signal } = this.begin().controller;
-    const operation = Promise.resolve().then(async () => {
-      if (signal.aborted) return;
-      await this.options.handoff(this.#prepared!, signal);
-      if (!signal.aborted) {
-        this.#completed = true;
-        this.finish();
-      }
-    }).catch(error => this.fail(signal, error)).finally(() => {
-      if (this.#handingOff !== operation) return;
-      this.#handingOff = undefined;
-      if (!signal.aborted && this.#pendingCheck) this.notify();
-    });
+    const operation = Promise.resolve()
+      .then(async () => {
+        if (signal.aborted) return;
+        await this.options.handoff(this.#prepared!, signal);
+        if (!signal.aborted) {
+          this.#completed = true;
+          this.finish();
+        }
+      })
+      .catch((error) => this.fail(signal, error))
+      .finally(() => {
+        if (this.#handingOff !== operation) return;
+        this.#handingOff = undefined;
+        if (!signal.aborted && this.#pendingCheck) this.notify();
+      });
     this.#handingOff = operation;
   }
 
-  dispose(): void { this.finish('cancelled'); }
+  dispose(): void {
+    this.finish('cancelled');
+  }
 
   private finish(outcome?: 'current' | 'cancelled'): void {
     this.#pendingCheck = false;
@@ -192,12 +230,14 @@ export async function runManagedUpdateWorker(): Promise<{
 }> {
   const layout = beelineInstallLayout(process.env);
   if (!layout) throw new Error('release preparation requires an installed layout');
-  return withInstallLock(layout, () =>
-    prepareLatestRelease(layout, {
-      env: process.env,
-      force: process.env.BEELINE_FORCE_REPAIR === '1',
-      logger: (line) => console.error(line),
-    }),
+  return withInstallLock(
+    layout,
+    () =>
+      prepareLatestRelease(layout, {
+        env: process.env,
+        force: process.env.BEELINE_FORCE_REPAIR === '1',
+        logger: (line) => console.error(line),
+      }),
     'release preparation',
   );
 }
@@ -220,7 +260,9 @@ export async function prepareReleaseInWorker(
     ...(signal ? { signal } : {}),
   });
   if (child.code !== 0)
-    throw new Error(`${step}: worker exited ${child.code ?? child.signal}${child.stderr ? `: ${child.stderr.trim().split('\n').at(-1)}` : ''}`);
+    throw new Error(
+      `${step}: worker exited ${child.code ?? child.signal}${child.stderr ? `: ${child.stderr.trim().split('\n').at(-1)}` : ''}`,
+    );
   const result = JSON.parse(child.stdout);
   if (!result.releaseId) throw new Error('release preparation: no verified release');
   return result;

@@ -1,27 +1,27 @@
 import {
-isAgentCommand,
-type AgentCommand,
-type AgentSignInFrame,
-type DaemonOperationMap,
+  isAgentCommand,
+  type AgentCommand,
+  type AgentSignInFrame,
+  type DaemonOperationMap,
 } from '@beeline/api-contract/daemon';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { agentSignInFrame } from './agent-sign-in.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { invalidateUsageAccountAttachment } from './helper-usage-publisher.js';
-import { helperVersion,helperVersionHeader } from './helper-version.js';
+import { helperVersion, helperVersionHeader } from './helper-version.js';
 import {
-retryAfterMs,
-type LiveLink,
-type LiveLinkTiming,
-type LiveSocketFactory,
+  retryAfterMs,
+  type LiveLink,
+  type LiveLinkTiming,
+  type LiveSocketFactory,
 } from './live-link.js';
-import { MachineLink,type AgentChannel } from './machine-link.js';
+import { MachineLink, type AgentChannel } from './machine-link.js';
 import {
-readRuntimeRecord,
-runtimeDirectory,
-writeRuntimeRecord,
-type AgentRuntimeRecord,
+  readRuntimeRecord,
+  runtimeDirectory,
+  writeRuntimeRecord,
+  type AgentRuntimeRecord,
 } from './runtime.js';
 import { renewSquireShareOnViewerActivity } from './squire-share-renewals.js';
 import { unknownServerEventLogger } from './unknown-server-event.js';
@@ -145,13 +145,27 @@ export class DaemonApiClient {
    * It must never register a second execution owner for the parent agent. */
   #repositoryCredentialRoom: string | undefined;
 
-  static async readRepositoryCredential(configPath: string, roomId: string, fetchImpl?: DaemonFetch, write = false): Promise<Output<'getRoomGitHubToken'>> {
+  static async readRepositoryCredential(
+    configPath: string,
+    roomId: string,
+    fetchImpl?: DaemonFetch,
+    write = false,
+  ): Promise<Output<'getRoomGitHubToken'>> {
     const runtime = await readRuntimeRecord(configPath);
-    if (resolve(configPath) !== resolve(runtimeDirectory(runtime.supervisorRoot, runtime.agent.publicKey), 'runtime.json'))
+    if (
+      resolve(configPath) !==
+      resolve(runtimeDirectory(runtime.supervisorRoot, runtime.agent.publicKey), 'runtime.json')
+    )
       throw new Error('refusing repository credential read outside canonical runtime path');
     const transport = runtime.transport;
-    if (!transport?.daemonToken) throw new Error('thread-read-token requires an activated monolith transport');
-    const client = new DaemonApiClient(transport.baseUrl, transport.daemonToken, runtime.agent.publicKey, fetchImpl);
+    if (!transport?.daemonToken)
+      throw new Error('thread-read-token requires an activated monolith transport');
+    const client = new DaemonApiClient(
+      transport.baseUrl,
+      transport.daemonToken,
+      runtime.agent.publicKey,
+      fetchImpl,
+    );
     client.#repositoryCredentialRoom = roomId;
     return client.execute('getRoomGitHubToken', { roomId, ...(write ? { write: true } : {}) });
   }
@@ -169,7 +183,11 @@ export class DaemonApiClient {
   private channelStateListener?: (connected: boolean, refusal?: string) => void;
   private inFlight = 0;
   private requestCount = 0;
-  private queueListener?: (commands: readonly AgentCommand[], completedCommandIds: readonly string[], stoppedCommandIds: readonly string[]) => void;
+  private queueListener?: (
+    commands: readonly AgentCommand[],
+    completedCommandIds: readonly string[],
+    stoppedCommandIds: readonly string[],
+  ) => void;
   private queueCommandIds: readonly string[] = [];
   private queueDemanded = false;
   private roomsChangedListener?: (event?: RoomMembershipChange) => void;
@@ -221,22 +239,29 @@ export class DaemonApiClient {
       // that proof even after socket selection prohibits HTTP fallback.
       onRefused: (code) => {
         if (code === AGENT_REMOVED_CODE) {
-          this.registrationRefusal = new DaemonApiError('Agent removed', 403, false, AGENT_REMOVED_CODE);
+          this.registrationRefusal = new DaemonApiError(
+            'Agent removed',
+            403,
+            false,
+            AGENT_REMOVED_CODE,
+          );
           this.roomsChangedListener?.();
-        }
-        else this.channelStateListener?.(false, code);
+        } else this.channelStateListener?.(false, code);
       },
       onUpdateRequired: (minVersion) => this.forceUpdateListener?.(minVersion),
-      reportVault: report => this.execute('postConnectorVault', { ...report, agentId: this.agentId }),
+      reportVault: (report) =>
+        this.execute('postConnectorVault', { ...report, agentId: this.agentId }),
     });
     this.channel = this.#channel;
   }
 
   /** Refresh the shared machine observation after an explicit local vault event. */
-  refreshMachineVault(githubReference?: string): Promise<void> { return this.#machine.refreshVault(githubReference); }
+  refreshMachineVault(githubReference?: string): Promise<void> {
+    return this.#machine.refreshVault(githubReference);
+  }
 
   /** The machine socket under this agent's registration. */
-  get link(): Pick<LiveLink,'state'|'isOpen'|'onOpen'|'reconnects'> {
+  get link(): Pick<LiveLink, 'state' | 'isOpen' | 'onOpen' | 'reconnects'> {
     return this.#machine.link;
   }
 
@@ -291,7 +316,13 @@ export class DaemonApiClient {
   }
 
   /** The one listener for this agent's queue: every undone item, oldest first. */
-  setQueueListener(listener: (commands: readonly AgentCommand[], completedCommandIds: readonly string[], stoppedCommandIds: readonly string[]) => void): void {
+  setQueueListener(
+    listener: (
+      commands: readonly AgentCommand[],
+      completedCommandIds: readonly string[],
+      stoppedCommandIds: readonly string[],
+    ) => void,
+  ): void {
     this.queueListener = listener;
   }
 
@@ -299,7 +330,8 @@ export class DaemonApiClient {
   subscribeQueue(): void {
     this.queueDemanded = true;
     this.ensureLiveSocket();
-    if (this.#channel.isOpen()) this.#channel.send({ type: 'subscribe-queue', knownCommandIds: this.queueCommandIds });
+    if (this.#channel.isOpen())
+      this.#channel.send({ type: 'subscribe-queue', knownCommandIds: this.queueCommandIds });
   }
 
   /** Register the one listener invoked when the server reports this agent's
@@ -340,8 +372,10 @@ export class DaemonApiClient {
     // This one-use vault relay answer has an attempt lifetime, not daemon
     // operation/turn authority. Only whitelisted metadata leaves the helper.
     await this.fetchImpl(endpoint(this.baseUrl, '/v1/vault-save/answer'), {
-      method: 'POST', headers: { authorization: `Bearer ${this.daemonToken}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ attemptId, answer }), signal: undefined,
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.daemonToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ attemptId, answer }),
+      signal: undefined,
     });
   }
 
@@ -364,7 +398,9 @@ export class DaemonApiClient {
   }
 
   /** Join the existing registration wake; socket loss is not a turn failure. */
-  waitForConnection(): Promise<void> { return this.#channel.operationReady(); }
+  waitForConnection(): Promise<void> {
+    return this.#channel.operationReady();
+  }
 
   async execute<Name extends keyof DaemonOperationMap>(
     name: Name,
@@ -372,7 +408,10 @@ export class DaemonApiClient {
   ): Promise<Output<Name>> {
     if (this.registrationRefusal) throw this.registrationRefusal;
     if (this.#repositoryCredentialRoom !== undefined) {
-      if (name !== 'getRoomGitHubToken' || (input as Input<'getRoomGitHubToken'>).roomId !== this.#repositoryCredentialRoom)
+      if (
+        name !== 'getRoomGitHubToken' ||
+        (input as Input<'getRoomGitHubToken'>).roomId !== this.#repositoryCredentialRoom
+      )
         throw new Error('Repository credential reader cannot dispatch another operation');
       return this.#requestHttp(name, input);
     }
@@ -382,29 +421,45 @@ export class DaemonApiClient {
     }
     await this.#channel.operationReady();
     if (name === 'postAgentUsage' && candidate.usageSource === undefined)
-      return postChangedAgentUsage(this,this.agentId,(input as Input<'postAgentUsage'>).usage) as Promise<Output<Name>>;
-    this.requestCount++; this.inFlight++;
+      return postChangedAgentUsage(
+        this,
+        this.agentId,
+        (input as Input<'postAgentUsage'>).usage,
+      ) as Promise<Output<Name>>;
+    this.requestCount++;
+    this.inFlight++;
     try {
-      const result = await this.#channel.requestOperation(name,input);
+      const result = await this.#channel.requestOperation(name, input);
       if (name === 'postAgentUsage' && (input as Input<'postAgentUsage'>).usage?.spend) {
-        const scope=this.#channel.usageAccountScope();
-        if(scope)invalidateUsageAccountAttachment(scope.origin,scope.ownerId,this.agentId);
+        const scope = this.#channel.usageAccountScope();
+        if (scope) invalidateUsageAccountAttachment(scope.origin, scope.ownerId, this.agentId);
       }
       return result;
     } catch (error) {
-      const failure=error as {status?:number;code?:string};
-      const status=failure.status??503;
-      const refusal=new DaemonApiError(error instanceof Error?error.message:'Machine operation refused',status,
-        status===408||status===429||status>=500,failure.code);
-      if(status===401)this.authorityRefusalListener?.(refusal);
+      const failure = error as { status?: number; code?: string };
+      const status = failure.status ?? 503;
+      const refusal = new DaemonApiError(
+        error instanceof Error ? error.message : 'Machine operation refused',
+        status,
+        status === 408 || status === 429 || status >= 500,
+        failure.code,
+      );
+      if (status === 401) this.authorityRefusalListener?.(refusal);
       throw refusal;
-    } finally { this.inFlight--; }
+    } finally {
+      this.inFlight--;
+    }
   }
 
   /** The explicit one-shot repository credential read cannot register another
    * machine owner. Every ordinary runtime operation uses the live connection. */
-  async #requestHttp<Name extends keyof DaemonOperationMap>(name: Name, input: Input<Name>): Promise<Output<Name>> {
-    const repositoryCredential = name === 'getRoomGitHubToken' && this.#repositoryCredentialRoom !== undefined &&
+  async #requestHttp<Name extends keyof DaemonOperationMap>(
+    name: Name,
+    input: Input<Name>,
+  ): Promise<Output<Name>> {
+    const repositoryCredential =
+      name === 'getRoomGitHubToken' &&
+      this.#repositoryCredentialRoom !== undefined &&
       (input as Input<'getRoomGitHubToken'>).roomId === this.#repositoryCredentialRoom;
     if (!repositoryCredential)
       throw new Error('HTTP daemon operation requires bootstrap or a registered old server');
@@ -413,7 +468,10 @@ export class DaemonApiClient {
     try {
       // `corner-read-token` names the host and step on stderr before it waits.
       const response = await ask(
-        { url: endpoint(this.baseUrl, `/v1/daemon/operations/${String(name)}`), fetch: this.fetchImpl },
+        {
+          url: endpoint(this.baseUrl, `/v1/daemon/operations/${String(name)}`),
+          fetch: this.fetchImpl,
+        },
         {
           method: 'POST',
           headers: {
@@ -442,7 +500,8 @@ export class DaemonApiClient {
   }
 
   private liveOpened(): void {
-    if (this.queueDemanded) this.#channel.send({ type: 'subscribe-queue', knownCommandIds: this.queueCommandIds });
+    if (this.queueDemanded)
+      this.#channel.send({ type: 'subscribe-queue', knownCommandIds: this.queueCommandIds });
     // Every wake on this socket is fire-and-forget: a membership written, or
     // a Connect tapped, while this socket was connecting (or between
     // reconnects) never replays its frame. Treat every open as both wakes,
@@ -452,7 +511,10 @@ export class DaemonApiClient {
   }
 
   private liveMessage(event: Record<string, unknown>): void {
-    if(event.type==='share-viewer-activity'&&typeof event.sessionId==='string'){renewSquireShareOnViewerActivity(event.sessionId);return;}
+    if (event.type === 'share-viewer-activity' && typeof event.sessionId === 'string') {
+      renewSquireShareOnViewerActivity(event.sessionId);
+      return;
+    }
     if (event.type === 'vault-save') {
       this.vaultSaveListener?.(event);
       return;
@@ -486,15 +548,22 @@ export class DaemonApiClient {
     }
     if (event.type === 'usage-refresh') {
       this.usageRefreshListener?.(
-        typeof event.requestId === 'string' && /^[0-9a-f-]{36}$/.test(event.requestId) ? event.requestId : undefined,
+        typeof event.requestId === 'string' && /^[0-9a-f-]{36}$/.test(event.requestId)
+          ? event.requestId
+          : undefined,
       );
       return;
     }
     if (event.type === 'agent-sign-in') {
       const frame = agentSignInFrame(event);
       if (frame) this.agentSignInListener?.(frame);
-      if (event.step === 'result' && event.outcome === 'signed-in' &&
-          typeof event.attemptId === 'string' && event.attemptId) this.configChangedListener?.();
+      if (
+        event.step === 'result' &&
+        event.outcome === 'signed-in' &&
+        typeof event.attemptId === 'string' &&
+        event.attemptId
+      )
+        this.configChangedListener?.();
       return;
     }
     if (event.type === 'config-changed') {
@@ -509,13 +578,16 @@ export class DaemonApiClient {
     if (event.type === 'commands' && event.commandProtocol === 2 && Array.isArray(event.commands)) {
       if (typeof event.agentId === 'string' && event.agentId !== this.agentId) return;
       const commands = event.commands.filter(
-        (command): command is AgentCommand => isAgentCommand(command) && command.agentId === this.agentId,
+        (command): command is AgentCommand =>
+          isAgentCommand(command) && command.agentId === this.agentId,
       );
       const completed = Array.isArray(event.completedCommandIds)
-        ? event.completedCommandIds.filter((id): id is string => typeof id === 'string') : [];
+        ? event.completedCommandIds.filter((id): id is string => typeof id === 'string')
+        : [];
       const stopped = Array.isArray(event.stoppedCommandIds)
-        ? event.stoppedCommandIds.filter((id): id is string => typeof id === 'string') : [];
-      this.queueCommandIds = commands.map(command => command.id);
+        ? event.stoppedCommandIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      this.queueCommandIds = commands.map((command) => command.id);
       this.queueListener?.(commands, completed, stopped);
       return;
     }

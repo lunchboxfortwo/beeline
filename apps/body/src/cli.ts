@@ -39,7 +39,12 @@ import {
   type HelperExitReason,
 } from './helper-lifecycle.js';
 import { DaemonApiClient } from './daemon-api-client.js';
-import { defaultSupervisorRoot, findAgentRuntimeConfigPaths, readRuntimeRecord, setAgentStopped } from './runtime.js';
+import {
+  defaultSupervisorRoot,
+  findAgentRuntimeConfigPaths,
+  readRuntimeRecord,
+  setAgentStopped,
+} from './runtime.js';
 import { runCleanupSharedHomeCommand } from './startup-cleanup.js';
 import { runStartCommand } from './start-command.js';
 import {
@@ -173,12 +178,15 @@ async function main(): Promise<void> {
   }
 
   if (command === 'converge-dependencies') {
-    if (process.env.BEELINE_INTERNAL_RECOVERY !== '1') throw new Error('converge-dependencies is an internal recovery command');
+    if (process.env.BEELINE_INTERNAL_RECOVERY !== '1')
+      throw new Error('converge-dependencies is an internal recovery command');
     exitWithOwner();
     await refreshRuntimeHarnessAdapters({ env: process.env });
     // The machine's login proxy tracks its latest release; the helper starts it.
     const { installLatestCliProxy } = await import('./cliproxy.js');
-    await installLatestCliProxy().catch(error => console.error(`[beeline] CLIProxyAPI not updated: ${String(error)}`));
+    await installLatestCliProxy().catch((error) =>
+      console.error(`[beeline] CLIProxyAPI not updated: ${String(error)}`),
+    );
     const layout = beelineInstallLayout(process.env);
     if (!layout) throw new Error('dependency convergence requires an installed layout');
     const invocationPath = resolve(layout.libDir, 'lib/beeline/beeline-cli.mjs');
@@ -190,7 +198,9 @@ async function main(): Promise<void> {
         const { installLaunchdTrustySquireBrokerService } = await import('./launchd.js');
         await installLaunchdTrustySquireBrokerService({ invocationPath });
       }
-    } catch (error) { console.error(`[beeline] host Squire dependency not converged: ${String(error)}`); }
+    } catch (error) {
+      console.error(`[beeline] host Squire dependency not converged: ${String(error)}`);
+    }
     return;
   }
 
@@ -200,7 +210,12 @@ async function main(): Promise<void> {
     const configPath = configFlag >= 0 ? args[configFlag + 1] : undefined;
     const roomId = roomFlag >= 0 ? args[roomFlag + 1] : undefined;
     if (!configPath || !roomId) throw new Error('thread-read-token requires --config and --room');
-    const credential = await DaemonApiClient.readRepositoryCredential(resolve(configPath), roomId, undefined, args.includes('--write')).catch(error => {
+    const credential = await DaemonApiClient.readRepositoryCredential(
+      resolve(configPath),
+      roomId,
+      undefined,
+      args.includes('--write'),
+    ).catch((error) => {
       if (error?.code === 'Call claim_thread before pushing or opening a PR for this thread.') {
         process.stderr.write(`${error.code}\n`);
         process.exit(1);
@@ -211,7 +226,9 @@ async function main(): Promise<void> {
     process.stdout.once('error', (error: NodeJS.ErrnoException) => {
       if (error.code !== 'EPIPE') throw error;
     });
-    process.stdout.write(`${args.includes('--json') ? JSON.stringify(credential) : credential.token}\n`);
+    process.stdout.write(
+      `${args.includes('--json') ? JSON.stringify(credential) : credential.token}\n`,
+    );
     return;
   }
 
@@ -291,11 +308,13 @@ async function main(): Promise<void> {
       throw new Error('daemon requires --machine, or --config <runtime.json> for one agent');
     // `--machine` hosts every paired agent; `--config` hosts exactly one, for
     // a development checkout or a test that runs one helper by hand.
-    if (configPath && process.env.BEELINE_LAB !== '1') throw new Error('daemon --config requires explicit BEELINE_LAB=1 and an isolated state root');
+    if (configPath && process.env.BEELINE_LAB !== '1')
+      throw new Error('daemon --config requires explicit BEELINE_LAB=1 and an isolated state root');
     if (startupLayout && !configPath) {
       const { refreshJoinedSessionBridge } = await import('./session-join/bridge.js');
-      await refreshJoinedSessionBridge(resolve(startupLayout.libDir, 'lib/beeline/recovery-cli.mjs'))
-        .catch(error => console.warn('[helper] joined-session bridge upgrade failed:', error));
+      await refreshJoinedSessionBridge(
+        resolve(startupLayout.libDir, 'lib/beeline/recovery-cli.mjs'),
+      ).catch((error) => console.warn('[helper] joined-session bridge upgrade failed:', error));
     }
     const { reason, lifecycle } = await runMachineHelper(
       configPath ? { configPaths: [resolve(configPath)] } : {},
@@ -347,7 +366,10 @@ async function main(): Promise<void> {
     // The helper answers with the agent's drain state now; nothing waits for it to finish.
     let drain = '';
     if (reloaded) {
-      const answer = await askMachine(defaultSupervisorRoot(), { operation: 'stop', agentId: runtime.agent.publicKey });
+      const answer = await askMachine(defaultSupervisorRoot(), {
+        operation: 'stop',
+        agentId: runtime.agent.publicKey,
+      });
       const agent = answer.agents[runtime.agent.publicKey];
       drain = agent
         ? `; helper reports ${agent.state}${agent.enabled === false ? ' (disabled)' : ''}${agent.status ? `: ${agent.status}` : ''}`

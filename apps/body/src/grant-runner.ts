@@ -61,7 +61,12 @@ import {
   type CommandGrantRule,
   hostGrantSshArgv,
 } from '@beeline/api-contract/agent-grants';
-import { HOST_GRANT_ARGV_HINT, hostGrantRefusal, matchHostGrant, trustedHostSsh } from './grant-host.js';
+import {
+  HOST_GRANT_ARGV_HINT,
+  hostGrantRefusal,
+  matchHostGrant,
+  trustedHostSsh,
+} from './grant-host.js';
 import { requireSecretGrants, validateRequestedSecrets } from './grant-secret.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
@@ -498,7 +503,10 @@ export class GrantCommandRunner {
     }
   }
 
-  async run(input: { roomId: unknown; argv: unknown; stdin?: unknown; secrets?: unknown }, onOutput?: (line: GrantOutputLine) => void): Promise<GrantRunResult> {
+  async run(
+    input: { roomId: unknown; argv: unknown; stdin?: unknown; secrets?: unknown },
+    onOutput?: (line: GrantOutputLine) => void,
+  ): Promise<GrantRunResult> {
     if (typeof input.roomId !== 'string' || !input.roomId) throw new Error('roomId is required');
     const room = this.rooms.get(input.roomId);
     if (!room) throw new Error('this daemon is not serving that chat');
@@ -551,10 +559,12 @@ export class GrantCommandRunner {
     }
     // An exact command grant wins; otherwise `ssh user@host <command>` may run
     // under an approved host grant for exactly that login.
-    const hostMatch = match || bindingFailure ? undefined : matchHostGrant(live.grants, room.workspaceId, argv);
+    const hostMatch =
+      match || bindingFailure ? undefined : matchHostGrant(live.grants, room.workspaceId, argv);
     if (!match && !hostMatch) {
       if (bindingFailure) throw bindingFailure;
-      const hostRefusal = argv[0] === 'ssh' ? hostGrantRefusal(live.grants, room.workspaceId, argv) : undefined;
+      const hostRefusal =
+        argv[0] === 'ssh' ? hostGrantRefusal(live.grants, room.workspaceId, argv) : undefined;
       if (hostRefusal) throw new Error(hostRefusal);
       const history = await this.options.api.execute('listAgentGrantRequests', {
         agentId: this.options.agentId,
@@ -573,7 +583,9 @@ export class GrantCommandRunner {
     if (match) await this.checkScriptBinding(grant, room.cwd, checkEnv, argv, stdin);
     const execArgv = hostMatch ? hostGrantSshArgv(hostMatch.login, argv.slice(2)) : argv;
     if (hostMatch && requestedSecrets.length)
-      throw new Error('secrets are not passed to a host grant run; ssh does not carry this environment to the remote host.');
+      throw new Error(
+        'secrets are not passed to a host grant run; ssh does not carry this environment to the remote host.',
+      );
     // Each requested secret needs its own live secret grant; the command itself
     // still has to match a command grant exactly.
     const secretGrants = requireSecretGrants(live.grants, room.workspaceId, requestedSecrets);
@@ -585,27 +597,34 @@ export class GrantCommandRunner {
     }
     const source = this.options.env ?? process.env;
     const sshPath = hostMatch
-      ? trustedHostSsh(this.options.trustedExecutable ?? installedGrantExecutable, room.cwd, source.PATH)
+      ? trustedHostSsh(
+          this.options.trustedExecutable ?? installedGrantExecutable,
+          room.cwd,
+          source.PATH,
+        )
       : undefined;
     // A once grant is spent before the command starts, so a second call in the
     // same instant cannot ride the same approval.
     for (const spent of [grant, ...secretGrants]) {
-      if (spent.status === 'once') await this.options.api.execute('consumeAgentGrant', { grantId: spent.grantId });
+      if (spent.status === 'once')
+        await this.options.api.execute('consumeAgentGrant', { grantId: spent.grantId });
     }
     // ssh needs the owner's real HOME for its keys and known hosts, so a host
     // run gets only PATH and HOME, never the session's tool environment.
-    const env: Record<string, string> = hostMatch ? {
-      ...(source.PATH ? { PATH: source.PATH } : {}),
-      ...(source.HOME ? { HOME: source.HOME } : {}),
-    } : {
-      ...(source.PATH ? { PATH: source.PATH } : {}),
-      ...(source.HOME ? { HOME: source.HOME } : {}),
-      XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
-      DBUS_SESSION_BUS_ADDRESS:
-        source.DBUS_SESSION_BUS_ADDRESS ?? `unix:path=/run/user/${process.getuid?.() ?? 0}/bus`,
-      ...(policy.toolEnv ?? {}),
-      ...Object.fromEntries(secrets),
-    };
+    const env: Record<string, string> = hostMatch
+      ? {
+          ...(source.PATH ? { PATH: source.PATH } : {}),
+          ...(source.HOME ? { HOME: source.HOME } : {}),
+        }
+      : {
+          ...(source.PATH ? { PATH: source.PATH } : {}),
+          ...(source.HOME ? { HOME: source.HOME } : {}),
+          XDG_RUNTIME_DIR: source.XDG_RUNTIME_DIR ?? `/run/user/${process.getuid?.() ?? 0}`,
+          DBUS_SESSION_BUS_ADDRESS:
+            source.DBUS_SESSION_BUS_ADDRESS ?? `unix:path=/run/user/${process.getuid?.() ?? 0}/bus`,
+          ...(policy.toolEnv ?? {}),
+          ...Object.fromEntries(secrets),
+        };
     const cap = this.options.outputCapBytes ?? GRANT_COMMAND_OUTPUT_CAP_BYTES;
     // The capability table decides: a corner may act on the host, so it spawns
     // plainly; a Room may not, so it spawns into the very mount table an
@@ -648,7 +667,11 @@ export class GrantCommandRunner {
       const stderr: Buffer[] = [];
       let failure: Error | undefined;
       const progress = grantOutputLines(secrets, onOutput, sandboxMarker);
-      const capture = (stream: NodeJS.ReadableStream, chunks: Buffer[], name: 'stdout' | 'stderr') => {
+      const capture = (
+        stream: NodeJS.ReadableStream,
+        chunks: Buffer[],
+        name: 'stdout' | 'stderr',
+      ) => {
         let bytes = 0;
         stream.on('data', (chunk: Buffer) => {
           progress.chunk(name, chunk);

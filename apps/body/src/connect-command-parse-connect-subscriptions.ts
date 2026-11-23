@@ -1,25 +1,40 @@
-import { resolve, dirname } from "node:path";
-import { homedir, hostname } from "node:os";
-import { readFile, mkdir, writeFile, chmod, unlink } from "node:fs/promises";
-import { randomUUID, createHash } from "node:crypto";
-import { normalizeAgentPairingCode } from "@beeline/api-contract/phone";
-import { agentBehavior } from "./agent-command.js";
-import { defaultSupervisorRoot, findAgentRuntimeConfigPaths } from "./runtime.js";
-import { runOwned } from "./wait.js";
-import { stopLiveAcpAdapters } from "./acp.js";
-import * as clack from "@clack/prompts";
-import { clackPromptOutput } from "./clack-support.js";
-import { type AgentAccessPolicy, isAgentAccessPolicy } from "./access-policy.js";
-import { verifyProviderKey } from "./provider-key-check.js";
-import { agentComputeWarning } from "./agent-compute-warning.js";
-import { type DevicePairingGrant, completeDevicePairing } from "./device-pairing.js";
-import { isCanonicalInstalledLauncher } from "./systemd.js";
-import { openRouterModelId, resolveOpenRouterRouting, openRouterRoutingCacheDir } from "./openrouter-routing.js";
-import { ConnectWizardResult, DeviceGrantResponse, jsonRequest, ConnectProvider, brass, clackPrompts, collectConnectWizard, loadConnectModelCatalog, fileConnectKeyStore, installCurrentRelease, ConnectPrompts, isReasonableAgentName, AGENT_NAME_MAX_LENGTH, CONNECT_HARNESSES } from './connect-command.js';
-
-
-
-
+import { resolve, dirname } from 'node:path';
+import { homedir, hostname } from 'node:os';
+import { readFile, mkdir, writeFile, chmod, unlink } from 'node:fs/promises';
+import { randomUUID, createHash } from 'node:crypto';
+import { normalizeAgentPairingCode } from '@beeline/api-contract/phone';
+import { agentBehavior } from './agent-command.js';
+import { defaultSupervisorRoot, findAgentRuntimeConfigPaths } from './runtime.js';
+import { runOwned } from './wait.js';
+import { stopLiveAcpAdapters } from './acp.js';
+import * as clack from '@clack/prompts';
+import { clackPromptOutput } from './clack-support.js';
+import { type AgentAccessPolicy, isAgentAccessPolicy } from './access-policy.js';
+import { verifyProviderKey } from './provider-key-check.js';
+import { agentComputeWarning } from './agent-compute-warning.js';
+import { type DevicePairingGrant, completeDevicePairing } from './device-pairing.js';
+import { isCanonicalInstalledLauncher } from './systemd.js';
+import {
+  openRouterModelId,
+  resolveOpenRouterRouting,
+  openRouterRoutingCacheDir,
+} from './openrouter-routing.js';
+import {
+  ConnectWizardResult,
+  DeviceGrantResponse,
+  jsonRequest,
+  ConnectProvider,
+  brass,
+  clackPrompts,
+  collectConnectWizard,
+  loadConnectModelCatalog,
+  fileConnectKeyStore,
+  installCurrentRelease,
+  ConnectPrompts,
+  isReasonableAgentName,
+  AGENT_NAME_MAX_LENGTH,
+  CONNECT_HARNESSES,
+} from './connect-command.js';
 
 /**
  * The kinds `--subscribe` accepts. Parsed here only to keep an obvious typo out
@@ -35,8 +50,6 @@ export function parseConnectSubscriptions(value: string | undefined): string[] {
     ),
   ];
 }
-
-
 
 /**
  * Resolve a stable MACHINE identifier for this host. Uses a persisted UUID in
@@ -69,8 +82,6 @@ export async function readMachineId(
   }
   return { machineId, machineName };
 }
-
-
 
 export function requestConnectGrant(
   baseUrl: string,
@@ -111,8 +122,6 @@ export function requestConnectGrant(
   );
 }
 
-
-
 /**
  * The one rename the terminal may make, right after the seeded identity is
  * printed. The pairing code is the authority and the server closes the window
@@ -133,8 +142,6 @@ export async function renameConnectedAgent(
   );
   return renamed.agent_name;
 }
-
-
 
 /**
  * The wizard's last step: joins the agent to the Workspace's live top-level
@@ -163,14 +170,10 @@ export async function finishConnectedAgentPairing(
   return finished.agent_handle;
 }
 
-
-
 /** `Foxy the fox` — one line naming what to look for in the app. */
 export function seededIdentityLine(grant: { agent_name: string; agent_face?: string }): string {
   return grant.agent_face ? `${grant.agent_name} the ${grant.agent_face}` : grant.agent_name;
 }
-
-
 
 export function providerEnvironment(
   selection: Pick<ConnectWizardResult, 'harness' | 'provider' | 'apiKey' | 'model'>,
@@ -194,15 +197,11 @@ export function providerEnvironment(
   };
 }
 
-
-
 export async function writePrivateJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
-
-
 
 export async function writeProviderEnv(
   selection: ConnectWizardResult,
@@ -224,8 +223,6 @@ export async function writeProviderEnv(
   await chmod(path, 0o600);
   return path;
 }
-
-
 
 /**
  * Run the installed `connect-finish` as an owned child until it exits. Each
@@ -255,8 +252,6 @@ export async function runInstalledFinish(
     : `installed Beeline exited ${result.code}`;
   throw new Error(`${outcome}${diagnostic.trim() ? `: ${diagnostic.trim()}` : ''}`);
 }
-
-
 
 /** What a spinner hands the wait it covers. */
 export interface SpinnerStep {
@@ -310,8 +305,6 @@ export async function brassSpinner<T>(
   }
 }
 
-
-
 export async function runConnectWizard(
   code: string | undefined,
   fetchImpl: typeof fetch,
@@ -332,7 +325,11 @@ export async function runConnectWizard(
     fileConnectKeyStore,
     process.env,
     (input, step) =>
-      verifyProviderKey({ ...input, fetchImpl, ...(step ? { report: step.say, signal: step.signal } : {}) }),
+      verifyProviderKey({
+        ...input,
+        fetchImpl,
+        ...(step ? { report: step.say, signal: step.signal } : {}),
+      }),
   );
   const baseUrl = (process.env.BEELINE_AUTH_URL ?? 'https://server.usebeeline.app').replace(
     /\/$/,
@@ -391,7 +388,11 @@ export async function runConnectWizard(
       () => `Started ${grant.agent_name}`,
     );
     const assignedHandle = await finishConnectedAgentPairing(
-      baseUrl, pairingCode, grant.workspace_joined, eventSubscriptions, fetchImpl,
+      baseUrl,
+      pairingCode,
+      grant.workspace_joined,
+      eventSubscriptions,
+      fetchImpl,
     );
     console.log('');
     console.log(`${brass('Agent')}      ${seededIdentityLine(grant)}`);
@@ -401,27 +402,36 @@ export async function runConnectWizard(
   } catch (error) {
     // Covers every failure after claiming, including local writes and helper
     // startup. The server refuses rollback once this agent has done real work.
-    await jsonRequest(`${baseUrl}/v1/auth/daemon/rollback`, {
-      exchangeToken: claimed.daemon_exchange_token,
-    }, fetchImpl).catch(() => undefined);
+    await jsonRequest(
+      `${baseUrl}/v1/auth/daemon/rollback`,
+      {
+        exchangeToken: claimed.daemon_exchange_token,
+      },
+      fetchImpl,
+    ).catch(() => undefined);
     throw error;
   }
 }
 
-
-
 // After a remote claim, cancellation must unwind through the wizard's rollback.
 // Ordinary setup prompts can still exit directly before anything is registered.
 const connectNamePrompts: Pick<ConnectPrompts, 'select' | 'text'> = {
-  async select<T extends string>(input: { message: string; options: Array<{ value: T; label: string; hint?: string }>; initialValue?: T }) {
+  async select<T extends string>(input: {
+    message: string;
+    options: Array<{ value: T; label: string; hint?: string }>;
+    initialValue?: T;
+  }) {
     clackPromptOutput();
     const result = await clack.select<T>(input as clack.SelectOptions<T>);
     if (clack.isCancel(result)) throw new ConnectFailureError('Connection cancelled.');
     return result;
   },
   async text(input) {
-    const result = await clack.text({ ...input, output: clackPromptOutput(),
-      validate: input.validate ? value => input.validate!(value ?? '') : undefined });
+    const result = await clack.text({
+      ...input,
+      output: clackPromptOutput(),
+      validate: input.validate ? (value) => input.validate!(value ?? '') : undefined,
+    });
     if (clack.isCancel(result)) throw new ConnectFailureError('Connection cancelled.');
     return result;
   },
@@ -474,8 +484,6 @@ export async function confirmSeededName(
   }
 }
 
-
-
 export function isDevicePairingGrant(value: unknown): value is DevicePairingGrant {
   if (!value || typeof value !== 'object') return false;
   const grant = value as Partial<DevicePairingGrant>;
@@ -508,8 +516,6 @@ export function isDevicePairingGrant(value: unknown): value is DevicePairingGran
   );
 }
 
-
-
 /**
  * One plain sentence for a human at the end of a terminal — no stacks, no
  * multi-frame ACP dumps. Keeps the first line of the message and drops any
@@ -524,16 +530,12 @@ export function connectPlainFailure(error: unknown): string {
   return `Connecting your agent failed: ${firstLine ?? 'unknown error'}`;
 }
 
-
-
 export class ConnectFailureError extends Error {
   constructor(sentence: string) {
     super(sentence);
     this.name = 'ConnectFailureError';
   }
 }
-
-
 
 export async function runConnectFinishCommand(path: string | undefined): Promise<void> {
   if (!path) throw new Error('connect-finish requires a grant path');

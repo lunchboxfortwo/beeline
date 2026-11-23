@@ -324,7 +324,9 @@ try {
         baseline = await observe(serving);
         assert.notEqual(baseline.generation, previous);
         // The status JSON is stdout; progress lines go to stderr.
-        const status = JSON.parse((await exec(cli, ['update', '--status'], { env, maxBuffer: 1_000_000 })).stdout);
+        const status = JSON.parse(
+          (await exec(cli, ['update', '--status'], { env, maxBuffer: 1_000_000 })).stdout,
+        );
         assert.equal(status.releaseSelection.lastCheckResult, 'unconfirmed');
       } finally {
         fixture.setPublicationAvailable(true);
@@ -379,13 +381,22 @@ try {
       // Cross the actual admission deadline without shortening the held turn.
       while (Date.now() - began < 305_000) await delay(1000);
       const draining = await observe();
-      assert.equal(draining.generation, baseline.generation, 'routine update must preserve the running helper');
+      assert.equal(
+        draining.generation,
+        baseline.generation,
+        'routine update must preserve the running helper',
+      );
       const queued = await fixture.message('native after-deadline sibling', 1);
       await delay(500);
       const pending = await database.query(
-        'SELECT state FROM agent_commands WHERE turn_request_id=$1', [queued],
+        'SELECT state FROM agent_commands WHERE turn_request_id=$1',
+        [queued],
       );
-      assert.equal(pending.rows[0]?.state, 'pending', 'new wakes wait durably while active work drains');
+      assert.equal(
+        pending.rows[0]?.state,
+        'pending',
+        'new wakes wait durably while active work drains',
+      );
       const successor = observe((s) => serving(s) && s.generation !== draining.generation, 120_000);
       fixture.holdWork(false);
       assert.equal((await fixture.waitReply(heldId, 60_000)).length, 1);

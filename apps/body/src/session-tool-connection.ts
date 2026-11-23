@@ -6,7 +6,9 @@ import { ask } from './wait.js';
 /** The loopback listener may finish starting after the first session opens. */
 export async function sessionToolConnection(): Promise<GrantRunnerEndpoint> {
   if (process.env.BEELINE_GRANT_RUNNER_FILE) {
-    const value = JSON.parse(await readFile(process.env.BEELINE_GRANT_RUNNER_FILE, 'utf8')) as GrantRunnerEndpoint;
+    const value = JSON.parse(
+      await readFile(process.env.BEELINE_GRANT_RUNNER_FILE, 'utf8'),
+    ) as GrantRunnerEndpoint;
     if (value.url && value.token) return value;
   }
   const url = process.env.BEELINE_GRANT_RUNNER_URL;
@@ -28,7 +30,10 @@ export function transportCause(error: unknown): string {
   return message;
 }
 
-async function streamResult(response: Response, output: (line: GrantOutputLine) => void): Promise<{ status: number; body: unknown }> {
+async function streamResult(
+  response: Response,
+  output: (line: GrantOutputLine) => void,
+): Promise<{ status: number; body: unknown }> {
   if (!response.body) throw new Error('Session tool stream has no body');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -42,38 +47,58 @@ async function streamResult(response: Response, output: (line: GrantOutputLine) 
       while ((end = pending.indexOf('\n')) >= 0) {
         const value = JSON.parse(pending.slice(0, end));
         pending = pending.slice(end + 1);
-        if (value.type === 'result' && Number.isInteger(value.status)) return { status: value.status, body: value.value };
-        if (value.type !== 'output' || !['stdout', 'stderr'].includes(value.stream) || typeof value.text !== 'string')
+        if (value.type === 'result' && Number.isInteger(value.status))
+          return { status: value.status, body: value.value };
+        if (
+          value.type !== 'output' ||
+          !['stdout', 'stderr'].includes(value.stream) ||
+          typeof value.text !== 'string'
+        )
           throw new Error('Session tool stream returned an invalid frame');
         output({ stream: value.stream, text: value.text });
       }
     }
-  } finally { await reader.cancel().catch(() => undefined); }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
 }
 
-export async function sessionToolRequest(route: string, input: unknown,
-  output: (line: GrantOutputLine) => void = line => { process.stderr.write(line.text); }): Promise<unknown> {
+export async function sessionToolRequest(
+  route: string,
+  input: unknown,
+  output: (line: GrantOutputLine) => void = (line) => {
+    process.stderr.write(line.text);
+  },
+): Promise<unknown> {
   const endpoint = await sessionToolConnection();
   let status: number;
   let body: { error?: string };
   try {
-    const response = await ask({ url: new URL(route, `${endpoint.url}/`), peer: 'Beeline session tools', machineRead: true }, {
-      method: 'POST', headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
+    const response = await ask(
+      { url: new URL(route, `${endpoint.url}/`), peer: 'Beeline session tools', machineRead: true },
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+    );
     if (response.headers.get('content-type')?.startsWith('application/x-ndjson')) {
       const result = await streamResult(response, output);
       status = result.status;
       body = result.body as { error?: string };
     } else {
       status = response.status;
-      body = await response.json() as { error?: string };
+      body = (await response.json()) as { error?: string };
     }
   } catch (error) {
     if (error instanceof SyntaxError) throw error;
-    throw new Error(`Beeline session tools did not answer ${route.replace(/^\//, '')} ` +
-      `(${transportCause(error)}); the outcome is unknown`, { cause: error });
+    throw new Error(
+      `Beeline session tools did not answer ${route.replace(/^\//, '')} ` +
+        `(${transportCause(error)}); the outcome is unknown`,
+      { cause: error },
+    );
   }
-  if (status < 200 || status >= 300) throw new Error(body.error ?? `Session tool failed (${status})`);
+  if (status < 200 || status >= 300)
+    throw new Error(body.error ?? `Session tool failed (${status})`);
   return body;
 }

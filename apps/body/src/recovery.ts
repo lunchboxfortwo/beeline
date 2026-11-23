@@ -1,7 +1,12 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { askMachine, followHelperExit, helperAbsent, type MachineAnswer } from './machine-control.js';
+import {
+  askMachine,
+  followHelperExit,
+  helperAbsent,
+  type MachineAnswer,
+} from './machine-control.js';
 import {
   convergeNativeHelper,
   nativeHelperStatus,
@@ -36,7 +41,11 @@ export async function prepareMachineRelease(
     BEELINE_LIB_DIR: layout.libDir,
   };
   if (options?.fetchImpl || env.BEELINE_LAB === '1')
-    return withInstallLock(layout, () => prepareLatestRelease(layout, options), 'release preparation');
+    return withInstallLock(
+      layout,
+      () => prepareLatestRelease(layout, options),
+      'release preparation',
+    );
   const stable = resolve(layout.libDir, '../beeline-bootstrap.mjs');
   const entrypoint =
     env.BEELINE_RECOVERY_ENTRY ||
@@ -72,22 +81,28 @@ export async function convergeMachine(
   assertLifecycleTestIsolation(env, Boolean(options.run));
   const layout = options.layout ?? beelineInstallLayout(env) ?? discoveredBeelineInstallLayout(env);
   const stateRoot = env.XDG_STATE_HOME || resolve(env.HOME || '', '.local/state');
-  const current = await askMachine(stateRoot, { operation: 'status' }).catch(
-    error => { if (helperAbsent(error)) return undefined; throw error; },
-  );
+  const current = await askMachine(stateRoot, { operation: 'status' }).catch((error) => {
+    if (helperAbsent(error)) return undefined;
+    throw error;
+  });
   const hasControl = Boolean(current);
   // Repair current-release anchors and forwarders even while its body is live.
   // A different prepared release is handed off by the serving helper.
   if (options.releaseId && (!hasControl || current?.loadedRelease === options.releaseId))
-    await withInstallLock(layout, () => activateRelease(layout, options.releaseId!), 'release activation');
+    await withInstallLock(
+      layout,
+      () => activateRelease(layout, options.releaseId!),
+      'release activation',
+    );
   // A live helper can pick up one paired runtime directly. Avoid rewriting its
   // native service from a potentially older connect bundle.
-  if (!hasControl || !options.agentIds) await convergeNativeHelper({
-    env: { ...env, BEELINE_LIB_DIR: layout.libDir },
-    ...(options.run ? { run: options.run } : {}),
-    // A pre-control helper cannot acknowledge this protocol. Its first forward migration replaces it once.
-    restart: !hasControl,
-  });
+  if (!hasControl || !options.agentIds)
+    await convergeNativeHelper({
+      env: { ...env, BEELINE_LIB_DIR: layout.libDir },
+      ...(options.run ? { run: options.run } : {}),
+      // A pre-control helper cannot acknowledge this protocol. Its first forward migration replaces it once.
+      restart: !hasControl,
+    });
   let status: MachineAnswer;
   if (options.releaseId && hasControl) {
     const answer = await askMachine(stateRoot, {
@@ -100,14 +115,20 @@ export async function convergeMachine(
     // hands off later; it is done only once it already runs the target.
     const legacy = !answer.outcome && answer.loadedRelease !== options.releaseId;
     if (answer.outcome === 'handoff' || legacy) {
-      progress(`helper pid ${answer.pid} is handing off to release ${options.releaseId}; following its exit` +
-        (legacy ? ' (this helper predates one-answer control; Ctrl-C stops waiting, the helper continues)' : ''));
+      progress(
+        `helper pid ${answer.pid} is handing off to release ${options.releaseId}; following its exit` +
+          (legacy
+            ? ' (this helper predates one-answer control; Ctrl-C stops waiting, the helper continues)'
+            : ''),
+      );
       await followHelperExit(stateRoot, answer);
       if (options.run) await options.run(['start', SYSTEMD_HELPER_UNIT_NAME]);
       else await startNativeHelper(env);
       status = await askMachine(stateRoot, { operation: 'status' });
       if (status.generation === answer.generation)
-        throw new Error(`helper pid ${status.pid} did not hand off to release ${options.releaseId}`);
+        throw new Error(
+          `helper pid ${status.pid} did not hand off to release ${options.releaseId}`,
+        );
     } else status = answer;
   } else status = await askMachine(stateRoot, { operation: 'converge' });
   await checkTarget(status, layout, options.releaseId);
@@ -116,11 +137,24 @@ export async function convergeMachine(
 }
 
 /** The selected target, or a strictly newer successor, must be loaded; the predecessor's desire is not execution. */
-async function checkTarget(status: MachineAnswer, layout: BeelineInstallLayout, releaseId?: string): Promise<void> {
+async function checkTarget(
+  status: MachineAnswer,
+  layout: BeelineInstallLayout,
+  releaseId?: string,
+): Promise<void> {
   if (!releaseId || status.loadedRelease === releaseId) return;
-  const target = await readInstalledBundleIdentity({ ...layout, libDir: resolve(layout.releasesRoot, releaseId) });
+  const target = await readInstalledBundleIdentity({
+    ...layout,
+    libDir: resolve(layout.releasesRoot, releaseId),
+  });
   const loaded = status.loadedIdentity?.version;
-  if (target?.version && loaded && target.version !== loaded && versionAtLeast(loaded, target.version)) return;
+  if (
+    target?.version &&
+    loaded &&
+    target.version !== loaded &&
+    versionAtLeast(loaded, target.version)
+  )
+    return;
   throw new Error(
     `helper pid ${status.pid} is serving release ${status.loadedRelease ?? 'unknown'}, not ${releaseId}` +
       (status.lastError ? `; last error: ${status.lastError}` : ''),
@@ -135,13 +169,18 @@ function checkAgents(status: MachineAnswer, stateRoot: string, agentIds?: string
       (required.includes(id) || (!agentIds && agent.enabled !== false)) &&
       (agent.state === 'needs-auth' || agent.state === 'needs-config' || agent.state === 'removed'),
   );
-  const missing = required.filter((id) => !status.agents[id] || status.agents[id]?.enabled === false);
+  const missing = required.filter(
+    (id) => !status.agents[id] || status.agents[id]?.enabled === false,
+  );
   const problems = [
     ...refused.map(([id, agent]) => `agent ${id}: ${agent.status}`),
-    ...missing.map((id) => !status.agents[id] && /^[0-9a-f]{64}$/i.test(id) &&
+    ...missing.map((id) =>
+      !status.agents[id] &&
+      /^[0-9a-f]{64}$/i.test(id) &&
       !existsSync(runtimeConfigPath(stateRoot, id))
-      ? `agent ${id}: removed from this machine`
-      : `agent ${id}: not hosted by helper pid ${status.pid}`),
+        ? `agent ${id}: removed from this machine`
+        : `agent ${id}: not hosted by helper pid ${status.pid}`,
+    ),
   ];
   if (problems.length) throw new Error(problems.join('; '));
 }
@@ -166,29 +205,45 @@ export async function bootstrapMachine(env: NodeJS.ProcessEnv = process.env): Pr
   const active = await activeReleaseId(layout);
   // Consume a staged boot selection once, before activation can fail. If the
   // native launcher returns to the old anchor, it must not retry that selection.
-  if (state.stagedReleaseId) await withInstallLock(layout, async () => {
-    const current = await readUpdateState(layout);
-    if (current.stagedReleaseId === state.stagedReleaseId)
-      await writeUpdateState(layout, { ...current, stagedReleaseId: undefined });
-  }, 'helper boot selection');
+  if (state.stagedReleaseId)
+    await withInstallLock(
+      layout,
+      async () => {
+        const current = await readUpdateState(layout);
+        if (current.stagedReleaseId === state.stagedReleaseId)
+          await writeUpdateState(layout, { ...current, stagedReleaseId: undefined });
+      },
+      'helper boot selection',
+    );
   let releaseId: string | undefined;
   for (const id of [state.stagedReleaseId, active]) {
     if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) continue;
-    const digest = await readFile(resolve(layout.releasesRoot, id, '.stage-ok'), 'utf8').catch(() => '');
-    if (/^[0-9a-f]{64}$/i.test(digest.trim()) &&
-        await resolveBundleEntrypoint(resolve(layout.releasesRoot, id))) {
+    const digest = await readFile(resolve(layout.releasesRoot, id, '.stage-ok'), 'utf8').catch(
+      () => '',
+    );
+    if (
+      /^[0-9a-f]{64}$/i.test(digest.trim()) &&
+      (await resolveBundleEntrypoint(resolve(layout.releasesRoot, id)))
+    ) {
       releaseId = id;
       break;
     }
   }
   if (!releaseId) {
     // Recovery of a missing/broken install still prepares before importing code.
-    releaseId = (await prepareMachineRelease(layout, {
-      env, logger: line => console.error(line),
-    })).releaseId;
+    releaseId = (
+      await prepareMachineRelease(layout, {
+        env,
+        logger: (line) => console.error(line),
+      })
+    ).releaseId;
   }
   if (releaseId !== active)
-    await withInstallLock(layout, () => activateRelease(layout, releaseId!, { deferPruning: true }), 'helper boot activation');
+    await withInstallLock(
+      layout,
+      () => activateRelease(layout, releaseId!, { deferPruning: true }),
+      'helper boot activation',
+    );
   const entry = await resolveBundleEntrypoint(resolve(layout.releasesRoot, releaseId));
   if (!entry) throw new Error(`selected release ${releaseId} has no body entry`);
   return entry;

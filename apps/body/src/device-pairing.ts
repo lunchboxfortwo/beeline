@@ -88,7 +88,7 @@ async function pairDevice(
     launch?: (configPath: string, agentPubkey: string) => Promise<number>;
   } = {},
 ): Promise<DeviceConnectionResult> {
-  return withCallerSignal(async signal => {
+  return withCallerSignal(async (signal) => {
     signal.throwIfAborted();
     const selectedAgent =
       options.selectedAgent ??

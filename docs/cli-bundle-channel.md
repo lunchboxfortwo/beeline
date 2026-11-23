@@ -183,7 +183,8 @@ forward migration, both installed `beeline update`/`beeline start` and npx selec
 the current release, ensure the native helper is running, and wait for a live process-generation acknowledgment. Update completes when
 that helper runs the selected release (or a strictly newer release), and prints
 a timestamped state and diagnostic for each hosted agent. Agent readiness does
-not gate update. Start still waits for every enabled agent to serve. `update` preserves stopped agents; `start --all`
+not gate either command; start reports current agent states and fails on an explicit
+refusal or an unhosted requested agent. `update` preserves stopped agents; `start --all`
 or `start --agent <key>` explicitly re-enables them. `update --status` is a local,
 read-only observation; `--check` checks only the published artifact.
 
@@ -197,16 +198,17 @@ helper repair still runs. Equal versions still verify content, and --force stage
 a separate repair release. Obsolete staging is cleared only when it still matches
 the attempt holding the install lock.
 
-Every wait goes through `apps/body/src/wait.ts` (strict architecture rule
-`helper.waits`): a command waits only for the answer to its own request or the exit
-of a child it owns. The helper answers each control request once: `update` is
+The [helper wait boundary](architecture/README.md#architecture-invariants) owns the
+shared wait primitives and migration ratchet. The helper answers each control request once: `update` is
 answered when the handoff starts (or with the refusal), and the CLI then follows
-the old helper's kernel lock to its exit, runs the blocking native start job, and
-reads the successor's status once. `start` and `update` report each agent as the
+the old helper's kernel lock to its exit, runs the native start/status command, and
+reads the successor's status once. systemd start completes on native READY;
+launchd print reports its current job without asserting readiness. `start` and `update` report each agent as the
 helper answered; nothing waits for agents to serve. Locks never queue: a busy lock
 fails at once naming its holder's pid and step. Preparation, dependency and native
 convergence workers are owned children: their output streams to the CLI, and they
-die with it (one process group per owned tree). Adapter installation streams npm
+die with it. Non-interactive children have separate process groups; interactive
+children keep the terminal's foreground group so the TTY and Ctrl-C reach them. Adapter installation streams npm
 with `--loglevel=http`. Dependencies converge using the selected bundle before this
 invocation requests successor startup. Downloads report cumulative bytes; there is
 no own inactivity timer or command-wide deadline, so a silent server ends only on
@@ -219,11 +221,11 @@ policy, homes and sessions. Revoked or unrecognized identities show `needs
 reconnect`; other agents continue serving.
 
 One release transaction prepares in a private worker while intake stays open.
-It hands over at a quiet gap. Preparation and handoff each use the same
-three-minute timeout, disarmed while waiting for idle. A prepared release stays
-staged throughout busy periods and boots on the next restart if no quiet gap
-arrives. `beeline update --force` hands off while busy, journaling interrupted
-commands through the same path as a server minimum. If an operation cannot finish, Beeline cancels it,
+It hands over as soon as verified preparation finishes, without waiting for a
+quiet gap or pausing admission. Queued and in-flight commands remain on the
+server for the successor. Server minimums and `beeline update --force` journal
+interrupted commands immediately before handoff. Preparation and handoff have
+no application deadline. On explicit preparation or handoff failure, Beeline
 records the failure in local helper status and keeps the current release
 serving; it does not schedule a retry. A later explicit release notification
 or update request can start a new attempt. Pending wakes stay on the server
@@ -274,7 +276,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 - **`<prefix>/lib/beeline` is the active bundle anchor**, a symlink into `lib/beeline-releases/<id>` swung by rename(2) (`self-update.ts`). Never suggest `npx beeline` (an unrelated package); recovery is `npx usebeeline update`.
 - **Update restarts are silent and exit directly.** `runMachineHelper` closes the machine link with `HELPER_UPDATE_CLOSE_CODE`/`HELPER_UPDATE_CLOSE_REASON`, then exits synchronously without awaiting agent teardown; `DaemonAgentSession` releases presence without an offline notice only for that signal. Unexpected loss still notices the owner (`machine-offline.test.ts`, `daemon-live.test.ts`, `machine-update-handoff.test.ts`). Release delivery wakes helpers (`release-notify.ts`); reporting-agent notices follow the [feedback loop](feedback-loop.md#agent-reports-told-when-the-fix-ships).
 - **Linux handovers use a fixed one-second native restart delay.** `native-helper.ts` renders no escalating restart steps. The running helper refreshes the installed unit with `daemon-reload`, without restarting the service. `recovery.startup.test.ts` proves verified staged/active boot makes no publication request; `systemd.test.ts` covers unit convergence.
-- **Routine release notices preserve active turns.** `ReleaseNotifier` pushes published helper releases; `MachineLink` reconciles the manifest once after first registration, with no periodic check. `ReleaseTransaction` dispatches preparation and waits for an idle event without pausing admission or discarding the staged boot selection. Its single three-minute timeout bounds preparation and handoff separately, never idle waiting. Server minimums and explicit forced updates journal and interrupt immediately before the verified handoff. Late asynchronous completions cannot restart the helper after cancellation (`managed-update.startup.test.ts`, `machine-update-handoff.test.ts`, `agent-runtime.startup.test.ts`). Installation remains checksum verification plus atomic activation.
+- **Release notices use the shared update transaction.** `ReleaseNotifier` pushes published helper releases; `MachineLink` reconciles the manifest once after first registration, with no periodic check. See [recovery and update completion](#recovery-and-the-first-update-from-an-old-release) for preparation, handoff and failure behavior. Regression coverage: `managed-update.startup.test.ts`, `machine-update-handoff.test.ts`, `agent-runtime.startup.test.ts`.
 - `unified-release.yml` builds Linux and Mac bundles in parallel; `.github/actions/daemon-leg/` collects and promotes their verified outputs; `launchd.ts` supervises macOS (no bwrap). `https://usebeeline.app/dl/manifest.json` stays pinned; runbook `docs/cli-bundle-channel.md`.
 
 ### Installed bundle retention
@@ -290,6 +292,4 @@ later installs use the recorded previous version. Historical release symlinks
 are unlinked without following their targets. Regression coverage:
 `storage-bloat.regression.test.ts` and `self-update-layout.test.ts`.
 
-### Joined-session sign-in expiry residual
-
-The server does not yet end a held OAuth handoff when its row reaches `expires_at` without another committed change. The client uses the transport's own read failure, releases the finisher lock when that call ends, and preserves a ceremony while its finisher still owns it. Repeating join does not kill that finisher based on elapsed time. Server-owned expiry remains follow-up work; no server timer is added here.
+Joined-session sign-in expiry is documented in the [join protocol](session-join.md#server).

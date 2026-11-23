@@ -203,9 +203,10 @@ export function parseOpenRouterEndpoints(payload: unknown): {
     const supported = Array.isArray(endpoint.supported_parameters)
       ? endpoint.supported_parameters
       : [];
-    const pricing = endpoint.pricing && typeof endpoint.pricing === 'object'
-      ? endpoint.pricing as Record<string, unknown>
-      : {};
+    const pricing =
+      endpoint.pricing && typeof endpoint.pricing === 'object'
+        ? (endpoint.pricing as Record<string, unknown>)
+        : {};
     const promptPrice = tokenPrice(pricing.prompt);
     const cacheReadPrice = tokenPrice(pricing.input_cache_read);
     endpoints.push({
@@ -214,7 +215,9 @@ export function parseOpenRouterEndpoints(payload: unknown): {
       contextLength,
       maxCompletionTokens,
       tools: supported.includes('tools'),
-      ...(typeof endpoint.provider_name === 'string' ? { providerName: endpoint.provider_name } : {}),
+      ...(typeof endpoint.provider_name === 'string'
+        ? { providerName: endpoint.provider_name }
+        : {}),
       ...(promptPrice === undefined ? {} : { promptPrice }),
       ...(cacheReadPrice === undefined ? {} : { cacheReadPrice }),
       discountedCacheRead:
@@ -255,24 +258,48 @@ export function rankOpenRouterProviders(
   traffic: readonly OpenRouterProviderTraffic[],
   answered: readonly string[],
 ): OpenRouterProviderCost[] {
-  const shares = traffic.filter((row) => row.promptTokens > 0).map((row) => row.cacheShare).sort((a, b) => a - b);
+  const shares = traffic
+    .filter((row) => row.promptTokens > 0)
+    .map((row) => row.cacheShare)
+    .sort((a, b) => a - b);
   const middle = Math.floor(shares.length / 2);
   // With no observations, assume a cold prompt rather than inventing savings.
-  const medianShare = shares.length ? (shares[middle]! + shares[Math.floor((shares.length - 1) / 2)]!) / 2 : 0;
+  const medianShare = shares.length
+    ? (shares[middle]! + shares[Math.floor((shares.length - 1) / 2)]!) / 2
+    : 0;
   const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
   const ranked = new Map<string, OpenRouterProviderCost>();
   for (const endpoint of endpoints) {
-    if (!endpoint.tools || endpoint.uptime < OPENROUTER_UPTIME_BAR_RELAXED ||
-        (contextLength !== undefined && endpoint.contextLength < contextLength) ||
-        !answered.includes(endpoint.provider) || endpoint.promptPrice === undefined) continue;
-    const measured = traffic.find((row) => normalize(row.provider) === normalize(endpoint.providerName ?? endpoint.provider));
+    if (
+      !endpoint.tools ||
+      endpoint.uptime < OPENROUTER_UPTIME_BAR_RELAXED ||
+      (contextLength !== undefined && endpoint.contextLength < contextLength) ||
+      !answered.includes(endpoint.provider) ||
+      endpoint.promptPrice === undefined
+    )
+      continue;
+    const measured = traffic.find(
+      (row) => normalize(row.provider) === normalize(endpoint.providerName ?? endpoint.provider),
+    );
     const cacheShare = measured?.cacheShare ?? medianShare;
-    const effectiveInputPrice = endpoint.promptPrice * (1 - cacheShare) +
+    const effectiveInputPrice =
+      endpoint.promptPrice * (1 - cacheShare) +
       (endpoint.cacheReadPrice ?? endpoint.promptPrice) * cacheShare;
-    const row = { provider: endpoint.provider, cacheShare, measuredCalls: measured?.calls ?? 0, effectiveInputPrice };
-    if (!ranked.has(row.provider) || effectiveInputPrice < ranked.get(row.provider)!.effectiveInputPrice) ranked.set(row.provider, row);
+    const row = {
+      provider: endpoint.provider,
+      cacheShare,
+      measuredCalls: measured?.calls ?? 0,
+      effectiveInputPrice,
+    };
+    if (
+      !ranked.has(row.provider) ||
+      effectiveInputPrice < ranked.get(row.provider)!.effectiveInputPrice
+    )
+      ranked.set(row.provider, row);
   }
-  return [...ranked.values()].sort((a, b) => a.effectiveInputPrice - b.effectiveInputPrice || a.provider.localeCompare(b.provider));
+  return [...ranked.values()].sort(
+    (a, b) => a.effectiveInputPrice - b.effectiveInputPrice || a.provider.localeCompare(b.provider),
+  );
 }
 
 /** Missing/blank prices must not become zero through Number(null) or Number(''). */
@@ -593,7 +620,8 @@ function decision(
   const criteria = bar === null ? 'fallback pair' : `uptime ≥${bar}%, tools`;
   const suffix = [
     bar === OPENROUTER_UPTIME_BAR_RELAXED && !note?.startsWith('daily')
-      ? 'bar lowered: reliability fallback or cache continuity' : '',
+      ? 'bar lowered: reliability fallback or cache continuity'
+      : '',
     source === 'cache' ? 'cached' : '',
     source === 'stale-cache' ? 'stale cache' : '',
     note ?? '',
@@ -766,83 +794,181 @@ function dailyCachePath(input: ResolveOpenRouterRoutingInput): string {
   return resolve(input.cacheDir, `${input.model.replace(/[^A-Za-z0-9._-]+/g, '_')}.daily.json`);
 }
 
-async function readDailyRouting(input: ResolveOpenRouterRoutingInput): Promise<DailyRouting | undefined> {
+async function readDailyRouting(
+  input: ResolveOpenRouterRoutingInput,
+): Promise<DailyRouting | undefined> {
   try {
     const row = JSON.parse(await readFile(dailyCachePath(input), 'utf8')) as DailyRouting;
-    if (row.policy !== 'cost-daily-v1' || row.model !== input.model || !Number.isFinite(row.fetchedAt) ||
-        !Array.isArray(row.providers) || !row.providers.length || row.providers.length > 3 ||
-        !row.providers.every((provider) => typeof provider === 'string' && provider.length > 0) ||
-        !Array.isArray(row.ranking) || !row.ranking.every((entry) => entry &&
-          typeof entry.provider === 'string' && Number.isFinite(entry.effectiveInputPrice) && entry.effectiveInputPrice >= 0 &&
-          Number.isFinite(entry.cacheShare) && entry.cacheShare >= 0 && entry.cacheShare <= 1) ||
-        !row.providers.every((provider) => row.ranking.some((entry) => entry.provider === provider))) return undefined;
-    return { policy: 'cost-daily-v1', model: row.model, fetchedAt: row.fetchedAt, providers: row.providers, ranking: row.ranking,
-      ...(Array.isArray(row.input) ? { input: row.input.filter((value) => value === 'text' || value === 'image') } : {}),
-      ...(cachedLimits(row.limits) ? { limits: cachedLimits(row.limits) } : {}) };
-  } catch { return undefined; }
+    if (
+      row.policy !== 'cost-daily-v1' ||
+      row.model !== input.model ||
+      !Number.isFinite(row.fetchedAt) ||
+      !Array.isArray(row.providers) ||
+      !row.providers.length ||
+      row.providers.length > 3 ||
+      !row.providers.every((provider) => typeof provider === 'string' && provider.length > 0) ||
+      !Array.isArray(row.ranking) ||
+      !row.ranking.every(
+        (entry) =>
+          entry &&
+          typeof entry.provider === 'string' &&
+          Number.isFinite(entry.effectiveInputPrice) &&
+          entry.effectiveInputPrice >= 0 &&
+          Number.isFinite(entry.cacheShare) &&
+          entry.cacheShare >= 0 &&
+          entry.cacheShare <= 1,
+      ) ||
+      !row.providers.every((provider) => row.ranking.some((entry) => entry.provider === provider))
+    )
+      return undefined;
+    return {
+      policy: 'cost-daily-v1',
+      model: row.model,
+      fetchedAt: row.fetchedAt,
+      providers: row.providers,
+      ranking: row.ranking,
+      ...(Array.isArray(row.input)
+        ? { input: row.input.filter((value) => value === 'text' || value === 'image') }
+        : {}),
+      ...(cachedLimits(row.limits) ? { limits: cachedLimits(row.limits) } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
-function dailyDecision(row: DailyRouting, source: OpenRouterRoutingSource): OpenRouterRoutingDecision {
-  return decision(row.model, row.providers, OPENROUTER_UPTIME_BAR_RELAXED, source,
-    'daily effective input cost; seven-day cache shares; answer-probed', true, row.input, row.limits);
+function dailyDecision(
+  row: DailyRouting,
+  source: OpenRouterRoutingSource,
+): OpenRouterRoutingDecision {
+  return decision(
+    row.model,
+    row.providers,
+    OPENROUTER_UPTIME_BAR_RELAXED,
+    source,
+    'daily effective input cost; seven-day cache shares; answer-probed',
+    true,
+    row.input,
+    row.limits,
+  );
 }
 
 /** A cold agent qualifies once; expired decisions refresh in the background for new activations. */
 async function buildDailyRouting(input: ResolveOpenRouterRoutingInput): Promise<DailyRouting> {
   const now = input.now ?? Date.now;
-  const response = await (input.fetchImpl ?? fetch)(`${OPENROUTER_ENDPOINTS_BASE_URL}/${input.model}/endpoints`, {
-    signal: undefined,
-  });
+  const response = await (input.fetchImpl ?? fetch)(
+    `${OPENROUTER_ENDPOINTS_BASE_URL}/${input.model}/endpoints`,
+    {
+      signal: undefined,
+    },
+  );
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const { endpoints, contextLength, inputModalities } = parseOpenRouterEndpoints(await response.json());
-  const eligible = [...new Set(endpoints.filter((endpoint) => endpoint.tools &&
-    endpoint.uptime >= OPENROUTER_UPTIME_BAR_RELAXED && endpoint.promptPrice !== undefined &&
-    (contextLength === undefined || endpoint.contextLength >= contextLength)).map((endpoint) => endpoint.provider))];
+  const { endpoints, contextLength, inputModalities } = parseOpenRouterEndpoints(
+    await response.json(),
+  );
+  const eligible = [
+    ...new Set(
+      endpoints
+        .filter(
+          (endpoint) =>
+            endpoint.tools &&
+            endpoint.uptime >= OPENROUTER_UPTIME_BAR_RELAXED &&
+            endpoint.promptPrice !== undefined &&
+            (contextLength === undefined || endpoint.contextLength >= contextLength),
+        )
+        .map((endpoint) => endpoint.provider),
+    ),
+  ];
   if (!eligible.length) throw new Error('no priced provider met the tools/context/95% gate');
   const [traffic, probes] = await Promise.all([
-    readOpenRouterTraffic({ model: input.model, cacheDir: input.cacheDir,
+    readOpenRouterTraffic({
+      model: input.model,
+      cacheDir: input.cacheDir,
       ...(input.historyRoomsDir ? { roomsDir: input.historyRoomsDir } : {}),
-      apiKey: input.apiKey!, now: now(), fetchImpl: input.fetchImpl }),
-    probeOpenRouterProviders({ model: input.model, providers: eligible, apiKey: input.apiKey!,
-      fetchImpl: input.fetchImpl, now: input.now,
+      apiKey: input.apiKey!,
+      now: now(),
+      fetchImpl: input.fetchImpl,
+    }),
+    probeOpenRouterProviders({
+      model: input.model,
+      providers: eligible,
+      apiKey: input.apiKey!,
+      fetchImpl: input.fetchImpl,
+      now: input.now,
       // Gate every eligible provider once per day, rather than using the old
       // uptime-first six as a proxy for the cheapest qualified set.
-      maxCandidates: input.probeMaxCandidates ?? eligible.length }),
+      maxCandidates: input.probeMaxCandidates ?? eligible.length,
+    }),
   ]);
-  const ranking = rankOpenRouterProviders(endpoints, contextLength, traffic,
-    probes.filter((probe) => probe.answered).map((probe) => probe.provider));
+  const ranking = rankOpenRouterProviders(
+    endpoints,
+    contextLength,
+    traffic,
+    probes.filter((probe) => probe.answered).map((probe) => probe.provider),
+  );
   if (!ranking.length) throw new Error('no eligible provider answered the text probe');
   const providers = ranking.slice(0, 3).map((row) => row.provider);
-  const row: DailyRouting = { policy: 'cost-daily-v1', model: input.model, fetchedAt: now(), providers, ranking,
-    input: piInputModalities(inputModalities), limits: openRouterModelLimits(endpoints, providers) };
-  await writePrivateFileAtomically(dailyCachePath(input), `${JSON.stringify(row, null, 2)}\n`).catch(() => undefined);
+  const row: DailyRouting = {
+    policy: 'cost-daily-v1',
+    model: input.model,
+    fetchedAt: now(),
+    providers,
+    ranking,
+    input: piInputModalities(inputModalities),
+    limits: openRouterModelLimits(endpoints, providers),
+  };
+  await writePrivateFileAtomically(
+    dailyCachePath(input),
+    `${JSON.stringify(row, null, 2)}\n`,
+  ).catch(() => undefined);
   return row;
 }
 
 // Keep completed attempts too: an unreachable API or unwritable disk must not
 // turn the daily ranking into a per-activation retry/purchase loop.
-const dailyAttempts = new Map<string, { startedAt: number; result: Promise<OpenRouterRoutingDecision> }>();
+const dailyAttempts = new Map<
+  string,
+  { startedAt: number; result: Promise<OpenRouterRoutingDecision> }
+>();
 
-export async function resolveOpenRouterRouting(input: ResolveOpenRouterRoutingInput): Promise<OpenRouterRoutingDecision> {
+export async function resolveOpenRouterRouting(
+  input: ResolveOpenRouterRoutingInput,
+): Promise<OpenRouterRoutingDecision> {
   const cached = await readDailyRouting(input);
   const override = input.providerOverride?.trim();
   if (override) {
     const base = cached ? dailyDecision(cached, 'cache') : await resolveUptimeRouting(input);
-    return decision(input.model, [override], base.bar, base.source,
-      'pinned to one provider after an empty completion', false, base.input, base.limits);
+    return decision(
+      input.model,
+      [override],
+      base.bar,
+      base.source,
+      'pinned to one provider after an empty completion',
+      false,
+      base.input,
+      base.limits,
+    );
   }
   // Without a credential we cannot buy the answer probe or read account
   // generations. Preserve the legacy reliability fallback for standalone use.
   if (!input.apiKey?.trim()) return resolveUptimeRouting(input);
   const now = input.now ?? Date.now;
-  if (cached && now() - cached.fetchedAt < OPENROUTER_ROUTING_CACHE_TTL_MS) return dailyDecision(cached, 'cache');
+  if (cached && now() - cached.fetchedAt < OPENROUTER_ROUTING_CACHE_TTL_MS)
+    return dailyDecision(cached, 'cache');
   const key = `${input.cacheDir}\u0000${input.model}`;
   let attempt = dailyAttempts.get(key);
   if (!attempt || now() - attempt.startedAt >= OPENROUTER_ROUTING_CACHE_TTL_MS) {
-    const result = buildDailyRouting(input).then((row) => dailyDecision(row, 'live')).catch(async (error) => {
-      const base = cached ? dailyDecision(cached, 'stale-cache') : await resolveUptimeRouting(input);
-      return { ...base, line: `${base.line}; daily ranking unavailable: ${error instanceof Error ? error.message : String(error)}` };
-    });
+    const result = buildDailyRouting(input)
+      .then((row) => dailyDecision(row, 'live'))
+      .catch(async (error) => {
+        const base = cached
+          ? dailyDecision(cached, 'stale-cache')
+          : await resolveUptimeRouting(input);
+        return {
+          ...base,
+          line: `${base.line}; daily ranking unavailable: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      });
     attempt = { startedAt: now(), result };
     dailyAttempts.set(key, attempt);
   }
@@ -961,7 +1087,9 @@ export function openRouterRoutingInput(
     openRouterRouting: {
       model,
       cacheDir: config.openRouterRoutingCacheDir,
-      ...(apiKey ? { apiKey, historyRoomsDir: resolve(config.openRouterRoutingCacheDir, '../rooms') } : {}),
+      ...(apiKey
+        ? { apiKey, historyRoomsDir: resolve(config.openRouterRoutingCacheDir, '../rooms') }
+        : {}),
       ...(fetchImpl ? { fetchImpl } : {}),
       ...(extra?.providerOverride ? { providerOverride: extra.providerOverride } : {}),
       ...(extra?.onDecision ? { onDecision: extra.onDecision } : {}),
