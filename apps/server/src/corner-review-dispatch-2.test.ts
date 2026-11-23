@@ -14,7 +14,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('requests review after a new green event despite a historical verdict or brief change', async () => {
+  it('requests review after a new green event despite a historical verdict, keyed to the current brief', async () => {
     const head = 'f'.repeat(40);
     /** A check verdict on `head`, as the GitHub webhook writes it. */
     const verdict = async (kind: 'check-passed' | 'rerun') => {
@@ -48,7 +48,7 @@ describe('corner message attribution', () => {
     expect(repeated).toBe(1);
     const [pending] = await commands(B, C);
     expect(pending?.id).not.toBe(review!.id);
-    // A revised brief cannot drop an older unanswered request.
+    // A revised brief replaces the unstarted request made under revision 1.
     await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
       VALUES($1,2,'Brief','Brief with the waiver',$2,$3)`, [C, A, R]);
     await verdict('rerun');
@@ -58,12 +58,15 @@ describe('corner message attribution', () => {
       [C, B],
     )).rows;
     console.info(
-      `Reproduction review-redeliver: brief revision on verdicted head; wrong=1 repeat review wake; right=0; observed=${afterBrief.length}`,
+      `Reproduction review-redeliver: brief revision on a pending head review; replacement wakes keyed to revision 2=${afterBrief.length}`,
     );
-    expect((await commands(B,C)).some(item=>item.id===pending!.id)).toBe(true);
+    expect(afterBrief).toHaveLength(1);
+    expect((await commands(B,C)).some(item=>item.id===pending!.id)).toBe(false);
     await verdict('rerun');
     const [current]=await commands(B,C);
     expect(current?.reason).toBe('corner_review_dispatch');
+    expect((await rootFixture.db.query(`SELECT review_context->>'briefRevision' revision FROM agent_commands WHERE id=$1`,
+      [current!.id])).rows[0]).toEqual({ revision: '2' });
     expect(current?.source.body).not.toMatch(/brief revision/i);
   });
 

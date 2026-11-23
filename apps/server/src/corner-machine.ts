@@ -199,7 +199,7 @@ export function transitionCorner(
     !f.approved &&
     !exhausted &&
     !(f.reviewRequestActive ?? f.reviewerActive) &&
-    ((sameTarget && current.reviewDue) || event.kind === 'checks')
+    ((sameTarget && current.reviewDue) || event.kind === 'checks' || event.kind === 'brief-revised')
   )
     base.reviewDue = true;
   if (
@@ -232,7 +232,7 @@ export function transitionCorner(
       !(f.implementerActive ?? f.turnRunning) &&
       !(f.reviewRequestActive ?? f.reviewerActive) &&
       !exhausted &&
-      !wakes.some((effect) => effect.kind === 'review-findings') &&
+      !wakes.some((effect) => effect.kind === 'review-findings' || effect.kind === 'revision') &&
       (base.reviewDue || !f.reviewRequests)
     ) {
       if (f.reviewerConfigured)

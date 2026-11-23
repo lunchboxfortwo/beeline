@@ -838,6 +838,52 @@ describe('thread message attribution', () => {
   });
 
 
+  it('Reproduction STALE-5: a brief revision replaces an unstarted review wake on the same head', async () => {
+    await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+    const head = '6'.repeat(40);
+    await greenHead(45, head);
+    const [queued] = await commands(B, C);
+    expect(queued?.reason).toBe('corner_review_dispatch');
+    const parent = (await createAgentCommand(rootFixture.db, { roomId: R, agentId: A, sourceMessageId: null, reason: 'order',
+      privatePayload: { kind: 'order', authorId: H, fromRoomId: R, text: 'Revise the brief.' } }))!;
+    const line = await systemLine(rootFixture.db, { roomId: C, subject: { kind: 'person', id: H, name: 'Ada' },
+      verb: 'revised the thread brief', object: { text: 'Revision 1', id: C } });
+    await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
+      VALUES($1,1,'Brief','Brief at 1',$2,$3)`, [C, H, R]);
+    await advanceCorner(rootFixture.db, C, { kind: 'brief-revised', revision: 1, sourceMessageId: line.id, command: parent });
+    const stale = (await commands(B, C)).filter(command => command.id === queued!.id);
+    console.info(`Reproduction STALE-5: review wakes for an older brief revision delivered=${stale.length}; wrong=1 right=0`);
+    expect(stale).toEqual([]);
+    // The implementer takes the revision first; the review follows on revision 1.
+    for (const work of await commands(A, C)) { await claim(work); await result(work, 'Read revision 1; no change needed.'); }
+    for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    const current = await commands(B, C);
+    expect(current).toHaveLength(1);
+    expect(current[0]?.reason).toBe('corner_review_dispatch');
+    expect((await rootFixture.db.query(`SELECT review_context->>'briefRevision' revision,review_context->>'headSha' head
+      FROM agent_commands WHERE id=$1`, [current[0]!.id])).rows[0]).toEqual({ revision: '1', head });
+  });
+
+
+  it('Reproduction STALE-6: drops an unstarted review wake once its head gets FAIL findings', async () => {
+    await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+    const head = '7'.repeat(40);
+    await greenHead(46, head);
+    const [queued] = await commands(B, C);
+    // Another review request for the same head and revision answers FAIL first.
+    const other = (await createAgentCommand(rootFixture.db, { roomId: C, agentId: B, sourceMessageId: null, reason: 'order',
+      privatePayload: { kind: 'order', authorId: H, fromRoomId: C, text: 'Review this head now.' } }))!;
+    await rootFixture.db.query(`UPDATE agent_commands SET review_context=(SELECT review_context FROM agent_commands WHERE id=$2)
+      WHERE id=$1`, [other.id, queued!.id]);
+    const answered = (await commands(B, C)).find(command => command.id === other.id)!;
+    await claim(answered);
+    await result(answered, 'FAIL: attach the demonstration.');
+    const stale = (await commands(B, C)).filter(command => command.id === queued!.id);
+    console.info(`Reproduction STALE-6: review wakes for a head with FAIL findings delivered=${stale.length}; wrong=1 right=0`);
+    expect(stale).toEqual([]);
+  });
+
+
   it('Reproduction STALE-3: drops an undelivered review wake when the head moves', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     const headA = '3'.repeat(40), headB = '4'.repeat(40);

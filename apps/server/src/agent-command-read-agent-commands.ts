@@ -8,6 +8,8 @@ import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } fr
 import { advanceCorner } from './corner-lifecycle.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
 import { currentIdleReportSql } from './corner-idle.js';
+import { REVIEW_FINDINGS_PATTERN,reviewVerdictSql } from './corner-lifecycle-review-state.js';
+import { greenReviewRequestSql } from './corner-lifecycle-values.js';
 import type { SqlDatabase } from './database.js';
 import { savedScheduleCommand } from './scheduled-command-authority.js';
 
@@ -49,20 +51,31 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
      ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
  }
 
-/** A pending automatic review wake whose turn never started, for a head that
- * is no longer the thread head or already has the reviewer's PASS. */
+/** A pending automatic review wake whose turn never started, for a head, PR or
+ * brief revision that is no longer the thread's, for a head with the reviewer's
+ * PASS, or for a head and revision given FAIL findings after it was queued. */
 export function staleReviewWakeSql(item: string): string {
   const corner = `COALESCE((${item}.review_context->>'cornerId')::uuid,${item}.room_id)`;
   const pr = `${cornerLifecycleSql(corner)}->'pr'`;
+  const pattern = `'${REVIEW_FINDINGS_PATTERN.replaceAll("'", "''")}'`;
   return `(${item}.reason IN ('corner_review_dispatch','subscribed_event')
     AND ${item}.review_context->>'headSha' IS NOT NULL AND ${item}.review_context->>'purpose' IS NULL
     AND NOT EXISTS(SELECT 1 FROM agent_turns started WHERE started.agent_id=${item}.agent_id
       AND started.request_id=${item}.turn_request_id)
     AND (${item}.review_context->>'headSha' IS DISTINCT FROM ${pr}->>'headSha'
       OR ${item}.review_context->'pullRequest' IS DISTINCT FROM ${pr}->'number'
+      OR (${item}.review_context->>'briefRevision')::int IS DISTINCT FROM
+        COALESCE((SELECT max(revision) FROM corner_brief_revisions WHERE corner_id=${corner}),0)
       OR EXISTS(SELECT 1 FROM corner_merge_approvals approval WHERE approval.corner_id=${corner}
         AND approval.head_sha=${item}.review_context->>'headSha'
-        AND approval.pull_request_number=(${item}.review_context->>'pullRequest')::int)))`;
+        AND approval.pull_request_number=(${item}.review_context->>'pullRequest')::int)
+      OR EXISTS(SELECT 1 FROM agent_commands reviewed CROSS JOIN LATERAL ${reviewVerdictSql('reviewed', pattern)} verdict
+        WHERE reviewed.room_id=${item}.room_id AND reviewed.agent_id=${item}.agent_id AND reviewed.id<>${item}.id
+          AND reviewed.state='complete' AND reviewed.completed_at>${item}.created_at
+          AND ${greenReviewRequestSql('reviewed')}
+          AND reviewed.review_context->>'headSha'=${item}.review_context->>'headSha'
+          AND reviewed.review_context->'pullRequest'=${item}.review_context->'pullRequest'
+          AND reviewed.review_context->'briefRevision'=${item}.review_context->'briefRevision')))`;
 }
 
 /** Every current pending item in one agent's queue, in append order.
