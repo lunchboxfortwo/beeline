@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { SYSTEM_IDENTITY_PUBKEY } from './system-identity';
-import { foldPillRuns, isPillMessage, isSystemLine, stopNotice } from './transcript-pills';
+import { foldPillRuns, isGitHubEventRun, isPillMessage, isSystemLine, stopNotice } from './transcript-pills';
+import { foldPrLifecycleRuns } from './pr-lifecycle';
 import { ledgerSpeakerKey } from './ledger-attribution';
 import { transcriptBylineOpeners } from './message-dates';
 
@@ -84,13 +85,39 @@ describe('transcript pills', () => {
     expect(rows[2]!.pillRun).toBeUndefined();
   });
 
-  it('keeps a lifecycle disclosure separate from adjacent avatar pills', () => {
-    const lifecycle = row('merges', { isSystemNotice: true,
-      notificationLifecycleRun: { items: [], subline: '' }, foldedIds: ['merge1', 'merge2'] });
-    const rows = foldPillRuns([say('before'), lifecycle, say('after')]);
-    expect(rows.map(message => message.id)).toEqual(['before', 'merges', 'after']);
-    expect(rows[1]!.pillRun).toBeUndefined();
-    expect(rows[1]!.foldedIds).toEqual(['merge1', 'merge2']);
+  const merged = (id: string, number: number) => row(id, { isSystemNotice: true, text: `Merged ${number}`,
+    systemEvent: { subject: { kind: 'github', name: 'GitHub' }, verb: 'merged pull request',
+      object: { text: `Change ${number}`, url: `https://github.com/o/r/pull/${number}` } } });
+  const paid = (id: string) => row(id, { walletTx: { direction: 'out', amountText: '$1', counterparty: 'x', chain: 'base',
+    balanceAfterUsd: '$9', txUrl: 'https://example.com/tx' } as never });
+  const fold = (messages: ChatDisplayMessage[]) => foldPillRuns(foldPrLifecycleRuns(messages));
+  const runIds = (rows: ChatDisplayMessage[]) => rows.map(message => [message.id, message.pillRun?.map(entry => entry.id) ?? null]);
+
+  it('folds GitHub events with the agent messages around them into one pill run that keeps every id', () => {
+    // Events between messages: one run, with no lifecycle row left between the pills.
+    const between = fold([say('m1'), merged('e1', 1), merged('e2', 2), say('m2')]);
+    expect(runIds(between)).toEqual([['m1', ['m1', 'e1', 'm2']]]);
+    expect(between[0]!.foldedIds).toEqual(['m1', 'e1', 'e2', 'm2']);
+    expect(between[0]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['m1', 'e1', 'e2', 'm2']);
+    expect(between[0]!.pillRun![1]!.notificationLifecycleRun?.items.map(item => item.id)).toEqual(['e1', 'e2']);
+    // Events first, and events last.
+    expect(runIds(fold([merged('e1', 1), say('m1'), say('m2')]))).toEqual([['e1', ['e1', 'm1', 'm2']]]);
+    expect(runIds(fold([say('m1'), merged('e1', 1)]))).toEqual([['m1', ['m1', 'e1']]]);
+    // Events only: one lifecycle row, drawn as a pill.
+    const only = fold([merged('e1', 1), merged('e2', 2)]);
+    expect(runIds(only)).toEqual([['e1', null]]);
+    expect(isPillMessage(only[0]!)).toBe(true);
+    expect(isGitHubEventRun(only[0]!)).toBe(true);
+    // A system line still ends the run.
+    expect(runIds(fold([say('m1'), merged('e1', 1), system('joined'), say('m2')])))
+      .toEqual([['m1', ['m1', 'e1']], ['joined', null], ['m2', null]]);
+  });
+
+  it('keeps payment runs as their own rows, apart from GitHub events and agent pills', () => {
+    const rows = fold([say('m1'), merged('e1', 1), paid('p1'), merged('e2', 2), say('m2')]);
+    expect(runIds(rows)).toEqual([['m1', ['m1', 'e1']], ['p1', null], ['e2', ['e2', 'm2']]]);
+    expect(rows[1]!.notificationLifecycleRun?.items.map(item => item.kind)).toEqual(['payment']);
+    expect(isGitHubEventRun(rows[1]!)).toBe(false);
   });
 
   it('opens a new sender group after a pill', () => {

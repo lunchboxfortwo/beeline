@@ -28,7 +28,7 @@ vi.mock('./IndexRow', () => ({
 import { foldPrLifecycleRuns } from '@/buzz/pr-lifecycle';
 import { foldPillRuns } from '@/buzz/transcript-pills';
 import { pillItems, TranscriptPills } from './TranscriptPills';
-import { PillRow } from '@/ui/screens/transcript/PillRow';
+import { PillRow, runCountLabel } from '@/ui/screens/transcript/PillRow';
 
 it.each(['message', 'reply'] as const)('renders an addressed %s with the recorded sender, recipient and text', kind => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -93,35 +93,82 @@ it('folds consecutive person stops into one pill that opens in send order', () =
   expect(items[0]!.run![0]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
 });
 
-it('MERGE-ROWS-1 shows the merge count immediately and expands every stored event and destination', () => {
+it('MERGE-ROWS-1 folds a run of merges into one pill that counts them and opens every stored event and destination', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const events: ChatDisplayMessage[] = Array.from({ length: 14 }, (_, index) => ({
-    id: `merge-${index}`, text: `Merged change ${index}`, timestamp: 1_800_000_000 + index,
+    id: `merge-${index}`, text: `Merged change ${index}`, timestamp: 1_800_000_000 + index * 60,
     isUser: false, isSystemNotice: true,
     systemEvent: { subject: { kind: 'github', name: 'GitHub' },
       verb: 'merged pull request', object: { text: `Change ${index}`, url: `https://github.com/Beeline-Work/beeline/pull/${4200 + index}` } },
   }));
   const rows = foldPillRuns(foldPrLifecycleRuns(events));
+  expect(rows).toHaveLength(1);
   const openUrl = vi.fn();
   let tree: any;
-  act(() => { tree = create(<>{rows.map(row => <TranscriptPills key={row.id}
-    run={row.pillRun ?? [row]} resolve={() => ({ kind: 'system', name: 'Beeline' })} onOpenUrl={openUrl} />)}</>); });
-  const control = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
-  expect(control('notification-run-expand-merge-0').props.accessibilityLabel).toBe('14 PRs merged');
-  act(() => control('notification-run-expand-merge-0').props.onPress());
-  expect(control('notification-run-more-merge-0').props.accessibilityLabel).toBe('12 more events');
-  act(() => control('notification-run-more-merge-0').props.onPress());
+  act(() => { tree = create(<TranscriptPills run={rows[0]!.pillRun ?? [rows[0]!]}
+    resolve={() => ({ kind: 'system', name: 'Beeline' })} onOpenUrl={openUrl} />); });
+  // No lifecycle disclosure: the run is one pill.
+  expect(tree.root.findAll((node: any) => node.props?.testID === 'notification-run-expand-merge-0')).toHaveLength(0);
+  const [item] = tree.root.findByType(PillRow).props.items;
+  expect(runCountLabel(item.run)).toBe('14 events');
   for (const [index, event] of events.entries()) {
-    const row = control(`notification-run-cell-${event.id}`);
-    const copy = row.findAll((node: any) => node.type === 'Text').flatMap((node: any) => node.children);
-    expect(copy).toContain(`Change ${index}`);
-    act(() => row.props.onPress());
+    expect(item.run[index]).toMatchObject({ id: event.id, from: { kind: 'github' },
+      event: { verb: 'Merged', number: String(4200 + index), title: `Change ${index}`, counted: true, mark: 'merged',
+        spoken: `Merged PR #${4200 + index} Change ${index}` } });
+    item.run[index].event.open.onPress();
     expect(openUrl).toHaveBeenLastCalledWith(event.systemEvent!.object!.url);
   }
-  act(() => control('notification-run-expand-merge-0').props.onPress());
-  expect(control('notification-run-expand-merge-0').props.accessibilityState.expanded).toBe(false);
-  act(() => control('notification-run-expand-merge-0').props.onPress());
-  expect(control('notification-run-more-merge-0').props.accessibilityLabel).toBe('12 more events');
+  // Each event keeps its own send time.
+  expect(item.run[0].time).not.toBe(item.run[13].time);
+  act(() => tree.unmount());
+});
+
+it('counts a PR event once when webhook and subscription lines both stored it', () => {
+  const line = (id: string): ChatDisplayMessage => ({ id, text: id, isUser: false, timestamp: 1_800_000_000, isSystemNotice: true,
+    systemEvent: { subject: { kind: 'github', name: 'GitHub' }, verb: 'merged pull request',
+      object: { text: 'Change', url: 'https://github.com/o/r/pull/7' } } });
+  const say: ChatDisplayMessage = { id: 'm1', text: 'm1', isUser: false, timestamp: 1_800_000_000, pubkey: 'ruby',
+    agentCommand: { kind: 'message', recipient: { id: 'claude', name: 'Claude', kind: 'agent' }, text: 'm1' } };
+  const rows = foldPillRuns(foldPrLifecycleRuns([line('hook'), say, line('sub')]));
+  const [item] = pillItems(rows[0]!.pillRun!, (id, name) => ({ kind: 'agent', seed: id, name }), {});
+  expect(item!.run!.map(entry => entry.id)).toEqual(['hook', 'm1', 'sub']);
+  expect(runCountLabel(item!.run!)).toBe('1 message · 1 event');
+});
+
+it('opens a thread event in its thread, and a check inside its own thread on GitHub', () => {
+  const opened: ChatDisplayMessage = { id: 'open', text: '', isUser: false, timestamp: 1_800_000_000,
+    daemonFact: { type: 'corner-open', cornerId: 'c1', objective: 'Fix the stop path', name: 'stop-path' } as never };
+  const failed: ChatDisplayMessage = { id: 'fail', text: '', isUser: false, timestamp: 1_800_000_060,
+    daemonFact: { type: 'checks-failing', cornerId: 'c2', objective: 'x', name: 'other', pullRequest: { url: 'https://github.com/o/r/pull/9' } } as never };
+  const rows = foldPrLifecycleRuns([opened, failed]);
+  const openCorner = vi.fn();
+  const openUrl = vi.fn();
+  const [item] = pillItems(rows, () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: openCorner, onOpenUrl: openUrl, cornerId: 'c2' });
+  // A thread opening is Beeline's, never GitHub's.
+  expect(item!.run![0]).toMatchObject({ from: { kind: 'system', name: 'Beeline' },
+    event: { source: 'beeline', verb: 'Opened thread', mark: 'thread', title: 'stop-path', spoken: 'Opened thread stop-path' } });
+  item!.run![0]!.event!.open!.onPress();
+  expect(openCorner).toHaveBeenCalledWith('c1');
+  expect(item!.run![1]).toMatchObject({ from: { kind: 'github' }, event: { source: 'github', verb: 'Failed', mark: 'failed', number: '9' } });
+  item!.run![1]!.event!.open!.onPress();
+  expect(openUrl).toHaveBeenCalledWith('https://github.com/o/r/pull/9');
+});
+
+it('draws a lone GitHub event as one event pill, and leaves payments on their own card', () => {
+  const merge: ChatDisplayMessage = { id: 'e1', text: '', isUser: false, timestamp: 1_800_000_000, isSystemNotice: true,
+    systemEvent: { subject: { kind: 'github', name: 'GitHub' }, verb: 'merged pull request',
+      object: { text: 'Change', url: 'https://github.com/o/r/pull/7' } } };
+  const [lone] = foldPrLifecycleRuns([merge]);
+  const items = pillItems([lone!], () => ({ kind: 'system', name: 'Beeline' }), {});
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({ id: 'e1', system: false, from: { kind: 'github' }, event: { mark: 'merged' } });
+  expect(items[0]!.run).toBeUndefined();
+  const payment: ChatDisplayMessage = { id: 'p1', text: '', isUser: false, timestamp: 1_800_000_000,
+    walletTx: { direction: 'out', amountText: '$1', counterparty: 'x', chain: 'base', balanceAfterUsd: '$9', txUrl: 'https://e.com' } as never };
+  const [paid] = foldPrLifecycleRuns([payment]);
+  let tree: any;
+  act(() => { tree = create(<TranscriptPills run={[paid!]} resolve={() => ({ kind: 'system', name: 'Beeline' })} />); });
+  expect(tree.root.findAllByType(PillRow)).toHaveLength(0);
   act(() => tree.unmount());
 });
 
@@ -225,4 +272,13 @@ it('PR-CHAT-ONLY uses large PR cards and small failed-head lines with no PR titl
     : Array.isArray(value) ? value.map(words).join('') : value?.props ? words(value.props.children) : '';
   expect(words(text[0].props.children)).toBe('Failed check 82828a8');
   act(() => tree.unmount());
+});
+
+it('keeps a lone thread opening in a Room with no repository on the Beeline ring', () => {
+  const opened: ChatDisplayMessage = { id: 'open', text: '', isUser: false, timestamp: 1_800_000_000,
+    daemonFact: { type: 'corner-open', cornerId: 'c1', objective: 'Plan the launch', name: 'launch-plan' } as never };
+  const rows = foldPillRuns(foldPrLifecycleRuns([opened]));
+  const items = pillItems(rows[0]!.pillRun ?? [rows[0]!], () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: vi.fn() });
+  expect(items).toEqual([expect.objectContaining({ from: { kind: 'system', name: 'Beeline' },
+    event: expect.objectContaining({ source: 'beeline', mark: 'thread' }) })]);
 });

@@ -166,7 +166,7 @@ export function LedgerSystemLine({
   text: string;
   event?: SystemEvent;
   stamp: string;
-  /** Read inside an opened pill, whose header already carries the time. */
+  /** Read inside an opened pill, whose header already carries the time. Same meta at the quiet ink as a GitHub event there. */
   bare?: boolean;
   onOpenIdentity?: (identityId: string) => void;
   onOpenUrl?: (url: string) => void;
@@ -355,7 +355,7 @@ export function LedgerSystemLine({
   const body = (
     <T
       v="meta"
-      color={bare ? 'ink' : 'secondary'}
+      color="secondary"
       numberOfLines={expanded ? undefined : 2}
       ellipsizeMode="tail"
       testID={`system-line-text-${id}`}
