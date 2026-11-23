@@ -109,12 +109,12 @@ describe('repository homepage icons', () => {
     for (let offset = 0; offset < data.length; offset += info.channels) colors.add(data.subarray(offset, offset + info.channels).toString('hex'));
     expect(colors).toEqual(new Set(['ffffffff', '000000ff']));
   });
-  it('resolves a repository homepage\'s site icon as the stored 64 px chat picture, uncached', async () => {
+  it('resolves a repository homepage\'s site icon as the stored 256 px chat picture, uncached', async () => {
     response('<link rel="icon" href="/favicon.svg">', 'text/html'); response(svg, 'image/svg+xml');
     const icon = await resolveHomepageIcon('grunt.example');
     expect(mocks.get.mock.calls.map(call => call[0].href)).toEqual(['https://grunt.example/', 'https://grunt.example/favicon.svg']);
     expect(icon?.path).toBe('https://grunt.example/');
-    expect(await sharp(icon!.image.bytes).metadata()).toMatchObject({ format: 'png', width: 64, height: 64 });
+    expect(await sharp(icon!.image.bytes).metadata()).toMatchObject({ format: 'png', width: 256, height: 256 });
     response('', 'text/html', 404); response('', 'text/html', 404);
     expect(await resolveHomepageIcon('https://grunt.example')).toBeUndefined();
     expect(mocks.get).toHaveBeenCalledTimes(4);
@@ -151,7 +151,7 @@ describe('repository icon files', () => {
     const read = vi.fn(async (path: string) => sources[path]);
     return { read, path: pickRepositoryIconPath(new Set(files), read) };
   };
-  it('follows t3code: its well-known paths in order, first existing file wins, no image comparison', async () => {
+  it('follows t3code\'s well-known paths; without sizes to compare, the earliest existing file wins', async () => {
     expect(await pick(['assets/logo.png', 'src/favicon.ico', 'public/favicon.png', 'favicon.ico', 'app/icon.svg']).path).toBe('favicon.ico');
     expect(await pick(['assets/logo.png', 'src/favicon.ico', 'app/icon.svg', '.idea/icon.svg']).path).toBe('app/icon.svg');
     expect(await pick(['.idea/icon.svg', 'assets/logo.svg']).path).toBe('assets/logo.svg');
@@ -183,20 +183,66 @@ describe('repository icon files', () => {
       'apps/mobile/public/index.html', 'apps/mobile/sources/assets/images/icon.svg', 'apps/site/apple-touch-icon.png', 'apps/site/favicon.ico',
       'apps/site/icon-512.png', 'apps/site/index.html'], { 'apps/mobile/public/index.html': '<link rel="manifest" href="/site.webmanifest">' });
     expect(await beeline.path).toBe('apps/site/favicon.ico');
+    // With apps/site's real icon links, its declared 512 px icon beats the 48 px favicon.ico.
+    const linked = pick(['apps/site/favicon.ico', 'apps/site/icon-512.png', 'apps/site/index.html'], { 'apps/site/index.html':
+      '<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">' });
+    expect(await linked.path).toBe('apps/site/icon-512.png');
     expect(await pick(['apps/web/public/favicon.svg', 'apps/web/public/logo.svg']).path).toBe('apps/web/public/favicon.svg');
     expect(await pick(['public/favicon.svg', 'src/app.tsx']).path).toBe('public/favicon.svg');
     expect(await pick(['site/favicon.svg', 'site/index.html', 'src/chat.html']).path).toBeUndefined();
     expect(await pick(['README.md', 'src/main.ts']).path).toBeUndefined();
   });
-  it('reads one tree and only the picked file, storing it at 64 px', async () => {
+  it('reads one tree and only the icon files, storing the largest at 256 px', async () => {
     const read = repository({ 'README.md': 'hi', 'assets/logo.png': await square(180), 'favicon.png': await square(32, 16) });
     const icon = await resolveRepositoryIcon('main', read);
-    expect(read.mock.calls.map(([path]) => path)).toEqual(['git/trees/main?recursive=1', 'git/blobs/sha2']);
-    expect(icon?.path).toBe('favicon.png');
-    expect(await sharp(icon!.image.bytes).metadata()).toMatchObject({ width: 64, height: 64 });
-    // testatlas's committed favicon.svg is 64x60; it is padded into the 64 px square.
+    expect(read.mock.calls.map(([path]) => path)).toEqual(['git/trees/main?recursive=1', 'git/blobs/sha2', 'git/blobs/sha1']);
+    expect(icon?.path).toBe('assets/logo.png');
+    expect(await sharp(icon!.image.bytes).metadata()).toMatchObject({ width: 256, height: 256 });
+    // One icon in the directory is stored without measuring.
+    const single = repository({ 'favicon.png': await square(32) });
+    expect((await resolveRepositoryIcon('main', single))?.path).toBe('favicon.png');
+    expect(single.mock.calls.map(([path]) => path)).toEqual(['git/trees/main?recursive=1', 'git/blobs/sha0']);
+    // testatlas's committed favicon.svg is 64x60; it is padded into the 256 px square.
     const wide = await resolveRepositoryIcon('main', repository({ 'public/favicon.svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 60"><path d="M0 0h64v60H0z"/></svg>' }));
-    expect(await sharp(wide!.image.bytes).metadata()).toMatchObject({ width: 64, height: 64 });
+    expect(await sharp(wide!.image.bytes).metadata()).toMatchObject({ width: 256, height: 256 });
+  });
+  /** The largest step between horizontally adjacent channel values: a smooth resample has no hard edges. */
+  async function largestStep(bytes: Buffer) {
+    const { data, info } = await sharp(bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let step = 0;
+    for (let y = 0; y < info.height; y++) for (let x = 1; x < info.width; x++) for (let c = 0; c < 3; c++) {
+      const at = (y * info.width + x) * 3 + c;
+      step = Math.max(step, Math.abs(data[at]! - data[at - 3]!));
+    }
+    return step;
+  }
+  it('stores the 512 px linked icon over a 48 px favicon.ico and serves a 150 px request smoothly', async () => {
+    // 48 px favicon: one PNG entry. 512 px icon: thin white stripes every 3 px; nearest-neighbour keeps stripes,
+    // a smooth resample averages them to grey.
+    const favicon = await square(48);
+    const ico = Buffer.alloc(22); ico.writeUInt16LE(1, 2); ico.writeUInt16LE(1, 4); ico[6] = 48; ico[7] = 48;
+    ico.writeUInt32LE(favicon.length, 14); ico.writeUInt32LE(22, 18);
+    const gradient = Buffer.alloc(512 * 512 * 3);
+    for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) gradient.fill(x % 3 ? 0 : 255, (y * 512 + x) * 3, (y * 512 + x) * 3 + 3);
+    const large = await sharp(gradient, { raw: { width: 512, height: 512, channels: 3 } }).png().toBuffer();
+    const icon = await resolveRepositoryIcon('main', repository({ 'apps/site/favicon.ico': Buffer.concat([ico, favicon]),
+      'apps/site/icon-512.png': large, 'apps/site/index.html':
+        '<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">' }));
+    expect(icon?.path).toBe('apps/site/icon-512.png');
+    expect(await sharp(icon!.image.bytes).metadata()).toMatchObject({ format: 'png', width: 256, height: 256 });
+    const sized = await sizeCompanyLogo(icon!.image, '150');
+    expect(await sharp(sized.bytes).metadata()).toMatchObject({ width: 150, height: 150 });
+    expect(await largestStep(sized.bytes)).toBeLessThanOrEqual(32);
+  });
+  it('keeps a 16 px pixel-art icon hard-edged when stored at 256 px and served at 150 px', async () => {
+    const checker = Buffer.alloc(16 * 16 * 3);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) checker.fill((x + y) % 2 ? 255 : 0, (y * 16 + x) * 3, (y * 16 + x) * 3 + 3);
+    const art = await sharp(checker, { raw: { width: 16, height: 16, channels: 3 } }).png().toBuffer();
+    const icon = await resolveRepositoryIcon('main', repository({ 'favicon.png': art }));
+    for (const bytes of [icon!.image.bytes, (await sizeCompanyLogo(icon!.image, '150')).bytes]) {
+      const { data } = await sharp(bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      expect(new Set(data)).toEqual(new Set([0, 255]));
+    }
   });
   it('reads a committed favicon.ico through its largest entry', async () => {
     const png = await square(32);
@@ -207,9 +253,9 @@ describe('repository icon files', () => {
     header[6] = 2; header.writeUInt32LE(bmp.length, 14); header.writeUInt32LE(38, 18);
     header[22] = 32; header.writeUInt32LE(png.length, 30); header.writeUInt32LE(38 + bmp.length, 34);
     const icon = await resolveRepositoryIcon('main', repository({ 'favicon.ico': Buffer.concat([header, bmp, png]) }));
-    // The 32 px PNG entry (#123456), not the 2 px red bitmap, scaled to the stored 64 px.
+    // The 32 px PNG entry (#123456), not the 2 px red bitmap, scaled to the stored 256 px.
     const { data, info } = await sharp(icon!.image.bytes).raw().toBuffer({ resolveWithObject: true });
-    expect(info.width).toBe(64);
+    expect(info.width).toBe(256);
     expect([...data.subarray(0, 3)]).toEqual([0x12, 0x34, 0x56]);
   });
   it('finds no icon when the tree has none or the file is not an image, and surfaces a refused tree read so nothing is stored', async () => {

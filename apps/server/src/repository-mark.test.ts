@@ -77,7 +77,10 @@ it('stores the icon once at link time; list loads and the endpoint read only the
     const icon = await fetch(`${origin}/v1/repository-icons/${room}/${stored.icon_hash}?size=108`);
     expect(icon.status).toBe(200);
     expect(icon.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-    expect(Buffer.from(await icon.arrayBuffer()).equals(Buffer.from(stored.icon_png))).toBe(true);
+    // A sized request is scaled to the app's physical pixels; an unsized one is the stored picture.
+    expect(await sharp(Buffer.from(await icon.arrayBuffer())).metadata()).toMatchObject({ format: 'png', width: 108, height: 108 });
+    const unsized = await fetch(`${origin}/v1/repository-icons/${room}/${stored.icon_hash}`);
+    expect(Buffer.from(await unsized.arrayBuffer()).equals(Buffer.from(stored.icon_png))).toBe(true);
     expect((await fetch(`${origin}/v1/repository-icons/${room}/${'0'.repeat(64)}`)).status).toBe(404);
     expect((await fetch(`${origin}/v1/repository-icons/${thread}/${stored.icon_hash}`)).status).toBe(404);
     expect((await fetch(`${origin}/v1/repository-icons/${room}`)).status).toBe(404);
@@ -166,7 +169,7 @@ it('re-resolves rows stored by an older resolver once', async () => {
   expect(app.issuesRequest).toHaveBeenCalledTimes(2);
   expect(changed).toEqual([room]);
   expect((await db.query<{ resolver_revision: number; icon_hash: string }>('SELECT resolver_revision,icon_hash FROM repository_icons')).rows[0])
-    .toMatchObject({ resolver_revision: 2, icon_hash: expect.not.stringMatching(/^0+$/) });
+    .toMatchObject({ resolver_revision: 3, icon_hash: expect.not.stringMatching(/^0+$/) });
   await github.resolveRepositoryIcons();
   expect(app.issuesRequest).toHaveBeenCalledTimes(2);
 });
