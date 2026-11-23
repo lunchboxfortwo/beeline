@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, access, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, access, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, delimiter, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -14,7 +14,7 @@ async function fixture(fn) {
     await writeFile(join(cwd, 'package.json'), JSON.stringify({
       name: 'preparation-proof', version: '1.0.0',
       scripts: {
-        'mobile:install': 'node -e "require(\'fs\').writeFileSync(\'mobile-ran\',\'yes\')"',
+        'mobile:install': 'node -e "require(\'fs\').writeFileSync(\'mobile-ran\',\'yes\');require(\'fs\').mkdirSync(\'apps/mobile\',{recursive:true})"',
         build: 'node -e "require(\'fs\').writeFileSync(\'build-ran\',\'yes\')"',
       },
     }));
@@ -26,7 +26,9 @@ async function fixture(fn) {
     await writeFile(join(cwd, 'bin/npm'), `#!${process.execPath}
 const fs=require('node:fs'),{spawnSync}=require('node:child_process');
 const args=process.argv.slice(2);
-if(args.includes('turbo')) {
+if(args.includes('vitest')) {
+ fs.appendFileSync(require('node:path').join(__dirname,'..','tests-ran'),require('node:path').relative(require('node:path').join(__dirname,'..'),process.cwd())+': '+args.join(' ')+'\\n');
+} else if(args.includes('turbo')) {
  fs.mkdirSync('node_modules/shared/dist',{recursive:true});
  fs.writeFileSync('node_modules/shared/package.json',JSON.stringify({name:'shared',exports:'./dist/index.js'}));
  fs.writeFileSync('node_modules/shared/dist/index.js','module.exports="ready";');
@@ -51,6 +53,22 @@ for (const options of [[], ['--mobile'], ['--build'], ['--mobile', '--build']]) 
     assert.equal(await exists(join(cwd, 'build-ran')), options.includes('--build'));
   }));
 }
+for (const options of [[], ['--mobile']]) {
+  test(`Reproduction READY-TEST: preparation runs one test file in each prepared workspace: ${options.join(' ') || 'default'}`, async () => fixture(async (cwd) => {
+    const result = spawnSync(process.execPath, [prepare, ...options], { cwd, encoding: 'utf8', env: environment(cwd) });
+    assert.equal(result.status, 0, result.stderr);
+    const ran = await readFile(join(cwd, 'tests-ran'), 'utf8').catch(() => '');
+    assert.match(ran, /^: exec --workspace=@beeline\/body -- vitest run \S+\.test\.ts$/m);
+    assert.equal(/^apps\/mobile: exec -- vitest run \S+\.test\.ts$/m.test(ran), options.includes('--mobile'));
+  }));
+}
+for (const [brief, mobile] of [['Fix the phone app in apps/mobile.', true], ['Fix the server read path.', false]]) {
+  test(`Reproduction BRIEF-WORKSPACES: preparation installs the workspaces the brief touches: ${brief}`, async () => fixture(async (cwd) => {
+    const result = spawnSync(process.execPath, [prepare], { cwd, encoding: 'utf8', env: { ...environment(cwd), BEELINE_BRIEF: brief } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await exists(join(cwd, 'mobile-ran')), mobile);
+  }));
+}
 test('invalid options fail before installation', async () => fixture(async (cwd) => {
   await rm(join(cwd, 'package-lock.json'));
   const result = spawnSync(process.execPath, [prepare, '--moblie'], { cwd, encoding: 'utf8', env: environment(cwd) });
@@ -68,4 +86,6 @@ test('managed preparation preserves mounted trees and requests mobile for the ne
   assert.equal(await exists(join(cwd, '.beeline-dependency-request')), true);
   assert.equal(await exists(join(cwd, 'build-ran')), true);
   assert.match(result.stdout, /this turn continues with them/);
+  // Mobile packages arrive after this turn, so only the root test runs now.
+  assert.doesNotMatch(await readFile(join(cwd, 'tests-ran'), 'utf8'), /apps\/mobile/);
 }));

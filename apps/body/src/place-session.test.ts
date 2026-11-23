@@ -19,6 +19,7 @@ import { distillTurnFailureReason } from './turn-failure-reason.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { execFileAsync,prepareWorkspace } from './workspace-checkout.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 // Cache persistence is tested with real files by SessionResources. These
 // prompt tests intentionally finish while optional background work is pending.
@@ -130,7 +131,7 @@ it('answers after thread reconciliation while other optional reads remain pendin
 
 it.each([false, true])('keeps the operator Pi login out of the live session (thread=%s)', async corner => {
   const f = await fixture(corner);
-  f.config.operatorHome = await mkdtemp('/var/tmp/session-login-operator-'); roots.push(f.config.operatorHome);
+  f.config.operatorHome = await mkdtemp(`${testTmpDir()}/session-login-operator-`); roots.push(f.config.operatorHome);
   const loginDir = join(f.config.operatorHome!, '.pi', 'agent');
   await mkdir(loginDir, { recursive: true });
   const login = JSON.stringify({ anthropic: { type: 'oauth', refresh: 'operator-refresh' } });
@@ -700,7 +701,7 @@ it('rejects a hosted item without its credential before launching ACP', async ()
 });
 
 it('admits the hosted model journal inside the live Room sandbox across cold and warm items', async () => {
-  const f = await fixture(false, '/var/tmp');
+  const f = await fixture(false, testTmpDir());
   f.config.bwrapPath = '/usr/bin/bwrap';
   const modelCredential = { v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null };
   try {
