@@ -6,7 +6,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BrowserShareHost, startHostedBrowserShare } from './browser-share-host.js';
-import { MachineControl, type MachineAnswer } from './machine-control.js';
+import { createHash } from 'node:crypto';
+import {
+  followHelperExit,
+  helperLockKey,
+  MachineControl,
+  type MachineAnswer,
+} from './machine-control.js';
 import { postToClaude } from './session-join/claude.js';
 import {
   answer,
@@ -436,3 +442,22 @@ it('a linked worker kills its own owned groups before its group when the owner i
     expect(alive(nested!)).toBe(false);
   });
 });
+
+// Linux proof repro: `beeline update` failed with "read ECONNRESET" while following
+// an exiting helper whose lock socket was still bound but closing.
+it.runIf(process.platform === 'linux')(
+  'following a helper that vanishes between its busy bind and its record ends as its exit',
+  async () => {
+    const root = join(await scratch(), 'state');
+    const key = helperLockKey(root);
+    const exiting = createServer((peer) => {
+      // The holder is exiting: it resets the follower and its socket goes away.
+      peer.destroy();
+      exiting.close();
+    });
+    const address = `\0beeline-lock-${createHash('sha256').update(key).digest('hex')}`;
+    await new Promise<void>((done) => exiting.listen(address, done));
+    await followHelperExit(root, { pid: 999_999, generation: 'predecessor' });
+    expect(exiting.listening).toBe(false);
+  },
+);

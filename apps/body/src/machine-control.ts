@@ -134,15 +134,29 @@ export class MachineControl {
   }
 }
 
-/** Follow the serving helper's kernel lock until the kernel releases it on that process's exit. */
+/**
+ * Follow the serving helper's kernel lock until the kernel releases it on that
+ * process's exit. An exiting holder can vanish between the busy bind and its
+ * record (the follower's connect is refused or reset): that is the exit being
+ * followed, so the lock is evaluated once more, and only the same predecessor
+ * is followed.
+ */
 export async function followHelperExit(
   stateRoot: string,
   predecessor: Pick<MachineAnswer, 'pid' | 'generation'>,
 ): Promise<void> {
-  const lock = await tryLock(helperLockKey(stateRoot));
+  const key = helperLockKey(stateRoot);
+  const vanished = (error: unknown) =>
+    ['ECONNRESET', 'ECONNREFUSED', 'ENOENT', 'EPIPE'].includes(
+      (error as NodeJS.ErrnoException)?.code ?? '',
+    );
+  const lock = await tryLock(key).catch((error: unknown) => {
+    if (vanished(error)) return tryLock(key);
+    throw error;
+  });
   if (lock.held) await lock.release();
   else if (
-    lock.holder.key === helperLockKey(stateRoot) &&
+    lock.holder.key === key &&
     lock.holder.pid === predecessor.pid &&
     (lock.holder.generation === undefined || lock.holder.generation === predecessor.generation)
   )

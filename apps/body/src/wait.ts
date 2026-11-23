@@ -417,7 +417,10 @@ export async function tryLock(
     });
     peer.once('error', reject);
     peer.once('close', () => {
-      if (!answered) reject(new Error('Lock holder closed before answering'));
+      if (!answered)
+        reject(
+          Object.assign(new Error('Lock holder closed before answering'), { code: 'ECONNRESET' }),
+        );
     });
   });
 }
