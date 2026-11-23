@@ -41,6 +41,10 @@ function admitHeldMcpCompletion(url:string,body:unknown):void{
     throw new Error('Held MCP completion admission invalid');
 }
 
+/** Hook output, session tool JSON and the session MCP servers are read by a machine: their waits print no line. */
+let machineReadOutput = false;
+export function setMachineReadOutput(machineRead: boolean): void { machineReadOutput = machineRead; }
+
 /** The existing authenticated MCP/OAuth transport leaf owns all requests,
  * including the persistent member stream; callers cannot create a second owner. */
 async function request(url: string, body: unknown, headers: Record<string,string>, stream?: AbortSignal, cancellation?:AbortSignal,held=false,step?:string): Promise<Response> {
@@ -48,8 +52,9 @@ async function request(url: string, body: unknown, headers: Record<string,string
   if(stream&&new URL(url).pathname!=='/mcp/member-stream')throw new Error('MCP member stream route unavailable');
   const init:RequestInit&{dispatcher?:Agent}={method:stream?'GET':'POST',headers:{'content-type':'application/json',...headers},
     ...(stream?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined};
-  // A named step prints one line naming the host before the wait; the transport's own failure ends a silent one.
-  return ask(step?{url,peer:`${new URL(url).host} to ${step}`}:{url,report:false},init);
+  // Every wait names its peer on stderr unless this process's output is machine-read (see setMachineReadOutput).
+  const peer=step?`${new URL(url).host} to ${step}`:undefined;
+  return ask({url,...(peer?{peer}:{}),machineRead:machineReadOutput},init);
 }
 async function postJson(url: string, body: unknown, headers: Record<string, string> = {},
   {signal,held=false,step}:{signal?:AbortSignal;held?:boolean;step?:string}={}): Promise<{ status: number; value: Record<string, unknown> }> {

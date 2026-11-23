@@ -17,7 +17,8 @@ export function grantOutputLines(
     if (sandboxMarker) text = text.replace(sandboxMarker, '');
     for (const [name, secret] of secrets) {
       if (secret.length < 4) continue;
-      for (const part of secret.split(/\r\n|\r|\n/)) if (part) text = text.split(part).join(`[${name}]`);
+      for (const part of secret.split(/\r\n|\r|\n/))
+        if (part) text = text.split(part).join(`[${name}]`);
     }
     emit?.({ stream, text });
   };

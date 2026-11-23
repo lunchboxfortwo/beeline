@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { initializeAdapterCandidate, useAdapterCommand, withIdleAdapterCandidate, withAdapterCandidateLock, withAdapterInstallLock } from './adapter-install-lock.js';
+import {
+  initializeAdapterCandidate,
+  useAdapterCommand,
+  withIdleAdapterCandidate,
+  withAdapterCandidateLock,
+  withAdapterInstallLock,
+} from './adapter-install-lock.js';
 import { adapterStatePath, readAdapterState } from './adapter-store.js';
 import { updateAgentAdapter, type AdapterUpdateOptions } from './adapter-update.js';
 import type { AdapterInstallCommand } from './agent-command.js';
@@ -205,9 +211,9 @@ await updateAgentAdapter('claude', { env: ${JSON.stringify(env)},
   log: (line) => process.stderr.write(line + '\\n') });
 `,
     );
-    // Run tsx's CLI on this Node, not whichever `node` PATH names.
-    const tsx = resolve(here, '../../../node_modules/tsx/dist/cli.mjs');
-    const child = spawn(process.execPath, [tsx, script], {
+    // One process on this Node: its exit means the kernel already closed its lock socket.
+    // (tsx's CLI forks a second process whose lock can outlive the CLI's exit event.)
+    const child = spawn(process.execPath, ['--import', 'tsx', script], {
       detached: true,
       stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, ...env },
@@ -245,38 +251,60 @@ await updateAgentAdapter('claude', { env: ${JSON.stringify(env)},
   }, 30_000);
 });
 
-it.each(['active', 'rejected'] as const)('does not promote over a concurrent %s decision', async change => {
-  const { env } = await scratch();
-  const options: AdapterUpdateOptions = {
-    env, readRegistry: registry, install: installAdapter('#!/bin/sh\n'), log: () => undefined,
-    alert: async () => {},
-    checkSession: async () => {
-      await updateAgentAdapter('claude', {
-        env, install: installAdapter('#!/bin/sh\n'), log: () => undefined, alert: async () => {},
-        readRegistry: async () => ({ 'dist-tags': { latest: change === 'active' ? '2.0.0' : '1.0.0' },
-          time: { '1.0.0': '2000-01-01T00:00:00Z', '2.0.0': '2000-01-01T00:00:00Z' } }),
-        checkSession: async () => {
-          if (change === 'rejected') throw new Error('protocol refused');
-          return { protocolVersion: 1, agentCapabilities: {} };
-        },
-      });
-      return { protocolVersion: 1, agentCapabilities: {} };
-    },
-  };
-  await expect(updateAgentAdapter('claude', options)).resolves.toBe(false);
-  const state = readAdapterState('claude', env);
-  if (change === 'active') expect(state.active?.version).toBe('2.0.0');
-  else { expect(state.active).toBeUndefined(); expect(state.rejected?.['1.0.0']).toEqual({ error: 'protocol refused' }); }
-});
+it.each(['active', 'rejected'] as const)(
+  'does not promote over a concurrent %s decision',
+  async (change) => {
+    const { env } = await scratch();
+    const options: AdapterUpdateOptions = {
+      env,
+      readRegistry: registry,
+      install: installAdapter('#!/bin/sh\n'),
+      log: () => undefined,
+      alert: async () => {},
+      checkSession: async () => {
+        await updateAgentAdapter('claude', {
+          env,
+          install: installAdapter('#!/bin/sh\n'),
+          log: () => undefined,
+          alert: async () => {},
+          readRegistry: async () => ({
+            'dist-tags': { latest: change === 'active' ? '2.0.0' : '1.0.0' },
+            time: { '1.0.0': '2000-01-01T00:00:00Z', '2.0.0': '2000-01-01T00:00:00Z' },
+          }),
+          checkSession: async () => {
+            if (change === 'rejected') throw new Error('protocol refused');
+            return { protocolVersion: 1, agentCapabilities: {} };
+          },
+        });
+        return { protocolVersion: 1, agentCapabilities: {} };
+      },
+    };
+    await expect(updateAgentAdapter('claude', options)).resolves.toBe(false);
+    const state = readAdapterState('claude', env);
+    if (change === 'active') expect(state.active?.version).toBe('2.0.0');
+    else {
+      expect(state.active).toBeUndefined();
+      expect(state.rejected?.['1.0.0']).toEqual({ error: 'protocol refused' });
+    }
+  },
+);
 
 it('leaves a successfully checked candidate unpromoted when its caller cancels', async () => {
   const { env } = await scratch();
   const caller = new AbortController();
-  await expect(updateAgentAdapter('claude', {
-    env, readRegistry: registry, install: installAdapter('#!/bin/sh\n'), log: () => undefined,
-    signal: caller.signal,
-    checkSession: async () => { caller.abort(); return { protocolVersion: 1, agentCapabilities: {} }; },
-  })).rejects.toThrow('cancelled');
+  await expect(
+    updateAgentAdapter('claude', {
+      env,
+      readRegistry: registry,
+      install: installAdapter('#!/bin/sh\n'),
+      log: () => undefined,
+      signal: caller.signal,
+      checkSession: async () => {
+        caller.abort();
+        return { protocolVersion: 1, agentCapabilities: {} };
+      },
+    }),
+  ).rejects.toThrow('cancelled');
   expect(readAdapterState('claude', env)).toEqual({});
 });
 
@@ -286,20 +314,33 @@ it('retains an old prefix across promotions until every ACP session exits', asyn
 require('node:readline').createInterface({input:process.stdin}).on('line', line => {
   const r=JSON.parse(line); if(r.id!==undefined) process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:r.id,result:{protocolVersion:1,agentCapabilities:{}}})+'\\n');
 });`;
-  const promote = (version: string) => updateAgentAdapter('claude', {
-    env, readRegistry: async () => ({ 'dist-tags': { latest: version }, time: { [version]: '2000-01-01T00:00:00Z' } }),
-    install: installAdapter(body), log: () => undefined,
-    checkSession: async () => ({ protocolVersion: 1, agentCapabilities: {} }),
-  });
+  const promote = (version: string) =>
+    updateAgentAdapter('claude', {
+      env,
+      readRegistry: async () => ({
+        'dist-tags': { latest: version },
+        time: { [version]: '2000-01-01T00:00:00Z' },
+      }),
+      install: installAdapter(body),
+      log: () => undefined,
+      checkSession: async () => ({ protocolVersion: 1, agentCapabilities: {} }),
+    });
   await promote('1.0.0');
   const command = readAdapterState('claude', env).active!.command;
   const prefix = resolve(command, '../../..');
   const { AcpClient } = await import('./acp.js');
   const { startAgentProcess, stopAgentProcess } = await import('./agent-process.js');
-  const clients = Array.from({ length: 2 }, () => new AcpClient({ agentCommand: command, agentEnv: env, resourceScope: 'none' }));
+  const clients = Array.from(
+    { length: 2 },
+    () => new AcpClient({ agentCommand: command, agentEnv: env, resourceScope: 'none' }),
+  );
   try {
-    await withAdapterInstallLock(() => Promise.all(clients.map(client => startAgentProcess(client))), env);
-    await promote('2.0.0'); await promote('3.0.0');
+    await withAdapterInstallLock(
+      () => Promise.all(clients.map((client) => startAgentProcess(client))),
+      env,
+    );
+    await promote('2.0.0');
+    await promote('3.0.0');
     expect(await readFile(command, 'utf8')).toBe(body);
     await stopAgentProcess(clients[0]!);
     await promote('4.0.0');
@@ -307,7 +348,9 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
     await stopAgentProcess(clients[1]!);
     await promote('5.0.0');
     expect(await readdir(store)).not.toContain(prefix.split('/').at(-1));
-  } finally { for (const client of clients) await stopAgentProcess(client); }
+  } finally {
+    for (const client of clients) await stopAgentProcess(client);
+  }
 });
 
 it('cannot admit a new user after pruning atomically retires an empty usage directory', async () => {
@@ -316,9 +359,11 @@ it('cannot admit a new user after pruning atomically retires an empty usage dire
   await mkdir(prefix, { recursive: true });
   initializeAdapterCandidate(prefix);
   const command = join(prefix, 'node_modules/.bin/claude-agent-acp');
-  await expect(withIdleAdapterCandidate(prefix, async () => {
-    expect(() => useAdapterCommand(command)).toThrow(expect.objectContaining({ code: 'ENOENT' }));
-  })).resolves.toBe(true);
+  await expect(
+    withIdleAdapterCandidate(prefix, async () => {
+      expect(() => useAdapterCommand(command)).toThrow(expect.objectContaining({ code: 'ENOENT' }));
+    }),
+  ).resolves.toBe(true);
   await expect(withIdleAdapterCandidate(prefix, async () => {})).resolves.toBe(true);
 });
 
@@ -327,6 +372,10 @@ it('preserves untracked legacy prefixes during pruning', async () => {
   const prefix = join(store, 'candidate-legacy');
   await mkdir(prefix, { recursive: true });
   let pruned = false;
-  await expect(withIdleAdapterCandidate(prefix, async () => { pruned = true; })).resolves.toBe(false);
+  await expect(
+    withIdleAdapterCandidate(prefix, async () => {
+      pruned = true;
+    }),
+  ).resolves.toBe(false);
   expect(pruned).toBe(false);
 });

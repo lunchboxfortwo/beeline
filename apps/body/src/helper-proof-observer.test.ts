@@ -10,14 +10,17 @@ it('observes status writes during the initial request and each subsequent reques
   const root = await mkdtemp(join(tmpdir(), 'beeline-observer-'));
   let requests = 0;
   const control = new MachineControl(machineControlPath(root), async () => {
-    const processState = ++requests < 3 ? 'starting' as const : 'serving' as const;
+    const processState = ++requests < 3 ? ('starting' as const) : ('serving' as const);
     await writeFile(helperStatusPath(root), String(requests));
     return { pid: process.pid, generation: 'proof', processState, updatedAt: '', agents: {} };
   });
   try {
     await control.start();
-    const status = await observeHelper(root, value => value.processState === 'serving', 2000);
+    const status = await observeHelper(root, (value) => value.processState === 'serving', 2000);
     expect(status.processState).toBe('serving');
     expect(requests).toBe(3);
-  } finally { await control.stop(); await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await control.stop();
+    await rm(root, { recursive: true, force: true });
+  }
 });

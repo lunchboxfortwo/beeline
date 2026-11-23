@@ -16,7 +16,7 @@ export type ComputerActivityEvent = {
 export async function findChromiumPage(debugUrl: string, target?: string): Promise<ChromiumPage> {
   const origin = new URL(debugUrl);
   if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('Chromium debug URL is invalid');
-  const response = await ask({ url: new URL('/json/list', origin), peer: 'Chromium debugging endpoint', report: false });
+  const response = await ask({ url: new URL('/json/list', origin), peer: 'Chromium debugging endpoint' });
   if (!response.ok) throw new Error('Chromium debugging endpoint is unavailable');
   const pages = (await response.json()) as ChromiumPage[];
   const page = pages.find((item) => item.type === 'page' &&

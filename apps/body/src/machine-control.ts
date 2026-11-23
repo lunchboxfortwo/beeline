@@ -146,12 +146,12 @@ export function helperAbsent(error: unknown): boolean {
 export async function askMachine(
   stateRoot: string,
   request: MachineRequest,
-  report?: ((line: string) => void) | false,
+  wait: { report?: (line: string) => void; machineRead?: boolean } = {},
 ): Promise<MachineAnswer> {
   const path = machineControlPath(stateRoot);
   await preparePrivateSocketDirectory(path);
   const answer = await ask<MachineAnswer>(
-    { socket: path, peer: `helper ${request.operation}`, ...(report === undefined ? {} : { report }) },
+    { socket: path, peer: `helper ${request.operation}`, ...wait },
     request,
   );
   if (
@@ -254,7 +254,7 @@ export async function startHelperWithAcknowledgment(stateRoot: string, start: ()
       error => { if (!controller.signal.aborted) failed(error); },
     );
     if (!status) {
-      const current = await askMachine(stateRoot, { operation: 'status' }, false).catch(error => {
+      const current = await askMachine(stateRoot, { operation: 'status' }).catch(error => {
         if (helperAbsent(error)) return undefined;
         throw error;
       });

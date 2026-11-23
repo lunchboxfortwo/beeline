@@ -152,7 +152,7 @@ export class CliProxy {
 
   async #management(path: string, init: RequestInit = {}): Promise<unknown> {
     await this.start();
-    const response = await ask({ url: `${this.endpoint!.url}/v0/management/${path}`, report: false }, {
+    const response = await ask({ url: `${this.endpoint!.url}/v0/management/${path}`, peer: 'CLIProxyAPI management' }, {
       ...init, headers: { authorization: `Bearer ${this.#managementKey}`, 'content-type': 'application/json' },
     });
     if (!response.ok) throw new Error(`CLIProxyAPI ${path.split('?')[0]} answered ${response.status}`);

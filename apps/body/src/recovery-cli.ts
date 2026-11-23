@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     if (args.includes('--status')) {
       const [native, helper] = await Promise.all([
         nativeHelperStatus(),
-        askMachine(stateRoot, { operation: 'status' }, false).catch(error => {
+        askMachine(stateRoot, { operation: 'status' }).catch(error => {
           if (helperAbsent(error)) return undefined;
           throw error;
         }),

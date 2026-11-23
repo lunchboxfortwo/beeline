@@ -134,9 +134,12 @@ it('does not activate a cold install cancelled during release preparation', asyn
     return { releaseId: 'cancelled', identity: { version: 'v0.1.201' } };
   });
   try {
-    await expect(installCurrentRelease(async () => Response.json({ bundles: {
+    const error = await installCurrentRelease(async () => Response.json({ bundles: {
       [hostPlatformKey()]: { file: 'bundle.tar.gz', sha256: 'a'.repeat(64), version: 'v0.1.201' },
-    } }), { signal: cancel.signal, say: () => {} })).rejects.toBe(cancel.signal.reason);
+    } }), { signal: cancel.signal, say: () => {} }).then(() => undefined, (reason: unknown) => reason);
+    // The abort happens during preparation, so read its reason only after the rejection.
+    expect(error).toBe(cancel.signal.reason);
+    expect(error).toBeDefined();
     expect(await activeReleaseId(defaultBeelineInstallLayout())).toBeUndefined();
   } finally { await rm(home, { recursive: true, force: true }); }
 });

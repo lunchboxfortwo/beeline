@@ -83,7 +83,8 @@ export class GrantRunnerServer {
     response.writeHead(200, { 'content-type': 'application/x-ndjson' });
     response.flushHeaders();
     const frame = (value: unknown) => {
-      if (!response.destroyed && !response.writableEnded) response.write(`${JSON.stringify(value)}\n`);
+      if (!response.destroyed && !response.writableEnded)
+        response.write(`${JSON.stringify(value)}\n`);
     };
     const finish = (status: number, value: unknown) => {
       frame({ type: 'result', status, value });
@@ -94,18 +95,32 @@ export class GrantRunnerServer {
       for await (const chunk of request) chunks.push(chunk as Buffer);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (request.url === '/session') {
-        if (!this.session || typeof body.placeId !== 'string') throw new Error('Session tools unavailable');
+        if (!this.session || typeof body.placeId !== 'string')
+          throw new Error('Session tools unavailable');
         finish(200, await this.session(body.placeId, body));
       } else if (request.url === '/workspace') {
-        if (!this.workspace || typeof body.placeId !== 'string') throw new Error('workspace is unavailable here');
-        finish(200, { text: await this.workspace(body.placeId,
-          typeof body.parentRoomId === 'string' ? body.parentRoomId : undefined) });
+        if (!this.workspace || typeof body.placeId !== 'string')
+          throw new Error('workspace is unavailable here');
+        finish(200, {
+          text: await this.workspace(
+            body.placeId,
+            typeof body.parentRoomId === 'string' ? body.parentRoomId : undefined,
+          ),
+        });
       } else {
-        finish(200, await this.runner.run({ roomId: body.roomId, argv: body.argv, stdin: body.stdin, secrets: body.secrets },
-          output => frame({ type: 'output', ...output })));
+        finish(
+          200,
+          await this.runner.run(
+            { roomId: body.roomId, argv: body.argv, stdin: body.stdin, secrets: body.secrets },
+            (output) => frame({ type: 'output', ...output }),
+          ),
+        );
       }
     } catch (error) {
-      if (request.url === '/workspace') finish(200, { text: `The checkout could not be made: ${error instanceof Error ? error.message : String(error)}` });
+      if (request.url === '/workspace')
+        finish(200, {
+          text: `The checkout could not be made: ${error instanceof Error ? error.message : String(error)}`,
+        });
       else finish(400, { error: error instanceof Error ? error.message : String(error) });
     }
   }

@@ -7,7 +7,7 @@ import { closeSync, constants, copyFileSync, existsSync, fsyncSync, mkdirSync, o
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { AGENTS, agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
-import { accessToken, attachLocalDelivery, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
+import { accessToken, attachLocalDelivery, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, setMachineReadOutput, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
 import { bridgeRunning, ensureBridge, notifyBridgeSessions, renderAttachments, renderMention, renderRules, renderWake, runBridge, toolViaBridge, type Mention, type Runner, type Wake } from './bridge.js';
 import { chosenName, claudeTranscript, heldBy, inboundSetting, permissionMode, postToClaude, scanClaude } from './claude.js';
 import { acceptClaudeInbound, assertClaudePolicy, restoreClaudeInbound } from './claude-inbound.js';
@@ -131,6 +131,8 @@ function serverUrl(args: string[], env: NodeJS.ProcessEnv): string {
 }
 
 async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
+  // A person reads join's output: its waits name their peer.
+  setMachineReadOutput(false);
   const host=flag(args,'--host');
   if(host){if(!isAgentId(host))throw new Error('Unknown join host');env={...env,BEELINE_SESSION_AGENT:host};}
   const dir = stateDir(env);
@@ -335,6 +337,8 @@ const VALUED = ['--as', '--room', '--reply-to', '--server', '--name', '--session
 async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   const [sub, ...rest] = args;
   const dir = stateDir(env);
+  // The one place session commands choose: these outputs are parsed by the host app or agent.
+  setMachineReadOutput(['hook', 'reply', 'read', 'tool', 'status', 'mcp', 'claude-mcp'].includes(sub ?? ''));
   if (sub === 'bridge') return runBridge(dir, runner(dir, env));
   if (sub === 'finish-join') return finishJoin(rest[0] ?? '', env);
   if (sub === 'mcp') return runZcodeMcp(dir);

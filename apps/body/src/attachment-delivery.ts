@@ -62,7 +62,7 @@ export async function fetchBoundedBytes(
   url: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<BoundedFetchResult> {
-  const response = await ask({ url, fetch: fetchImpl, report: false });
+  const response = await ask({ url, fetch: fetchImpl, machineRead: true });
   if (response.status === 410 || !response.ok) {
     await response.body?.cancel();
     return { status: response.status, ok: response.ok, bytes: Buffer.alloc(0), mimeType: '' };

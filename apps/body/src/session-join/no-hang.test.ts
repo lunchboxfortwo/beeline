@@ -5,14 +5,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, type Server } from 'node:net';
 import { createRequire } from 'node:module';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -503,15 +496,24 @@ describe('fix 13 and 15: join sign-in', () => {
 
 it('refuses takeover of a legacy bridge without an owner channel', async () => {
   const dir = scratch();
-  const oldDir = join(dir, 'old'); mkdirSync(oldDir);
-  const old = spawn(process.execPath, [entry(oldDir, 'setInterval(() => {}, 1000);'), 'session', 'bridge'], { stdio: 'ignore' });
+  const oldDir = join(dir, 'old');
+  mkdirSync(oldDir);
+  const old = spawn(
+    process.execPath,
+    [entry(oldDir, 'setInterval(() => {}, 1000);'), 'session', 'bridge'],
+    { stdio: 'ignore' },
+  );
   children.push(old);
   await once(old, 'spawn');
   writeFileSync(join(dir, 'bridge.pid'), String(old.pid));
-  const candidateDir = join(dir, 'new'); mkdirSync(candidateDir);
+  const candidateDir = join(dir, 'new');
+  mkdirSync(candidateDir);
   const candidate = entry(candidateDir, "process.send('ready'); setInterval(() => {}, 1000);");
-  await expect(ensureBridge(dir, { node: process.execPath, bundle: candidate })).rejects.toThrow('no followable owner channel');
-  expect(old.exitCode).toBeNull(); expect(old.signalCode).toBeNull();
+  await expect(ensureBridge(dir, { node: process.execPath, bundle: candidate })).rejects.toThrow(
+    'no followable owner channel',
+  );
+  expect(old.exitCode).toBeNull();
+  expect(old.signalCode).toBeNull();
 });
 
 it('leaves held sign-in completion under the transport read-failure policy', async () => {
@@ -521,8 +523,13 @@ it('leaves held sign-in completion under the transport read-failure policy', asy
     calls.push(init);
     throw new Error('transport read failure');
   });
-  await expect(finishSignIn('https://synthetic.invalid', 'client', signInLink('https://synthetic.invalid', 'client', 'member')))
-    .rejects.toThrow('completion is still pending');
+  await expect(
+    finishSignIn(
+      'https://synthetic.invalid',
+      'client',
+      signInLink('https://synthetic.invalid', 'client', 'member'),
+    ),
+  ).rejects.toThrow('completion is still pending');
   expect(calls).toHaveLength(1);
   expect(calls[0]).not.toHaveProperty('dispatcher');
 });

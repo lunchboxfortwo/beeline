@@ -16,23 +16,35 @@ import { createConnection, createServer, type Socket } from 'node:net';
 
 const say = (line: string) => process.stderr.write(`[beeline] ${line}\n`);
 
+/**
+ * The one switch for wait lines. Every wait prints one stderr line naming the
+ * peer it waits on, so a human-facing command is never silent. Only a caller
+ * whose stdout/stderr is read by a machine (session tool JSON, hook output,
+ * the MCP stdio tool process and what it calls) sets `machineRead: true`, and
+ * then no line is written.
+ */
+interface WaitReport {
+  report?: (line: string) => void;
+  machineRead?: boolean;
+}
+function reporter(channel: WaitReport): ((line: string) => void) | undefined {
+  return channel.machineRead ? undefined : (channel.report ?? say);
+}
+
 /** A local line-protocol peer: one JSON line out, one JSON line back. */
-export interface SocketChannel {
+export interface SocketChannel extends WaitReport {
   socket: string;
   peer: string;
-  report?: ((line: string) => void) | false;
 }
 /** An HTTP peer; the transport's own read failure ends a silent wait. */
-export interface HttpChannel {
+export interface HttpChannel extends WaitReport {
   url: string | URL;
   peer?: string;
   fetch?: typeof fetch;
-  report?: ((line: string) => void) | false;
 }
 
-export interface RequestChannel {
+export interface RequestChannel extends WaitReport {
   peer: string;
-  report?: ((line: string) => void) | false;
   send: (answer: (value: unknown) => void, fail: (error: Error) => void) => Promise<void>;
 }
 
@@ -46,10 +58,12 @@ export async function ask(
   channel: SocketChannel | HttpChannel | RequestChannel,
   request?: unknown,
 ): Promise<unknown> {
-  const report = channel.report === false ? undefined : (channel.report ?? say);
+  const report = reporter(channel);
   if ('send' in channel) {
     report?.(`waiting for ${channel.peer}`);
-    return new Promise((resolve, reject) => { void channel.send(resolve, reject).catch(reject); });
+    return new Promise((resolve, reject) => {
+      void channel.send(resolve, reject).catch(reject);
+    });
   }
   if ('url' in channel) {
     const init = request as RequestInit | undefined;
@@ -141,8 +155,12 @@ let ownerHooks = false;
 function killGroup(child: ChildProcess): void {
   if (!child.pid) return;
   try {
-    process.kill(groupLeaders.has(child) ? -child.pid : child.pid,
-      linkedWorkers.has(child) && child.exitCode === null && child.signalCode === null ? 'SIGTERM' : 'SIGKILL');
+    process.kill(
+      groupLeaders.has(child) ? -child.pid : child.pid,
+      linkedWorkers.has(child) && child.exitCode === null && child.signalCode === null
+        ? 'SIGTERM'
+        : 'SIGKILL',
+    );
   } catch {
     // The group is already gone.
   }
@@ -165,10 +183,12 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
         for (const child of owned) killGroup(child);
         process.removeListener(name, onSignal);
         // Keep the default disposition when nobody else handles the signal.
+        // Prepended, this runs before other handlers remove themselves, so the
+        // count says whether anyone else handles the signal.
         if (!process.listenerCount(name)) process.kill(process.pid, name);
-        else process.once(name, onSignal);
+        else process.prependOnceListener(name, onSignal);
       };
-      process.once(name, onSignal);
+      process.prependOnceListener(name, onSignal);
     }
   }
   const onLine =
@@ -191,7 +211,13 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       detached: leader,
       stdio: command.interactive
         ? 'inherit'
-        : [command.input === undefined && !command.ownerLink && command.stdin !== 'pipe' ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+        : [
+            command.input === undefined && !command.ownerLink && command.stdin !== 'pipe'
+              ? 'ignore'
+              : 'pipe',
+            'pipe',
+            'pipe',
+          ],
     });
     if (leader) groupLeaders.add(child);
     if (command.ownerLink) linkedWorkers.add(child);
@@ -237,7 +263,8 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       for (const stream of ['stdout', 'stderr'] as const)
         if (pending[stream]) onLine(pending[stream], stream);
       if (failure) reject(failure);
-      else if (command.signal?.aborted) reject(new Error(`${command.step}: cancelled; process group killed`));
+      else if (command.signal?.aborted)
+        reject(new Error(`${command.step}: cancelled; process group killed`));
       else resolve({ ...exited!, ...output });
     });
   });
@@ -289,13 +316,15 @@ export async function tryLock(
     );
     server.listen(address, () => resolve(true));
   });
-  if (bound) return {
-    held: true,
-    release: () => new Promise<void>((done) => {
-      for (const peer of peers) peer.destroy();
-      server.close(() => done());
-    }),
-  };
+  if (bound)
+    return {
+      held: true,
+      release: () =>
+        new Promise<void>((done) => {
+          for (const peer of peers) peer.destroy();
+          server.close(() => done());
+        }),
+    };
   return new Promise<LockAttempt>((resolve, reject) => {
     const peer = createConnection(address);
     let input = '';
@@ -311,7 +340,15 @@ export async function tryLock(
         const holder = JSON.parse(input.slice(0, end)) as LockHolder;
         answered = true;
         peer.unref();
-        resolve({ held: false, holder, close: () => peer.destroy(), released: () => { peer.ref(); return released; } });
+        resolve({
+          held: false,
+          holder,
+          close: () => peer.destroy(),
+          released: () => {
+            peer.ref();
+            return released;
+          },
+        });
       } catch {
         peer.destroy(new Error('Lock holder returned an unreadable record'));
       }

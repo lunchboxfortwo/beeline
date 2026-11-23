@@ -22,18 +22,32 @@ export async function observeHelper(
     () => controller.abort(new Error(`helper observation timed out after ${timeoutMs} ms`)),
     timeoutMs,
   );
-  let dirty = false, wake;
+  let dirty = false,
+    wake;
   let watchError;
-  const changed = () => { dirty = true; wake?.(); };
+  const changed = () => {
+    dirty = true;
+    wake?.();
+  };
   const changes = watch(directory, { signal: controller.signal }, changed);
-  changes.on('error', error => { watchError = error; changed(); });
-  changes.on('close', () => { watchError = new Error('helper status watcher ended'); changed(); });
+  changes.on('error', (error) => {
+    watchError = error;
+    changed();
+  });
+  changes.on('close', () => {
+    watchError = new Error('helper status watcher ended');
+    changed();
+  });
   try {
     for (;;) {
       if (controller.signal.aborted) throw controller.signal.reason;
       if (watchError) throw watchError;
       dirty = false;
-      const status = await askMachine(stateRoot, { operation: 'status' }, false).catch((error) => {
+      const status = await askMachine(
+        stateRoot,
+        { operation: 'status' },
+        { machineRead: true },
+      ).catch((error) => {
         // A helper the proof is killing resets the connection; re-read on its next status write.
         if (helperAbsent(error) || error?.code === 'ECONNRESET') return undefined;
         throw error;
@@ -42,7 +56,10 @@ export async function observeHelper(
         onStatus(status);
         if (accept(status)) return status;
       }
-      if (!dirty) await new Promise(resolve => { wake = resolve; });
+      if (!dirty)
+        await new Promise((resolve) => {
+          wake = resolve;
+        });
       wake = undefined;
     }
   } catch (error) {

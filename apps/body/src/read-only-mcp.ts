@@ -504,7 +504,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
         return await sessionToolRequest('session',{placeId:input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
           action:'operation',operation:name,input}) as JsonObject;
       }
-      const response = await ask({ url: new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), report: false }, {
+      const response = await ask({ url: new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), machineRead: true }, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
@@ -690,7 +690,7 @@ export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
     if (!relayUrl || !relayToken) result = await sessionSquireCall(tool, args) as typeof result;
     else {
       const context = await activeCommandContext();
-      const response = await ask({ url: new URL('/mcp', relayUrl), report: false }, {
+      const response = await ask({ url: new URL('/mcp', relayUrl), machineRead: true }, {
         method: 'POST',
         headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ ...context, method: 'tools/call',
@@ -745,7 +745,7 @@ export async function squireShareEndpoint(sessionId: string): Promise<{ url: str
       body = { result: await sessionSquireCall('operate_share', { session_id: sessionId }) };
       response = { ok: true, status: 200 };
     } else {
-      const upstream = await ask({ url: new URL('/mcp', relayUrl), report: false }, {
+      const upstream = await ask({ url: new URL('/mcp', relayUrl), machineRead: true }, {
         method: 'POST',
         headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ ...await activeCommandContext(), method: 'tools/call',
@@ -806,7 +806,7 @@ export async function daemonUploadArtifact(
   mime: string,
   title: string,
 ): Promise<DaemonArtifactUploadResult> {
-  const response = await ask({ url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), report: false }, {
+  const response = await ask({ url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), machineRead: true }, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,

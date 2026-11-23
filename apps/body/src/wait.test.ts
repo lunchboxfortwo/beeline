@@ -7,9 +7,15 @@ import { join, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { preparePrivateSocketDirectory } from './local-socket.js';
-import { askMachine, followHelperExit, helperAbsent, helperLockKey, machineControlPath } from './machine-control.js';
+import {
+  askMachine,
+  followHelperExit,
+  helperAbsent,
+  helperLockKey,
+  machineControlPath,
+} from './machine-control.js';
 import { downloadBytes } from './update-download.js';
-import { PeerRefusal, runOwned, tryLock } from './wait.js';
+import { ask, PeerRefusal, runOwned, tryLock } from './wait.js';
 
 const alive = (pid: number) => {
   try {
@@ -269,16 +275,22 @@ it('follows the recorded holder connection even if a successor binds before foll
   await owner.release();
   const successor = await tryLock(key);
   if (!successor.held) throw new Error('expected successor');
-  try { await follower.released(); }
-  finally { await successor.release(); }
+  try {
+    await follower.released();
+  } finally {
+    await successor.release();
+  }
 });
 
 it('does not follow a successor helper generation after an acknowledged handoff', async () => {
   const root = `helper-successor-${process.pid}-${Math.random()}`;
   const successor = await tryLock(helperLockKey(root), { generation: 'successor' });
   if (!successor.held) throw new Error('expected successor');
-  try { await followHelperExit(root, { pid: process.pid, generation: 'predecessor' }); }
-  finally { await successor.release(); }
+  try {
+    await followHelperExit(root, { pid: process.pid, generation: 'predecessor' });
+  } finally {
+    await successor.release();
+  }
 });
 
 it('a nested owner settles when its own child exits with a background pipe holder', async () => {
@@ -287,18 +299,29 @@ it('a nested owner settles when its own child exits with a background pipe holde
       args: ['-e', "require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'}).unref(); console.log('done');"],
       onLine: () => {} });
     console.log(result.stdout.trim());`;
-  const result = await runOwned({ step: 'worker', file: process.execPath,
-    args: ['--import', 'tsx', '--input-type=module', '-e', worker], onLine: () => {} });
+  const result = await runOwned({
+    step: 'worker',
+    file: process.execPath,
+    args: ['--import', 'tsx', '--input-type=module', '-e', worker],
+    onLine: () => {},
+  });
   expect(result.code).toBe(0);
   expect(result.stdout).toBe('done\n');
 });
 
 it('returns every stdout and stderr byte written before child exit', async () => {
   const count = 1024 * 1024;
-  const result = await runOwned({ step: 'complete pipe output', file: process.execPath,
-    args: ['-e', `const fs=require('node:fs');
+  const result = await runOwned({
+    step: 'complete pipe output',
+    file: process.execPath,
+    args: [
+      '-e',
+      `const fs=require('node:fs');
       for (const fd of [1,2]) { const bytes=Buffer.from(String(fd).repeat(${count})+'TAIL'+fd); let n=0;
-        while(n<bytes.length)n+=fs.writeSync(fd,bytes,n); }`], onLine: () => {} });
+        while(n<bytes.length)n+=fs.writeSync(fd,bytes,n); }`,
+    ],
+    onLine: () => {},
+  });
   expect(result.code).toBe(0);
   expect(result.stdout).toBe('1'.repeat(count) + 'TAIL1');
   expect(result.stderr).toBe('2'.repeat(count) + 'TAIL2');
@@ -309,11 +332,32 @@ it('follows an acknowledged legacy helper whose lock record has no generation', 
   const owner = await tryLock(helperLockKey(root));
   if (!owner.held) throw new Error('expected owner');
   let settled = false;
-  const followed = followHelperExit(root, { pid: process.pid, generation: 'legacy' }).then(() => { settled = true; });
+  const followed = followHelperExit(root, { pid: process.pid, generation: 'legacy' }).then(() => {
+    settled = true;
+  });
   try {
-    for (let i = 0; i < 8; i++) await new Promise<void>(done => setImmediate(done));
+    for (let i = 0; i < 8; i++) await new Promise<void>((done) => setImmediate(done));
     expect(settled).toBe(false);
-  } finally { await owner.release(); }
+  } finally {
+    await owner.release();
+  }
   await followed;
   expect(settled).toBe(true);
+});
+
+it('names the peer of every wait on stderr unless the output is machine-read', async () => {
+  const server = httpServer((_req, res) => res.end('ok'));
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const port = (server.address() as { port: number }).port;
+  const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    await (await ask({ url: `http://127.0.0.1:${port}/human` })).text();
+    await (await ask({ url: `http://127.0.0.1:${port}/tool`, machineRead: true })).text();
+    const lines = writes.mock.calls.map(([chunk]) => String(chunk));
+    expect(lines).toContain(`[beeline] waiting for 127.0.0.1:${port} (GET /human)\n`);
+    expect(lines.some((line) => line.includes('/tool'))).toBe(false);
+  } finally {
+    writes.mockRestore();
+    await new Promise<void>((done) => server.close(() => done()));
+  }
 });

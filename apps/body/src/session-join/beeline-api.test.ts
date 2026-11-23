@@ -23,10 +23,9 @@ move5_describe('one correlated held OAuth completion',()=>{
     });move5_vi.stubGlobal('fetch',fetcher);
     const result=move5_finishSignIn('https://synthetic.invalid','client',state,Date.now()+600_000,value=>{persisted.push(structuredClone(value));});
     await move5_vi.advanceTimersByTimeAsync(599_999);move5_expect(fetcher).toHaveBeenCalledOnce();
-    const request=fetcher.mock.calls[0]![1] as RequestInit&{dispatcher:move5_Agent};
-    const dispatch=move5_vi.spyOn(move5_Agent.prototype,'dispatch').mockReturnValue(true);
-    request.dispatcher.dispatch({origin:'https://synthetic.invalid',path:'/mcp/oauth/handoff',method:'POST',headersTimeout:1234,bodyTimeout:300000},{} as never);
-    move5_expect(dispatch).toHaveBeenCalledWith(move5_expect.objectContaining({bodyTimeout:0,headersTimeout:1234}),move5_expect.anything());dispatch.mockRestore();
+    // The held handoff uses the transport's own limits (no bodyTimeout:0 dispatcher), so it ends on the transport's failure.
+    const request=fetcher.mock.calls[0]![1] as RequestInit&{dispatcher?:move5_Agent};
+    move5_expect(request.dispatcher).toBeUndefined();
     finish(Response.json({code:'synthetic-code'}));move5_expect(await result).toEqual(tokens);
     move5_expect(fetcher).toHaveBeenCalledTimes(2);move5_expect(persisted.at(-1)).toMatchObject({tokens,tokensAt:move5_expect.any(Number)});
     const recovered=structuredClone(state);await move5_finishSignIn('https://synthetic.invalid','client',recovered,Date.now()+1);

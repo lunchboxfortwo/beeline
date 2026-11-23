@@ -9,7 +9,11 @@ export function exitWithOwner(): void {
   process.stdin.resume();
   process.stdin.on('end', () => {
     process.once('exit', () => {
-      try { process.kill(0, 'SIGKILL'); } catch { /* already gone */ }
+      try {
+        process.kill(0, 'SIGKILL');
+      } catch {
+        /* already gone */
+      }
     });
     process.exit(1);
   });
@@ -17,16 +21,24 @@ export function exitWithOwner(): void {
   process.stdin.unref?.();
 }
 
-export async function withCallerSignal<T>(work: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+export async function withCallerSignal<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
   if (signal) return work(signal);
   const controller = new AbortController();
   const abort = (name: 'SIGINT' | 'SIGTERM') => {
     controller.abort(new Error('Operation cancelled'));
     process.kill(process.pid, name);
   };
-  const interrupt = () => abort('SIGINT'), terminate = () => abort('SIGTERM');
+  const interrupt = () => abort('SIGINT'),
+    terminate = () => abort('SIGTERM');
   process.once('SIGINT', interrupt);
   process.once('SIGTERM', terminate);
-  try { return await work(controller.signal); }
-  finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', terminate); }
+  try {
+    return await work(controller.signal);
+  } finally {
+    process.removeListener('SIGINT', interrupt);
+    process.removeListener('SIGTERM', terminate);
+  }
 }

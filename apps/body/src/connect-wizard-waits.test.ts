@@ -169,13 +169,23 @@ it('does not spawn after cancellation during ACP startup preparation', async () 
   const { AcpClient } = await import('./acp.js');
   const { startAgentProcess } = await import('./agent-process.js');
   let resume!: () => void;
-  const priming = new Promise<void>(done => { resume = done; });
-  const client = new AcpClient({ agentCommand: process.execPath,
-    agentArgs: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned'); process.exit(1);`],
-    agentEnv: {}, resourceScope: 'none', oomKills: { prime: () => priming, consume: async () => false } });
+  const priming = new Promise<void>((done) => {
+    resume = done;
+  });
+  const client = new AcpClient({
+    agentCommand: process.execPath,
+    agentArgs: [
+      '-e',
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned'); process.exit(1);`,
+    ],
+    agentEnv: {},
+    resourceScope: 'none',
+    oomKills: { prime: () => priming, consume: async () => false },
+  });
   const cancel = new AbortController();
   const starting = startAgentProcess(client, cancel.signal);
-  cancel.abort(); resume();
+  cancel.abort();
+  resume();
   await expect(starting).rejects.toBe(cancel.signal.reason);
   expect(existsSync(marker)).toBe(false);
 });
@@ -186,12 +196,30 @@ it('carries connect cancellation through the real catalog startup', async () => 
   const { loadConnectModelCatalog } = await import('./connect-command.js');
   const { fetchAgentModelCatalog } = await import('./model-catalog.js');
   const cancel = new AbortController();
-  const catalog = loadConnectModelCatalog({ harness: 'codex', signal: cancel.signal }, {
-    refreshAdapter: async () => {},
-    resolveAgent: () => ({ kind: 'codex', command: process.execPath,
-      args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned'); process.exit(1);`] }),
-    fetchCatalog: (agent, env, selection, signal) => { cancel.abort(); return fetchAgentModelCatalog(agent, env, selection, signal); },
-  });
-  await expect(catalog).rejects.toBe(cancel.signal.reason);
+  const catalog = loadConnectModelCatalog(
+    { harness: 'codex', signal: cancel.signal },
+    {
+      refreshAdapter: async () => {},
+      resolveAgent: () => ({
+        kind: 'codex',
+        command: process.execPath,
+        args: [
+          '-e',
+          `require('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned'); process.exit(1);`,
+        ],
+      }),
+      fetchCatalog: (agent, env, selection, signal) => {
+        cancel.abort();
+        return fetchAgentModelCatalog(agent, env, selection, signal);
+      },
+    },
+  );
+  const error = await catalog.then(
+    () => undefined,
+    (reason: unknown) => reason,
+  );
+  // The abort happens inside the catalog fetch, so read its reason only after the rejection.
+  expect(error).toBe(cancel.signal.reason);
+  expect(error).toBeDefined();
   expect(existsSync(marker)).toBe(false);
 });
