@@ -210,6 +210,7 @@
     "@types/react": "~19.1.10",
     "babel-plugin-transform-remove-console": "^6.9.4",
     "cross-env": "^10.1.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^30.0.1",
     "patch-package": "^8.0.0",
     "react-test-renderer": "19.0.0",

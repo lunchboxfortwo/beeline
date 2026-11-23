@@ -226,24 +226,29 @@ class WebArtifactByteStore implements ArtifactByteStore {
       request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
     });
   }
-  async get(key: string): Promise<Uint8Array | null> {
+  private async transaction(work: (transaction: IDBTransaction) => void): Promise<void> {
     const db = await this.open(); return new Promise((resolve, reject) => {
       const transaction = db.transaction(['objects', 'metadata'], 'readwrite');
-      const request = transaction.objectStore('objects').get(key); let bytes: Uint8Array | null = null;
+      transaction.oncomplete = () => resolve(); transaction.onerror = transaction.onabort = () => reject(transaction.error);
+      try { work(transaction); }
+      catch (error) { transaction.abort(); reject(error); }
+    });
+  }
+  async get(key: string): Promise<Uint8Array | null> {
+    let bytes: Uint8Array | null = null; await this.transaction(transaction => {
+      const request = transaction.objectStore('objects').get(key);
       request.onsuccess = () => {
         const row = request.result as WebRow | undefined;
         if (row && row.size <= OBJECT_LIMIT && row.bytes.byteLength === row.size) {
           bytes = new Uint8Array(row.bytes); transaction.objectStore('metadata').put({ key, size: row.size, used: Date.now() });
         }
       };
-      transaction.oncomplete = () => resolve(bytes); transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
     });
+    return bytes;
   }
   async set(key: string, bytes: Uint8Array): Promise<void> {
     if (bytes.byteLength > OBJECT_LIMIT) throw new Error('File cache object exceeds budget.');
-    const db = await this.open(); return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['objects', 'metadata'], 'readwrite');
+    return this.transaction(transaction => {
       const metadata = transaction.objectStore('metadata');
       const used = Date.now();
       transaction.objectStore('objects').put({ key, bytes: bytes.slice().buffer, size: bytes.byteLength, used });
@@ -258,22 +263,16 @@ class WebArtifactByteStore implements ArtifactByteStore {
           total -= row.size; count--; metadata.delete(row.key); transaction.objectStore('objects').delete(row.key);
         }
       };
-      transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
     });
   }
-  async remove(key: string): Promise<void> {
-    const db = await this.open(); return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['objects', 'metadata'], 'readwrite');
+  remove(key: string): Promise<void> {
+    return this.transaction(transaction => {
       transaction.objectStore('objects').delete(key); transaction.objectStore('metadata').delete(key);
-      transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error);
     });
   }
-  async clear(): Promise<void> {
-    const db = await this.open(); return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['objects', 'metadata'], 'readwrite');
+  clear(): Promise<void> {
+    return this.transaction(transaction => {
       transaction.objectStore('objects').clear(); transaction.objectStore('metadata').clear();
-      transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error);
     });
   }
 
