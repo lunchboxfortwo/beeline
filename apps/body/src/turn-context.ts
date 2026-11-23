@@ -11,7 +11,6 @@ export async function writeTurnContext(
       >
     | undefined,
   queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [],
-  ownedModelDirectory?: string,
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
 ): Promise<void> {
   await writePrivateFileAtomically(
@@ -32,7 +31,6 @@ export async function writeTurnContext(
             })),
             startedAt: Date.now(),
             ...(invocation ? { invocation } : {}),
-            ...(ownedModelDirectory ? { ownedModelDirectory } : {}),
           }
         : {},
     ),

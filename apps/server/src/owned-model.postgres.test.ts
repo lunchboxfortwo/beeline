@@ -5,7 +5,7 @@ import { PostgresDatabase, type SqlDatabase } from './database.js';
 import { COMMITTED_JOURNAL_SCHEMA } from './committed-journal-schema.js';
 import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
-import { MODEL, MODEL_AGENT, MODEL_KEY, MODEL_ROOM, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
+import { MODEL, MODEL_AGENT, MODEL_ROOM, seedOwnedModelFixture } from './test-fixtures/owned-model.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { FreeAgentService, freeAgentConfigFromEnv, sealSecrets, tokenHash } from './free-agents.js';
 import { retireAgentFromWorkspace } from './agent-retirement.js';
@@ -66,7 +66,7 @@ async function fixture() {
       CREATE TABLE agent_commands(id text PRIMARY KEY,room_id uuid,agent_id text,turn_request_id text,action text,reason text,
         root_command_id text,root_source_message_id text,agent_depth integer,state text,
         created_at timestamptz DEFAULT now());
-      CREATE TABLE agent_turns(room_id uuid,request_id text,agent_id text,status text,started_at timestamptz);`);
+      CREATE TABLE agent_turns(room_id uuid,request_id text,agent_id text,status text,started_at timestamptz,invocation_id text);`);
     // Install actual authority writer triggers and actual owned source/commit
     // predicates, rather than a fake lock in the proof's membership adapter.
     await left.query(COMMITTED_JOURNAL_SCHEMA); await left.query(MEMBERSHIP_AUTHORITY_SCHEMA);
@@ -121,8 +121,8 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       const owner = new OwnedModelAttempts(observe(f.left,async sql=>{
         if(sql.includes('INSERT INTO owned_model_attempts')){entered.resolve();await release.promise;}
       }), f.credentials);
-      const otherKeys = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL);
-      const otherActor = await otherKeys.authenticate(f.right, f.issued.token);
+      const otherKeys = new OwnedModelCredentials(MODEL);
+      const otherActor = await otherKeys.authenticate(f.right, f.token, MODEL_ROOM);
       const other = new OwnedModelAttempts(f.right, otherKeys);
       // The committed unique request key decides the winner. A duplicate's
       // speculative accounting rolls back before its receipt is returned.
@@ -259,7 +259,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
     }
   }, 20_000);
 
-  it("DB response delay cannot expire a queue item’s credential", async () => {
+  it("DB response delay cannot expire the model credential", async () => {
     const f = await fixture(); let delay = false, delayed = false;
     try {
       const owner = new OwnedModelAttempts(observe(f.left, async (sql, tx) => {
@@ -282,7 +282,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
         ALTER TABLE free_agents ADD COLUMN bootstrap_hash text,ADD COLUMN updated_at timestamptz;
         CREATE TABLE free_agent_events(id bigserial PRIMARY KEY,agent_id text,kind text,detail jsonb);`);
       const key = 'synthetic-sealing-key', bootstrapToken = 'bfb_synthetic';
-      await f.left.query('UPDATE free_agents SET sealed_keys=$1,bootstrap_hash=$2', [sealSecrets(key, { agent: 'synthetic-agent-key', body: 'synthetic-body-key' }), tokenHash(bootstrapToken)]);
+      await f.left.query('UPDATE free_agents SET sealed_keys=$1,bootstrap_hash=$2', [sealSecrets(key, { agent: 'synthetic-agent-key', body: 'synthetic-body-key', modelToken: f.token }), tokenHash(bootstrapToken)]);
       const owner = new OwnedModelAttempts(f.left, f.credentials), admitted = await owner.reserve(f.actor, ONE, payload(), reserve);
       const noMachine = vi.fn(async () => { throw new Error('No lifecycle effect is authorized by this fixture'); });
       const machines: FreeAgentMachines = { create: noMachine, find: noMachine, start: noMachine, suspend: noMachine, stop: noMachine, destroy: noMachine, state: noMachine, waitFor: noMachine };
@@ -300,7 +300,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       await waiting(f.admin, await pid.promise); expect(start).not.toHaveBeenCalled();
       release.resolve(); expect((await bootstrap)?.daemonExchangeToken).toBe('synthetic-exchange');
       expect((await handoff).state).toBe('started'); expect(start).toHaveBeenCalledOnce(); expect(noMachine).not.toHaveBeenCalled();
-      expect((await f.credentials.authenticate(f.left, f.issued.token)).binding.commandId).toBe(f.actor.binding.commandId);
+      expect((await f.credentials.authenticate(f.left, f.token, MODEL_ROOM)).binding.commandId).toBe(f.actor.binding.commandId);
       expect((await f.left.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{ state: 'unknown' }]);
     } finally { release.resolve(); await Promise.allSettled([bootstrap, handoff].filter(work => work !== undefined)); await f.close(); }
   }, 20_000);
@@ -315,6 +315,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
         ALTER TABLE agents ADD COLUMN usage_snapshot jsonb,ADD COLUMN usage_account_id text,ADD COLUMN soul jsonb,
           ADD COLUMN chosen_voices jsonb,ADD COLUMN selected_model text,ADD COLUMN selected_effort text,ADD COLUMN model_catalog jsonb,
           ADD COLUMN model_unavailable jsonb,ADD COLUMN commands jsonb,ADD COLUMN schedule_ids jsonb,
+          ADD COLUMN running_model text,ADD COLUMN running_model_selected text,ADD COLUMN running_model_reason text,
           ADD COLUMN squire_work jsonb,ADD COLUMN yolo_mode boolean,ADD COLUMN yolo_set_by text,ADD COLUMN yolo_set_at timestamptz,
           ADD COLUMN access_policy jsonb,ADD COLUMN updated_at timestamptz;
         CREATE TABLE free_agent_events(id bigserial PRIMARY KEY,agent_id text,kind text,detail jsonb);
@@ -335,7 +336,7 @@ describe.skipIf(!url)('real PostgreSQL owned model primitive contention', () => 
       void handoff.catch(() => {}); await waiting(f.admin, await pid.promise); expect(start).not.toHaveBeenCalled();
       releaseRetire.resolve(); await retirement;
       await expect(handoff).rejects.toThrow('authority'); expect(start).not.toHaveBeenCalled();
-      await expect(f.credentials.authenticate(f.left, f.issued.token)).rejects.toThrow('authority');
+      await expect(f.credentials.authenticate(f.left, f.token, MODEL_ROOM)).rejects.toThrow('authority');
       expect((await f.left.query('SELECT hidden_from_roster FROM identities WHERE id=$1', [MODEL_AGENT])).rows).toEqual([{ hidden_from_roster: true }]);
     } finally {
       releaseRetire.resolve();

@@ -13,7 +13,7 @@ const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024;
 /** `generation_id` is retained storage and holds the item id. */
 export const OWNED_MODEL_ATTEMPT_SCHEMA = `
 CREATE TABLE IF NOT EXISTS owned_model_attempts (
- credential_id text NOT NULL REFERENCES owned_model_credentials(id), model_request_id text NOT NULL,
+ credential_id text NOT NULL, model_request_id text NOT NULL,
  command_id text NOT NULL, generation_id text NOT NULL, agent_id text NOT NULL, owner_id text NOT NULL,
  request_digest text NOT NULL CHECK(request_digest ~ '^[a-f0-9]{64}$'),
  payload_digest text NOT NULL CHECK(payload_digest ~ '^[a-f0-9]{64}$'),
@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS owned_model_attempts (
  CHECK(COALESCE(state='unknown' OR evidence IS NOT NULL AND (state='succeeded' AND evidence->>'kind'='usage'
    OR state='refused' AND evidence->>'kind' IN ('not-dispatched','provider-refused')),false))
 );
+-- Preserve existing accounting rows. New attempts use agent identity in this column.
+ALTER TABLE owned_model_attempts DROP CONSTRAINT IF EXISTS owned_model_attempts_credential_id_fkey;
 -- An earlier UNKNOWN attempt never refuses a new request for the same item.
 DROP INDEX IF EXISTS owned_model_unknown_request;
 DROP INDEX IF EXISTS owned_model_unknown_payload;
@@ -145,9 +147,9 @@ export class OwnedModelAttempts {
     const owned = this.credentials.actor(actor), canonical = canonicalOwnedModelPayload(semanticInput);
     const semantic = createHash('sha256').update('beeline:owned-model:request:v1\0').update(canonical.body).digest('hex');
     const replay = async (database: SqlDatabase): Promise<void> => {
-      const row = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2', [owned.id,id])).rows[0];
+      const row = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2', [owned.agentId,id])).rows[0];
       if (!row) return;
-      if (row.request_digest !== semantic) throw new OwnedModelIdentityConflict();
+      if (row.command_id !== owned.commandId || row.request_digest !== semantic) throw new OwnedModelIdentityConflict();
       throw new ReplayedAttempt(row);
     };
     const admitted: { row: Row; body?: string } = await this.database.transaction(async database => {
@@ -155,9 +157,9 @@ export class OwnedModelAttempts {
       // their ordinary row contention says nothing about provider entry.
       await database.query('SELECT id FROM agent_commands WHERE id=$1 FOR SHARE', [owned.commandId]);
       await this.credentials.assertCurrent(database, actor);
-      const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.id, id])).rows[0];
+      const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.agentId, id])).rows[0];
       if (old) {
-        if (old.request_digest !== semantic) throw new OwnedModelIdentityConflict();
+        if (old.command_id !== owned.commandId || old.request_digest !== semantic) throw new OwnedModelIdentityConflict();
         return { row: old };
       }
       let prepared: Awaited<ReturnType<typeof reserve>>;
@@ -175,7 +177,7 @@ export class OwnedModelAttempts {
       const row = (await database.query<Row>(`INSERT INTO owned_model_attempts(credential_id,model_request_id,command_id,generation_id,agent_id,owner_id,
         request_digest,payload_digest,reservation,state) VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8::jsonb,'unknown')
         ON CONFLICT(credential_id,model_request_id) DO NOTHING RETURNING *`,
-      [owned.id, id, owned.commandId, owned.agentId, owned.ownerId, semantic, payload.digest, JSON.stringify(prepared.reservation)])).rows[0];
+      [owned.agentId, id, owned.commandId, owned.agentId, owned.ownerId, semantic, payload.digest, JSON.stringify(prepared.reservation)])).rows[0];
       if (!row) { await replay(database); throw new OwnedModelUnknownPayload(); }
       return { row, body: payload.body };
     }).catch((error: unknown) => {
@@ -209,10 +211,9 @@ export class OwnedModelAttempts {
         if (!await lockRoomAccess(database, [owned.roomId], [owned.agentId])) throw new OwnedModelRefusal();
         await this.credentials.lockInvocation(database, pending.actor);
         await database.query('SELECT agent_id FROM agents WHERE agent_id=$1 FOR SHARE', [owned.agentId]);
-        await database.query('SELECT id FROM owned_model_credentials WHERE id=$1 FOR SHARE', [owned.id]);
         const row = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR SHARE',
-          [owned.id, pending.requestId])).rows[0];
-        if (!row || row.state !== 'unknown' || row.evidence || row.payload_digest !== pending.digest) throw new OwnedModelRefusal();
+          [owned.agentId, pending.requestId])).rows[0];
+        if (!row || row.command_id !== owned.commandId || row.state !== 'unknown' || row.evidence || row.payload_digest !== pending.digest) throw new OwnedModelRefusal();
         await this.credentials.assertCurrent(database, pending.actor);
         pending.entered = true;
         completion = start(pending.body);
@@ -246,14 +247,14 @@ export class OwnedModelAttempts {
     const owned = this.credentials.actor(actor), digest = evidence(value);
     if (!requestId(id)) throw new OwnedModelIdentityConflict();
     return this.database.transaction(async database => {
-      const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.id, id])).rows[0];
+      const old = (await database.query<Row>('SELECT * FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2 FOR UPDATE', [owned.agentId, id])).rows[0];
       if (!old || old.command_id !== owned.commandId || old.owner_id !== owned.ownerId ||
           old.evidence_hash && old.evidence_hash !== digest || old.state !== 'unknown' && old.state !== outcome) throw new OwnedModelIdentityConflict();
       if (!old.evidence_hash) await settle(database, old.reservation, value);
       else if (old.state === outcome) return receipt(old);
       const row = (await database.query<Row>(`UPDATE owned_model_attempts SET state=$3,evidence=$4::jsonb,evidence_hash=$5,
         settled_at=COALESCE(settled_at,clock_timestamp()) WHERE credential_id=$1 AND model_request_id=$2 RETURNING *`,
-      [owned.id, id, outcome, JSON.stringify(value), digest])).rows[0]!;
+      [owned.agentId, id, outcome, JSON.stringify(value), digest])).rows[0]!;
       return receipt(row);
     });
   }

@@ -24,6 +24,7 @@ import {
   FreeAgentService,
   generateAgentKeypair,
   openSecrets,
+  sealSecrets,
   freeAgentConfigFromEnv,
   type FreeAgentConfig,
 } from './free-agents.js';
@@ -613,7 +614,7 @@ describe('free starter agents', () => {
     ).toBe(2);
   });
 
-  it('seals keys that derive the agent identity, and bootstraps the Machine once per grant', async () => {
+  it.each([false, true])('reuses the sealed model token on bootstrap (older agent=%s)', async (legacy) => {
     const { id } = await createWorkspace();
     await settle();
     const agent = await freeAgentOf(id);
@@ -623,9 +624,15 @@ describe('free starter agents', () => {
       ])
     ).rows[0]!.sealed_keys;
     expect(sealed).not.toContain(agent.agent_id);
-    const keys = openSecrets<{ agent: string; body: string }>('test-seal-secret', sealed);
+    const keys = openSecrets<{ agent: string; body: string; modelToken: string }>('test-seal-secret', sealed);
     expect(getPublicKey(Buffer.from(keys.agent, 'hex'))).toBe(agent.agent_id);
 
+    if (legacy) {
+      await db.query('UPDATE free_agents SET sealed_keys=$2 WHERE agent_id=$1', [
+        agent.agent_id,
+        sealSecrets('test-seal-secret', { agent: keys.agent, body: keys.body }),
+      ]);
+    }
     expect(await freeAgents.bootstrap('bfb_wrong')).toBeUndefined();
     const token = machines.specs[0]!.env.BEELINE_FREE_AGENT_BOOTSTRAP!;
     const grant = (await freeAgents.bootstrap(token))!;
@@ -641,10 +648,12 @@ describe('free starter agents', () => {
       modelBaseUrl: 'https://server.test/v1/free-agents/model',
         });
     expect(grant.modelToken).toMatch(/^bfm_/);
+    if (legacy) expect(grant.modelToken).not.toBe(keys.modelToken);
+    else expect(grant.modelToken).toBe(keys.modelToken);
     expect(exchanges).toEqual([agent.agent_id]);
-    // A retried first boot gets a fresh exchange and model token; the old model token dies.
+    // Bootstrap retries reuse the provisioned model token.
     const retry = (await freeAgents.bootstrap(token))!;
-    expect(retry.modelToken).not.toBe(grant.modelToken);
+    expect(retry.modelToken).toBe(grant.modelToken);
     expect(exchanges).toHaveLength(2);
   });
 

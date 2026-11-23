@@ -784,9 +784,6 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   if (saved) saved = await attachQueuedContext(db, saved, chat.members);
   if (saved && chat.parent_id && ['corner_objective','human_tag'].includes(input.reason))
     await initializeThreadImplementer(db, chat.id);
-  if (saved?.state === 'pending' && saved.action === 'input' && db.ownedModelCredentials &&
-      (await db.query('SELECT 1 FROM free_agents WHERE agent_id=$1 AND removed_at IS NULL', [saved.agent_id])).rowCount)
-    await db.ownedModelCredentials.issueInTransaction(db, { agentId: saved.agent_id, commandId: saved.id });
   if (saved && input.sourceMessageId) await recordMcpMention(db,input.agentId,chat.id,input.sourceMessageId);
   const member = chat.members.find(member => member.id === input.agentId);
   const webhookSource = privateMessage ? null : input.sourceMessageId;

@@ -6,7 +6,7 @@ import ts from 'typescript';
 /** Checks stay beside their data. This checks refusal construction, not authority. */
 export const PATH = [
   { file: 'apps/body/src/agent-runner.ts', functions: ['queueChanged', 'reconcileQueue', 'resendStoredAnswers', 'pump', 'deliver', 'store', 'post'] },
-  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'hostedModel', 'optional', 'stop', 'dispose'], startup: true },
+  { file: 'apps/body/src/place-session.ts', functions: ['start', 'startFresh', 'activate', 'deliver', 'optional', 'stop', 'dispose'], startup: true },
   { file: 'apps/body/src/read-only-mcp-execute-agent-operation.ts', functions:['executeAgentOperation','executeConversationOperation'] },
   { file: 'apps/body/src/read-only-mcp-open-poll.ts', functions:['executeAgentTool','callAgentTool'] },
   { file: 'apps/body/src/agent-process.ts', functions: ['startAgentProcess', 'stopAgentProcess'], startup: true },
@@ -185,7 +185,7 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   'openAcpConversation', 'applyAgentModelSelection', 'answering', 'client.startProcess', 'client.stopProcess',
   'repairRoomAgentCredentialLinks', 'lstat', 'assertRealContainedDirectory', 'writeIsolatedHarnessFile',
   'readlink', 'rm', 'symlink', 'rename', 'writeBackDetachedClaudeLogin', 'readFile', 'provisionPiCustomModelConfig',
-  'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.hostedModel', 'this.writeContext', 'OwnedModelFiles.create', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
+  'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.writeContext', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
   // Owner-requested credential bootstrap refreshes retained thread launchers.
   'this.prepareGitHubLaunchers',
   // Release-owned skills must exist before the harness starts; operator shares stay optional.
@@ -251,8 +251,6 @@ export function stopSites(file, text, functions, startup = false, kinds = [], tr
       };
       return Boolean(nested && inspect(nested));
     }
-    // The current item's hosted credential is necessary to use its own model.
-    if (callee.endsWith('.execute') && expression.arguments[0]?.text === 'getModelCredential') return true;
     return SESSION_OPERATIONS.has(callee);
   };
   const propagated = expression => {
@@ -285,7 +283,7 @@ export function stopSites(file, text, functions, startup = false, kinds = [], tr
     else if (transport && ts.isCallExpression(node) && /\.(?:take|acquire|reserve)$/.test(node.expression.getText(tree))) add('admission');
     else if (transport && ts.isAwaitExpression(node) && /\.audit$/.test(node.expression.expression?.getText(tree) ?? '')) add('optional audit wait');
     else if (startup && ts.isAwaitExpression(node) && !awaited(node.expression)) add('wait');
-    else if (startup && ts.isCallExpression(node) && /(?:^|\.)execute$/.test(node.expression.getText(tree)) && node.arguments[0]?.text !== 'getModelCredential') add('optional setup read');
+    else if (startup && ts.isCallExpression(node) && /(?:^|\.)execute$/.test(node.expression.getText(tree))) add('optional setup read');
     else if (ts.isAwaitExpression(node) && /(?:refreshCornerReviewHead|refreshToken|installDependencies|gitClone|prepareWorkspace)/.test(node.expression.getText(tree))) add('optional setup wait');
     else if (ts.isCallExpression(node) && WAITS.has(node.expression.getText(tree).split('.').at(-1))) add('wait');
     else if (ts.isNewExpression(node) && node.expression.getText(tree) === 'Promise') add('wait');

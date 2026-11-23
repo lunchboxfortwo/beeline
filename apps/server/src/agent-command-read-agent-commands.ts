@@ -91,7 +91,6 @@ export async function readAgentCommands(
     [...new Set(rows.rows.map(item => item.parent_room_id ?? item.room_id))]
       .map(async placeId => [placeId, await daemonCorners({ database: db }, placeId, agentId, true)] as const),
   ));
-  const credentials = await db.ownedModelCredentials?.forCommands(db, rows.rows.map(item => item.id));
   return {
     commandProtocol: 2,
     commands: rows.rows.map(item => {
@@ -104,7 +103,6 @@ export async function readAgentCommands(
       };
       return {
         ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
-        ...(credentials?.has(item.id) ? { modelCredential: credentials.get(item.id) } : {}),
         ...(item.selected_model || item.selected_effort || item.fast_mode != null ? { modelSelection: {
           ...(item.selected_model ? { model: item.selected_model } : {}),
           ...(item.selected_effort ? { effort: item.selected_effort } : {}),

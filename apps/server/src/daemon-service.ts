@@ -20,7 +20,7 @@ import { daemonBootstrap,daemonInbox,daemonWorkspaceRoster } from './daemon/inbo
 import { daemonExpiredMediaIds,daemonRoomAttachment,daemonRoomMessage,daemonWithStoredDigests } from './daemon/message-reads.js';
 import { daemonCompletion,daemonLiveOutput,daemonPersistTurnTrace,daemonPostAgentAttachment,daemonPostRoomMessage,daemonRetract } from './daemon/messages.js';
 import { daemonAgentAvatar,daemonCommands,daemonMachineReport,daemonModelCatalog,daemonPostMandate } from './daemon/models.js';
-import { daemonSetOwnedModel,daemonSetStarterOnboarding } from './daemon/owned-model.js';
+import { daemonSetStarterOnboarding } from './daemon/owned-model.js';
 import { daemonCreateAgentSchedule,daemonDeleteAgentSchedule,daemonListAgentSchedules,daemonListEventSubscriptions,daemonPostRoomEvent,daemonRecordScheduleAuthorization,daemonRequireScheduleAdmin,daemonSetEventSubscriptions,daemonUpdateAgentSchedule } from './daemon/schedules-events.js';
 import { daemonActivity,daemonTurnReceipt } from './daemon/turn-receipts.js';
 import { DEFAULT_MEDIA_MAXIMUM_BYTES } from './daemon/values.js';
@@ -61,7 +61,6 @@ export class DaemonService {
   }
 
 
-  setOwnedModel(...args: CommandArguments<typeof daemonSetOwnedModel>): ReturnType<typeof daemonSetOwnedModel> { return daemonSetOwnedModel(this, ...args); }
 
    cornerPrRegistrationUnavailable?: boolean;
    starterOnboarding?: StarterOnboardingService;

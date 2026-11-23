@@ -1,9 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
-import { OwnedModelFiles, OwnedModelFileRefusal } from './owned-model-files.js';
+import { join } from 'node:path';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { ownedModelStream } from './owned-model-provider.js';
 const roots: string[] = [];
@@ -12,7 +10,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
-const token = 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64);
+const token = 'bfm_' + 'a'.repeat(43);
 const baseUrl = 'https://fixture.invalid/v1/free-agents/model';
 const model = {
   id: 'synthetic-model',
@@ -29,122 +27,38 @@ const model = {
 const context = {
   messages: [{ role: 'user' as const, content: 'Synthetic request', timestamp: 1 }],
 };
-function fixture() {
+it('uses the provisioned bearer for both prompts even when the sandbox sees the first turn context', async () => {
   const root = mkdtempSync(join(tmpdir(), 'owned-provider-'));
   roots.push(root);
-  const owner = OwnedModelFiles.create({
-    root,
-    binding: {
-      agentId: 'agent',
-      itemId: 'generation',
-      provider: 'beeline',
-      model: 'server-selected',
-      baseUrl,
-    },
-    credential: { v: 1, token, expiresAt: null },
-  });
   const path = join(root, 'context.json');
-  writeFileSync(
-    path,
-    JSON.stringify({ itemId: 'generation', ownedModelDirectory: owner.paths().directory }),
-    { mode: 0o600 },
-  );
+  writeFileSync(path, JSON.stringify({ itemId: 'first', ownedModelDirectory: join(root, 'revoked') }));
   vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', path);
-  return owner;
-}
-it.each([false, true])('uses the actual Pi provider and commits its receipt (resumed after cleanup: %s)', async resumed => {
-  const owner = fixture();
-  if (resumed) {
-    const binding = owner.binding(), root = dirname(owner.paths().directory);
-    owner.prepareHeaders();
-    owner.revoke();
-    OwnedModelFiles.create({ root, binding, credential: { v: 1, token, expiresAt: null } });
-  }
-  const calls: string[] = [];
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (url, init) => {
-      calls.push(String(url));
-      const headers = new Headers(init.headers);
-      expect(headers.get('x-beeline-model-invocation')).toBe(token);
-      const id = headers.get('x-beeline-model-request')!;
-      const receipt = encodeOwnedModelReceipt(token, {
-        requestId: id,
-        state: 'succeeded',
-        evidence: { kind: 'usage', tokens: 3, usd: 0 },
-      });
-      const chunks = [
-        {
-          choices: [
-            {
-              index: 0,
-              delta: { role: 'assistant', content: 'Original answer' },
-              finish_reason: null,
-            },
-          ],
-        },
-        {
-          id: receipt,
-          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
-        },
-      ];
-      return new Response(
-        chunks.map((chunk) => 'data: ' + JSON.stringify(chunk) + '\n\n').join('') +
-          'data: [DONE]\n\n',
-        { headers: { 'content-type': 'text/event-stream' } },
-      );
-    }),
-  );
-  const result = await ownedModelStream(model, context).result();
-  expect(result.stopReason).toBe('stop');
-  expect(result.content).toContainEqual(
-    expect.objectContaining({ type: 'text', text: 'Original answer' }),
-  );
-  expect(owner.snapshot().state).toBe('idle');
-  expect(calls).toEqual([baseUrl + '/chat/completions']);
-});
-it('delivers a finished answer whose receipt cannot be confirmed', async () => {
-  const owner = fixture();
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(
-    ['{"choices":[{"index":0,"delta":{"role":"assistant","content":"Answer"},"finish_reason":null}]}',
-      '{"id":"unsigned","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}']
-      .map(chunk => 'data: ' + chunk + '\n\n').join('') + 'data: [DONE]\n\n',
-    { headers: { 'content-type': 'text/event-stream' } })));
-  const result = await ownedModelStream(model, context).result();
-  expect(result.stopReason).toBe('stop');
-  expect(result.content).toContainEqual(expect.objectContaining({ type: 'text', text: 'Answer' }));
-  expect(owner.snapshot().state).toBe('unknown');
-});
-
-it('keeps transport loss UNKNOWN and sends the next model request', async () => {
-  const owner = fixture();
-  const calls: { method: string; url: string }[] = [];
-  vi.stubGlobal('fetch',vi.fn(async (url,init) => {
-    calls.push({method:init?.method ?? 'GET',url:String(url)});
-    throw new TypeError('synthetic lost response');
+  vi.stubEnv('BEELINE_FREE_AGENT_MODEL_TOKEN', token);
+  vi.stubEnv('BEELINE_MODEL_ROOM_ID', 'general');
+  const requests: string[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+    expect(String(url)).toBe(baseUrl + '/chat/completions');
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer ' + token);
+    expect(headers.get('x-beeline-model-room')).toBe('general');
+    requests.push(headers.get('x-beeline-model-request')!);
+    const chunk = JSON.stringify({
+      choices: [{ index: 0, delta: { role: 'assistant', content: 'Answer' }, finish_reason: 'stop' }],
+    });
+    return new Response('data: ' + chunk + '\n\ndata: [DONE]\n\n', {
+      headers: { 'content-type': 'text/event-stream' },
+    });
   }));
-  expect((await ownedModelStream(model,context).result()).stopReason).toBe('error');
-  expect(calls).toEqual([{method:'POST',url:baseUrl+'/chat/completions'}]);
-  expect(owner.snapshot().state).toBe('unknown');
-  expect((await ownedModelStream(model,context).result()).stopReason).toBe('error');
-  expect(calls).toHaveLength(2);
-});
 
-it.each([true,false])('uses the native provider’s error receipt only when authenticated (%s)', async signed => {
-  const owner=fixture();
-  const native=vi.fn(async (_url,init)=>{
-    const id=new Headers(init.headers).get('x-beeline-model-request')!;
-    const receipt=encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'provider-refused',status:429}});
-    return Response.json({error:{message:'The model provider refused this invocation (HTTP 429).',
-      signedReceipt:signed ? receipt : receipt.slice(0,-1)+(receipt.endsWith('0')?'1':'0')}},{status:409});
-  });
-  vi.stubGlobal('fetch',native);
-  const result=await ownedModelStream(model,context).result();
-  expect(result.stopReason).toBe('error');
-  expect(result.errorMessage).toBe('The model provider refused this invocation (HTTP 429).');
-  expect(owner.snapshot().state).toBe(signed?'idle':'unknown');
-  expect(native).toHaveBeenCalledOnce();
+  for (const text of ['First prompt', 'Second prompt']) {
+    const result = await ownedModelStream(model, {
+      ...context, messages: [{ ...context.messages[0]!, content: text }],
+    }).result();
+    expect(result.stopReason).toBe('stop');
+    expect(result.content).toContainEqual(expect.objectContaining({ type: 'text', text: 'Answer' }));
+  }
+  expect(requests).toHaveLength(2);
+  expect(new Set(requests).size).toBe(2);
 });
 
 it('loads the immutable provider artifact through the pinned Pi extension host', async () => {

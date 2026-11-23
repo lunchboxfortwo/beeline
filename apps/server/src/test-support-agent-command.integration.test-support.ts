@@ -1,5 +1,4 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { OwnedModelCredentials } from './owned-model-credential.js';
 
 import { randomBytes, randomUUID } from 'node:crypto';
 
@@ -175,7 +174,6 @@ beforeAll(async () => {
   phone = new PhoneService(db, 'http://test');
   live = new LiveHub();
   daemon = new DaemonService(db, live);
-  daemon.setOwnedModel({ready:()=>true,credentials:new OwnedModelCredentials({currentVersion:'test',key:()=>Buffer.alloc(32,7)},()=> 'synthetic/model')});
   Object.assign(daemon, { github: { assertCornerReviewerNotAuthor: async () => {} } });
 }, 30_000);
 
@@ -256,7 +254,6 @@ return {
 room,
 };
 }
-export { OwnedModelCredentials } from './owned-model-credential.js';
 export { randomBytes, randomUUID } from 'node:crypto';
 export { readFileSync } from 'node:fs';
 export { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';

@@ -24,6 +24,7 @@ beforeEach(async () => {
   await fixture.db.query(
     `UPDATE agent_commands SET state='complete',completed_at=clock_timestamp()`,
   );
+  await fixture.db.query('DELETE FROM agent_turns');
   await fixture.db.query(`UPDATE identities SET name='Beebee',handle='beebee' WHERE id=$1`, [
     MODEL_AGENT,
   ]);
@@ -49,18 +50,15 @@ const config = () =>
 const send = (text: string) =>
   phone.execute('sendRoomMessage', { roomId: MODEL_ROOM, text: `@beebee ${text}` }, MODEL_OWNER);
 
-it('queues the first message with its hosted credential before a machine exists and completes it after boot', async () => {
+it('queues the first message before a machine exists and completes it after boot', async () => {
   const daemon = new DaemonService(fixture.db, live);
-  daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
-  await fixture.db.query('UPDATE free_agents SET fly_machine_id=NULL,model_token_hash=NULL');
+  await fixture.db.query('UPDATE free_agents SET fly_machine_id=NULL');
   const sent = await send('my first message');
   const queued = await daemon.execute('getAgentCommands', {}, MODEL_AGENT);
   expect(queued.commands).toHaveLength(1);
   const item = queued.commands[0]!;
-  const credential = (item as typeof item & { modelCredential?: typeof fixture.issued }).modelCredential;
-  expect(credential).toMatchObject({ v: 1, expiresAt: null });
   expect((await fixture.db.query('SELECT fly_machine_id FROM free_agents')).rows).toEqual([{ fly_machine_id: null }]);
-  expect((await fixture.credentials.authenticate(fixture.db, credential!.token)).binding.commandId).toBe(item.id);
+  expect(item).not.toHaveProperty('modelCredential');
   const create = vi.fn(async () => Response.json({ id: 'first-machine' }));
   const provider = new FlyMachines('synthetic', 'first-boot', async (url, init) =>
     init?.method === 'POST' ? create() : Response.json(new URL(String(url)).pathname.endsWith('/machines') ? [] : { id: 'first-machine', state: 'started', config: { image } }));
@@ -72,9 +70,8 @@ it('queues the first message with its hosted credential before a machine exists 
   expect((await phone.readRoom(MODEL_ROOM, MODEL_OWNER))?.messages.some(message => message.text === 'First message answered.')).toBe(true);
 });
 
-it('queue credentials retain owned-model authority through runtime catch-up', async () => {
+it('uses the provisioned model credential through runtime catch-up', async () => {
   const daemon = new DaemonService(fixture.db, live);
-  daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
   const first = await send('original first message'), second = await send('original second message');
   const source = { connectionId: 'current-image-helper', epoch: await claimAgentConnection(
     fixture.db, live, MODEL_AGENT, {}, { connectionId: 'current-image-helper', instanceId: 'synthetic-server' }) };
@@ -88,7 +85,6 @@ it('queue credentials retain owned-model authority through runtime catch-up', as
   const pending = await daemon.execute('getAgentCommands', { roomId: MODEL_ROOM }, MODEL_AGENT);
   const generationId = 'original-messages';
   await daemon.execute('startAgentTurn',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT);
-  const {modelCredential}=await daemon.execute('getModelCredential',{roomId:MODEL_ROOM,requestId:pending.commands[0]!.turnRequestId},MODEL_AGENT);
   const workingRoom = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
   const working = workingRoom.latestAgentTurns.find(turn => turn.status === 'working')!;
   expect(workingRoom.pendingAgentCommands).toHaveLength(1);
@@ -99,9 +95,8 @@ it('queue credentials retain owned-model authority through runtime catch-up', as
   expect(workingAck?.label).not.toContain('starting');
   expect(workingAck).not.toBeNull();
   expect(pending.commands.map(command => command.source.id)).toEqual([first.messageId, second.messageId]);
-  expect(modelCredential).toMatchObject({ v: 1 });
-  const actor = await fixture.credentials.authenticate(fixture.db, modelCredential!.token);
-  expect(actor.binding).toMatchObject({ connectionId: null, connectionEpoch: null });
+  const actor = await fixture.credentials.authenticate(fixture.db, fixture.token, MODEL_ROOM);
+  expect(actor.binding.commandId).toBe(pending.commands[0]!.id);
   for(const item of pending.commands)await daemon.execute('postRoomMessage',{roomId:MODEL_ROOM,requestId:item.turnRequestId,text:'Both original messages answered.'},MODEL_AGENT);
   expect((await fixture.db.query('SELECT state FROM free_agents WHERE agent_id=$1', [MODEL_AGENT])).rows)
     .toEqual([{ state: 'sleeping' }]);
@@ -261,7 +256,6 @@ it('replaces a busy snapshot immediately and retains its queued work',async()=>{
 
 it('records a hosted startup failure visibly and terminates the item without an offline notice', async () => {
   const daemon = new DaemonService(fixture.db, live);
-  daemon.setOwnedModel({ credentials: fixture.credentials, ready: () => true });
   await send('first message');
   const item = (await daemon.execute('getAgentCommands', {}, MODEL_AGENT)).commands[0]!;
   const reason = 'ACP error -32000: Authentication required: Configure an API key or log in';

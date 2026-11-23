@@ -1,13 +1,10 @@
 import type { AgentCommand } from '@beeline/api-contract/daemon';
-import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { OwnedModelFiles } from './owned-model-files.js';
 import { expect, it, vi } from 'vitest';
 import { GrantCommandRunner } from './grant-runner.js';
 import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
-import { freeAgentPiConfig } from './free-agent-vm.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 import { runOwnedFile as execFileAsync } from './wait.js';
 import { fixture, pendingRead } from './place-session.test-support.js';
@@ -225,105 +222,6 @@ it('delivers an 18-hour offline backlog as one prompt without requiring steering
   expect(prompt).toContain('scheduled run 24');
   expect(prompt).toContain('Answer each asker in one combined reply.');
   await f.session.dispose();
-});
-
-it('opens a fresh hosted ACP session with provider configuration and the queue credential already present', async () => {
-  const f = await fixture();
-  f.config.agentKind = 'pi';
-  f.config.agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN = 'legacy-bootstrap-marker';
-  const operatorModels = join(f.config.operatorHome!, '.pi', 'agent');
-  await mkdir(operatorModels, { recursive: true });
-  await writeFile(
-    join(operatorModels, 'models.json'),
-    freeAgentPiConfig({
-      modelBaseUrl: 'https://synthetic.test/v1/free-agents/model',
-      upstreamModel: 'synthetic/model',
-    }),
-  );
-  const modelCredential = {
-    v: 1 as const,
-    token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64),
-    expiresAt: null,
-  };
-  f.client.sessionNew.mockImplementation(async () => {
-    const environment = f.spawn.mock.calls[0]![0].agentEnv!;
-    const modelConfig = JSON.parse(
-      await readFile(join(environment.PI_CODING_AGENT_DIR!, 'models.json'), 'utf8'),
-    );
-    expect(modelConfig.providers.beeline.apiKey).toBeTruthy();
-    const active = JSON.parse(await readFile(f.session.contextPath, 'utf8'));
-    expect(active.itemId).toBe(f.item.id);
-    const auth = JSON.parse(
-      await readFile(join(active.ownedModelDirectory, 'credential.json'), 'utf8'),
-    );
-    expect(auth.credential).toEqual(modelCredential);
-    return { sessionId: 'live', raw: { configOptions: [] } };
-  });
-  try {
-    await f.session.start({ ...f.item, modelCredential });
-    expect(await f.session.deliver({ ...f.item, modelCredential })).toMatchObject({
-      text: 'The answer',
-    });
-    expect(f.execute.mock.calls.some(([name]) => name === 'getModelCredential')).toBe(false);
-  } finally {
-    await f.session.dispose();
-  }
-});
-
-it('rejects a hosted item without its credential before launching ACP', async () => {
-  const f = await fixture();
-  f.config.agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN = 'legacy-bootstrap-marker';
-  await expect(f.session.start(f.item)).rejects.toThrow('Owned model local intent is unavailable');
-  expect(f.spawn).not.toHaveBeenCalled();
-  await f.session.dispose();
-});
-
-it('admits the hosted model journal inside the live Room sandbox across cold and warm items', async () => {
-  const f = await fixture(false, '/var/tmp');
-  f.config.bwrapPath = '/usr/bin/bwrap';
-  const modelCredential = {
-    v: 1 as const,
-    token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64),
-    expiresAt: null,
-  };
-  try {
-    for (const id of ['cold-tag', 'warm-tag']) {
-      const item = { ...f.item, id, turnRequestId: id, modelCredential };
-      await f.session.start(item);
-      const launch = f.spawn.mock.calls[0]![0];
-      const commandIndex = launch.agentArgs!.lastIndexOf(launch.harnessCommand!);
-      const probe = `import {OwnedModelFiles} from ${JSON.stringify(new URL('./owned-model-files.ts', import.meta.url).href)};
-        import {readFileSync,writeFileSync} from 'node:fs';
-        const active=JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE,'utf8'));
-        const owner=OwnedModelFiles.open(active.ownedModelDirectory);
-        owner.prepareHeaders(); console.log(owner.snapshot().state);
-        try {writeFileSync(process.env.BEELINE_TURN_CONTEXT_FILE,'escape');throw new Error('turn context became writable');}
-        catch(error){if(error.code!=='EROFS')throw error;}`;
-      const result = await execFileAsync(
-        launch.agentCommand,
-        [
-          ...launch.agentArgs!.slice(0, commandIndex),
-          process.execPath,
-          '--import',
-          createRequire(import.meta.url).resolve('tsx'),
-          '--input-type=module',
-          '-e',
-          probe,
-        ],
-        { env: { ...process.env, ...launch.agentEnv } },
-      );
-      expect(result.stdout.trim()).toBe('unknown');
-      const active = JSON.parse(await readFile(f.session.contextPath, 'utf8'));
-      expect(OwnedModelFiles.open(active.ownedModelDirectory).snapshot()).toMatchObject({
-        state: 'unknown',
-      });
-      const answer = await f.session.deliver(item);
-      void answer.cleanup();
-    }
-    expect(f.spawn).toHaveBeenCalledTimes(1);
-  } finally {
-    await f.session.dispose();
-  }
 });
 
 it('mounts Room CodeGraph at the cached workspace checkout', async () => {

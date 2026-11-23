@@ -30,7 +30,7 @@ import { deleteSkill, saveSkill } from '../institutional-skills.js';
 import { archiveWorkflow, assignWorkflowRole, handoff, getWorkflowRun, cancelWorkflowRun, saveWorkflow, startWorkflow } from '../workflow-runs.js';
 import type { DaemonContext } from './context.js';
 import { Input, Output, id } from './values.js';
-import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, getModelCredentialOperation, startAgentTurnOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation } from './operation-effects.js';
+import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, startAgentTurnOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation } from './operation-effects.js';
 import { daemonAccess, daemonRoomMembers } from './access.js';
 import { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
 import { daemonRoomMessage } from './message-reads.js';
@@ -172,8 +172,6 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'getAgentCommands':
         return (await readAgentCommands(ctx.database, authenticatedAgentId)) as Output<Name>;
-      case 'getModelCredential':
-        return getModelCredentialOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'startAgentTurn':
         return startAgentTurnOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'getDaemonBootstrap':

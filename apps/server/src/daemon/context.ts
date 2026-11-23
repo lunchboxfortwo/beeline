@@ -27,7 +27,7 @@ import type { daemonBootstrap,daemonInbox,daemonWorkspaceRoster } from './inbox-
 import type { daemonExpiredMediaIds,daemonRoomAttachment,daemonRoomMessage,daemonWithStoredDigests } from './message-reads.js';
 import type { daemonCompletion,daemonLiveOutput,daemonPersistTurnTrace,daemonPostAgentAttachment,daemonPostRoomMessage,daemonRetract } from './messages.js';
 import type { daemonAgentAvatar,daemonCommands,daemonMachineReport,daemonModelCatalog,daemonPostMandate } from './models.js';
-import type { daemonSetOwnedModel,daemonSetStarterOnboarding } from './owned-model.js';
+import type { daemonSetStarterOnboarding } from './owned-model.js';
 import type { daemonCreateAgentSchedule,daemonDeleteAgentSchedule,daemonListAgentSchedules,daemonListEventSubscriptions,daemonPostRoomEvent,daemonRecordScheduleAuthorization,daemonRequireScheduleAdmin,daemonSetEventSubscriptions,daemonUpdateAgentSchedule } from './schedules-events.js';
 import type { daemonActivity,daemonTurnReceipt } from './turn-receipts.js';
 import type { Input,Output } from './values.js';
@@ -80,7 +80,6 @@ export interface DaemonContext extends DaemonDependencies {
   starterOnboarding?: StarterOnboardingService;
   memoryEmbed: EmbedFn | undefined;
   afterCommit: AfterCommit | undefined;
-  setOwnedModel: (...args: CommandArguments<typeof daemonSetOwnedModel>) => ReturnType<typeof daemonSetOwnedModel>;
   setStarterOnboarding: (...args: CommandArguments<typeof daemonSetStarterOnboarding>) => ReturnType<typeof daemonSetStarterOnboarding>;
   reconcileZeroCheckWorkerCompletion: (...args: CommandArguments<typeof daemonReconcileZeroCheckWorkerCompletion>) => ReturnType<typeof daemonReconcileZeroCheckWorkerCompletion>;
   connectorAssignments: (...args: CommandArguments<typeof daemonConnectorAssignments>) => ReturnType<typeof daemonConnectorAssignments>;

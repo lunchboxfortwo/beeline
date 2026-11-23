@@ -1,4 +1,3 @@
-import type { OwnedModelCredential } from './helper-model.js';
 import type { UsageAccountPublicationResult, UsageAccountReference, UsageWriteSource } from './helper-usage.js';
 import type { RepositoryOnboardingCard } from './repository-onboarding.js';
 import type { AgentUsage, UsageRefreshOutcome } from './agent-usage.js';
@@ -158,7 +157,6 @@ export type DaemonOperationMap = {
   /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
   startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly invocationId?: string; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
   /** A hosted-model credential bound to one undone queue item (`requestId`). */
-  getModelCredential: Operation<RoomInput & { readonly requestId: string }, { readonly modelCredential?: OwnedModelCredential }>;
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;
   getWorkspaceRoster: Operation<WorkspaceRosterInput, WorkspaceRosterResult>;
   getOwedMentions: Operation<Record<string, never>, { readonly owedMentions: readonly { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly replyRule: string; readonly idempotencyKey: string }[] }>;

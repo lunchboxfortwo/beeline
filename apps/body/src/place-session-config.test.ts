@@ -16,7 +16,7 @@ afterEach(async () => {
 it('publishes complete tool context and resource-auth JSON while readers overlap rewrites', async () => {
   const root = await mkdtemp(join(tmpdir(), 'session-config-'));
   roots.push(root);
-  // Exceed Node's write chunk size to exercise reads between chunks as well as truncation.
+  // Exceed Node's write chunk size for the resource-auth JSON.
   const padding = 'x'.repeat(1024 * 1024);
   let generation = 0;
   const session = new PlaceSession({
@@ -26,17 +26,17 @@ it('publishes complete tool context and resource-auth JSON while readers overlap
     api: { connection: () => ({ baseUrl: 'https://synthetic.test', daemonToken: `${generation}:${padding}` }) } as unknown as DaemonApiClient,
     placeId: 'room', workspaceId: 'workspace', onExit() {},
   });
-  const item = () => ({ id: `item-${generation}`, roomId: 'room', turnRequestId: `request-${generation}`,
+  const item = () => ({ operatorAgent: true, id: `item-${generation}`, roomId: 'room', turnRequestId: `request-${generation}`,
     rootCommandId: 'task', reason: 'human_tag' }) as AgentCommand;
   const paths = [session.contextPath, `${session.contextPath}.resource-auth.json`];
   const observations = paths.map(() => new Set<string>());
-  await session.writeContext(item(), [], padding);
+  await session.writeContext(item(), []);
   let writing = true;
   const readers = paths.map(async (path, index) => {
     while (writing) {
       const value = JSON.parse(await readFile(path, 'utf8'));
       if (index === 0) {
-        expect(value.ownedModelDirectory).toBe(padding);
+        expect(value.operatorAgent).toBe(true);
         expect(value.requestId).toMatch(/^request-\d+$/);
         observations[index].add(value.requestId);
       } else {
@@ -49,7 +49,7 @@ it('publishes complete tool context and resource-auth JSON while readers overlap
   // Attach immediately so a reader failure is reported after all writes settle.
   const reading = Promise.allSettled(readers);
   try {
-    for (generation = 1; generation <= 12; generation++) await session.writeContext(item(), [], padding);
+    for (generation = 1; generation <= 12; generation++) await session.writeContext(item(), []);
   } finally {
     writing = false;
   }

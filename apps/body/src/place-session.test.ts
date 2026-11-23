@@ -627,25 +627,6 @@ it('does not pass an unverified retired model to a native launch before it can f
   await f.session.dispose();
 });
 
-it('returns the successful public answer before a model cleanup error', async () => {
-  const f = await fixture();
-  await f.session.start();
-  const revoke = vi.fn(() => {
-    throw new Error('cleanup EACCES');
-  });
-  (f.session as unknown as { hostedModel: () => Promise<unknown> }).hostedModel = async () => ({
-    paths: () => ({ directory: '/fixture' }),
-    revoke,
-  });
-  const answer = await f.session.deliver(f.item, []);
-  expect(answer.text).toBe('The answer');
-  expect(f.prompt).toHaveBeenCalledTimes(1);
-  expect(revoke).not.toHaveBeenCalled();
-  await expect(answer.cleanup()).rejects.toThrow('cleanup EACCES');
-  expect(answer.text).toBe('The answer');
-  await f.session.dispose();
-});
-
 it('starts and answers without awaiting an optional model setter', async () => {
   const f = await fixture();
   f.config.modelSelection = { model: 'default-model' };

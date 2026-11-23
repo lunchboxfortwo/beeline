@@ -78,10 +78,9 @@ soul. Existing free agents keep their names.
   pending. Recovery after an unobservable provider completion requires another
   actual signal. No external-completion/eventual-recovery guarantee is implied.
   Connection registration manages connection facts only and cannot clear the
-  lifecycle owner's token. Model credentials are issued in the queue-write
-  transaction and delivered on the item, before machine creation or connection.
-  Bootstrap tokens and connection negotiation do not grant model authority. Pi's
-  required provider configuration is prepared before ACP startup. A harness that
+  lifecycle owner's token. Provisioning stores one model credential per agent.
+  Machine bootstrap reads that same credential and writes it into the helper's
+  private model environment. Pi's provider is configured before ACP startup. A harness that
   cannot start completes the item as failed and posts its real reason, without an
   offline notice. Model admission uses current item and membership authority.
   The unused state column remains only for serving/rollback compatibility; its
@@ -140,8 +139,9 @@ and a 65,536-token output ceiling.
 ## Model access and allowances
 
 The Machine never holds a provider key. Pi's `beeline` provider points at
-`POST /v1/free-agents/model/chat/completions` with the current claimed invocation’s private credential. The release-owned Pi extension supplies invocation and request-ID headers to the existing native provider transport and commits its signed response receipt; legacy agent-wide model tokens cannot call this endpoint. The
-proxy pins each new agent's stored model. Beebee uses `BEELINE_FREE_AGENT_MODEL` (default `deepseek/deepseek-v4.1-flash-1017`); Luna uses `BEELINE_FREE_AGENT_LUNA_MODEL` (default `openai/gpt-6-luna`). Existing rows without a stored model keep the configured legacy model. Both teammates reserve and settle against the same owner's allowance and shared dollar budget. It
+`POST /v1/free-agents/model/chat/completions` with the agent's provisioned bearer.
+The Pi extension supplies the Room and a fresh model request ID to the native
+provider transport. The proxy pins each new agent's stored model. Beebee uses `BEELINE_FREE_AGENT_MODEL` (default `deepseek/deepseek-v4.1-flash-1017`); Luna uses `BEELINE_FREE_AGENT_LUNA_MODEL` (default `openai/gpt-6-luna`). Existing rows without a stored model keep the configured legacy model. Both teammates reserve and settle against the same owner's allowance and shared dollar budget. It
 forwards to `BEELINE_FREE_AGENT_MODEL_UPSTREAM` (default OpenRouter) with
 `BEELINE_FREE_AGENT_MODEL_KEY`, which may be a Squire egress grant. Before each call it
 reserves an estimated prompt plus a capped reply against the
@@ -172,17 +172,18 @@ model request is sent with its own request ID. No process-wide call queue or per
 minute throttle delays a call. Allowance and dollar reservations still happen
 atomically before provider entry.
 
-Helper model calls require a claimed `input`/`resume` command. The credential
-belongs to that invocation, not to a socket or server instance, so it keeps
-working through a deploy, a reconnect and a helper restart. Every request checks current invocation authority and the shared cost
-budget; a refusal ends that turn through the single terminal owner, which posts
-the turn's failed System line with its reason. Final provider entry waits for
-ordinary row locks (lifecycle reconcile, bootstrap, turn writes); it takes the
-free-agent row first, matching retirement's order. The Machine
-then sleeps at its normal idle boundary. Pending and completed commands do not
-permit calls, including copied model tokens used from outside Beeline. The
-helper retains the command claim through model responses and tool follow-ups;
-there is no post-completion grace that would authorize idle calls. Server-owned starter banter is a separate internal entry: a recent generating onboarding run must bind the agent and owner to the current Room team. It shares the same allowance, dollar budget, settlement code; the HTTP endpoint retains its live-turn requirement.
+Helper model calls require a live input turn in the supplied Room. Every call
+uses the same agent credential, and the proxy binds the request to the working
+turn and current membership from server rows. A refusal ends the turn through
+its terminal owner. Final provider entry waits on the free-agent, membership
+and command locks in the same order used for retirement. The Machine sleeps at
+its normal idle boundary. Pending and completed items cannot admit model calls. Server-owned starter banter is a separate internal entry: a recent generating onboarding run must bind the agent and owner to the current Room team. It shares the same allowance, dollar budget, settlement code; the HTTP endpoint retains its live-turn requirement.
+
+The server and free-agent image carry the model transport change together.
+`owned_model_credentials` remains historical storage until earlier serving
+images are retired. Existing machines keep their saved model token. An older
+agent without a sealed model token stores one when it next bootstraps a new
+machine.
 
 Reservations update owner lifetime accounting, daily tokens and shared dollars
 in that order within one short database transaction, refunding excess owner
@@ -233,10 +234,9 @@ See [SUB0ZERO admission and instruction replay proof](free-agent-token-admission
 
 Free-agent turns end on their result, explicit Stop, removal, or actual process loss.
 There is no elapsed execution window, generated shell-time budget, model-call
-queue or per-owner calls-per-minute limit. Model calls retain current command,
-generation, connection and Room membership checks, the daily token allowance,
-and the shared daily dollar budget. Lost model responses retain their original
-invocation receipt; a later request in a new turn is sent normally.
+queue or per-owner calls-per-minute limit. Model calls retain current command and Room membership checks, the daily token
+allowance, and the shared daily dollar budget. Lost model responses retain
+their reservation and attempt evidence. A later request is sent normally.
 
 Runtime preparation is outside execution. Pending commands are saved work;
 claims begin execution at the server claim timestamp. The image always runs its

@@ -1,4 +1,3 @@
-import { encodeOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
 import { OwnedModelStream } from './owned-model-stream.js';
 import { imageInput, withoutImageData } from './free-agent-image-input.js';
 import { Writable } from 'node:stream';
@@ -32,14 +31,6 @@ export interface FreeAgentModelProxyOptions {
   upstreamBaseUrl?: string;
   fetchImpl?: typeof fetch;
   now?: () => Date;
-  /** Absent until schema, installed helper negotiation and claim hook are ready.
-   * This does not opt legacy per-agent credentials into owned authority. */
-  ownedModel?: Readonly<{
-    credentials: OwnedModelCredentials;
-    ready(): boolean;
-    /** Synchronous server-known model evidence only; absent allows images. */
-    acceptsImages?(model: string): boolean;
-  }>;
 }
 
 interface Usage {
@@ -219,18 +210,14 @@ export async function handleFreeAgentModelRequest(
     return true;
   }
   const header = request.headers.authorization;
-  const invocation = request.headers['x-beeline-model-invocation'];
-  const token = typeof invocation === 'string' ? invocation :
-    typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
-  if (token.startsWith('bfmc_')) return handleOwnedFreeAgentModel(request, response, token, options);
-  sendJson(response,401,{error:{code:'owned_model_required',message:'Model access requires this invocation’s current claimed credential.'}});
-  return true;
+  const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : '';
+  return handleOwnedFreeAgentModel(request, response, token, options);
 }
 
 interface ModelAgent { agent_id: string; owner_id: string; model: string | null }
 interface ModelTurn { id: string; started: Date | string; room_id: string; turn_request_id: string }
 
-function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceipt,token:string): void {
+function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceipt): void {
   if (response.destroyed || response.writableEnded) return;
   if (response.headersSent) { response.destroy(); return; }
   sendJson(response, 409, { error: {
@@ -238,8 +225,7 @@ function ownedOutcome(response: ServerResponse, receipt: OwnedModelAttemptReceip
     message: receipt.state === 'unknown' ? 'Model request outcome is UNKNOWN.' :
       receipt.evidence?.kind==='provider-refused' ? `The model provider refused this invocation (HTTP ${receipt.evidence.status}).` :
       'Model request already has a recorded outcome.',
-    signedReceipt:encodeOwnedModelReceipt(token,receipt),
-  }, receipt,signedReceipt:encodeOwnedModelReceipt(token,receipt) });
+  }, receipt });
 }
 function waitOwned<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -259,29 +245,27 @@ function ownedUsage(value: Usage | undefined, limits: FreeAgentLimits): { tokens
   return { tokens, usd };
 }
 
-/** Closed selected cohort at the existing endpoint. There is deliberately no
- * latest-command lookup, timer retry, streamed-answer replay or legacy fallback.
- * Schema/signer/claim/installed-helper negotiation must all precede ready(). */
+/** Authorize and account for one request from the provisioned agent. */
 async function handleOwnedFreeAgentModel(request: IncomingMessage, response: ServerResponse, token: string,
   options: FreeAgentModelProxyOptions): Promise<boolean> {
-  const selected = options.ownedModel;
-  if (!selected?.ready()) {
-    sendJson(response, 401, { error: { code: 'owned_model_unavailable', message: 'Owned model access is unavailable' } }); return true;
-  }
+  const credentials = new OwnedModelCredentials(options.config.model);
+  const room = request.headers['x-beeline-model-room'];
   let actor: AuthenticatedOwnedModel;
-  try { actor = await selected.credentials.authenticate(options.database, token); }
-  catch {
-    sendJson(response, 401, { error: { code: 'owned_model_authority', message: 'Owned model authority is unavailable' } }); return true;
+  try {
+    actor = await credentials.authenticate(options.database, token, typeof room === 'string' ? room : '');
+  } catch {
+    sendJson(response, 401, { error: { code: 'owned_model_authority', message: 'Owned model authority is unavailable' } });
+    return true;
   }
   const id = request.headers['x-beeline-model-request'];
   if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) {
     sendJson(response, 400, { error: { message: 'Owned model request identity is required' } }); return true;
   }
-  const binding = selected.credentials.actor(actor), limits = options.config.limits ?? DEFAULT_FREE_AGENT_LIMITS;
+  const binding = actor.binding, limits = options.config.limits ?? DEFAULT_FREE_AGENT_LIMITS;
   let modelSucceeded = false;
   const respondOutcome = (receipt: OwnedModelAttemptReceipt) => {
     modelSucceeded = receipt.state === 'succeeded';
-    ownedOutcome(response, receipt, token);
+    ownedOutcome(response, receipt);
   };
   // A failed hosted call ends its item through the same owner as answers and
   // Stop, with the visible failed-turn line. UNKNOWN billing evidence stays retained.
@@ -297,11 +281,10 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
   try {
     body = JSON.parse((await readBody(request)).toString('utf8')) as Record<string, unknown>;
     if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.messages)) throw new Error('messages required');
-    imageInput(body, selected.acceptsImages?.(binding.model) !== false);
+    imageInput(body, true);
   } catch {
     await failTurn('Invalid owned model request');
-    sendJson(response,400,{error:{message:'Invalid owned model request',signedReceipt:encodeOwnedModelReceipt(token,
-      {requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})}});return true;
+    sendJson(response,400,{error:{message:'Invalid owned model request'}});return true;
   }
   const stream = body.stream === true, now = options.now?.() ?? new Date(), day = now.toISOString().slice(0, 10);
   const requested = [body.max_tokens, body.max_completion_tokens].map(Number).filter(value => Number.isFinite(value) && value > 0);
@@ -312,7 +295,7 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
   const cacheBody = { ...forwardedFields(body), model: binding.model, upstream: upstreamBase };
   const cacheKey = `${binding.agentId}:${day}`, estimated = promptTokenBound(body);
   const cached = Math.min(estimated, promptCache.cached(cacheKey, cacheBody, now.getTime()));
-  const attempts = new OwnedModelAttempts(options.database, selected.credentials);
+  const attempts = new OwnedModelAttempts(options.database, credentials);
   let admitted: Awaited<ReturnType<OwnedModelAttempts['reserve']>>;
   try {
     admitted = await attempts.reserve(actor, id, semantic, async tx => {
@@ -329,8 +312,7 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     if (error instanceof CommandRefusalError) sendJson(response, error.status, { error: {
       code: error instanceof OwnedModelAllowanceRefusal ? 'owned_model_allowance' :
         error instanceof OwnedModelUnknownPayload ? 'owned_model_unknown' : 'owned_model_refused', message: error.message,
-      ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}),
-    }, ...(error instanceof OwnedModelAllowanceRefusal ? {signedReceipt:encodeOwnedModelReceipt(token,{requestId:id,state:'refused',evidence:{kind:'not-dispatched',reason:'authority'}})} : {}) });
+    } });
     else sendJson(response, 503, { error: { code: 'owned_model_unknown', message: 'Model request admission is uncertain.' } });
     return true;
   }
@@ -344,9 +326,9 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     // The existing model leaf owns lost-result reads. This never creates a
     // reservation, another provider request, or a helper-side HTTP boundary.
     try {
-      await selected.credentials.assertCurrent(options.database,actor);
+      await credentials.assertCurrent(options.database,actor);
       const row=(await options.database.query<{state:OwnedModelAttemptReceipt['state'];evidence:OwnedModelAttemptReceipt['evidence']|null}>(
-        `SELECT state,evidence FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2`,[binding.id,id])).rows[0];
+        `SELECT state,evidence FROM owned_model_attempts WHERE credential_id=$1 AND model_request_id=$2`,[binding.agentId,id])).rows[0];
       respondOutcome(row ? {requestId:id,state:row.state,...(row.evidence ? {evidence:row.evidence} : {})} : admitted.receipt);
     } catch { respondOutcome(admitted.receipt); }
   };
@@ -404,7 +386,7 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     try {
       for (;;) {
         const next = await waitOwned(reader.read(), abort.signal);
-        await selected.credentials.assertCurrent(options.database, actor);
+        await credentials.assertCurrent(options.database, actor);
         if (next.done) { complete = true; break; }
         const text = decoder.decode(next.value, { stream: true });
         if (stream) {
@@ -438,9 +420,8 @@ async function handleOwnedFreeAgentModel(request: IncomingMessage, response: Ser
     if (!complete || !receipt || receipt.state !== 'succeeded') response.destroy();
     else {
       modelSucceeded = true;
-      const terminal = encodeOwnedModelReceipt(token, receipt);
-      if (stream) response.end(filtered.terminal(terminal));
-      else response.end(JSON.stringify({ ...answer, id: terminal }));
+      if (stream) response.end(filtered.terminal(id));
+      else response.end(JSON.stringify({ ...answer, id }));
     }
     return true;
   } finally {
