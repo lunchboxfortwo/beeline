@@ -208,9 +208,11 @@ function inboxPath(dir: string, key: string): string {
 }
 
 /** Every new local or streamed message uses the same durable delivery queue. */
-export function queueInbox(dir: string, key: string, text: string): void {
+export function queueInbox(dir: string, key: string, text: string): string {
   adoptInboxText(dir,key);
-  queueInboxOnce(dir,key,`local:${randomUUID()}`,text);
+  const deliveryId = `local:${randomUUID()}`;
+  queueInboxOnce(dir,key,deliveryId,text);
+  return deliveryStem(dir, key, deliveryId) + '.pending';
 }
 
 /** Move installed-helper text into the delivery queue atomically. No text is
@@ -225,6 +227,11 @@ function adoptInboxText(dir:string,key:string):void {
 }
 let lastInboxOrder=0;
 
+function deliveryStem(dir: string, key: string, deliveryId: string): string {
+  const folder = ensureDir(join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0,24)));
+  return join(folder, createHash('sha256').update(deliveryId).digest('hex'));
+}
+
 /** A stable delivery is stored before its transport cursor advances. A taken
  * delivery retains a content-free tombstone, so replay after a crash cannot
  * append the same text to an app inbox again. This is local delivery identity,
@@ -233,8 +240,7 @@ export function queueInboxOnce(dir: string, key: string, deliveryId: string, tex
   lastInboxOrder=Math.max(Date.now(),lastInboxOrder+0.001);
   const queuedAt=lastInboxOrder;
   if (!deliveryId || deliveryId.length > 256) throw new Error('Invalid inbox delivery identity');
-  const folder = ensureDir(join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0,24)));
-  const stem = join(folder, createHash('sha256').update(deliveryId).digest('hex'));
+  const stem = deliveryStem(dir, key, deliveryId);
   if (existsDelivery(stem+'.pending') || existsDelivery(stem+'.done')) return false;
   writePrivate(stem+'.pending', JSON.stringify({id:deliveryId,text,queuedAt}));
   return true;

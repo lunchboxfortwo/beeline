@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import { watchChanges } from '../wait.js';
 import { ancestors } from './agents.js';
@@ -22,14 +22,18 @@ export function hasClaudeMcp(dir: string, claudePid?: number): boolean {
 
 /** The token stays in the MCP child's memory, never in the bridge state, registry, argv or stdout. */
 export async function flushClaudeMcp(dir: string, session: ClaudeSession, token: string,
-  post: typeof postToClaude = postToClaude): Promise<boolean> {
+  post: typeof postToClaude = postToClaude, requeued?: (path: string) => void): Promise<boolean> {
   if (!session.messagingSocketPath) return false;
   const joined = readState(dir).sessions.find(s => s.agent === 'claude-code' && (s.pid === session.pid || s.sessionId === session.sessionId));
   if (!joined) return false;
   const text = takeInbox(dir, joined.key);
   if (!text) return false;
   try { await post({ path: session.messagingSocketPath, token }, text); return true; }
-  catch { queueInbox(dir, joined.key, text); return false; }
+  catch {
+    const path = queueInbox(dir, joined.key, text);
+    requeued?.(path);
+    return false;
+  }
 }
 
 /** The joined record of the Claude Code session this process runs inside, if it joined. */
@@ -48,16 +52,8 @@ export async function runClaudeMcp(dir: string, env: NodeJS.ProcessEnv, rulesFor
   post: typeof postToClaude = postToClaude): Promise<void> {
   const chain = ancestors(process.pid);
   let registration: string | undefined;
-  let flushing = false, dirty = false, deaf = false, deliveryFailed = false;
-  const send: typeof post = async (target, text) => {
-    try {
-      await post(target, text);
-      deliveryFailed = false;
-    } catch (error) {
-      deliveryFailed = true;
-      throw error;
-    }
-  };
+  let flushing = false, dirty = false, deaf = false;
+  let requeuedPath: string | undefined;
   const flush = async () => {
     dirty = true;
     if (flushing || !env.CLAUDE_CODE_MESSAGING_TOKEN) return;
@@ -74,14 +70,17 @@ export async function runClaudeMcp(dir: string, env: NodeJS.ProcessEnv, rulesFor
           registration = join(folder, `${process.pid}.json`);
           writeFileSync(registration, JSON.stringify({ pid: process.pid, claudePid: session.pid }), { mode: 0o600 });
         }
-        if (!await flushClaudeMcp(dir, session, env.CLAUDE_CODE_MESSAGING_TOKEN, send)) break;
+        await flushClaudeMcp(dir, session, env.CLAUDE_CODE_MESSAGING_TOKEN, post,
+          (path) => { requeuedPath = relative(dir, path); });
       }
     } finally { flushing = false; }
   };
   // A change without a name is any change. If the watcher fails this server
   // can no longer hear deliveries, so it gives delivery back to the bridge.
   const stopWatching = watchChanges(dir, (path) => {
-    if (deliveryFailed && (path === null || /^deliveries(?:\/|$)/.test(path))) return;
+    if (path !== null && path.startsWith('deliveries/') &&
+      /\.(?:pending|done)(?:\.|$)/.test(path) &&
+      (!path.endsWith('.pending') || path === requeuedPath || !existsSync(join(dir, path)))) return;
     if (path === null || path === 'state.json' || /^(?:inbox|deliveries)(?:\/|$)/.test(path)) void flush().catch(() => undefined);
   }, {
     recursive: true,

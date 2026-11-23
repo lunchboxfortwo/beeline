@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { setImmediate } from 'node:timers/promises';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -47,12 +47,12 @@ async function receiver(post = vi.fn(async (_target: unknown, _text: string) => 
   return { dir, joined, post, input, running, change, options };
 }
 
-it.each(['deliveries', 'deliveries/session/announcement.pending', 'inbox', 'inbox/session.txt', 'state.json', null])(
+it.each(['deliveries', 'delivery file', 'inbox', 'inbox/session.txt', 'state.json', null])(
   'posts queued mail on a %s invalidation without another state write', async path => {
     const current = await receiver();
     const state = readFileSync(join(current.dir, 'state.json'), 'utf8');
-    queueInbox(current.dir, current.joined.key, 'You joined Beeline');
-    current.change(path);
+    const queued = queueInbox(current.dir, current.joined.key, 'You joined Beeline');
+    current.change(path === 'delivery file' ? relative(current.dir, queued) : path);
     await setImmediate();
     expect(current.post).toHaveBeenCalledWith({ path: '/synthetic', token: 'fixture-token' }, 'You joined Beeline');
     expect(current.post).toHaveBeenCalledTimes(1);
@@ -62,13 +62,21 @@ it.each(['deliveries', 'deliveries/session/announcement.pending', 'inbox', 'inbo
   },
 );
 
-it('keeps a failed post owed without reposting on its requeue invalidations', async () => {
+function pendingPaths(dir: string): string[] {
+  return readdirSync(dir, { recursive: true }).filter(path => path.endsWith('.pending'));
+}
+
+it('keeps a failed post owed without reposting on its own queue changes', async () => {
   const post = vi.fn(async (_target: unknown, _text: string) => { throw new Error('post refused'); });
   const current = await receiver(post);
-  queueInbox(current.dir, current.joined.key, 'owed announcement');
-  current.change('deliveries/session/announcement.pending');
+  const original = relative(current.dir, queueInbox(current.dir, current.joined.key, 'owed announcement'));
+  current.change(original);
   await setImmediate();
-  for (const path of ['deliveries', 'deliveries/session/requeue.pending', null]) current.change(path);
+  const [requeued] = pendingPaths(current.dir);
+  expect(requeued).toBeDefined();
+  for (const path of [requeued, requeued, `${requeued}.${process.pid}.tmp`, original,
+    original.replace(/\.pending$/, '.done'), original.replace(/\.pending$/, `.done.${process.pid}.tmp`)])
+    current.change(path);
   await setImmediate();
   expect(post).toHaveBeenCalledTimes(1);
   expect(takeInbox(current.dir, current.joined.key)).toBe('owed announcement');
@@ -76,14 +84,55 @@ it('keeps a failed post owed without reposting on its requeue invalidations', as
   await current.running;
 });
 
-it('still delivers on a subsequent state commit after a refused post', async () => {
+it.each(['delivery file', 'deliveries', 'delivery directory', null])(
+  'delivers the join announcement and requeued backlog on a fresh %s wake', async path => {
+    const post = vi.fn(async (_target: unknown, _text: string) => {});
+    post.mockRejectedValueOnce(new Error('post refused'));
+    const current = await receiver(post);
+    const state = readFileSync(join(current.dir, 'state.json'), 'utf8');
+    const first = queueInbox(current.dir, current.joined.key, 'earlier probe');
+    current.change(relative(current.dir, first));
+    await setImmediate();
+    const [requeued] = pendingPaths(current.dir);
+    current.change(requeued);
+    await setImmediate();
+    expect(post).toHaveBeenCalledTimes(1);
+    const announcement = relative(current.dir, queueInbox(current.dir, current.joined.key, 'You joined Beeline'));
+    current.change(path === 'delivery file' ? announcement
+      : path === 'delivery directory' ? announcement.slice(0, announcement.lastIndexOf('/')) : path);
+    await setImmediate();
+    expect(post.mock.calls.map(call => call[1])).toEqual(['earlier probe', 'earlier probe\n\nYou joined Beeline']);
+    expect(takeInbox(current.dir, current.joined.key)).toBe('');
+    expect(readFileSync(join(current.dir, 'state.json'), 'utf8')).toBe(state);
+    current.input.end();
+    await current.running;
+  },
+);
+
+it('drains fresh mail that arrived during a post which then fails', async () => {
+  let fail!: (error: Error) => void;
+  const pending = new Promise<void>((_done, reject) => { fail = reject; });
+  const post = vi.fn(async (_target: unknown, _text: string) => {});
+  post.mockImplementationOnce(() => pending);
+  const current = await receiver(post);
+  current.change(relative(current.dir, queueInbox(current.dir, current.joined.key, 'first')));
+  current.change(relative(current.dir, queueInbox(current.dir, current.joined.key, 'second')));
+  fail(new Error('post refused'));
+  await setImmediate();
+  expect(post.mock.calls.map(call => call[1])).toEqual(['first', 'second\n\nfirst']);
+  expect(takeInbox(current.dir, current.joined.key)).toBe('');
+  current.input.end();
+  await current.running;
+});
+
+it.each(['state.json', 'inbox', null])('delivers after a refused post on a %s invalidation', async path => {
   const post = vi.fn(async (_target: unknown, _text: string) => {});
   post.mockRejectedValueOnce(new Error('post refused'));
   const current = await receiver(post);
   queueInbox(current.dir, current.joined.key, 'owed announcement');
   current.change('deliveries');
   await setImmediate();
-  current.change('state.json');
+  current.change(path);
   await setImmediate();
   expect(post).toHaveBeenCalledTimes(2);
   expect(post.mock.calls[1]![1]).toBe('owed announcement');
@@ -100,8 +149,8 @@ it('coalesces a delivery committed while an earlier post is awaiting its answer'
   const current = await receiver(post);
   queueInbox(current.dir, current.joined.key, 'first');
   current.change('deliveries');
-  queueInbox(current.dir, current.joined.key, 'second');
-  current.change('deliveries/session/second.pending');
+  const second = queueInbox(current.dir, current.joined.key, 'second');
+  current.change(relative(current.dir, second));
   finish();
   await setImmediate();
   expect(post.mock.calls.map(call => call[1])).toEqual(['first', 'second']);
