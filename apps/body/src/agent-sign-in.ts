@@ -60,8 +60,17 @@ export type CliSignIn = {
  */
 export function parseProxyDeviceLogin(output: string, now: number): AgentSignInLink | undefined {
   const url = /(?:Codex device URL:|please visit:)\s*(https:\/\/\S+)/.exec(output)?.[1];
-  const code = /(?:Codex device code:|enter this code:)\s*([A-Z0-9]{4}-[A-Z0-9]{4,6})\b/.exec(output)?.[1];
-  return url && code ? { kind: 'device-code', authorizeUrl: url, userCode: code, expiresAt: now + AGENT_SIGN_IN_ATTEMPT_TTL_MS } : undefined;
+  const code = /(?:Codex device code:|enter this code:)\s*([A-Z0-9]{4}-[A-Z0-9]{4,6})\b/.exec(
+    output,
+  )?.[1];
+  return url && code
+    ? {
+        kind: 'device-code',
+        authorizeUrl: url,
+        userCode: code,
+        expiresAt: now + AGENT_SIGN_IN_ATTEMPT_TTL_MS,
+      }
+    : undefined;
 }
 
 /** `NO_OPEN_BROWSER=1 cursor-agent login` (Cursor Agent 2026.10.01-e373342). */
@@ -71,11 +80,29 @@ export function parseCursorLogin(output: string): AgentSignInLink | undefined {
 }
 
 /** The proxy's own device login for each proxied account; Claude uses Beeline's paste-code exchange. */
-const PROXY_SIGN_INS: Readonly<Record<ProxiedProvider, 'codex' | 'grok' | undefined>> = { claude: undefined, codex: 'codex', xai: 'grok' };
+const PROXY_SIGN_INS: Readonly<Record<ProxiedProvider, 'codex' | 'grok' | undefined>> = {
+  claude: undefined,
+  codex: 'codex',
+  xai: 'grok',
+};
 
 export const CLI_SIGN_INS: Readonly<Record<'codex' | 'grok' | 'cursor', CliSignIn>> = {
-  codex: { command: 'codex', args: [], env: {}, kind: 'device-code', parse: parseProxyDeviceLogin, proxyFlag: '-codex-device-login' },
-  grok: { command: 'grok', args: [], env: {}, kind: 'device-code', parse: parseProxyDeviceLogin, proxyFlag: '-xai-login' },
+  codex: {
+    command: 'codex',
+    args: [],
+    env: {},
+    kind: 'device-code',
+    parse: parseProxyDeviceLogin,
+    proxyFlag: '-codex-device-login',
+  },
+  grok: {
+    command: 'grok',
+    args: [],
+    env: {},
+    kind: 'device-code',
+    parse: parseProxyDeviceLogin,
+    proxyFlag: '-xai-login',
+  },
   cursor: {
     command: 'cursor-agent',
     args: ['login'],
@@ -97,7 +124,11 @@ export const PROVIDER_KEY_ENV: Readonly<Record<AgentSignInKeyProvider, string>> 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
 function lastLine(output: string): string {
-  const lines = output.replace(ANSI, '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const lines = output
+    .replace(ANSI, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
   return (lines.at(-1) ?? '').slice(0, 200);
 }
 
@@ -149,7 +180,10 @@ export type AgentSignInOptions = {
   /** The model the agent runs, `provider/model` for OpenCode. */
   readonly model?: () => string | undefined | Promise<string | undefined>;
   /** A result that arrives on its own, after `start` answered. */
-  readonly onResult: (attemptId: string, result: { ok: true } | { ok: false; error: string }) => void;
+  readonly onResult: (
+    attemptId: string,
+    result: { ok: true } | { ok: false; error: string },
+  ) => void;
   /**
    * After any sign-in succeeds: retire idle sessions so the next turn starts
    * cold, relinks the shared login file (a first login may have just created
@@ -187,11 +221,15 @@ export class AgentSignIn {
 
   async start(attemptId: string): Promise<AgentSignInLink> {
     const { harness } = this.options;
-    const env = { ...(this.options.llmEnvFile ? parseEnvFile(this.options.llmEnvFile) : {}), ...this.options.agentEnv };
+    const env = {
+      ...(this.options.llmEnvFile ? parseEnvFile(this.options.llmEnvFile) : {}),
+      ...this.options.agentEnv,
+    };
     const model = await this.options.model?.();
     const login = await cliProxyLogin(harness, model, env, this.options.operatorHome);
     const cliSignIn = login ? PROXY_SIGN_INS[login] : agentBehavior(harness).cliSignIn;
-    if (login && !cliSignIn) return { kind: 'paste-code', authorizeUrl: this.#claude.start(attemptId) };
+    if (login && !cliSignIn)
+      return { kind: 'paste-code', authorizeUrl: this.#claude.start(attemptId) };
     if (cliSignIn) return this.#startCli(attemptId, cliSignIn);
     return this.#startKey(attemptId, model);
   }
@@ -200,12 +238,16 @@ export class AgentSignIn {
   async submit(attemptId: string, value: string): Promise<void> {
     const pending = this.#pending.get(attemptId);
     if (!pending) {
-      await (await this.#proxy()).saveLogin('claude', await this.#claude.complete(attemptId, value));
+      await (
+        await this.#proxy()
+      ).saveLogin('claude', await this.#claude.complete(attemptId, value));
       this.#signedIn();
       return;
     }
     if (pending.kind !== 'key' || pending.expiresAt <= this.#now())
-      throw new Error("This sign-in expired or was already used. Send the agent `/login` again to start a new one.");
+      throw new Error(
+        'This sign-in expired or was already used. Send the agent `/login` again to start a new one.',
+      );
     await this.#saveKey(pending.provider, value.trim());
     this.#pending.delete(attemptId);
     this.#signedIn();
@@ -232,7 +274,10 @@ export class AgentSignIn {
     this.options.onSignedIn?.();
   }
 
-  async #startCli(attemptId: string, provider: keyof typeof CLI_SIGN_INS): Promise<AgentSignInLink> {
+  async #startCli(
+    attemptId: string,
+    provider: keyof typeof CLI_SIGN_INS,
+  ): Promise<AgentSignInLink> {
     const login = CLI_SIGN_INS[provider];
     // One headless login at a time: a new `login` replaces an unfinished one.
     for (const [id, pending] of this.#pending) {
@@ -242,8 +287,18 @@ export class AgentSignIn {
     }
     // Cursor's own login lands in the operator's home, never an isolated one.
     const { CURSOR_HOME: _isolated, ...ambient } = process.env;
-    const launch = login.proxyFlag ? (await this.#proxy()).login(login.proxyFlag) : { command: login.command, args: [...login.args],
-      env: { ...ambient, HOME: this.options.operatorHome, PATH: this.options.agentEnv.PATH || process.env.PATH || '', ...login.env } };
+    const launch = login.proxyFlag
+      ? (await this.#proxy()).login(login.proxyFlag)
+      : {
+          command: login.command,
+          args: [...login.args],
+          env: {
+            ...ambient,
+            HOME: this.options.operatorHome,
+            PATH: this.options.agentEnv.PATH || process.env.PATH || '',
+            ...login.env,
+          },
+        };
     let output = '';
     let child: ChildProcess | undefined;
     let link!: Settle<AgentSignInLink>;
@@ -304,7 +359,10 @@ export class AgentSignIn {
           return;
         }
         // The proxy's login exits 0 either way; only its success line means saved.
-        const ok = code === 0 && (!login.proxyFlag || /^(?:Codex device|xAI) authentication successful!$/.test(lastLine(output)));
+        const ok =
+          code === 0 &&
+          (!login.proxyFlag ||
+            /^(?:Codex device|xAI) authentication successful!$/.test(lastLine(output)));
         if (ok) this.#signedIn();
         this.options.onResult(attemptId, ok ? { ok: true } : { ok: false, error: failure });
       },
@@ -321,7 +379,8 @@ export class AgentSignIn {
     let provider: AgentSignInKeyProvider | undefined;
     if (agentBehavior(harness).providerKeyStore === 'auth-file') {
       const prefix = model?.split('/')[0];
-      provider = prefix && prefix in PROVIDER_KEY_ENV ? (prefix as AgentSignInKeyProvider) : undefined;
+      provider =
+        prefix && prefix in PROVIDER_KEY_ENV ? (prefix as AgentSignInKeyProvider) : undefined;
       if (!provider)
         throw new Error(
           "This OpenCode agent's model is not served by a provider key Beeline can set. Run `opencode auth login` on its machine.",
@@ -348,7 +407,9 @@ export class AgentSignIn {
       await writeOpenCodeKey(this.options.operatorHome, provider, key);
     } else {
       if (!this.options.llmEnvFile)
-        throw new Error('This agent has no provider key to replace. Run `beeline connect` on its machine.');
+        throw new Error(
+          'This agent has no provider key to replace. Run `beeline connect` on its machine.',
+        );
       await writeEnvFileKey(this.options.llmEnvFile, PROVIDER_KEY_ENV[provider], key);
       this.options.agentEnv[PROVIDER_KEY_ENV[provider]] = key;
     }
@@ -360,7 +421,12 @@ export function agentSignInFrame(event: Record<string, unknown>): AgentSignInFra
   if (event.type !== 'agent-sign-in' || typeof event.attemptId !== 'string' || !event.attemptId)
     return undefined;
   if (event.step === 'start' && typeof event.cardId === 'string' && event.cardId)
-    return { type: 'agent-sign-in', step: 'start', attemptId: event.attemptId, cardId: event.cardId };
+    return {
+      type: 'agent-sign-in',
+      step: 'start',
+      attemptId: event.attemptId,
+      cardId: event.cardId,
+    };
   if (event.step === 'code' && typeof event.code === 'string')
     return { type: 'agent-sign-in', step: 'code', attemptId: event.attemptId, code: event.code };
   return undefined;
@@ -391,7 +457,12 @@ export async function answerAgentSignInFrame(
     } else {
       await signIn.submit(frame.attemptId, frame.code);
       const cardId = cards.get(frame.attemptId);
-      report = { agentId, attemptId: frame.attemptId, ...(cardId ? { cardId } : {}), outcome: 'signed-in' };
+      report = {
+        agentId,
+        attemptId: frame.attemptId,
+        ...(cardId ? { cardId } : {}),
+        outcome: 'signed-in',
+      };
       log(`sign-in ${frame.attemptId} saved`);
     }
   } catch (error) {
@@ -432,6 +503,8 @@ export async function reportAgentSignInResult(
   try {
     await api.execute('reportAgentSignIn', report);
   } catch (error) {
-    log(`sign-in ${attemptId} report failed: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `sign-in ${attemptId} report failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }

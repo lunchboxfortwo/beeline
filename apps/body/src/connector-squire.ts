@@ -190,7 +190,7 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
 
     let child!: ChildProcess;
     // The connect process is owned: its own group, killed on exit or abort.
-    // The run settles on its exit; the answer usually settles earlier, on
+    // The run settles after exit and output drain; the answer usually settles earlier, on
     // the first publishable report, while the ceremony keeps running.
     const run = runOwned({
       step: 'Trusty Squire connect',

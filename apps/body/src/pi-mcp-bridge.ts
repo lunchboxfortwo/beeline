@@ -148,7 +148,7 @@ async function callServer(server, request, signal) {
   if (signal?.aborted) throw new Error(server.name + ' call cancelled');
   let child, startError;
   let stderr = '';
-  // The route is owned for this one call: its group is killed when we leave.
+  // The route stays in the harness's group and is killed when this call leaves.
   const done = new AbortController();
   const run = runOwned({
     step: server.name, file: server.command, args: server.args,

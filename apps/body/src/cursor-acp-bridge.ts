@@ -56,8 +56,7 @@ export type CursorMcpServer = {
 };
 
 /** Match the owned bridge and the retired stub so leftover labels still classify. */
-export const CURSOR_HARNESS_COMMAND =
-  /(^|[/\\])(cursor-acp-bridge|cursor-agent-acp)(\.[a-z]+)?$/i;
+export const CURSOR_HARNESS_COMMAND = /(^|[/\\])(cursor-acp-bridge|cursor-agent-acp)(\.[a-z]+)?$/i;
 
 const STDERR_TAIL_MAX_CHARS = 2_000;
 const MODEL_AXIS_ID = 'model';
@@ -284,7 +283,10 @@ function assistantTexts(event: CursorStreamEvent): string[] {
   return textChunksFromContent(asRecord(event)?.content);
 }
 
-function chunkUpdate(sessionUpdate: 'agent_thought_chunk' | 'agent_message_chunk', text: string): AcpSessionUpdate {
+function chunkUpdate(
+  sessionUpdate: 'agent_thought_chunk' | 'agent_message_chunk',
+  text: string,
+): AcpSessionUpdate {
   return { sessionUpdate, content: { type: 'text', text } };
 }
 
@@ -339,7 +341,8 @@ export function describeCursorTurnFailure(input: {
   }
   const stderr = input.stderr?.trim() ?? '';
   if (input.isError) {
-    const named = input.resultText?.trim() || stderr || 'cursor-agent reported an error with no answer text';
+    const named =
+      input.resultText?.trim() || stderr || 'cursor-agent reported an error with no answer text';
     return trimReason(`cursor-agent reported an error: ${named}`);
   }
   if (input.signal) {
@@ -380,7 +383,9 @@ export interface CursorAcpServerOptions {
 export class CursorAcpServer {
   private readonly write: CursorAcpWriter;
   private readonly spawnCursorAgent?: CursorAgentSpawn;
-  private readonly enumerateModels: (env?: NodeJS.ProcessEnv) => Promise<CursorModelCatalog | undefined>;
+  private readonly enumerateModels: (
+    env?: NodeJS.ProcessEnv,
+  ) => Promise<CursorModelCatalog | undefined>;
   private readonly env: NodeJS.ProcessEnv;
   private readonly sessions = new Map<string, BridgeSession>();
   private models: CursorModelCatalog | undefined;
@@ -443,7 +448,7 @@ export class CursorAcpServer {
     if (this.models) return this.models;
     // A failed lookup is unknown, never proof that only Auto is available.
     // Retry once and cache only success so a later session can recover.
-    this.models = await this.enumerateModels(this.env) ?? await this.enumerateModels(this.env);
+    this.models = (await this.enumerateModels(this.env)) ?? (await this.enumerateModels(this.env));
     return this.models;
   }
 
@@ -465,17 +470,19 @@ export class CursorAcpServer {
     this.sessions.set(session.id, session);
     return {
       sessionId: session.id,
-      configOptions: catalog ? [
-        {
-          id: MODEL_AXIS_ID,
-          category: 'model',
-          currentValue: session.model,
-          options: catalog.options.map((option) => ({
-            id: option.id,
-            ...(option.name ? { name: option.name } : {}),
-          })),
-        },
-      ] : [],
+      configOptions: catalog
+        ? [
+            {
+              id: MODEL_AXIS_ID,
+              category: 'model',
+              currentValue: session.model,
+              options: catalog.options.map((option) => ({
+                id: option.id,
+                ...(option.name ? { name: option.name } : {}),
+              })),
+            },
+          ]
+        : [],
     };
   }
 
@@ -583,8 +590,16 @@ export class CursorAcpServer {
       },
       inject
         ? {
-            spawn: ((_file: string, args: readonly string[], options: { cwd?: string; env?: NodeJS.ProcessEnv }) =>
-              inject({ argv: [...args], cwd: options.cwd ?? session.cwd, env: options.env ?? this.env })) as never,
+            spawn: ((
+              _file: string,
+              args: readonly string[],
+              options: { cwd?: string; env?: NodeJS.ProcessEnv },
+            ) =>
+              inject({
+                argv: [...args],
+                cwd: options.cwd ?? session.cwd,
+                env: options.env ?? this.env,
+              })) as never,
           }
         : undefined,
     );
@@ -610,7 +625,8 @@ export class CursorAcpServer {
       });
       if (failure) throw new Error(failure);
       if (!sawAssistant) {
-        const fallback = resultEvent && !cursorResultIsError(resultEvent) ? resultEventText(resultEvent) : '';
+        const fallback =
+          resultEvent && !cursorResultIsError(resultEvent) ? resultEventText(resultEvent) : '';
         if (fallback) this.emitUpdate(session.id, chunkUpdate('agent_message_chunk', fallback));
       }
       return { stopReason: 'end_turn' };

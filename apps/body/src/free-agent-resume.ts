@@ -23,8 +23,11 @@ export function watchFreeAgentResume(onResume: () => void, source?: Readable): (
       if (!reading.signal.aborted) console.error('[free-agent] resume event reader failed:', error);
     });
   const lines = createInterface({ input: input! });
-  lines.on('line', line => {
+  lines.on('line', (line) => {
     if (line.endsWith('random: crng reseeded due to virtual machine fork')) onResume();
   });
-  return () => { lines.close(); reading.abort(); };
+  return () => {
+    lines.close();
+    reading.abort();
+  };
 }

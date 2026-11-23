@@ -5,71 +5,148 @@ import { codexHome } from './codex.js';
 import { hookCommand, type SetupContext } from './setup.js';
 
 interface Hook {
-  key: string; sourcePath: string; source: string; eventName: string; handlerType: string;
-  command?: string; matcher?: string; timeoutSec?: number; currentHash: string; isManaged: boolean; pluginId: string | null;
+  key: string;
+  sourcePath: string;
+  source: string;
+  eventName: string;
+  handlerType: string;
+  command?: string;
+  matcher?: string;
+  timeoutSec?: number;
+  currentHash: string;
+  isManaged: boolean;
+  pluginId: string | null;
 }
-interface Edit { keyPath: string; value: string; mergeStrategy: 'replace' }
+interface Edit {
+  keyPath: string;
+  value: string;
+  mergeStrategy: 'replace';
+}
 
 /** Codex owns the hash format and normalization. Trust only the exact Beeline declaration we just installed. */
 export function beelineTrustEdits(hooks: Hook[], context: SetupContext): Edit[] {
   const path = join(codexHome(context.env), 'hooks.json');
   const expected = hookCommand(context, 'codex', 'session-start');
-  const own = hooks.filter(h => h.sourcePath === path && h.source === 'user' && !h.isManaged && h.pluginId === null
-    && h.eventName === 'sessionStart' && h.handlerType === 'command' && h.command === expected && h.matcher === '*'
-    && h.timeoutSec === 10 && h.key.startsWith(path) && /^:session_start:\d+:\d+$/.test(h.key.slice(path.length))
-    && /^sha256:[0-9a-f]{64}$/.test(h.currentHash));
+  const own = hooks.filter(
+    (h) =>
+      h.sourcePath === path &&
+      h.source === 'user' &&
+      !h.isManaged &&
+      h.pluginId === null &&
+      h.eventName === 'sessionStart' &&
+      h.handlerType === 'command' &&
+      h.command === expected &&
+      h.matcher === '*' &&
+      h.timeoutSec === 10 &&
+      h.key.startsWith(path) &&
+      /^:session_start:\d+:\d+$/.test(h.key.slice(path.length)) &&
+      /^sha256:[0-9a-f]{64}$/.test(h.currentHash),
+  );
   if (own.length !== 1) return [];
   const hook = own[0]!;
-  return [{ keyPath: `hooks.state.${JSON.stringify(hook.key)}.trusted_hash`, value: hook.currentHash, mergeStrategy: 'replace' }];
+  return [
+    {
+      keyPath: `hooks.state.${JSON.stringify(hook.key)}.trusted_hash`,
+      value: hook.currentHash,
+      mergeStrategy: 'replace',
+    },
+  ];
 }
 
 /** Verified against Codex 0.165.0. Unknown APIs/formats retain Codex's own review prompt. */
-export async function trustCodexHook(context: SetupContext, bin: string, cwd: string): Promise<boolean> {
+export async function trustCodexHook(
+  context: SetupContext,
+  bin: string,
+  cwd: string,
+): Promise<boolean> {
   // A transient stdio config client creates no thread and performs no daemon
   // lifecycle operation. It is owned for this call and killed when it returns.
   const done = new AbortController();
   let child!: ChildProcess;
   void runOwned({
-    step: 'codex app-server', file: bin, args: ['app-server', '--stdio'], env: context.env, cwd,
-    stdin: 'pipe', captureOutput: false, machineRead: true, signal: done.signal,
+    step: 'codex app-server',
+    file: bin,
+    args: ['app-server', '--stdio'],
+    env: context.env,
+    cwd,
+    stdin: 'pipe',
+    captureOutput: false,
+    machineRead: true,
+    signal: done.signal,
     // Its stderr is not read: drain it so it cannot fill the pipe.
-    onSpawn: (spawned) => { child = spawned; spawned.stderr?.resume(); },
+    onSpawn: (spawned) => {
+      child = spawned;
+      spawned.stderr?.resume();
+    },
   }).catch(() => undefined);
-  let id = 0, buffer = '', failed = false;
+  let id = 0,
+    buffer = '',
+    failed = false;
   const pending = new Map<number, Settle<any>>();
   const unavailable = () => new Error('Codex hook trust unavailable');
-  const fail = () => { failed = true; for (const p of pending.values()) p.reject(unavailable()); pending.clear(); };
+  const fail = () => {
+    failed = true;
+    for (const p of pending.values()) p.reject(unavailable());
+    pending.clear();
+  };
   onEnd(child, ['exit', 'error'], fail);
   onEnd(child.stdout!, ['end', 'close', 'error'], fail);
   child.stdin!.on('error', fail);
-  child.stdout!.on('data', chunk => {
+  child.stdout!.on('data', (chunk) => {
     buffer += String(chunk);
-    if (buffer.length > 2 << 20) { fail(); child.kill(); return; }
+    if (buffer.length > 2 << 20) {
+      fail();
+      child.kill();
+      return;
+    }
     for (;;) {
       const end = buffer.indexOf('\n');
       if (end < 0) break;
-      const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+      const line = buffer.slice(0, end);
+      buffer = buffer.slice(end + 1);
       try {
         const answer = JSON.parse(line) as { id?: number; result?: unknown; error?: unknown };
         const p = answer.id === undefined ? undefined : pending.get(answer.id);
-        if (p) { pending.delete(answer.id!); if (answer.error) p.reject(unavailable()); else p.resolve(answer.result); }
-      } catch { /* An unknown response cannot grant trust. */ }
+        if (p) {
+          pending.delete(answer.id!);
+          if (answer.error) p.reject(unavailable());
+          else p.resolve(answer.result);
+        }
+      } catch {
+        /* An unknown response cannot grant trust. */
+      }
     }
   });
-  // One JSON-RPC reply per id; the app-server's exit, error or closed stdin fails every pending one.
-  const request = (method: string, params: object): Promise<any> => answer<any>('codex app-server', [], (settle) => {
-    if (failed) { settle.reject(unavailable()); return; }
-    const key = ++id;
-    pending.set(key, settle);
-    child.stdin!.write(JSON.stringify({ id: key, method, params }) + '\n');
-  });
+  // One JSON-RPC reply per id; child exit, stdout EOF/error or stdin error fails pending requests.
+  const request = (method: string, params: object): Promise<any> =>
+    answer<any>('codex app-server', [], (settle) => {
+      if (failed) {
+        settle.reject(unavailable());
+        return;
+      }
+      const key = ++id;
+      pending.set(key, settle);
+      child.stdin!.write(JSON.stringify({ id: key, method, params }) + '\n');
+    });
   try {
-    await request('initialize', { clientInfo: { name: 'beeline-session-join', version: '1' }, capabilities: { experimentalApi: true } });
-    const list = await request('hooks/list', { cwds: [cwd] }) as { data?: { hooks?: Hook[] }[] };
+    await request('initialize', {
+      clientInfo: { name: 'beeline-session-join', version: '1' },
+      capabilities: { experimentalApi: true },
+    });
+    const list = (await request('hooks/list', { cwds: [cwd] })) as { data?: { hooks?: Hook[] }[] };
     if (!Array.isArray(list.data)) return false;
-    const edits = beelineTrustEdits(list.data.flatMap(entry => entry.hooks ?? []), context);
+    const edits = beelineTrustEdits(
+      list.data.flatMap((entry) => entry.hooks ?? []),
+      context,
+    );
     if (edits.length !== 1) return false;
-    const result = await request('config/batchWrite', { edits, reloadUserConfig: true }) as { status?: string };
+    const result = (await request('config/batchWrite', { edits, reloadUserConfig: true })) as {
+      status?: string;
+    };
     return result.status === 'ok';
-  } catch { return false; } finally { done.abort(); }
+  } catch {
+    return false;
+  } finally {
+    done.abort();
+  }
 }
