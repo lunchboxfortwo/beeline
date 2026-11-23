@@ -8,6 +8,8 @@ ${committedCommandNotificationSchema()}
 DO $$ DECLARE source record; BEGIN
  FOR source IN SELECT tgname,tgrelid::regclass AS relation FROM pg_trigger
    WHERE NOT tgisinternal AND tgfoid=to_regprocedure('beeline_background_source()')
+     AND (tgname,tgrelid) NOT IN (('beeline_background_push',to_regclass('push_outbox')),
+       ('beeline_background_read_clear',to_regclass('room_read_marks')))
  LOOP EXECUTE format('DROP TRIGGER %I ON %s',source.tgname,source.relation); END LOOP;
 END $$;
 CREATE OR REPLACE FUNCTION beeline_background_source() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -17,8 +19,12 @@ BEGIN
  PERFORM beeline_notify_committed_command('${JSON.stringify(backgroundDueKey('push'))}');
  RETURN NULL;
 END $$;
+-- A current trigger is skipped by the migration runner; dropping it would
+-- wait for an exclusive lock on push_outbox while deliveries hold it.
+DROP TRIGGER IF EXISTS beeline_background_push ON push_outbox;
 CREATE TRIGGER beeline_background_push AFTER INSERT OR UPDATE ON push_outbox
  FOR EACH ROW EXECUTE FUNCTION beeline_background_source();
+DROP TRIGGER IF EXISTS beeline_background_read_clear ON room_read_marks;
 CREATE TRIGGER beeline_background_read_clear AFTER INSERT OR UPDATE ON room_read_marks
  FOR EACH ROW EXECUTE FUNCTION beeline_background_source();
 `;

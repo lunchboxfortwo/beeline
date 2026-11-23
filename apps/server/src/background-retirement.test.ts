@@ -90,3 +90,17 @@ it('R-RELEASE-DDL: an upgrade preserves overlap storage and runs a real owner sc
     expect(await new AgentScheduleLoop(db).runOnce(new Date(Date.now() + 240_000))).toBe(0);
   } finally { await db.close(); }
 });
+
+it('db/push-outbox-lock-timeout: a rerun with unchanged trigger definitions leaves push_outbox triggers in place', async () => {
+  const db = await migratedDatabase();
+  try {
+    const triggers = () => db.query<{ tgname: string; oid: number }>(`SELECT tgname,oid::int AS oid FROM pg_trigger
+      WHERE tgfoid='beeline_background_source()'::regprocedure AND NOT tgisinternal ORDER BY tgname`);
+    const before = (await triggers()).rows;
+    expect(before.map(row => row.tgname)).toEqual(['beeline_background_push', 'beeline_background_read_clear']);
+    // Dropping a trigger needs an exclusive lock on its table; an unchanged
+    // definition must keep the same trigger row, so no drop happened.
+    await migrate(db);
+    expect((await triggers()).rows).toEqual(before);
+  } finally { await db.close(); }
+});
