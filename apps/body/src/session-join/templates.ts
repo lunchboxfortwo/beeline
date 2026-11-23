@@ -13,11 +13,13 @@ const NODE = "__NODE__"
 const BUNDLE = "__BUNDLE__"
 
 const run = (args: string[], cwd: string) =>
-  new Promise<string>((resolve) =>
-    execFile(NODE, [BUNDLE, "session", "hook", "opencode", ...args], { cwd, timeout: 10_000, windowsHide: true }, (err, out) =>
+  new Promise<string>((resolve) => {
+    const child = execFile(NODE, [BUNDLE, "session", "hook", "opencode", ...args], { cwd, timeout: 10_000, windowsHide: true }, (err, out) =>
       resolve(err ? "" : String(out).trim()),
-    ),
-  )
+    )
+    // The hook reads no payload from a plugin; an open stdin would hold it until the timeout kills it.
+    child.stdin?.end()
+  })
 
 const network = (prompt: (id: string, text: string) => Promise<unknown>) => {
   const idle = new Set<string>()
@@ -131,10 +133,12 @@ export default function (pi: ExtensionAPI) {
   let delivering = false
   let watcher: ReturnType<typeof watch> | undefined
   const hook = (args: string[]) =>
-    new Promise<string>((resolve) =>
-      execFile(NODE, [BUNDLE, "session", "hook", "pi", ...args, "--session", id], { cwd, timeout: 10_000, windowsHide: true },
-        (err, out) => resolve(err ? "" : String(out).trim())),
-    )
+    new Promise<string>((resolve) => {
+      const child = execFile(NODE, [BUNDLE, "session", "hook", "pi", ...args, "--session", id], { cwd, timeout: 10_000, windowsHide: true },
+        (err, out) => resolve(err ? "" : String(out).trim()))
+      // The hook reads no payload from a plugin; an open stdin would hold it until the timeout kills it.
+      child.stdin?.end()
+    })
   const deliver = async (event: "post-tool-use" | "poll") => {
     if (!id || delivering) return
     delivering = true
@@ -198,7 +202,7 @@ def _hook(event, session_id):
         return ""
     try:
         done = subprocess.run([NODE, BUNDLE, "session", "hook", "hermes", event, "--session", str(session_id)],
-            capture_output=True, text=True, timeout=10, cwd=os.getcwd())
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10, cwd=os.getcwd())
         return done.stdout.strip() if done.returncode == 0 else ""
     except Exception:
         return ""

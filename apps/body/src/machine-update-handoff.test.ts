@@ -11,7 +11,7 @@ import { runMachineHelper } from './machine-helper.js';
 import { RegistryMcpHostBroker } from './registry-mcp.js';
 import { identityFromKey } from './runtime.js';
 import { writeUpdateState } from './self-update.js';
-import { requestMachine } from './machine-control.js';
+import { askMachine } from './machine-control.js';
 
 it.each(['notified', 'force'] as const)('exits for a verified %s update without waiting for agents or retained local clients', async mode => {
   const root = await mkdtemp(join(tmpdir(), 'beeline-handoff-'));
@@ -144,8 +144,10 @@ it.each(['notified', 'force'] as const)('exits for a verified %s update without 
     if (mode === 'force') {
       // Exercise the CLI's private control protocol against the real helper.
       await writeUpdateState(layout, { stagedReleaseId: 'new', lastCheckResult: 'verified' });
-      await requestMachine(join(root, 'state'), { operation: 'update', releaseId: 'new', force: true }, () => true);
+      const answer = askMachine(join(root, 'state'), { operation: 'update', releaseId: 'new', force: true });
       finishPrepare();
+      // The helper answers once, as it starts the handoff and before it exits.
+      expect(await answer).toMatchObject({ outcome: 'handoff' });
     } else {
       stageNew = true;
       releaseAvailable!();

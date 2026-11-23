@@ -7,7 +7,8 @@ import { waitForProcessExit } from '../process-exit.js';
 import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
 import { notifyBridgeSessions } from './bridge.js';
-import { bridgeSocketPath } from './bridge-socket.js';
+import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
+import { tryLock } from '../wait.js';
 
 export function bridgeRunning(dir: string): boolean {
   try { const pid = Number(readFileSync(join(dir, 'bridge.pid'), 'utf8')); return pid > 0 && pidAlive(pid); } catch { return false; }
@@ -86,8 +87,13 @@ export async function ensureBridge(dir: string, runner: Runner, env: NodeJS.Proc
       // Observe a candidate death even while the old process drains.
       void active.catch(() => undefined);
       if (old) {
+        // A serving bridge holds its owner lock until it exits; the kernel closes it on exit or death.
+        const owner = await tryLock(bridgeOwnerKey(dir));
+        if (owner.held) await owner.release();
         try { process.kill(old, 'SIGTERM'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
-        await waitForProcessExit(old);
+        if (!owner.held) await owner.released();
+        // A bridge from a release before the owner lock holds none; follow its exit instead.
+        else if (pidAlive(old)) await waitForProcessExit(old);
         if (existsSync(pidFile) && Number(readFileSync(pidFile, 'utf8')) === old) rmSync(pidFile);
       }
       renameSync(bundle, stable); published = true;

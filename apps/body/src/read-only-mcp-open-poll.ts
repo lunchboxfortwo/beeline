@@ -83,7 +83,7 @@ export async function runGrantedCommand(
     result.sandboxFailure === true
       ? 'sandbox failed before command start'
       : result.timedOut === true
-        ? 'timed out after 10 minutes'
+        ? 'timed out: the run limit killed its process group'
         : typeof result.exitCode === 'number'
           ? `exit ${result.exitCode}`
           : `did not start${typeof result.signal === 'string' ? ` (${result.signal})` : ''}`;

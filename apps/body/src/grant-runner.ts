@@ -665,6 +665,7 @@ export class GrantCommandRunner {
       child.on('error', (error) => {
         failure = error;
       });
+      child.on('exit', () => killChildProcessGroup(child, 'SIGKILL')); // Exit (also the time limit's) ends the run: no pipe holder outlives it; close collects output.
       child.on('close', (exitCode, signal) => {
         this.children.delete(child);
         const combined = [

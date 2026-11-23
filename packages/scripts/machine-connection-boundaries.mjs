@@ -21,39 +21,22 @@ function method(node){
 function typeOnly(node){for(let parent=node.parent;parent;parent=parent.parent)if(ts.isTypeNode(parent))return true;return false;}
 
 /** Capability inspection, independent of counts: the physical machine socket
- * cannot escape its connection owner. The two countdowns have exact owners. */
+ * cannot escape its connection owner. The stay-warm countdown has an exact owner. */
 export function inspectMachineConnectionSource(file,text){
   const source=ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true);
   const errors=[];
   const deny=(node,reason)=>errors.push(`${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line+1}: machine connection boundary: ${reason}`);
   const timerAliases=new Set(TIMER_NAMES);
-  let warmCountdownSites=0, updateHandoffSites=0;
-  // These observers own only their local wait/progress. They cannot replace
-  // the machine connection or stop an installer/helper on expiry.
-  const observerOwners = {
-    'machine-control.ts': 'requestMachine', 'kernel-lock.ts': 'withKernelLock',
-    'update-progress.ts': 'observe', 'update-child.ts': 'observeChild',
-    'update-download.ts': 'downloadBytes',
-  };
-  const observerSites = new Map();
-  const observerTimer = node => file.startsWith(BODY) &&
-    Boolean(observerOwners[file.slice(BODY.length)]) &&
-    observerOwners[file.slice(BODY.length)] === method(node) &&
-    ['setTimeout', 'setInterval'].includes(name(node.expression));
+  let warmCountdownSites=0;
   const warmCountdown=node=>{
     if(file!==BODY+'agent-runner.ts'||name(node.expression)!=='setTimeout'||method(node)!=='armIdle')return false;
     for(let parent=node.parent;parent;parent=parent.parent)if(ts.isClassDeclaration(parent))return parent.name?.text==='AgentRunner';
     return false;
   };
-  const updateHandoff=node=>{
-    if(file!==BODY+'managed-update.ts'||name(node.expression)!=='setTimeout'||method(node)!=='begin')return false;
-    for(let parent=node.parent;parent;parent=parent.parent)if(ts.isClassDeclaration(parent))return parent.name?.text==='ReleaseTransaction';
-    return false;
-  };
   function visit(node){
     if(file.startsWith(BODY)){
       if(ts.isIdentifier(node)&&['setTimeout','setInterval','setImmediate'].includes(node.text)&&!typeOnly(node)&&
-        !(ts.isCallExpression(node.parent)&&node.parent.expression===node&&(warmCountdown(node.parent)||updateHandoff(node.parent)||observerTimer(node.parent))))
+        !(ts.isCallExpression(node.parent)&&node.parent.expression===node&&warmCountdown(node.parent)))
         deny(node,'helper timer references and destructured aliases are forbidden');
       if(ts.isCallExpression(node)&&(node.expression.kind===ts.SyntaxKind.ImportKeyword||name(node.expression)==='require')&&
         node.arguments[0]&&ts.isStringLiteralLike(node.arguments[0])&&/^(?:node:)?timers(?:\/promises)?$/.test(node.arguments[0].text))
@@ -66,14 +49,9 @@ export function inspectMachineConnectionSource(file,text){
         deny(node,'helper timer aliases are forbidden');
       }
       if(ts.isCallExpression(node)&&(timerAliases.has(name(node.expression))||name(node.expression)==='timeout'&&name(node.expression.expression)==='AbortSignal')){
-        // One stay-warm countdown and one cancellable update attempt.
+        // One stay-warm countdown; every other helper wait goes through wait.ts.
         if(warmCountdown(node)){if(++warmCountdownSites>1)deny(node,'AgentRunner.armIdle may own only one stay-warm countdown');}
-        else if(updateHandoff(node)){if(++updateHandoffSites>1)deny(node,'ReleaseTransaction.begin may own only one update handoff timeout');}
-        else if(observerTimer(node)){
-          const timer=name(node.expression); const count=(observerSites.get(timer)??0)+1; observerSites.set(timer,count);
-          if(count>1)deny(node,'an observer may own only one progress interval and one expiry timer');
-        }
-        else deny(node,'helper timers are forbidden outside the stay-warm and update handoff owners');
+        else deny(node,'helper timers are forbidden outside the stay-warm countdown');
       }
       // Generated plugin/bridge code is executable too, not a place to hide a timer.
       if(ts.isStringLiteralLike(node)||ts.isNoSubstitutionTemplateLiteral(node)||ts.isTemplateExpression(node)){

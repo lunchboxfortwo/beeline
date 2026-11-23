@@ -1,11 +1,20 @@
 import { lstat, readdir, readFile, readlink } from 'node:fs/promises';
 import { resolve, sep, relative } from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileOptions } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 import { canonicalStoragePath, ordinaryDirectory, storageTree, isSquirePath, removeStoragePath, type TreeEntry } from './storage-filesystem.js';
 export { ordinaryDirectory, storageTree, isSquirePath, removeStoragePath } from './storage-filesystem.js';
 import { SHARED_CREDENTIALS } from './agent-home.js';
+
+let reportChild: ((line: string) => void) | undefined;
+/** `beeline storage` names each local child before it waits on it; the helper's own passes stay quiet. */
+export function reportStorageChildren(report: ((line: string) => void) | undefined): void { reportChild = report; }
+/** One local child a storage pass waits on. `label` names it when its argv carries an inline script. */
+export function storageChild(file: string, args: readonly string[], options: ExecFileOptions = {}, label = [file, ...args].join(' ')): Promise<{ stdout: string; stderr: string }> {
+  reportChild?.(label);
+  return execFileAsync(file, [...args], { ...options, encoding: 'utf8' });
+}
 
 export const STORAGE_ITEM_UNUSED_MS = 7 * 24 * 60 * 60_000;
 export interface StorageRoomState { roomId: string; archived: boolean; workspaceId?: string; landedHeadSha?: string }
@@ -82,7 +91,7 @@ print(json.dumps({'paths':paths,'uncertain':uncertain}))
 export async function capturePrivateProcessUse(progress?: () => Promise<void>): Promise<(root: string) => boolean> {
   if (process.platform === 'darwin' && process.getuid) {
     try {
-      const { stdout } = await execFileAsync('/usr/sbin/lsof', ['-nP', '-a', '-u', String(process.getuid()), '-Fn'], { maxBuffer: 32 * 1024 * 1024 });
+      const { stdout } = await storageChild('/usr/sbin/lsof', ['-nP', '-a', '-u', String(process.getuid()), '-Fn'], { maxBuffer: 32 * 1024 * 1024 });
       return processPathIndex(stdout.split('\n').filter(line => line.startsWith('n/')).map(line => line.slice(1)));
     } catch { return () => true; }
   }
@@ -119,7 +128,7 @@ export async function capturePrivateProcessUse(progress?: () => Promise<void>): 
     } catch {
       if (await lstat(proc).catch(() => undefined)) {
         try {
-          const { stdout } = await execFileAsync('sudo', ['-n', '/usr/bin/python3', '-c', PROCESS_INVENTORY, String(process.getuid())], { maxBuffer: 16 * 1024 * 1024 });
+          const { stdout } = await storageChild('sudo', ['-n', '/usr/bin/python3', '-c', PROCESS_INVENTORY, String(process.getuid())], { maxBuffer: 16 * 1024 * 1024 }, 'sudo -n /usr/bin/python3 (read-only /proc process inventory)');
           const snapshot = JSON.parse(stdout) as { paths: string[]; uncertain: boolean };
           if (snapshot.uncertain) return () => true;
           return processPathIndex(snapshot.paths);
@@ -267,7 +276,7 @@ function disposalObjects(root: string, archived: boolean, tree: Map<string, Tree
 async function captureMountUse(): Promise<(path: string) => boolean> {
   let mounts: string[];
   if (process.platform === 'darwin') {
-    const { stdout } = await execFileAsync('/sbin/mount', []);
+    const { stdout } = await storageChild('/sbin/mount', []);
     mounts = stdout.split('\n').flatMap(line => {
       const raw = / on (.+) \(/.exec(line)?.[1];
       return raw ? [canonicalStoragePath(raw)] : [];
@@ -540,6 +549,6 @@ def payload(path):
     return not names or any(payload(os.path.join(path,name)) for name in names)
 print('true' if payload(sys.argv[1]) else 'false')
 `;
-  const { stdout } = await execFileAsync('/usr/bin/python3', ['-c', script, root]);
+  const { stdout } = await storageChild('/usr/bin/python3', ['-c', script, root], {}, `/usr/bin/python3 (payload scan) ${root}`);
   return JSON.parse(stdout) as boolean;
 }

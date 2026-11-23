@@ -189,24 +189,28 @@ read-only observation; `--check` checks only the published artifact.
 
 `connect` reuses the installed CLI and never prepares or requests a helper
 release when one is already installed. It writes the paired agent's runtime,
-asks the running helper to converge, and waits for that agent alone. A new
-machine installs the helper first and starts it after the runtime is written.
+asks the running helper to converge once, and reports that agent's current state;
+it never waits for the agent to serve. A new machine installs the helper first and
+starts it after the runtime is written.
 An older publication is a freshness result, including final versus rc comparisons;
 helper repair still runs. Equal versions still verify content, and --force stages
 a separate repair release. Obsolete staging is cleared only when it still matches
 the attempt holding the install lock.
 
-Socket and lock observers print their current phase while waiting and report a
-named error when they stop observing. They never restart a helper after a protocol
-error, take over a live install lock, or cancel its owner. Detached preparation and
-dependency children keep durable stdout/stderr logs, stream progress to the CLI,
-and continue when its observer leaves. Native convergence likewise has a detached owner;
-its lock covers the complete transaction, including after the observing CLI exits.
-Adapter installation has no child-killing deadline; only its outer observer may expire. Dependencies converge using the selected
-bundle before this invocation requests successor startup. Downloads have a network
-inactivity budget covering DNS, connection, headers and body; each received chunk
-resets it and reports cumulative bytes. There is no command-wide deadline that
-kills progressing work.
+Every wait goes through `apps/body/src/wait.ts` (strict architecture rule
+`helper.waits`): a command waits only for the answer to its own request or the exit
+of a child it owns. The helper answers each control request once: `update` is
+answered when the handoff starts (or with the refusal), and the CLI then follows
+the old helper's kernel lock to its exit, runs the blocking native start job, and
+reads the successor's status once. `start` and `update` report each agent as the
+helper answered; nothing waits for agents to serve. Locks never queue: a busy lock
+fails at once naming its holder's pid and step. Preparation, dependency and native
+convergence workers are owned children: their output streams to the CLI, and they
+die with it (one process group per owned tree). Adapter installation streams npm
+with `--loglevel=http`. Dependencies converge using the selected bundle before this
+invocation requests successor startup. Downloads report cumulative bytes; there is
+no own inactivity timer or command-wide deadline, so a silent server ends only on
+the transport's own read failure.
 
 Legacy helper records sign the one-time authenticated
 `/v1/auth/daemon/migrate-legacy` server route with their existing identity. The

@@ -1,9 +1,10 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { activeAdapterCommand } from './adapter-store.js';
+import { runOwned } from './wait.js';
 import type { AgentId } from './session-join/agents.js';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import { createRequire } from 'node:module';
@@ -277,34 +278,45 @@ export function latestAdapterInstallCommand(kind: AgentKind): AdapterInstallComm
     : undefined;
 }
 
+/** The exact argv `runAdapterInstall` runs, so callers can log the real command. */
+export function adapterInstallArgs(install: AdapterInstallCommand): AdapterInstallCommand['args'] {
+  // Codex's Linux executable is shipped as an optional platform package.
+  const linuxCodex = process.platform === 'linux' && install.args.some(
+    (arg) => /^@agentclientprotocol\/codex-acp(?:@|$)/.test(arg),
+  );
+  // npm's own progress (every registry request and lifecycle script) streams as it happens.
+  return [...install.args, linuxCodex ? '--include=optional' : '--omit=optional', '--loglevel=http', '--foreground-scripts'];
+}
+
+/** npm is an owned child: its lines stream, it settles on exit, and its group dies with the caller. */
 export async function runAdapterInstall(
   install: AdapterInstallCommand,
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: 'inherit' | 'ignore' } = {},
+  opts: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+    stdio?: 'inherit' | 'ignore';
+    onLine?: (line: string) => void;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<void> {
-  await new Promise<void>((resolveInstall, rejectInstall) => {
-    // Codex's Linux executable is shipped as an optional platform package.
-    const linuxCodex = process.platform === 'linux' && install.args.some(
-      (arg) => /^@agentclientprotocol\/codex-acp(?:@|$)/.test(arg),
-    );
-    const child = spawn(install.command, [...install.args, linuxCodex ? '--include=optional' : '--omit=optional'], {
-      ...(opts.cwd ? { cwd: opts.cwd } : {}),
-      env: opts.env ?? process.env,
-      stdio: opts.stdio ?? 'inherit',
-    });
-    child.once('error', rejectInstall);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolveInstall();
-      else {
-        rejectInstall(
-          new Error(
-            signal
-              ? `${install.command} was terminated by ${signal}`
-              : `${install.command} exited with status ${code ?? 'unknown'}`,
-          ),
-        );
-      }
-    });
+  const onLine = opts.stdio === 'ignore' ? () => undefined
+    : opts.onLine ?? ((line: string) => process.stderr.write(`${line}\n`));
+  const result = await runOwned({
+    step: install.command,
+    file: install.command,
+    args: adapterInstallArgs(install),
+    env: opts.env ?? process.env,
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    onLine,
   });
+  if (result.code !== 0) {
+    throw new Error(
+      result.signal
+        ? `${install.command} was terminated by ${result.signal}`
+        : `${install.command} exited with status ${result.code ?? 'unknown'}`,
+    );
+  }
 }
 
 /** Install beside the working adapter and promote only after session-start validation. */

@@ -36,6 +36,15 @@ additional timer owners still fail. There are no connection timer chains, retry 
 retention sweeps or expiry wake loops. `packages/scripts/server-timers.test.mjs` plants
 forbidden calls and verifies the real architecture check rejects them.
 
+The strict `helper.waits` rule covers `apps/body/src`: a helper command or agent
+tool waits only for the answer to its own request or the exit of a child it owns,
+never for a condition, and arms no timer. `ask`, `runOwned` and `tryLock` in
+`apps/body/src/wait.ts` own every wait; the agent stay-warm countdown
+`AgentRunner.armIdle` is the one timer owned outside it. The sites outside them
+today are a strict one-way ratchet: CI rejects a raised `total`, so it only
+falls as areas move to the owner. `packages/scripts/helper-waits.test.mjs` plants
+waits and timers and verifies the real check rejects them.
+
 
 ## Storage registry (bloat inside a module)
 
@@ -75,7 +84,7 @@ each app so a module cannot grow a second path for the same job.
 
 Non-strict invariant changes pass CI when the candidate satisfies its declared
 rules. Strict capability boundaries reject changes to their matching scope,
-owner functions, owned sink count or zero allowance; they cannot use the weekly
+owner functions, owned sink count or a raised allowance; they cannot use the weekly
 warning path to reopen a second owner. A one-for-one relocation or rename is
 allowed only when the complete owning function bodies are unchanged against the
 base, with the same owned sink count and matching boundary. `--base` reports those changes for the weekly audit;

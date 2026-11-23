@@ -59,8 +59,9 @@ describe('pair agent auto-selection', () => {
       env: { ...PATH_ONLY, PATH: directory },
       interactive: false,
       output: log.output,
-      install: async (command) => {
+      install: async (command, installOptions) => {
         installs.push(command);
+        installOptions.log?.('[beeline] codex adapter current at 1.2.3');
       },
     });
 
@@ -71,7 +72,9 @@ describe('pair agent auto-selection', () => {
         args: ['install', '-g', '@agentclientprotocol/codex-acp@latest'],
       },
     ]);
-    expect(log.text()).toContain('[beeline] refreshing codex adapter');
+    // The adapter update's own decision reaches the output; no pre-decision npm line.
+    expect(log.text()).toContain('[beeline] codex adapter current at 1.2.3');
+    expect(log.text()).not.toContain('npm install -g');
     expect(log.text()).toContain('[beeline] using codex (auto-detected; adapter current)');
   });
 

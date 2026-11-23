@@ -17,9 +17,9 @@ it('uses the target gate and reports a stuck agent on the direct body CLI', asyn
   const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
   await runUpdateCommand(['update', '--force']);
   expect(convergeDependencies).toHaveBeenCalledWith(expect.anything(), 'target');
-  expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ releaseId: 'target', waitForAgents: false, force: true }));
+  expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ releaseId: 'target', reportAgentsOnly: true, force: true }));
   expect(stderr.mock.calls.flat().join('')).toContain('sleepy: starting since startup-time; discovery pending; snapshot snapshot-time');
-  expect(stdout.mock.calls.flat().join('')).toContain('target release serving');
+  expect(stdout.mock.calls.flat().join('')).toContain('helper pid 123 serving');
 });
 
 it('repairs the installed helper after a freshness failure on the direct CLI', async () => {
@@ -28,6 +28,6 @@ it('repairs the installed helper after a freshness failure on the direct CLI', a
   vi.mocked(convergeMachine).mockResolvedValue({} as never);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   await expect(runUpdateCommand(['update'])).rejects.toThrow('freshness unconfirmed');
-  expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ waitForAgents: false }));
+  expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ reportAgentsOnly: true }));
   expect(convergeDependencies).not.toHaveBeenCalled();
 });

@@ -12,7 +12,7 @@ import { agentGitIdentity } from './agent-git-identity.js';
 import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { rememberStorageOwner } from './storage-owners.js';
-import { withKernelLock } from './kernel-lock.js';
+import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
 
@@ -255,10 +255,16 @@ export async function prepareWorkspace(input: {
       await input.api.execute('postCornerRemoteState', { cornerId: input.placeId, branch, state: 'working', checks: 'unknown' })
         .catch(error => console.warn(`[body] thread ${input.placeId} working state not posted:`, error));
   } else {
-    path = await materializeRoomCheckout({
-      roomId: input.placeId, workspaceId: input.workspaceId, supervisorRoot: input.supervisorRoot,
-      remote: repository.remote, targetBranch, ...(token ? { token } : {}),
-    });
+    try {
+      path = await materializeRoomCheckout({
+        roomId: input.placeId, workspaceId: input.workspaceId, supervisorRoot: input.supervisorRoot,
+        remote: repository.remote, targetBranch, ...(token ? { token } : {}),
+      });
+    } catch (error) {
+      if (error instanceof KernelLockBusyError) return checkoutBusy(roomCheckoutPath({ ...input, roomId: input.placeId,
+        remote: repository.remote, targetBranch }), error);
+      throw error;
+    }
   }
   const ready = () =>
     readyCheckout({
@@ -268,9 +274,15 @@ export async function prepareWorkspace(input: {
       agentId: input.agent.publicKey,
     });
   // Agents in one Room share its checkout; one prepares it at a time.
-  const notReady = input.parentRoomId
-    ? await ready()
-    : await withKernelLock(`room-checkout:${path}`, ready);
+  let notReady: string | undefined;
+  try {
+    notReady = input.parentRoomId
+      ? await ready()
+      : await withKernelLock(`room-checkout:${path}`, ready, { step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the Room checkout` });
+  } catch (error) {
+    if (error instanceof KernelLockBusyError) return checkoutBusy(path, error);
+    throw error;
+  }
   const indexed = await prepareCodegraphIndex(input.config, path);
   const where = input.parentRoomId
     ? `branch ${branch} (target ${targetBranch})`
@@ -281,4 +293,9 @@ export async function prepareWorkspace(input: {
       : `Checkout ready at ${path} on ${where}.`,
     indexed ? 'The code index is ready.' : 'The code index was not built; use the shell and file tools.',
   ].join(' ');
+}
+
+/** Agents in one Room share its checkout; one prepares it at a time and the others are told so at once. */
+function checkoutBusy(path: string, error: KernelLockBusyError): string {
+  return `Checkout at ${path} is being prepared by another agent (pid ${error.holder.pid || 'unknown'}, since ${error.holder.since}). Call workspace again to read it once that finishes.`;
 }

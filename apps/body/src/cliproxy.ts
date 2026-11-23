@@ -28,6 +28,8 @@ import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-code
 import { parse } from 'yaml';
 import { agentBehavior, type AgentKind } from './agent-command.js';
 import { readJsonObject, writePrivateFileAtomically } from './atomic-private-file.js';
+import { downloadBytes } from './update-download.js';
+import { ask, runOwned } from './wait.js';
 
 const execFileAsync = promisify(execFile);
 const RELEASES = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
@@ -45,7 +47,7 @@ export function cliProxyDir(operatorHome: string = homedir()): string {
 /** Install the latest release, only when its published checksum matches, and make it current. */
 export async function installLatestCliProxy(operatorHome?: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const bin = join(cliProxyDir(operatorHome), 'bin');
-  const release = (await (await fetchImpl(RELEASES)).json()) as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
+  const release = JSON.parse(Buffer.from(await downloadBytes(RELEASES, fetchImpl)).toString('utf8')) as { tag_name?: string; assets?: { name: string; browser_download_url: string }[] };
   const version = release.tag_name?.replace(/^v/, '');
   if (!version) throw new Error('CLIProxyAPI latest release has no version');
   const target = join(bin, version, BINARY);
@@ -54,16 +56,18 @@ export async function installLatestCliProxy(operatorHome?: string, fetchImpl: ty
     const download = (file: string) => {
       const url = release.assets?.find((asset) => asset.name === file)?.browser_download_url;
       if (!url) throw new Error(`CLIProxyAPI ${version} has no ${file}`);
-      return fetchImpl(url);
+      return downloadBytes(url, fetchImpl);
     };
-    const archive = Buffer.from(await (await download(name)).arrayBuffer());
+    const archive = Buffer.from(await download(name));
     const digest = createHash('sha256').update(archive).digest('hex');
-    if (!(await (await download('checksums.txt')).text()).split('\n').some((line) => line.trim() === `${digest}  ${name}`))
+    if (!Buffer.from(await download('checksums.txt')).toString('utf8').split('\n').some((line) => line.trim() === `${digest}  ${name}`))
       throw new Error(`CLIProxyAPI ${name} does not match its release checksum`);
     await mkdir(join(bin, version), { recursive: true, mode: 0o700 });
     await writeFile(join(bin, version, name), archive, { mode: 0o600 });
-    try { await execFileAsync('tar', ['-xzf', join(bin, version, name), '-C', join(bin, version), BINARY]); }
-    finally { await rm(join(bin, version, name), { force: true }); }
+    try {
+      const tar = await runOwned({ step: 'CLIProxyAPI unpack', file: 'tar', args: ['-xzf', join(bin, version, name), '-C', join(bin, version), BINARY] });
+      if (tar.code !== 0) throw new Error(`CLIProxyAPI unpack failed (${tar.signal ?? `exit ${tar.code}`}): ${tar.stderr.trim()}`);
+    } finally { await rm(join(bin, version, name), { force: true }); }
   }
   await writePrivateFileAtomically(join(bin, 'current'), `${version}\n`);
   return target;
@@ -148,7 +152,7 @@ export class CliProxy {
 
   async #management(path: string, init: RequestInit = {}): Promise<unknown> {
     await this.start();
-    const response = await fetch(`${this.endpoint!.url}/v0/management/${path}`, {
+    const response = await ask({ url: `${this.endpoint!.url}/v0/management/${path}`, report: false }, {
       ...init, headers: { authorization: `Bearer ${this.#managementKey}`, 'content-type': 'application/json' },
     });
     if (!response.ok) throw new Error(`CLIProxyAPI ${path.split('?')[0]} answered ${response.status}`);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { captureHelperError, flushHelperErrors } from './sentry.js';
-import { requestMachine } from './machine-control.js';
+import { askMachine } from './machine-control.js';
+import { exitWithOwner } from './owner-link.js';
 import { RESOURCE_FACADE_FLAG, runResourceFacade } from './resource-mcp-facade.js';
 /**
  * Beeline body CLI — run a body against a TLC channel.
@@ -157,6 +158,7 @@ async function main(): Promise<void> {
   }
   if (command === '--help' || command === '-h') usage(0);
 
+  if (command === 'native-converge-worker' || command === 'managed-update-worker') exitWithOwner();
   if (command === 'native-converge-worker') {
     const { runNativeConvergenceWorker } = await import('./native-helper.js');
     console.log(JSON.stringify({ pid: await runNativeConvergenceWorker() }));
@@ -172,6 +174,7 @@ async function main(): Promise<void> {
 
   if (command === 'converge-dependencies') {
     if (process.env.BEELINE_INTERNAL_RECOVERY !== '1') throw new Error('converge-dependencies is an internal recovery command');
+    exitWithOwner();
     await refreshRuntimeHarnessAdapters({ env: process.env });
     // The machine's login proxy tracks its latest release; the helper starts it.
     const { installLatestCliProxy } = await import('./cliproxy.js');
@@ -341,10 +344,17 @@ async function main(): Promise<void> {
     // it; every other agent on the machine keeps serving.
     await setAgentStopped(configPath, true);
     const reloaded = await reloadMachineHelper();
-    if (reloaded) await requestMachine(defaultSupervisorRoot(), { operation: 'stop', agentId: runtime.agent.publicKey },
-      (status) => !status.agents[runtime.agent.publicKey] || status.agents[runtime.agent.publicKey]!.state === 'stopped', 90_000);
+    // The helper answers with the agent's drain state now; nothing waits for it to finish.
+    let drain = '';
+    if (reloaded) {
+      const answer = await askMachine(defaultSupervisorRoot(), { operation: 'stop', agentId: runtime.agent.publicKey });
+      const agent = answer.agents[runtime.agent.publicKey];
+      drain = agent
+        ? `; helper reports ${agent.state}${agent.enabled === false ? ' (disabled)' : ''}${agent.status ? `: ${agent.status}` : ''}`
+        : '; no longer hosted by the helper';
+    }
     console.log(
-      `[beeline] agent ${runtime.agent.publicKey} stopped${reloaded ? '; graceful stop requested' : ''}`,
+      `[beeline] agent ${runtime.agent.publicKey} stopped${reloaded ? `; graceful stop requested${drain}` : ''}`,
     );
     return;
   }

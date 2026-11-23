@@ -3,6 +3,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Agent } from 'undici';
 import { readState, withLock, writeState, type JoinedSession } from './store.js';
+import { ask } from '../wait.js';
 
 export const DEFAULT_SERVER = 'https://server.usebeeline.app';
 
@@ -42,14 +43,17 @@ function admitHeldMcpCompletion(url:string,body:unknown):void{
 
 /** The existing authenticated MCP/OAuth transport leaf owns all requests,
  * including the persistent member stream; callers cannot create a second owner. */
-async function request(url: string, body: unknown, headers: Record<string,string>, stream?: AbortSignal, cancellation?:AbortSignal,held=false): Promise<Response> {
+async function request(url: string, body: unknown, headers: Record<string,string>, stream?: AbortSignal, cancellation?:AbortSignal,held=false,step?:string): Promise<Response> {
   if(held){if(stream)throw new Error('Held MCP completion mode invalid');admitHeldMcpCompletion(url,body);}
   if(stream&&new URL(url).pathname!=='/mcp/member-stream')throw new Error('MCP member stream route unavailable');
-  return fetch(url,{method:stream?'GET':'POST',headers:{'content-type':'application/json',...headers},
-    ...((stream||held)?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined});
+  const init:RequestInit&{dispatcher?:Agent}={method:stream?'GET':'POST',headers:{'content-type':'application/json',...headers},
+    ...((stream||held)?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined};
+  // A named step prints one line naming the host before the wait; the transport's own failure ends a silent one.
+  return ask(step?{url,peer:`${new URL(url).host} to ${step}`}:{url,report:false},init);
 }
-async function postJson(url: string, body: unknown, headers: Record<string, string> = {}, signal?:AbortSignal,_timeoutMs=60_000,held=false): Promise<{ status: number; value: Record<string, unknown> }> {
-  const response = await request(url,body,headers,undefined,signal,held);
+async function postJson(url: string, body: unknown, headers: Record<string, string> = {},
+  {signal,held=false,step}:{signal?:AbortSignal;held?:boolean;step?:string}={}): Promise<{ status: number; value: Record<string, unknown> }> {
+  const response = await request(url,body,headers,undefined,signal,held,step);
   const text = await response.text();
   let value: Record<string, unknown> = {};
   try { value = JSON.parse(text) as Record<string, unknown>; } catch { /* not JSON */ }
@@ -58,7 +62,7 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
 
 /** Adopt an already-consented member through the existing OAuth transport owner. */
 export async function attachLocalDelivery(server:string,secret:string):Promise<Tokens & {clientId:string}> {
-  const {status,value}=await postJson(`${server}/mcp/oauth/delivery-attach`,{secret});
+  const {status,value}=await postJson(`${server}/mcp/oauth/delivery-attach`,{secret},{},{step:'attach this host to the consented member'});
   if(status!==200 || typeof value.clientId!=='string' || typeof value.access_token!=='string' ||
     !value.access_token)
     throw new Error('The local delivery handoff ended or was already used. Ask this same connected member for setup_delivery again.');
@@ -72,7 +76,7 @@ export function handoffUri(server: string): string {
 /** One registration per joined session: its member is the session, named on the Allow page. */
 export async function registerClient(server: string, clientName: string): Promise<string> {
   const { status, value } = await postJson(`${server}/mcp/oauth/register`, { client_name: clientName, redirect_uris: [handoffUri(server)],
-    token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] });
+    token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'] }, {}, { step: 'register this session' });
   if (status !== 201 || typeof value.client_id !== 'string') throw new Error(`Beeline refused the registration (HTTP ${status})`);
   return value.client_id;
 }
@@ -101,7 +105,7 @@ export async function finishSignIn(server: string, clientId: string, signIn: Sig
   if(!signIn.code){
     let handoff:Awaited<ReturnType<typeof postJson>>;
     const waitMs=Math.max(1,Math.min(600_000,deadlineAt-Date.now()));
-    try{handoff=await postJson(`${server}/mcp/oauth/handoff`,{state:signIn.state,completionV1:true,waitMs},{},undefined,waitMs,true);}
+    try{handoff=await postJson(`${server}/mcp/oauth/handoff`,{state:signIn.state,completionV1:true,waitMs},{},{held:true});}
     catch{throw new SignInPendingError('The sign-in completion is still pending; no observation was repeated');}
     if(handoff.status!==200)throw new SignInPendingError('The sign-in completion is still pending; no observation was repeated');
     if(['authorization_pending','completion_unavailable'].includes(String(handoff.value.error)))
@@ -151,9 +155,9 @@ export async function accessToken(dir: string, key: string): Promise<string> {
 }
 
 /** Calls one Beeline tool as the session's member. Results are untrusted Room data. */
-export async function callTool(session: Pick<JoinedSession, 'server'>, token: string, name: string, args: Record<string, unknown>): Promise<any> {
+export async function callTool(session: Pick<JoinedSession, 'server'>, token: string, name: string, args: Record<string, unknown>, step?: string): Promise<any> {
   const { status, value } = await postJson(`${session.server}/mcp`, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
-    { authorization: `Bearer ${token}`, 'mcp-protocol-version': '2026-07-28', accept: 'application/json' });
+    { authorization: `Bearer ${token}`, 'mcp-protocol-version': '2026-07-28', accept: 'application/json' }, { step });
   if (status === 401) throw new Error(DISCONNECTED);
   if (status !== 200) throw new Error(`Beeline answered HTTP ${status}`);
   const result = value.result as { isError?: boolean; content?: { text?: string }[] } | undefined;
@@ -166,7 +170,7 @@ export async function callTool(session: Pick<JoinedSession, 'server'>, token: st
  * authenticated adapter. An old server cannot silently select a poll loop. */
 export async function requireMemberStream(session:Pick<JoinedSession,'server'>,token:string,signal?:AbortSignal):Promise<void>{
   const {status,value}=await postJson(`${session.server}/mcp`,{jsonrpc:'2.0',id:1,method:'server/discover',params:{}},
-    {authorization:`Bearer ${token}`,'mcp-protocol-version':'2026-07-28',accept:'application/json'},signal);
+    {authorization:`Bearer ${token}`,'mcp-protocol-version':'2026-07-28',accept:'application/json'},{signal});
   const result=value.result as {capabilities?:{memberStreamV1?:unknown}}|undefined;
   if(status!==200||result?.capabilities?.memberStreamV1!==true)
     throw new Error('Beeline member stream unavailable: this server must support memberStreamV1 for automatic joined-session delivery; explicit session read/tool remains available');

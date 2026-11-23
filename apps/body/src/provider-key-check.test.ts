@@ -62,4 +62,22 @@ describe('provider key check', () => {
       }),
     ).rejects.toThrow('Anthropic could not verify the key right now (HTTP 503)');
   });
+
+  it('names the host and step before it waits, and a cancel aborts a silent provider', async () => {
+    const lines: string[] = [];
+    const cancel = new AbortController();
+    // A provider that accepts the request and never answers: only the abort ends it.
+    const silent = (async (_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const aborted = () => reject(new Error('This operation was aborted'));
+        if (init?.signal?.aborted) aborted();
+        else init?.signal?.addEventListener('abort', aborted);
+      })) as typeof fetch;
+    const checking = verifyProviderKey({
+      provider: 'openrouter', apiKey: 'sk-or-real', fetchImpl: silent,
+      report: (line) => { lines.push(line); cancel.abort(); }, signal: cancel.signal,
+    });
+    await expect(checking).rejects.toThrow('Could not reach OpenRouter to verify the key (This operation was aborted)');
+    expect(lines).toEqual(['waiting for openrouter.ai to verify the OpenRouter key (GET /api/v1/key)']);
+  });
 });

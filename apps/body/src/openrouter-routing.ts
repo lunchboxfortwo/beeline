@@ -505,7 +505,6 @@ export async function probeOpenRouterProvider(input: {
   apiKey: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  timeoutMs?: number;
 }): Promise<OpenRouterProbeResult> {
   const now = input.now ?? Date.now;
   const started = now();
@@ -562,7 +561,6 @@ export async function probeOpenRouterProviders(input: {
   apiKey: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  timeoutMs?: number;
   maxCandidates?: number;
 }): Promise<OpenRouterProbeResult[]> {
   const candidates = input.providers.slice(
@@ -577,7 +575,6 @@ export async function probeOpenRouterProviders(input: {
         apiKey: input.apiKey,
         ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         ...(input.now ? { now: input.now } : {}),
-        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       }),
     ),
   );
@@ -627,7 +624,6 @@ export interface ResolveOpenRouterRoutingInput {
   cacheDir: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
-  timeoutMs?: number;
   /**
    * OpenRouter key for the answer probe. Without it only the uptime/tools
    * filter runs — the pin is then no worse than it was before C92.
@@ -641,7 +637,6 @@ export interface ResolveOpenRouterRoutingInput {
   providerOverride?: string;
   /** Bound on the probe; tests pass a smaller one. */
   probeMaxCandidates?: number;
-  probeTimeoutMs?: number;
   /** This agent's Room homes; read-only session IDs for seven-day generation facts. */
   historyRoomsDir?: string;
 }
@@ -807,9 +802,9 @@ async function buildDailyRouting(input: ResolveOpenRouterRoutingInput): Promise<
   const [traffic, probes] = await Promise.all([
     readOpenRouterTraffic({ model: input.model, cacheDir: input.cacheDir,
       ...(input.historyRoomsDir ? { roomsDir: input.historyRoomsDir } : {}),
-      apiKey: input.apiKey!, now: now(), fetchImpl: input.fetchImpl, timeoutMs: input.timeoutMs }),
+      apiKey: input.apiKey!, now: now(), fetchImpl: input.fetchImpl }),
     probeOpenRouterProviders({ model: input.model, providers: eligible, apiKey: input.apiKey!,
-      fetchImpl: input.fetchImpl, now: input.now, timeoutMs: input.probeTimeoutMs,
+      fetchImpl: input.fetchImpl, now: input.now,
       // Gate every eligible provider once per day, rather than using the old
       // uptime-first six as a proxy for the cheapest qualified set.
       maxCandidates: input.probeMaxCandidates ?? eligible.length }),

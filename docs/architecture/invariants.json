@@ -313,6 +313,33 @@
       "fix": "Drive work from its source event. Only owner-schedule-clock.ts and shutdown.ts own schedule and shutdown deadlines."
     },
     {
+      "id": "helper.waits",
+      "module": "Helper waits",
+      "invariant": "A helper command or agent tool waits only for the answer to its own request or the exit of a child it owns; it never waits for a condition, and arms no timer.",
+      "pattern": "setTimeout\\(|setInterval\\(|new Promise\\b|\\bwatch\\(|\\.once\\(\\s*['\"](?:exit|close|end)['\"]|\\bfetch\\(|\\bspawn\\(|execFile(?:Sync)?\\(|createConnection\\(|\\.listen\\(",
+      "scope": [
+        "apps/body/src"
+      ],
+      "owners": [
+        "apps/body/src/wait.ts",
+        "apps/body/src/agent-runner.ts"
+      ],
+      "ownerFunctions": {
+        "apps/body/src/wait.ts": [
+          "ask",
+          "runOwned",
+          "tryLock"
+        ],
+        "apps/body/src/agent-runner.ts": [
+          "armIdle"
+        ]
+      },
+      "ownerSites": 19,
+      "strict": true,
+      "total": 152,
+      "fix": "use ask/runOwned/tryLock in apps/body/src/wait.ts: ask for one request and one answer (socket or HTTP), runOwned for a child you own and stream, tryLock for a lock that never queues. Do not wait for a condition and do not add a timer; the agent stay-warm countdown AgentRunner.armIdle is the only timer owned outside wait.ts."
+    },
+    {
       "id": "access.membership-writes",
       "module": "Access and membership",
       "invariant": "Memberships are written only by the membership module.",

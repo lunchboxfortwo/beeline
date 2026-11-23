@@ -172,7 +172,7 @@ export function validateRules(invariants) {
       if (rule[key] === undefined) errors.push(`${INVARIANTS_PATH}: rule ${name} needs "${key}"`);
     if (ids.has(rule.id)) errors.push(`${INVARIANTS_PATH}: rule ${name} is listed twice`);
     ids.add(rule.id);
-    if (rule.strict && rule.total !== 0) errors.push(`${INVARIANTS_PATH}: strict rule ${name} must have zero allowance`);
+    // A strict rule may start a one-way ratchet: strictRelaxations rejects any raise.
     if (!Number.isInteger(rule.total) || rule.total < 0)
       errors.push(`${INVARIANTS_PATH}: rule ${name} total must be a whole number`);
     try {

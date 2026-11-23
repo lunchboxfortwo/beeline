@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdir, unlink, cp, rename, readlink } from 'node:f
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isolatedNativeProof } from '../../../apps/body/src/lifecycle-test-guard.ts';
-import { requestMachine } from '../../../apps/body/src/machine-control.ts';
+import { observeHelper } from './observe-helper.mjs';
 import { helperServiceUnit } from '../../../apps/body/src/native-helper.ts';
 
 if (!isolatedNativeProof(process.env))
@@ -24,25 +24,19 @@ const systemctl = async (...args) =>
   (await exec('systemctl', ['--user', ...args], { env, timeout: 120_000 })).stdout;
 let lastObservation;
 const observe = (accept = () => true, timeout = 90_000) =>
-  requestMachine(
-    stateRoot,
-    { operation: 'status' },
-    (status) => {
-      const observed = JSON.stringify({
-        generation: status.generation,
-        pid: status.pid,
-        processState: status.processState,
-        loadedRelease: status.loadedRelease,
-        desiredRelease: status.desiredRelease,
-      });
-      if (observed !== lastObservation) {
-        lastObservation = observed;
-        console.log(`[native-status] ${observed}`);
-      }
-      return accept(status);
-    },
-    timeout,
-  );
+  observeHelper(stateRoot, accept, timeout, (status) => {
+    const observed = JSON.stringify({
+      generation: status.generation,
+      pid: status.pid,
+      processState: status.processState,
+      loadedRelease: status.loadedRelease,
+      desiredRelease: status.desiredRelease,
+    });
+    if (observed !== lastObservation) {
+      lastObservation = observed;
+      console.log(`[native-status] ${observed}`);
+    }
+  });
 const serving = (status) =>
   status.processState === 'serving' && agents.every((id) => status.agents[id]?.state === 'serving');
 async function entry(command, args = [], options = {}) {
@@ -329,7 +323,8 @@ try {
         await assert.rejects(entry(cli, ['update']), /freshness unconfirmed/);
         baseline = await observe(serving);
         assert.notEqual(baseline.generation, previous);
-        const status = JSON.parse(await entry(cli, ['update', '--status']));
+        // The status JSON is stdout; progress lines go to stderr.
+        const status = JSON.parse((await exec(cli, ['update', '--status'], { env, maxBuffer: 1_000_000 })).stdout);
         assert.equal(status.releaseSelection.lastCheckResult, 'unconfirmed');
       } finally {
         fixture.setPublicationAvailable(true);

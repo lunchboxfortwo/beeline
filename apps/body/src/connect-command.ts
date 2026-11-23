@@ -6,13 +6,15 @@ import { withInstallLock } from './managed-update.js';
 import type { AgentAccessPolicy } from "./access-policy.js";
 import { AUTO_DETECT_AGENT_KINDS, type AgentKind, type AgentCommand, installLatestAgentAdapter, requireInstalledAgentProgram, resolveAgentCommand, installedAgentProgramEnvironment, agentBehavior, type DetectedAgentCommand, detectInstalledAgentCommands } from "./agent-command.js";
 import { stdin, stdout } from "node:process";
+import { fstatSync } from "node:fs";
 import { type ProviderKeyProvider, readSavedProviderKey, saveProviderKey, providerKeyFromEnvironment, maskProviderKey, PROVIDER_KEY_ENV_VARS } from "./provider-key-store.js";
 import { clackPromptOutput, unwrapPrompt } from "./clack-support.js";
 import * as clack from "@clack/prompts";
 import { fetchAgentModelCatalog } from "./model-catalog.js";
 import { enumerateCursorModels } from "./cursor-models.js";
 import { verifyProviderKey, type ConnectKeyProvider } from "./provider-key-check.js";
-import { runConnectWizard, providerEnvironment } from './connect-command-parse-connect-subscriptions.js';
+import { runConnectWizard, providerEnvironment, brassSpinner, type SpinnerStep } from './connect-command-parse-connect-subscriptions.js';
+import { ask } from './wait.js';
 
 
 
@@ -26,15 +28,24 @@ export const AGENT_NAME_MAX_LENGTH = 32;
 
 
 /**
- * Connect needs a keyboard-backed input stream. Some mobile terminal shells
- * proxy stdout through their UI, so it is writable but does not identify as a
- * TTY. Requiring that output stream to be a TTY rejects a person who can still
- * answer every prompt.
+ * Connect needs a keyboard-backed input stream and an output someone reads.
+ * Some mobile terminal shells proxy stdout through their UI, so it is writable
+ * but does not identify as a TTY; that pipe still reaches a person who can
+ * answer every prompt. Stdout redirected to a file or a device such as
+ * /dev/null reaches nobody, and the prompts would wait blind.
  */
 export function isInteractiveConnectTerminal(
   input: Pick<NodeJS.ReadStream, 'isTTY'> = stdin,
+  output: { isTTY?: boolean; fd?: number } = stdout,
 ): boolean {
-  return input.isTTY === true;
+  if (input.isTTY !== true) return false;
+  if (output.isTTY === true || output.fd === undefined) return true;
+  try {
+    const target = fstatSync(output.fd);
+    return !target.isFile() && !target.isCharacterDevice();
+  } catch {
+    return true;
+  }
 }
 
 
@@ -354,13 +365,19 @@ export interface ConnectModelCatalogRequest {
    * person just picked before asking what effort it should run at.
    */
   model?: string;
-  /** Bound the read; the discovery probe sets one, the credentialed read does not. */
+  /** Aborted when the person cancels; no adapter is started after that. */
+  signal?: AbortSignal;
+  /** Where the adapter refresh's own decision and progress lines go. */
+  say?: (line: string) => void;
 }
 
 
 
 export interface ConnectModelCatalogDependencies {
-  refreshAdapter?: (kind: AgentKind) => Promise<unknown>;
+  refreshAdapter?: (
+    kind: AgentKind,
+    options?: { log?: (line: string) => void; signal?: AbortSignal },
+  ) => Promise<unknown>;
   resolveAgent?: (kind: AgentKind) => Pick<AgentCommand, 'kind' | 'command' | 'args'>;
   fetchCatalog?: typeof fetchAgentModelCatalog;
 }
@@ -371,10 +388,13 @@ export const refreshedConnectAdapters = new Map<AgentKind, Promise<unknown>>();
 
 
 
-export function refreshConnectAdapter(kind: AgentKind): Promise<unknown> {
+export function refreshConnectAdapter(
+  kind: AgentKind,
+  options: { log?: (line: string) => void; signal?: AbortSignal } = {},
+): Promise<unknown> {
   const existing = refreshedConnectAdapters.get(kind);
   if (existing) return existing;
-  const refresh = installLatestAgentAdapter(kind).catch((error) => {
+  const refresh = installLatestAgentAdapter(kind, options).catch((error) => {
     refreshedConnectAdapters.delete(kind);
     throw error;
   });
@@ -393,7 +413,11 @@ export async function loadConnectModelCatalog(
   // old adapter, persist its model id, then launch a different adapter from a
   // later PATH resolution. A picker choice must come from the exact command
   // that connect-finish will store for the daemon.
-  await (dependencies.refreshAdapter ?? refreshConnectAdapter)(input.harness);
+  await (dependencies.refreshAdapter ?? refreshConnectAdapter)(input.harness, {
+    ...(input.say ? { log: input.say } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (input.signal?.aborted) throw new Error('Connection cancelled.');
   const agent = (dependencies.resolveAgent ?? ((kind) => resolveAgentCommand({ kind })))(
     input.harness,
   );
@@ -432,23 +456,6 @@ export async function loadConnectModelCatalog(
 }
 
 
-
-/**
- * How long the wizard waits for a harness to say what it can do before it
- * gives up and asks instead — the WHOLE read, handshake through live
- * validation of every advertised model (`loadConnectModelCatalog` exercises
- * each candidate through the harness's real setter before offering it, one
- * ACP round trip apiece). A configured harness answers the ACP handshake plus
- * `session/new` in about three seconds on a warm machine (measured: goose
- * 1.41 against a live OpenRouter config, 3.0s, nearly all of it `session/new`
- * loading extensions); claude-agent-acp's per-model validation adds roughly a
- * further second per numbered model on top of that (measured: claude-agent-acp
- * 0.84.0, ~12 models, ~13s of validation alone). Twenty-five seconds covers
- * that with room for a cold binary on a loaded machine, while a spinner
- * covers the wait itself so nobody reads it as hung. There is exactly one
- * attempt: a harness that needs longer than this is one the person should
- * simply be asked about.
- */
 
 /**
  * A catalog is evidence that a harness is already configured only when the
@@ -530,8 +537,14 @@ export async function collectConnectWizard(
   ) => Promise<ConnectModelCatalog> = loadConnectModelCatalog,
   keyStore: ConnectKeyStore = fileConnectKeyStore,
   env: NodeJS.ProcessEnv = process.env,
-  verifyKey: (input: { provider: ConnectProvider; apiKey: string }) => Promise<void> = (input) =>
-    verifyProviderKey(input as { provider: ConnectKeyProvider; apiKey: string }),
+  verifyKey: (
+    input: { provider: ConnectProvider; apiKey: string },
+    step?: SpinnerStep,
+  ) => Promise<void> = (input, step) =>
+    verifyProviderKey({
+      ...(input as { provider: ConnectKeyProvider; apiKey: string }),
+      ...(step ? { report: step.say, signal: step.signal } : {}),
+    }),
   seams: ConnectWizardSeams = {},
 ): Promise<ConnectWizardResult> {
   const announce = seams.announce ?? ((line: string) => clack.log.info(brass(line)));
@@ -571,12 +584,20 @@ export async function collectConnectWizard(
   ): Promise<string | undefined> => {
     let axis = catalog.effort;
     if (model !== catalog.currentValue) {
-      const reread = await loadModels({
-        harness: forHarness,
-        model,
-        ...(forProvider ? { provider: forProvider } : {}),
-        ...(forKey ? { apiKey: forKey } : {}),
-      }).catch(() => undefined);
+      const reread = await brassSpinner(
+        `Reading ${model}'s effort options…`,
+        ({ signal, say }) =>
+          loadModels({
+            harness: forHarness,
+            model,
+            ...(forProvider ? { provider: forProvider } : {}),
+            ...(forKey ? { apiKey: forKey } : {}),
+            signal,
+            say,
+          }).catch(() => undefined),
+        () => undefined,
+        undefined,
+      );
       axis = reread?.effort;
     }
     if (!axis?.options.some((choice) => choice.id !== 'off')) return undefined;
@@ -593,27 +614,31 @@ export async function collectConnectWizard(
     });
     return (picked ?? '').trim();
   };
-  // One bounded attempt, and never a hard failure: a harness that times out,
-  // refuses or crashes is simply one the wizard has to ask about. The read
-  // itself can take several seconds (claude-agent-acp live-validates every
-  // advertised model), so a spinner covers the wait — without it, the wizard
-  // sits at "Choose harness" with nothing on screen and reads as hung.
-  const probe = async (
+  // One attempt, and never a hard failure: a harness that refuses, crashes or
+  // exits is simply one the wizard has to ask about. The read waits only for
+  // the adapter's answers or its exit, and it can take several seconds
+  // (claude-agent-acp live-validates every advertised model), so a spinner
+  // covers it; without one the wizard sits at "Choose harness" and reads as
+  // hung. Cancelling stops the adapter (`brassSpinner`).
+  const probe = (
     candidate: (typeof CONNECT_HARNESSES)[number],
-  ): Promise<ConnectModelCatalog | undefined> => {
-    const spinner = clack.spinner({ output: clackPromptOutput() });
-    spinner.start(brass(`Checking ${connectHarnessLabel(candidate)}…`));
-    try {
-      const catalog = await loadModels({
-        harness: candidate,
-      });
-      spinner.stop();
-      return connectProbeFoundModels(catalog) ? catalog : undefined;
-    } catch {
-      spinner.stop();
-      return undefined;
-    }
-  };
+  ): Promise<ConnectModelCatalog | undefined> =>
+    brassSpinner(
+      `Checking ${connectHarnessLabel(candidate)}…`,
+      ({ signal, say }) =>
+        loadModels({ harness: candidate, signal, say }).then(
+          (catalog) => (connectProbeFoundModels(catalog) ? catalog : undefined),
+          () => undefined,
+        ),
+      () => undefined,
+      undefined,
+    );
+  const checkKey = (forProvider: ConnectProvider, key: string, label: string) =>
+    brassSpinner(
+      `Checking the ${label} key…`,
+      (step) => verifyKey({ provider: forProvider, apiKey: key }, step),
+      () => `${label} accepted the key`,
+    );
 
   const detected = (seams.detect ?? detectInstalledAgentCommands)();
   const sole = soleInstalledConnectHarness(detected);
@@ -672,14 +697,14 @@ export async function collectConnectWizard(
       });
       if (choice === 'saved') {
         apiKey = availableKey;
-        await verifyKey({ provider, apiKey });
+        await checkKey(provider, apiKey, providerLabel);
       } else {
         apiKey = await prompts.password({
           message: brass(`${providerLabel} API key`),
           validate: (value) => (value.trim() ? undefined : 'API key is required'),
         });
         apiKey = apiKey.trim();
-        await verifyKey({ provider, apiKey });
+        await checkKey(provider, apiKey, providerLabel);
         await keyStore.save(provider, apiKey);
       }
     } else {
@@ -688,18 +713,25 @@ export async function collectConnectWizard(
         validate: (value) => (value.trim() ? undefined : 'API key is required'),
       });
       apiKey = apiKey.trim();
-      await verifyKey({ provider, apiKey });
+      await checkKey(provider, apiKey, providerLabel);
       await keyStore.save(provider, apiKey);
     }
   }
-  // Unbounded, exactly as before: the wizard is committed to this harness now,
-  // so a slow catalog read is worth waiting for and a failed one is worth
-  // reporting rather than swallowing.
-  const catalog = await loadModels({
-    harness,
-    ...(provider ? { provider } : {}),
-    ...(apiKey ? { apiKey: apiKey.trim() } : {}),
-  });
+  // The wizard is committed to this harness now: the read waits for the
+  // adapter's answers or its exit, and a failed one is reported rather than
+  // swallowed.
+  const catalog = await brassSpinner(
+    `Reading ${connectHarnessLabel(harness)} models…`,
+    ({ signal, say }) =>
+      loadModels({
+        harness,
+        ...(provider ? { provider } : {}),
+        ...(apiKey ? { apiKey: apiKey.trim() } : {}),
+        signal,
+        say,
+      }),
+    () => undefined,
+  );
   const model = await askModel(catalog, harness, provider);
   const effort = await askEffort(catalog, harness, model, provider, apiKey?.trim());
   return {
@@ -733,13 +765,26 @@ export interface DeviceGrantResponse {
 
 
 
-export async function jsonRequest<T>(url: string, body: unknown, fetchImpl: typeof fetch): Promise<T> {
-  const response = await fetchImpl(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: undefined,
-  });
+/**
+ * One wizard POST through `ask`: it names the host and path it waits on (in
+ * the covering spinner when there is one, else on stderr) and aborts when the
+ * person cancels.
+ */
+export async function jsonRequest<T>(
+  url: string,
+  body: unknown,
+  fetchImpl: typeof fetch,
+  step?: SpinnerStep,
+): Promise<T> {
+  const response = await ask(
+    { url, fetch: fetchImpl, ...(step ? { report: step.say } : {}) },
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      ...(step ? { signal: step.signal } : {}),
+    },
+  );
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as {
       error?: string;
@@ -754,6 +799,7 @@ export async function jsonRequest<T>(url: string, body: unknown, fetchImpl: type
 
 export async function installCurrentRelease(
   fetchImpl: typeof fetch,
+  step?: SpinnerStep,
 ): Promise<{ binary: string; version: string }> {
   const layout = defaultBeelineInstallLayout(process.env);
   const binary = resolve(layout.binDir, 'beeline');
@@ -762,11 +808,14 @@ export async function installCurrentRelease(
   if (await resolveBundleEntrypoint(layout.libDir))
     return { binary, version: (await readInstalledBundleIdentity(layout))?.version ?? 'unknown' };
   const manifestUrl = resolveManifestUrl(process.env);
-  const response = await fetchImpl(manifestUrl, { signal: undefined });
+  const response = await ask(
+    { url: manifestUrl, fetch: fetchImpl, ...(step ? { report: step.say } : {}) },
+    step ? { signal: step.signal } : undefined,
+  );
   if (!response.ok)
     throw new Error(`fetching the Beeline release manifest failed: HTTP ${response.status}`);
   const published = parseUpdateManifest(await response.text(), hostPlatformKey()).bundle;
-  const { releaseId } = await prepareMachineRelease(layout, { manifest: { url: manifestUrl, bundle: published }, fetchImpl, logger: () => {} });
+  const { releaseId } = await prepareMachineRelease(layout, { manifest: { url: manifestUrl, bundle: published }, fetchImpl, logger: step?.say ?? (() => {}) });
   await withInstallLock(layout, () => activateRelease(layout, releaseId));
   return {
     binary,

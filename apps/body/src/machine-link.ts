@@ -38,6 +38,8 @@ export class AgentChannel {
   #registered = false;
   #registrationSent = false;
   #capabilities: Record<string, unknown> = {};
+  /** Why this socket will not register the agent again; cleared by the next socket. */
+  #ended: Error | undefined;
   initialSnapshotsV1 = true;
   constructor(private readonly machine: MachineLink, readonly agentId: string, private readonly handlers: AgentChannelHandlers) {}
   isOpen(): boolean { return this.#registered && this.machine.link.isOpen(); }
@@ -49,12 +51,15 @@ export class AgentChannel {
   }
   async operationReady(): Promise<void> {
     if (this.isOpen()) return;
+    // A refused or replaced registration is not retried on this socket.
+    if (this.#ended) throw this.#ended;
     await new Promise<void>((resolve,reject) => { this.#waiters.add({resolve,reject}); this.start(); });
   }
   requestOperation<N extends keyof DaemonOperationMap>(operation: N, input: DaemonOperationMap[N]['input']): Promise<DaemonOperationMap[N]['output']> {
     const requestId = randomUUID();
     const frame = {type:'daemon-operation',requestId,operation,input};
     return new Promise((resolve,reject) => {
+      if (!this.isOpen() && this.#ended) { reject(this.#ended); return; }
       const pending = {frame,sent:false,resolve:(value:unknown) => resolve(value as DaemonOperationMap[N]['output']),reject};
       this.#requests.set(requestId,pending);
       this.start();
@@ -107,6 +112,7 @@ export class AgentChannel {
     if (event.type === 'registered') {
       if (!this.#wanted || this.#registered) return;
       this.#registered = true;
+      this.#ended = undefined;
       this.#capabilities = event.capabilities as Record<string,unknown> ?? {};
       const c = this.#capabilities;
       if (typeof c.ownerId === 'string') setHelperErrorUser(c.ownerId);
@@ -120,10 +126,20 @@ export class AgentChannel {
       return;
     }
     if (event.type === 'register-refused') {
-      this.handlers.onRefused?.(String(event.code));
-      return; // A refusal never replaces the machine connection or fails work.
+      const code = String(event.code);
+      this.handlers.onRefused?.(code);
+      // A refusal never replaces the machine connection, but nothing registers
+      // this agent again on it: its waiting work ends now with the code.
+      this.#end(Object.assign(new Error(`Agent registration refused: ${code}`), {code}));
+      return;
     }
-    if (event.type === 'unregistered') { this.socketClosed(); return; }
+    if (event.type === 'unregistered') {
+      // A newer connection owns this agent; this socket never answers its work.
+      this.socketClosed();
+      const reason = typeof event.reason === 'string' ? event.reason : 'unregistered';
+      this.#end(Object.assign(new Error(`Agent registration ended: ${reason}`), {code:'unregistered'}));
+      return;
+    }
     if (event.type === 'request-missing' && typeof event.requestId === 'string') {
       const pending = this.#requests.get(event.requestId);
       if (pending) { pending.sent = false; this.#dispatch(pending); }
@@ -146,10 +162,23 @@ export class AgentChannel {
     }
     if (this.#registered && !this.overlay.receive(event)) this.handlers.onMessage(event);
   }
+  /** Unsent work is refused with the cause; sent work has no answer coming, so its outcome is unknown. */
+  #end(cause: Error & {code: string}): void {
+    this.#ended = cause;
+    for (const waiter of this.#waiters) waiter.reject(cause);
+    this.#waiters.clear();
+    for (const [requestId, pending] of this.#requests) {
+      this.#requests.delete(requestId);
+      pending.reject(pending.sent
+        ? Object.assign(new Error(`${cause.message}; outcome unknown`), {code:cause.code})
+        : cause);
+    }
+  }
   socketClosed(ended = false):void {
     const registered = this.#registered;
     this.#registered = false;
     this.#registrationSent = false;
+    this.#ended = undefined;
     this.overlay.suspend();
     if (ended) {
       for(const waiter of this.#waiters)waiter.reject(new Error('Agent runtime ended'));

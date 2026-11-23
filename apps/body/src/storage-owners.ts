@@ -1,17 +1,16 @@
 import { lstat, mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
 import { workspaceAssetRoot } from './workspace-assets.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
-import { storageOperation, reclaimWholeStorageObject, ordinaryDirectory, storageTree, isSquirePath, reclaimHelperStorage, type StorageRoomState, type WholeStorageOptions } from './helper-storage.js';
+import { storageChild, storageOperation, reclaimWholeStorageObject, ordinaryDirectory, storageTree, isSquirePath, reclaimHelperStorage, type StorageRoomState, type WholeStorageOptions } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 import { removeArchivedCornerData } from './archived-corner-cleanup.js';
+import { ask } from './wait.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = storageChild;
 export interface StorageOwner { workspaceId: string; roomId: string; kind: 'corners' | 'room-checkouts'; itemId: string; agentId?: string; ended?: boolean; archived?: boolean; endedAt?: number; landedHeadSha?: string }
 function ownersRoot(supervisorRoot: string): string { return resolve(supervisorRoot, 'beeline', 'storage-owners'); }
 export async function rememberStorageOwner(supervisorRoot: string, owner: StorageOwner): Promise<void> {
@@ -267,9 +266,10 @@ export async function pruneStoppedAgentStorage(supervisorRoot: string, options: 
       const runtime = JSON.parse(await readFile(configPath, 'utf8')) as AgentRuntimeRecord;
       if (!runtime.transport?.daemonToken) continue;
       const read = async () => {
-        const response = await fetch(new URL('/v1/daemon/operations/getDaemonBootstrap', runtime.transport!.baseUrl), {
+        const url = new URL('/v1/daemon/operations/getDaemonBootstrap', runtime.transport!.baseUrl);
+        const response = await ask({ url, peer: `${url.host} for stopped agent ${agentId.slice(0, 12)}` }, {
           method: 'POST', headers: { authorization: `Bearer ${runtime.transport!.daemonToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ agentId }), signal: undefined,
+          body: JSON.stringify({ agentId }),
         });
         const result = await response.json() as { code?: string; error?: string; workspaceIds?: string[]; storageRooms?: StorageRoomState[] };
         if (response.status === 403 && [result.code, result.error].includes('agent_removed')) return { removed: true as const };

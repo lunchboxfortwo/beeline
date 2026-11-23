@@ -58,9 +58,9 @@ async function fixture() {
       // Fail immediately instead of spending minutes waiting for the busy helper.
       throw new Error('connect requested a helper release swap while agents were busy');
     }
+    return status;
   });
   await control.start();
-  control.publish(status);
   return { layout, agentId, status, requests, handoff, control, async close() {
     update.dispose(); await update.pending; await control.stop(); await rm(home, { recursive: true, force: true });
   } };
@@ -82,7 +82,8 @@ it.each(['v0.1.201', 'v0.1.202-rc.5', 'v0.1.203'])('reuses a busy helper when co
   } finally { await helper.close(); }
 });
 
-it('connect convergence waits only for the paired agent on the current helper generation', async () => {
+it('connect convergence reports the paired agent as the helper answers, never waiting for serving', async () => {
+  // Live on the audited box: agent 0e0aa42e01c5 stuck in `starting` would hold start/connect-finish.
   const helper = await fixture();
   try {
     const sibling = 'b'.repeat(64);
@@ -91,16 +92,9 @@ it('connect convergence waits only for the paired agent on the current helper ge
     await writeFile(join(runtime, 'runtime.json'), '{}');
     helper.status.desiredRelease = 'unrelated-background-update';
     helper.status.agents[helper.agentId]!.state = 'starting';
-    helper.control.publish(helper.status);
-    let finished = false;
-    const converging = convergeMachine({ layout: helper.layout, agentIds: [helper.agentId], run: async () => ({ stdout: '' }) })
-      .then(status => { finished = true; return status; });
-    await vi.waitFor(() => expect(helper.requests.map(request => request.operation)).toEqual(['status', 'converge']));
-    expect(finished).toBe(false);
-    helper.status.agents[helper.agentId]!.state = 'serving';
-    helper.control.publish(helper.status);
-    await expect(converging)
-      .resolves.toMatchObject({ generation: 'running-generation', loadedRelease: 'running-next' });
+    const status = await convergeMachine({ layout: helper.layout, agentIds: [helper.agentId], run: async () => ({ stdout: '' }) });
+    expect(status).toMatchObject({ generation: 'running-generation', loadedRelease: 'running-next' });
+    expect(status.agents[helper.agentId]?.state).toBe('starting');
     expect(helper.requests.map(request => request.operation)).toEqual(['status', 'converge']);
     expect(helper.handoff).not.toHaveBeenCalled();
     expect(convergeNativeHelper).not.toHaveBeenCalled();
@@ -112,7 +106,6 @@ it('starts an absent helper after pairing without staging a release', async () =
   await helper.control.stop();
   vi.mocked(convergeNativeHelper).mockImplementationOnce(async () => {
     await helper.control.start();
-    helper.control.publish(helper.status);
     return process.pid;
   });
   try {

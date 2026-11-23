@@ -195,7 +195,7 @@ m29_describe('daemon tool-call network retry', () => {
       throw scope28.bareFetchFailed();
     });
     await m29_expect(m29_callAgentTool('close_thread', { address:'corner-1' }, 'call-1')).rejects.toThrow(
-      'daemon operation archiveCorner failed before the server answered; await a new action or recovery boundary; the write outcome is unknown',
+      'daemon operation archiveCorner failed before the server answered (fetch failed); await a new action or recovery boundary; the write outcome is unknown',
     );
     m29_expect(calls).toBe(1);
   });

@@ -19,6 +19,7 @@ import { runAntigravitySidecar, runZcodeMcp } from './pull-apps.js';
 import { setupAgent, antigravitySidecarEnabled } from './setup.js';
 import { hookSessions, queueInbox, readState, sessionKey, stateDir, updateState, type JoinedSession, recordHookSession } from './store.js';
 import { tryWithKernelLock } from '../kernel-lock.js';
+import { ask, tryLock } from '../wait.js';
 
 interface Pending {
   server: string; clientId: string; signIn: SignIn; agent: AgentId; cwd: string; name: string;
@@ -176,7 +177,17 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   const name = pickName(flag(args, '--name') ?? own.chosen, defaultName(own.agent, own.cwd, gitRoot(own.cwd)), n => taken.has(n));
   const previous=existingPending(dir,own,server);
   const clientId = previous?.pending.clientId??await registerClient(server, agentLabel(own.agent));
-  const available=previous?await tryWithKernelLock(finisherKey(previous.file),async()=>true):true;
+  let available=true;
+  if(previous){
+    const finisher=await tryLock(finisherKey(previous.file));
+    const signedIn=previous.pending.signIn;
+    if(finisher.held)await finisher.release();
+    else if(!signedIn.code&&!signedIn.tokens&&!signedIn.exchangeStarted&&previous.pending.startedAt+600_000<=Date.now()&&
+      finisher.holder.key===finisherKey(previous.file)&&finisher.holder.pid>0){
+      // The link expired and the server never ends its finisher's held wait, so a fresh link replaces it.
+      try{process.kill(finisher.holder.pid,'SIGTERM');}catch{/* It already ended. */}
+    }else available=false;
+  }
   const known=previous?.pending.signIn.tokens;
   const resume=previous&&(available!==true||Boolean(known)||
     !known&&!previous.pending.signIn.exchangeStarted&&previous.pending.startedAt+600_000>Date.now());
@@ -208,7 +219,7 @@ async function bindLocalDelivery(dir:string,joined:JoinedSession,token:string,en
   const local=sessionAgentBehavior(joined.agent).joinDelivery==='local';
   if(local && (!joined.sessionId || joined.agent==='antigravity' && !which('agentapi',env)))return;
   const result=await callTool(joined,token,'setup_delivery',{mechanism:local?'local':'on_demand',host:joined.agent,
-    surface:joined.agent==='antigravity'?'app':'local_session',conversation:joined.sessionId??joined.key,installed:true}) as {delivery:{generation?:string;mechanism?:JoinedSession['deliveryMechanism']}};
+    surface:joined.agent==='antigravity'?'app':'local_session',conversation:joined.sessionId??joined.key,installed:true},'set up delivery') as {delivery:{generation?:string;mechanism?:JoinedSession['deliveryMechanism']}};
   joined.deliveryGeneration=result.delivery.generation;
   joined.deliveryMechanism=result.delivery.mechanism;
   await updateState(dir,state=>{const current=state.sessions.find(s=>s.key===joined.key);if(current){current.deliveryGeneration=joined.deliveryGeneration;current.deliveryMechanism=joined.deliveryMechanism;}});
@@ -276,7 +287,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     const rooms = me.rooms.map(r => r.name).slice(0, 5).join(', ');
     if(joined.deliveryMechanism==='on_demand'){console.log(`Joined on demand as @${joined.handle??joined.name}. Run session status to read the approved member and owner. ${SESSION_ON_DEMAND_NOTICE}`);return;}
     await announce(joined, `Beeline: joined · connecting live replies as @${joined.handle ?? joined.name}${rooms ? ` in ${rooms}` : ''}. A separate delivery check must reach this conversation and return its receipt before live replies are proved ready. Incoming chat messages include the command that answers them.${changes.length ? `\n(${changes.join('; ')})` : ''}\n\n${renderRules(joined, run)}`, dir);
-    } catch(error) { if(generation) await callTool(joined,tokens.access_token,'delivery_failed',{generation,reason:'local_receiver_setup_failed'}).catch(()=>undefined);throw error; }
+    } catch(error) { if(generation) await callTool(joined,tokens.access_token,'delivery_failed',{generation,reason:'local_receiver_setup_failed'},'roll back delivery setup').catch(()=>undefined);throw error; }
   }catch(error){retain=!(error instanceof SignInEndedError);throw error;}
   finally{if(!retain)rmSync(file,{force:true});}
 }
@@ -312,8 +323,8 @@ function own(args: string[], env: NodeJS.ProcessEnv): JoinedSession {
 /** The session's own tool call: through the bridge first, which works inside a network sandbox, else direct. */
 async function ownTool(dir: string, joined: JoinedSession, name: string, args: Record<string, unknown>): Promise<any> {
   let bridged = await toolViaBridge(dir, joined.key, name, args);
-  // A sandbox that refuses the socket still lets the session write its own folder.
-  if (!bridged && existsSync(join(dir, 'bridge.pid')) && process.cwd().startsWith(joined.cwd)) bridged = await toolViaOutbox(joined.cwd, name, args, joined.key);
+  // A sandbox that refuses the socket still lets the session write its own folder, which only a live bridge serves.
+  if (!bridged && bridgeRunning(dir) && process.cwd().startsWith(joined.cwd)) bridged = await toolViaOutbox(dir, joined.cwd, name, args, joined.key);
   if (bridged) {
     if (!bridged.ok) throw new Error(bridged.error ?? 'Beeline refused the call');
     return bridged.data;
@@ -341,7 +352,8 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
     try {
       const [agent, event] = words(rest, VALUED);
       if (!agent || !event || !isAgentId(agent)) return;
-      const input = process.stdin.isTTY ? '' : await readStdin(3000);
+      // A plugin names its session with --session and sends no payload; only a host hook writes one and closes stdin.
+      const input = process.stdin.isTTY || flag(rest, '--session') ? '' : await readStdin();
       let payload: Record<string, unknown> = {};
       try { payload = JSON.parse(input.replace(/^﻿/, '')) as Record<string, unknown>; } catch { /* no payload */ }
       const out = runHook(dir, { agent, event, payload, session: flag(rest, '--session'), state: flag(rest, '--state'),
@@ -400,8 +412,8 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   }
   if (sub === 'leave') {
     const joined = own(rest, env);
-    await fetch(`${joined.server}/mcp/oauth/revoke`, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ client_id: joined.clientId, token: joined.accessToken ?? joined.refreshToken }), signal: undefined }).catch(() => undefined);
+    await ask({ url: `${joined.server}/mcp/oauth/revoke`, peer: `${new URL(joined.server).host} to revoke this session` }, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_id: joined.clientId, token: joined.accessToken ?? joined.refreshToken }) }).catch(() => undefined);
     const left = await updateState(dir, state => {
       state.sessions = state.sessions.filter(s => s.key !== joined.key);
       return state.sessions;
@@ -416,7 +428,7 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   throw new Error('Usage: usebeeline join | usebeeline session reply|read|tool|status|leave');
 }
 
-function readStdin(_limitMs: number): Promise<string> {
+function readStdin(): Promise<string> {
   return new Promise(resolve => {
     let text = '';
     process.stdin.setEncoding('utf8');

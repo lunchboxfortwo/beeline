@@ -54,15 +54,13 @@ it('delivers committed reply ids and carries the last queue into a reconnect sub
   sockets[1]!.receive({type:'commands',commandProtocol:2,commands:[],completedCommandIds:[],stoppedCommandIds:['command',7]});
   expect(listener).toHaveBeenLastCalledWith([],[],['command']);
 });
-it('registration refusal leaves requests waiting without another socket or a timer',async()=>{
-  vi.useFakeTimers();const {api,sockets,machine}=fixture();let settled=false;
-  const request=api.execute('getAgentConfiguration',{agentId}).finally(()=>{settled=true;});
+it('registration refusal ends waiting requests with its code without another socket or a timer',async()=>{
+  const {api,sockets,machine}=fixture();
+  const request=api.execute('getAgentConfiguration',{agentId});
   sockets[0]!.open();sockets[0]!.receive({type:'register-refused',code:'registration_failed'});
-  await vi.advanceTimersByTimeAsync(24*60*60*1000);
-  expect(settled).toBe(false);expect(sockets).toHaveLength(1);expect(machine.link.reconnects).toBe(0);
-  sockets[0]!.register();await flush();const frame=sockets[0]!.frames.find(frame=>frame.type==='daemon-operation')!;
-  sockets[0]!.receive({type:'daemon-operation-result',requestId:frame.requestId,result:{id:'ready'}});
-  await expect(request).resolves.toEqual({id:'ready'});
+  await expect(request).rejects.toMatchObject({message:'Agent registration refused: registration_failed',code:'registration_failed'});
+  expect(sockets).toHaveLength(1);expect(machine.link.reconnects).toBe(0);
+  expect(sockets[0]!.frames.some(frame=>frame.type==='daemon-operation')).toBe(false);
 });
 it('elapsed time, pongs, and refused requests never reconnect a living socket',async()=>{
   vi.useFakeTimers();const {api,sockets,machine}=fixture();

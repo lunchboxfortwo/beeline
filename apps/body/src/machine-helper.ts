@@ -2,7 +2,7 @@ import { storageOperation } from './helper-storage.js';
 import { waitForProcessExit } from './process-exit.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { MachineControl, machineControlPath } from './machine-control.js';
+import { helperLockKey, MachineControl, machineControlPath, type HeldAnswer, type MachineAnswer } from './machine-control.js';
 import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
 import { retireRemovedAgent } from './agent-retirement.js';
@@ -189,6 +189,8 @@ async function serveMachineHelper(
   let loadedRelease: string | undefined;
   let loadedReleaseIdentity: InstalledBundleIdentity | undefined;
   let update: ReleaseTransaction | undefined;
+  /** The helper's own pruning holds the install lock; its update preparation follows it rather than failing busy. */
+  let pruning: Promise<unknown> = Promise.resolve();
   const generation = randomUUID();
   let control: MachineControl | undefined;
   let stoppingStatus = 'helper stopped';
@@ -278,7 +280,6 @@ async function serveMachineHelper(
   let statusWrite = Promise.resolve();
   const writeStatus = () => {
     pendingStatus = snapshot();
-    control?.publish(pendingStatus);
     if (statusWriting) return;
     statusWriting = true;
     statusWrite = (async () => {
@@ -324,17 +325,21 @@ async function serveMachineHelper(
       loadedRelease,
       env,
       ...(options.runUpdateWorker ? { prepare: options.runUpdateWorker } : {}),
+      ownWork: () => pruning,
       changed: () => writeStatus(),
       handoff: async (desiredRelease, signal) => {
         await nativeConfiguration;
         if (signal.aborted || controller.signal.aborted) return;
         stoppingStatus = `loaded_release=${loadedRelease}; desired_release=${desiredRelease}; handoff`;
+        // The requester follows this process's exit, then starts the native successor job.
+        await control?.settleHeld({ ...snapshot(), outcome: 'handoff' });
         restartHelper('update');
       },
       failed: (error) => {
         console.error('[helper] release transaction failed:', error);
         helperError = String(error).slice(0, 500);
         writeStatus();
+        void control?.settleHeld({ error: helperError });
       },
     });
   const tickUpdate = () => {
@@ -670,18 +675,23 @@ async function serveMachineHelper(
     console.log('[helper] rescanning paired agents');
     void rescan().catch((error) => console.error('[helper] rescan failed:', error));
   };
-  control = new MachineControl(machineControlPath(supervisorRoot), async (request) => {
-    if (request.operation === 'converge' || request.operation === 'stop') onHangup();
-    if (
-      request.operation === 'update' &&
-      request.releaseId &&
-      layout &&
-      (!request.sourceGeneration || request.sourceGeneration === generation)
-    ) {
-      void update?.prepared(request.releaseId)
-        .catch(error => console.error('[helper] update handoff failed:', error));
+  control = new MachineControl(machineControlPath(supervisorRoot), async (request, hold): Promise<MachineAnswer | HeldAnswer> => {
+    if (request.operation === 'converge' || request.operation === 'stop') {
+      console.log('[helper] rescanning paired agents');
+      await rescan();
+    }
+    if (request.operation === 'update') {
+      if (!update || !request.releaseId) throw new Error('this helper does not manage releases');
+      if (request.sourceGeneration && request.sourceGeneration !== generation)
+        throw new Error(`helper generation ${generation} is not the requested source ${request.sourceGeneration}`);
+      // Answered when the handoff starts or the transaction fails.
+      const held: HeldAnswer = hold();
+      const outcome = await update.prepared(request.releaseId);
+      if (outcome === 'pending') return held;
+      return { ...snapshot(), outcome: outcome === 'handed-off' ? 'handoff' : 'current' };
     }
     writeStatus();
+    return snapshot();
   });
   await control.start();
   signals.on('SIGHUP', onHangup);
@@ -700,7 +710,7 @@ async function serveMachineHelper(
         .ready(`ready; ${statusLine()}`)
         .catch((error) => console.error('[helper] ready notification failed:', error));
     if (layout && !controller.signal.aborted)
-      void withInstallLock(layout, () => pruneHelperReleases(layout, loadedRelease), { waitMs: 0 })
+      pruning = withInstallLock(layout, () => pruneHelperReleases(layout, loadedRelease), 'release pruning')
         .catch(error => console.warn('[helper] release pruning deferred:', error));
     if (!controller.signal.aborted)
       await new Promise<void>((resolveAbort) =>
@@ -728,8 +738,8 @@ async function serveMachineHelper(
 export async function runMachineHelper(
   options: Parameters<typeof serveMachineHelper>[0] = {},
 ): ReturnType<typeof serveMachineHelper> {
-  return withKernelLock(`beeline-helper:${defaultSupervisorRoot(options?.env)}`, () =>
+  return withKernelLock(helperLockKey(defaultSupervisorRoot(options?.env)), () =>
     serveMachineHelper(options),
-  );
+  { step: 'machine helper' });
 }
 

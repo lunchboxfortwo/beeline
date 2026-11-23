@@ -31,6 +31,7 @@ import { basename,dirname,join,resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSquireBrokerLink } from './squire-broker-link.js';
 import { reclaimSquireBrokerSockets } from './squire-broker-squatter.js';
+import { runOwned } from './wait.js';
 
 export const SQUIRE_BROKER_UNAVAILABLE = 'broker unavailable';
 export const TRUSTY_SQUIRE_BROKER_UNIT_NAME = 'trusty-squire-broker.service';
@@ -231,20 +232,12 @@ export type SquireInstallRunner = (
   options: { cwd: string },
 ) => Promise<{ code: number | null; stderr: string; stdout?: string }>;
 
+/** Settles on npm's exit (its group is then killed); npm's stderr streams as it runs. */
 const defaultSquireInstallRunner: SquireInstallRunner = (command, args, options) =>
-  new Promise((resolveRun) => {
-    const child = spawn(command, [...args], { cwd: options.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    let stdout = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf8');
-    });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf8');
-    });
-    child.once('error', (error) => resolveRun({ code: 1, stderr: error.message }));
-    child.once('close', (code) => resolveRun({ code, stderr, stdout }));
-  });
+  runOwned({ step: `Trusty Squire ${command} ${args[0] ?? ''}`.trim(), file: command, args, cwd: options.cwd }).then(
+    ({ code, stderr, stdout }) => ({ code, stderr, stdout }),
+    (error: unknown) => ({ code: 1, stderr: error instanceof Error ? error.message : String(error) }),
+  );
 
 const squirePackagePath = (dir: string) =>
   join(dir, 'node_modules', '@trusty-squire', 'mcp', 'package.json');

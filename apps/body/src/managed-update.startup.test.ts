@@ -32,7 +32,7 @@ it.each(['v0.1.201', 'v0.1.202-rc.4'])(
     const update = new ReleaseTransaction({ layout, loadedRelease: 'running', env: {},
       handoff, failed, changed: vi.fn() });
     try {
-      await update.prepared('older');
+      expect(await update.prepared('older')).toBe('current');
       await update.pending;
       expect(handoff).not.toHaveBeenCalled();
       expect(failed).not.toHaveBeenCalled();
@@ -73,64 +73,23 @@ function fixture(handoff: (release: string, signal: AbortSignal) => Promise<void
   return { update, failed, changed };
 }
 
-it('abandons a wedged handoff once and fences its late completion', async () => {
+it('arms no timer for a handoff; the requester is answered when it starts or fails', async () => {
   vi.useFakeTimers();
   let release!: () => void;
   let started!: () => void;
   const entered = new Promise<void>(done => { started = done; });
   const stuck = new Promise<void>(done => { release = done; });
-  let signal: AbortSignal | undefined;
-  const handoff = vi.fn(async (_target: string, attempt: AbortSignal) => {
-    signal = attempt;
-    started();
-    await stuck;
-  });
+  const handoff = vi.fn(async () => { started(); await stuck; });
   const { update, failed } = fixture(handoff);
-  await update.prepared('new');
+  expect(await update.prepared('new')).toBe('pending');
   await entered;
-  const pending = update.pending;
-  vi.advanceTimersByTime(179_999);
-  expect(signal?.aborted).toBe(false);
-  vi.advanceTimersByTime(1);
-  expect(signal?.aborted).toBe(true);
-  expect(failed).toHaveBeenCalledTimes(1);
-  expect(String(failed.mock.calls[0]![0])).toContain('update handoff timed out');
-  expect(update.desiredRelease).toBeUndefined();
+  expect(vi.getTimerCount()).toBe(0);
+  expect(failed).not.toHaveBeenCalled();
   release();
-  await pending;
-  expect(handoff).toHaveBeenCalledTimes(1);
-  await update.prepared('newer');
   await update.pending;
-  expect(handoff).toHaveBeenCalledTimes(2);
-  update.dispose();
-});
-
-it('cancels a wedged preparation and does not let it adopt a release after timeout', async () => {
-  vi.useFakeTimers();
-  let release!: () => void;
-  const stuck = new Promise<void>(done => { release = done; });
-  let started!: () => void;
-  const entered = new Promise<void>(done => { started = done; });
-  const failed = vi.fn();
-  const handoff = vi.fn();
-  const prepare = vi.fn(async () => { started(); await stuck; });
-  const update = new ReleaseTransaction({
-    layout: { libDir: '/isolated/lib', releasesRoot: '/isolated/releases', binDir: '/isolated/bin' },
-    loadedRelease: 'old', env: {},
-    prepare,
-    handoff, failed, changed: vi.fn(),
-  });
-  update.notify('new');
-  await entered;
-  const pending = update.pending;
-  update.notify('newer');
-  vi.runOnlyPendingTimers();
-  expect(failed).toHaveBeenCalledTimes(1);
-  release();
-  await pending;
-  expect(handoff).not.toHaveBeenCalled();
-  expect(prepare).toHaveBeenCalledTimes(1);
-  expect(update.desiredRelease).toBeUndefined();
+  expect(handoff).toHaveBeenCalledTimes(1);
+  // The handoff already ran: a later request is answered at once.
+  expect(await update.prepared('newer')).toBe('handed-off');
   update.dispose();
 });
 
@@ -184,4 +143,23 @@ it('preserves a release notification arriving during an earlier preparation', as
     await update.pending;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+it('prepares after this helper\'s own pruning instead of failing on its install lock', async () => {
+  // Native proof: a release notice at boot failed "release pruning already running as pid <self>".
+  let pruned!: () => void;
+  const pruning = new Promise<void>(done => { pruned = done; });
+  const prepare = vi.fn(async () => {});
+  const update = new ReleaseTransaction({
+    layout: { libDir: '/isolated/lib', releasesRoot: '/isolated/releases', binDir: '/isolated/bin' },
+    loadedRelease: 'old', env: {}, prepare, ownWork: () => pruning,
+    handoff: vi.fn(), failed: vi.fn(), changed: vi.fn(),
+  });
+  update.notify('new');
+  await new Promise(done => setImmediate(done));
+  expect(prepare).not.toHaveBeenCalled();
+  pruned();
+  await update.pending;
+  expect(prepare).toHaveBeenCalledTimes(1);
+  update.dispose();
 });

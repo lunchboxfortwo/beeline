@@ -49,7 +49,7 @@ export function chosenName(session: ClaudeSession): string | undefined {
   return ['user', 'peer', 'hook'].includes(session.nameSource ?? '') ? session.name : undefined;
 }
 
-export function postToClaude(socket: ClaudeSocket, text: string, _timeoutMs = 5000): Promise<void> {
+export function postToClaude(socket: ClaudeSocket, text: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const connection = createConnection(socket.path);
     connection.once('error', error => { reject(error); });

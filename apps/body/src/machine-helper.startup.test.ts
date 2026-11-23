@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest';
 import { runMachineHelper } from './machine-helper.js';
 import { identityFromKey, writeRuntimeRecord, type AgentRuntimeRecord } from './runtime.js';
 import { SystemdNotifier } from './systemd.js';
-import { requestMachine } from './machine-control.js';
+import { askMachine } from './machine-control.js';
 
 const disk = vi.hoisted(() => ({ path: '', entered: () => {}, wait: Promise.resolve(),
   statusPrefix: '', statusEntered: () => {}, statusWait: Promise.resolve() }));
@@ -72,7 +72,8 @@ it('keeps native readiness and a sibling independent of one stalled configuratio
     await blocked;
     await sibling;
     await statusBlocked;
-    const status = await requestMachine(root, { operation: 'status' }, current => current.processState === 'serving');
+    const status = await askMachine(root, { operation: 'status' });
+    expect(status.processState).toBe('serving');
     expect(Object.values(status.agents).map(agent => agent.state).sort()).toEqual(['serving', 'starting']);
   } finally {
     release();

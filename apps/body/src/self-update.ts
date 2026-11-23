@@ -3,7 +3,7 @@ import { downloadBytes } from './update-download.js';
 import { readFile, mkdir, open, rename, lstat, access, writeFile, rm, chmod } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { homedir } from "node:os";
-import { spawn } from "node:child_process";
+import { runOwned } from "./wait.js";
 import { constants as fsConstants } from "node:fs";
 import { assertInstallTestIsolation } from "./lifecycle-test-guard.js";
 import { createHash } from "node:crypto";
@@ -400,26 +400,6 @@ export async function fetchText(url: string, fetchImpl: typeof fetch): Promise<s
 
 
 
-export function run(
-  command: string,
-  args: string[],
-  _timeoutMs: number,
-): Promise<{ status: number | null; stderr: string }> {
-  return new Promise((resolveRun) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (chunk: string) => {
-      stderr = `${stderr}${chunk}`.slice(-4_000);
-    });
-    child.once('error', () => {
-      resolveRun({ status: -1, stderr });
-    });
-    child.once('exit', (status) => {
-      resolveRun({ status, stderr });
-    });
-  });
-}
 
 
 
@@ -483,13 +463,9 @@ export async function stageRelease(
     smokeTestCli?: boolean;
     logger?: (line: string) => void;
     force?: boolean;
-    deadlineAt?: number;
   } = {},
 ): Promise<string> {
   assertInstallTestIsolation(layout);
-  // Each local subprocess has its own observation budget. Transfer progress
-  // must not consume a later extraction or smoke-test budget.
-  const remaining = () => 180_000;
   const fetchImpl: typeof fetch = (input, init) =>
     (opts.fetchImpl ?? fetch)(input, {
       ...init,
@@ -546,21 +522,9 @@ export async function stageRelease(
 
     // Path-traversal guard, mirroring the installer.
     log(`checking archive paths for ${published.file}`);
-    const entries = (
-      await new Promise<string>((resolveList, rejectList) => {
-        const child = spawn('tar', ['-tzf', tempArchive], { stdio: ['ignore', 'pipe', 'inherit'] });
-        let out = '';
-        child.stdout?.on('data', (chunk: Buffer) => {
-          out += chunk.toString('utf8');
-        });
-        child.once('error', (error) => {
-          rejectList(error);
-        });
-        child.once('exit', (status) => {
-          status === 0 ? resolveList(out) : rejectList(new Error('tar -tzf failed'));
-        });
-      })
-    )
+    const listing = await runOwned({ step: 'tar -tzf', file: 'tar', args: ['-tzf', tempArchive] });
+    if (listing.code !== 0) throw new Error(`tar -tzf failed${listing.stderr ? `: ${listing.stderr.trim()}` : ''}`);
+    const entries = listing.stdout
       .split('\n')
       .filter(Boolean);
     for (const entry of entries) {
@@ -570,12 +534,10 @@ export async function stageRelease(
     }
 
     log(`extracting ${published.file}`);
-    const extract = await run(
-      'tar',
-      ['-xzf', tempArchive, '-C', releaseDir],
-      Math.min(60_000, remaining()),
-    );
-    if (extract.status !== 0) throw new Error(`extracting bundle failed: ${extract.stderr}`);
+    const extract = await runOwned({
+      step: 'tar -xzf', file: 'tar', args: ['-xzf', tempArchive, '-C', releaseDir],
+    });
+    if (extract.code !== 0) throw new Error(`extracting bundle failed: ${extract.stderr.slice(-4_000)}`);
 
     for (const relative of requiredBundlePaths()) {
       try {
@@ -615,14 +577,12 @@ export async function stageRelease(
     // even answer --version must never win the symlink.
     if (opts.smokeTestCli !== false) {
       log(`checking staged CLI startup for ${releaseId}`);
-      const probe = await run(
-        process.execPath,
-        [join(releaseDir, BUNDLE_ENTRYPOINT), '--version'],
-        Math.min(60_000, remaining()),
-      );
-      if (probe.status !== 0) {
+      const probe = await runOwned({
+        step: 'staged CLI --version', file: process.execPath, args: [join(releaseDir, BUNDLE_ENTRYPOINT), '--version'],
+      });
+      if (probe.code !== 0) {
         throw new Error(
-          `staged bundle failed its startup smoke test (--version exited ${probe.status})${probe.stderr ? `: ${probe.stderr.trim()}` : ''}`,
+          `staged bundle failed its startup smoke test (--version exited ${probe.code ?? probe.signal})${probe.stderr ? `: ${probe.stderr.slice(-4_000).trim()}` : ''}`,
         );
       }
     }
@@ -736,7 +696,6 @@ export async function prepareLatestRelease(
     fetchImpl?: typeof fetch;
     logger?: (line: string) => void;
     force?: boolean;
-    deadlineAt?: number;
     manifest?: { url: string; bundle: PublishedBundle };
   } = {},
 ): Promise<{ releaseId: string; identity: InstalledBundleIdentity }> {
@@ -768,7 +727,6 @@ export async function prepareLatestRelease(
             fetchImpl: options.fetchImpl,
             logger: options.logger,
             force: options.force,
-            deadlineAt: options.deadlineAt,
           });
     await writeUpdateState(layout, {
       ...(await readUpdateState(layout)),

@@ -4,10 +4,11 @@ import { sessionAgentBehavior } from '../agent-command.js';
 import { agentMessageText, replyNeeded, type MessageAsk } from '@beeline/api-contract/daemon';
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, watch } from 'node:fs';
-import { createConnection, createServer } from 'node:net';
+import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { preparePrivateSocketDirectory } from '../local-socket.js';
-import { bridgeSocketPath } from './bridge-socket.js';
+import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
+import { ask, PeerRefusal, tryLock, type LockAttempt } from '../wait.js';
 import { externalAgentRules } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
@@ -16,7 +17,7 @@ import { codexQueue, turnRunning } from './codex.js';
 import { postToClaude } from './claude.js';
 import { hasClaudeMcp } from './claude-mcp.js';
 import { findSession, liveSessions, machineSources, type LiveSession, type Sources } from './sessions.js';
-import { bundleDigest } from './bridge-launch.js';
+import { bridgeRunning, bundleDigest } from './bridge-launch.js';
 import { pidAlive, queueInbox, queueInboxOnce, readState, takeInbox, updateState, type JoinedSession, hasLocalDelivery } from './store.js';
 
 export interface Mention { memberId?: string; replyRule?: string; id: string; room_id: string; room_name?: string; author_handle?: string | null; author_name?: string | null; text: string; institutionalContext?: string; attachments?: readonly DaemonAttachment[] }
@@ -243,8 +244,14 @@ export async function serveOutboxes(dir: string): Promise<number> {
   return served;
 }
 
-/** Leaves a tool call in the working folder's outbox and waits for the bridge's answer. */
-export async function toolViaOutbox(cwd: string, name: string, args: Record<string, unknown>, key?: string): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
+const BRIDGE_EXITED = 'Beeline bridge exited; the call was not sent';
+const BRIDGE_EXITED_AFTER_TAKING = 'Beeline bridge exited after taking the call; its result is unknown';
+
+/**
+ * Leaves a tool call in the working folder's outbox and waits for the bridge's answer. The serving bridge holds
+ * its owner lock until it exits, so the lock's close ends the wait; an untaken request is then removed, never replayed.
+ */
+export async function toolViaOutbox(dir: string, cwd: string, name: string, args: Record<string, unknown>, key?: string): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
   const dirPath = outboxDir(cwd);
   mkdirSync(dirPath, { recursive: true });
   // Keep the outbox out of the person's repository.
@@ -253,6 +260,9 @@ export async function toolViaOutbox(cwd: string, name: string, args: Record<stri
   const request = join(dirPath, `${id}.request.json`), result = join(dirPath, `${id}.result.json`);
   writeFileSync(`${request}.tmp`, JSON.stringify({ key, name, args }));
   renameSync(`${request}.tmp`, request);
+  // A sandbox that refuses every socket cannot follow the lock; there the bridge's answer is the only end.
+  const owner: LockAttempt | undefined = await tryLock(bridgeOwnerKey(dir)).catch(() => undefined);
+  if (owner?.held) await owner.release();
   return new Promise(resolve=>{
     let settled=false;
     const finish=(answer:{ok:boolean;data?:unknown;error?:string}|undefined)=>{
@@ -264,8 +274,18 @@ export async function toolViaOutbox(cwd: string, name: string, args: Record<stri
         rmSync(result,{force:true});finish(answer);
       }catch{/* Only a completed atomic result rename admits another inspection. */}
     };
+    const exited=()=>{
+      inspect();
+      if(settled)return;
+      const untaken=existsSync(request);
+      rmSync(request,{force:true});rmSync(`${request}.taking`,{force:true});
+      finish({ok:false,error:untaken?BRIDGE_EXITED:BRIDGE_EXITED_AFTER_TAKING});
+    };
     const watcher=watch(dirPath,(_event,file)=>{if(String(file??'')===`${id}.result.json`)inspect();});
     inspect();
+    // A free lock with a live pid is a bridge from a release before the owner lock: its answer stays the only end.
+    if(owner?.held){if(!bridgeRunning(dir))exited();}
+    else if(owner)void owner.released().then(exited);
   });
 }
 
@@ -280,20 +300,19 @@ export async function notifyBridgeSessions(dir: string): Promise<void> {
   if (!answer?.ok) throw new Error(answer?.error ?? 'Beeline tool result is awaiting confirmation');
 }
 
-function bridgeRequest(dir: string, request: object): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
-  return new Promise(resolve => {
-    const connection = createConnection(bridgeSocketPath(dir));
-    let text = '', sent = false, settled = false;
-    const unknown = { ok: false, error: 'Beeline tool result is awaiting confirmation' };
-    const finish = (answer: {ok:boolean;data?:unknown;error?:string}|undefined) => {
-      if (settled) return; settled=true; resolve(answer); connection.destroy();
-    };
-    connection.setEncoding('utf8');
-    connection.once('connect', () => { sent=true; connection.write(JSON.stringify(request) + '\n'); });
-    connection.once('error', () => finish(sent ? unknown : undefined));
-    connection.on('data', chunk => { text += chunk; });
-    connection.on('end', () => { try { finish(JSON.parse(text) as { ok: boolean }); } catch { finish(sent ? unknown : undefined); } });
-  });
+const BRIDGE_PEER = 'Beeline bridge';
+/** Connect failures: the request never reached a bridge. */
+const UNSENT = new Set(['ENOENT', 'ECONNREFUSED', 'EACCES', 'EPERM', 'ENOTSOCK']);
+
+/** One request to the bridge; it settles on the bridge's answer or the socket's explicit failure. */
+async function bridgeRequest(dir: string, request: object): Promise<{ ok: boolean; data?: unknown; error?: string } | undefined> {
+  try {
+    return await ask<{ ok: boolean; data?: unknown; error?: string }>({ socket: bridgeSocketPath(dir), peer: BRIDGE_PEER }, request);
+  } catch (error) {
+    if (error instanceof PeerRefusal) return { ok: false, error: error.message.slice(BRIDGE_PEER.length + 2) };
+    if (UNSENT.has(String((error as NodeJS.ErrnoException).code))) return undefined;
+    return { ok: false, error: 'Beeline tool result is awaiting confirmation' };
+  }
 }
 
 /** Runs until no session is joined. One per machine user: a second exits at once. */
@@ -322,6 +341,14 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     return true;
   };
   if (!staged && !claim()) return;
+  // Held until this process exits: a successor and outbox callers follow its close, never the pid file.
+  let owner: Extract<LockAttempt, { held: true }> | undefined;
+  const own = async () => {
+    const lock = await tryLock(bridgeOwnerKey(dir), { step: 'Beeline session bridge', log: join(dir, 'bridge.log') });
+    if (!lock.held) throw new Error(`Beeline bridge owner changed: pid ${lock.holder.pid || 'unknown'} serves`);
+    owner = lock;
+  };
+  if (!staged) await own();
   const socket = bridgeSocketPath(dir, staged ? process.pid : undefined);
   let localDirty=true,wake:(()=>void)|undefined;
   const changed=()=>{localDirty=true;wake?.();};
@@ -412,6 +439,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       renameSync(socket, bridgeSocketPath(dir));
     }
     if (staged && !claim()) throw new Error('Beeline bridge owner changed during handoff');
+    if (staged) await own();
     writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest }), { mode: 0o600 });
     if (staged) { activated = true; activate(); process.send?.('active'); }
     log(dir,`bridge ${process.pid} started`);
@@ -443,6 +471,8 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     }
   }catch(error){
     failedStartup(error);
+    // A failed bridge leaves through its caller, which must not keep the lock's listener open.
+    await owner?.release();
     throw error;
   }finally{
     localWatch.close();for(const watcher of outboxWatches.values())watcher.close();

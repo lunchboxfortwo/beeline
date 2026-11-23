@@ -8,3 +8,8 @@ export function bridgeSocketPath(dir: string, pid?: number): string {
     : dirname(privateSocketPath(JSON.stringify(['session-bridge', resolve(dir)])));
   return join(directory, pid === undefined ? 'bridge.sock' : `bridge-${pid}.sock`);
 }
+
+/** The serving bridge holds this kernel lock until it exits, so its death is an explicit close. */
+export function bridgeOwnerKey(dir: string): string {
+  return `beeline-session-bridge-owner:${resolve(dir)}`;
+}

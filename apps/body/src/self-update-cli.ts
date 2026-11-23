@@ -11,7 +11,6 @@ import { convergeMachine, prepareMachineRelease } from './recovery.js';
 import pc from 'picocolors';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import {
-  formatAdapterInstallCommand,
   installLatestAgentAdapter,
   latestAdapterInstallCommand,
   type AgentKind,
@@ -67,11 +66,10 @@ export async function refreshRuntimeHarnessAdapters(
     if (runtime?.agentKind) kinds.add(runtime.agentKind);
   }
   for (const kind of kinds) {
-    const command = latestAdapterInstallCommand(kind);
-    if (!command) continue;
-    log(`[beeline] refreshing ${kind} adapter: ${formatAdapterInstallCommand(command)}`);
+    if (!latestAdapterInstallCommand(kind)) continue;
+    // updateAgentAdapter logs its real decision: current, or the exact prefix install.
     try {
-      await installLatestAgentAdapter(kind, options);
+      await installLatestAgentAdapter(kind, { ...options, log });
     } catch (error) {
       log(
         `[beeline] ${kind} adapter refresh failed; keeping the installed copy (${error instanceof Error ? error.message : String(error)})`,
@@ -190,7 +188,7 @@ export async function runUpdateCommand(args: string[]): Promise<void> {
     force,
     });
   } catch (error) {
-    await convergeMachine({ layout, waitForAgents: false });
+    await convergeMachine({ layout, reportAgentsOnly: true });
     throw new Error(`helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`);
   }
   await convergeDependencies(layout, target.releaseId);
@@ -198,12 +196,12 @@ export async function runUpdateCommand(args: string[]): Promise<void> {
     layout,
     env: { ...process.env, BEELINE_LIB_DIR: layout.libDir },
     releaseId: target.releaseId,
-    waitForAgents: false,
+    reportAgentsOnly: true,
     force,
   });
   for (const [id, agent] of Object.entries(status.agents))
     progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
   console.log(
-    `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid}; target release serving`,
+    `[beeline] executing release ${status.loadedRelease}; helper pid ${status.pid} ${status.processState}`,
   );
 }

@@ -7,11 +7,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 
-it('retains native ownership and serialization after the CLI observer process exits', async () => {
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+it('fails a second native convergence at once and leaves no owner behind when the CLI exits', async () => {
+  // Audit: observers left at 600 s while the detached owner kept the native lock; the next
+  // command then waited up to 600 s behind it.
   const home = await mkdtemp(join(tmpdir(), 'beeline-native-owner-'));
   const bin = join(home, 'bin');
   const events = join(home, 'events');
-  const release = join(home, 'release');
   const entry = join(home, 'entry.mjs');
   await mkdir(bin);
   await mkdir(join(home, '.local/lib'), { recursive: true });
@@ -23,14 +26,13 @@ it('retains native ownership and serialization after the CLI observer process ex
 register();
 const m=await import(${JSON.stringify(source)});
 if(process.argv[2]==='native-converge-worker') console.log(JSON.stringify({pid:await m.runNativeConvergenceWorker()}));
-else try {console.log(await m.convergeNativeHelper({observationMs:Number(process.argv[2])}));} catch(e){console.error(e.message);process.exitCode=1;}
+else try {console.log(await m.convergeNativeHelper({}));} catch(e){console.error(e.message);process.exitCode=1;}
 `);
+  // A wedged user manager: daemon-reload never returns.
   await writeFile(join(bin, 'systemctl'), `#!${process.execPath}
 const fs=require('node:fs');const args=process.argv.slice(2).filter(a=>a!=='--user');
-fs.appendFileSync(${JSON.stringify(events)},args[0]+'\\n');
-if(args[0]==='daemon-reload'&&!fs.existsSync(${JSON.stringify(release)})){
-const tick=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearInterval(tick);}},20);
-}else if(args[0]==='show') console.log('MainPID=4321');
+fs.appendFileSync(${JSON.stringify(events)},args[0]+' '+process.pid+'\\n');
+if(args[0]==='daemon-reload') setInterval(()=>{},1000);
 `, { mode: 0o700 });
   const env = { ...process.env, VITEST: '', NODE_ENV: 'native-owner-fixture', HOME: home,
     XDG_CONFIG_HOME: join(home, 'config'), XDG_STATE_HOME: join(home, 'state'),
@@ -39,34 +41,18 @@ const tick=setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)})){clearI
     BEELINE_LIB_DIR: '', BEELINE_INSTALL_DIR: '', BEELINE_INSTALL_LIB_DIR: '',
     BEELINE_RECOVERY_ENTRY: entry, PATH: bin + ':' + process.env.PATH };
   const execute = promisify(execFile);
-  let second: Promise<{ stdout: string; stderr: string }> | undefined;
+  const running = execute(process.execPath, [entry], { env });
+  const first = running.then(value => ({ value }), error => ({ error }));
   try {
-    const first = execute(process.execPath, [entry, '1000'], { env })
-      .then(value => ({ value }), error => ({ error }));
-    await vi.waitFor(async () => expect(await readFile(events, 'utf8')).toBe('daemon-reload\n'), { timeout: 5000 });
-    const outcome = await first;
-    expect(outcome).toMatchObject({ error: { stderr: expect.stringContaining('owner pid') } });
-    if (process.env.BEELINE_OWNER_PROOF === '1' && 'error' in outcome)
-      process.stderr.write(outcome.error.stderr);
-    const following = execute(process.execPath, [entry, '15000'], { env });
-    second = following;
-    let waitingForOwner = false;
-    following.child.stderr?.on('data', chunk => {
-      if (String(chunk).includes('waiting for installer')) waitingForOwner = true;
-    });
-    await vi.waitFor(() => expect(waitingForOwner).toBe(true), { timeout: 5000 });
-    expect(await readFile(events, 'utf8')).toBe('daemon-reload\n');
-    await writeFile(release, 'continue');
-    const completed = await second;
-    expect(completed.stdout.trim()).toBe('4321');
-    if (process.env.BEELINE_OWNER_PROOF === '1') {
-      process.stderr.write(completed.stderr);
-      process.stderr.write('SUCCESS: native owner outlived its CLI; waiting successor completed after lock release\n');
-    }
-    expect((await readFile(events, 'utf8')).split('\n').filter(line => line === 'start')).toHaveLength(2);
+    await vi.waitFor(async () => expect(await readFile(events, 'utf8')).toMatch(/^daemon-reload \d+\n$/), { timeout: 10_000 });
+    const wedged = Number((await readFile(events, 'utf8')).trim().split(' ')[1]);
+    const second = await execute(process.execPath, [entry], { env }).then(value => ({ value }), error => ({ error }));
+    expect(second).toMatchObject({ error: { stderr: expect.stringContaining('native service convergence already running as pid') } });
+    // The CLI leaves (Ctrl-C/TERM): its owned worker and the wedged systemctl die with it.
+    running.child.kill('SIGTERM');
+    expect(await first).toMatchObject({ error: { signal: 'SIGTERM' } });
+    await vi.waitFor(() => expect(alive(wedged)).toBe(false), { timeout: 10_000 });
   } finally {
-    await writeFile(release, 'continue');
-    await second?.catch(() => undefined);
     await rm(home, { recursive: true, force: true });
   }
-}, 25000);
+}, 30_000);

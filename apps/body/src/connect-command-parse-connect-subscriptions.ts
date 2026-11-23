@@ -5,7 +5,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { normalizeAgentPairingCode } from "@beeline/api-contract/phone";
 import { agentBehavior } from "./agent-command.js";
 import { defaultSupervisorRoot, findAgentRuntimeConfigPaths } from "./runtime.js";
-import { spawn } from "node:child_process";
+import { runOwned } from "./wait.js";
+import { stopLiveAcpAdapters } from "./acp.js";
 import * as clack from "@clack/prompts";
 import { clackPromptOutput } from "./clack-support.js";
 import { type AgentAccessPolicy, isAgentAccessPolicy } from "./access-policy.js";
@@ -77,6 +78,7 @@ export function requestConnectGrant(
   selection: ConnectWizardResult,
   fetchImpl: typeof fetch,
   machineInfo?: { machineId: string; machineName: string },
+  step?: SpinnerStep,
 ): Promise<DeviceGrantResponse> {
   const normalizedPairingCode = normalizeAgentPairingCode(pairingCode);
   if (!normalizedPairingCode) throw new Error('invalid pairing code');
@@ -105,6 +107,7 @@ export function requestConnectGrant(
         : {}),
     },
     fetchImpl,
+    step,
   );
 }
 
@@ -224,46 +227,86 @@ export async function writeProviderEnv(
 
 
 
-export async function runInstalledFinish(binary: string, grantPath: string): Promise<void> {
-  await new Promise<void>((resolveRun, rejectRun) => {
-    const child = spawn(binary, ['connect-finish', grantPath], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let diagnostic = '';
-    const retainDiagnostic = (chunk: Buffer): void => {
-      diagnostic = `${diagnostic}${chunk.toString('utf8')}`.slice(-16_000);
-    };
-    child.stdout?.on('data', retainDiagnostic);
-    child.stderr?.on('data', retainDiagnostic);
-    child.once('error', rejectRun);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolveRun();
-      else {
-        const outcome = signal
-          ? `installed Beeline exited on ${signal}`
-          : `installed Beeline exited ${code}`;
-        rejectRun(new Error(`${outcome}${diagnostic.trim() ? `: ${diagnostic.trim()}` : ''}`));
-      }
-    });
+/**
+ * Run the installed `connect-finish` as an owned child until it exits. Each
+ * output line it prints is shown as it arrives (the covering spinner's
+ * message), and the tail is kept for the failure message. Cancelling or
+ * leaving the wizard kills the child's process group.
+ */
+export async function runInstalledFinish(
+  binary: string,
+  grantPath: string,
+  step?: SpinnerStep,
+): Promise<void> {
+  let diagnostic = '';
+  const result = await runOwned({
+    step: 'installed Beeline connect-finish',
+    file: binary,
+    args: ['connect-finish', grantPath],
+    ...(step ? { signal: step.signal } : {}),
+    onLine: (line) => {
+      diagnostic = `${diagnostic}${line}\n`.slice(-16_000);
+      if (line.trim()) step?.say(line.trim());
+    },
   });
+  if (result.code === 0) return;
+  const outcome = result.signal
+    ? `installed Beeline exited on ${result.signal}`
+    : `installed Beeline exited ${result.code}`;
+  throw new Error(`${outcome}${diagnostic.trim() ? `: ${diagnostic.trim()}` : ''}`);
 }
 
 
 
+/** What a spinner hands the wait it covers. */
+export interface SpinnerStep {
+  /** Replace the spinner's message with the wait's latest line. */
+  say: (line: string) => void;
+  /** Aborted when SIGINT or SIGTERM cancels the spinner. */
+  signal: AbortSignal;
+}
+
+/**
+ * One spinner over one wait. The wait's own lines (a child's output, the host
+ * a request waits on) replace the message as they arrive. SIGINT or SIGTERM
+ * reaches clack's spinner as a cancel: it aborts the wait's signal and stops
+ * every ACP adapter this process is probing, whose exit fails the pending
+ * request through the client's own exit path; the wizard then ends as
+ * cancelled. Ctrl-C at the keyboard makes clack exit the process, and the
+ * exit hook stops those adapters on the way out.
+ */
 export async function brassSpinner<T>(
   message: string,
-  action: () => Promise<T>,
-  completion: (result: T) => string,
+  action: (step: SpinnerStep) => Promise<T>,
+  completion: (result: T) => string | undefined,
+  failure: string | undefined = 'Failed',
 ): Promise<T> {
-  const spinner = clack.spinner({ output: clackPromptOutput() });
+  const cancel = new AbortController();
+  const spinner = clack.spinner({
+    output: clackPromptOutput(),
+    onCancel: () => {
+      cancel.abort();
+      stopLiveAcpAdapters();
+    },
+  });
+  process.on('exit', stopLiveAcpAdapters);
   spinner.start(brass(message));
   try {
-    const result = await action();
-    spinner.stop(brass(completion(result)));
+    const result = await action({
+      say: (line) => spinner.message(brass(line)),
+      signal: cancel.signal,
+    });
+    if (cancel.signal.aborted) throw new ConnectFailureError('Connection cancelled.');
+    const done = completion(result);
+    spinner.stop(done === undefined ? undefined : brass(done));
     return result;
   } catch (error) {
-    spinner.stop('Failed');
+    // Clack has already stopped a cancelled spinner with its own line.
+    if (cancel.signal.aborted) throw new ConnectFailureError('Connection cancelled.');
+    spinner.stop(failure);
     throw error;
+  } finally {
+    process.removeListener('exit', stopLiveAcpAdapters);
   }
 }
 
@@ -288,7 +331,8 @@ export async function runConnectWizard(
     loadConnectModelCatalog,
     fileConnectKeyStore,
     process.env,
-    (input) => verifyProviderKey({ ...input, fetchImpl }),
+    (input, step) =>
+      verifyProviderKey({ ...input, fetchImpl, ...(step ? { report: step.say, signal: step.signal } : {}) }),
   );
   const baseUrl = (process.env.BEELINE_AUTH_URL ?? 'https://server.usebeeline.app').replace(
     /\/$/,
@@ -296,13 +340,13 @@ export async function runConnectWizard(
   );
   const installedRelease = await brassSpinner(
     'Installing the Beeline daemon…',
-    () => installCurrentRelease(fetchImpl),
+    (step) => installCurrentRelease(fetchImpl, step),
     (release) => `Installed Beeline helper ${release.version}`,
   );
   const machineInfo = await readMachineId(process.env);
   const claimed = await brassSpinner(
     'Connecting to your Beeline Workspace…',
-    () => requestConnectGrant(baseUrl, pairingCode, selection, fetchImpl, machineInfo),
+    (step) => requestConnectGrant(baseUrl, pairingCode, selection, fetchImpl, machineInfo, step),
     (connectedGrant) => `Connected to ${connectedGrant.workspace_name}`,
   );
   try {
@@ -343,7 +387,7 @@ export async function runConnectWizard(
     } satisfies DevicePairingGrant);
     await brassSpinner(
       'Starting your agent…',
-      () => runInstalledFinish(installedRelease.binary, grantPath),
+      (step) => runInstalledFinish(installedRelease.binary, grantPath, step),
       () => `Started ${grant.agent_name}`,
     );
     const assignedHandle = await finishConnectedAgentPairing(
@@ -517,7 +561,6 @@ export async function runConnectFinishCommand(path: string | undefined): Promise
         model,
         cacheDir: openRouterRoutingCacheDir(dirname(connected.configPath)),
         ...(apiKey ? { apiKey } : {}),
-        probeTimeoutMs: 10_000,
       });
       console.log(decision.line);
       // Connect is the one place the answer probe MAY block: warming it here

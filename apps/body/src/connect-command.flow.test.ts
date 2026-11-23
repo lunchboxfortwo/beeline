@@ -11,7 +11,7 @@ vi.mock('@clack/prompts', () => ({
   intro: vi.fn(), outro: vi.fn(), log: { info: vi.fn(), warn: vi.fn() },
   select: (...args: unknown[]) => fixture.select(...args), text: (...args: unknown[]) => fixture.text(...args),
   isCancel: (value: unknown) => typeof value === 'symbol',
-  spinner: () => ({ start: vi.fn(), stop: vi.fn() }),
+  spinner: () => ({ start: vi.fn(), stop: vi.fn(), message: vi.fn() }),
 }));
 vi.mock('./runtime.js', async importOriginal => ({ ...await importOriginal<typeof import('./runtime.js')>(), defaultSupervisorRoot: () => '/tmp/beeline-connect-unit', findAgentRuntimeConfigPaths: async () => [] }));
 vi.mock('./device-pairing.js', () => ({ completeDevicePairing: vi.fn() }));
@@ -30,6 +30,14 @@ vi.mock('./connect-command.js', () => ({
 }));
 import { runConnectWizard } from './connect-command-parse-connect-subscriptions.js';
 
+/** The installed helper child as runOwned sees it: output streams, then `exit`, then `close`. */
+function finishChild(code: number): EventEmitter {
+  const stream = () => Object.assign(new EventEmitter(), { setEncoding() { return this; } });
+  const child = Object.assign(new EventEmitter(), { stdout: stream(), stderr: stream() });
+  queueMicrotask(() => { child.emit('exit', code, null); child.emit('close', code, null); });
+  return child;
+}
+
 const claimed = {
   agent_name: 'Bruin', agent_face: 'bear', agent_pubkey: 'a'.repeat(64), agent_secret_key: 'b'.repeat(64), body_secret_key: 'c'.repeat(64),
   daemon_exchange_token: 'bde_' + 'd'.repeat(43), workspace_id: 'workspace', workspace_name: 'Builders', workspace_joined: true,
@@ -41,10 +49,7 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation((line = '') => { output.push(String(line)); });
   fixture.install.mockResolvedValue({ binary: '/test/beeline', version: 'test' });
   fixture.select.mockResolvedValue('rename'); fixture.text.mockResolvedValue('Milo');
-  fixture.start.mockImplementation(() => {
-    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() });
-    requests.push('helper-start'); queueMicrotask(() => child.emit('exit', 0, null)); return child;
-  });
+  fixture.start.mockImplementation(() => { requests.push('helper-start'); return finishChild(0); });
   fetchImpl = vi.fn(async (input: string | URL | Request) => {
     const path = new URL(String(input)).pathname; requests.push(path);
     const data = path.endsWith('/name') ? { agent_name: 'Milo' }
@@ -67,10 +72,7 @@ it('does not register an identity when helper installation fails', async () => {
 });
 
 it('rolls back a claimed identity when helper startup fails, without announcing a join', async () => {
-  fixture.start.mockImplementationOnce(() => {
-    const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter() });
-    queueMicrotask(() => child.emit('exit', 1, null)); return child;
-  });
+  fixture.start.mockImplementationOnce(() => finishChild(1));
   await expect(runConnectWizard('ABCD1234-EF567890', fetchImpl, [], undefined)).rejects.toThrow('exited 1');
   expect(requests).toEqual(['/auth/agent/connect','/auth/agent/connect/name','/v1/auth/daemon/rollback']);
 });

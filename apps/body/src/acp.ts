@@ -40,6 +40,20 @@ export { AcpRequestError,AcpResourceLimitError,AcpRuntimeExitedError,agentMessag
 
 
 
+/** Unscoped adapter process groups this process started that have not exited. */
+const liveAdapterGroups = new Set<ChildProcessWithoutNullStreams>();
+
+/**
+ * Kill every unscoped adapter group this process still runs. Each exit then
+ * fails that client's pending requests through `handleChildExit`. It is
+ * synchronous so a cancelled wizard can also call it from an `exit` hook.
+ */
+export function stopLiveAcpAdapters(): void {
+  for (const child of liveAdapterGroups) {
+    try { killChildProcessGroup(child, 'SIGKILL'); } catch { /* already gone */ }
+  }
+}
+
 /** Collapse ACP's start/update/result notifications into one physical tool call. */
 export function toolCallEntries(updates: readonly SessionUpdate[]): ToolCallEntry[] {
   const calls = new Map<string, ToolCallEntry>();
@@ -360,11 +374,15 @@ export class AcpClient extends EventEmitter {
     this.child.stdin.on('close', () => pipeClosed('stdin'));
     this.child.stdin.on('error', (error) => this.failRuntime(`stdin: ${error.message}`));
 
+    // A scoped child shares this process's group; its scope owns teardown.
+    if (!launch) liveAdapterGroups.add(child);
     this.child.on('exit', (code, signal) => {
+      liveAdapterGroups.delete(child);
       if (this.child === child) void this.handleChildExit(code, signal);
     });
 
     this.child.on('error', (err) => {
+      liveAdapterGroups.delete(child);
       // An ENOENT/unspawnable command never emits 'exit', so without this the
       // in-flight `initialize` request (and every later one) would hang until
       // its full timeout instead of failing now — which is what a catalog

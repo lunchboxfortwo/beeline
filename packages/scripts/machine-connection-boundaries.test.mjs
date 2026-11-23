@@ -57,10 +57,9 @@ test('the sole warm countdown is pinned to AgentRunner.armIdle',()=>{
   assert.ok(inspectMachineConnectionSource(file,'class AgentRunner { extra(){setTimeout(stop,60000)} }').length);
 });
 
-test('the sole update timeout is pinned to ReleaseTransaction.begin',()=>{
+test('an update attempt owns no timeout',()=>{
   const file='apps/body/src/managed-update.ts';
-  assert.deepEqual(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000)} }'),[]);
-  assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000);setTimeout(retry,10)} }').length);
+  assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { begin(){setTimeout(abandon,180000)} }').length);
   assert.ok(inspectMachineConnectionSource(file,'class ReleaseTransaction { idleChanged(){setTimeout(retry,180000)} }').length);
 });
 
@@ -81,12 +80,10 @@ test('server shutdown sinks follow only an unchanged mechanical owner move',()=>
 
 
 
-test('local observers have pinned progress and expiry timers without adding machine liveness timers',()=>{
-  for(const [file,owner] of [['machine-control.ts','requestMachine'],['kernel-lock.ts','withKernelLock'],
-    ['update-progress.ts','observe'],['update-child.ts','observeChild'],['update-download.ts','downloadBytes']]) {
+test('former local observers own no progress or expiry timers',()=>{
+  for(const [file,owner] of [['machine-control.ts','askMachine'],['kernel-lock.ts','withKernelLock'],
+    ['update-progress.ts','progress'],['wait.ts','ask'],['update-download.ts','downloadBytes'],['managed-update.ts','begin']]) {
     const source=`function ${owner}(){setInterval(progress,5000);setTimeout(expire,30000)}`;
-    assert.deepEqual(inspectMachineConnectionSource('apps/body/src/'+file,source),[]);
-    assert.ok(inspectMachineConnectionSource('apps/body/src/'+file,source.replace('setTimeout(expire,30000)','setTimeout(expire,30000);setTimeout(retry,1)')).length);
-    assert.ok(inspectMachineConnectionSource('apps/body/src/'+file,source.replace(owner,'reconnect')).length);
+    assert.ok(inspectMachineConnectionSource('apps/body/src/'+file,source).length);
   }
 });

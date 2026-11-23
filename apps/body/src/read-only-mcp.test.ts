@@ -822,7 +822,7 @@ m9_describe('beeline-agent run_granted_command', () => {
         run: async () => ({ grantId: 'g', exitCode: null, timedOut: true, output: '' }),
       },
     );
-    m9_expect(timedOut).toBe('ran under grant g: timed out after 10 minutes\n(no output)');
+    m9_expect(timedOut).toBe('ran under grant g: timed out: the run limit killed its process group\n(no output)');
   });
 });
 m9_describe('request_grant carries the script an interpreter will run', () => {

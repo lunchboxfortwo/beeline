@@ -3,11 +3,12 @@
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { DaemonBootstrapResult, CornerListResult } from '@beeline/api-contract/daemon';
-import { capturePrivateProcessUse, hasNonSquirePayload, reclaimWholeStorageObject, reclaimHelperStorage, type StorageReclaimEntry, type StorageRoomState } from './helper-storage.js';
+import { capturePrivateProcessUse, hasNonSquirePayload, reclaimWholeStorageObject, reclaimHelperStorage, reportStorageChildren, type StorageReclaimEntry, type StorageRoomState } from './helper-storage.js';
 import { isDeletedRuntimeName, pruneDeletedRuntimes, pruneRepositoryCaches, pruneMachineStorage } from './host-disk-retention.js';
 import { pruneEndedOwnerStorage, pruneUnusedCheckoutStorage, pruneOpenCheckoutObjects, discoverLegacyStorageOwners, readStorageOwners, reclaimOwnedCheckout } from './storage-owners.js';
 import { defaultSupervisorRoot, type AgentRuntimeRecord } from './runtime.js';
 import { inspectCheckoutPreservation } from './storage-owners.js';
+import { ask } from './wait.js';
 
 export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot(), input: { orphanOnly?: boolean } = {}) {
   const processUse = input.orphanOnly ? () => true : await capturePrivateProcessUse();
@@ -28,10 +29,12 @@ export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot
       if (!runtime.transport?.daemonToken) throw new Error('no existing daemon token; no exchange attempted');
       // Operator storage inspection must also work with the helper stopped.
       // Only these two lifecycle reads may use the existing token, never a claim.
-      const operation = async <T>(name: 'getDaemonBootstrap' | 'listRoomCorners', operationInput: unknown): Promise<T> => {
-        const response = await fetch(new URL(`/v1/daemon/operations/${name}`, runtime.transport!.baseUrl), {
+      // Each read names its host and step on stderr before it waits; Ctrl-C ends it.
+      const operation = async <T>(name: 'getDaemonBootstrap' | 'listRoomCorners', operationInput: unknown, about: string): Promise<T> => {
+        const url = new URL(`/v1/daemon/operations/${name}`, runtime.transport!.baseUrl);
+        const response = await ask({ url, peer: `${url.host} for ${about}` }, {
           method: 'POST', headers: { authorization: `Bearer ${runtime.transport!.daemonToken}`, 'content-type': 'application/json' },
-          body: JSON.stringify(operationInput), signal: undefined,
+          body: JSON.stringify(operationInput),
         });
         if (!response.ok) {
           const payload = await response.json().catch(() => ({})) as { error?: string; code?: string };
@@ -43,13 +46,13 @@ export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot
         }
         return await response.json() as T;
       };
-      const bootstrap = await operation<DaemonBootstrapResult>('getDaemonBootstrap', { agentId: runtime.agent.publicKey });
+      const bootstrap = await operation<DaemonBootstrapResult>('getDaemonBootstrap', { agentId: runtime.agent.publicKey }, `agent ${agent.name.slice(0, 12)}`);
       let agentStates: readonly StorageRoomState[] = bootstrap.storageRooms ?? [];
       if (!bootstrap.storageRooms) {
         const byId = new Map<string, StorageRoomState>(bootstrap.rooms.map(room => [room.roomId, room]));
         for (const room of bootstrap.rooms) {
           try {
-            const listed = await operation<CornerListResult>('listRoomCorners', { roomId: room.roomId });
+            const listed = await operation<CornerListResult>('listRoomCorners', { roomId: room.roomId }, `room ${room.roomId}`);
             for (const corner of listed.corners) if (typeof corner.archived === 'boolean')
               byId.set(corner.cornerId, { roomId: corner.cornerId, archived: corner.archived });
           } catch { /* No archive inference from a failed read. */ }
@@ -128,6 +131,8 @@ export async function helperStorageReport(supervisorRoot = defaultSupervisorRoot
 export async function runStorageReportCommand(args: string[]): Promise<void> {
   if (args.some(arg => !['--dry-run', '--orphans'].includes(arg)))
     throw new Error('Usage: beeline storage [--dry-run|--orphans] (read-only)');
+  // stderr names every local child before it is awaited; stdout stays the one JSON report.
+  reportStorageChildren(line => console.error(`[storage dry-run] running ${line}`));
   const report = await helperStorageReport(defaultSupervisorRoot(), { orphanOnly: args.includes('--orphans') });
   console.log(JSON.stringify(args.includes('--orphans') ? { mode: report.mode, orphans: report.orphans, unknown: report.unknown, archivedCheckouts: report.archivedCheckouts } : report, null, 2));
 }

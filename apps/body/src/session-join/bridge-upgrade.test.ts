@@ -107,6 +107,8 @@ it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path a
           mentions: [{ id: 'tag-' + n, room_id: 'synthetic-room', text: n === 1 ? 'missed while old bridge lived' : 'committed after reconnect' }],
           wakes: [], mentionCursor: String(459 + n) }) + '\\n'));
         if (n === 1) controller.close();
+        // Like undici, an aborted request fails its body read, so a stopping bridge's stream job settles.
+        else init.signal?.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
       } }), { headers: { 'content-type': 'application/x-ndjson' } });
     };
     await runBridge(${JSON.stringify(stateDir)}, { node: process.execPath, bundle: ${JSON.stringify(bundle)} });`);

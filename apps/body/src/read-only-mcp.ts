@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync,lstatSync,readFileSync,realpathSync,statSync,writeFileSync } from "node:fs";
 import { basename,isAbsolute,join,relative,resolve,sep } from "node:path";
 import { createInterface } from "node:readline";
-import { BoundedSizeError,EXPIRED_REASON,FETCH_TIMEOUT_MS,fetchBoundedBytes,MAX_ATTACHMENT_BYTES } from "./attachment-delivery.js";
+import { BoundedSizeError,EXPIRED_REASON,fetchBoundedBytes,MAX_ATTACHMENT_BYTES } from "./attachment-delivery.js";
 import { readVault } from "./connector-squire.js";
 import { describeTailscaleReach } from "./connector-tailscale.js";
 import { agentToolsFor,REPOSITORY_ROUTES,repositoryTools } from "./minimal-tool-surface.js";
@@ -17,8 +17,9 @@ import { gitDiff,gitLog,gitShow,gitStatus,listFiles,readAgentFile,searchText } f
 import { handleLine } from './read-only-mcp-tool-call-id.js';
 import { READ_ONLY_TOOL_NAMES } from "./read-only-policy.js";
 import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
-import { sessionToolRequest } from './session-tool-connection.js';
+import { sessionToolRequest,transportCause } from './session-tool-connection.js';
 import { squireReachCause } from "./squire-status.js";
+import { ask } from "./wait.js";
 
 
 
@@ -473,7 +474,9 @@ export function daemonOperationIsSafeToRepeat(name: string, input: JsonObject): 
  *  network-level too. A response the server actually sent never reaches here. */
 export function isDaemonNetworkFailure(error: unknown): boolean {
   if (isNetworkFailure(error)) return true;
-  return error instanceof TypeError && /^fetch failed/i.test(error.message);
+  if (error instanceof TypeError && /^fetch failed/i.test(error.message)) return true;
+  // A session-tool failure names its transport cause and keeps it as `cause`.
+  return error instanceof Error && error.cause !== undefined && isDaemonNetworkFailure(error.cause);
 }
 
 
@@ -501,7 +504,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
         return await sessionToolRequest('session',{placeId:input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
           action:'operation',operation:name,input}) as JsonObject;
       }
-      const response = await fetch(new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), {
+      const response = await ask({ url: new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), report: false }, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
@@ -523,7 +526,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
       return await response.json() as JsonObject;
   } catch(error){
     if(!isDaemonNetworkFailure(error))throw error;
-    throw new Error(`daemon operation ${name} failed before the server answered; await a new action or recovery boundary${daemonOperationIsSafeToRepeat(name,input)?'':'; the write outcome is unknown'}`);
+    throw new Error(`daemon operation ${name} failed before the server answered (${transportCause(error)}); await a new action or recovery boundary${daemonOperationIsSafeToRepeat(name,input)?'':'; the write outcome is unknown'}`);
   }
 }
 
@@ -563,8 +566,8 @@ export async function fetchImage(
         `image exceeds the ${MAX_ATTACHMENT_BYTES}-byte limit (${error.bytes} bytes)`,
       );
     }
-    if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
-      throw new Error(`image fetch timed out after ${FETCH_TIMEOUT_MS / 1000} seconds`);
+    if (isDaemonNetworkFailure(error)) {
+      throw new Error(`image fetch ended without an answer (${transportCause(error)})`);
     }
     throw error instanceof Error ? error : new Error(String(error));
   }
@@ -687,7 +690,7 @@ export function connectorOfferDepsFromEnv(): ConnectorOfferDeps {
     if (!relayUrl || !relayToken) result = await sessionSquireCall(tool, args) as typeof result;
     else {
       const context = await activeCommandContext();
-      const response = await fetch(new URL('/mcp', relayUrl), {
+      const response = await ask({ url: new URL('/mcp', relayUrl), report: false }, {
         method: 'POST',
         headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ ...context, method: 'tools/call',
@@ -742,14 +745,14 @@ export async function squireShareEndpoint(sessionId: string): Promise<{ url: str
       body = { result: await sessionSquireCall('operate_share', { session_id: sessionId }) };
       response = { ok: true, status: 200 };
     } else {
-      const upstream = await fetch(new URL('/mcp', relayUrl), {
+      const upstream = await ask({ url: new URL('/mcp', relayUrl), report: false }, {
         method: 'POST',
         headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ ...await activeCommandContext(), method: 'tools/call',
           params: { name: 'operate_share', arguments: { session_id: sessionId } } }),
         signal: undefined,
       });
-      // Only an unparseable body is tolerated; a timeout while reading it is not.
+      // Only an unparseable body is tolerated; a failed read of it is not.
       response = upstream;
       body = await upstream.json().catch((error: unknown) => {
         if (error instanceof SyntaxError) return undefined;
@@ -757,8 +760,8 @@ export async function squireShareEndpoint(sessionId: string): Promise<{ url: str
       });
     }
   } catch (error) {
-    if (error instanceof Error && error.name === 'TimeoutError')
-      throw new Error('Squire share timed out after 30 seconds');
+    if (isDaemonNetworkFailure(error))
+      throw new Error(`Squire share ended without an answer (${transportCause(error)})`);
     throw error;
   }
   if (response.status === 403 && body === undefined)
@@ -803,7 +806,7 @@ export async function daemonUploadArtifact(
   mime: string,
   title: string,
 ): Promise<DaemonArtifactUploadResult> {
-  const response = await fetch(new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), {
+  const response = await ask({ url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`), report: false }, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,

@@ -25,6 +25,7 @@ type AgentRuntimeRecord,
 } from './runtime.js';
 import { renewSquireShareOnViewerActivity } from './squire-share-renewals.js';
 import { unknownServerEventLogger } from './unknown-server-event.js';
+import { ask } from './wait.js';
 
 type Input<Name extends keyof DaemonOperationMap> = DaemonOperationMap[Name]['input'];
 type Output<Name extends keyof DaemonOperationMap> = DaemonOperationMap[Name]['output'];
@@ -410,8 +411,9 @@ export class DaemonApiClient {
     this.requestCount += 1;
     this.inFlight += 1;
     try {
-      const response = await this.fetchImpl(
-        endpoint(this.baseUrl, `/v1/daemon/operations/${String(name)}`),
+      // `corner-read-token` names the host and step on stderr before it waits.
+      const response = await ask(
+        { url: endpoint(this.baseUrl, `/v1/daemon/operations/${String(name)}`), fetch: this.fetchImpl },
         {
           method: 'POST',
           headers: {

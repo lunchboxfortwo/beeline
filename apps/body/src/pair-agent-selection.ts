@@ -47,9 +47,12 @@ async function clackSelectAgent(candidates: DetectedAgentCommand[]): Promise<Age
   return unwrapPrompt(picked, 'Pairing cancelled.');
 }
 
+type InstallOptions = { cwd?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void };
+
+/** `updateAgentAdapter` logs its own decision (current version, or the exact install). */
 async function installAdapter(
   install: AdapterInstallCommand,
-  opts: { cwd?: string; env?: NodeJS.ProcessEnv },
+  opts: InstallOptions,
 ): Promise<void> {
   const kind = install.args.at(-1)?.includes('codex-acp') ? 'codex'
     : install.args.at(-1)?.includes('claude-agent-acp') ? 'claude' : 'pi';
@@ -79,7 +82,7 @@ export async function selectPairAgentCommand(opts: {
   confirmInstall?: (message: string) => Promise<boolean>;
   install?: (
     command: AdapterInstallCommand,
-    opts: { cwd?: string; env?: NodeJS.ProcessEnv },
+    opts: InstallOptions,
   ) => Promise<void>;
 }): Promise<AgentCommand> {
   const output = opts.output ?? stdout;
@@ -87,6 +90,11 @@ export async function selectPairAgentCommand(opts: {
   const selectAgent = opts.selectAgent ?? clackSelectAgent;
   const confirmInstall = opts.confirmInstall ?? clackConfirmInstall;
   const runInstall = opts.install ?? installAdapter;
+  const installOptions: InstallOptions = {
+    cwd: opts.cwd,
+    env: opts.env,
+    log: (line) => output.write(`${line}\n`),
+  };
 
   const useReadyAgent = async (agent: AgentCommand, label: string): Promise<AgentCommand> => {
     const refresh = latestAdapterInstallCommand(agent.kind);
@@ -94,11 +102,8 @@ export async function selectPairAgentCommand(opts: {
       output.write(`[beeline] using ${agent.kind} (${label})\n`);
       return agent;
     }
-    output.write(
-      `[beeline] refreshing ${agent.kind} adapter: ${formatAdapterInstallCommand(refresh)}\n`,
-    );
     try {
-      await runInstall(refresh, { cwd: opts.cwd, env: opts.env });
+      await runInstall(refresh, installOptions);
       const refreshed = resolveAgentCommand({
         kind: agent.kind,
         env: opts.env,
@@ -136,11 +141,8 @@ export async function selectPairAgentCommand(opts: {
       }
       const install = await confirmInstall(`${manual}. Install now?`);
       if (!install) throw new Error(manual);
-      output.write(
-        `[beeline] installing ${candidate.kind} adapter: ${formatAdapterInstallCommand(candidate.install)}\n`,
-      );
       try {
-        await runInstall(candidate.install, { cwd: opts.cwd, env: opts.env });
+        await runInstall(candidate.install, installOptions);
         const selected = resolveAgentCommand({
           kind: candidate.kind,
           env: opts.env,
@@ -203,11 +205,8 @@ export async function selectPairAgentCommand(opts: {
       return useReadyAgent(selected.agent, 'selected');
     }
     const manual = missingAdapterMessage(selected);
-    output.write(
-      `[beeline] installing ${selected.kind} adapter: ${formatAdapterInstallCommand(selected.install)}\n`,
-    );
     try {
-      await runInstall(selected.install, { cwd: opts.cwd, env: opts.env });
+      await runInstall(selected.install, installOptions);
       const installed = resolveAgentCommand({
         kind: selected.kind,
         env: opts.env,
