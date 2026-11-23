@@ -16,7 +16,7 @@ it.each(['native','HTTP'] as const)('%s tool delivery binds an old-target reply 
  const invocation={id:randomUUID(),requestId:current.id};
  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:current.id,invocationId:invocation.id},B);
  const root=await mkdtemp(join(tmpdir(),'invocation-wire-'));roots.push(root);const context=join(root,'turn.json');
- await writeTurnContext(context,{id:current.id,roomId:CHAT,turnRequestId:current.id,rootCommandId:current.id,reason:'human_tag'},[],undefined,invocation);
+ await writeTurnContext(context,{id:current.id,roomId:CHAT,turnRequestId:current.id,rootCommandId:current.id,reason:'human_tag'},[],invocation);
  for(const [key,value] of Object.entries({BEELINE_TURN_CONTEXT_FILE:context,BEELINE_DAEMON_BASE_URL:'http://adapter.test',BEELINE_DAEMON_TOKEN:'fixture',
   BEELINE_GRANT_RUNNER_FILE:'',BEELINE_GRANT_RUNNER_URL:transport==='native'?'http://native.test':'',BEELINE_GRANT_RUNNER_TOKEN:'fixture'}))vi.stubEnv(key,value);
  const requests:Record<string,unknown>[]=[];

@@ -2,6 +2,22 @@ import type { SqlDatabase } from './database.js';
 import { tokenHash } from './free-agents.js';
 import { OwnedModelRefusal } from './owned-model-errors.js';
 
+/** Historical per-item credential records retained during the rollout. */
+export const RETIRED_OWNED_MODEL_CREDENTIAL_SCHEMA = `
+CREATE TABLE IF NOT EXISTS owned_model_credentials (
+ id text PRIMARY KEY CHECK(id ~ '^[a-f0-9]{32}$'),
+ key_version text NOT NULL,
+ token_hash text NOT NULL CHECK(token_hash ~ '^[a-f0-9]{64}$'),
+ agent_id text NOT NULL, owner_id text NOT NULL, workspace_id uuid NOT NULL, room_id uuid NOT NULL,
+ command_id text NOT NULL, generation_id text NOT NULL, request_id text NOT NULL,
+ connection_id text, connection_epoch bigint CHECK(connection_epoch>0), instance_id text,
+ model text NOT NULL, agent_model text, model_token_hash text,
+ expires_ms bigint CHECK(expires_ms>0),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(), revoked_at timestamptz,
+ UNIQUE(command_id,generation_id)
+);
+`;
+
 export interface OwnedModelBinding {
   readonly agentId: string;
   readonly ownerId: string;
