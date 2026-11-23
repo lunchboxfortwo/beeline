@@ -198,7 +198,7 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
       });
     } catch (error) {
       signal.throwIfAborted();
-      if ('older' in await convergeMachine({ layout, reportAgentsOnly: true })) return;
+      await convergeMachine({ layout, reportAgentsOnly: true });
       throw new Error(`helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`);
     }
     await convergeDependencies(layout, target.releaseId, undefined, signal);
@@ -210,7 +210,6 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
       reportAgentsOnly: true,
       force,
     });
-    if ('older' in status) return;
     for (const [id, agent] of Object.entries(status.agents))
       progress(`agent ${id}: ${agent.state} since ${agent.since}; ${agent.lastError ?? agent.status}; snapshot ${status.updatedAt}`);
     console.log(

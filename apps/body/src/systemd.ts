@@ -151,13 +151,12 @@ export async function installHelperService(
   assertLifecycleTestIsolation(env, Boolean(options.run));
   assertCanonicalInstalledLauncher(env, options.invocationPath);
   if (options.start === false) throw new Error('installing a disabled helper is unsupported');
-  const started = await convergeNativeHelper({
+  return convergeNativeHelper({
     env,
     platform: 'systemd',
     ...(options.run ? { run: options.run } : {}),
     ...(options.selfAgent ? { legacyCaller: `beeline-agent@${options.selfAgent}.service` } : {}),
   });
-  return typeof started === 'number' ? started : started.pid;
 }
 
 /** Ask a running machine helper to rescan paired agents. A stopped one is left stopped. */

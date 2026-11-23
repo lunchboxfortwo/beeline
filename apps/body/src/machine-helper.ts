@@ -2,7 +2,7 @@ import { storageOperation } from './helper-storage.js';
 import { waitForProcessExit } from './process-exit.js';
 import { captureHelperError } from './sentry.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { reportHelperStartup, helperLockKey, MachineControl, machineControlPath, type HeldAnswer, type MachineAnswer } from './machine-control.js';
+import { helperLockKey, MachineControl, machineControlPath, type HeldAnswer, type MachineAnswer } from './machine-control.js';
 import { withKernelLock } from './kernel-lock.js';
 import { DaemonApiError, isAgentRemovedError } from './daemon-api-client.js';
 import { retireRemovedAgent } from './agent-retirement.js';
@@ -709,7 +709,6 @@ async function serveMachineHelper(
     for (const configPath of initial) startSlot(configPath);
     lifecycle.beginServing();
     writeStatus();
-    if (managedBy === 'launchd') reportHelperStartup(supervisorRoot, snapshot());
     if (!controller.signal.aborted) void sweepHostDisk();
     if (!controller.signal.aborted)
       await notifier
@@ -747,10 +746,6 @@ export async function runMachineHelper(
   const generation = randomUUID();
   return withKernelLock(helperLockKey(defaultSupervisorRoot(options?.env)), () =>
     serveMachineHelper(options, generation),
-  { step: 'machine helper', generation }).catch(error => {
-    if (process.platform === 'darwin') reportHelperStartup(defaultSupervisorRoot(options?.env),
-      { error: error instanceof Error ? error.message : String(error) });
-    throw error;
-  });
+  { step: 'machine helper', generation });
 }
 

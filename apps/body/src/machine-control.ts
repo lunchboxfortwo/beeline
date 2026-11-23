@@ -4,8 +4,6 @@ import { resolve } from 'node:path';
 import type { HelperStatusFile } from './helper-status.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
 import { ask, tryLock } from './wait.js';
-import { waitForProcessExit } from './process-exit.js';
-import { versionAtLeast } from './self-update-manifest.js';
 
 export interface MachineRequest {
   operation: 'status' | 'converge' | 'stop' | 'update';
@@ -13,7 +11,6 @@ export interface MachineRequest {
   agentId?: string;
   sourceGeneration?: string;
   force?: boolean;
-  startup?: HelperStatusFile | { error: string };
 }
 
 /**
@@ -52,7 +49,6 @@ export class MachineControl {
     socket.once('close', () => {
       this.#held.delete(socket);
       this.#peers.delete(socket);
-      if (!received) this.onIncompleteClose?.();
     });
     let input = '';
     let received = false;
@@ -80,7 +76,6 @@ export class MachineControl {
         if (!socket.writableEnded) socket.end(`${JSON.stringify(answer)}\n`);
       })().catch((error) => {
         this.#held.delete(socket);
-        this.onIncompleteClose?.();
         if (!socket.writableEnded) socket.end(`${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`);
       });
     });
@@ -92,7 +87,6 @@ export class MachineControl {
       request: MachineRequest,
       hold: () => HeldAnswer,
     ) => Promise<MachineAnswer | HeldAnswer>,
-    readonly onIncompleteClose?: () => void,
   ) {}
 
   async start(): Promise<void> {
@@ -210,57 +204,3 @@ function hostAdbQuery(query: string, connect: () => ReturnType<typeof createConn
   });
 }
 
-function helperStartupPath(stateRoot: string): string {
-  return privateSocketPath(JSON.stringify(['helper-startup', resolve(stateRoot)]));
-}
-
-export async function reportHelperStartup(stateRoot: string, startup: HelperStatusFile | { error: string }): Promise<void> {
-  const answer = 'error' in startup ? startup : { pid: startup.pid, generation: startup.generation,
-    processState: startup.processState, updatedAt: startup.updatedAt, agents: {} };
-  await ask({ socket: helperStartupPath(stateRoot), peer: 'helper startup owner', machineRead: true },
-    { operation: 'status', startup: answer }).catch(() => undefined);
-}
-
-export interface OlderHelperStarted { readonly pid: number; readonly older: true }
-
-export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<{ pid: number; started: boolean }>, version: string): Promise<Pick<HelperStatusFile, 'pid'> | OlderHelperStarted> {
-  if (!versionAtLeast(version, 'v0.1.245-rc.1')) {
-    const { pid } = await start();
-    if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('launchd start completed without a process');
-    process.stderr.write(`started older helper pid ${pid}\n`);
-    return { pid, older: true };
-  }
-  let channel: MachineControl | undefined;
-  const controller = new AbortController();
-  return ask<Pick<HelperStatusFile, 'pid'>>({ peer: 'launchd helper startup acknowledgment', send: async (ready, failed) => {
-    let status: HelperStatusFile | undefined;
-    let pid: number | undefined;
-    const complete = () => {
-      if (!status || pid === undefined) return;
-      if (status.pid !== pid) failed(new Error(`helper startup answered from pid ${status.pid}, expected ${pid}`));
-      else ready(status);
-    };
-    channel = new MachineControl(helperStartupPath(stateRoot), async request => {
-      const value = request.startup;
-      if (!value || typeof value !== 'object') throw new Error('helper startup answer missing');
-      if ('error' in value) {
-        const error = new Error(value.error);
-        failed(error);
-        throw error;
-      }
-      status = value;
-      complete();
-      return value;
-    }, () => failed(new Error('helper exited before its startup acknowledgment')));
-    await channel.start();
-    const job = await start();
-    pid = job.pid;
-    if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('launchd start completed without a process');
-    if (!job.started) { ready({ pid }); return; }
-    void waitForProcessExit(pid, controller.signal).then(
-      () => { if (!controller.signal.aborted) failed(new Error(`helper pid ${pid} exited before its startup acknowledgment`)); },
-      error => { if (!controller.signal.aborted) failed(error); },
-    );
-    complete();
-  } }).finally(async () => { controller.abort(); await channel?.stop(); });
-}

@@ -138,7 +138,7 @@ async function main(): Promise<void> {
       });
     } catch (error) {
       if (command === 'install-only') throw error;
-      if ('older' in await convergeMachine({ layout, reportAgentsOnly: true })) return;
+      await convergeMachine({ layout, reportAgentsOnly: true });
       throw new Error(
         `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
       );
@@ -155,7 +155,6 @@ async function main(): Promise<void> {
     await convergeDependencies(layout, target.releaseId);
     const status = await convergeMachine({ layout, releaseId: target.releaseId,
       reportAgentsOnly: true, force: args.includes('--force') });
-    if ('older' in status) return;
     reportAgents(status);
     console.log(
       `[beeline] executing release ${status.loadedRelease}; helper ${status.pid} ${status.processState}`,
@@ -199,14 +198,13 @@ async function main(): Promise<void> {
     try {
       target = await prepareMachineRelease(layout);
     } catch (error) {
-      if ('older' in await convergeMachine({ layout })) return;
+      await convergeMachine({ layout });
       throw new Error(
         `helper recovered on the verified installed release; freshness unconfirmed: ${String(error)}`,
       );
     }
     await convergeDependencies(layout, target.releaseId);
     const status = await convergeMachine({ layout, releaseId: target.releaseId });
-    if ('older' in status) return;
     reportAgents(status);
     console.log(
       `[beeline] executing release ${status.loadedRelease}; helper ${status.pid} ${status.processState}`,

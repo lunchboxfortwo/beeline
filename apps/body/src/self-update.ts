@@ -191,15 +191,6 @@ export function bundleJsonCandidates(bundleDir: string): string[] {
 
 
 
-export async function selectBootRelease(layout: BeelineInstallLayout, candidates: readonly (string | undefined)[]): Promise<string | undefined> {
-  for (const id of candidates) {
-    if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) continue;
-    const digest = await readFile(resolve(layout.releasesRoot, id, '.stage-ok'), 'utf8').catch(() => '');
-    if (/^[0-9a-f]{64}$/i.test(digest.trim()) && await resolveBundleEntrypoint(resolve(layout.releasesRoot, id))) return id;
-  }
-  return undefined;
-}
-
 export async function readBundleJson(bundleDir: string): Promise<InstalledBundleIdentity | undefined> {
   let raw: string | undefined;
   for (const candidate of bundleJsonCandidates(bundleDir)) {

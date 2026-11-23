@@ -262,13 +262,12 @@ export async function installLaunchdHelperService(
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   assertCanonicalInstalledLauncher(env, options.invocationPath);
-  const started = await convergeNativeHelper({
+  return convergeNativeHelper({
     env,
     platform: 'launchd',
     ...(options.run ? { run: options.run } : {}),
     ...(options.selfLabel ? { legacyCaller: options.selfLabel } : {}),
   });
-  return typeof started === 'number' ? started : started.pid;
 }
 
 /** Ask a running machine helper to rescan paired agents. */

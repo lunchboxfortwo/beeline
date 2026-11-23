@@ -31,13 +31,3 @@ it('repairs the installed helper after a freshness failure on the direct CLI', a
   expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ reportAgentsOnly: true }));
   expect(convergeDependencies).not.toHaveBeenCalled();
 });
-
-it('returns successfully after recovering an older installed helper without claiming readiness', async () => {
-  vi.stubEnv('BEELINE_LIB_DIR', '/tmp/beeline-direct-cli/lib/beeline');
-  vi.mocked(prepareMachineRelease).mockRejectedValue(new Error('publication unavailable'));
-  vi.mocked(convergeMachine).mockResolvedValue({ pid: 321, older: true });
-  const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
-  await expect(runUpdateCommand(['update'])).resolves.toBeUndefined();
-  expect(convergeDependencies).not.toHaveBeenCalled();
-  expect(stdout.mock.calls.flat().join('')).not.toContain('executing release');
-});
