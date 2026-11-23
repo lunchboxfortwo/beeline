@@ -109,9 +109,9 @@ The helper physical connection belongs to `apps/body/src/live-link.ts`; server
 machine output and login/version changes belong to `machine-connection.ts`.
 `machine-connection-sinks.json` pins owned sink counts and can only shrink.
 A helper cannot acquire another reconnect/close/send path. Helper timers have
-zero inventory allowance, including generated child code and timer aliases.
-The session exception is one stay-warm countdown in `AgentRunner.armIdle`
-in `apps/body/src/agent-runner.ts`; the existing release handoff deadline remains in `ReleaseTransaction.begin`. The mutation suite plants a second
-reconnect and timer and requires both to fail; TYPECHECK runs that suite.
+zero inventory allowance, including generated child code and timer aliases;
+the exception is defined in the [helper wait boundary](#architecture-invariants).
+The mutation suite plants a second reconnect and timer and requires both to fail;
+TYPECHECK runs that suite.
 
 The `code.file-lines` rule caps every tracked `.ts`, `.tsx`, `.js` and `.mjs` file under `apps/`, `packages/`, `packages/scripts/` and `tools/` at 1,000 lines, including tests. Only exact generated paths declared in the rule are exempt. New files must meet the cap when staged; there is no oversized-file allowlist. `--base` rejects relaxing the cap, its scope or its generated exclusions. Split by existing domain boundaries while preserving behavior.
