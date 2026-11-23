@@ -11,16 +11,24 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
-  watch,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { preparePrivateSocketDirectory } from '../local-socket.js';
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
-import { ask, PeerRefusal, tryLock, type LockAttempt } from '../wait.js';
+import {
+  answer,
+  ask,
+  listen,
+  PeerRefusal,
+  tryLock,
+  watchChanges,
+  type LockAttempt,
+} from '../wait.js';
 import { externalAgentRules } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
+import { quote } from './setup.js';
 import { createHash } from 'node:crypto';
 import { codexQueue, turnRunning } from './codex.js';
 import { postToClaude } from './claude.js';
@@ -82,9 +90,7 @@ export interface Runner {
 }
 
 function command(runner: Runner, joined: JoinedSession, args: string): string {
-  const q = (v: string) =>
-    /^[A-Za-z0-9_./:@=-]+$/.test(v) ? v : `"${v.replace(/(["\\$`])/g, '\\$1')}"`;
-  return `${q(runner.node)} ${q(runner.bundle)} session ${args} --as ${q(joined.key)}`;
+  return `${quote(runner.node)} ${quote(runner.bundle)} session ${args} --as ${quote(joined.key)}`;
 }
 
 export function renderAttachments(attachments: readonly DaemonAttachment[] = []): string[] {
@@ -153,6 +159,30 @@ export async function recordDeliveryFailure(
   } catch {
     /* The durable inbox stays owed if the server is unreachable. */
   }
+}
+
+/** Binds the joined session's receiver for one host conversation on the server. */
+export async function setupDelivery(
+  joined: JoinedSession,
+  token: string,
+  mechanism: 'local' | 'on_demand',
+  conversation: string,
+): Promise<void> {
+  const { delivery } = (await callTool(
+    joined,
+    token,
+    'setup_delivery',
+    {
+      mechanism,
+      host: joined.agent,
+      surface: joined.agent === 'antigravity' ? 'app' : 'local_session',
+      conversation,
+      installed: true,
+    },
+    'set up delivery',
+  )) as { delivery: { generation?: string; mechanism?: JoinedSession['deliveryMechanism'] } };
+  joined.deliveryGeneration = delivery.generation;
+  joined.deliveryMechanism = delivery.mechanism ?? mechanism;
 }
 
 export interface DeliverDeps {
@@ -278,22 +308,8 @@ export async function flush(
       if (
         hasLocalDelivery(joined) &&
         (!joined.deliveryGeneration || session.sessionId !== joined.sessionId)
-      ) {
-        const binding = (await callTool(
-          joined,
-          await accessToken(dir, joined.key),
-          'setup_delivery',
-          {
-            mechanism: 'local',
-            host: joined.agent,
-            surface: joined.agent === 'antigravity' ? 'app' : 'local_session',
-            conversation: session.sessionId,
-            installed: true,
-          },
-        )) as { delivery: { generation: string } };
-        joined.deliveryGeneration = binding.delivery.generation;
-        joined.deliveryMechanism = 'local';
-      }
+      )
+        await setupDelivery(joined, await accessToken(dir, joined.key), 'local', session.sessionId);
       await updateState(dir, (s) => {
         const current = s.sessions.find((x) => x.key === joined.key);
         if (current) {
@@ -318,51 +334,69 @@ export async function flush(
 async function serveTools(dir: string, path: string, sessionsChanged: () => void) {
   if (dirname(path) !== dir) await preparePrivateSocketDirectory(path);
   rmSync(path, { force: true });
+  const requests = new Set<Promise<void>>();
+  let closing = false;
   const server = createServer((connection) => {
+    if (closing) {
+      connection.destroy();
+      return;
+    }
     let buffer = '',
       taken = false;
     connection.setEncoding('utf8');
-    connection.on('data', async (chunk) => {
+    connection.on('data', (chunk) => {
+      if (closing) return;
       buffer += chunk;
       const end = buffer.indexOf('\n');
       if (end < 0 || taken) return;
       taken = true;
-      let answer: object;
-      try {
-        const request = JSON.parse(buffer.slice(0, end)) as {
-          type?: string;
-          key: string;
-          name: string;
-          args: Record<string, unknown>;
-        };
-        if (request.type === 'sessions-changed') {
-          sessionsChanged();
-          answer = { ok: true };
-        } else {
-          const joined = readState(dir).sessions.find((s) => s.key === request.key);
-          if (!joined) throw new Error('This session has not joined Beeline');
-          const token = await accessToken(dir, joined.key);
-          if (token !== joined.accessToken) sessionsChanged();
-          answer = {
-            ok: true,
-            data: await callTool(joined, token, request.name, request.args ?? {}),
+      const request = (async () => {
+        let answer: object;
+        try {
+          const request = JSON.parse(buffer.slice(0, end)) as {
+            type?: string;
+            key: string;
+            name: string;
+            args: Record<string, unknown>;
           };
+          if (request.type === 'sessions-changed') {
+            sessionsChanged();
+            answer = { ok: true };
+          } else {
+            const joined = readState(dir).sessions.find((s) => s.key === request.key);
+            if (!joined) throw new Error('This session has not joined Beeline');
+            const token = await accessToken(dir, joined.key);
+            if (token !== joined.accessToken) sessionsChanged();
+            answer = {
+              ok: true,
+              data: await callTool(joined, token, request.name, request.args ?? {}),
+            };
+          }
+        } catch (error) {
+          answer = { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
-      } catch (error) {
-        answer = { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
-      connection.end(JSON.stringify(answer) + '\n');
+        connection.end(JSON.stringify(answer) + '\n');
+      })();
+      requests.add(request);
+      void request.then(
+        () => requests.delete(request),
+        () => requests.delete(request),
+      );
     });
   });
-  await new Promise<void>((done, fail) => {
-    server.once('error', fail);
-    server.listen(path, () => {
-      chmodSync(path, 0o600);
-      done();
-    });
-  });
+  const listening = await listen(server, path);
+  chmodSync(path, 0o600);
   server.unref();
-  return server;
+  let closed: Promise<void> | undefined;
+  return {
+    close: () => {
+      closing = true;
+      return (closed ??= (async () => {
+        await Promise.allSettled(requests);
+        await listening.close();
+      })());
+    },
+  };
 }
 
 /** Calls a tool through the bridge; undefined when no bridge answers, so the caller goes direct. */
@@ -409,14 +443,16 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   let activated = !staged,
     stopping = false;
   let activate!: () => void, begin!: () => void;
+  // The launcher's `activate`; losing the launcher before activation exits (below).
   const handoff = staged
-    ? new Promise<void>((done) => {
-        begin = done;
+    ? answer<void>('Beeline bridge launcher', [], ({ resolve }) => {
+        begin = () => resolve();
       })
     : Promise.resolve();
+  // Received frames wait here until this candidate owns delivery.
   const activation = staged
-    ? new Promise<void>((done) => {
-        activate = done;
+    ? answer<void>('Beeline bridge activation', [], ({ resolve }) => {
+        activate = () => resolve();
       })
     : Promise.resolve();
   if (staged) {
@@ -471,11 +507,22 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   const sources = machineSources(dir);
   type Stream = { fingerprint: string; controller: AbortController; recovered: boolean };
   const streams = new Map<string, Stream>();
-  const localWatch = watch(dir, { recursive: true }, (_event, name) => {
-    const path = String(name ?? '');
-    if (path.startsWith('hooks/') || path.startsWith('inbox/') || path.startsWith('deliveries/'))
-      changed();
-  });
+  // A change without a name is any change. A failed watcher would leave this
+  // bridge deaf, so it stops and the next session start launches a new one.
+  const stopWatching = watchChanges(
+    dir,
+    (path) => {
+      // A new subdirectory can be reported by its own name only.
+      if (path === null || /^(?:hooks|inbox|deliveries|claude-mcp)(?:\/|$)/.test(path)) changed();
+    },
+    {
+      recursive: true,
+      onError: (error) => {
+        log(dir, `local watcher failed: ${error.message}`);
+        stop();
+      },
+    },
+  );
   const stop = () => {
     if (!activated) process.exit(0);
     stopping = true;
@@ -586,10 +633,12 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       await handoff;
       // Commands embedded in delivered messages always use the retained path.
       runner = { ...runner, bundle: join(dir, 'usebeeline.mjs') };
+      // Own the bridge before publishing anything: a candidate that loses the
+      // claim leaves the serving bridge's public socket where it is.
+      if (!claim()) throw new Error('Beeline bridge owner changed during handoff');
+      await own();
       renameSync(socket, bridgeSocketPath(dir));
     }
-    if (staged && !claim()) throw new Error('Beeline bridge owner changed during handoff');
-    if (staged) await own();
     writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest }), {
       mode: 0o600,
     });
@@ -618,9 +667,10 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
         }
       }
       await flush(dir, sources).catch((error) => log(dir, `flush: ${String(error)}`));
+      // A change during flush set localDirty; otherwise park until the next one.
       if (!localDirty)
-        await new Promise<void>((resolve) => {
-          wake = resolve;
+        await answer<void>('Beeline bridge changes', [], ({ resolve }) => {
+          wake = () => resolve();
         });
       wake = undefined;
     }
@@ -630,19 +680,24 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     await owner?.release();
     throw error;
   } finally {
-    localWatch.close();
+    stopWatching();
     for (const stream of streams.values()) {
       stream.controller.abort();
     }
     if (staged && !activated) activate();
     await Promise.allSettled(jobs);
-    await new Promise<void>((done) => tools.close(() => done()));
+    await tools.close();
   }
   log(
     dir,
     `bridge ${process.pid} stopped: ${stopping ? 'handoff or shutdown' : 'no joined sessions'}`,
   );
-  rmSync(pidFile, { force: true });
+  // Clean up only what this bridge still owns.
+  try {
+    if (Number(readFileSync(pidFile, 'utf8')) === process.pid) rmSync(pidFile, { force: true });
+  } catch {
+    /* already gone */
+  }
   rmSync(bridgeSocketPath(dir), { force: true });
   process.exit(0);
 }

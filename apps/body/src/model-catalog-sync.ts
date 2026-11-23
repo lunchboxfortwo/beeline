@@ -3,8 +3,8 @@
  * probes its harness once (`fetchAgentModelCatalog`, the same allow-list +
  * credential filtered view the connect wizard offers) and posts the result
  * through `postAgentModelCatalog` together with the selection sessions will
- * actually use — the server's human selection when one exists, otherwise the
- * runtime record's. The phone's MODEL / EFFORT rows read that row verbatim.
+ * actually use — per axis, the server's human selection when one exists,
+ * otherwise the runtime record's. The phone's MODEL / EFFORT rows read that row verbatim.
  *
  * One probe per activation, independent of command intake, and a persisted
  * hash so an unchanged catalog is never re-posted, and every failure is one
@@ -74,13 +74,12 @@ export async function syncAgentModelCatalog(
     const configuration = await input.api.execute('getAgentConfiguration', {
       agentId: input.agentId,
     });
+    // Per axis, as sessions resolve it (`place-session.ts` `selectionFrom`):
+    // an axis the owner left unset keeps the runtime record's value.
+    const model = configuration.model || input.runtimeSelection?.model;
+    const effort = configuration.effort || input.runtimeSelection?.effort;
     const selection: Selection | undefined =
-      configuration.model || configuration.effort
-        ? {
-            ...(configuration.model ? { model: configuration.model } : {}),
-            ...(configuration.effort ? { effort: configuration.effort } : {}),
-          }
-        : input.runtimeSelection;
+      model || effort ? { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } : undefined;
     const { catalog } = await fetchCatalog(input.agent, input.agentEnv, selection);
     const effectiveCatalog = withEffectiveCurrentValues(catalog, selection);
     const hash = modelCatalogHash(effectiveCatalog, selection);

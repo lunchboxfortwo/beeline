@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { credentialMaskPaths, harnessHomeStateDirs, wrapAgentCommand } from './bwrap-sandbox.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -10,7 +11,7 @@ afterEach(() => {
 });
 
 it('starts a free-agent Room with absent native logins, masked proxy credentials and writable private state', () => {
-  const home = mkdtempSync('/var/tmp/beeline-free-agent-sandbox-');
+  const home = mkdtempSync(`${testTmpDir()}/beeline-free-agent-sandbox-`);
   roots.push(home);
   const room = join(home, '.local/state/beeline/agents/agent/rooms/room');
   const state = join(room, 'state');

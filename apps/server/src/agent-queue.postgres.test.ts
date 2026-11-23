@@ -267,9 +267,11 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
 
   it('delivers every pending depth-four item after helper reconnect without another insert', async () => {
     await connect();
+    abort!.abort();
+    await running;
     client!.closeLive();
     const backlog = await ask('Queued while disconnected',4);
-    client!.subscribeQueue();
+    await connect();
     await answered(backlog.id);
     expect(delivered().map(item => item.id)).toContain(backlog.id);
     expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);

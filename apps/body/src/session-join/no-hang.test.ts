@@ -177,7 +177,6 @@ describe('fix 7: session hook from plugin-driven apps', () => {
         },
       });
       await handlers.session_start!({}, { sessionManager: { getSessionId: () => 'p1' }, cwd: dir });
-      await handlers.agent_settled!();
       await handlers.session_shutdown!();
       expect(sent).toEqual(['hook:session hook pi poll --session p1']);
     } finally {

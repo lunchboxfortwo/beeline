@@ -256,14 +256,21 @@ export function fixtureScope2(scope1: ReturnType<typeof fixtureScope1>) {
       await scope1.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner'),($1,$2,$4,'member')`, [bigWorkspace, BIG, USER, AGENT]);
       // Seed pre-cutover history without replay fanout. Fresh MCP sends below
       // retain all triggers and exercise the live write path against this history.
-      await scope1.db.query('ALTER TABLE messages DISABLE TRIGGER beeline_notify_live_messages');
+      // Row-by-row trigger work made this hook outlast its timeout on a loaded
+      // machine: the chat number trigger rewrites one counter row per insert,
+      // quadratic within a statement. The rows still carry what the insert
+      // triggers derive: search documents from their trigger, chat numbers
+      // 1..n with their counter.
+      await scope1.db.query('ALTER TABLE messages DISABLE TRIGGER USER');
       try {
-        await scope1.db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at)
+        await scope1.db.query('ALTER TABLE messages ENABLE TRIGGER messages_search_document_trg');
+        await scope1.db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at,chat_seq)
           SELECT encode(sha256(('big'||g)::bytea),'hex'),$1,CASE WHEN g%3=0 THEN $3 ELSE $2 END,
             'message '||g||' about @demo-agent and the release plan, with body text long enough to look real',
-            now()-((20001-g)||' seconds')::interval FROM generate_series(1,20000) g`, [BIG, USER, AGENT]);
+            now()-((20001-g)||' seconds')::interval,g FROM generate_series(1,20000) g`, [BIG, USER, AGENT]);
+        await scope1.db.query('INSERT INTO chat_message_counters(root_room_id,last_seq) VALUES($1,20000)', [BIG]);
       } finally {
-        await scope1.db.query('ALTER TABLE messages ENABLE TRIGGER beeline_notify_live_messages');
+        await scope1.db.query('ALTER TABLE messages ENABLE TRIGGER USER');
       }
       // The long seed outlives the server's keep-alive; drop the stale pooled socket.
       await phoneFetch(scope1.origin + '/.well-known/oauth-authorization-server').catch(() => undefined);

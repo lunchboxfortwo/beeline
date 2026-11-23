@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
-import { runOwned } from './wait.js';
-import { withKernelLock } from './kernel-lock.js';
+import { runWorker } from './owner-link.js';
+import { withKernelLock, withKernelLockWhenFree } from './kernel-lock.js';
 import {
   beelineInstallLayout,
   prepareLatestRelease,
@@ -10,13 +10,37 @@ import {
   type BeelineInstallLayout,
 } from './self-update.js';
 
+const installLockKey = (layout: BeelineInstallLayout) =>
+  `beeline-install:${resolve(layout.libDir)}`;
+const PREPARATION = 'release preparation';
+
 /** A busy install lock fails at once with its holder; a second updater never queues behind the first. */
 export function withInstallLock<T>(
   layout: BeelineInstallLayout,
   work: () => Promise<T>,
   step = 'Beeline install',
 ): Promise<T> {
-  return withKernelLock(`beeline-install:${resolve(layout.libDir)}`, work, { step });
+  return withKernelLock(installLockKey(layout), work, { step });
+}
+
+/**
+ * Preparation joins a preparation already running on this install (the helper
+ * preparing a just-published release): it follows that owner's lock to its
+ * end, then prepares, reusing the owner's verified staging. Any other install
+ * work refuses at once.
+ */
+export function withPreparationLock<T>(
+  layout: BeelineInstallLayout,
+  work: () => Promise<T>,
+  logger: (line: string) => void = (line) => console.error(line),
+): Promise<T> {
+  return withKernelLockWhenFree(installLockKey(layout), work, { step: PREPARATION }, (holder) => {
+    if (holder.step !== PREPARATION) return false;
+    logger(
+      `${PREPARATION} already running as pid ${holder.pid} since ${holder.since}; following it`,
+    );
+    return true;
+  });
 }
 
 export { versionAtLeast } from './self-update-manifest.js';
@@ -230,15 +254,12 @@ export async function runManagedUpdateWorker(): Promise<{
 }> {
   const layout = beelineInstallLayout(process.env);
   if (!layout) throw new Error('release preparation requires an installed layout');
-  return withInstallLock(
-    layout,
-    () =>
-      prepareLatestRelease(layout, {
-        env: process.env,
-        force: process.env.BEELINE_FORCE_REPAIR === '1',
-        logger: (line) => console.error(line),
-      }),
-    'release preparation',
+  return withPreparationLock(layout, () =>
+    prepareLatestRelease(layout, {
+      env: process.env,
+      force: process.env.BEELINE_FORCE_REPAIR === '1',
+      logger: (line) => console.error(line),
+    }),
   );
 }
 
@@ -250,20 +271,14 @@ export async function prepareReleaseInWorker(
 ): Promise<{ releaseId: string; identity: { version?: string; commit?: string } }> {
   const layout = beelineInstallLayout(env)!;
   const bootstrap = entrypoint ?? resolve(layout.libDir, '../beeline-bootstrap.mjs');
-  const step = 'preparing verified release';
-  const child = await runOwned({
-    step,
-    file: process.execPath,
-    args: [bootstrap, 'managed-update-worker'],
-    env: { ...env, BEELINE_INTERNAL_UPDATE_WORKER: '1', BEELINE_UPDATE_GROUP_OWNER: '1' },
-    ownerLink: true,
-    ...(signal ? { signal } : {}),
-  });
-  if (child.code !== 0)
-    throw new Error(
-      `${step}: worker exited ${child.code ?? child.signal}${child.stderr ? `: ${child.stderr.trim().split('\n').at(-1)}` : ''}`,
-    );
-  const result = JSON.parse(child.stdout);
+  const stdout = await runWorker(
+    'preparing verified release',
+    bootstrap,
+    'managed-update-worker',
+    { ...env, BEELINE_INTERNAL_UPDATE_WORKER: '1', BEELINE_UPDATE_GROUP_OWNER: '1' },
+    signal,
+  );
+  const result = JSON.parse(stdout);
   if (!result.releaseId) throw new Error('release preparation: no verified release');
   return result;
 }

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { withKernelLock } from './kernel-lock.js';
 import { assertLifecycleTestIsolation } from './lifecycle-test-guard.js';
 import { runOwned } from './wait.js';
+import { runWorker } from './owner-link.js';
 
 /** A native manager command is an owned child; its nonzero exit carries stdout/stderr like execFile's error. */
 async function native(
@@ -149,24 +150,16 @@ export async function convergeNativeHelper(
   if (options.run) return convergeNativeHelperOwned(options);
   const entry = env.BEELINE_RECOVERY_ENTRY || process.argv[1];
   if (!entry) throw new Error('native service convergence requires a CLI entry');
-  const step = 'native service convergence';
-  const worker = await runOwned({
-    step,
-    file: process.execPath,
-    args: [entry, 'native-converge-worker'],
-    env: {
-      ...env,
-      BEELINE_NATIVE_CONVERGENCE: JSON.stringify({
-        platform: options.platform,
-        restart: options.restart,
-        legacyCaller: options.legacyCaller,
-      }),
-      BEELINE_INTERNAL_NATIVE_WORKER: '1',
-    },
-    ownerLink: true,
+  const stdout = await runWorker('native service convergence', entry, 'native-converge-worker', {
+    ...env,
+    BEELINE_NATIVE_CONVERGENCE: JSON.stringify({
+      platform: options.platform,
+      restart: options.restart,
+      legacyCaller: options.legacyCaller,
+    }),
+    BEELINE_INTERNAL_NATIVE_WORKER: '1',
   });
-  if (worker.code !== 0) throw new Error(`${step}: worker exited ${worker.code ?? worker.signal}`);
-  const pid = JSON.parse(worker.stdout).pid as number;
+  const pid = JSON.parse(stdout).pid as number;
   if (!Number.isSafeInteger(pid) || pid < 0)
     throw new Error('native convergence returned an invalid pid');
   return pid;

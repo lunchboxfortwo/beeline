@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { migrate, PostgresDatabase, postgresPoolConfig, type SqlDatabase } from './database.js';
 import { PushDeliveryLoop } from './background.js';
 import { backfillPushOutbox } from './push-outbox.js';
+import { messageSearchDocumentSql } from './message-search-document-sql.js';
 import { PgliteDatabase } from './test-support.js';
 import * as sentry from './sentry.js';
 
@@ -67,14 +68,22 @@ describe.skipIf(!postgresUrl)('R-PUSH-SCAN-LOCK', () => {
       expect((await jobs.query(`SHOW statement_timeout`)).rows[0]!.statement_timeout).toBe('2s');
       expect((await jobs.query(`SHOW lock_timeout`)).rows[0]!.lock_timeout).toBe('500ms');
       // This history predates both outbox and replay cutover. Seed it without
-      // fanout; fresh messages below still exercise both transactional triggers.
-      await owner.query(`ALTER TABLE messages DISABLE TRIGGER message_push_outbox`);
-      await owner.query(`ALTER TABLE messages DISABLE TRIGGER beeline_notify_live_messages`);
-      await owner.query(`INSERT INTO messages(id,room_id,author_id,text,created_at)
-        SELECT 'history-'||n,$1,$2,repeat('@owner historical message ',100),now()-interval '1 day'
-        FROM generate_series(1,50000) n`, [room, author]);
-      await owner.query(`ALTER TABLE messages ENABLE TRIGGER message_push_outbox`);
-      await owner.query(`ALTER TABLE messages ENABLE TRIGGER beeline_notify_live_messages`);
+      // fanout; fresh messages below still exercise every transactional trigger.
+      // Row-by-row trigger work made this one statement outlast the test on a
+      // loaded machine: the chat number trigger rewrites one counter row per
+      // insert, quadratic within a statement. The rows still carry what the
+      // insert triggers derive: chat numbers 1..n with their counter, and the
+      // shared text's search documents computed once with the trigger's SQL.
+      await owner.query(`ALTER TABLE messages DISABLE TRIGGER USER`);
+      await owner.query(`WITH history AS MATERIALIZED (
+          SELECT text,${messageSearchDocumentSql('seed.')} search_document,
+            ${messageSearchDocumentSql('seed.', 'english')} search_stem_document
+          FROM (SELECT repeat('@owner historical message ',100) text,'message' presentation) seed)
+        INSERT INTO messages(id,room_id,author_id,text,created_at,chat_seq,search_document,search_stem_document)
+        SELECT 'history-'||n,$1,$2,history.text,now()-interval '1 day',n,history.search_document,history.search_stem_document
+        FROM history,generate_series(1,50000) n`, [room, author]);
+      await owner.query(`INSERT INTO chat_message_counters(root_room_id,last_seq) VALUES($1,50000)`, [room]);
+      await owner.query(`ALTER TABLE messages ENABLE TRIGGER USER`);
       await owner.query(`INSERT INTO messages(id,room_id,author_id,text)
         SELECT 'fresh-'||n,$1,$2,'@owner fresh' FROM generate_series(1,300) n`, [room, author]);
       // Finish fixture statistics before measuring worker lock handoff. The

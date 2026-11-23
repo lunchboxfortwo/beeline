@@ -785,6 +785,13 @@ export async function queueReviewerCommand(
     (await hasPendingCornerReview(db, input.roomId, input.agentId, headSha, pullRequest))
   )
     return { blocked: true };
+  // FAIL findings on this head and brief revision are its verdict; an explicit
+  // request is the way to ask for another review of the same head.
+  const reviewed = headSha === undefined ? undefined : (await loadCornerReviewState(db, input.roomId, headSha)).ended;
+  if (reviewed?.findings && (await db.query(
+    `SELECT 1 FROM agent_commands WHERE id=$1 AND (review_context->>'briefRevision')::int=$2`,
+    [reviewed.id, brief?.revision ?? 0])).rowCount)
+    return { blocked: true };
   const prior = (
     await db.query<{ text: string }>(
       `SELECT evidence.text FROM agent_commands command

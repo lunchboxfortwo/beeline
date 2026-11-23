@@ -7,6 +7,7 @@ import { afterEach, expect, it } from 'vitest';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { prepareWorkspace } from './workspace-checkout.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -31,8 +32,11 @@ const commit = async (source: string, version: string) => {
 };
 
 /** A repository whose first test run needs installed packages and built output. */
-async function fixture(scripts: Record<string, string>) {
-  const root = await mkdtemp('/var/tmp/beeline-prepare-');
+async function fixture(
+  scripts: Record<string, string>,
+  restore: { brief?: { spec: string } } = {},
+) {
+  const root = await mkdtemp(`${testTmpDir()}/beeline-prepare-`);
   roots.push(root);
   const source = join(root, 'source');
   await mkdir(join(source, 'dep'), { recursive: true });
@@ -64,7 +68,12 @@ async function fixture(scripts: Record<string, string>) {
   await commit(source, 'v1');
   const repository = { resolution: 'repository', remote: `file://${source}`, targetBranch: 'main' };
   const api = {
-    execute: async (name: string) => (name === 'getRoomRepositoryState' ? repository : {}),
+    execute: async (name: string) =>
+      name === 'getRoomRepositoryState'
+        ? repository
+        : name === 'getCornerRestoreState'
+          ? restore
+          : {},
   } as unknown as DaemonApiClient;
   const supervisorRoot = join(root, 'state');
   const config = {
@@ -76,6 +85,7 @@ async function fixture(scripts: Record<string, string>) {
   return {
     source,
     config,
+    restore,
     prepare: (parentRoomId?: string) =>
       prepareWorkspace({
         api,
@@ -128,4 +138,29 @@ it('prepare says the checkout is not ready when no OS sandbox can run its script
   expect(result).toContain(
     'is not ready: packages were not installed and the build step did not run',
   );
+});
+
+it('prepare hands its step the thread brief and a writable temp folder tests can use', async () => {
+  const record = [
+    "const fs = require('node:fs');",
+    "fs.writeFileSync(process.env.TMPDIR + '/probe', 'written');",
+    "fs.writeFileSync('prepared.json', JSON.stringify({ brief: process.env.BEELINE_BRIEF, tmp: process.env.TMPDIR }));",
+  ].join(' ');
+  const f = await fixture(
+    { 'corner:prepare': `node -e ${JSON.stringify(record)}` },
+    { brief: { spec: 'Fix the phone app in apps/mobile.' } },
+  );
+  const prepared = async () => {
+    const result = await f.prepare('room');
+    expect(result).toContain('Checkout ready at ');
+    const path = result.slice('Checkout ready at '.length).split(' on ')[0]!;
+    return JSON.parse(await readFile(join(path, 'prepared.json'), 'utf8'));
+  };
+  const first = await prepared();
+  expect(first.brief).toBe('Fix the phone app in apps/mobile.');
+  // Test helpers root their folders in TMPDIR only under /var/tmp.
+  expect(first.tmp).toMatch(/^\/var\/tmp\//);
+  // A revised brief prepares again even though the tree did not change.
+  f.restore.brief = { spec: 'Fix the server read path.' };
+  expect((await prepared()).brief).toBe('Fix the server read path.');
 });

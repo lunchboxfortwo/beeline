@@ -7,6 +7,7 @@ import { sandboxMountPlan, buildBwrapArgv, credentialMaskPaths, grantedSandboxPa
 import { isPreapprovedReadOnlyCommand, parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { requestGrant, readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { GrantCommandRunner } from './grant-runner.js';
+import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 it.each([
   ['bash', '-c', 'printf approved'],
@@ -165,11 +166,11 @@ const roots: string[] = [];
 const children: ChildProcess[] = [];
 afterEach(() => { for (const child of children.splice(0)) child.kill();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-function fixture(base = '/var/tmp') {
+function fixture(base = testTmpDir()) {
   const root = mkdtempSync(`${base}/beeline-access-`); roots.push(root); return root;
 }
 
-it.each(['/tmp', '/var/tmp'])('R1 keeps chat host files read-only under %s while private state is writable and credentials stay masked', base => {
+it.each(['/tmp', testTmpDir()])('R1 keeps chat host files read-only under %s while private state is writable and credentials stay masked', base => {
   const home = fixture(base);
   const privateHome = resolve(home, 'agent-home'); mkdirSync(privateHome);
   const hidden = resolve(home, '.aws');
@@ -199,7 +200,7 @@ it('R1 startup has no ambient owner HOME or bus capability and retains Docker ma
   expect(explicit.masks.some(mask => mask.path === socket)).toBe(false);
 });
 
-it.each(['/tmp', '/var/tmp'])('R2 a write path grant under %s retains its capability from receipt to sandbox activation', async base => {
+it.each(['/tmp', testTmpDir()])('R2 a write path grant under %s retains its capability from receipt to sandbox activation', async base => {
   const target = fixture(base); const calls: Record<string, unknown>[] = [];
   const result = await requestGrant({ mode: 'request', action: 'Write the project directory', kind: 'path', target, capabilities: 'read and write', reason: 'Build', purpose: 'Build project' }, {
     roomId: 'room', execute: async (_name, input) => { calls.push(input); return { auto: true, grantId: 'write' }; },

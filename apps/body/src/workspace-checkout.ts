@@ -1,25 +1,19 @@
 import { runOwnedFile } from './wait.js';
-import { type ExecFileOptions } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { credentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { agentGitIdentity } from './agent-git-identity.js';
-import {
-  agentCornerCheckoutPaths,
-  materializeAgentCornerCheckout,
-} from './agent-corner-checkout.js';
+import { materializeAgentCornerCheckout } from './agent-corner-checkout.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { rememberStorageOwner } from './storage-owners.js';
 import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
-
-export const execFileAsync = runOwnedFile;
 
 export function githubHttpsRemote(remote: string): string {
   const normalized = remote
@@ -62,11 +56,6 @@ export function cornerRepositoryCacheDir(supervisorRoot: string, remote: string)
   return resolve(supervisorRoot, 'beeline', 'repositories', `${repositoryHash}.git`);
 }
 
-/** The checkout folders a corner session binds before any checkout exists. */
-export function cornerCheckoutFolders(supervisorRoot: string, cornerId: string, agentId: string) {
-  return agentCornerCheckoutPaths(supervisorRoot, cornerId, agentId);
-}
-
 /**
  * The agent's own copy of a corner's branch. The session already binds these
  * folders, so the copy is written into them rather than renamed over them.
@@ -80,11 +69,8 @@ export async function materializeCornerWorktree(input: {
   supervisorRoot: string;
   committer: { name: string; publicKey: string };
 }): Promise<{ path: string; gitCommonDir: string }> {
-  const git = (args: string[], options: ExecFileOptions = {}) =>
-    execFileAsync('git', args, {
-      ...options,
-      encoding: 'utf8',
-    });
+  const git = (args: string[], options: Parameters<typeof runOwnedFile>[2] = {}) =>
+    runOwnedFile('git', args, options);
   const remote = roomCheckoutRemote(input.remote);
   const sourceGitDir = cornerRepositoryCacheDir(input.supervisorRoot, remote);
   await mkdir(dirname(sourceGitDir), { recursive: true, mode: 0o700 });
@@ -117,8 +103,7 @@ export async function materializeCornerWorktree(input: {
     targetBranch: input.targetBranch,
     env: githubGitEnv(input.token),
   });
-  await git([`--git-dir=${gitCommonDir}`, 'config', 'extensions.worktreeConfig', 'true']);
-  await git(['-C', path, 'config', '--worktree', 'core.bare', 'false']);
+  // materializeAgentCornerCheckout already pinned worktree config and the checkout's root.
   await git([
     '-C',
     path,
@@ -130,9 +115,6 @@ export async function materializeCornerWorktree(input: {
   const identity = agentGitIdentity(input.committer);
   await git(['-C', path, 'config', '--worktree', 'user.name', identity.name]);
   await git(['-C', path, 'config', '--worktree', 'user.email', identity.email]);
-  const top = (await git(['-C', path, 'rev-parse', '--show-toplevel'])).stdout.toString().trim();
-  if ((await realpath(top)) !== (await realpath(path)))
-    throw new Error(`thread worktree escaped its isolated root: ${top}`);
   return { path, gitCommonDir };
 }
 
@@ -172,12 +154,12 @@ export async function materializeRoomCheckout(input: {
   return withKernelLock(`room-checkout:${path}`, async () => {
     const env = input.token ? githubGitEnv(input.token) : process.env;
     if (!existsSync(resolve(path, '.git')))
-      await execFileAsync(
+      await runOwnedFile(
         'git',
         ['clone', '--no-checkout', ...CRASH_SAFE_CLONE_ARGS, remote, path],
         { env, maxBuffer: 4 * 1024 * 1024 },
       );
-    await execFileAsync('git', ['-C', path, 'config', 'gc.pruneExpire', 'never']);
+    await runOwnedFile('git', ['-C', path, 'config', 'gc.pruneExpire', 'never']);
     await fetchRepositoryCache({
       gitDir: resolve(path, '.git'),
       label: `room-checkouts/${checkoutId}`,
@@ -188,7 +170,7 @@ export async function materializeRoomCheckout(input: {
       ],
       env,
     });
-    await execFileAsync(
+    await runOwnedFile(
       'git',
       ['-C', path, 'checkout', '--detach', '--force', `origin/${input.targetBranch}`],
       { env, maxBuffer: 4 * 1024 * 1024 },
@@ -200,14 +182,16 @@ export async function materializeRoomCheckout(input: {
 /**
  * Install the checkout's packages and run its build step in the same OS
  * sandbox as the agent's own commands. A repository's `corner:prepare` is its
- * whole step; otherwise `npm ci` and `npm run build` when defined. Returns why
- * the checkout is not ready, or undefined once it is.
+ * whole step and reads the thread brief from `BEELINE_BRIEF`; otherwise
+ * `npm ci` and `npm run build` when defined. Returns why the checkout is not
+ * ready, or undefined once it is.
  */
 async function readyCheckout(input: {
   path: string;
   config: BodyConfig;
   supervisorRoot: string;
   agentId: string;
+  brief?: string;
 }): Promise<string | undefined> {
   const { path, config } = input;
   const manifest = await readFile(resolve(path, 'package.json'), 'utf8').catch(() => undefined);
@@ -222,13 +206,19 @@ async function readyCheckout(input: {
   if (!steps.length) return undefined;
   if (!config.bwrapPath)
     return 'packages were not installed and the build step did not run: this host has no OS sandbox to run the repository scripts in.';
-  const git = (args: string[]) => execFileAsync('git', ['-C', path, ...args], { encoding: 'utf8' });
+  const git = (args: string[]) => runOwnedFile('git', ['-C', path, ...args]);
   // An unchanged clean tree keeps the packages and build it was prepared with.
   const marker = resolve(
     path,
     (await git(['rev-parse', '--git-path', 'beeline-prepared'])).stdout.trim(),
   );
-  const tree = (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim();
+  // A revised brief may touch other workspaces, so it is part of what was prepared.
+  const tree = [
+    (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim(),
+    createHash('sha256')
+      .update(input.brief ?? '')
+      .digest('hex'),
+  ].join(' ');
   if (
     (await readFile(marker, 'utf8').catch(() => '')) === tree &&
     !(await git(['status', '--porcelain'])).stdout.trim()
@@ -237,36 +227,45 @@ async function readyCheckout(input: {
   await rm(marker, { force: true });
   const cache = resolve(input.supervisorRoot, 'beeline', 'npm-cache');
   await mkdir(cache, { recursive: true, mode: 0o700 });
-  for (const args of steps) {
-    const command = wrapAgentCommand({
-      bwrapPath: config.bwrapPath,
-      spec: {
-        mode: 'readonly',
+  // The sandbox keeps /tmp private and /var/tmp read-only; tests write here.
+  const tmp = await mkdtemp('/var/tmp/beeline-prepare-');
+  try {
+    for (const args of steps) {
+      const command = wrapAgentCommand({
+        bwrapPath: config.bwrapPath,
+        spec: {
+          mode: 'readonly',
+          cwd: path,
+          additionalWritablePaths: [path, cache, tmp],
+          maskPaths: [
+            ...credentialMaskPaths(config.sandboxMaskPaths, config.operatorHome ?? homedir()),
+            ...siblingAgentMaskPaths(runtimeDirectory(input.supervisorRoot, input.agentId)),
+          ],
+        },
+        command: 'npm',
+        args,
+      });
+      await runOwnedFile(command.command, command.args, {
         cwd: path,
-        additionalWritablePaths: [path, cache],
-        maskPaths: [
-          ...credentialMaskPaths(config.sandboxMaskPaths, config.operatorHome ?? homedir()),
-          ...siblingAgentMaskPaths(runtimeDirectory(input.supervisorRoot, input.agentId)),
-        ],
-      },
-      command: 'npm',
-      args,
-    });
-    await execFileAsync(command.command, command.args, {
-      cwd: path,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-      // Turbo otherwise caches beside a linked worktree's Git storage, outside the checkout.
-      env: {
-        PATH: process.env.PATH ?? '',
-        HOME: '/tmp',
-        npm_config_cache: cache,
-        TURBO_CACHE_DIR: resolve(path, '.turbo', 'cache'),
-      },
-    }).catch((error: { stderr?: string; stdout?: string; message?: string }) => {
-      const output = (error.stderr || error.stdout || error.message || '').trim().slice(-1500);
-      throw new Error(`Checkout at ${path} is not ready: npm ${args.join(' ')} failed:\n${output}`);
-    });
+        maxBuffer: 64 * 1024 * 1024,
+        // Turbo otherwise caches beside a linked worktree's Git storage, outside the checkout.
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: '/tmp',
+          TMPDIR: tmp,
+          BEELINE_BRIEF: input.brief ?? '',
+          npm_config_cache: cache,
+          TURBO_CACHE_DIR: resolve(path, '.turbo', 'cache'),
+        },
+      }).catch((error: { stderr?: string; stdout?: string; message?: string }) => {
+        const output = (error.stderr || error.stdout || error.message || '').trim().slice(-1500);
+        throw new Error(
+          `Checkout at ${path} is not ready: npm ${args.join(' ')} failed:\n${output}`,
+        );
+      });
+    }
+  } finally {
+    await rm(tmp, { recursive: true, force: true });
   }
   await writeFile(marker, tree);
   return undefined;
@@ -295,9 +294,11 @@ export async function prepareWorkspace(input: {
     ? undefined
     : (await input.api.execute('getRoomGitHubToken', { roomId: repositoryRoom })).token;
   let path: string;
+  let brief: string | undefined;
   let branch = targetBranch;
   if (input.parentRoomId) {
     const restore = await input.api.execute('getCornerRestoreState', { cornerId: input.placeId });
+    brief = restore.brief?.spec;
     branch =
       restore.featureBranch ?? `feature/corner-${input.placeId.replaceAll('-', '').slice(0, 12)}`;
     path = (
@@ -314,12 +315,12 @@ export async function prepareWorkspace(input: {
     // A checkout with no work of its own moves to the base just fetched.
     const base = `refs/remotes/origin/${targetBranch}`;
     if (
-      await execFileAsync('git', ['-C', path, 'merge-base', '--is-ancestor', 'HEAD', base]).then(
+      await runOwnedFile('git', ['-C', path, 'merge-base', '--is-ancestor', 'HEAD', base]).then(
         () => true,
         () => false,
       )
     )
-      await execFileAsync('git', ['-C', path, 'merge', '--ff-only', '--quiet', base]);
+      await runOwnedFile('git', ['-C', path, 'merge', '--ff-only', '--quiet', base]);
     await rememberStorageOwner(input.supervisorRoot, {
       workspaceId: input.workspaceId,
       roomId: input.placeId,
@@ -369,6 +370,7 @@ export async function prepareWorkspace(input: {
       config: input.config,
       supervisorRoot: input.supervisorRoot,
       agentId: input.agent.publicKey,
+      ...(brief ? { brief } : {}),
     });
   // Agents in one Room share its checkout; one prepares it at a time.
   let notReady: string | undefined;

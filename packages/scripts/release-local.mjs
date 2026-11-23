@@ -82,7 +82,7 @@ export function attribution(text) {
 }
 
 export function missingReleaseCredentials(args, secrets, plan = {}) {
-  const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'NPM_AUTOMATION_TOKEN'];
+  const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8'];
   if (args.channel === 'latest') required.push('CLOUDFLARE_PAGES_TOKEN', 'CLOUDFLARE_ACCOUNT_ID');
   if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
   if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
@@ -363,11 +363,6 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
           step.run = run;
         }
         processes.log('Windows desktop skipped: published Windows installers carried unchanged; the updater manifest omits Windows.');
-      }
-      if (step.name === 'Publish the exact helper CLI package') {
-        // Keep publication logic and exact smoke-tested tarball; the global
-        // npm install is confined to this job's private NPM_CONFIG_PREFIX.
-        if (!context.env.NPM_AUTOMATION_TOKEN) throw new Error('Local npm publication requires NPM_AUTOMATION_TOKEN');
       }
     },
     afterStep: async ({ step, context, env, result, engine }) => {

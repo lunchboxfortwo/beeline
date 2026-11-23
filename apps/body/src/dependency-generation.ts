@@ -13,7 +13,6 @@ import {
   isContainedTreePath,
 } from './warm-node-modules.js';
 
-const exec = runOwnedFile;
 const marker = '.beeline-generation';
 export const dependencyRequest = '.beeline-dependency-request';
 
@@ -116,7 +115,7 @@ export async function prepareDependencyGeneration(input: {
   if (seeded?.reason !== 'seeded') {
     if (input.install) await input.install();
     else
-      await exec(input.npm, ['ci', '--no-audit', '--no-fund'], {
+      await runOwnedFile(input.npm, ['ci', '--no-audit', '--no-fund'], {
         cwd: input.root,
         env: { ...process.env, npm_config_cache: input.cache },
         maxBuffer: 16 * 1024 * 1024,

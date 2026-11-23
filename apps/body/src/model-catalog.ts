@@ -99,7 +99,6 @@ async function withAgentModelCatalog<T>(
   };
   signal?.addEventListener('abort', abort, { once: true });
   try {
-    signal?.throwIfAborted();
     await startAgentProcess(client, signal);
     signal?.throwIfAborted();
     const { sessionId, raw: sessionRaw } = await client.sessionNew({

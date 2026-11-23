@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import {
   closeSync,
   existsSync,
@@ -8,7 +8,6 @@ import {
   readFileSync,
   renameSync,
   rmSync,
-  watch,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -18,7 +17,7 @@ import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
 import { notifyBridgeSessions } from './bridge.js';
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
-import { runOwned, tryLock } from '../wait.js';
+import { answer, launchDetached, runOwnedFile, tryLock } from '../wait.js';
 
 export function bridgeRunning(dir: string): boolean {
   try {
@@ -54,14 +53,9 @@ async function isBridgeProcess(pid: number): Promise<boolean> {
         args[3] === 'bridge'
       );
     }
-    const listed = await runOwned({
-      step: 'ps',
-      file: 'ps',
-      args: ['-ww', '-p', String(pid), '-o', 'args='],
-      onLine: () => undefined,
-    });
-    if (listed.code !== 0) return false;
-    const args = listed.stdout.trim();
+    const args = (
+      await runOwnedFile('ps', ['-ww', '-p', String(pid), '-o', 'args='])
+    ).stdout.trim();
     return /(?:^|\/)node\s+.*\/(?:beeline|usebeeline\.mjs|recovery-cli\.mjs) session bridge$/.test(
       args,
     );
@@ -70,25 +64,25 @@ async function isBridgeProcess(pid: number): Promise<boolean> {
   }
 }
 
+/** The candidate's IPC message `expected`, or its exit, error or lost channel first. */
 function message(child: ChildProcess, expected: string): Promise<void> {
-  return new Promise((done, fail) => {
-    const finish = (error?: Error) => {
-      child.removeListener('message', received);
-      child.removeListener('error', failed);
-      child.removeListener('exit', exited);
-      if (error) fail(error);
-      else done();
-    };
-    const received = (value: unknown) => {
-      if (value === expected) finish();
-    };
-    const failed = (error: Error) => finish(error);
-    const exited = () =>
-      finish(new Error(`Beeline bridge exited before ${expected}; see bridge.log`));
-    child.on('message', received);
-    child.once('error', failed);
-    child.once('exit', exited);
-    if (child.exitCode !== null || child.signalCode !== null) exited();
+  const lost = () => new Error(`Beeline bridge exited before ${expected}; see bridge.log`);
+  let received: ((value: unknown) => void) | undefined;
+  return answer<void>(
+    'Beeline bridge candidate',
+    [
+      [child, 'error'],
+      [child, 'exit', lost],
+      [child, 'disconnect', lost],
+    ],
+    ({ resolve }) => {
+      received = (value) => {
+        if (value === expected) resolve();
+      };
+      child.on('message', received);
+    },
+  ).finally(() => {
+    if (received) child.removeListener('message', received);
   });
 }
 
@@ -98,8 +92,11 @@ export async function ensureBridge(
   dir: string,
   runner: Runner,
   env: NodeJS.ProcessEnv = process.env,
+  options: { onlyIfAbsent?: boolean } = {},
 ): Promise<void> {
   await withKernelLock(`beeline-session-bridge:${resolve(dir)}`, async () => {
+    // Recovery starts a bridge only where none serves; it never replaces one.
+    if (options.onlyIfAbsent && bridgeRunning(dir)) return;
     const source = runner.candidate ?? runner.bundle;
     const digest = bundleDigest({ ...runner, bundle: source });
     const pidFile = join(dir, 'bridge.pid');
@@ -123,12 +120,20 @@ export async function ensureBridge(
     const bundle = join(staging, 'usebeeline.mjs');
     writeFileSync(bundle, readFileSync(source), { mode: 0o600 });
     const out = openSync(join(dir, 'bridge.log'), 'a', 0o600);
-    const child = spawn(runner.node, [bundle, 'session', 'bridge'], {
-      detached: true,
-      stdio: ['ignore', out, out, 'ipc'],
-      env: { ...env, BEELINE_SESSION_BUNDLE: bundle, BEELINE_SESSION_BRIDGE_STAGING: '1' },
-    });
-    closeSync(out);
+    // It must outlive this command; the IPC channel lasts only through the handshake.
+    let launched: ReturnType<typeof launchDetached>;
+    try {
+      launched = launchDetached({
+        file: runner.node,
+        args: [bundle, 'session', 'bridge'],
+        stdio: ['ignore', out, out],
+        ipc: true,
+        env: { ...env, BEELINE_SESSION_BUNDLE: bundle, BEELINE_SESSION_BRIDGE_STAGING: '1' },
+      });
+    } finally {
+      closeSync(out);
+    }
+    const child = launched.child;
     let published = false;
     try {
       await message(child, 'ready');
@@ -152,7 +157,8 @@ export async function ensureBridge(
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
           }
-          await owner.released();
+          // The candidate dying while the old owner drains ends this takeover too.
+          await Promise.race([owner.released(), active]);
         } finally {
           owner.close();
         }
@@ -162,14 +168,11 @@ export async function ensureBridge(
       published = true;
       child.send('activate');
       await active;
-      child.disconnect();
-      child.unref();
+      launched.release();
     } catch (error) {
       if (child.pid && child.exitCode === null && child.signalCode === null) {
-        await new Promise<void>((done) => {
-          child.once('exit', () => done());
-          child.kill('SIGKILL');
-        });
+        child.kill('SIGKILL');
+        await launched.exited;
       }
       if (published) {
         if (previous) {
@@ -186,46 +189,38 @@ export async function ensureBridge(
   });
 }
 
-/** Recovery must also run a retained pre-handoff release. Its readiness
- * contract was bridge-owner.json, so do not require the new IPC protocol. */
+/**
+ * Recovery runs the retained bundle when no bridge serves. One that speaks
+ * the staged handshake (since #4096) is recovered through it, so recovery
+ * settles on the candidate's own ready/active, exit or error, serialized by
+ * the launch lock and proven ownership. An older, marker-only bundle is
+ * launched without a readiness wait: a candidate claims ownership before it
+ * publishes anything, so a concurrent start cannot replace the socket it serves.
+ */
 async function recoverRetainedBridge(
   dir: string,
   stable: string,
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
+  if (readFileSync(stable, 'utf8').includes('BEELINE_SESSION_BRIDGE_STAGING')) {
+    await ensureBridge(dir, { node: process.execPath, bundle: stable }, env, {
+      onlyIfAbsent: true,
+    });
+    return;
+  }
   await withKernelLock(`beeline-session-bridge:${resolve(dir)}`, async () => {
     if (bridgeRunning(dir)) return;
-    const digest = bundleDigest({ node: process.execPath, bundle: stable });
     const out = openSync(join(dir, 'bridge.log'), 'a', 0o600);
-    const child = spawn(process.execPath, [stable, 'session', 'bridge'], {
-      detached: true,
-      stdio: ['ignore', out, out],
-      env: { ...env, BEELINE_SESSION_BUNDLE: stable, BEELINE_SESSION_BRIDGE_STAGING: '' },
-    });
-    closeSync(out);
-    await new Promise<void>((done, fail) => {
-      const finish = (error?: Error) => {
-        watcher.close();
-        child.removeListener('error', failed);
-        child.removeListener('exit', exited);
-        if (error) fail(error);
-        else done();
-      };
-      const inspect = () => {
-        const owner = bridgeOwner(dir);
-        if (owner && owner.pid === child.pid && owner.digest === digest) finish();
-      };
-      const failed = (error: Error) => finish(error);
-      const exited = () =>
-        finish(new Error('Retained Beeline bridge exited before readiness; see bridge.log'));
-      const watcher = watch(dir, (_event, name) => {
-        if (String(name) === 'bridge-owner.json') inspect();
+    try {
+      launchDetached({
+        file: process.execPath,
+        args: [stable, 'session', 'bridge'],
+        stdio: ['ignore', out, out],
+        env: { ...env, BEELINE_SESSION_BUNDLE: stable, BEELINE_SESSION_BRIDGE_STAGING: '' },
       });
-      child.once('error', failed);
-      child.once('exit', exited);
-      inspect();
-    });
-    child.unref();
+    } finally {
+      closeSync(out);
+    }
   });
 }
 
@@ -247,7 +242,13 @@ export async function refreshJoinedSessionBridge(
     });
     const stable = join(dir, 'usebeeline.mjs');
     if (!bridgeRunning(dir) && existsSync(stable)) {
-      await recoverRetainedBridge(dir, stable, env);
+      // A failed recovery has its own diagnostic; the caller still gets the upgrade's error.
+      await recoverRetainedBridge(dir, stable, env).catch((recovery: unknown) =>
+        writeFileSync(join(dir, 'bridge.log'), `bridge recovery failed: ${String(recovery)}\n`, {
+          flag: 'a',
+          mode: 0o600,
+        }),
+      );
     }
     throw error;
   }

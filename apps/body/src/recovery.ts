@@ -15,7 +15,12 @@ import {
   SYSTEMD_HELPER_UNIT_NAME,
   type NativeRunner,
 } from './native-helper.js';
-import { prepareReleaseInWorker, versionAtLeast, withInstallLock } from './managed-update.js';
+import {
+  prepareReleaseInWorker,
+  versionAtLeast,
+  withInstallLock,
+  withPreparationLock,
+} from './managed-update.js';
 import {
   activeReleaseId,
   activateRelease,
@@ -41,11 +46,7 @@ export async function prepareMachineRelease(
     BEELINE_LIB_DIR: layout.libDir,
   };
   if (options?.fetchImpl || env.BEELINE_LAB === '1')
-    return withInstallLock(
-      layout,
-      () => prepareLatestRelease(layout, options),
-      'release preparation',
-    );
+    return withPreparationLock(layout, () => prepareLatestRelease(layout, options), options.logger);
   const stable = resolve(layout.libDir, '../beeline-bootstrap.mjs');
   const entrypoint =
     env.BEELINE_RECOVERY_ENTRY ||

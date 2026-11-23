@@ -301,6 +301,23 @@ async function laterBriefApproval(
 }
 
 /**
+ * The message a delivery ID addressed to this agent delivered. Briefs, holds
+ * and message reads accept that delivery ID wherever they accept a message ID.
+ * With a corner, also says whether its author commands that corner.
+ */
+export async function deliveredMessage(
+  db: SqlDatabase, deliveryId: string, agentId: string, cornerId?: string,
+): Promise<{ id: string; room_id: string; from_commander: boolean | null } | undefined> {
+  return (await db.query<{ id: string; room_id: string; from_commander: boolean | null }>(
+    `SELECT message.id,message.room_id,message.author_id=${cornerCommanderIdSql('corner')} from_commander
+     FROM agent_commands command JOIN messages message ON message.id=command.source_message_id
+     LEFT JOIN rooms corner ON corner.id=$3::uuid
+     WHERE command.id=$1 AND command.agent_id=$2 AND command.private_payload IS NULL`,
+    [deliveryId, agentId, cornerId ?? null],
+  )).rows[0];
+}
+
+/**
  * Quote the human message that approved this spec. The agent names only the
  * message; its exact text and author come from the Room, and whether it was
  * the command that opened this work or a later answer is decided here.
@@ -344,13 +361,9 @@ export async function resolveCornerBriefApproval(
   // for it. An uncited revision cites this turn's delivery when the thread's
   // human commander sent it; the commander may cite any chat it was addressed in.
   let sourceMessageId = draft.approval?.sourceMessageId ?? revision?.command?.id ?? '';
-  const delivered = revision && sourceMessageId ? (await db.query<{ id: string; room_id: string; from_commander: boolean }>(
-    `SELECT message.id,message.room_id,message.author_id=${cornerCommanderIdSql('corner')} from_commander
-     FROM agent_commands command JOIN messages message ON message.id=command.source_message_id
-     JOIN rooms corner ON corner.id=$3
-     WHERE command.id=$1 AND command.agent_id=$2 AND command.private_payload IS NULL`,
-    [sourceMessageId, revision.agentId, revision.cornerId],
-  )).rows[0] : undefined;
+  const citingAgentId = revision?.agentId ?? humanCitation?.agentId;
+  const delivered = citingAgentId && sourceMessageId
+    ? await deliveredMessage(db, sourceMessageId, citingAgentId, revision?.cornerId) : undefined;
   if (revision && !draft.approval && !delivered?.from_commander)
     throw new CommandRefusalError('brief.approval.sourceMessageId is required; cite the approving human message or active private commander order ID', 403);
   if (delivered) sourceMessageId = delivered.id;

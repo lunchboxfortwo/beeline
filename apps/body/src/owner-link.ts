@@ -1,4 +1,4 @@
-import { onEnd } from './wait.js';
+import { onEnd, runOwned } from './wait.js';
 
 /**
  * A worker started by runOwned with `ownerLink` reads EOF on stdin when its
@@ -23,6 +23,29 @@ export function exitWithOwner(): void {
   });
   // The link must not keep a finished worker alive.
   process.stdin.unref?.();
+}
+
+/** One of our own workers as an owned child that dies with this owner; its stdout is the answer. */
+export async function runWorker(
+  step: string,
+  entry: string,
+  command: string,
+  env: NodeJS.ProcessEnv,
+  signal?: AbortSignal,
+): Promise<string> {
+  const worker = await runOwned({
+    step,
+    file: process.execPath,
+    args: [entry, command],
+    env,
+    ownerLink: true,
+    ...(signal ? { signal } : {}),
+  });
+  if (worker.code !== 0)
+    throw new Error(
+      `${step}: worker exited ${worker.code ?? worker.signal}${worker.stderr ? `: ${worker.stderr.trim().split('\n').at(-1)}` : ''}`,
+    );
+  return worker.stdout;
 }
 
 export async function withCallerSignal<T>(

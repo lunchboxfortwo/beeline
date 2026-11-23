@@ -1,6 +1,6 @@
 # Shared dependency generations
 
-Sandboxed repository corners prepare root npm dependencies before harness activation. Mobile remains opt-in: `npm run corner:prepare -- --mobile` requests its tree on the next turn. Both use one machine store, keyed by the lockfile, Node ABI, architecture and platform. Workspace corners use the same path.
+Sandboxed repository corners prepare root npm dependencies before harness activation. Mobile is opt-in: `npm run corner:prepare -- --mobile` requests its tree on the next turn, and the workspace tool adds it when the thread brief mentions mobile. Preparation ends by running one test file in each prepared workspace. Both use one machine store, keyed by the lockfile, Node ABI, architecture and platform. Workspace corners use the same path.
 
 Each checkout keeps writable npm metadata and tool caches, plus its own directory structure and workspace symlinks; package files share store inodes. The helper seals installed package directories with read-only binds after writable checkout and agent-home mounts. A corner cannot chmod or write those files through its mount namespace. This is the existing sandbox's filesystem boundary, not protection against privileged host services that bypass the namespace.
 

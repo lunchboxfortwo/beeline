@@ -1,9 +1,7 @@
-import { runOwned } from '../wait.js';
 import { SESSION_ON_DEMAND_NOTICE } from '@beeline/api-contract/agent-invitation-guide';
 // `usebeeline join` and `usebeeline session …`: a coding session that is already running joins a person's Beeline
 // Rooms as its own member, from one pasted line and one sign-in on any device.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { spawn } from 'node:child_process';
 import {
   closeSync,
   constants,
@@ -37,7 +35,6 @@ import {
   finishSignIn,
   NOT_JOINED,
   registerClient,
-  setMachineReadOutput,
   signInLink,
   SignInEndedError,
   type SignIn,
@@ -46,11 +43,13 @@ import {
   bridgeRunning,
   ensureBridge,
   notifyBridgeSessions,
+  recordDeliveryFailure,
   renderAttachments,
   renderMention,
   renderRules,
   renderWake,
   runBridge,
+  setupDelivery,
   toolViaBridge,
   type Mention,
   type Runner,
@@ -83,7 +82,7 @@ import {
   recordHookSession,
 } from './store.js';
 import { tryWithKernelLock } from '../kernel-lock.js';
-import { ask, tryLock } from '../wait.js';
+import { answer, ask, launchDetached, runOwnedFile, setMachineReadOutput } from '../wait.js';
 
 interface Pending {
   server: string;
@@ -200,15 +199,11 @@ function runner(dir: string, env: NodeJS.ProcessEnv): Runner {
   return { node: process.execPath, bundle: existsSync(bundle) ? bundle : running };
 }
 
-async function gitRoot(cwd: string): Promise<string | undefined> {
-  const result = await runOwned({
-    step: 'git root',
-    file: 'git',
-    args: ['rev-parse', '--show-toplevel'],
-    machineRead: true,
-    cwd,
-  }).catch(() => ({ code: 1, stdout: '' }));
-  return result.code === 0 ? result.stdout.trim() : undefined;
+function gitRoot(cwd: string): Promise<string | undefined> {
+  return runOwnedFile('git', ['rev-parse', '--show-toplevel'], { cwd }).then(
+    (result) => result.stdout.trim(),
+    () => undefined,
+  );
 }
 
 interface Found {
@@ -245,10 +240,11 @@ export function findOwnSession(env: NodeJS.ProcessEnv, dir: string): Found {
       claudeInboundFallback: held && !hasClaudeMcp(dir, own?.pid ?? detected.pid),
     };
   }
+  // Other apps report their conversations through the hooks or plugins this command installs.
+  const reported = hookSessions(dir)
+    .filter((h) => h.agent === detected.agent && h.cwd === cwd)
+    .sort((a, b) => b.seenAt - a.seenAt)[0];
   if (sessionAgentBehavior(detected.agent).delivery === 'queue') {
-    const reported = hookSessions(dir)
-      .filter((h) => h.agent === detected.agent && h.cwd === cwd)
-      .sort((a, b) => b.seenAt - a.seenAt)[0];
     const thread = env.CODEX_THREAD_ID ?? env.CODEX_SESSION_ID ?? reported?.sessionId;
     const live = scanCodex();
     const own = thread
@@ -261,10 +257,6 @@ export function findOwnSession(env: NodeJS.ProcessEnv, dir: string): Found {
       pid: own?.pid ?? detected.pid,
     };
   }
-  // Other apps report their conversations through the hooks or plugins this command installs.
-  const reported = hookSessions(dir)
-    .filter((h) => h.agent === detected.agent && h.cwd === cwd)
-    .sort((a, b) => b.seenAt - a.seenAt)[0];
   return {
     agent: detected.agent,
     cwd,
@@ -297,6 +289,16 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   const run = runner(dir, env);
   const key = sessionKey(own.agent, own.cwd, own.sessionId);
   const server = serverUrl(args, env);
+  const agentBin =
+    sessionAgentBehavior(own.agent).delivery === 'queue' ? which('codex', env) : undefined;
+  const pendingFile = (state: string) => {
+    mkdirSync(join(dir, 'pending'), { recursive: true, mode: 0o700 });
+    return join(
+      dir,
+      'pending',
+      `${createHash('sha256').update(state).digest('hex').slice(0, 24)}.json`,
+    );
+  };
   const attachment = flag(args, '--attach');
   if (attachment) {
     const tokens = await attachLocalDelivery(server, attachment);
@@ -307,18 +309,12 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
       agent: own.agent,
       cwd: own.cwd,
       name: own.chosen ?? agentLabel(own.agent),
-      sessionId: flag(args, '--conversation') ?? own.sessionId,
+      sessionId: own.sessionId,
       pid: own.pid,
-      agentBin:
-        sessionAgentBehavior(own.agent).delivery === 'queue' ? which('codex', env) : undefined,
+      agentBin,
       startedAt: Date.now(),
     };
-    mkdirSync(join(dir, 'pending'), { recursive: true, mode: 0o700 });
-    const file = join(
-      dir,
-      'pending',
-      `${createHash('sha256').update(pending.signIn.state).digest('hex').slice(0, 24)}.json`,
-    );
+    const file = pendingFile(pending.signIn.state);
     writePending(file, pending);
     await finishJoin(file, env);
     console.log(
@@ -368,22 +364,15 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   const previous = existingPending(dir, own, server);
   const clientId =
     previous?.pending.clientId ?? (await registerClient(server, agentLabel(own.agent)));
-  let available = true;
-  if (previous) {
-    const finisher = await tryLock(finisherKey(previous.file));
-    if (finisher.held) await finisher.release();
-    else {
-      finisher.close();
-      available = false;
-    }
-  }
-  const known = previous?.pending.signIn.tokens;
+  // A busy finisher lock means a background finisher still owns the pending sign-in.
+  const available = previous
+    ? await tryWithKernelLock(finisherKey(previous.file), async () => true)
+    : true;
   const resume =
     previous &&
-    (available !== true ||
-      Boolean(known) ||
-      (!known &&
-        !previous.pending.signIn.exchangeStarted &&
+    (!available ||
+      Boolean(previous.pending.signIn.tokens) ||
+      (!previous.pending.signIn.exchangeStarted &&
         previous.pending.startedAt + 600_000 > Date.now()));
   const signIn = resume
     ? previous.pending.signIn
@@ -399,29 +388,22 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
         name,
         sessionId: own.sessionId,
         pid: own.pid,
-        agentBin:
-          sessionAgentBehavior(own.agent).delivery === 'queue' ? which('codex', env) : undefined,
+        agentBin,
         startedAt: Date.now(),
         claudeInboundFallback: own.claudeInboundFallback,
       };
-  mkdirSync(join(dir, 'pending'), { recursive: true, mode: 0o700 });
-  const file = join(
-    dir,
-    'pending',
-    `${createHash('sha256').update(signIn.state).digest('hex').slice(0, 24)}.json`,
-  );
+  const file = pendingFile(signIn.state);
   // A running finisher owns its progress file. An explicit repeated join may
   // display/reuse it but must never overwrite a newly persisted code/result.
   if (!resume) writePending(file, pending);
   if (!resume && previous && previous.file !== file) rmSync(previous.file, { force: true });
   // The app shows this command's output only when it ends, so the sign-in finishes in the background.
   const out = join(dir, 'bridge.log');
-  const child = spawn(run.node, [run.bundle, 'session', 'finish-join', file], {
-    detached: true,
-    stdio: 'ignore',
+  launchDetached({
+    file: run.node,
+    args: [run.bundle, 'session', 'finish-join', file],
     env: { ...env, BEELINE_SESSION_BUNDLE: run.bundle },
   });
-  child.unref();
   console.log(
     [
       `Show your person this link. They open it on any device (a phone works) and sign in with GitHub or Google:`,
@@ -446,25 +428,11 @@ async function bindLocalDelivery(
   joined: JoinedSession,
   token: string,
   env: NodeJS.ProcessEnv,
-): Promise<string | undefined> {
+): Promise<void> {
   const local = sessionAgentBehavior(joined.agent).joinDelivery === 'local';
   if (local && (!joined.sessionId || (joined.agent === 'antigravity' && !which('agentapi', env))))
     return;
-  const result = (await callTool(
-    joined,
-    token,
-    'setup_delivery',
-    {
-      mechanism: local ? 'local' : 'on_demand',
-      host: joined.agent,
-      surface: joined.agent === 'antigravity' ? 'app' : 'local_session',
-      conversation: joined.sessionId ?? joined.key,
-      installed: true,
-    },
-    'set up delivery',
-  )) as { delivery: { generation?: string; mechanism?: JoinedSession['deliveryMechanism'] } };
-  joined.deliveryGeneration = result.delivery.generation;
-  joined.deliveryMechanism = result.delivery.mechanism;
+  await setupDelivery(joined, token, local ? 'local' : 'on_demand', joined.sessionId ?? joined.key);
   await updateState(dir, (state) => {
     const current = state.sessions.find((s) => s.key === joined.key);
     if (current) {
@@ -472,7 +440,6 @@ async function bindLocalDelivery(
       current.deliveryMechanism = joined.deliveryMechanism;
     }
   });
-  return joined.deliveryGeneration;
 }
 
 async function finishJoin(file: string, env: NodeJS.ProcessEnv): Promise<void> {
@@ -565,7 +532,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
         pid: joined.pid,
         seenAt: Date.now(),
       });
-    const generation = await bindLocalDelivery(dir, joined, tokens.access_token, env);
+    await bindLocalDelivery(dir, joined, tokens.access_token, env);
     try {
       const changes =
         joined.deliveryMechanism === 'local'
@@ -587,12 +554,11 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
       if (joined.agent === 'antigravity' && which('agentapi', env) && joined.sessionId) {
         if (!antigravitySidecarEnabled(env))
           throw new Error('Beeline’s Antigravity sidecar is disabled in the host configuration.');
-        const child = spawn(run.node, [run.bundle, 'session', 'antigravity-sidecar'], {
-          detached: true,
-          stdio: 'ignore',
+        launchDetached({
+          file: run.node,
+          args: [run.bundle, 'session', 'antigravity-sidecar'],
           env,
         });
-        child.unref();
       }
       const rooms = me.rooms
         .map((r) => r.name)
@@ -610,14 +576,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
         dir,
       );
     } catch (error) {
-      if (generation)
-        await callTool(
-          joined,
-          tokens.access_token,
-          'delivery_failed',
-          { generation, reason: 'local_receiver_setup_failed' },
-          'roll back delivery setup',
-        ).catch(() => undefined);
+      await recordDeliveryFailure(dir, joined, 'local_receiver_setup_failed');
       throw error;
     }
   } catch (error) {
@@ -632,7 +591,6 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
 async function announce(joined: JoinedSession, text: string, dir: string): Promise<void> {
   if (joined.agent === 'claude-code') {
     if (hasClaudeMcp(dir, joined.pid)) {
-      const { queueInbox } = await import('./store.js');
       queueInbox(dir, joined.key, text);
       return;
     }
@@ -648,7 +606,6 @@ async function announce(joined: JoinedSession, text: string, dir: string): Promi
     await codexQueue(joined.sessionId, text, joined.agentBin ?? 'codex');
     return;
   }
-  const { queueInbox } = await import('./store.js');
   queueInbox(dir, joined.key, text);
 }
 
@@ -856,17 +813,30 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   throw new Error('Usage: usebeeline join | usebeeline session reply|read|tool|status|leave');
 }
 
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let text = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
-      text += chunk;
-    });
-    process.stdin.on('end', () => {
-      resolve(text);
-    });
-  });
+/**
+ * The host hook's payload: everything up to stdin's EOF, the host protocol's
+ * delimiter. An error or a close without EOF is a truncated payload, read as
+ * none. Residual: a host that keeps its writer open is waited on.
+ */
+async function readStdin(): Promise<string> {
+  let text = '';
+  const append = (chunk: string) => {
+    text += chunk;
+  };
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', append);
+  try {
+    await answer('host hook payload', [
+      [process.stdin, 'end', 'answer'],
+      [process.stdin, 'error'],
+      [process.stdin, 'close'],
+    ]);
+    return text;
+  } catch {
+    return '';
+  } finally {
+    process.stdin.removeListener('data', append);
+  }
 }
 
 export async function runSessionCommand(

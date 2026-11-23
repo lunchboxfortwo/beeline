@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws';
 import { unknownServerEventLogger } from './unknown-server-event.js';
-import { ask } from './wait.js';
+import { answer, ask, onEnd } from './wait.js';
 
 export type ChromiumPage = {
   id: string;
@@ -55,11 +55,19 @@ const SELECTED_TEXT = `(() => {
 })()`;
 const shares = new Map<string, Share>();
 
-function opened(socket: WebSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    socket.once('open', resolve);
-    socket.once('error', reject);
-  });
+/**
+ * A share socket's open. Its later errors are its close's concern, never an
+ * unhandled event; it fails on its own error or close, or on its mate's.
+ */
+function opened(socket: WebSocket, peer: string, mate?: WebSocket): Promise<void> {
+  socket.on('error', () => undefined);
+  const closed = () => new Error(`${peer} closed before opening`);
+  return answer<void>(peer, [
+    [socket, 'open', 'answer'],
+    [socket, 'error'],
+    [socket, 'close', closed],
+    ...(mate ? [[mate, 'close', () => new Error('Chromium debugger closed')] as const] : []),
+  ]);
 }
 
 /** Relay CDP screencast and input over an outbound authenticated socket. */
@@ -72,16 +80,17 @@ export async function shareChromiumPage(input: {
 }): Promise<void> {
   if (!input.page.webSocketDebuggerUrl) throw new Error('Chromium page has no debugger socket');
   const cdp = new WebSocket(input.page.webSocketDebuggerUrl);
-  await opened(cdp);
+  await opened(cdp, 'Chromium debugger');
   const source = new URL(`/s/${input.shareId}/source`, input.serverBaseUrl);
   source.protocol = source.protocol === 'https:' ? 'wss:' : 'ws:';
   const relay = new WebSocket(source, {
     headers: { authorization: `Bearer ${input.daemonToken}` },
   });
   try {
-    await opened(relay);
+    await opened(relay, 'Beeline share relay', cdp);
   } catch (error) {
     cdp.close();
+    relay.close();
     throw error;
   }
   const share: Share = { cdp, relay, controlled: false };
@@ -208,15 +217,20 @@ export async function shareChromiumPage(input: {
       sendCdp(message.method, message.params ?? {});
     } else if (message.type !== 'takeover' && message.type !== 'release') logUnknown(message.type);
   });
+  // Either socket's end ends the pair once. A share replaced on the same tab
+  // still closes its own sockets; only the current share sends the end receipt.
+  let finished = false;
   const finish = () => {
-    if (shares.get(input.page.id) !== share) return;
-    shares.delete(input.page.id);
+    if (finished) return;
+    finished = true;
     cdp.close();
     relay.close();
+    if (shares.get(input.page.id) !== share) return;
+    shares.delete(input.page.id);
     void input.onEnded();
   };
-  cdp.once('close', finish);
-  relay.once('close', finish);
+  onEnd(cdp, ['close'], finish);
+  onEnd(relay, ['close'], finish);
   sendCdp('Page.enable');
   const screencastId = sendCdp('Page.startScreencast', {
     format: 'jpeg',
@@ -230,7 +244,10 @@ export async function shareChromiumPage(input: {
   capture();
 }
 
-/** One live event wait, with one authoritative reconcile if the socket reconnects. */
+/**
+ * One live event wait. A close or error before `handoff`/`ended` fails the
+ * call; the agent can call the tool again (there is no second attempt).
+ */
 export async function waitForComputerHandback(input: {
   serverBaseUrl: string;
   shareId: string;
@@ -241,73 +258,74 @@ export async function waitForComputerHandback(input: {
   const events: ComputerActivityEvent[] = [];
   const logUnknown = unknownServerEventLogger('computer-handback');
   let since = 0;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const url = new URL(`/s/${input.shareId}/wait?since=${since}`, input.serverBaseUrl);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const result = await new Promise<
-      { type: 'handoff' | 'ended'; note?: string; events: ComputerActivityEvent[] } | undefined
-    >((resolve, reject) => {
-      const socket = new WebSocket(url, {
-        headers: { authorization: `Bearer ${input.daemonToken}` },
-      });
-      let settled = false;
-      socket.on('message', (data) => {
-        try {
-          const value = JSON.parse(data.toString()) as {
-            type?: string;
-            note?: string;
-            seq?: number;
-            at?: string;
-            name?: ComputerActivityEvent['name'];
-            detail?: string;
-          };
-          if (!value || typeof value.type !== 'string' || !value.type)
-            throw new Error('invalid handback event');
-          if (value.type === 'event') {
-            if (
-              typeof value.seq === 'number' &&
-              Number.isSafeInteger(value.seq) &&
-              value.seq > since &&
-              typeof value.at === 'string' &&
-              value.name
-            ) {
-              since = value.seq;
-              if (!COMPUTER_ACTIVITY_NAMES.includes(value.name)) {
-                logUnknown(value.name);
-                return;
+  const url = new URL(`/s/${input.shareId}/wait?since=${since}`, input.serverBaseUrl);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  const socket = new WebSocket(url, {
+    headers: { authorization: `Bearer ${input.daemonToken}` },
+  });
+  socket.on('error', () => undefined);
+  const lost = () => new Error('Browser handback connection closed before a result');
+  try {
+    return await answer<{
+      type: 'handoff' | 'ended';
+      note?: string;
+      events: ComputerActivityEvent[];
+    }>(
+      'Beeline server handback',
+      [
+        [socket, 'error', lost],
+        [socket, 'close', lost],
+      ],
+      ({ resolve, reject }) => {
+        socket.on('message', (data) => {
+          try {
+            const value = JSON.parse(data.toString()) as {
+              type?: string;
+              note?: string;
+              seq?: number;
+              at?: string;
+              name?: ComputerActivityEvent['name'];
+              detail?: string;
+            };
+            if (!value || typeof value.type !== 'string' || !value.type)
+              throw new Error('invalid handback event');
+            if (value.type === 'event') {
+              if (
+                typeof value.seq === 'number' &&
+                Number.isSafeInteger(value.seq) &&
+                value.seq > since &&
+                typeof value.at === 'string' &&
+                value.name
+              ) {
+                since = value.seq;
+                if (!COMPUTER_ACTIVITY_NAMES.includes(value.name)) {
+                  logUnknown(value.name);
+                  return;
+                }
+                const event: ComputerActivityEvent = {
+                  type: 'event',
+                  seq: value.seq,
+                  at: value.at,
+                  name: value.name,
+                  ...(value.detail ? { detail: value.detail } : {}),
+                };
+                events.push(event);
+                input.onEvent?.(event);
               }
-              const event: ComputerActivityEvent = {
-                type: 'event',
-                seq: value.seq,
-                at: value.at,
-                name: value.name,
-                ...(value.detail ? { detail: value.detail } : {}),
-              };
-              events.push(event);
-              input.onEvent?.(event);
+              return;
             }
-            return;
+            if (value.type !== 'handoff' && value.type !== 'ended') {
+              logUnknown(value.type);
+              return;
+            }
+            resolve({ type: value.type, ...(value.note ? { note: value.note } : {}), events });
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
           }
-          if (value.type !== 'handoff' && value.type !== 'ended') {
-            logUnknown(value.type);
-            return;
-          }
-          settled = true;
-          resolve({ type: value.type, ...(value.note ? { note: value.note } : {}), events });
-          socket.close();
-        } catch (error) {
-          reject(error);
-          socket.close();
-        }
-      });
-      socket.once('close', () => {
-        if (!settled) resolve(undefined);
-      });
-      socket.once('error', () => {
-        if (!settled) resolve(undefined);
-      });
-    });
-    if (result) return result;
+        });
+      },
+    );
+  } finally {
+    socket.close();
   }
-  throw new Error('Browser handback connection closed before a result');
 }

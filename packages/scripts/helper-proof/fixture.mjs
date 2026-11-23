@@ -33,6 +33,7 @@ let loseExchangeReply = false;
 let publicationAvailable = true;
 const held = new Set();
 const downloadListeners = new Set();
+const heldDownloads = new Set();
 const harnessListeners = new Set();
 const calls = new Map();
 export const stateRoot = `${home}/.local/state`;
@@ -51,7 +52,7 @@ const daemon = new DaemonService(database, live);
 const connectionPresence = new ConnectionPresence(database, live);
 await connectionPresence.start();
 export const releases = new ReleaseNotifier(database, { secret: 'fixture-release', live });
-export const helperVersionGate = new HelperVersionGate();
+const helperVersionGate = new HelperVersionGate();
 const backendOptions = {
   database,
   auth,
@@ -93,7 +94,11 @@ const server = createServer(async (request, response) => {
       for (const done of downloadListeners) done();
       downloadListeners.clear();
       if (slowDownload) {
-        response.write(archive.subarray(0, 1024));
+        const bytes = archive;
+        response.write(bytes.subarray(0, 1024));
+        const finish = () => response.end(bytes.subarray(1024));
+        heldDownloads.add(finish);
+        response.once('close', () => heldDownloads.delete(finish));
         return;
       }
       return response.end(archive);
@@ -305,6 +310,7 @@ export async function addUnrecognizedAgent() {
 }
 export function holdDownload(value) {
   slowDownload = value;
+  if (!value) for (const finish of heldDownloads) finish();
 }
 export function nextDownload() {
   return new Promise((done) => downloadListeners.add(done));

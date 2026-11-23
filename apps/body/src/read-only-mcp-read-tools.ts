@@ -111,7 +111,7 @@ export function searchText(args: JsonObject): string {
   return `${matches.join('\n')}${truncated ? `\n[truncated at ${matches.length} matches]` : ''}`;
 }
 
-export async function runGit(args: string[]): Promise<string> {
+export async function runGit(args: string[], root = repositoryRoot): Promise<string> {
   if (!gitBinary) throw new Error('trusted system git is unavailable');
   let result;
   try {
@@ -127,7 +127,7 @@ export async function runGit(args: string[]): Promise<string> {
         'core.attributesFile=/dev/null',
         '--no-pager',
         '-C',
-        repositoryRoot,
+        root,
         ...args,
       ],
       env: {

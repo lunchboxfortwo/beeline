@@ -369,10 +369,11 @@ export async function writeIsolatedHarnessFile(path: string, content: string): P
  * `helper-storage.ts` and the OS sandbox keep seeing it — and this path is a
  * symlink to it, named by a hash of the home so it is stable per session and
  * comfortably inside the socket limit. `prepareRoomAgentHome` creates the
- * symlink; `bwrap-sandbox.ts` binds its resolved directory over the sandbox's
- * private `/tmp`.
+ * symlink; `bwrap-sandbox.ts` binds its resolved directory writable. It lives
+ * in `/var/tmp`, which the sandbox shows read-only rather than hiding, so tests
+ * and the sandboxes they start can write under `os.tmpdir()` and still see it.
  */
-export function roomSessionTmpDir(root: string, base: string = '/tmp'): string {
+export function roomSessionTmpDir(root: string, base: string = '/var/tmp'): string {
   const hash = createHash('sha256').update(resolve(root)).digest('hex').slice(0, 12);
   return join(base, `beeline-${hash}`);
 }

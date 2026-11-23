@@ -5,6 +5,7 @@ import { helperVersion } from './helper-version.js';
 import { unknownServerEventLogger } from './unknown-server-event.js';
 import { setHelperErrorUser } from './sentry.js';
 import { LiveLink, type LiveLinkTiming, type LiveSocketFactory } from './live-link.js';
+import { answer } from './wait.js';
 
 /** Subprotocol of the one socket a helper machine holds for all of its agents. */
 export const MACHINE_SOCKET_PROTOCOL = 'beeline.machine.1';
@@ -46,8 +47,9 @@ export class AgentChannel {
   #registered = false;
   #registrationSent = false;
   #capabilities: Record<string, unknown> = {};
-  /** Why this socket will not register the agent again; cleared by the next socket. */
+  /** Registration failure; cleared on socket close unless this channel is retired. */
   #ended: Error | undefined;
+  #retired = false;
   initialSnapshotsV1 = true;
   constructor(
     private readonly machine: MachineLink,
@@ -84,8 +86,9 @@ export class AgentChannel {
     if (this.isOpen()) return;
     // A refused or replaced registration is not retried on this socket.
     if (this.#ended) throw this.#ended;
-    await new Promise<void>((resolve, reject) => {
-      this.#waiters.add({ resolve, reject });
+    // Registration on a connection, or this channel's refusal, unregistration or retirement (D5).
+    await answer<void>('Beeline server registration', [], ({ resolve, reject }) => {
+      this.#waiters.add({ resolve: () => resolve(), reject });
       this.start();
     });
   }
@@ -95,21 +98,27 @@ export class AgentChannel {
   ): Promise<DaemonOperationMap[N]['output']> {
     const requestId = randomUUID();
     const frame = { type: 'daemon-operation', requestId, operation, input };
-    return new Promise((resolve, reject) => {
-      if (!this.isOpen() && this.#ended) {
-        reject(this.#ended);
-        return;
-      }
-      const pending = {
-        frame,
-        sent: false,
-        resolve: (value: unknown) => resolve(value as DaemonOperationMap[N]['output']),
-        reject,
-      };
-      this.#requests.set(requestId, pending);
-      this.start();
-      this.#dispatch(pending);
-    });
+    // The result for this requestId; refusal, unregistration, retirement or a
+    // sent request's lost connection ends it (D5: unsent work waits for registration).
+    return answer<DaemonOperationMap[N]['output']>(
+      'Beeline server operation',
+      [],
+      ({ resolve, reject }) => {
+        if (!this.isOpen() && this.#ended) {
+          reject(this.#ended);
+          return;
+        }
+        const pending = {
+          frame,
+          sent: false,
+          resolve: (value: unknown) => resolve(value as DaemonOperationMap[N]['output']),
+          reject,
+        };
+        this.#requests.set(requestId, pending);
+        this.start();
+        this.#dispatch(pending);
+      },
+    );
   }
   #dispatch(pending: { frame: Record<string, unknown>; sent: boolean }): void {
     if (!this.isOpen()) return;
@@ -139,16 +148,31 @@ export class AgentChannel {
     this.machine.link.reconnect();
   }
   start(): void {
-    if (this.#wanted) return;
+    if (this.#wanted || this.#retired) return;
     this.#wanted = true;
     this.machine.want(this);
   }
   stop(): void {
-    if (!this.#wanted) return;
+    if (this.#retired) return;
     if (this.isOpen()) this.send({ type: 'unregister' });
     this.#wanted = false;
-    this.socketClosed(true);
+    this.retire();
     this.machine.unwant(this);
+  }
+  /**
+   * This channel's lifetime is over (stopped, replaced, or its link retired
+   * for an update): its work ends now, and later work on it is refused
+   * instead of queueing for a registration that will never come.
+   */
+  retire(
+    cause: Error & { code: string } = Object.assign(new Error('Agent runtime ended'), {
+      code: 'runtime_ended',
+    }),
+  ): void {
+    // Sent work gets "<cause>; outcome unknown"; waiters and unsent work get the cause.
+    this.#retired = true;
+    this.#end(cause);
+    this.socketClosed(cause);
   }
   send(frame: Record<string, unknown>): boolean {
     return this.isOpen() && this.machine.send({ ...frame, agentId: this.agentId });
@@ -160,7 +184,7 @@ export class AgentChannel {
     this.machine.link.requireUpdate(minVersion);
   }
   registration(): Record<string, unknown> | undefined {
-    if (!this.#wanted || this.#registered || this.#registrationSent) return;
+    if (this.#retired || !this.#wanted || this.#registered || this.#registrationSent) return;
     this.#registrationSent = true;
     return {
       ...this.handlers.registration(),
@@ -172,6 +196,7 @@ export class AgentChannel {
     };
   }
   receive(event: Record<string, unknown>): void {
+    if (this.#retired) return;
     if (event.type === 'registered') {
       if (!this.#wanted || this.#registered) return;
       this.#registered = true;
@@ -199,13 +224,11 @@ export class AgentChannel {
     if (event.type === 'unregistered') {
       // A newer connection owns this agent; this socket never answers its work.
       const reason = typeof event.reason === 'string' ? event.reason : 'unregistered';
-      this.socketClosed(
-        false,
-        Object.assign(new Error(`Agent registration ended: ${reason}`), { code: 'unregistered' }),
-      );
-      this.#end(
-        Object.assign(new Error(`Agent registration ended: ${reason}`), { code: 'unregistered' }),
-      );
+      const cause = Object.assign(new Error(`Agent registration ended: ${reason}`), {
+        code: 'unregistered',
+      });
+      this.socketClosed(cause);
+      this.#end(cause);
       return;
     }
     if (event.type === 'daemon-operation-result' && typeof event.requestId === 'string') {
@@ -246,13 +269,13 @@ export class AgentChannel {
     }
   }
   socketClosed(
-    ended = false,
     cause = Object.assign(new Error('Agent connection closed'), { code: 'connection_closed' }),
   ): void {
     const registered = this.#registered;
     this.#registered = false;
     this.#registrationSent = false;
-    this.#ended = undefined;
+    // A plain close lets a refused registration try again; a retirement stays.
+    if (!this.#retired) this.#ended = undefined;
     this.overlay.suspend();
     for (const [requestId, pending] of this.#requests) {
       if (!pending.sent) continue;
@@ -260,13 +283,6 @@ export class AgentChannel {
       pending.reject(
         Object.assign(new Error(`${cause.message}; outcome unknown`), { code: cause.code }),
       );
-    }
-    if (ended) {
-      for (const waiter of this.#waiters) waiter.reject(new Error('Agent runtime ended'));
-      this.#waiters.clear();
-      for (const pending of this.#requests.values())
-        pending.reject(new Error('Agent runtime ended'));
-      this.#requests.clear();
     }
     if (registered) this.handlers.onClose();
   }
@@ -288,6 +304,7 @@ export class MachineLink {
   readonly #channels = new Map<string, AgentChannel>();
   #identity: { releaseVersion: string; sourceSha?: string } = { releaseVersion: 'v0.0.0' };
   #reconciledOnSocket = false;
+  #terminalCause: (Error & { code: string }) | undefined;
   #pendingRelease: Record<string, unknown> | undefined;
   #vaultSnapshot: { content?: string } = {};
   #vaultRefresh: Promise<void> | undefined;
@@ -327,7 +344,14 @@ export class MachineLink {
         for (const channel of this.#channels.values()) channel.socketClosed();
       },
       onUpdateRequired: (minVersion) => {
-        for (const channel of [...this.#channels.values()]) channel.updateRequired(minVersion);
+        // The link stops for good: its work ends now rather than waiting for a registration.
+        this.#terminalCause = Object.assign(new Error('Helper update required'), {
+          code: 'update_required',
+        });
+        for (const channel of [...this.#channels.values()]) {
+          channel.retire(this.#terminalCause);
+          channel.updateRequired(minVersion);
+        }
       },
       ...(options.timing ? { timing: options.timing } : {}),
       ...(options.random ? { random: options.random } : {}),
@@ -422,14 +446,20 @@ export class MachineLink {
 
   /** A later channel for the same agent (an in-process restart) replaces the earlier one. */
   attach(agentId: string, handlers: AgentChannelHandlers): AgentChannel {
-    return new AgentChannel(this, agentId, handlers);
+    const channel = new AgentChannel(this, agentId, handlers);
+    if (this.#terminalCause) channel.retire(this.#terminalCause);
+    return channel;
   }
 
   /** @internal */
   want(channel: AgentChannel): void {
+    if (this.#terminalCause) {
+      channel.retire(this.#terminalCause);
+      return;
+    }
     const previous = this.#channels.get(channel.agentId);
     this.#channels.set(channel.agentId, channel);
-    if (previous && previous !== channel) previous.socketClosed(true);
+    if (previous && previous !== channel) previous.retire();
     if (this.link.isOpen()) this.#register();
     else this.link.start();
   }
@@ -452,7 +482,7 @@ export class MachineLink {
   }
 
   stop(forUpdate = false): void {
-    for (const channel of this.#channels.values()) channel.socketClosed(true);
+    for (const channel of this.#channels.values()) channel.retire();
     this.#channels.clear();
     this.link.stop(forUpdate);
   }
