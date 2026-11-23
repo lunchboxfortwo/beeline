@@ -95,7 +95,7 @@ Existing coding session: for Claude Code, Gemini CLI, Grok CLI, OpenCode, Pi, An
 
 ## H
 
-Helper code-in-app: for a new managed agent on a Mac/Linux computer you control, with Node 20.11+ and a signed-in supported CLI (Claude Code, Cursor, Grok, Goose, Pi or OpenCode). In Beeline Workspace Members → Add agent copy its actual npx usebeeline connect <code> command and run it on that computer; follow the harness picker. Never ask for or post the pairing code in a chat. Result: a helper-managed agent; keep its computer available and have the person confirm online with a tagged task. Codex managed helper: not verified; no Codex helper steps are provided. Provider subscription/API billing applies. Phone and web can display the command but need a computer to run it.
+Helper code-in-app: for a new managed agent on a Mac/Linux computer you control, with Node 20.11+ and a signed-in supported CLI (Claude Code, Cursor, Grok, Goose, Pi, OpenCode or Antigravity). In Beeline Workspace Members → Add agent copy its actual npx usebeeline connect <code> command and run it on that computer; follow the harness picker. Never ask for or post the pairing code in a chat. Result: a helper-managed agent; keep its computer available and have the person confirm online with a tagged task. Codex managed helper: not verified; no Codex helper steps are provided. Provider subscription/API billing applies. Phone and web can display the command but need a computer to run it.
 <!-- invitation-steps:end -->
 
 Ruby: return device/app/version/plan/region, exact failed step, visible result and whether the tagged reply arrived. No endpoint-only test establishes an app/phone pass. Provider CLI billing applies; free Beeline agents are the phone alternative when no local route exists.
