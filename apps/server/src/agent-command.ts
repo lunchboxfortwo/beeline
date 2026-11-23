@@ -17,7 +17,7 @@ import { queuedWorkflowWakeDetail,squireDecisionDetail,type WorkflowWakeCard } f
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { endAgentTurn, PERSON_STOP_REASON } from './agent-turn-end.js';
-import { closingActivity,replySteps } from './answer-activity.js';
+import { recordAnswerActivity } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { cornerCommanderBriefSql } from './corner-commander.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
@@ -810,7 +810,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   /** Internal publication receipt shared by items with the same return address. */
   sharedReplyId?: string;
-}): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; suppressed?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
+}): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
   if (input.harnessEnded && input.invocation && !input.explicitReply && !input.report) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
     db => answerQueuedMessage(db,agentId,{...input,invocation:undefined}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
@@ -850,9 +850,11 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   let completedNow = false;
   const published = await database.transaction(async db => {
     const item = (await db.query<CommandRow & { parent_row: CommandRow | null; root_command_row: CommandRow | null; public_reply_id: string | null; public_reply_text: string | null;
-      root_author: string | null; source_author: string | null; name: string }>(
+      root_author: string | null; source_author: string | null; name: string; answered_elsewhere: boolean; stop_requested_at: Date | null }>(
       `SELECT item.*,row_to_json(parent) parent_row,row_to_json(root_command) root_command_row,root.author_id root_author,
-         source.author_id source_author,identity.name,posted.id public_reply_id,posted.text public_reply_text
+         source.author_id source_author,identity.name,posted.id public_reply_id,posted.text public_reply_text,
+         EXISTS(SELECT 1 FROM messages result WHERE result.id=item.result_message_id AND result.author_id=item.agent_id
+           AND result.room_id<>item.room_id AND result.deleted_at IS NULL) answered_elsewhere
        FROM agent_commands item JOIN identities identity ON identity.id=item.agent_id
        LEFT JOIN agent_commands parent ON parent.id=item.parent_command_id
        LEFT JOIN agent_commands root_command ON root_command.id=item.root_command_id
@@ -863,6 +865,15 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
        WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
       [agentId, input.roomId, input.requestId ?? null],
     )).rows[0];
+    if (item?.state === 'complete' && item.answered_elsewhere && input.harnessEnded && !input.explicitReply && !input.report) {
+      const text = repairAgentPost(input.text).text.trim();
+      if (!text || item.stop_requested_at) return {id:item.result_message_id ?? item.id,createdAt:Math.floor(Date.now()/1000)};
+      await refuseDoneWithBlocks(db,agentId,input.roomId,text);
+      completedNow = true;
+      return queueMessage(db,{kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(text),agentIds:[],
+        id:hash(`local-final:${item.id}`),parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id})
+        .then(({id,createdAt})=>({id,createdAt,delivered:true}));
+    }
     // A later, different reply to an answered command posts as an ordinary message where the answer went.
     const late = item?.state === 'complete' && item.public_reply_id && input.explicitReply && !input.messageAsk ? repairAgentPost(input.text).text.trim() : '';
     if (item && late && late !== item.public_reply_text?.trim()) { const saved = await queueMessage(db,{kind:'post',roomId:item.return_room_id ?? input.roomId,
@@ -969,30 +980,19 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     if (item) await endAgentTurn(db, item, input.report && input.status === 'failed' ? 'failed' : 'complete', null, saved.id);
     return saved;
   });
-  // Publication has committed. A failed history/cleanup write cannot turn a
-  // posted reply back into an unanswered item or hold the helper's receipt.
+  // Optional history and cleanup cannot hold the committed publication receipt.
   if (completedNow) {
-    const after=async()=>{
-      const activity=async()=>{
-        if (history) await database.query(
-          `INSERT INTO messages(id,room_id,author_id,text,presentation,request_id,activity)
-           VALUES($1,$2,$3,$6,'activity',$4,$5::jsonb) ON CONFLICT(id) DO NOTHING`,
-          [history.id,history.roomId,agentId,input.requestId ?? null,closingActivity(history.text,input.steps),history.text]);
-        if (!history && input.steps) await database.query('UPDATE messages SET activity=$2::jsonb WHERE id=$1 AND author_id=$3',
-          [published.id,replySteps(input.steps),agentId]);
-      };
-      await Promise.all([
+    const after=()=>Promise.all([
         observeQueuedAnswer(database,published.id,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
         recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId:published.id})
           .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),
         database.query(`SELECT beeline_record_agent_answer(id,false,NULL) FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,[input.roomId,agentId,input.requestId ?? null])
           .catch(error=>console.warn('[answer] optional turn status omitted:',error)),
-        activity().catch(error=>console.warn('[answer] optional activity omitted:',error)),
+        recordAnswerActivity(database,agentId,published.id,input,history).catch(error=>console.warn('[answer] optional activity omitted:',error)),
         database.query('DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3',
           [input.roomId,agentId,input.requestId ?? null]).catch(error=>console.warn('[answer] optional media cleanup omitted:',error)),
-      ]);
-    };
+      ]).then(()=>undefined);
     const background=CornerAccessDatabase.physical(database).backgroundWork;
     if (background) background.run(after); else void after();
   }

@@ -1,3 +1,5 @@
+import type { SqlDatabase } from './database.js';
+
 export const MAX_REPLY_STEPS = 2_000;
 
 export const MAX_REPLY_NOTE_LENGTH = 16_000;
@@ -44,4 +46,13 @@ export function closingActivity(text: string, steps: unknown): string | null {
     from = to;
   }
   return replySteps([...history,...notes], notes.length);
+}
+export async function recordAnswerActivity(db: SqlDatabase, agentId: string, messageId: string,
+  input: {requestId?:string;steps?:unknown}, history?: {id:string;roomId:string;text:string}): Promise<void> {
+  if (history) await db.query(
+    `INSERT INTO messages(id,room_id,author_id,text,presentation,request_id,activity)
+     VALUES($1,$2,$3,$6,'activity',$4,$5::jsonb) ON CONFLICT(id) DO NOTHING`,
+    [history.id,history.roomId,agentId,input.requestId ?? null,closingActivity(history.text,input.steps),history.text]);
+  else if (input.steps) await db.query('UPDATE messages SET activity=$2::jsonb WHERE id=$1 AND author_id=$3',
+    [messageId,replySteps(input.steps),agentId]);
 }

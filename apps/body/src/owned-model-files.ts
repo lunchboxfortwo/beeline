@@ -152,9 +152,8 @@ export class OwnedModelFiles {
         writeNew(authPath, contents); writeNew(journalPath, JSON.stringify({ v: 1, bindingHash: owner.bindingHash, requests: [], active: null } satisfies Journal));
         directorySync(directory); directorySync(root);
       } else if (existsSync(join(directory, 'revoked'))) {
-        // Harness cleanup ends only that execution. A suppressed answer can
-        // leave the same server-owned item queued, with its credential supplied
-        // again. Restore it without discarding the durable request journal.
+        // A closed execution can leave its queue item owed. Restore the supplied
+        // credential without discarding the durable request journal.
         privateDirectory(directory); readJournal(owner);
         const temporary = join(directory, 'credential-' + randomBytes(16).toString('hex') + '.tmp');
         writeNew(temporary, contents); renameSync(temporary, authPath); directorySync(directory);
