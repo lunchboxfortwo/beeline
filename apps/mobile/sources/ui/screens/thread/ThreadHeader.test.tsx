@@ -226,3 +226,12 @@ it.each([
   expect(tree.root.findAllByType('WorkStateMark').map((node: any) => node.props)).toEqual([mark, mark]);
   act(() => tree.unmount());
 });
+
+it('keeps the exact working sentence in the header after a mid-session answer', () => {
+  let tree: any;
+  act(() => { tree = create(<ThreadBar h={{ ...reconnect, workingAgentName: 'Ruby' }} collapsed back={() => {}} openChat={() => {}} />); });
+  expect(tree.root.findByProps({ testID: 'thread-header-working' }).props.children).toBe('Ruby is working');
+  act(() => tree.update(<ThreadBar h={reconnect} collapsed back={() => {}} openChat={() => {}} />));
+  expect(tree.root.findAllByProps({ testID: 'thread-header-working' })).toHaveLength(0);
+  act(() => tree.unmount());
+});

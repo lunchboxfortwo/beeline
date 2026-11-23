@@ -16,7 +16,7 @@ import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/gra
  * block of the transcript. Once that block scrolls away, the bar takes the
  * title with the work-state glyph. A small scroll up, or a tap on that title, shows
  * the full header under the bar until the reader scrolls down.
- * There is no driver line.
+ * The running session name supplies the working sentence.
  */
 export type ThreadHeaderData = {
     /** `#beeline`, or null while the parent's name has not landed. */
@@ -27,6 +27,7 @@ export type ThreadHeaderData = {
     repositoryHomepageIcon?: string;
     /** Undefined until the parent Room's corner row lands. */
     state?: CornerState;
+    workingAgentName?: string;
     /** The machine's reason alongside `state` (`backlog` on an idle thread). */
     reason?: CornerStateReason;
     prLine?: string;
@@ -95,6 +96,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                     <ThreadName title={h.title} v={headerMark(h)?.state === 'needs-you' ? "metaStrong" : "meta"} testID="thread-bar-name" trail={<HeaderMark h={h} />} />
                                 </ListItem>
                             ) : null}
+                            {h.workingAgentName ? <T v="meta" color="needsYou" testID="thread-header-working">{`${h.workingAgentName} is working`}</T> : null}
                         </YStack>
                     </XStack>
                     {openActions ? (

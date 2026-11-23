@@ -11,13 +11,14 @@ import { threadListLabel } from './thread-status';
  * on the right, both centred on the title's line. A thread waiting on this viewer reads
  * "waiting on you" in semibold; one waiting on anyone else names them, quiet.
  */
-export function ThreadLine({ title, state, blocker, reason, viewer, onPress, testID }: {
+export function ThreadLine({ title, state, blocker, reason, workingAgentName, viewer, onPress, testID }: {
+    workingAgentName?: string;
     title: string; state: CornerState; blocker?: CornerBlocker; reason?: CornerStateReason;
     /** The viewer's identity id; the waiting line names them "you". */
     viewer?: string;
     onPress: () => void; testID?: string;
 }) {
-    const { word, you: brass } = threadListLabel({ state, blocker, reason }, viewer);
+    const { word, you: brass } = threadListLabel({ state, blocker, reason, workingAgentName }, viewer);
     const mark = threadWorkMark({ state, reason });
     const line = typeStyle('body', useTextSize()).lineHeight;
     return (
