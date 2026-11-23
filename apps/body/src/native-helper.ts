@@ -9,6 +9,10 @@ import { startHelperWithAcknowledgment, type OlderHelperStarted } from './machin
 import { defaultSupervisorRoot } from './runtime.js';
 import { activeReleaseId, anchorLayout, readBundleJson, readUpdateState, selectBootRelease } from './self-update.js';
 
+function launchdJobPid(stdout: string): number {
+  return Number(stdout.match(/^\s*pid\s*=\s*(\d+)\s*$/m)?.[1] ?? '0');
+}
+
 async function launchdBundleVersion(env: NodeJS.ProcessEnv): Promise<string> {
   const layout = anchorLayout(resolve(homeFor(env), '.local/lib/beeline'));
   const state = await readUpdateState(layout);
@@ -316,16 +320,27 @@ async function convergeNativeHelperOwned(
         const path = resolve(directory, `${LAUNCHD_HELPER_LABEL}.plist`);
         const changed = (await readFile(path, 'utf8').catch(() => '')) !== nativeHelperPlist(env);
         const before = await run(['print', target]).catch(() => ({ stdout: '' }));
-        if (changed && before.stdout) await run(['bootout', target]);
+        let pid = launchdJobPid(before.stdout);
+        const replace = Boolean(options.restart && pid);
+        const bootstrap = !before.stdout || (changed && (!pid || replace));
+        if (bootstrap && before.stdout) await run(['bootout', target]);
         await writeFile(path, nativeHelperPlist(env), { mode: 0o600 });
         await rm(resolve(home, 'Library/Application Support/Beeline/bin/supervise-helper'), {
           force: true,
         });
         await run(['enable', target]);
-        if (changed || !before.stdout) await run(['bootstrap', domain, path]);
-        const started = await run(['kickstart', '-k', '-p', target]);
+        let started = false;
+        if (bootstrap) {
+          await run(['bootstrap', domain, path]);
+          pid = launchdJobPid((await run(['print', target])).stdout);
+          started = true;
+        } else if (replace || !pid) {
+          const job = await run(['kickstart', ...(replace ? ['-k'] : []), '-p', target]);
+          pid = Number(job.stdout.trim());
+          started = true;
+        }
         if (options.legacyCaller) await retire();
-        return Number(started.stdout.trim());
+        return { pid, started };
       }, version);
       return 'older' in ready ? ready : ready.pid;
     },
@@ -346,9 +361,13 @@ export async function startNativeHelper(
   } else return withKernelLock(`native-helper:${homeFor(env)}`, async () => {
     const version = await launchdBundleVersion(env);
     const ready = await startHelperWithAcknowledgment(defaultSupervisorRoot(env), async () => {
-      const args = ['kickstart', '-k', '-p', `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`];
-      const started = options.run ? await options.run(args) : await native('launchctl', args, env);
-      return Number(started.stdout.trim());
+      const target = `gui/${process.getuid!()}/${LAUNCHD_HELPER_LABEL}`;
+      const run: NativeRunner = options.run ?? (args => native('launchctl', args, env));
+      const before = await run(['print', target]);
+      const pid = launchdJobPid(before.stdout);
+      if (pid) return { pid, started: false };
+      const started = await run(['kickstart', '-p', target]);
+      return { pid: Number(started.stdout.trim()), started: true };
     }, version);
     if ('older' in ready) return ready;
   }, { step: 'native service convergence' });

@@ -223,16 +223,16 @@ export async function reportHelperStartup(stateRoot: string, startup: HelperStat
 
 export interface OlderHelperStarted { readonly pid: number; readonly older: true }
 
-export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<number>, version: string): Promise<HelperStatusFile | OlderHelperStarted> {
+export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<{ pid: number; started: boolean }>, version: string): Promise<Pick<HelperStatusFile, 'pid'> | OlderHelperStarted> {
   if (!versionAtLeast(version, 'v0.1.245-rc.1')) {
-    const pid = await start();
+    const { pid } = await start();
     if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('launchd start completed without a process');
     process.stderr.write(`started older helper pid ${pid}\n`);
     return { pid, older: true };
   }
   let channel: MachineControl | undefined;
   const controller = new AbortController();
-  return ask<HelperStatusFile>({ peer: 'launchd helper startup acknowledgment', send: async (ready, failed) => {
+  return ask<Pick<HelperStatusFile, 'pid'>>({ peer: 'launchd helper startup acknowledgment', send: async (ready, failed) => {
     let status: HelperStatusFile | undefined;
     let pid: number | undefined;
     const complete = () => {
@@ -253,8 +253,10 @@ export async function startHelperWithAcknowledgment(stateRoot: string, start: ()
       return value;
     }, () => failed(new Error('helper exited before its startup acknowledgment')));
     await channel.start();
-    pid = await start();
+    const job = await start();
+    pid = job.pid;
     if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('launchd start completed without a process');
+    if (!job.started) { ready({ pid }); return; }
     void waitForProcessExit(pid, controller.signal).then(
       () => { if (!controller.signal.aborted) failed(new Error(`helper pid ${pid} exited before its startup acknowledgment`)); },
       error => { if (!controller.signal.aborted) failed(error); },
