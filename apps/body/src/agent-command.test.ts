@@ -177,6 +177,67 @@ describe('agent command selection', () => {
     });
   });
 
+  async function agy(help: string): Promise<{ directory: string; path: string }> {
+    const program = await executable('agy');
+    await writeFile(
+      program.path,
+      // Builtins only: the test PATH holds nothing but this program.
+      `#!/bin/sh\nif [ "$1" = "--help" ]; then\n${help
+        .split('\n')
+        .map((line) => `echo '${line}'`)
+        .join('\n')}\nexit 0\nfi\nexit 1\n`,
+    );
+    return program;
+  }
+  const AGY_HELP = [
+    'Usage of agy:',
+    '  --add-dir    Add a directory to the workspace',
+    '',
+    'Available subcommands:',
+    '  acp             Start the Agent Client Protocol (ACP) stdio server',
+    '  models          List available models',
+  ].join('\n');
+
+  it('detects and resolves Antigravity through `agy acp`', async () => {
+    const program = await agy(AGY_HELP);
+    const env = {
+      HOME: await hermeticHome(),
+      PATH: program.directory,
+      BEELINE_HARNESS_PATH_AUGMENT: '0',
+    };
+    expect(resolveAgentCommand({ kind: 'antigravity', env })).toEqual({
+      kind: 'antigravity',
+      command: program.path,
+      args: ['acp'],
+    });
+    expect(detectInstalledAgentCommands({ env })).toEqual([
+      {
+        kind: 'antigravity',
+        status: 'ready',
+        agent: { kind: 'antigravity', command: program.path, args: ['acp'] },
+      },
+    ]);
+  });
+
+  it('tells a person without agy how to install the Antigravity CLI', async () => {
+    const env = { HOME: await hermeticHome(), PATH: '', BEELINE_HARNESS_PATH_AUGMENT: '0' };
+    expect(() => resolveAgentCommand({ kind: 'antigravity', env })).toThrow(
+      'Antigravity CLI is not installed on this machine (agy). Install it with `curl -fsSL https://antigravity.google/cli/install.sh | bash`',
+    );
+    expect(detectInstalledAgentCommands({ env })).toEqual([]);
+  });
+
+  it('asks for an update when agy has no acp subcommand, and does not list it', async () => {
+    const program = await agy(
+      ['Usage of agy:', '  --add-dir    acp-like flag text', '', 'Available subcommands:', '  models   List models'].join('\n'),
+    );
+    const env = { HOME: await hermeticHome(), PATH: program.directory, BEELINE_HARNESS_PATH_AUGMENT: '0' };
+    expect(() => resolveAgentCommand({ kind: 'antigravity', env })).toThrow(
+      /has no `acp` command\. Update it with .*1\.5\.0 or later/,
+    );
+    expect(detectInstalledAgentCommands({ env })).toEqual([]);
+  });
+
   it("resolves a Cursor Agent CLI install through Beeline's owned ACP bridge", async () => {
     const cursorAgent = await executable('cursor-agent');
     const selected = resolveAgentCommand({
