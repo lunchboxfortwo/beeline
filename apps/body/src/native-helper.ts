@@ -15,7 +15,7 @@ async function native(
   env: NodeJS.ProcessEnv,
 ): Promise<{ stdout: string }> {
   const step = `${file} ${args.join(' ')}`;
-  const result = await runOwned({ step, file, args, env, onLine: () => undefined });
+  const result = await runOwned({ step, file, args, env });
   if (result.code !== 0)
     throw Object.assign(new Error(`${step} exited ${result.code ?? result.signal}: ${result.stderr.trim()}`), {
       code: result.code, stdout: result.stdout, stderr: result.stderr,

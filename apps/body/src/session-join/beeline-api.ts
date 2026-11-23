@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Agent } from 'undici';
 import { readState, withLock, writeState, type JoinedSession } from './store.js';
 import { ask } from '../wait.js';
+export { setMachineReadOutput } from '../wait.js';
 
 export const DEFAULT_SERVER = 'https://server.usebeeline.app';
 
@@ -41,10 +42,6 @@ function admitHeldMcpCompletion(url:string,body:unknown):void{
     throw new Error('Held MCP completion admission invalid');
 }
 
-/** Hook output, session tool JSON and the session MCP servers are read by a machine: their waits print no line. */
-let machineReadOutput = false;
-export function setMachineReadOutput(machineRead: boolean): void { machineReadOutput = machineRead; }
-
 /** The existing authenticated MCP/OAuth transport leaf owns all requests,
  * including the persistent member stream; callers cannot create a second owner. */
 async function request(url: string, body: unknown, headers: Record<string,string>, stream?: AbortSignal, cancellation?:AbortSignal,held=false,step?:string): Promise<Response> {
@@ -54,7 +51,7 @@ async function request(url: string, body: unknown, headers: Record<string,string
     ...(stream?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined};
   // Every wait names its peer on stderr unless this process's output is machine-read (see setMachineReadOutput).
   const peer=step?`${new URL(url).host} to ${step}`:undefined;
-  return ask({url,...(peer?{peer}:{}),machineRead:machineReadOutput},init);
+  return ask({url,...(peer?{peer}:{})},init);
 }
 async function postJson(url: string, body: unknown, headers: Record<string, string> = {},
   {signal,held=false,step}:{signal?:AbortSignal;held?:boolean;step?:string}={}): Promise<{ status: number; value: Record<string, unknown> }> {

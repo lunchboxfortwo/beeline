@@ -16,6 +16,9 @@ import { createConnection, createServer, type Socket } from 'node:net';
 
 const say = (line: string) => process.stderr.write(`[beeline] ${line}\n`);
 
+let machineReadOutput = false;
+export function setMachineReadOutput(machineRead: boolean): void { machineReadOutput = machineRead; }
+
 /**
  * The one switch for wait lines. Every wait prints one stderr line naming the
  * peer it waits on, so a human-facing command is never silent. Only a caller
@@ -28,7 +31,7 @@ interface WaitReport {
   machineRead?: boolean;
 }
 function reporter(channel: WaitReport): ((line: string) => void) | undefined {
-  return channel.machineRead ? undefined : (channel.report ?? say);
+  return machineReadOutput || channel.machineRead ? undefined : (channel.report ?? say);
 }
 
 /** A local line-protocol peer: one JSON line out, one JSON line back. */
@@ -115,7 +118,7 @@ export async function ask(
   });
 }
 
-export interface OwnedCommand {
+export interface OwnedCommand extends WaitReport {
   /** Names the child in progress lines and errors. */
   step: string;
   file: string;
@@ -132,10 +135,8 @@ export interface OwnedCommand {
   stdin?: 'pipe';
   captureOutput?: boolean;
   onSpawn?: (child: ChildProcess) => void;
-  /** Called for each output line as it arrives. By default stderr lines stream to the terminal. */
+  /** Called for each output line as it arrives. By default stdout and stderr lines stream to the terminal. */
   onLine?: (line: string, stream: 'stdout' | 'stderr') => void;
-  /** Forward stdout lines too (the child's stdout is progress, not a result). */
-  streamStdout?: boolean;
   /** A terminal program: inherits stdio and stays in the terminal's process group. */
   interactive?: boolean;
   /** The caller left: kill the child's process group. */
@@ -191,16 +192,16 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       process.prependOnceListener(name, onSignal);
     }
   }
-  const onLine =
-    command.onLine ??
-    ((line: string, stream: 'stdout' | 'stderr') => {
-      if (stream === 'stderr' || command.streamStdout) process.stderr.write(`${line}\n`);
-    });
+  const report = reporter(command);
+  const onLine = command.onLine ?? ((line: string) => {
+    if (report) process.stderr.write(`${line}\n`);
+  });
   return new Promise((resolve, reject) => {
     if (command.signal?.aborted) {
       reject(new Error(`${command.step}: cancelled before start`));
       return;
     }
+    report?.(`waiting for ${command.step}`);
     const leader = !command.interactive;
     const env = { ...(command.env ?? process.env) };
     if (command.ownerLink) env.BEELINE_OWNER_LINK = '1';

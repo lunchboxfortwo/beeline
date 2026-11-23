@@ -9,7 +9,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { ensureBridge, toolViaBridge } from './bridge.js';
+import { ensureBridge, notifyBridgeSessions, toolViaBridge } from './bridge.js';
+import { setMachineReadOutput } from './beeline-api.js';
 
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
 import { runSessionCommand } from './command.js';
@@ -295,6 +296,26 @@ describe('fix 8: session tool calls through the bridge', () => {
           error: 'Beeline answered HTTP 500',
         });
       } finally {
+        server.close();
+      }
+    });
+
+    it('uses the HTTP machine-output switch for bridge tools and hook notifications', async () => {
+      const dir = scratch();
+      const server = await serve(dir, (connection) => connection.end('{"ok":true,"data":{"id":"m"}}\n'));
+      const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        setMachineReadOutput(false);
+        expect(await toolViaBridge(dir, 'k', 'read', {})).toEqual({ ok: true, data: { id: 'm' } });
+        expect(writes).toHaveBeenCalledWith('[beeline] waiting for Beeline bridge\n');
+        writes.mockClear();
+        setMachineReadOutput(true);
+        expect(await toolViaBridge(dir, 'k', 'tool', {})).toEqual({ ok: true, data: { id: 'm' } });
+        await notifyBridgeSessions(dir);
+        expect(writes).not.toHaveBeenCalled();
+      } finally {
+        setMachineReadOutput(false);
+        writes.mockRestore();
         server.close();
       }
     });

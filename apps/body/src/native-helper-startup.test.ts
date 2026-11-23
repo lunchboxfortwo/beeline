@@ -16,48 +16,25 @@ const status = {
 };
 
 it.each(['cold', 'restart'] as const)(
-  'awaits the successor startup reply through a launchd throttle window (%s)',
+  'accepts the successor startup acknowledgment (%s)',
   async (mode) => {
     const root = await mkdtemp(join(tmpdir(), 'beeline-launchd-start-'));
-    const env = {
-      HOME: root,
-      XDG_CONFIG_HOME: join(root, 'config'),
-      XDG_STATE_HOME: join(root, 'state'),
-    };
+    const env = { HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') };
     const commands: string[][] = [];
-    let launched!: () => void;
-    const launch = new Promise<void>((done) => {
-      launched = done;
-    });
     const run = async (args: string[]) => {
       commands.push(args);
       if (args[0] === 'kickstart') {
-        launched();
+        await reportHelperStartup(env.XDG_STATE_HOME, status);
         return { stdout: String(process.pid) };
       }
       return { stdout: '' };
     };
-    let settled = false;
-    const work = (
-      mode === 'cold'
-        ? convergeNativeHelper({ env, platform: 'launchd', run })
-        : startNativeHelper(env, { platform: 'launchd', run })
-    ).then((value) => {
-      settled = true;
-      return value;
-    });
     try {
-      await launch;
-      for (let i = 0; i < 8; i++) await new Promise<void>((done) => setImmediate(done));
-      expect(settled).toBe(false);
-      reportHelperStartup(env.XDG_STATE_HOME, status);
-      await work;
-      expect(settled).toBe(true);
+      if (mode === 'cold') await convergeNativeHelper({ env, platform: 'launchd', run });
+      else await startNativeHelper(env, { platform: 'launchd', run });
       expect(commands.filter((args) => args[0] === 'kickstart')).toHaveLength(1);
       expect(commands.filter((args) => args[0] === 'print')).toHaveLength(mode === 'cold' ? 1 : 0);
     } finally {
-      reportHelperStartup(env.XDG_STATE_HOME, status);
-      await work.catch(() => undefined);
       await rm(root, { recursive: true, force: true });
     }
   },
@@ -65,27 +42,15 @@ it.each(['cold', 'restart'] as const)(
 
 it('ends launchd startup on the successor explicit failure reply', async () => {
   const root = await mkdtemp(join(tmpdir(), 'beeline-launchd-failed-'));
-  const env = {
-    HOME: root,
-    XDG_CONFIG_HOME: join(root, 'config'),
-    XDG_STATE_HOME: join(root, 'state'),
-  };
-  let launched!: () => void;
-  const launch = new Promise<void>((done) => {
-    launched = done;
-  });
-  const work = startNativeHelper(env, {
-    platform: 'launchd',
-    run: async () => {
-      launched();
-      return { stdout: String(process.pid) };
-    },
-  });
-  const answer = work.catch((error) => error);
+  const env = { HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') };
   try {
-    await launch;
-    reportHelperStartup(env.XDG_STATE_HOME, { error: 'successor configuration failed' });
-    expect(String(await answer)).toContain('successor configuration failed');
+    await expect(startNativeHelper(env, {
+      platform: 'launchd',
+      run: async () => {
+        await reportHelperStartup(env.XDG_STATE_HOME, { error: 'successor configuration failed' });
+        return { stdout: String(process.pid) };
+      },
+    })).rejects.toThrow('successor configuration failed');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -111,38 +76,26 @@ it('acknowledges an already-running launchd helper without waiting for a startup
   }
 });
 
-it('ends startup when the successor exits without sending a reply', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'beeline-launchd-exit-'));
-  const env = {
-    HOME: root,
-    XDG_CONFIG_HOME: join(root, 'config'),
-    XDG_STATE_HOME: join(root, 'state'),
-  };
-  const child = spawn(process.execPath, ['-e', 'process.stdin.resume();'], {
-    stdio: ['pipe', 'ignore', 'ignore'],
-  });
+it.each(['absent', 'starting'] as const)('refuses a live pre-acknowledgment helper with %s control', async (controlState) => {
+  const root = await mkdtemp(join(tmpdir(), 'beeline-launchd-legacy-'));
+  const env = { HOME: root, XDG_CONFIG_HOME: join(root, 'config'), XDG_STATE_HOME: join(root, 'state') };
+  const child = spawn(process.execPath, ['-e', 'process.stdin.resume();'], { stdio: ['pipe', 'ignore', 'ignore'] });
   const ended = once(child, 'exit');
   await once(child, 'spawn');
-  let launched!: () => void;
-  const launch = new Promise<void>((done) => {
-    launched = done;
-  });
-  const work = startNativeHelper(env, {
-    platform: 'launchd',
-    run: async () => {
-      launched();
-      return { stdout: String(child.pid) };
-    },
-  });
-  const answer = work.catch((error) => error);
+  const control = controlState === 'starting'
+    ? new MachineControl(machineControlPath(env.XDG_STATE_HOME), async () => ({ ...status, pid: child.pid!, processState: 'starting' }))
+    : undefined;
   try {
-    await launch;
+    await control?.start();
+    await expect(startNativeHelper(env, {
+      platform: 'launchd', run: async () => ({ stdout: String(child.pid) }),
+    })).rejects.toThrow('helper startup was not acknowledged');
+    expect(child.exitCode).toBeNull();
+    expect(child.signalCode).toBeNull();
+  } finally {
     child.kill('SIGKILL');
     await ended;
-    expect(String(await answer)).toContain('exited before its startup acknowledgment');
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    await ended;
+    await control?.stop();
     await rm(root, { recursive: true, force: true });
   }
 });

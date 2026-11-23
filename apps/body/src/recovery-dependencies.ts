@@ -18,7 +18,6 @@ export async function convergeDependencies(
     file: process.execPath,
     args: [entry, 'converge-dependencies'],
     env: { ...env, BEELINE_LIB_DIR: libDir, BEELINE_INTERNAL_RECOVERY: '1' },
-    streamStdout: true,
     ownerLink: true,
     ...(signal ? { signal } : {}),
   });

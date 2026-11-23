@@ -213,14 +213,11 @@ function helperStartupPath(stateRoot: string): string {
   return privateSocketPath(JSON.stringify(['helper-startup', resolve(stateRoot)]));
 }
 
-export function reportHelperStartup(stateRoot: string, startup: HelperStatusFile | { error: string }): void {
-  const peer = createConnection(helperStartupPath(stateRoot));
-  peer.unref();
-  peer.on('error', () => undefined);
-  peer.on('data', () => undefined);
+export async function reportHelperStartup(stateRoot: string, startup: HelperStatusFile | { error: string }): Promise<void> {
   const answer = 'error' in startup ? startup : { pid: startup.pid, generation: startup.generation,
     processState: startup.processState, updatedAt: startup.updatedAt, agents: {} };
-  peer.end(`${JSON.stringify({ operation: 'status', startup: answer })}\n`);
+  await ask({ socket: helperStartupPath(stateRoot), peer: 'helper startup owner', machineRead: true },
+    { operation: 'status', startup: answer }).catch(() => undefined);
 }
 
 export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<number>): Promise<HelperStatusFile> {
@@ -260,6 +257,7 @@ export async function startHelperWithAcknowledgment(stateRoot: string, start: ()
       });
       if (current?.processState === 'serving') status = current;
     }
+    if (!status) throw new Error('helper startup was not acknowledged; the started helper may not support startup acknowledgments');
     complete();
   } }).finally(async () => { controller.abort(); await channel?.stop(); });
 }
