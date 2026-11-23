@@ -1,4 +1,14 @@
-import { link, lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  link,
+  lstat,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -105,8 +115,9 @@ it('a configured home that is a file recovers with the rule-named Pi skills', as
   expect(env.PI_CODING_AGENT_DIR).not.toBe(join(home, 'pi'));
   expect((await readdir(join(env.PI_CODING_AGENT_DIR!, 'skills'))).sort()).toEqual(managedNames());
   for (const name of ['beeline-triage', 'beeline-spec']) {
-    expect(await readFile(join(env.PI_CODING_AGENT_DIR!, 'skills', name, 'SKILL.md'), 'utf8'))
-      .toMatch(new RegExp(`^---\\nname: ${name}\\ndescription: \\S`));
+    expect(
+      await readFile(join(env.PI_CODING_AGENT_DIR!, 'skills', name, 'SKILL.md'), 'utf8'),
+    ).toMatch(new RegExp(`^---\\nname: ${name}\\ndescription: \\S`));
   }
   expect(await readFile(home, 'utf8')).toBe('unusable home');
 });
@@ -135,8 +146,9 @@ it.each(['skills-link', 'skill-link', 'file-link', 'hard-link', 'stale'])(
     const env = await prepareRoomAgentCredentials({ root: home, operatorHome, agentKind: 'pi' });
     links.push(env.TMPDIR!);
     expect(env.PI_CODING_AGENT_DIR).toBe(join(home, 'pi'));
-    expect(await readFile(join(target, 'SKILL.md'), 'utf8'))
-      .toMatch(/^---\nname: beeline-triage\ndescription: \S/);
+    expect(await readFile(join(target, 'SKILL.md'), 'utf8')).toMatch(
+      /^---\nname: beeline-triage\ndescription: \S/,
+    );
     for (const path of [join(home, 'pi/skills'), target, join(target, 'SKILL.md')]) {
       expect((await lstat(path)).isSymbolicLink()).toBe(false);
     }

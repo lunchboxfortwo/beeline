@@ -46,26 +46,60 @@ import { piRetrySettings } from './pi-retry-settings.js';
  * otherwise-implicit reads from the operator's `~/.pi` and `~/.agents` trees.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync,readFileSync } from 'node:fs';
-import { lstat,mkdir,realpath,rename,rm,unlink } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { lstat, mkdir, realpath, rename, rm, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname,resolve } from 'node:path';
-import { parse as parseToml,stringify as stringifyToml } from 'smol-toml';
-import { parse as parseYaml,stringify as stringifyYaml } from 'yaml';
-import { AGENT_BEHAVIORS,IMPORTED_MCP_KINDS,agentBehavior,type AgentKind } from './agent-command.js';
-import { assertRealContainedDirectory,copySafeSkillTree,materializedSkillManifest,planManagedSkills,resolveSharedSkillSources,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { AgentHomeSecurityError,AgentSkillDir,CODEX_ROOM_AGENT_LOCKDOWN_TOML,CODEX_ROOM_WEB_SEARCH_TOML,HARNESS_MCP_CONFIGS,PI_CUSTOM_MODEL_CONFIG,PI_MCP_CONFIG,RoomAgentHomeInput } from './agent-home.js';
+import { dirname, resolve } from 'node:path';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import {
+  AGENT_BEHAVIORS,
+  IMPORTED_MCP_KINDS,
+  agentBehavior,
+  type AgentKind,
+} from './agent-command.js';
+import {
+  assertRealContainedDirectory,
+  copySafeSkillTree,
+  materializedSkillManifest,
+  planManagedSkills,
+  resolveSharedSkillSources,
+  writeIsolatedHarnessFile,
+} from './agent-home-plan-managed-skills.js';
+import {
+  AgentHomeSecurityError,
+  AgentSkillDir,
+  CODEX_ROOM_AGENT_LOCKDOWN_TOML,
+  CODEX_ROOM_WEB_SEARCH_TOML,
+  HARNESS_MCP_CONFIGS,
+  PI_CUSTOM_MODEL_CONFIG,
+  PI_MCP_CONFIG,
+  RoomAgentHomeInput,
+} from './agent-home.js';
 import { beelineManagedSkills } from './beeline-skill.js';
 import { piCliProxyProviders } from './cliproxy.js';
-import { DRAW_AVATAR_SKILL_NAME,drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
-import { grantedSquireHostRoute,mergeGooseHostRoutes,mergeJsonHostRoutes,mergeTomlHostRoutes,rewriteGrantedHostRoutes } from './host-mcp-route.js';
+import { DRAW_AVATAR_SKILL_NAME, drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
+import {
+  grantedSquireHostRoute,
+  mergeGooseHostRoutes,
+  mergeJsonHostRoutes,
+  mergeTomlHostRoutes,
+  rewriteGrantedHostRoutes,
+} from './host-mcp-route.js';
 import { classifyImportedMcpServer } from './mcp-route-class.js';
-import { NATIVE_SHELL_OUTPUT_SCRIPT,nativeShellHookCommand,nativeShellHookConfig } from './native-shell-output.js';
-import { OPENROUTER_MAX_OUTPUT_TOKENS,resolveOpenRouterRouting,withOpenRouterModelRouting,type OpenRouterRoutingDecision } from './openrouter-routing.js';
+import {
+  NATIVE_SHELL_OUTPUT_SCRIPT,
+  nativeShellHookCommand,
+  nativeShellHookConfig,
+} from './native-shell-output.js';
+import {
+  OPENROUTER_MAX_OUTPUT_TOKENS,
+  resolveOpenRouterRouting,
+  withOpenRouterModelRouting,
+  type OpenRouterRoutingDecision,
+} from './openrouter-routing.js';
 import { ensureSquireHostDir } from './squire-host.js';
-import { extractTomlSections,tomlChildTableNames } from './toml-section.js';
-
-
+import { extractTomlSections, tomlChildTableNames } from './toml-section.js';
 
 function releaseSkills(skillReleaseId: string, isReviewer: boolean) {
   return [
@@ -94,7 +128,6 @@ export async function provisionAgentSkills(
     await writeIsolatedHarnessFile(resolve(entry, 'SKILL.md'), skill.content);
   }
 }
-
 
 /**
  * Optional skill and MCP preparation follows `docs/agent-body.md`.
@@ -135,12 +168,11 @@ export async function provisionAgentSkillsAndMcp(
         : undefined;
       // A Codex Room needs this config even when the operator shares no MCP
       // servers: Codex otherwise enables internal collaboration by default.
-      const section =
-        config.roomDefaults
-          ? [CODEX_ROOM_AGENT_LOCKDOWN_TOML, CODEX_ROOM_WEB_SEARCH_TOML, mcpSection]
-              .filter(Boolean)
-              .join('\n')
-          : mcpSection;
+      const section = config.roomDefaults
+        ? [CODEX_ROOM_AGENT_LOCKDOWN_TOML, CODEX_ROOM_WEB_SEARCH_TOML, mcpSection]
+            .filter(Boolean)
+            .join('\n')
+        : mcpSection;
       // Regeneration is also deletion: if the operator removes the config or
       // its last MCP table, do not leave stale servers active in a Room. Codex
       // retains its required delegation lockdown without shared MCP config.
@@ -196,8 +228,12 @@ export async function provisionAgentSkillsAndMcp(
     const shellHook = resolve(root, 'claude', 'beeline-shell-output.cjs');
     if (process.platform !== 'win32')
       await writeIsolatedHarnessFile(shellHook, NATIVE_SHELL_OUTPUT_SCRIPT);
-    const settings = { permissions: { allow: ['WebSearch', 'WebFetch'] },
-      ...(process.platform !== 'win32' ? nativeShellHookConfig(nativeShellHookCommand(shellHook, 'claude')) : {}) };
+    const settings = {
+      permissions: { allow: ['WebSearch', 'WebFetch'] },
+      ...(process.platform !== 'win32'
+        ? nativeShellHookConfig(nativeShellHookCommand(shellHook, 'claude'))
+        : {}),
+    };
     await writeIsolatedHarnessFile(
       resolve(root, 'claude', 'settings.json'),
       `${JSON.stringify(settings, null, 2)}\n`,
@@ -207,15 +243,26 @@ export async function provisionAgentSkillsAndMcp(
     console.warn('[body] claude web-search settings provisioning failed:', error);
   }
 
-  if (agentBehavior(agentKind).nativeShellHook?.config === 'hooks-file' && process.platform !== 'win32') {
+  if (
+    agentBehavior(agentKind).nativeShellHook?.config === 'hooks-file' &&
+    process.platform !== 'win32'
+  ) {
     const shellHook = resolve(root, 'cursor', 'beeline-shell-output.cjs');
     await writeIsolatedHarnessFile(shellHook, NATIVE_SHELL_OUTPUT_SCRIPT);
     const config = resolve(root, 'user', '.cursor');
     await mkdir(config, { recursive: true, mode: 0o700 });
     await assertRealContainedDirectory(config, root);
-    await writeIsolatedHarnessFile(resolve(config, 'hooks.json'), JSON.stringify({
-      version: 1, hooks: { preToolUse: [{ matcher: '^Shell$', command: nativeShellHookCommand(shellHook, 'cursor') }] },
-    }));
+    await writeIsolatedHarnessFile(
+      resolve(config, 'hooks.json'),
+      JSON.stringify({
+        version: 1,
+        hooks: {
+          preToolUse: [
+            { matcher: '^Shell$', command: nativeShellHookCommand(shellHook, 'cursor') },
+          ],
+        },
+      }),
+    );
   }
 
   await applyGrantedHostRoutes(
@@ -228,7 +275,14 @@ export async function provisionAgentSkillsAndMcp(
     extraHostRoutes,
     squireScope,
   );
-  await provisionPiCustomModelConfig(root, operatorHome, failClosed, openRouterRouting, cliProxy, agentEnv);
+  await provisionPiCustomModelConfig(
+    root,
+    operatorHome,
+    failClosed,
+    openRouterRouting,
+    cliProxy,
+    agentEnv,
+  );
   // Keep the transport deadline and let Pi retry a temporary model failure twice.
   // Generate isolated settings rather than inheriting operator retry defaults.
   if (appliesToHarness(agentKind, 'pi')) {
@@ -243,11 +297,9 @@ export async function provisionAgentSkillsAndMcp(
   }
 }
 
-
 export function appliesToHarness(selected: AgentKind | undefined, harness: AgentKind): boolean {
   return !selected || selected === harness;
 }
-
 
 export async function applyGrantedHostRoutes(
   root: string,
@@ -325,7 +377,6 @@ export async function applyGrantedHostRoutes(
   }
 }
 
-
 export async function provisionPiCustomModelConfig(
   root: string,
   operatorHome: string,
@@ -340,7 +391,9 @@ export async function provisionPiCustomModelConfig(
     const models = recordValue(value) ?? {};
     const providers = recordValue(models.providers) ?? {};
     const routed = await piCliProxyProviders(cliProxy, agentEnv, operatorHome, providers);
-    return Object.keys(routed).length ? { ...models, providers: { ...providers, ...routed } } : value;
+    return Object.keys(routed).length
+      ? { ...models, providers: { ...providers, ...routed } }
+      : value;
   };
   const target = resolve(root, 'pi', PI_CUSTOM_MODEL_CONFIG.target);
   // One decision per activation, one log line; never a failed activation.
@@ -404,7 +457,6 @@ export async function provisionPiCustomModelConfig(
   }
 }
 
-
 export function readClaudeUserScopeMcpServers(path: string): Record<string, unknown> | undefined {
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
@@ -415,7 +467,6 @@ export function readClaudeUserScopeMcpServers(path: string): Record<string, unkn
   }
   return undefined;
 }
-
 
 export function localHarnessMcpToml(source: string): string | undefined {
   let servers: Record<string, unknown> | undefined;
@@ -446,7 +497,6 @@ export function localHarnessMcpToml(source: string): string | undefined {
   return sections.length > 0 ? sections.join('\n') : undefined;
 }
 
-
 export function localGooseConfig(source: string): string {
   let parsed: unknown;
   try {
@@ -462,11 +512,9 @@ export function localGooseConfig(source: string): string {
   return stringifyYaml({ ...document, extensions: local });
 }
 
-
 export function isHostMcpDeclaration(name: string, value: unknown): boolean {
   return classifyImportedMcpServer({ name, declaration: recordValue(value) ?? {} }) === 'host';
 }
-
 
 export function hostMcpServerNames(servers: Record<string, unknown>): string[] {
   return Object.entries(servers)
@@ -474,20 +522,17 @@ export function hostMcpServerNames(servers: Record<string, unknown>): string[] {
     .map(([name]) => name);
 }
 
-
 export function localMcpServers(servers: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(servers).filter(([name, value]) => !isHostMcpDeclaration(name, value)),
   );
 }
 
-
 export function recordValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 }
-
 
 /**
  * Host-classified imported servers, read from the operator's own configs.
@@ -515,19 +560,21 @@ export function hostImportedMcpDeclarations(
   return declarations;
 }
 
-
 export function importedMcpConfigs(kind?: AgentKind) {
-  const behaviors = kind ? [agentBehavior(kind)] : IMPORTED_MCP_KINDS.map(kind => AGENT_BEHAVIORS[kind]);
-  return behaviors.flatMap((behavior) => behavior.importedMcp ? [behavior.importedMcp] : []);
+  const behaviors = kind
+    ? [agentBehavior(kind)]
+    : IMPORTED_MCP_KINDS.map((kind) => AGENT_BEHAVIORS[kind]);
+  return behaviors.flatMap((behavior) => (behavior.importedMcp ? [behavior.importedMcp] : []));
 }
 
-
-export function readImportedMcpServers(format: 'toml' | 'json' | 'extensions', path: string): Record<string, unknown> | undefined {
+export function readImportedMcpServers(
+  format: 'toml' | 'json' | 'extensions',
+  path: string,
+): Record<string, unknown> | undefined {
   if (format === 'toml') return readTomlMcpServers(path);
   if (format === 'extensions') return readGooseExtensions(path);
   return recordValue(readJsonObject(path)?.mcpServers);
 }
-
 
 export function readTomlMcpServers(path: string): Record<string, unknown> | undefined {
   const source = readExistingText(path);
@@ -538,7 +585,6 @@ export function readTomlMcpServers(path: string): Record<string, unknown> | unde
     return undefined;
   }
 }
-
 
 export function readGooseExtensions(path: string): Record<string, unknown> | undefined {
   const source = readExistingText(path);
@@ -552,7 +598,6 @@ export function readGooseExtensions(path: string): Record<string, unknown> | und
   return recordValue(recordValue(parsed)?.extensions);
 }
 
-
 export function readExistingText(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   try {
@@ -561,7 +606,6 @@ export function readExistingText(path: string): string | undefined {
     return undefined;
   }
 }
-
 
 export function readJsonObject(path: string): Record<string, unknown> | undefined {
   const source = readExistingText(path);
@@ -575,7 +619,6 @@ export function readJsonObject(path: string): Record<string, unknown> | undefine
     return undefined;
   }
 }
-
 
 /**
  * Atomically rebuild `target` with the exact release-owned defaults plus the
@@ -616,7 +659,6 @@ export async function provisionManagedSkillsDir(
     await rm(staged, { recursive: true, force: true });
   }
 }
-
 
 export type PlannedSkill =
   | { kind: 'managed'; name: string; content: string }
