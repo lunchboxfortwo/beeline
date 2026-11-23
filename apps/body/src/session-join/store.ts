@@ -1,10 +1,10 @@
-import { waitForPathRemoval } from '../filesystem-change.js';
 // Local state for sessions that joined Beeline: one private file per machine user, a lock, and per-session inboxes
 // for apps that take messages through their own hooks or plugins instead of a push channel.
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { withKernelLockWhenFree } from '../kernel-lock.js';
 import type { AgentId } from './agents.js';
 import { sessionAgentBehavior } from '../agent-command.js';
 
@@ -98,22 +98,91 @@ export function writeState(dir: string, state: State): void {
   writePrivate(join(ensureDir(dir), 'state.json'), JSON.stringify(state, null, 2) + '\n');
 }
 
-/** Serializes every change to the state file across the bridge and one-off commands. */
-export async function withLock<T>(dir: string, run: () => Promise<T> | T): Promise<T> {
-  const lock = join(ensureDir(dir), 'state.lock');
-  for (let attempt = 0; ; attempt++) {
+/**
+ * Releases before the kernel lock exclude each other with the `state.lock`
+ * directory. While such a release may still be running (a long-lived Claude
+ * MCP child keeps its launch-time code), every holder also takes that marker,
+ * with an owner file naming itself. A marker is never taken over by age.
+ */
+const LEGACY_OWNER = 'owner';
+
+function legacyLockRefused(path: string): Error {
+  return new Error(
+    `Beeline session state is locked by another Beeline process at ${path}; if no Beeline process is running, remove that directory`,
+  );
+}
+
+/** A marker this release left when its holder died: our owner file, naming a dead pid. */
+function removeDeadOwnMarker(path: string): boolean {
+  let owner: string;
+  try {
+    owner = readFileSync(join(path, LEGACY_OWNER), 'utf8');
+  } catch {
+    return false; // empty or foreign: an older release's marker
+  }
+  const pid = Number(owner.split(':')[0]);
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pidAlive(pid)) return false;
+  rmSync(join(path, LEGACY_OWNER), { force: true });
+  try {
+    rmdirSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function takeLegacyMarker(path: string, token: string): void {
+  try {
+    mkdirSync(path, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if (!removeDeadOwnMarker(path)) throw legacyLockRefused(path);
     try {
-      mkdirSync(lock);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      // A holder that died leaves its lock; nothing holds it for 30 seconds.
-      try { if (Date.now() - statSync(lock).mtimeMs > 30_000) rmSync(lock, { recursive: true, force: true }); } catch { /* gone */ }
-      if (attempt > 400) throw new Error('Beeline session state is locked');
-      await waitForPathRemoval(lock);
+      mkdirSync(path, { mode: 0o700 });
+    } catch (again) {
+      if ((again as NodeJS.ErrnoException).code === 'EEXIST') throw legacyLockRefused(path);
+      throw again;
     }
   }
-  try { return await run(); } finally { rmSync(lock, { recursive: true, force: true }); }
+  writeFileSync(join(path, LEGACY_OWNER), token, { mode: 0o600 });
+}
+
+/** Removes the marker only while it is still ours. */
+function releaseLegacyMarker(path: string, token: string): void {
+  try {
+    if (readFileSync(join(path, LEGACY_OWNER), 'utf8') !== token) return;
+  } catch {
+    return;
+  }
+  rmSync(join(path, LEGACY_OWNER), { force: true });
+  try {
+    rmdirSync(path);
+  } catch {
+    /* an older release already took it over */
+  }
+}
+
+/**
+ * Serializes every change to the state file across the bridge and one-off
+ * commands: a kernel lock followed while busy, plus the legacy marker. A
+ * marker held by an older release refuses at once, naming its path; callers
+ * treat that as uncommitted work.
+ */
+export async function withLock<T>(dir: string, run: () => Promise<T> | T): Promise<T> {
+  const legacy = join(ensureDir(dir), 'state.lock');
+  return withKernelLockWhenFree(
+    `beeline-session-state:${resolve(dir)}`,
+    async () => {
+      const token = `${process.pid}:${randomUUID()}`;
+      takeLegacyMarker(legacy, token);
+      try {
+        return await run();
+      } finally {
+        releaseLegacyMarker(legacy, token);
+      }
+    },
+    { step: 'Beeline session state' },
+  );
 }
 
 /** Reads, changes and writes the state under the lock. */

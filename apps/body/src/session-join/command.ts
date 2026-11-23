@@ -3,7 +3,6 @@ import { SESSION_ON_DEMAND_NOTICE } from '@beeline/api-contract/agent-invitation
 // `usebeeline join` and `usebeeline session …`: a coding session that is already running joins a person's Beeline
 // Rooms as its own member, from one pasted line and one sign-in on any device.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { spawn } from 'node:child_process';
 import {
   closeSync,
   constants,
@@ -83,7 +82,7 @@ import {
   recordHookSession,
 } from './store.js';
 import { tryWithKernelLock } from '../kernel-lock.js';
-import { ask, tryLock } from '../wait.js';
+import { answer, ask, launchDetached, tryLock } from '../wait.js';
 
 interface Pending {
   server: string;
@@ -416,12 +415,11 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   if (!resume && previous && previous.file !== file) rmSync(previous.file, { force: true });
   // The app shows this command's output only when it ends, so the sign-in finishes in the background.
   const out = join(dir, 'bridge.log');
-  const child = spawn(run.node, [run.bundle, 'session', 'finish-join', file], {
-    detached: true,
-    stdio: 'ignore',
+  launchDetached({
+    file: run.node,
+    args: [run.bundle, 'session', 'finish-join', file],
     env: { ...env, BEELINE_SESSION_BUNDLE: run.bundle },
   });
-  child.unref();
   console.log(
     [
       `Show your person this link. They open it on any device (a phone works) and sign in with GitHub or Google:`,
@@ -587,12 +585,11 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
       if (joined.agent === 'antigravity' && which('agentapi', env) && joined.sessionId) {
         if (!antigravitySidecarEnabled(env))
           throw new Error('Beeline’s Antigravity sidecar is disabled in the host configuration.');
-        const child = spawn(run.node, [run.bundle, 'session', 'antigravity-sidecar'], {
-          detached: true,
-          stdio: 'ignore',
+        launchDetached({
+          file: run.node,
+          args: [run.bundle, 'session', 'antigravity-sidecar'],
           env,
         });
-        child.unref();
       }
       const rooms = me.rooms
         .map((r) => r.name)
@@ -856,17 +853,30 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   throw new Error('Usage: usebeeline join | usebeeline session reply|read|tool|status|leave');
 }
 
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let text = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
-      text += chunk;
-    });
-    process.stdin.on('end', () => {
-      resolve(text);
-    });
-  });
+/**
+ * The host hook's payload: everything up to stdin's EOF, the host protocol's
+ * delimiter. An error or a close without EOF is a truncated payload, read as
+ * none. Residual: a host that keeps its writer open is waited on.
+ */
+async function readStdin(): Promise<string> {
+  let text = '';
+  const append = (chunk: string) => {
+    text += chunk;
+  };
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', append);
+  try {
+    await answer('host hook payload', [
+      [process.stdin, 'end', 'answer'],
+      [process.stdin, 'error'],
+      [process.stdin, 'close'],
+    ]);
+    return text;
+  } catch {
+    return '';
+  } finally {
+    process.stdin.removeListener('data', append);
+  }
 }
 
 export async function runSessionCommand(

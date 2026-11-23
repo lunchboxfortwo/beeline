@@ -1,10 +1,9 @@
 import { tryWithKernelLock } from '../kernel-lock.js';
 import { recordDeliveryFailure } from './bridge.js';
-import { watch } from 'node:fs/promises';
 // Apps that collect Beeline messages themselves: ZCode through a small MCP server of ours, Antigravity's App through
 // a sidecar that hands them to `agentapi`. Ported from Reason Network (src/setup/zcode.rs, src/antigravity.rs),
 // Copyright 2026 Reason Machines, Inc., MIT OR Apache-2.0. See ./NOTICE and ./UPSTREAM.json for the copied commit.
-import { runOwned } from '../wait.js';
+import { answer, runOwned, watchChanges } from '../wait.js';
 import { createInterface } from 'node:readline';
 import { hookSessions, queueInbox, readState, takeInbox, type HookSession } from './store.js';
 import { NOT_JOINED } from './beeline-api.js';
@@ -112,11 +111,32 @@ export async function antigravityOnce(
 export async function runAntigravitySidecar(dir: string): Promise<void> {
   await tryWithKernelLock('beeline-antigravity-sidecar:' + dir, () => watchAntigravity(dir));
 }
+/** One drain at a time; a change during a drain runs one more. Ends only when its watcher fails. */
 async function watchAntigravity(dir: string): Promise<never> {
-  await antigravityOnce(dir, hookSessions(dir)).catch(() => 0);
-  for await (const event of watch(dir, { recursive: true })) {
-    if (event.filename?.startsWith('inbox/') || event.filename?.startsWith('deliveries/'))
-      await antigravityOnce(dir, hookSessions(dir)).catch(() => 0);
-  }
-  throw new Error('session inbox watcher closed');
+  let draining = false,
+    dirty = false;
+  const drain = async () => {
+    dirty = true;
+    if (draining) return;
+    draining = true;
+    try {
+      while (dirty) {
+        dirty = false;
+        await antigravityOnce(dir, hookSessions(dir)).catch(() => 0);
+      }
+    } finally {
+      draining = false;
+    }
+  };
+  return answer<never>('session inbox watcher', [], ({ reject }) => {
+    // Subscribe before the first drain, so nothing written in between is missed.
+    watchChanges(
+      dir,
+      (name) => {
+        if (name === null || /^(?:inbox|deliveries)(?:\/|$)/.test(name)) void drain();
+      },
+      { recursive: true, onError: () => reject(new Error('session inbox watcher closed')) },
+    );
+    void drain();
+  });
 }

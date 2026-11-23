@@ -43,3 +43,46 @@ export async function withKernelLock<T>(
     await lock.release();
   }
 }
+
+/** The holder's socket was refused or reset before its record: it is gone, not busy. */
+function holderVanished(error: unknown): boolean {
+  return ['ECONNRESET', 'ECONNREFUSED', 'ENOENT', 'EPIPE'].includes(
+    (error as NodeJS.ErrnoException)?.code ?? '',
+  );
+}
+
+/**
+ * A short shared-file critical section (session state, operator secrets).
+ * A busy lock is followed to its holder's close, which the kernel delivers on
+ * release or death, and then contended again; a holder that vanishes between
+ * the busy bind and its record is contended again at once. Every step waits
+ * on a kernel event, with no timer and no count. Residual: under endless
+ * contention a caller can keep losing the race (starvation), and a live but
+ * stuck holder is followed for as long as it holds.
+ */
+export async function withKernelLockWhenFree<T>(
+  key: string,
+  work: () => Promise<T>,
+  about: { step?: string; log?: string } = {},
+): Promise<T> {
+  for (;;) {
+    const lock = await tryLock(key, about).catch((error: unknown) => {
+      if (holderVanished(error)) return undefined;
+      throw error;
+    });
+    if (!lock) continue;
+    if (lock.held) {
+      try {
+        return await work();
+      } finally {
+        await lock.release();
+      }
+    }
+    // A different key on the same address (a Darwin port collision) is never followed.
+    if (lock.holder.key !== key) {
+      lock.close();
+      throw new KernelLockBusyError(lock.holder);
+    }
+    await lock.released();
+  }
+}

@@ -1,6 +1,7 @@
-import { watch, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { watchChanges } from '../wait.js';
 import { ancestors } from './agents.js';
 import { postToClaude, scanClaude, type ClaudeSession } from './claude.js';
 import { pidAlive, queueInbox, readState, takeInbox, type JoinedSession } from './store.js';
@@ -47,7 +48,7 @@ export async function runClaudeMcp(dir: string, env: NodeJS.ProcessEnv, rulesFor
   post: typeof postToClaude = postToClaude): Promise<void> {
   const chain = ancestors(process.pid);
   let registration: string | undefined;
-  let flushing = false, dirty = false;
+  let flushing = false, dirty = false, deaf = false;
   const flush = async () => {
     dirty = true;
     if (flushing || !env.CLAUDE_CODE_MESSAGING_TOKEN) return;
@@ -58,7 +59,7 @@ export async function runClaudeMcp(dir: string, env: NodeJS.ProcessEnv, rulesFor
         const live = scanClaude(env);
         const session = chain.map(pid => live.find(s => s.pid === pid)).find(Boolean);
         if (!session) return;
-        if (!registration) {
+        if (!registration && !deaf) {
           const folder = join(dir, 'claude-mcp');
           mkdirSync(folder, { recursive: true, mode: 0o700 });
           registration = join(folder, `${process.pid}.json`);
@@ -68,11 +69,19 @@ export async function runClaudeMcp(dir: string, env: NodeJS.ProcessEnv, rulesFor
       }
     } finally { flushing = false; }
   };
-  const watcher=watch(dir,{recursive:true},(_event,name)=>{
-    const path=String(name??'');
-    // Stream intake commits state.json after persisting the delivery. Watching
-    // that commit also avoids treating our own failure requeue as a new wake.
-    if(path === 'state.json' || path.startsWith('inbox/')) void flush().catch(()=>undefined);
+  // Stream intake commits state.json after persisting the delivery. Watching
+  // that commit also avoids treating our own failure requeue as a new wake.
+  // A change without a name is any change. If the watcher fails this server
+  // can no longer hear deliveries, so it gives delivery back to the bridge.
+  const stopWatching = watchChanges(dir, (path) => {
+    if (path === null || path === 'state.json' || path.startsWith('inbox/')) void flush().catch(() => undefined);
+  }, {
+    recursive: true,
+    onError: () => {
+      deaf = true;
+      if (registration) rmSync(registration, { force: true });
+      registration = undefined;
+    },
   });
   try {
     await flush();
@@ -87,7 +96,7 @@ export async function runClaudeMcp(dir: string, env: NodeJS.ProcessEnv, rulesFor
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...(result ? { result } : { error: { code: -32601, message: 'Method not found' } }) }) + '\n');
     }
   } finally {
-    watcher.close();
+    stopWatching();
     if (registration) rmSync(registration, { force: true });
   }
 }

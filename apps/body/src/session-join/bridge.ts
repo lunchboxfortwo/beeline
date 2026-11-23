@@ -11,13 +11,20 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
-  watch,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { preparePrivateSocketDirectory } from '../local-socket.js';
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
-import { ask, PeerRefusal, tryLock, type LockAttempt } from '../wait.js';
+import {
+  answer,
+  ask,
+  listen,
+  PeerRefusal,
+  tryLock,
+  watchChanges,
+  type LockAttempt,
+} from '../wait.js';
 import { externalAgentRules } from '@beeline/api-contract/phone';
 import { accessToken, callTool, memberStream } from './beeline-api.js';
 import { memberStreamFrame } from './stream-frame.js';
@@ -354,15 +361,10 @@ async function serveTools(dir: string, path: string, sessionsChanged: () => void
       connection.end(JSON.stringify(answer) + '\n');
     });
   });
-  await new Promise<void>((done, fail) => {
-    server.once('error', fail);
-    server.listen(path, () => {
-      chmodSync(path, 0o600);
-      done();
-    });
-  });
+  const listening = await listen(server, path);
+  chmodSync(path, 0o600);
   server.unref();
-  return server;
+  return listening;
 }
 
 /** Calls a tool through the bridge; undefined when no bridge answers, so the caller goes direct. */
@@ -409,14 +411,16 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   let activated = !staged,
     stopping = false;
   let activate!: () => void, begin!: () => void;
+  // The launcher's `activate`; losing the launcher before activation exits (below).
   const handoff = staged
-    ? new Promise<void>((done) => {
-        begin = done;
+    ? answer<void>('Beeline bridge launcher', [], ({ resolve }) => {
+        begin = () => resolve();
       })
     : Promise.resolve();
+  // Received frames wait here until this candidate owns delivery.
   const activation = staged
-    ? new Promise<void>((done) => {
-        activate = done;
+    ? answer<void>('Beeline bridge activation', [], ({ resolve }) => {
+        activate = () => resolve();
       })
     : Promise.resolve();
   if (staged) {
@@ -471,11 +475,22 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   const sources = machineSources(dir);
   type Stream = { fingerprint: string; controller: AbortController; recovered: boolean };
   const streams = new Map<string, Stream>();
-  const localWatch = watch(dir, { recursive: true }, (_event, name) => {
-    const path = String(name ?? '');
-    if (path.startsWith('hooks/') || path.startsWith('inbox/') || path.startsWith('deliveries/'))
-      changed();
-  });
+  // A change without a name is any change. A failed watcher would leave this
+  // bridge deaf, so it stops and the next session start launches a new one.
+  const stopWatching = watchChanges(
+    dir,
+    (path) => {
+      // A new subdirectory can be reported by its own name only.
+      if (path === null || /^(?:hooks|inbox|deliveries)(?:\/|$)/.test(path)) changed();
+    },
+    {
+      recursive: true,
+      onError: (error) => {
+        log(dir, `local watcher failed: ${error.message}`);
+        stop();
+      },
+    },
+  );
   const stop = () => {
     if (!activated) process.exit(0);
     stopping = true;
@@ -586,10 +601,12 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       await handoff;
       // Commands embedded in delivered messages always use the retained path.
       runner = { ...runner, bundle: join(dir, 'usebeeline.mjs') };
+      // Own the bridge before publishing anything: a candidate that loses the
+      // claim leaves the serving bridge's public socket where it is.
+      if (!claim()) throw new Error('Beeline bridge owner changed during handoff');
+      await own();
       renameSync(socket, bridgeSocketPath(dir));
     }
-    if (staged && !claim()) throw new Error('Beeline bridge owner changed during handoff');
-    if (staged) await own();
     writeFileSync(join(dir, 'bridge-owner.json'), JSON.stringify({ pid: process.pid, digest }), {
       mode: 0o600,
     });
@@ -618,9 +635,10 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
         }
       }
       await flush(dir, sources).catch((error) => log(dir, `flush: ${String(error)}`));
+      // A change during flush set localDirty; otherwise park until the next one.
       if (!localDirty)
-        await new Promise<void>((resolve) => {
-          wake = resolve;
+        await answer<void>('Beeline bridge changes', [], ({ resolve }) => {
+          wake = () => resolve();
         });
       wake = undefined;
     }
@@ -630,19 +648,24 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     await owner?.release();
     throw error;
   } finally {
-    localWatch.close();
+    stopWatching();
     for (const stream of streams.values()) {
       stream.controller.abort();
     }
     if (staged && !activated) activate();
     await Promise.allSettled(jobs);
-    await new Promise<void>((done) => tools.close(() => done()));
+    await tools.close();
   }
   log(
     dir,
     `bridge ${process.pid} stopped: ${stopping ? 'handoff or shutdown' : 'no joined sessions'}`,
   );
-  rmSync(pidFile, { force: true });
+  // Clean up only what this bridge still owns.
+  try {
+    if (Number(readFileSync(pidFile, 'utf8')) === process.pid) rmSync(pidFile, { force: true });
+  } catch {
+    /* already gone */
+  }
   rmSync(bridgeSocketPath(dir), { force: true });
   process.exit(0);
 }

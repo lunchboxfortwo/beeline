@@ -1,6 +1,6 @@
 import { runOwned } from './wait.js';
 import { grantOutputLines, type GrantOutputLine } from './grant-runner-output.js';
-import { waitForPathRemoval } from './filesystem-change.js';
+import { withKernelLockWhenFree } from './kernel-lock.js';
 import {
   installedGrantExecutable,
   isNativeGrantExecutable,
@@ -207,12 +207,6 @@ async function readOperatorSecrets(
   }
 }
 
-/** How long a stale lock may sit before a waiter takes it over. */
-const SECRETS_LOCK_STALE_MS = 15_000;
-/** Ceiling on waiting for the lock; the caller gets an error, not a hang. */
-const SECRETS_LOCK_TIMEOUT_MS = 30_000;
-/** Base poll interval while the lock is held by someone else. */
-
 /** The holder's unguessable owner token, which also names its lock marker file. */
 function operatorSecretsLockToken(): string {
   return `${process.pid}:${randomUUID()}`;
@@ -230,34 +224,30 @@ async function operatorSecretsLockOwner(lockDir: string): Promise<string | undef
   return marker ?? undefined;
 }
 
+function operatorSecretsLockRefused(lockDir: string): Error {
+  return new Error(
+    `operator secret store is locked by another Beeline process at ${lockDir}; if no Beeline process is running, remove that directory`,
+  );
+}
+
 /**
- * Take over a stale lock directory. The lock's ownership is verified and
- * removed with ATOMIC primitives, never by a bare pathname unlink:
- * a stale lock is a directory aged past `SECRETS_LOCK_STALE_MS` containing
- * either the dead holder's marker, or NOTHING — a holder crashed between
- * `mkdir` and writing its marker, or a prior takeover crashed between
- * unlink and `rmdir`. In both cases we then `rmdir`, which succeeds only on
- * an EMPTY directory. If a rival removed the marker and re-created the
- * directory with its own marker first, our `rmdir` sees ENOTEMPTY and
- * removes nothing. There is no read-then-replace window in which a newly
- * acquired lock can be deleted.
- *
- * Freshness is judged BEFORE the contents are read: a FRESH directory —
- * even an empty one — is a live `mkdir`→marker handshake in progress, so it
- * is always left alone for the acquirer to finish writing its marker.
- *
- * Returns true when the stale lock was removed (the caller should retry
- * `mkdir` at once); false when the lock is fresh, gone, or already claimed.
+ * Remove a marker whose owner is demonstrably gone: its `<pid>:<token>` names a
+ * pid that is no longer alive. A live, empty or unreadable marker is never
+ * taken over, however old. The marker and directory go through ownership-safe
+ * primitives: `rmdir` succeeds only on an empty directory, so a rival that
+ * re-created it with its own marker keeps it.
  */
-async function takeOverStaleOperatorSecretsLock(lockDir: string): Promise<boolean> {
-  const info = await stat(lockDir).catch(() => undefined);
-  if (!info || Date.now() - info.mtimeMs <= SECRETS_LOCK_STALE_MS) return false;
+async function removeDeadOperatorSecretsLock(lockDir: string): Promise<boolean> {
   const owner = await operatorSecretsLockOwner(lockDir);
-  if (owner) {
-    // `force` so a rival waiter that already unlinked the marker makes this
-    // a no-op, not an ENOENT that aborts our wait.
-    await rm(joinDirSafe(lockDir, owner), { force: true });
+  const pid = Number(owner?.split(':')[0]);
+  if (!owner || !Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false;
   }
+  await rm(joinDirSafe(lockDir, owner), { force: true });
   try {
     await rmdir(lockDir);
   } catch {
@@ -284,49 +274,58 @@ function joinDirSafe(dir: string, name: string): string {
   return /^[A-Za-z0-9:._-]+$/.test(name) ? `${dir}/${name}` : dir;
 }
 
-/**
- * Hold the operator-store lock for one read-modify-write. The lock is a
- * sibling `secrets.json.lock` DIRECTORY: `mkdir` is the atomic acquire
- * fence (only one process wins), the holder drops an unguessably named
- * owner marker inside, and every removal goes through `rmdir`, which
- * succeeds only on an empty directory — so release and stale takeover are
- * ownership-safe by construction, with no unlink-by-pathname that a
- * concurrent replacement can race. Cross-process by construction, since
- * separate daemon processes sharing one operator config directory contend
- * on the same path. Returns a release function; call it in `finally`. A
- * crashed holder leaves a stale lock that any waiter takes over after
- * `SECRETS_LOCK_STALE_MS`.
- */
-export async function acquireOperatorSecretStoreLock(path: string): Promise<() => Promise<void>> {
-  const lockDir = `${path}.lock`;
-  const owner = operatorSecretsLockToken();
-  const deadline = Date.now() + SECRETS_LOCK_TIMEOUT_MS;
-  for (;;) {
+/** Take the `secrets.json.lock` marker older releases exclude each other with. */
+async function takeOperatorSecretsMarker(lockDir: string, owner: string): Promise<void> {
+  try {
+    await mkdir(lockDir, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if (!(await removeDeadOperatorSecretsLock(lockDir))) throw operatorSecretsLockRefused(lockDir);
     try {
       await mkdir(lockDir, { mode: 0o700 });
-      // A rival could have stolen an old lock and be re-creating this path;
-      // if our marker write fails the lock is no longer ours — retry fresh.
-      await writeFile(`${lockDir}/${owner}`, `${process.pid}\n`, { mode: 0o600 });
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await releaseOperatorSecretsLock(lockDir, owner);
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        if (await takeOverStaleOperatorSecretsLock(lockDir)) continue;
-      } else {
-        // The empty-dir window of a concurrent stale takeover: our marker
-        // could not be written, so this acquire must be retried, not held.
-        await rmdir(lockDir).catch(() => {});
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`timed out waiting for the operator secret store lock at ${lockDir}`);
-      }
-      await waitForPathRemoval(lockDir);
+    } catch (again) {
+      if ((again as NodeJS.ErrnoException).code === 'EEXIST')
+        throw operatorSecretsLockRefused(lockDir);
+      throw again;
     }
   }
+  try {
+    await writeFile(`${lockDir}/${owner}`, `${process.pid}\n`, { mode: 0o600 });
+  } catch (error) {
+    // A rival removed the directory before our marker landed: it is not ours.
+    await rmdir(lockDir).catch(() => {});
+    throw error;
+  }
+}
+
+/**
+ * Hold the operator-store lock for one read-modify-write. A kernel lock keyed
+ * by the store path is followed while another Beeline process holds it.
+ * While an older release may still run, the holder also takes its
+ * `secrets.json.lock` DIRECTORY with an unguessably named owner marker
+ * inside; every removal goes through `rmdir`, which succeeds only on an empty
+ * directory. A marker held by a live older process, or one with no readable
+ * owner, refuses at once naming its path; one whose owner pid is dead is
+ * removed. Returns the release; call it in `finally`.
+ */
+export async function withOperatorSecretStoreLock<T>(
+  path: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const lockDir = `${path}.lock`;
+  return withKernelLockWhenFree(
+    `beeline-operator-secrets:${resolve(path)}`,
+    async () => {
+      const owner = operatorSecretsLockToken();
+      await takeOperatorSecretsMarker(lockDir, owner);
+      try {
+        return await work();
+      } finally {
+        await releaseOperatorSecretsLock(lockDir, owner);
+      }
+    },
+    { step: 'operator secret store' },
+  );
 }
 
 /**
@@ -349,16 +348,14 @@ export async function storeOperatorSecret(
   // The lock file lives beside the store, so the directory must exist first;
   // recursive mkdir is idempotent and safe when several processes race to it.
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const release = await acquireOperatorSecretStoreLock(path);
-  try {
+  await withOperatorSecretStoreLock(path, async () => {
     const store = { ...(await readOperatorSecrets(env)), [name]: value };
-    const tmp = `${path}.tmp`;
+    // A unique temporary: an older release writing `secrets.json.tmp` cannot collide with it.
+    const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
     await writeFile(tmp, `${JSON.stringify(store, null, 2)}\n`, { mode: 0o600 });
     await rename(tmp, path);
     await chmod(path, 0o600);
-  } finally {
-    await release();
-  }
+  });
 }
 
 /**
