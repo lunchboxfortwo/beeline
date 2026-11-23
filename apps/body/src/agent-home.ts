@@ -366,7 +366,8 @@ async function retireNativeLogins(root: string): Promise<void> {
  * to another credential or ambient harness state.
  */
 export async function prepareRoomAgentCredentials(input: RoomAgentHomeInput): Promise<Record<string, string>> {
-  try { return await provisionRoomAgentCredentials(input); }
+  let env: Record<string, string>;
+  try { env = await provisionRoomAgentCredentials(input); }
   catch (error) {
     // A broken configured folder never admits ambient credentials or prevents
     // delivery. A fresh private home starts empty and the session hears why.
@@ -374,8 +375,16 @@ export async function prepareRoomAgentCredentials(input: RoomAgentHomeInput): Pr
     await Promise.all(HOME_SUBDIRS.map(dir => mkdir(resolve(root, dir), { recursive: true, mode: 0o700 })));
     input.onDiagnostic?.(`Private home setup failed (${error instanceof Error ? error.message : String(error)}). ` +
       `This session uses a fresh private home at ${root}; saved login and optional tools may be unavailable.`);
-    return { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
+    env = { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
   }
+  const root = dirname(env.HOME!);
+  await provisionAgentSkills(
+    root,
+    input.skillReleaseId ?? runningBeelineReleaseId(),
+    agentSkillDir(input.agentKind),
+    input.isReviewer ?? false,
+  ).catch((error) => console.warn(`[body] skills not provisioned under ${root}:`, error));
+  return env;
 }
 
 async function provisionRoomAgentCredentials(
@@ -434,20 +443,6 @@ async function provisionRoomAgentCredentials(
     }
   }
   if (agentBehavior(input.agentKind).hostedModelConfig === 'model-file') await provisionPiCustomModelConfig(root, operatorHome, true, undefined, input.cliProxy, input.agentEnv);
-  // A harness discovers its skills tree when its process starts, so the
-  // skills the rules name exist before the first turn, not only after an
-  // optional prepare. Best effort and unqueued: a hung prepare cannot hold the
-  // session, and any rebuild that wins a race also carries the Beeline skills.
-  await provisionAgentSkills(
-    root,
-    operatorHome,
-    input.skillReleaseId ?? runningBeelineReleaseId(),
-    input.sharedSkills ?? [],
-    agentSkillDir(input.agentKind),
-    input.isReviewer ?? false,
-    (error) => console.warn(`[body] shared skills skipped under ${root}:`, error),
-  ).catch((error) => console.warn(`[body] skills not provisioned under ${root}:`, error));
-
   const env = tmpLinkReady
     ? roomAgentHomeEnv(root)
     : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };

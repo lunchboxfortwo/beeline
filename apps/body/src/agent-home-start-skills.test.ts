@@ -1,6 +1,6 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { AGENT_KINDS } from './agent-command.js';
 import { agentSkillDir, prepareRoomAgentCredentials } from './agent-home.js';
@@ -60,13 +60,16 @@ it('pi-skills-1123: a new Pi Room lists beeline-triage and beeline-spec where Pi
   }
 });
 
-it('keeps operator shares and adds the review skill for a reviewer, as prepare does', async () => {
+it('installs only managed skills and preserves existing shares for a reviewer', async () => {
   const { home, operatorHome } = await newRoom();
   await mkdir(join(operatorHome, '.agents/skills/operator-notes'), { recursive: true });
   await writeFile(
     join(operatorHome, '.agents/skills/operator-notes/SKILL.md'),
     '---\nname: operator-notes\n---\n',
   );
+  const existingShare = join(home, 'pi/skills/previous-share');
+  await mkdir(existingShare, { recursive: true });
+  await writeFile(join(existingShare, 'SKILL.md'), 'previously prepared share');
   const env = await prepareRoomAgentCredentials({
     root: home,
     operatorHome,
@@ -75,8 +78,9 @@ it('keeps operator shares and adds the review skill for a reviewer, as prepare d
   });
   links.push(env.TMPDIR!);
   expect((await readdir(join(home, 'pi', 'skills'))).sort()).toEqual(
-    [...managedNames(true), 'operator-notes'].sort(),
+    [...managedNames(true), 'previous-share'].sort(),
   );
+  expect(await readFile(join(existingShare, 'SKILL.md'), 'utf8')).toBe('previously prepared share');
 });
 
 it('an explicit share that cannot be resolved still leaves the Beeline skills in the private home', async () => {
@@ -92,3 +96,54 @@ it('an explicit share that cannot be resolved still leaves the Beeline skills in
   expect(env.PI_CODING_AGENT_DIR).toBe(join(home, 'pi'));
   expect((await readdir(join(home, 'pi', 'skills'))).sort()).toEqual(managedNames());
 });
+
+it('a configured home that is a file recovers with the rule-named Pi skills', async () => {
+  const { home, operatorHome } = await newRoom();
+  await writeFile(home, 'unusable home');
+  const env = await prepareRoomAgentCredentials({ root: home, operatorHome, agentKind: 'pi' });
+  roots.push(dirname(env.HOME!));
+  expect(env.PI_CODING_AGENT_DIR).not.toBe(join(home, 'pi'));
+  expect((await readdir(join(env.PI_CODING_AGENT_DIR!, 'skills'))).sort()).toEqual(managedNames());
+  for (const name of ['beeline-triage', 'beeline-spec']) {
+    expect(await readFile(join(env.PI_CODING_AGENT_DIR!, 'skills', name, 'SKILL.md'), 'utf8'))
+      .toMatch(new RegExp(`^---\\nname: ${name}\\ndescription: \\S`));
+  }
+  expect(await readFile(home, 'utf8')).toBe('unusable home');
+});
+
+it.each(['skills-link', 'skill-link', 'file-link', 'hard-link', 'stale'])(
+  'startup replaces %s with private release-owned skills without mutating its source',
+  async (shape) => {
+    const { home, operatorHome } = await newRoom();
+    const source = join(operatorHome, 'source');
+    await mkdir(source);
+    const original = join(source, 'SKILL.md');
+    await writeFile(original, 'old skill');
+    const target = join(home, 'pi/skills/beeline-triage');
+    await mkdir(join(home, 'pi'), { recursive: true });
+    if (shape === 'skills-link') {
+      await symlink(source, join(home, 'pi/skills'));
+    } else if (shape === 'skill-link') {
+      await mkdir(dirname(target));
+      await symlink(source, target);
+    } else {
+      await mkdir(target, { recursive: true });
+      if (shape === 'hard-link') await link(original, join(target, 'SKILL.md'));
+      else if (shape === 'file-link') await symlink(original, join(target, 'SKILL.md'));
+      else await writeFile(join(target, 'SKILL.md'), 'old skill');
+    }
+    const env = await prepareRoomAgentCredentials({ root: home, operatorHome, agentKind: 'pi' });
+    links.push(env.TMPDIR!);
+    expect(env.PI_CODING_AGENT_DIR).toBe(join(home, 'pi'));
+    expect(await readFile(join(target, 'SKILL.md'), 'utf8'))
+      .toMatch(/^---\nname: beeline-triage\ndescription: \S/);
+    for (const path of [join(home, 'pi/skills'), target, join(target, 'SKILL.md')]) {
+      expect((await lstat(path)).isSymbolicLink()).toBe(false);
+    }
+    const stats = await lstat(join(target, 'SKILL.md'));
+    expect(stats.nlink).toBe(1);
+    expect(stats.mode & 0o777).toBe(0o600);
+    expect(await readFile(original, 'utf8')).toBe('old skill');
+    expect(await readdir(source)).toEqual(['SKILL.md']);
+  },
+);
