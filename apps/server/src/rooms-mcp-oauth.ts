@@ -326,7 +326,7 @@ export class RoomsMcpOAuth {
         const resource = suffix ? `${origin}${suffix}` : origin === short ? `${origin}/` : this.resource;
         // One existing issuer owns sign-in and consent for all aliases. Clients
         // send the resource from this document unchanged to that issuer.
-        mcpJson(response, 200, { resource, authorization_servers: [this.origin], scopes_supported: [MCP_READ, MCP_WRITE], bearer_methods_supported: ['header'] }); return true;
+        mcpJson(response, 200, { resource, resource_name: 'Beeline', logo_uri: 'https://usebeeline.app/apple-touch-icon.png', authorization_servers: [this.origin], scopes_supported: [MCP_READ, MCP_WRITE], bearer_methods_supported: ['header'] }); return true;
       }
       if (request.method === 'GET' && ISSUER_PATHS.includes(path)) {
         mcpJson(response, 200, { issuer: this.origin, authorization_endpoint: `${this.origin}/mcp/oauth/authorize`,

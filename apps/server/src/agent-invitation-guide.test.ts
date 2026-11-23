@@ -100,14 +100,21 @@ describe('agent invitation concordance', () => {
     expect(Object.fromEntries([...connector, ...session].map(name => [name, agentInvitationJoinLine(name)]))).toMatchSnapshot();
   });
 
-  it('publishes the same assistant and path facts on both public join pages', () => {
+  it('publishes the assistant and path facts on the public connect page', () => {
     const matrix = readFileSync(new URL('../../../docs/agent-invitation-matrix.md', import.meta.url), 'utf8');
     for (const text of [...Object.values(ASSISTANT_INVITATION_STEPS), ...Object.values(AGENT_INVITATION_PATHS)]) expect(matrix).toContain(text);
     const escape = (text: string) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-    for (const path of ['../assets/mcp/join.html', '../../site/connect/index.html']) {
-      const html = readFileSync(new URL(path, import.meta.url), 'utf8');
-      for (const text of [...Object.values(ASSISTANT_INVITATION_STEPS), ...Object.values(AGENT_INVITATION_PATHS)])
-        expect(html, 'Refresh public copy: node --import tsx packages/scripts/generate-agent-invitation-guides.mjs').toContain(escape(text));
-    }
+    const html = readFileSync(new URL('../../site/connect/index.html', import.meta.url), 'utf8');
+    for (const text of [...Object.values(ASSISTANT_INVITATION_STEPS), ...Object.values(AGENT_INVITATION_PATHS)])
+      expect(html, 'Refresh public copy: node --import tsx packages/scripts/generate-agent-invitation-guides.mjs').toContain(escape(text));
+  });
+
+  it('keeps the join page short, written for a person, and mirrored on the site', () => {
+    const body = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').split('<body>')[1];
+    const join = body('../assets/mcp/join.html');
+    expect(body('../../site/room/index.html')).toBe(join);
+    expect(join).toContain(BEELINE_ROOMS_MCP_URL);
+    expect(join).not.toMatch(/agent reading this|list_chats|setup_delivery/i);
+    expect(join).not.toContain('agent-invitation-guide:start');
   });
 });
