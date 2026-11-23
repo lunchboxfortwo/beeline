@@ -14,9 +14,9 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs';
-import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { ask } from '../wait.js';
 import { pidAlive } from './store.js';
 
 export interface ClaudeSession {
@@ -69,23 +69,16 @@ export function chosenName(session: ClaudeSession): string | undefined {
   return ['user', 'peer', 'hook'].includes(session.nameSource ?? '') ? session.name : undefined;
 }
 
-export function postToClaude(socket: ClaudeSocket, text: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const connection = createConnection(socket.path);
-    connection.once('error', (error) => {
-      reject(error);
-    });
-    connection.once('connect', () => {
-      if (socket.token)
-        connection.write(JSON.stringify({ type: 'auth', token: socket.token }) + '\n');
-      connection.end(
-        JSON.stringify({ type: 'user', message: { role: 'user', content: text } }) + '\n',
-        () => {
-          resolve();
-        },
-      );
-    });
-  });
+/** Settles once the frames are flushed into the session's socket; Claude Code sends no answer. */
+export async function postToClaude(socket: ClaudeSocket, text: string): Promise<void> {
+  const frames = [
+    ...(socket.token ? [{ type: 'auth', token: socket.token }] : []),
+    { type: 'user', message: { role: 'user', content: text } },
+  ];
+  await ask<void>(
+    { socket: socket.path, peer: 'Claude Code session', framing: 'flush', machineRead: true },
+    frames.map((frame) => `${JSON.stringify(frame)}\n`).join(''),
+  );
 }
 
 /** The transcript of a conversation, wherever Claude Code filed it under its projects. */

@@ -72,7 +72,7 @@ import { requireSecretGrants, validateRequestedSecrets } from './grant-secret.js
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
 import { surfaceAllows, type AgentSurface } from '@beeline/api-contract/surface-capabilities';
-import { spawn as spawnCommand, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   chmod,
@@ -105,6 +105,24 @@ export const GRANT_COMMAND_TIMEOUT_MS = 10 * 60_000;
 export const GRANT_COMMAND_OUTPUT_CAP_BYTES = 64 * 1024;
 const ARGV_MAX_WORDS = 256;
 const ARGV_WORD_MAX_LENGTH = 4_096;
+
+/**
+ * D3 (owner, PR #89 fix 11): a granted command keeps its one elapsed-time
+ * limit, the only timer a helper wait arms besides the agent stay-warm
+ * countdown. When it passes, `kill` ends the command's process group and the
+ * run reports `timedOut`; `dispose` clears it on every other ending.
+ */
+function grantCommandLimit(
+  ms: number,
+  kill: () => void,
+): { fired: () => boolean; dispose: () => void } {
+  let fired = false;
+  const timer = setTimeout(() => {
+    fired = true;
+    kill();
+  }, ms);
+  return { fired: () => fired, dispose: () => clearTimeout(timer) };
+}
 
 type LiveGrant = DaemonOperationMap['listAgentGrants']['output']['grants'][number];
 
@@ -650,67 +668,75 @@ export class GrantCommandRunner {
         );
     // Re-check after secret resolution and Once consumption, immediately before exec.
     if (match) await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
-    const outcome = await new Promise<{
-      exitCode: number | null;
-      signal?: string;
-      timedOut: boolean;
-      output: string;
-    }>((resolveRun) => {
-      const child = spawnCommand(spawn.command, spawn.args, {
-        cwd: room.cwd,
-        detached: process.platform !== 'win32',
-        timeout: this.options.timeoutMs ?? GRANT_COMMAND_TIMEOUT_MS,
-        killSignal: 'SIGKILL',
-        env,
-        stdio: 'pipe',
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let failure: Error | undefined;
+    let child: ChildProcess | undefined;
+    let limit: ReturnType<typeof grantCommandLimit> | undefined;
+    const progress = grantOutputLines(secrets, onOutput, sandboxMarker);
+    const capture = (
+      stream: NodeJS.ReadableStream,
+      chunks: Buffer[],
+      name: 'stdout' | 'stderr',
+    ) => {
+      let bytes = 0;
+      stream.on('data', (chunk: Buffer) => {
+        progress.chunk(name, chunk);
+        const remaining = Math.max(0, cap * 4 - bytes);
+        if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
+        bytes += chunk.length;
+        if (bytes > cap * 4) {
+          failure ??= new Error(`${name} maxBuffer length exceeded`);
+          if (child) killChildProcessGroup(child, 'SIGKILL');
+        }
       });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      let failure: Error | undefined;
-      const progress = grantOutputLines(secrets, onOutput, sandboxMarker);
-      const capture = (
-        stream: NodeJS.ReadableStream,
-        chunks: Buffer[],
-        name: 'stdout' | 'stderr',
-      ) => {
-        let bytes = 0;
-        stream.on('data', (chunk: Buffer) => {
-          progress.chunk(name, chunk);
-          const remaining = Math.max(0, cap * 4 - bytes);
-          if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
-          bytes += chunk.length;
-          if (bytes > cap * 4) {
-            failure ??= new Error(`${name} maxBuffer length exceeded`);
-            killChildProcessGroup(child, 'SIGKILL');
-          }
+    };
+    // The child's exit ends the run: runOwned kills its group, so no pipe
+    // holder outlives it, and close collects the output.
+    const run = await runOwned({
+      step: `granted command ${spawn.command}`,
+      file: spawn.command,
+      args: spawn.args,
+      cwd: room.cwd,
+      env,
+      input: stdin ?? '',
+      captureOutput: false,
+      machineRead: true,
+      onSpawn: (spawned) => {
+        child = spawned;
+        this.children.set(spawned, input.roomId as string);
+        spawned.on('error', (error) => {
+          failure = error;
         });
+        if (spawned.stdout) capture(spawned.stdout, stdout, 'stdout');
+        if (spawned.stderr) capture(spawned.stderr, stderr, 'stderr');
+        limit = grantCommandLimit(this.options.timeoutMs ?? GRANT_COMMAND_TIMEOUT_MS, () =>
+          killChildProcessGroup(spawned, 'SIGKILL'),
+        );
+      },
+    }).catch(() => undefined); // its spawn error is `failure`, and the exit status is the child's
+    limit?.dispose();
+    progress.close();
+    if (child) this.children.delete(child);
+    const exitCode = run ? run.code : (child?.exitCode ?? null);
+    const signal = run ? run.signal : (child?.signalCode ?? null);
+    const combined = [
+      Buffer.concat(stdout).toString('utf8'),
+      Buffer.concat(stderr).toString('utf8'),
+    ]
+      .filter(Boolean)
+      .join(stdout.length && stderr.length ? '\n' : '');
+    const outcome: { exitCode: number | null; signal?: string; timedOut: boolean; output: string } =
+      {
+        exitCode,
+        ...(signal ? { signal } : {}),
+        timedOut:
+          signal === 'SIGKILL' &&
+          limit?.fired() === true &&
+          !(child && this.cancelledChildren.has(child)) &&
+          !failure,
+        output: failure ? `${combined}${combined ? '\n' : ''}${failure.message}` : combined,
       };
-      capture(child.stdout, stdout, 'stdout');
-      capture(child.stderr, stderr, 'stderr');
-      child.on('error', (error) => {
-        failure = error;
-      });
-      child.on('exit', () => killChildProcessGroup(child, 'SIGKILL')); // Exit (also the time limit's) ends the run: no pipe holder outlives it; close collects output.
-      child.on('close', (exitCode, signal) => {
-        progress.close();
-        this.children.delete(child);
-        const combined = [
-          Buffer.concat(stdout).toString('utf8'),
-          Buffer.concat(stderr).toString('utf8'),
-        ]
-          .filter(Boolean)
-          .join(stdout.length && stderr.length ? '\n' : '');
-        resolveRun({
-          exitCode,
-          ...(signal ? { signal } : {}),
-          timedOut:
-            signal === 'SIGKILL' && child.killed && !this.cancelledChildren.has(child) && !failure,
-          output: failure ? `${combined}${combined ? '\n' : ''}${failure.message}` : combined,
-        });
-      });
-      this.children.set(child, input.roomId as string);
-      child.stdin?.end(stdin);
-    });
     // The record says what happened: a refused write is the Room boundary doing
     // its job, and the agent is told where the work belongs instead.
     const sandboxStarted = sandboxMarker ? outcome.output.includes(sandboxMarker) : true;

@@ -1,3 +1,5 @@
+import { onEnd } from './wait.js';
+
 /**
  * A worker started by runOwned with `ownerLink` reads EOF on stdin when its
  * owner dies, including by SIGKILL, which no exit hook can observe. It then
@@ -8,7 +10,9 @@ export function exitWithOwner(): void {
   if (process.env.BEELINE_OWNER_LINK !== '1') return;
   process.stdin.resume();
   process.stdin.on('end', () => {
-    process.once('exit', () => {
+    // Registered after any runOwned exit hook, so the worker's own owned groups
+    // are killed first, then its group, itself last.
+    onEnd(process, ['exit'], () => {
       try {
         process.kill(0, 'SIGKILL');
       } catch {

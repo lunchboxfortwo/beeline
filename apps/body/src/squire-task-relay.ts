@@ -6,7 +6,7 @@ import { SquireOperationError, squireOutcome } from './squire-outcome.js';
  * connection; each call still requires the current server-command authority.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
@@ -15,7 +15,7 @@ import { sharedSquireMcpClient, type SquireMcpConnection } from './squire-mcp-cl
 import { SquireShareRenewals, type SquireShareLease } from './squire-share-renewals.js';
 import { squireApprovalFromMcp } from './resource-mcp-facade.js';
 import { squireSignedOutUrl } from './squire-sign-in.js';
-import { ask } from './wait.js';
+import { ask, listen, type Listening } from './wait.js';
 import {
   forgetSquireSessions,
   registerSquireSession,
@@ -109,7 +109,7 @@ export type SquireApprovalDecision = {
 };
 
 export class SquireTaskRelay {
-  private server?: Server;
+  private listening?: Listening;
   private url?: string;
   private readonly token = randomUUID();
   private active?: TurnKey;
@@ -186,7 +186,7 @@ export class SquireTaskRelay {
 
   async listen(contextFile = this.contextFile): Promise<{ url: string; token: string; contextFile: string }> {
     if (this.closed) throw new Error('Squire task relay is closed');
-    if (!this.server) {
+    if (!this.listening) {
       const server = createServer(async (request, response) => {
         if (request.method === 'GET' && request.url === '/notifications' &&
             request.headers.authorization === `Bearer ${this.token}`) {
@@ -215,11 +215,7 @@ export class SquireTaskRelay {
           );
         }
       });
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject);
-        server.listen(0, '127.0.0.1', resolve);
-      });
-      this.server = server;
+      this.listening = await listen(server, { port: 0, host: '127.0.0.1' });
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Squire relay has no TCP port');
       this.url = `http://127.0.0.1:${address.port}`;
@@ -273,7 +269,7 @@ export class SquireTaskRelay {
     this.active = undefined;
     this.approvalRequestId = undefined;
     this.retire('helper-exit');
-    this.server?.close();
+    void this.listening?.close();
   }
 
   private log(event: string, task: TaskConnection, extra: Record<string, unknown> = {}): void {

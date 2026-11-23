@@ -118,6 +118,20 @@ test('the sole warm countdown is pinned to AgentRunner.armIdle', () => {
   );
 });
 
+test('the granted-command limit is pinned to one timer in grantCommandLimit (D3)', () => {
+  const file = 'apps/body/src/grant-runner.ts';
+  const limit = 'function grantCommandLimit(ms, kill) { return setTimeout(kill, ms); }';
+  assert.deepEqual(inspectMachineConnectionSource(file, limit), []);
+  for (const source of [
+    'function grantCommandLimit(ms, kill) { setTimeout(warn, 1); return setTimeout(kill, ms); }',
+    `${limit} function retry() { setTimeout(run, 1000); }`,
+    'class Runner { grantCommandLimit(ms, kill) { return setTimeout(kill, ms); } }',
+    'function outer() { function grantCommandLimit(ms, kill) { return setTimeout(kill, ms); } }',
+  ])
+    assert.ok(inspectMachineConnectionSource(file, source).length, source);
+  assert.ok(inspectMachineConnectionSource('apps/body/src/other.ts', limit).length);
+});
+
 test('an update attempt owns no timeout', () => {
   const file = 'apps/body/src/managed-update.ts';
   assert.ok(

@@ -75,6 +75,19 @@ it('terminates a granted command at its deadline', async () => {
   expect(result).toMatchObject({ exitCode: null, signal: 'SIGKILL', timedOut: true });
 });
 
+it('keeps the output a granted command wrote before its deadline', async () => {
+  const timedOut = await run(
+    'process.stdout.write("partial"); process.stderr.write("diagnostic"); setInterval(() => {}, 1000)',
+    { timeoutMs: 300 },
+  );
+  expect(timedOut).toMatchObject({
+    exitCode: null,
+    signal: 'SIGKILL',
+    timedOut: true,
+    output: 'partial\ndiagnostic',
+  });
+});
+
 it('terminates and caps a granted command that floods output', async () => {
   const result = await run('setInterval(() => process.stdout.write("x".repeat(8192)), 1)', {
     outputCapBytes: 128,

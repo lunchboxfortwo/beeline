@@ -37,13 +37,17 @@ retention sweeps or expiry wake loops. `packages/scripts/server-timers.test.mjs`
 forbidden calls and verifies the real architecture check rejects them.
 
 The strict `helper.waits` rule covers `apps/body/src`: a helper command or agent
-tool waits only for the answer to its own request or the exit of a child it owns,
-never for a condition, and arms no timer. `ask`, `runOwned` and `tryLock` in
-`apps/body/src/wait.ts` are the shared wait owners; the agent stay-warm countdown
-`AgentRunner.armIdle` is the one timer owned outside it. The sites outside them
+tool waits only for the answer to its own request, the exit of a child it owns,
+or its channel's explicit failure, never for a condition. The rule's
+`ownerFunctions` in `invariants.json` pins the shared wait owners and the only
+timer exceptions; `apps/body/src/wait.ts` documents the primitive contracts.
+Only the exact before/after manifest `HELPER_WAIT_OWNER_LANDING` in
+`packages/scripts/architecture-invariants.mjs` permits the approved owner
+expansion; any other widening still fails. The sites outside those owners
 today are a strict one-way ratchet: CI rejects a raised `total`, so it only
-falls as areas move to the owner. `packages/scripts/helper-waits.test.mjs` plants
-waits and timers and verifies the real check rejects them.
+falls as areas move to the owner.
+`packages/scripts/helper-waits.test.mjs` plants waits and timers and verifies the
+real check rejects them.
 
 ## Storage registry (bloat inside a module)
 
@@ -110,7 +114,7 @@ machine output and login/version changes belong to `machine-connection.ts`.
 `machine-connection-sinks.json` pins owned sink counts and can only shrink.
 A helper cannot acquire another reconnect/close/send path. Helper timers have
 zero inventory allowance, including generated child code and timer aliases;
-the exception is defined in the [helper wait boundary](#architecture-invariants).
+the exceptions are defined in the [helper wait boundary](#architecture-invariants).
 The mutation suite plants a second reconnect and timer and requires both to fail;
 TYPECHECK runs that suite.
 

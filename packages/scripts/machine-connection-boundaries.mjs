@@ -35,7 +35,8 @@ function typeOnly(node) {
 }
 
 /** Capability inspection, independent of counts: the physical machine socket
- * cannot escape its connection owner. The stay-warm countdown has an exact owner. */
+ * cannot escape its connection owner. The stay-warm countdown and the granted
+ * command limit (the owner's D3 decision) each have an exact owner. */
 export function inspectMachineConnectionSource(file, text) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
   const errors = [];
@@ -45,6 +46,7 @@ export function inspectMachineConnectionSource(file, text) {
     );
   const timerAliases = new Set(TIMER_NAMES);
   let warmCountdownSites = 0;
+  let grantLimitSites = 0;
   const warmCountdown = (node) => {
     if (
       file !== BODY + 'agent-runner.ts' ||
@@ -56,6 +58,18 @@ export function inspectMachineConnectionSource(file, text) {
       if (ts.isClassDeclaration(parent)) return parent.name?.text === 'AgentRunner';
     return false;
   };
+  const grantLimit = (node) => {
+    if (
+      file !== BODY + 'grant-runner.ts' ||
+      name(node.expression) !== 'setTimeout' ||
+      method(node) !== 'grantCommandLimit'
+    )
+      return false;
+    for (let parent = node.parent; parent; parent = parent.parent)
+      if (ts.isFunctionDeclaration(parent)) return ts.isSourceFile(parent.parent);
+    return false;
+  };
+  const ownedTimer = (node) => warmCountdown(node) || grantLimit(node);
   function visit(node) {
     if (file.startsWith(BODY)) {
       if (
@@ -65,7 +79,7 @@ export function inspectMachineConnectionSource(file, text) {
         !(
           ts.isCallExpression(node.parent) &&
           node.parent.expression === node &&
-          warmCountdown(node.parent)
+          ownedTimer(node.parent)
         )
       )
         deny(node, 'helper timer references and destructured aliases are forbidden');
@@ -103,7 +117,14 @@ export function inspectMachineConnectionSource(file, text) {
         if (warmCountdown(node)) {
           if (++warmCountdownSites > 1)
             deny(node, 'AgentRunner.armIdle may own only one stay-warm countdown');
-        } else deny(node, 'helper timers are forbidden outside the stay-warm countdown');
+        } else if (grantLimit(node)) {
+          if (++grantLimitSites > 1)
+            deny(node, 'grantCommandLimit may own only one granted-command limit');
+        } else
+          deny(
+            node,
+            'helper timers are forbidden outside the stay-warm countdown and the granted-command limit',
+          );
       }
       // Generated plugin/bridge code is executable too, not a place to hide a timer.
       if (

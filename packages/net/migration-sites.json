@@ -300,24 +300,8 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/session-join/claude.ts::import:node:net",
-      "file": "apps/body/src/session-join/claude.ts",
-      "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/squire-broker-link.ts::import:node:net",
       "file": "apps/body/src/squire-broker-link.ts",
-      "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/squire-host.ts::import:node:net",
-      "file": "apps/body/src/squire-host.ts",
       "kind": "import:node:net",
       "count": 1,
       "compatibility": "legacy-only",

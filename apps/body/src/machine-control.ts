@@ -1,9 +1,9 @@
 import { chmod, rm } from 'node:fs/promises';
-import { createConnection, createServer, type Socket } from 'node:net';
+import { createServer, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import type { HelperStatusFile } from './helper-status.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
-import { ask, tryLock } from './wait.js';
+import { answer, ask, listen, onEnd, tryLock, type Listening } from './wait.js';
 
 export interface MachineRequest {
   operation: 'status' | 'converge' | 'stop' | 'update';
@@ -42,11 +42,12 @@ export type HeldAnswer = typeof HELD;
 export class MachineControl {
   readonly #held = new Set<Socket>();
   readonly #peers = new Set<Socket>();
+  #listening?: Listening;
   readonly #server = createServer((socket) => {
     this.#peers.add(socket);
     socket.setEncoding('utf8');
     socket.on('error', () => undefined);
-    socket.once('close', () => {
+    onEnd(socket, ['close'], () => {
       this.#held.delete(socket);
       this.#peers.delete(socket);
     });
@@ -96,51 +97,66 @@ export class MachineControl {
     await preparePrivateSocketDirectory(this.path);
     // Machine ownership is held by the native supervisor and the process lock.
     await rm(this.path, { force: true });
-    await new Promise<void>((done, reject) => {
-      this.#server.once('error', reject);
-      this.#server.listen(this.path, done);
-    });
+    this.#listening = await listen(this.#server, this.path);
     await chmod(this.path, 0o600);
   }
 
-  /** Answer every held update request; resolves once each answer has been written. */
-  settleHeld(answer: MachineAnswer | { error: string }): Promise<void> {
-    const line = `${JSON.stringify(answer)}\n`;
+  /**
+   * Answer every held update request. Each settles on its own: once its
+   * answer is flushed, or once that requester has left, so one departed CLI
+   * cannot hold the others' handoff.
+   */
+  settleHeld(reply: MachineAnswer | { error: string }): Promise<void> {
+    const line = `${JSON.stringify(reply)}\n`;
     const sockets = [...this.#held];
     this.#held.clear();
     return Promise.all(
-      sockets.map(
-        (socket) =>
-          new Promise<void>((done) => {
-            if (socket.destroyed) done();
-            else socket.end(line, () => done());
-          }),
+      sockets.map((socket) =>
+        answer<unknown>('helper control requester', [[socket, 'close', 'answer']], ({ resolve }) =>
+          socket.end(line, () => resolve(undefined)),
+        ),
       ),
     ).then(() => undefined);
   }
 
   async stop(): Promise<void> {
-    if (!this.#server.listening) return;
+    const listening = this.#listening;
+    if (!listening || !this.#server.listening) return;
+    this.#listening = undefined;
     await this.settleHeld({ error: 'helper stopped before answering the update' });
     for (const peer of this.#peers) {
       if (!peer.writableEnded)
         peer.end(`${JSON.stringify({ error: 'helper control stopped before answering' })}\n`);
       peer.destroySoon();
     }
-    await new Promise<void>((done) => this.#server.close(() => done()));
+    await listening.close();
     await rm(this.path, { force: true });
   }
 }
 
-/** Follow the serving helper's kernel lock until the kernel releases it on that process's exit. */
+/**
+ * Follow the serving helper's kernel lock until the kernel releases it on that
+ * process's exit. An exiting holder can vanish between the busy bind and its
+ * record (the follower's connect is refused or reset): that is the exit being
+ * followed. Only the same predecessor is followed.
+ */
 export async function followHelperExit(
   stateRoot: string,
   predecessor: Pick<MachineAnswer, 'pid' | 'generation'>,
 ): Promise<void> {
-  const lock = await tryLock(helperLockKey(stateRoot));
+  const key = helperLockKey(stateRoot);
+  const vanished = (error: unknown) =>
+    ['ECONNRESET', 'ECONNREFUSED', 'ENOENT', 'EPIPE'].includes(
+      (error as NodeJS.ErrnoException)?.code ?? '',
+    );
+  const lock = await tryLock(key).catch((error: unknown) => {
+    if (vanished(error)) return;
+    throw error;
+  });
+  if (!lock) return;
   if (lock.held) await lock.release();
   else if (
-    lock.holder.key === helperLockKey(stateRoot) &&
+    lock.holder.key === key &&
     lock.holder.pid === predecessor.pid &&
     (lock.holder.generation === undefined || lock.holder.generation === predecessor.generation)
   )
@@ -180,9 +196,7 @@ export async function askMachine(
 }
 
 /** Read the existing host adb server directly: invoking adb could start a server. */
-export async function hostEmulatorSerials(
-  connect = () => createConnection({ host: '127.0.0.1', port: 5037 }),
-): Promise<string[]> {
+export async function hostEmulatorSerials(connect?: () => Socket): Promise<string[]> {
   const devices = await hostAdbQuery('host:devices', connect);
   const serials = devices.split('\n').flatMap((line) => {
     const [serial, state] = line.trim().split(/\s+/);
@@ -201,31 +215,26 @@ export async function hostEmulatorSerials(
   return serials.filter((_, index) => ready[index]);
 }
 
-function hostAdbQuery(
-  query: string,
-  connect: () => ReturnType<typeof createConnection>,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const socket = connect();
-    let bytes = Buffer.alloc(0);
-    socket.once('connect', () => {
-      socket.write(query.length.toString(16).padStart(4, '0') + query);
-    });
-    socket.on('data', (chunk: Buffer) => {
-      bytes = Buffer.concat([bytes, chunk]);
-      if (bytes.length < 8) return;
-      const status = bytes.subarray(0, 4).toString();
-      const header = bytes.subarray(4, 8).toString();
-      if (status !== 'OKAY' || !/^[0-9a-f]{4}$/i.test(header)) {
-        socket.destroy(new Error('host adb device list unavailable'));
-        return;
-      }
-      const length = Number.parseInt(header, 16);
-      if (bytes.length < 8 + length) return;
-      socket.destroy();
-      resolve(bytes.subarray(8, 8 + length).toString());
-    });
-    socket.once('error', reject);
-    socket.once('close', () => reject(new Error('host adb server closed')));
-  });
+/** One adb host query: a 4-hex length and the query out, `OKAY`, a 4-hex length and that many payload bytes back. */
+function hostAdbQuery(query: string, connect?: () => Socket): Promise<string> {
+  return ask<string>(
+    {
+      socket: { host: '127.0.0.1', port: 5037 },
+      peer: 'host adb server',
+      machineRead: true,
+      framing: {
+        read: (bytes) => {
+          if (bytes.length < 8) return undefined;
+          const status = bytes.subarray(0, 4).toString('latin1');
+          const header = bytes.subarray(4, 8).toString('latin1');
+          if (status !== 'OKAY' || !/^[0-9a-f]{4}$/i.test(header))
+            throw new Error('host adb device list unavailable');
+          const length = Number.parseInt(header, 16);
+          return bytes.length < 8 + length ? undefined : bytes.subarray(8, 8 + length).toString();
+        },
+      },
+    },
+    query.length.toString(16).padStart(4, '0') + query,
+    connect ? { createConnection: connect } : undefined,
+  );
 }

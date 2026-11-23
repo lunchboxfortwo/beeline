@@ -92,6 +92,10 @@ it.each(['notified', 'force'] as const)(
     const forcePreparation = new Promise<void>((done) => {
       finishPrepare = done;
     });
+    let releaseCleanup!: () => void;
+    const cleanupHeld = new Promise<void>((done) => {
+      releaseCleanup = done;
+    });
     const helper = runMachineHelper({
       configPaths: [config],
       signals,
@@ -141,8 +145,9 @@ it.each(['notified', 'force'] as const)(
           signal.addEventListener('abort', () => done(), { once: true });
           if (signal.aborted) done();
         });
-        // The real broker's server.close waits for this client. It cannot own
+        // The agent's cleanup is still running (held here). It cannot own
         // whether an already-disconnected machine gets its native restart.
+        await cleanupHeld;
         await broker.stop();
         cleanupFinished = true;
         channel.stop();
@@ -177,6 +182,7 @@ it.each(['notified', 'force'] as const)(
       retained.resume();
       retained.end('{}');
       await once(retained, 'close');
+      releaseCleanup();
       signals.emit('SIGTERM');
       await (
         await helper
