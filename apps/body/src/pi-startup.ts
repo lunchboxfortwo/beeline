@@ -1,3 +1,4 @@
+import { ownedCommandModule } from './wait.js';
 /**
  * Patch only the selected pi-acp entry as Node loads it. Installed packages stay
  * untouched; the hook belongs to this ACP process alone.
@@ -56,7 +57,7 @@ export async function load(url, context, nextLoad) {
 const VERSION_PREAMBLE = String.raw`
 import { realpathSync as __beelineRealpath, readFileSync as __beelineReadFile, accessSync as __beelineAccess, constants as __beelineFsConstants, statSync as __beelineStat } from 'node:fs';
 import { delimiter as __beelineDelimiter, dirname as __beelineDirname, resolve as __beelineResolve, isAbsolute as __beelineAbsolute } from 'node:path';
-import { execFile as __beelineExecFile } from 'node:child_process';
+import { runOwned as __beelineRunOwned } from __BEELINE_OWNED_MODULE__;
 const __beelinePiCommand = process.env.PI_ACP_PI_COMMAND ?? (process.platform === 'win32' ? 'pi.cmd' : 'pi');
 function __beelineInstalledPiVersion(cwd = process.cwd()) {
   const candidates = __beelineAbsolute(__beelinePiCommand) || /[/\\]/.test(__beelinePiCommand)
@@ -85,14 +86,14 @@ function __beelineInstalledPiVersion(cwd = process.cwd()) {
     return undefined;
   }
 }
-function __beelineReadPiVersion(cwd = process.cwd()) {
-  return new Promise(resolve => {
-    __beelineExecFile(__beelinePiCommand, ['--version'], { cwd, encoding: 'utf8', timeout: 2000, maxBuffer: 4096 }, (error, stdout, stderr) => {
-      const version = String(stdout || stderr).trim().replace(/^v/i, '');
-      resolve(!error && /^\d+\.\d+\.\d+(?:[-+].+)?$/.test(version) ? version : undefined);
-    });
-  });
+async function __beelineReadPiVersion(cwd = process.cwd()) {
+  try {
+    const result = await __beelineRunOwned({ step: 'pi version', file: __beelinePiCommand, args: ['--version'], cwd, machineRead: true, maxBuffer: 4096 });
+    const version = String(result.stdout || result.stderr).trim().replace(/^v/i, '');
+    return result.code === 0 && /^\d+\.\d+\.\d+(?:[-+].+)?$/.test(version) ? version : undefined;
+  } catch { return undefined; }
 }
+
 `;
 
 /** NODE_OPTIONS reaches sandbox wrappers too; only pi-acp registers a hook. */
@@ -101,7 +102,7 @@ export function piStartupEnvironment(
   env: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   if (!/(^|[/\\])pi-acp(?:\.[a-z]+)?$/i.test(label)) return env;
-  const loader = LOADER.replace('__BEELINE_PREAMBLE__', JSON.stringify(VERSION_PREAMBLE));
+  const loader = LOADER.replace('__BEELINE_PREAMBLE__', JSON.stringify(VERSION_PREAMBLE.replace('__BEELINE_OWNED_MODULE__', JSON.stringify(ownedCommandModule()))));
   const preload = `
 import { register } from 'node:module';
 import { realpathSync, readFileSync } from 'node:fs';

@@ -10,15 +10,15 @@
  * transport's own read failure. `helper.waits` in
  * docs/architecture/invariants.json ratchets remaining sites outside these owners.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type ExecFileOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createConnection, createServer, type Socket } from 'node:net';
 
-const say = (line: string) => process.stderr.write(`[beeline] ${line}\n`);
+const waitSay = (line: string) => process.stderr.write(`[beeline] ${line}\n`);
 
-let machineReadOutput = false;
+let waitMachineReadOutput = false;
 export function setMachineReadOutput(machineRead: boolean): void {
-  machineReadOutput = machineRead;
+  waitMachineReadOutput = machineRead;
 }
 
 /**
@@ -32,8 +32,8 @@ interface WaitReport {
   report?: (line: string) => void;
   machineRead?: boolean;
 }
-function reporter(channel: WaitReport): ((line: string) => void) | undefined {
-  return machineReadOutput || channel.machineRead ? undefined : (channel.report ?? say);
+function waitCommandReporter(channel: WaitReport): ((line: string) => void) | undefined {
+  return waitMachineReadOutput || channel.machineRead ? undefined : (channel.report ?? waitSay);
 }
 
 /** A local line-protocol peer: one JSON line out, one JSON line back. */
@@ -57,7 +57,7 @@ export async function ask(
   channel: SocketChannel | HttpChannel,
   request?: unknown,
 ): Promise<unknown> {
-  const report = reporter(channel);
+  const report = waitCommandReporter(channel);
   if ('url' in channel) {
     const init = request as RequestInit | undefined;
     const peer = channel.peer ?? new URL(channel.url).host;
@@ -124,6 +124,7 @@ export interface OwnedCommand extends WaitReport {
   ownerLink?: boolean;
   stdin?: 'pipe';
   captureOutput?: boolean;
+  maxBuffer?: number;
   onSpawn?: (child: ChildProcess) => void;
   /** Called for each output line as it arrives. By default stdout and stderr lines stream to the terminal. */
   onLine?: (line: string, stream: 'stdout' | 'stderr') => void;
@@ -139,16 +140,16 @@ export interface OwnedResult {
   stderr: string;
 }
 
-const owned = new Set<ChildProcess>();
-const groupLeaders = new WeakSet<ChildProcess>();
-const linkedWorkers = new WeakSet<ChildProcess>();
-let ownerHooks = false;
-function killGroup(child: ChildProcess): void {
+const waitOwnedChildren = new Set<ChildProcess>();
+const waitGroupLeaders = new WeakSet<ChildProcess>();
+const waitLinkedWorkers = new WeakSet<ChildProcess>();
+let waitOwnerHooks = false;
+function waitKillGroup(child: ChildProcess): void {
   if (!child.pid) return;
   try {
     process.kill(
-      groupLeaders.has(child) ? -child.pid : child.pid,
-      linkedWorkers.has(child) && child.exitCode === null && child.signalCode === null
+      waitGroupLeaders.has(child) ? -child.pid : child.pid,
+      waitLinkedWorkers.has(child) && child.exitCode === null && child.signalCode === null
         ? 'SIGTERM'
         : 'SIGKILL',
     );
@@ -162,16 +163,16 @@ function killGroup(child: ChildProcess): void {
  * process group is killed, so grandchildren holding its pipes die and the
  * output closes; nothing is left running after the result.
  */
-export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
+export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promise<OwnedResult> {
   // Owned children never outlive their owner: exit and SIGINT/SIGTERM kill each group.
-  if (!ownerHooks) {
-    ownerHooks = true;
+  if (!waitOwnerHooks) {
+    waitOwnerHooks = true;
     process.once('exit', () => {
-      for (const child of owned) killGroup(child);
+      for (const child of waitOwnedChildren) waitKillGroup(child);
     });
     for (const name of ['SIGINT', 'SIGTERM'] as const) {
       const onSignal = () => {
-        for (const child of owned) killGroup(child);
+        for (const child of waitOwnedChildren) waitKillGroup(child);
         process.removeListener(name, onSignal);
         // Keep the default disposition when nobody else handles the signal.
         // Prepended, this runs before other handlers remove themselves, so the
@@ -182,7 +183,7 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       process.prependOnceListener(name, onSignal);
     }
   }
-  const report = reporter(command);
+  const report = waitCommandReporter(command);
   const onLine =
     command.onLine ??
     ((line: string) => {
@@ -198,7 +199,7 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
     const env = { ...(command.env ?? process.env) };
     if (command.ownerLink) env.BEELINE_OWNER_LINK = '1';
     else delete env.BEELINE_OWNER_LINK;
-    const child = spawn(command.file, [...command.args], {
+    const child = childProcess.spawn(command.file, [...command.args], {
       env,
       ...(command.cwd ? { cwd: command.cwd } : {}),
       detached: leader,
@@ -212,12 +213,21 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
             'pipe',
           ],
     });
-    if (leader) groupLeaders.add(child);
-    if (command.ownerLink) linkedWorkers.add(child);
-    owned.add(child);
+    if (leader) waitGroupLeaders.add(child);
+    if (command.ownerLink) waitLinkedWorkers.add(child);
+    waitOwnedChildren.add(child);
     const output = { stdout: '', stderr: '' };
+    const bytes = { stdout: 0, stderr: 0 };
+    let failure: Error | undefined;
     const pending = { stdout: '', stderr: '' };
     const read = (stream: 'stdout' | 'stderr') => (chunk: string) => {
+      if (failure) return;
+      bytes[stream] += Buffer.byteLength(chunk);
+      if (command.maxBuffer !== undefined && bytes[stream] > command.maxBuffer) {
+        failure = new Error(`${command.step}: ${stream} maxBuffer exceeded`);
+        waitKillGroup(child);
+        return;
+      }
       output[stream] += chunk;
       pending[stream] += chunk;
       let end: number;
@@ -235,16 +245,15 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       child.stdin?.on('error', () => undefined);
       child.stdin?.end(command.input);
     }
-    const abort = () => killGroup(child);
+    const abort = () => waitKillGroup(child);
     command.signal?.addEventListener('abort', abort, { once: true });
     let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-    let failure: Error | undefined;
     const leave = () => {
-      killGroup(child);
+      waitKillGroup(child);
       command.signal?.removeEventListener('abort', abort);
     };
     child.once('error', (error) => {
-      failure = new Error(`${command.step}: ${error.message}`);
+      failure = Object.assign(new Error(`${command.step}: ${error.message}`), { code: (error as NodeJS.ErrnoException).code });
       leave();
     });
     child.once('exit', (code, signal) => {
@@ -252,10 +261,10 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       leave();
     });
     child.once('close', () => {
-      owned.delete(child);
+      waitOwnedChildren.delete(child);
       for (const stream of ['stdout', 'stderr'] as const)
         if (pending[stream]) onLine(pending[stream], stream);
-      if (failure) reject(failure);
+      if (failure) reject(Object.assign(failure, output));
       else if (command.signal?.aborted)
         reject(new Error(`${command.step}: cancelled; process group killed`));
       else resolve({ ...exited!, ...output });
@@ -351,4 +360,32 @@ export async function tryLock(
       if (!answered) reject(new Error('Lock holder closed before answering'));
     });
   });
+}
+
+export async function runOwnedFile(
+  file: string,
+  args: readonly string[],
+  options: ExecFileOptions = {},
+): Promise<OwnedResult> {
+  const result = await runOwned({
+    step: [file, ...args].join(' '), file, args,
+    cwd: options.cwd === undefined ? undefined : String(options.cwd),
+    env: options.env, signal: options.signal, machineRead: true,
+    maxBuffer: options.maxBuffer,
+  });
+  if (result.code !== 0) throw Object.assign(new Error(result.stderr.trim() || `${file} exited ${result.code ?? result.signal}`), result, { code: result.code });
+  return result;
+}
+
+export function ownedCommandModule(): string {
+  const source = `import { spawn } from 'node:child_process';
+const waitSay = line => process.stderr.write('[beeline] ' + line + '\\n');
+const __name = fn => fn;
+let waitMachineReadOutput = false, waitOwnerHooks = false;
+const waitOwnedChildren = new Set(), waitGroupLeaders = new WeakSet(), waitLinkedWorkers = new WeakSet();
+${waitCommandReporter.toString()}
+${waitKillGroup.toString()}
+const own = ${runOwned.toString()};
+export const runOwned = command => own(command, { spawn });`;
+  return `data:text/javascript,${encodeURIComponent(source)}`;
 }

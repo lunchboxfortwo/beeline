@@ -1,12 +1,11 @@
+import { runOwnedFile } from './wait.js';
 /** Destructive cleanup is called only with a persisted server-confirmed archive fact. */
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { lstat, readdir, rm } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { ordinaryDirectory, storageTree, hasMount, type WholeStorageOptions, type StorageReclaimEntry } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 import { DEPENDENCY_LAYERS_DIR, openDependencyLayer } from './dependency-generation.js';
-const exec = promisify(execFile);
+const exec = runOwnedFile;
 
 // pidfds fence PID reuse. No environment values, arbitrary shell commands or
 // process-group signals. Attribution requires an open file, cwd or an absolute argument
@@ -187,7 +186,7 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
           const stopped = await stopDarwinProcesses(existing);
           console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
         } else {
-        const result = await exec('/usr/bin/python3', ['-c', STOP, JSON.stringify(existing), String(process.pid)], { timeout: 30_000, maxBuffer: 1024 });
+        const result = await exec('/usr/bin/python3', ['-c', STOP, JSON.stringify(existing), String(process.pid)], { maxBuffer: 1024 });
         const { stopped } = JSON.parse(result.stdout) as { stopped: number };
         console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
         }

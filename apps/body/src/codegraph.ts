@@ -1,14 +1,12 @@
-import { execFile } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
 import { access,appendFile,mkdir,readFile } from 'node:fs/promises';
 import { dirname,isAbsolute,resolve } from 'node:path';
-import { promisify } from 'node:util';
 import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 
 const CODEGRAPH_INDEX_PATH = '.codegraph/codegraph.db';
-const CODEGRAPH_PREPARE_TIMEOUT_MS = 120_000;
 
 /** Release-owned, repository-scoped CodeGraph MCP server. */
 export function codegraphMcpServer(config: BodyConfig, cwd: string, options: { readonly: boolean }): McpServerWire | undefined {
@@ -27,7 +25,6 @@ async function isGitWorktree(cwd: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
       cwd,
-      timeout: 10_000,
     });
     return resolve(stdout.trim()) === resolve(cwd);
   } catch {
@@ -40,7 +37,6 @@ async function excludeIndexFromGitStatus(cwd: string): Promise<void> {
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--git-path', 'info/exclude'], {
       cwd,
-      timeout: 10_000,
     });
     const gitPath = stdout.trim();
     if (!gitPath) return;
@@ -73,7 +69,6 @@ export async function prepareCodegraphIndex(config: BodyConfig, cwd: string): Pr
     await execFileAsync(command, args, {
       cwd,
       env: { ...process.env, CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DAEMON: '1' },
-      timeout: CODEGRAPH_PREPARE_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
     });
     return true;

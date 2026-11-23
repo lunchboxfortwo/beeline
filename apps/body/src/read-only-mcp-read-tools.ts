@@ -145,11 +145,12 @@ export async function runGit(args: string[]): Promise<string> {
         PAGER: 'cat',
       },
       machineRead: true,
+      maxBuffer: MAX_GIT_BYTES,
     });
   } catch {
     throw new Error('git inspection command failed');
   }
-  if (result.code !== 0 || Buffer.byteLength(result.stdout) > MAX_GIT_BYTES)
+  if (result.code !== 0)
     throw new Error(result.stderr.trim() || 'git inspection command failed');
   return result.stdout.trimEnd();
 }

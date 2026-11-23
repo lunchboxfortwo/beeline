@@ -1,10 +1,10 @@
-import { execFile, type ExecFileOptions } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
+import { type ExecFileOptions } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { credentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
@@ -19,7 +19,7 @@ import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
 
-export const execFileAsync = promisify(execFile);
+export const execFileAsync = runOwnedFile;
 
 export function githubHttpsRemote(remote: string): string {
   const normalized = remote
@@ -84,8 +84,6 @@ export async function materializeCornerWorktree(input: {
     execFileAsync('git', args, {
       ...options,
       encoding: 'utf8',
-      timeout: 120_000,
-      killSignal: 'SIGKILL',
     });
   const remote = roomCheckoutRemote(input.remote);
   const sourceGitDir = cornerRepositoryCacheDir(input.supervisorRoot, remote);

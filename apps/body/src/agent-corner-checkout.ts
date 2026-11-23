@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
 import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import {
@@ -16,12 +16,11 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 const git = (args: string[], env?: NodeJS.ProcessEnv) =>
-  execFileAsync('git', args, { env, timeout: 120_000, killSignal: 'SIGKILL' });
+  execFileAsync('git', args, { env, });
 
 /** Private refs let agents check out the same public branch independently. */
 export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId: string) {

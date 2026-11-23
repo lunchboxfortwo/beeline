@@ -1,12 +1,11 @@
+import { runOwnedFile } from './wait.js';
 /** Host-only observations: never used as deletion or process-kill authority. */
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import { readdir } from 'node:fs/promises';
 import { readStorageOwners } from './storage-owners.js';
 import type { StorageReclaimEntry, StorageRoomState } from './helper-storage.js';
 
-const exec = promisify(execFile);
+const exec = runOwnedFile;
 const DISK_INTERVAL_MS = 6 * 60 * 60_000;
 
 // Stream metadata, not file contents. O_NOATIME prevents measuring retention
@@ -73,7 +72,7 @@ print(json.dumps({'categories':totals,'errors':errors}))
 
 export async function sampleHelperUsage(root: string, mode: 'disk' | 'process', signal?: AbortSignal): Promise<unknown> {
   const { stdout } = await exec('/usr/bin/python3', ['-c', INVENTORY, root, mode, String(process.pid)], {
-    timeout: mode === 'disk' ? 10 * 60_000 : 30_000, maxBuffer: 1024 * 1024, signal,
+    maxBuffer: 1024 * 1024, signal,
   });
   return JSON.parse(stdout);
 }

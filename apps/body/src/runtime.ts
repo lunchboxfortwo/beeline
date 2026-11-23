@@ -1,10 +1,9 @@
+import { runOwnedFile } from './wait.js';
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { decodeNsec, getPublicKey } from '@beeline/nostr';
 import { DEFAULT_ACCESS_POLICY, LEGACY_ACCESS_POLICY, type AgentAccessPolicy } from './access-policy.js';
 import { agentBehavior, resolveAgentCommand, type AgentCommand, type AgentKind } from './agent-command.js';
@@ -12,7 +11,7 @@ import { activeAdapterCommand } from './adapter-store.js';
 import type { ExternalMcpCapability } from './external-mcp-capabilities.js';
 import type { SandboxPolicy } from './bwrap-sandbox.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 const DEFAULT_AGENT_IDENTITY_NAME = 'beeline-agent';
 const DEFAULT_BODY_IDENTITY_NAME = 'beeline-body';
 export const DEFAULT_DAEMON_MONOLITH_BASE_URL = 'https://server.usebeeline.app';

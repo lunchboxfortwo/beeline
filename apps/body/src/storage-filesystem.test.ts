@@ -14,7 +14,7 @@ vi.mock('node:child_process', async importOriginal => {
       // Duplicate inode rows keep this fixture's memory small while exercising
       // the real parser with a pipe larger than the old 128 MiB execFile cap.
       while (fixture.bytes <= fixture.limit) { await fixture.advance?.(); fixture.bytes += Buffer.byteLength(chunk); yield chunk; }
-      setImmediate(() => child.emit('close', 0));
+      setImmediate(() => { child.emit('exit', 0, null); child.emit('close', 0); });
     })());
     child.stderr = new PassThrough();
     return child;

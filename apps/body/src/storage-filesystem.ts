@@ -2,7 +2,8 @@
  * setup: the small recovery bootstrap imports it when activating a bundle. */
 import { chmod, lstat, readdir, realpath, rm } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
-import { spawn } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { runOwned } from './wait.js';
 import { trustySquireLegacyStorePaths } from './trusty-squire-storage.js';
 
 /** macOS exposes /var and /tmp through OS-owned /private aliases. */
@@ -57,15 +58,13 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
     await visit(root);
     return tree;
   }
-  const child = spawn('/usr/bin/python3', ['-c', TREE_INVENTORY, root], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let child!: ChildProcessWithoutNullStreams;
+  const completed = runOwned({ step: 'storage inventory', file: '/usr/bin/python3', args: ['-c', TREE_INVENTORY, root],
+    captureOutput: false, machineRead: true, onSpawn: started => { child = started as ChildProcessWithoutNullStreams; } });
   const tree = new Map<string, TreeEntry>();
   let pending = '', stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8192); });
-  const completed = new Promise<void>((done, fail) => {
-    child.once('error', fail);
-    child.once('close', code => code === 0 ? done() : fail(new Error(`storage inventory failed (${code}): ${stderr}`)));
-  });
   // Attach the rejection handler before consuming the pipe.
   void completed.catch(() => undefined);
   const add = (line: string) => {
@@ -81,7 +80,8 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
       add(pending.slice(0, newline)); pending = pending.slice(newline + 1);
     }
   }
-  await completed;
+  const result = await completed;
+  if (result.code !== 0) throw new Error(`storage inventory failed (${result.code}): ${stderr}`);
   if (pending) add(pending);
   return tree;
 }

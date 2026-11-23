@@ -1,8 +1,9 @@
+import { runOwned } from '../wait.js';
 import { SESSION_ON_DEMAND_NOTICE } from '@beeline/api-contract/agent-invitation-guide';
 // `usebeeline join` and `usebeeline session …`: a coding session that is already running joins a person's Beeline
 // Rooms as its own member, from one pasted line and one sign-in on any device.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   closeSync,
   constants,
@@ -199,13 +200,11 @@ function runner(dir: string, env: NodeJS.ProcessEnv): Runner {
   return { node: process.execPath, bundle: existsSync(bundle) ? bundle : running };
 }
 
-function gitRoot(cwd: string): string | undefined {
-  const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+async function gitRoot(cwd: string): Promise<string | undefined> {
+  const result = await runOwned({ step: 'git root', file: 'git', args: ['rev-parse', '--show-toplevel'], machineRead: true,
     cwd,
-    encoding: 'utf8',
-    timeout: 5000,
-  });
-  return result.status === 0 ? result.stdout.trim() : undefined;
+  }).catch(() => ({ code: 1, stdout: '' }));
+  return result.code === 0 ? result.stdout.trim() : undefined;
 }
 
 interface Found {
@@ -343,7 +342,7 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
       const current = readState(dir).sessions.find((s) => s.key === key)!;
       await bindLocalDelivery(dir, current, await accessToken(dir, key), env);
       if (current.deliveryMechanism === 'local') {
-        setupAgent(current.agent, { env, node: run.node, bundle: run.bundle });
+        await setupAgent(current.agent, { env, node: run.node, bundle: run.bundle });
         await ensureBridge(dir, run, env);
       }
       console.log(
@@ -359,7 +358,7 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   );
   const name = pickName(
     flag(args, '--name') ?? own.chosen,
-    defaultName(own.agent, own.cwd, gitRoot(own.cwd)),
+    defaultName(own.agent, own.cwd, await gitRoot(own.cwd)),
     (n) => taken.has(n),
   );
   const previous = existingPending(dir, own, server);
@@ -566,7 +565,7 @@ async function finishJoinOwned(file: string, env: NodeJS.ProcessEnv): Promise<vo
     try {
       const changes =
         joined.deliveryMechanism === 'local'
-          ? setupAgent(pending.agent, { env, node: run.node, bundle: run.bundle })
+          ? await setupAgent(pending.agent, { env, node: run.node, bundle: run.bundle })
           : [];
       if (
         sessionAgentBehavior(pending.agent).delivery === 'queue' &&
@@ -844,7 +843,7 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
     await restoreClaudeInbound(env);
     const changes = left.some((s) => s.agent === joined.agent)
       ? []
-      : setupAgent(joined.agent, { env, node: r.node, bundle: r.bundle, remove: true });
+      : await setupAgent(joined.agent, { env, node: r.node, bundle: r.bundle, remove: true });
     console.log(
       [`@${joined.handle ?? joined.name} left Beeline on this machine.`, ...changes].join('\n'),
     );

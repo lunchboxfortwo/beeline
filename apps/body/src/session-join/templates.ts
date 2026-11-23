@@ -1,10 +1,11 @@
+import { ownedCommandModule } from '../wait.js';
 // Plugin sources written into apps that load code, not hooks. Ported from Reason Network (src/opencode-plugin.ts,
 // src/pi-extension.ts, integrations/hermes), Copyright 2026 Reason Machines, Inc., MIT OR Apache-2.0.
 // See ./NOTICE and ./UPSTREAM.json for the copied commit. `__NODE__` and `__BUNDLE__` are filled in on install.
 
 /** opencode 1.x and 2.x: reports busy/idle, and puts Beeline messages into idle sessions within seconds. */
 export const OPENCODE_PLUGIN = `// Beeline for opencode: written by \`usebeeline join\`, removed by \`usebeeline session leave\`.
-import { execFile } from "node:child_process"
+import { runOwned } from ${JSON.stringify(ownedCommandModule())}
 import { watch, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
@@ -12,14 +13,12 @@ import { homedir } from "node:os"
 const NODE = "__NODE__"
 const BUNDLE = "__BUNDLE__"
 
-const run = (args: string[], cwd: string) =>
-  new Promise<string>((resolve) => {
-    const child = execFile(NODE, [BUNDLE, "session", "hook", "opencode", ...args], { cwd, timeout: 10_000, windowsHide: true }, (err, out) =>
-      resolve(err ? "" : String(out).trim()),
-    )
-    // The hook reads no payload from a plugin; an open stdin would hold it until the timeout kills it.
-    child.stdin?.end()
-  })
+const run = async (args: string[], cwd: string) => {
+  try {
+    const result = await runOwned({ step: "opencode hook", file: NODE, args: [BUNDLE, "session", "hook", "opencode", ...args], cwd, machineRead: true })
+    return result.code === 0 ? result.stdout.trim() : ""
+  } catch { return "" }
+}
 
 const network = (prompt: (id: string, text: string) => Promise<unknown>) => {
   const idle = new Set<string>()
@@ -118,7 +117,7 @@ export default {
 /** pi: reports busy/idle and delivers Beeline messages, steering a running turn and starting one when idle. */
 export const PI_EXTENSION = `// Beeline for pi: written by \`usebeeline join\`, removed by \`usebeeline session leave\`.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { execFile } from "node:child_process"
+import { runOwned } from ${JSON.stringify(ownedCommandModule())}
 import { watch, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
@@ -132,13 +131,12 @@ export default function (pi: ExtensionAPI) {
   let busy = false
   let delivering = false
   let watcher: ReturnType<typeof watch> | undefined
-  const hook = (args: string[]) =>
-    new Promise<string>((resolve) => {
-      const child = execFile(NODE, [BUNDLE, "session", "hook", "pi", ...args, "--session", id], { cwd, timeout: 10_000, windowsHide: true },
-        (err, out) => resolve(err ? "" : String(out).trim()))
-      // The hook reads no payload from a plugin; an open stdin would hold it until the timeout kills it.
-      child.stdin?.end()
-    })
+  const hook = async (args: string[]) => {
+    try {
+      const result = await runOwned({ step: "pi hook", file: NODE, args: [BUNDLE, "session", "hook", "pi", ...args, "--session", id], cwd, machineRead: true })
+      return result.code === 0 ? result.stdout.trim() : ""
+    } catch { return "" }
+  }
   const deliver = async (event: "post-tool-use" | "poll") => {
     if (!id || delivering) return
     delivering = true

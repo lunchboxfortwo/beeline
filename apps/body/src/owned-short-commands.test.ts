@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { namedPrivateFiles } from './read-only-mcp-download-attachment.js';
+import { ownedCommandModule, runOwned } from './wait.js';
+import { build } from 'esbuild';
 import { fetchRepositoryCache } from './repository-cache-repair.js';
 
 const dirs: string[] = [];
@@ -62,4 +64,21 @@ describe('short local commands run as owned children', () => {
     const found = await namedPrivateFiles([checkout], 'See tracked.txt and proof.txt', true);
     expect(found.map((file) => file.named)).toEqual(['proof.txt']);
   });
+});
+
+it('runs the standalone child owner emitted by a bundled helper', async () => {
+  const bundled = await build({
+    stdin: { contents: "export { ownedCommandModule } from './wait.ts';", resolveDir: __dirname },
+    bundle: true, write: false, platform: 'node', format: 'esm', target: 'node20',
+  });
+  const result = await runOwned({
+    step: 'bundled standalone owner', file: process.execPath,
+    args: ['--input-type=module', '-e', bundled.outputFiles[0]!.text + `
+      const { runOwned } = await import(ownedCommandModule());
+      const result = await runOwned({step:'fixture',file:process.execPath,args:['-e',"console.log('owned'); console.error('progress');"],machineRead:true});
+      console.log(JSON.stringify(result));`],
+    machineRead: true,
+  });
+  expect(result.code).toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ code: 0, stdout: 'owned\n', stderr: 'progress\n' });
 });

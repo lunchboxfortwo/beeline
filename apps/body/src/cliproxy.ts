@@ -1,3 +1,4 @@
+import { runOwnedFile } from './wait.js';
 /**
  * The machine's one CLIProxyAPI child: the sole owner of every proxied
  * provider login (Claude, ChatGPT/Codex, xAI), and the routes that point
@@ -16,14 +17,13 @@
  * device login or hands it Beeline's Claude login once; plan reads use its
  * current login (`readLogin`).
  */
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { parse } from 'yaml';
 import { agentBehavior, type AgentKind } from './agent-command.js';
@@ -31,7 +31,7 @@ import { readJsonObject, writePrivateFileAtomically } from './atomic-private-fil
 import { downloadBytes } from './update-download.js';
 import { ask, runOwned } from './wait.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 const RELEASES = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
 const BINARY = 'cli-proxy-api';
 

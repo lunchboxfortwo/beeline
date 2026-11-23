@@ -1,9 +1,8 @@
-import { execFile } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
 import { lstat, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 import { storageOperation, reclaimWholeStorageObject, type WholeStorageOptions } from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 

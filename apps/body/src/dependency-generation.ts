@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
+import { ownedCommandModule, runOwnedFile } from './wait.js';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, readdir, realpath, lstat, rm, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, delimiter } from 'node:path';
-import { promisify } from 'node:util';
 import { tryWithKernelLock } from './kernel-lock.js';
 import type { DependencyLayer } from './bwrap-sandbox.js';
 import {
@@ -14,7 +13,7 @@ import {
   isContainedTreePath,
 } from './warm-node-modules.js';
 
-const exec = promisify(execFile);
+const exec = runOwnedFile;
 const marker = '.beeline-generation';
 export const dependencyRequest = '.beeline-dependency-request';
 
@@ -166,7 +165,7 @@ export async function installDependencyNpmGuard(
 ): Promise<string> {
   const bin = resolve(root, 'dependency-bin');
   await mkdir(bin, { recursive: true });
-  const program = `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');
+  const program = `#!${process.execPath}\n
 const args=process.argv.slice(2);
 const {existsSync,realpathSync}=require('node:fs');
 const {resolve,relative,isAbsolute}=require('node:path');
@@ -184,9 +183,10 @@ if(args.some(a=>mutations.has(a)) && !args.includes('--package-lock-only') && !p
  console.error('Beeline dependencies are read-only. Use npm install --package-lock-only --ignore-scripts <package> (or edit package.json and package-lock.json). Beeline installs and mounts the new generation automatically at the next turn.');
  process.exit(1);
 }
-const result=spawnSync(${JSON.stringify(npm)},args.includes('--package-lock-only')?[...args,'--ignore-scripts']:args,{stdio:'inherit'});
-if(result.error) throw result.error;
-process.exit(result.status??1);
+import(${JSON.stringify(ownedCommandModule())}).then(async ({runOwned})=>{
+const result=await runOwned({step:'npm',file:${JSON.stringify(npm)},args:args.includes('--package-lock-only')?[...args,'--ignore-scripts']:args,interactive:true,machineRead:true});
+process.exitCode=result.code??1;
+}).catch(error=>{console.error(error);process.exitCode=1;});
 `;
   await writeFile(resolve(bin, 'npm'), program, { mode: 0o755 });
   return `${bin}${delimiter}${inheritedPath}`;

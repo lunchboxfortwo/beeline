@@ -1,3 +1,4 @@
+import { runOwned } from './wait.js';
 import { grantOutputLines, type GrantOutputLine } from './grant-runner-output.js';
 import { waitForPathRemoval } from './filesystem-change.js';
 import {
@@ -71,7 +72,7 @@ import { requireSecretGrants, validateRequestedSecrets } from './grant-secret.js
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { killChildProcessGroup } from './acp-stderr-tail-max-chars.js';
 import { surfaceAllows, type AgentSurface } from '@beeline/api-contract/surface-capabilities';
-import { spawn as spawnCommand, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn as spawnCommand, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   chmod,
@@ -542,7 +543,7 @@ export class GrantCommandRunner {
       }
       // The probe runs only an installed git: a writable one on PATH could create files before the refusal.
       if (
-        gitShowPrintsFileContents(
+        await gitShowPrintsFileContents(
           room.cwd,
           checkEnv,
           argv,
@@ -845,22 +846,21 @@ export class GrantCommandRunner {
  * runs that file only, never a PATH lookup of `git`,
  * and its output is never returned to the agent.
  */
-function gitShowPrintsFileContents(
+async function gitShowPrintsFileContents(
   cwd: string,
   env: NodeJS.ProcessEnv,
   argv: readonly string[],
   executable: string | undefined,
-): boolean {
+): Promise<boolean> {
   if (argv[0] !== 'git' || argv[1] !== 'show' || !argv.includes('--stat')) return false;
   const objects = argv.slice(2).filter((word) => word !== '--stat' && !word.startsWith('-'));
   if (objects.length === 0) return false;
   if (!executable || !isAbsolute(executable)) return true;
   for (const word of objects) {
-    const probe = spawnSync(executable, ['cat-file', '-t', '--', word], {
+    const probe = await runOwned({ step: 'git object type', file: executable, args: ['cat-file', '-t', '--', word], machineRead: true,
       cwd,
       env,
-      encoding: 'utf8',
-    });
+    }).catch(() => ({ stdout: '' }));
     if ((probe.stdout ?? '').trim() !== 'commit') return true;
   }
   return false;

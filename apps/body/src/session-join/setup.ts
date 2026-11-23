@@ -1,7 +1,7 @@
 // Wires a joined app to Beeline without manual edits. Every change is additive (other entries stay), backed up once,
 // and removed again by `usebeeline session leave`. Ported from Reason Network (src/setup.rs, src/setup/*.rs),
 // Copyright 2026 Reason Machines, Inc., MIT OR Apache-2.0. See ./NOTICE and ./UPSTREAM.json for the copied commit.
-import { spawnSync } from 'node:child_process';
+import { runOwned } from '../wait.js';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -242,15 +242,15 @@ export function hermesRoot(env: NodeJS.ProcessEnv): string {
   return base;
 }
 
-function hermes(context: SetupContext): string[] {
+async function hermes(context: SetupContext): Promise<string[]> {
   const dir = join(hermesRoot(context.env), 'plugins', NAME);
   const remove = Boolean(context.remove);
   const lines = [...pluginFile(join(dir, '__init__.py'), fill(HERMES_PLUGIN, context.node, context.bundle), remove),
     ...pluginFile(join(dir, 'plugin.yaml'), HERMES_MANIFEST, remove)];
   if (remove) rmSync(dir, { recursive: true, force: true });
   // Hermes loads only plugins its person enabled: enable ours, so no manual step remains.
-  const done = spawnSync('hermes', ['plugins', remove ? 'disable' : 'enable', NAME], { env: context.env, stdio: 'ignore', timeout: 15_000 });
-  if (!remove && done.status !== 0) lines.push(`Run "hermes plugins enable ${NAME}" once if Hermes does not load it.`);
+  const done = await runOwned({ step: 'Hermes plugin setup', file: 'hermes', args: ['plugins', remove ? 'disable' : 'enable', NAME], env: context.env, machineRead: true }).catch(() => ({ code: 1 }));
+  if (!remove && done.code !== 0) lines.push(`Run "hermes plugins enable ${NAME}" once if Hermes does not load it.`);
   return lines;
 }
 
@@ -279,7 +279,7 @@ export function zcodeIn(homeDir: string, context: SetupContext): string[] {
   return lines;
 }
 
-const SETUP: Record<AgentId, (context: SetupContext) => string[]> = {
+const SETUP: Record<AgentId, (context: SetupContext) => string[] | Promise<string[]>> = {
   'claude-code': claudeCode, codex, gemini, antigravity, opencode, pi, hermes,
   // Headless Grok joins on demand until its actual host supplies a proved inbound trigger.
   grok:()=>[],
@@ -287,6 +287,6 @@ const SETUP: Record<AgentId, (context: SetupContext) => string[]> = {
 };
 
 /** Wires (or with `remove`, unwires) one app. Returns what changed, for the person to see. */
-export function setupAgent(agent: AgentId, context: SetupContext): string[] {
+export async function setupAgent(agent: AgentId, context: SetupContext): Promise<string[]> {
   return SETUP[agent](context);
 }

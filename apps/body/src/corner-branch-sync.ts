@@ -1,9 +1,8 @@
-import { execFile } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
 import { access, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 
 /**
  * Two agents, one branch. The branch on GitHub, not any one helper's
