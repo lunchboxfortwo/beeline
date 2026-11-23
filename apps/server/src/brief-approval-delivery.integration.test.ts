@@ -150,3 +150,38 @@ it("BRIEF-APPROVAL-DELIVERY: the commander cites a delivery from any chat it was
     'brief.approval.sourceMessageId',
   );
 }, 60_000);
+
+// Reproduction DELIVERY-ID-HOLD-READ (morning card item 4, 23 Nov): holds and
+// message reads refused the delivery ID an agent was shown for a person's tag
+// (hold: "cited message does not exist"; read: "message not found in this chat").
+it('Reproduction DELIVERY-ID-HOLD: a hold citing a delivery ID cites the human message it delivered', async () => {
+  const cornerId = await openThread();
+  const hold = await tag(ROOM, '@ruby hold the merge until I look');
+  await claim(hold.command);
+  await rootFixture.daemon.execute(
+    'setCornerHold',
+    { ...authority(hold.command), cornerId, sourceMessageId: hold.command.id },
+    RUBY,
+  );
+  expect(
+    (
+      await rootFixture.db.query(
+        `SELECT source_message_id,source_author_id FROM corner_merge_holds
+         WHERE corner_id=$1 AND released_at IS NULL`,
+        [cornerId],
+      )
+    ).rows,
+  ).toEqual([{ source_message_id: hold.messageId, source_author_id: HUMAN }]);
+}, 60_000);
+
+it('Reproduction DELIVERY-ID-READ: a message read by delivery ID returns the human message; another agent\'s delivery does not', async () => {
+  await finishAll();
+  const mine = await tag(ROOM, '@ruby read this back to me');
+  expect(
+    await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: mine.command.id }, RUBY),
+  ).toMatchObject({ body: '@ruby read this back to me' });
+  const peer = await tag(ROOM, '@worker this one is yours', WORKER);
+  await expect(
+    rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: peer.command.id }, RUBY),
+  ).rejects.toThrow('message not found');
+}, 60_000);
