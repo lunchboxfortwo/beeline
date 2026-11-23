@@ -194,8 +194,11 @@ asks the running helper to converge once, and reports that agent's current state
 it never waits for the agent to serve. A new machine installs the helper first and
 starts it after the runtime is written.
 An older publication is a freshness result, including final versus rc comparisons;
-helper repair still runs. Equal versions still verify content, and --force stages
-a separate repair release. Obsolete staging is cleared only when it still matches
+helper repair still runs. Preparation reuses a pending stage whose verification
+marker matches the published digest, then the active release if its marker matches;
+otherwise it stages and verifies the bundle. This preserves a pending forced repair
+before activation and the active repair afterward. To recheck those bytes, `--force` stages a
+separate repair release. Obsolete staging is cleared only when it still matches
 the attempt holding the install lock.
 
 The [helper wait boundary](architecture/README.md#architecture-invariants) owns the
@@ -204,9 +207,9 @@ answered when the handoff starts (or with the refusal), and the CLI then follows
 the old helper's kernel lock to its exit, runs the native start/status command, and
 reads the successor's status once. systemd start completes on native READY;
 launchd print reports its current job without asserting readiness. `start` and `update` report each agent as the
-helper answered; nothing waits for agents to serve. Locks never queue: a busy lock
-fails at once naming its holder's pid and step. The one exception is release
-preparation already running on the install (such as the helper's own, right after a
+helper answered; nothing waits for agents to serve. A busy install lock
+fails at once naming its holder's pid and step, except when one release
+preparation joins another already running on the install (such as the helper's own, right after a
 publish): a second preparation prints that holder, follows its lock to its end and
 reuses its verified staging. Preparation, dependency and native
 convergence workers are owned children: their output streams to the CLI, and they
