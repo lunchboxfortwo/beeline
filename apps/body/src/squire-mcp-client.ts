@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SquireOperationError } from './squire-outcome.js';
-import { answer } from './wait.js';
+import { answer, onEnd } from './wait.js';
 /**
  * The REAL Squire MCP client — one stdio JSON-RPC session with the Squire MCP
  * server process on this helper. Everything the connector lifecycle does
@@ -184,15 +184,15 @@ export class StdioSquireMcpClient {
       this.log(`squire mcp exited (${String(code)})`);
       if (this.child !== child) return;
       this.options.onExit?.(child.pid, code);
-      this.initialized = undefined;
-      this.child = undefined;
       for (const entry of this.pending.values()) {
         entry.reject(new SquireOperationError('Squire process exited', {cause:'process-exit',accepted:null,completed:false}, {cause:error}));
       }
       this.pending.clear();
+      this.reconnect();
     };
     child.on('error', (error) => fail(null, error));
     child.on('exit', (code) => fail(code));
+    onEnd(child.stdout, ['end', 'close', 'error'], (_event, error) => fail(null, error instanceof Error ? error : undefined));
     return this.request('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},

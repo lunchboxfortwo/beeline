@@ -153,7 +153,7 @@ async function callServer(server, request, signal) {
   const run = runOwned({
     step: server.name, file: server.command, args: server.args,
     env: { ...process.env, ...server.env }, ...(server.cwd ? { cwd: server.cwd } : {}),
-    stdin: 'pipe', captureOutput: false, machineRead: true, signal: done.signal,
+    stdin: 'pipe', group: 'caller', captureOutput: false, machineRead: true, signal: done.signal,
     onSpawn: (spawned) => {
       child = spawned;
       spawned.once('error', (error) => { startError = error; });

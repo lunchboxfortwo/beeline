@@ -40,6 +40,7 @@ export async function trustCodexHook(context: SetupContext, bin: string, cwd: st
   const unavailable = () => new Error('Codex hook trust unavailable');
   const fail = () => { failed = true; for (const p of pending.values()) p.reject(unavailable()); pending.clear(); };
   onEnd(child, ['exit', 'error'], fail);
+  onEnd(child.stdout!, ['end', 'close', 'error'], fail);
   child.stdin!.on('error', fail);
   child.stdout!.on('data', chunk => {
     buffer += String(chunk);

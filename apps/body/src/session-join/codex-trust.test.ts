@@ -39,6 +39,7 @@ process.stdin.on('data', (chunk) => {
     buffer = buffer.slice(end + 1);
     const answer = answers[request.method];
     if (answer === 'exit') process.exit(2);
+    if (answer === 'eof') { require('node:fs').closeSync(1); return; }
     if (answer !== undefined) process.stdout.write(JSON.stringify({ id: request.id, result: answer }) + '\\n');
   }
 });
@@ -66,6 +67,13 @@ it('ends its codex app-server when trust is decided', async () => {
 it('does not grant trust, or wait, when the app-server exits before answering', async () => {
   const codex = await fakeCodex(`{ initialize: {}, 'hooks/list': 'exit' }`);
   await expect(trustCodexHook(context(codex.root), codex.bin, codex.root)).resolves.toBe(false);
+});
+
+it.each(['initialize', 'hooks/list'])('ends its app-server when stdout closes during %s', async method => {
+  const codex = await fakeCodex(`{ initialize: {}, ${JSON.stringify(method)}: 'eof' }`);
+  await expect(trustCodexHook(context(codex.root), codex.bin, codex.root)).resolves.toBe(false);
+  const pid = await codex.pid();
+  await vi.waitFor(() => expect(alive(pid)).toBe(false));
 });
 
 it('does not grant trust when codex is missing', async () => {
