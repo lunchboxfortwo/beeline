@@ -44,22 +44,27 @@ export interface FreeAgentGrant {
 }
 
 /** Pi can open the hosted provider before prompting; actual authority comes from the queue item. */
-export function freeAgentPiConfig(grant: Pick<FreeAgentGrant, 'modelBaseUrl' | 'upstreamModel'>, input: Array<'text' | 'image'> = ['text']): string {
+export function freeAgentPiConfig(
+  grant: Pick<FreeAgentGrant, 'modelBaseUrl' | 'upstreamModel'>,
+  input: Array<'text' | 'image'> = ['text'],
+): string {
   return JSON.stringify({
     providers: {
       beeline: {
         baseUrl: grant.modelBaseUrl,
         api: 'openai-completions',
         apiKey: 'beeline-queue-item',
-        models: [{
-          id: grant.upstreamModel,
-          name: grant.upstreamModel,
-          reasoning: true,
-          input,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 1_000_000,
-          maxTokens: 65_536,
-        }],
+        models: [
+          {
+            id: grant.upstreamModel,
+            name: grant.upstreamModel,
+            reasoning: true,
+            input,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 1_000_000,
+            maxTokens: 65_536,
+          },
+        ],
       },
     },
   });
@@ -72,7 +77,9 @@ async function freeAgentInput(model: string): Promise<Array<'text' | 'image'>> {
       peer: 'OpenRouter',
     });
     if (!response.ok) return ['text'];
-    return piInputModalities(parseOpenRouterEndpoints(await response.json()).inputModalities) ?? ['text'];
+    return (
+      piInputModalities(parseOpenRouterEndpoints(await response.json()).inputModalities) ?? ['text']
+    );
   } catch {
     return ['text'];
   }
@@ -87,7 +94,10 @@ export function freeAgentModelEnv(grant: Pick<FreeAgentGrant, 'modelToken'>): st
     // Each Room sandbox has its own /tmp; long harness homes exceed AF_UNIX limits.
     AGENT_BROWSER_SOCKET_DIR: '/tmp/beeline-browser',
     BEELINE_BODY_AGENT_ENV_PASSTHROUGH: [
-      'BEELINE_FREE_AGENT_MODEL_TOKEN', 'AGENT_BROWSER_ENGINE', 'AGENT_BROWSER_EXECUTABLE_PATH', 'AGENT_BROWSER_SOCKET_DIR',
+      'BEELINE_FREE_AGENT_MODEL_TOKEN',
+      'AGENT_BROWSER_ENGINE',
+      'AGENT_BROWSER_EXECUTABLE_PATH',
+      'AGENT_BROWSER_SOCKET_DIR',
     ].join(','),
   };
   return `${Object.entries(lines)
@@ -101,12 +111,15 @@ export async function fetchFreeAgentGrant(
   fetchImpl: typeof fetch = fetch,
   _legacySleep?: (ms: number) => Promise<void>,
 ): Promise<FreeAgentGrant> {
-  const response=await fetchImpl(new URL('/v1/free-agents/bootstrap',serverUrl),{
-    method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token}),signal:undefined,
+  const response = await fetchImpl(new URL('/v1/free-agents/bootstrap', serverUrl), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+    signal: undefined,
   });
-  if(response.status===401)throw new Error('free agent bootstrap token was refused');
-  if(!response.ok)throw new Error(`free agent bootstrap failed: HTTP ${response.status}`);
-  return await response.json() as FreeAgentGrant;
+  if (response.status === 401) throw new Error('free agent bootstrap token was refused');
+  if (!response.ok) throw new Error(`free agent bootstrap failed: HTTP ${response.status}`);
+  return (await response.json()) as FreeAgentGrant;
 }
 
 async function hasDaemonToken(configPath: string): Promise<boolean> {
@@ -127,7 +140,10 @@ export async function stageFreeAgent(
   const directory = resolve(supervisorRoot, 'beeline', 'free-agent');
   const llmEnvFile = resolve(directory, 'model.env');
   await writePrivateFileAtomically(llmEnvFile, freeAgentModelEnv(grant));
-  await writePrivateFileAtomically(resolve(env.HOME ?? '/root', '.pi/agent/models.json'), freeAgentPiConfig(grant, await freeAgentInput(grant.upstreamModel)));
+  await writePrivateFileAtomically(
+    resolve(env.HOME ?? '/root', '.pi/agent/models.json'),
+    freeAgentPiConfig(grant, await freeAgentInput(grant.upstreamModel)),
+  );
   const agent = await freeAgentPiCommand(env);
   const localConfig = loadBodyConfig({ workspaceRoot: process.cwd(), llmEnvFile, agent, env });
   const staged = await stageMonolithAgentRuntime({
@@ -173,7 +189,11 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
   }
   const passthrough = new Set(
     [previous.BUZZY_BODY_AGENT_ENV_PASSTHROUGH, previous.BEELINE_BODY_AGENT_ENV_PASSTHROUGH]
-      .filter(Boolean).join(',').split(',').map(name => canonicalName(name.trim())).filter(Boolean),
+      .filter(Boolean)
+      .join(',')
+      .split(',')
+      .map((name) => canonicalName(name.trim()))
+      .filter(Boolean),
   );
   passthrough.add('BEELINE_FREE_AGENT_MODEL_TOKEN');
   passthrough.add('AGENT_BROWSER_ENGINE');
@@ -191,10 +211,16 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
     const model = runtime.modelSelection?.model;
     if (!model?.startsWith('beeline/')) throw new Error('free agent proxy model is missing');
     const agent = await freeAgentPiCommand(env);
-    await writePrivateFileAtomically(resolve(env.HOME ?? '/root', '.pi/agent/models.json'), freeAgentPiConfig({
-      modelBaseUrl: provider.options.baseURL,
-      upstreamModel: model.slice('beeline/'.length),
-    }, await freeAgentInput(model.slice('beeline/'.length))));
+    await writePrivateFileAtomically(
+      resolve(env.HOME ?? '/root', '.pi/agent/models.json'),
+      freeAgentPiConfig(
+        {
+          modelBaseUrl: provider.options.baseURL,
+          upstreamModel: model.slice('beeline/'.length),
+        },
+        await freeAgentInput(model.slice('beeline/'.length)),
+      ),
+    );
     runtime.agentKind = agent.kind;
     runtime.agentCommand = agent.command;
     runtime.agentBinary = agent.command;
@@ -208,17 +234,27 @@ async function upgradeFreeAgentHarness(configPath: string, env: NodeJS.ProcessEn
     const model = runtime.modelSelection?.model;
     if (provider?.baseUrl && model?.startsWith('beeline/')) {
       const upstreamModel = model.slice('beeline/'.length);
-      await writePrivateFileAtomically(path, freeAgentPiConfig({ modelBaseUrl: provider.baseUrl, upstreamModel },
-        await freeAgentInput(upstreamModel)));
+      await writePrivateFileAtomically(
+        path,
+        freeAgentPiConfig(
+          { modelBaseUrl: provider.baseUrl, upstreamModel },
+          await freeAgentInput(upstreamModel),
+        ),
+      );
     }
   }
-  const reconciled = `${Object.entries(normalized).map(([name, value]) => `${name}=${value}`).join('\n')}\n`;
+  const reconciled = `${Object.entries(normalized)
+    .map(([name, value]) => `${name}=${value}`)
+    .join('\n')}\n`;
   if (reconciled !== original) await writePrivateFileAtomically(runtime.llmEnvFile, reconciled);
 }
 
 export async function runFreeAgentCommand(env: NodeJS.ProcessEnv = process.env) {
   const startedAt = performance.now();
-  const startupStep = (step: string) => console.info(`[free-agent] boot ${new Date().toISOString()} step=${step} elapsedMs=${Math.round(performance.now() - startedAt)}`);
+  const startupStep = (step: string) =>
+    console.info(
+      `[free-agent] boot ${new Date().toISOString()} step=${step} elapsedMs=${Math.round(performance.now() - startedAt)}`,
+    );
   startupStep('command');
   const agentId = env.BEELINE_FREE_AGENT_ID?.trim().toLowerCase() ?? '';
   const serverUrl = env.BEELINE_SERVER_URL?.trim() ?? '';

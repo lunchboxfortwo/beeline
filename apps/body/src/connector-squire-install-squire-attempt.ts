@@ -1,11 +1,29 @@
 import { SquireOperationError } from './squire-outcome.js';
-import type { ConnectorStep, ConnectorSignIn, VaultConnectionMeta, ConnectionGrant } from "@beeline/api-contract/daemon";
-import { squireReachCause } from "./squire-status.js";
-import { InstallSquireOptions, InstallSquireResult, squireChromeProfileDir, defaultShellRunner, defaultStreamedRunner, step, releaseSquireConnectSession, SquireConnectResolution, resolveSquireConnectSpec, squireConnectProcessEnv, isOutstandingSignIn, connectBlockedLine, connectBrowserLocation, awaitPublicPage, SquireMcpClient, isRecord } from './connector-squire.js';
-
-
-
-
+import type {
+  ConnectorStep,
+  ConnectorSignIn,
+  VaultConnectionMeta,
+  ConnectionGrant,
+} from '@beeline/api-contract/daemon';
+import { squireReachCause } from './squire-status.js';
+import {
+  InstallSquireOptions,
+  InstallSquireResult,
+  squireChromeProfileDir,
+  defaultShellRunner,
+  defaultStreamedRunner,
+  step,
+  releaseSquireConnectSession,
+  SquireConnectResolution,
+  resolveSquireConnectSpec,
+  squireConnectProcessEnv,
+  isOutstandingSignIn,
+  connectBlockedLine,
+  connectBrowserLocation,
+  awaitPublicPage,
+  SquireMcpClient,
+  isRecord,
+} from './connector-squire.js';
 
 export async function installSquireAttempt(
   options: InstallSquireOptions,
@@ -42,7 +60,6 @@ export async function installSquireAttempt(
     );
   }
 
-
   // --json supplies the typed report consumed by the phone handoff.
   const install = await streamRun(
     'npx',
@@ -51,9 +68,7 @@ export async function installSquireAttempt(
       'connect',
       '--target=codex',
       '--json',
-      ...(options.forceReloginProvider
-        ? [`--force-relogin=${options.forceReloginProvider}`]
-        : []),
+      ...(options.forceReloginProvider ? [`--force-relogin=${options.forceReloginProvider}`] : []),
     ],
     squireConnectProcessEnv(profileDir),
     options.workspaceId,
@@ -91,18 +106,26 @@ export async function installSquireAttempt(
   const signIn: ConnectorSignIn | undefined =
     isOutstandingSignIn(report) && report.sign_in_url
       ? {
-          method: location?.kind === 'virtual' || location?.kind === 'host_screen'
-            ? 'streamed-page' : 'oauth',
+          method:
+            location?.kind === 'virtual' || location?.kind === 'host_screen'
+              ? 'streamed-page'
+              : 'oauth',
           url: location?.kind === 'virtual' ? location.url : report.sign_in_url,
           ...(location ? { browserLocation: location } : {}),
         }
       : undefined;
 
-  // A quick-tunnel name is printed before DNS knows it. A phone that looks it
-  // up that early caches the miss for minutes, so publish once it answers.
-  if (signIn && location?.kind === 'virtual' &&
-      !await (options.awaitPage ?? awaitPublicPage)(signIn.url)) {
-    log(`trusty-squire sign-in page ${new URL(signIn.url).host} was not ready on its admitted observation; publishing the reported result`);
+  // A quick-tunnel name can precede DNS propagation; an early phone lookup
+  // can cache the miss for minutes. Observe it once, without retrying or
+  // withholding the reported URL if that observation fails.
+  if (
+    signIn &&
+    location?.kind === 'virtual' &&
+    !(await (options.awaitPage ?? awaitPublicPage)(signIn.url))
+  ) {
+    log(
+      `trusty-squire sign-in page ${new URL(signIn.url).host} was not ready on its admitted observation; publishing the reported result`,
+    );
   }
 
   // Surface the reported sign-in URL so the phone has a page to
@@ -118,8 +141,12 @@ export async function installSquireAttempt(
     // answer. Keep that ordinary step-4 ceremony usable; its process exit
     // wakes the assignment and the next attempt probes the published binding.
     if (pair.reconnectRequired && signIn) {
-      return { status: 'installing', steps, signIn,
-        ...(version ? { squireVersion: version } : {}) };
+      return {
+        status: 'installing',
+        steps,
+        signIn,
+        ...(version ? { squireVersion: version } : {}),
+      };
     }
     // A legacy store can survive a completed connect. Give Squire's supported
     // connect path one fresh attempt to publish/rebind it, then probe again.
@@ -128,8 +155,13 @@ export async function installSquireAttempt(
       return installSquireAttempt(options, false);
     }
     push(step('paired to workspace', 'failed', pair.reason));
-    if (pair.reconnectRequired) return { status: 'error', steps, errorMessage: pair.reason,
-      ...(version ? { squireVersion: version } : {}) };
+    if (pair.reconnectRequired)
+      return {
+        status: 'error',
+        steps,
+        errorMessage: pair.reason,
+        ...(version ? { squireVersion: version } : {}),
+      };
     return {
       status: 'installing',
       steps,
@@ -155,13 +187,12 @@ export async function installSquireAttempt(
   return {
     status: 'connected',
     ...(report.account?.email || report.account?.id.includes('@')
-      ? { signedInAs: report.account.email ?? report.account.id } : {}),
+      ? { signedInAs: report.account.email ?? report.account.id }
+      : {}),
     steps,
     ...(version ? { squireVersion: version } : {}),
   };
 }
-
-
 
 /** Probe the mounted Squire MCP to confirm the account is live on this helper. */
 export async function pairSquire(
@@ -180,21 +211,30 @@ export async function pairSquire(
   }
 }
 
-
-
 /** Decode MCP error envelopes for recovery, and publish only a plain cause. */
-export function pairingFailure(error: unknown): { ok: false; reason: string; reconnectRequired?: true } {
-  if(error instanceof SquireOperationError && error.outcome.cause==='needs-sign-in')
-    return {ok:false,reason:'Trusty Squire needs account sign-in',reconnectRequired:true};
+export function pairingFailure(error: unknown): {
+  ok: false;
+  reason: string;
+  reconnectRequired?: true;
+} {
+  if (error instanceof SquireOperationError && error.outcome.cause === 'needs-sign-in')
+    return { ok: false, reason: 'Trusty Squire needs account sign-in', reconnectRequired: true };
   let payload: unknown = error;
   if (isRecord(payload) && Array.isArray(payload.content)) {
-    payload = payload.content.find((entry: unknown) => isRecord(entry) && entry.type === 'text')?.text;
+    payload = payload.content.find(
+      (entry: unknown) => isRecord(entry) && entry.type === 'text',
+    )?.text;
   }
-  const text = payload instanceof Error ? payload.message : typeof payload === 'string' ? payload : '';
+  const text =
+    payload instanceof Error ? payload.message : typeof payload === 'string' ? payload : '';
   if (text) {
     const start = text.indexOf('{');
     if (start >= 0) {
-      try { payload = JSON.parse(text.slice(start)); } catch { /* unstructured tool failure */ }
+      try {
+        payload = JSON.parse(text.slice(start));
+      } catch {
+        /* unstructured tool failure */
+      }
     }
   }
   const cause = isRecord(payload) && isRecord(payload.error) ? payload.error : undefined;
@@ -202,36 +242,29 @@ export function pairingFailure(error: unknown): { ok: false; reason: string; rec
     return { ok: false, reason: 'Trusty Squire needs account sign-in', reconnectRequired: true };
   }
   const plain = (typeof cause?.message === 'string' ? cause.message : text)
-    .replace(/^list_credentials failed:\s*/, '').trim();
-  return { ok: false, reason: plain && !/[{}\[\]]/.test(plain)
-    ? plain : squireReachCause(new Error(text)) };
+    .replace(/^list_credentials failed:\s*/, '')
+    .trim();
+  return {
+    ok: false,
+    reason: plain && !/[{}\[\]]/.test(plain) ? plain : squireReachCause(new Error(text)),
+  };
 }
-
-
 
 export function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
-
-
 export function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
-
-
 
 export function stringList(value: unknown): string[] {
   return asArray(value).filter((entry): entry is string => typeof entry === 'string');
 }
 
-
-
 export function numberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
-
-
 
 /**
  * Squire reports vault timestamps as ISO-8601 strings; older shapes sent epoch
@@ -245,8 +278,6 @@ export function epochSeconds(value: unknown): number | null {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : Math.floor(parsed / 1000);
 }
-
-
 
 /** Map one Squire vault entry to the contract metadata (never secret values). */
 export function vaultConnectionMeta(raw: unknown): VaultConnectionMeta {
@@ -270,15 +301,11 @@ export function vaultConnectionMeta(raw: unknown): VaultConnectionMeta {
   };
 }
 
-
-
 /** `list_credentials` through the Squire MCP, shaped to the contract. */
 export async function readVault(mcp: SquireMcpClient): Promise<VaultConnectionMeta[]> {
   const result = asRecord(await mcp.call('list_credentials'));
   return asArray(result.credentials ?? result.items ?? result).map(vaultConnectionMeta);
 }
-
-
 
 export function connectionGrant(raw: unknown): ConnectionGrant {
   const record = asRecord(raw);
@@ -298,8 +325,6 @@ export function connectionGrant(raw: unknown): ConnectionGrant {
   };
 }
 
-
-
 /** Every live grant on one connection, from `list_app_access`. */
 export async function readGrants(mcp: SquireMcpClient, ref: string): Promise<ConnectionGrant[]> {
   const result = asRecord(await mcp.call('list_app_access', {}));
@@ -307,8 +332,6 @@ export async function readGrants(mcp: SquireMcpClient, ref: string): Promise<Con
     .map(connectionGrant)
     .filter((grant) => grant.credentialRef === ref && grant.revokedAt === undefined);
 }
-
-
 
 /** Revoke every live grant on one connection; partial failures are counted. */
 export async function revokeGrants(

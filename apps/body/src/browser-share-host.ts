@@ -6,7 +6,9 @@ import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket
 import { ask } from './wait.js';
 
 export function browserShareHostPath(stateRoot: string, agentId: string): string {
-  return privateSocketPath(JSON.stringify(['browser-share', resolve(stateRoot), process.pid, agentId]));
+  return privateSocketPath(
+    JSON.stringify(['browser-share', resolve(stateRoot), process.pid, agentId]),
+  );
 }
 
 type ShareRequest = {
@@ -35,8 +37,14 @@ export class BrowserShareHost {
       socket.once('end', () => {
         void (async () => {
           const request = JSON.parse(text) as ShareRequest;
-          if (!request.page?.webSocketDebuggerUrl || !request.shareId || !request.roomId ||
-              !request.serverBaseUrl || !request.daemonToken) throw new Error('Invalid browser share request');
+          if (
+            !request.page?.webSocketDebuggerUrl ||
+            !request.shareId ||
+            !request.roomId ||
+            !request.serverBaseUrl ||
+            !request.daemonToken
+          )
+            throw new Error('Invalid browser share request');
           await shareChromiumPage({
             page: request.page,
             shareId: request.shareId,
@@ -62,12 +70,19 @@ export class BrowserShareHost {
             },
           });
           socket.end(JSON.stringify({ ok: true }));
-        })().catch((error: unknown) => socket.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })));
+        })().catch((error: unknown) =>
+          socket.end(
+            JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+          ),
+        );
       });
     });
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
-      this.server!.listen(this.socketPath, () => { this.server!.off('error', reject); resolve(); });
+      this.server!.listen(this.socketPath, () => {
+        this.server!.off('error', reject);
+        resolve();
+      });
     });
     chmodSync(this.socketPath, 0o600);
   }
@@ -85,14 +100,18 @@ export function startHostedBrowserShare(socketPath: string, request: ShareReques
     let output = '';
     socket.setEncoding('utf8');
     socket.once('connect', () => socket.end(JSON.stringify(request)));
-    socket.on('data', (chunk: string) => { output += chunk; });
+    socket.on('data', (chunk: string) => {
+      output += chunk;
+    });
     socket.once('error', reject);
     socket.once('close', () => {
       try {
         const result = JSON.parse(output) as { ok?: boolean; error?: string };
         if (!result.ok) throw new Error(result.error ?? 'Browser share host failed');
         resolve();
-      } catch (error) { reject(error); }
+      } catch (error) {
+        reject(error);
+      }
     });
   });
 }

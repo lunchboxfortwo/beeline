@@ -1,4 +1,4 @@
-import { mkdir,readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { grantedSquireHostRoute } from './host-mcp-route.js';
 import type { McpServerWire } from './acp.js';
