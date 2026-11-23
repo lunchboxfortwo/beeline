@@ -27,9 +27,10 @@ import { type InstalledBundleIdentity } from './self-update-manifest.js';
 export async function activateRelease(
   layout: BeelineInstallLayout,
   releaseId: string,
-  options: { deferPruning?: boolean } = {},
+  options: { deferPruning?: boolean; signal?: AbortSignal } = {},
 ): Promise<void> {
   assertInstallTestIsolation(layout);
+  options.signal?.throwIfAborted();
   let releaseDir = join(layout.releasesRoot, releaseId);
   let previousReleaseId = await activeReleaseId(layout);
   await access(join(releaseDir, BUNDLE_ENTRYPOINT), fsConstants.F_OK);
@@ -38,6 +39,7 @@ export async function activateRelease(
   await mkdir(layout.binDir, { recursive: true });
 
   const kind = await pathKind(layout.libDir);
+  options.signal?.throwIfAborted();
   if (kind === 'directory') {
     // Legacy migration. Name the preserved copy after its own identity when
     // it carries one.
@@ -50,10 +52,12 @@ export async function activateRelease(
       await access(legacyDir, fsConstants.F_OK);
       // Collision (same id already staged): keep both, suffix this one.
       const preservedId = `${legacyId}-${Date.now()}`;
+      options.signal?.throwIfAborted();
       await rename(layout.libDir, join(layout.releasesRoot, preservedId));
       await normalizeLegacyBundleShape(join(layout.releasesRoot, preservedId));
       previousReleaseId = preservedId;
     } catch {
+      options.signal?.throwIfAborted();
       await rename(layout.libDir, legacyDir);
       await normalizeLegacyBundleShape(legacyDir);
       previousReleaseId = legacyId;
@@ -63,6 +67,7 @@ export async function activateRelease(
   const tempLink = `${layout.libDir}.new-${process.pid}`;
   await rm(tempLink, { force: true });
   await symlink(join('beeline-releases', releaseId), tempLink);
+  if (kind !== 'directory' && options.signal?.aborted) { await rm(tempLink, { force: true }); options.signal.throwIfAborted(); }
   await rename(tempLink, layout.libDir);
   await fsyncDir(dirname(layout.libDir));
 

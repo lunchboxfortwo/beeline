@@ -47,6 +47,7 @@ export async function prepareMachineRelease(
   return prepareReleaseInWorker(
     { ...env, ...(options?.force ? { BEELINE_FORCE_REPAIR: '1' } : {}) },
     entrypoint,
+    options?.signal,
   );
 }
 

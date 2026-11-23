@@ -10,6 +10,7 @@ import {
   type AdapterInstallCommand,
 } from './agent-command.js';
 import {
+  initializeAdapterCandidate,
   withAdapterCandidateLock,
   withAdapterInstallLock,
   withIdleAdapterCandidate,
@@ -202,6 +203,7 @@ export async function updateAgentAdapter(
   let superseded: string[] = [];
   const promoted = await withAdapterCandidateLock(candidate, async () => {
     await mkdir(candidate, { mode: 0o700 });
+    initializeAdapterCandidate(candidate);
     let adopted = false;
     try {
       const install: AdapterInstallCommand = {

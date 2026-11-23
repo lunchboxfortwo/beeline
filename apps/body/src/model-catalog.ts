@@ -61,6 +61,7 @@ async function withAgentModelCatalog<T>(
     raw: AgentModelConfigOption[];
     catalog: AgentModelConfigOption[];
   }) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
   const scratchCwd = await mkdtemp(resolve(tmpdir(), 'beeline-pair-model-check-'));
   const cliProxy = (await machineCliProxy())?.endpoint;
@@ -80,8 +81,12 @@ async function withAgentModelCatalog<T>(
     // probe opts in.
     inheritProcessEnv: true,
   });
+  const abort = () => { void stopAgentProcess(client).catch(() => undefined); };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    await startAgentProcess(client);
+    signal?.throwIfAborted();
+    await startAgentProcess(client, signal);
+    signal?.throwIfAborted();
     const { sessionId, raw: sessionRaw } = await client.sessionNew({
       cwd: scratchCwd,
     });
@@ -111,6 +116,7 @@ async function withAgentModelCatalog<T>(
     const inspected = inspect({ client, sessionId, raw, catalog });
     return await inspected;
   } finally {
+    signal?.removeEventListener('abort', abort);
     await stopAgentProcess(client).catch(() => undefined);
     await rm(roomSessionTmpDir(scratchCwd), { force: true }).catch(() => undefined);
     await rm(scratchCwd, { recursive: true, force: true }).catch(() => undefined);
@@ -126,6 +132,7 @@ export async function fetchAgentModelCatalog(
   agent: ModelCatalogAgent,
   agentEnv: Record<string, string>,
   selection?: { model?: string; effort?: string },
+  signal?: AbortSignal,
 ): Promise<{ raw: AgentModelConfigOption[]; catalog: AgentModelConfigOption[] }> {
   return withAgentModelCatalog(
     agent,
@@ -140,6 +147,7 @@ export async function fetchAgentModelCatalog(
         selection?.model,
       ),
     }),
+    signal,
   );
 }
 

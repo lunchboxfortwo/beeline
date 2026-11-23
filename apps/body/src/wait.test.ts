@@ -292,3 +292,28 @@ it('a nested owner settles when its own child exits with a background pipe holde
   expect(result.code).toBe(0);
   expect(result.stdout).toBe('done\n');
 });
+
+it('returns every stdout and stderr byte written before child exit', async () => {
+  const count = 1024 * 1024;
+  const result = await runOwned({ step: 'complete pipe output', file: process.execPath,
+    args: ['-e', `const fs=require('node:fs');
+      for (const fd of [1,2]) { const bytes=Buffer.from(String(fd).repeat(${count})+'TAIL'+fd); let n=0;
+        while(n<bytes.length)n+=fs.writeSync(fd,bytes,n); }`], onLine: () => {} });
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe('1'.repeat(count) + 'TAIL1');
+  expect(result.stderr).toBe('2'.repeat(count) + 'TAIL2');
+});
+
+it('follows an acknowledged legacy helper whose lock record has no generation', async () => {
+  const root = `legacy-helper-${process.pid}-${Math.random()}`;
+  const owner = await tryLock(helperLockKey(root));
+  if (!owner.held) throw new Error('expected owner');
+  let settled = false;
+  const followed = followHelperExit(root, { pid: process.pid, generation: 'legacy' }).then(() => { settled = true; });
+  try {
+    for (let i = 0; i < 8; i++) await new Promise<void>(done => setImmediate(done));
+    expect(settled).toBe(false);
+  } finally { await owner.release(); }
+  await followed;
+  expect(settled).toBe(true);
+});

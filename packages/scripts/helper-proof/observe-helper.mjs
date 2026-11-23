@@ -1,4 +1,5 @@
-import { mkdir, watch } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
+import { watch } from 'node:fs';
 import { dirname } from 'node:path';
 import { helperStatusPath } from '../../../apps/body/src/helper-status.ts';
 import { askMachine, helperAbsent } from '../../../apps/body/src/machine-control.ts';
@@ -21,9 +22,17 @@ export async function observeHelper(
     () => controller.abort(new Error(`helper observation timed out after ${timeoutMs} ms`)),
     timeoutMs,
   );
-  const changes = watch(directory, { signal: controller.signal })[Symbol.asyncIterator]();
+  let dirty = false, wake;
+  let watchError;
+  const changed = () => { dirty = true; wake?.(); };
+  const changes = watch(directory, { signal: controller.signal }, changed);
+  changes.on('error', error => { watchError = error; changed(); });
+  changes.on('close', () => { watchError = new Error('helper status watcher ended'); changed(); });
   try {
     for (;;) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      if (watchError) throw watchError;
+      dirty = false;
       const status = await askMachine(stateRoot, { operation: 'status' }, false).catch((error) => {
         // A helper the proof is killing resets the connection; re-read on its next status write.
         if (helperAbsent(error) || error?.code === 'ECONNRESET') return undefined;
@@ -33,12 +42,14 @@ export async function observeHelper(
         onStatus(status);
         if (accept(status)) return status;
       }
-      if ((await changes.next()).done) throw new Error('helper status watcher ended');
+      if (!dirty) await new Promise(resolve => { wake = resolve; });
+      wake = undefined;
     }
   } catch (error) {
     throw controller.signal.aborted ? controller.signal.reason : error;
   } finally {
     clearTimeout(timer);
     controller.abort();
+    changes.close();
   }
 }

@@ -1,7 +1,6 @@
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { tryLock } from './wait.js';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
 import { adapterStoreRoot } from './adapter-store.js';
 import { tryWithKernelLock, withKernelLock } from './kernel-lock.js';
 
@@ -25,42 +24,45 @@ export async function withAdapterCandidateLock<T>(prefix: string, work: () => Pr
   return withKernelLock(candidateKey(prefix), work, { step: 'adapter candidate install' });
 }
 
-/** Runs `work` only while no live installer holds `prefix`; returns false when one does. */
+export function initializeAdapterCandidate(prefix: string): void {
+  mkdirSync(join(prefix, '.beeline-users'));
+  writeFileSync(join(prefix, '.beeline-tracked'), '');
+}
+
 export async function withIdleAdapterCandidate(prefix: string, work: () => Promise<void>): Promise<boolean> {
   return (await tryWithKernelLock(candidateKey(prefix), async () => {
+    if (!existsSync(join(prefix, '.beeline-tracked'))) return false;
     const directory = join(prefix, '.beeline-users');
-    for (const id of await readdir(directory).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return [] as string[];
-      throw error;
-    })) {
-      const use = await tryLock(`beeline-adapter-use:${resolve(prefix)}:${id}`);
-      if (!use.held) { use.close(); return false; }
-      await use.release();
-      await rm(join(directory, id), { force: true });
+    let users: string[];
+    try { users = readdirSync(directory); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; users = []; }
+    for (const id of users) {
+      const marker = join(directory, id);
+      let pid: number;
+      try { pid = Number(readFileSync(marker, 'utf8')); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+      if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+      try { process.kill(pid, 0); return false; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false; }
+      rmSync(marker, { force: true });
+    }
+    try { rmdirSync(directory); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOTEMPTY' || code === 'EEXIST') return false;
+      if (code !== 'ENOENT') throw error;
     }
     await work();
     return true;
   })) ?? false;
 }
 
-export async function useAdapterCommand(command: string): Promise<() => Promise<void>> {
-  if (!isAbsolute(command)) return async () => {};
+export function useAdapterCommand(command: string): () => void {
+  if (!isAbsolute(command)) return () => {};
   const prefix = resolve(command, '../../..');
   if (!basename(prefix).startsWith('candidate-') || basename(dirname(command)) !== '.bin' ||
-      basename(dirname(dirname(command))) !== 'node_modules') return async () => {};
-  return withKernelLock(`beeline-adapters:${resolve(prefix, '../..')}`, async () => {
-    const id = randomUUID();
-    const use = await tryLock(`beeline-adapter-use:${prefix}:${id}`);
-    if (!use.held) { use.close(); throw new Error('Adapter session use already owned'); }
-    const directory = join(prefix, '.beeline-users');
-    try {
-      await mkdir(directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') { await use.release(); throw error; }
-    }
-    const marker = join(directory, id);
-    try { await writeFile(marker, ''); }
-    catch (error) { await use.release(); throw error; }
-    return async () => { try { await rm(marker, { force: true }); } finally { await use.release(); } };
-  }, { step: 'adapter session start' });
+      basename(dirname(dirname(command))) !== 'node_modules' || !existsSync(join(prefix, '.beeline-tracked'))) return () => {};
+  const marker = join(prefix, '.beeline-users', randomUUID());
+  writeFileSync(marker, String(process.pid), { flag: 'wx' });
+  return () => rmSync(marker, { force: true });
 }

@@ -295,7 +295,8 @@ export class AcpClient extends EventEmitter {
         process.env.BEELINE_MANAGED_BY_SYSTEMD === '1');
     this.resourceScopeMemoryMaxBytes = opts.resourceScopeMemoryMaxBytes;
   }
-  async startProcess(): Promise<void> {
+  async startProcess(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (this.alive) return;
     this.promptDeliveries.clear();
     this.piDeliveryMarkers.clear();
@@ -303,6 +304,7 @@ export class AcpClient extends EventEmitter {
     // an OOM kill later is measured against this run rather than the first
     // probe at exit time (which would miss it).
     await this.oomKills.prime().catch(() => undefined);
+    signal?.throwIfAborted();
     this.stopping = false;
     let childEnv = piStartupEnvironment(
       this.agentLabel,
@@ -339,7 +341,7 @@ export class AcpClient extends EventEmitter {
     this.resourceScope = this.useResourceScope
       ? new AcpResourceScope(this.resourceScopeMemoryMaxBytes) : undefined;
     const launch = this.resourceScope?.launch(this.agentCommand, this.agentArgs, childEnv);
-    const releaseAdapter = await useAdapterCommand(this.harnessCommand);
+    const releaseAdapter = useAdapterCommand(this.harnessCommand);
     try {
       this.child = spawn(launch?.command ?? this.agentCommand, launch?.args ?? this.agentArgs, {
         // agentEnv is the child's whole environment: buildAgentEnv's allowlist is
@@ -351,7 +353,7 @@ export class AcpClient extends EventEmitter {
         detached: !launch && process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-    } catch (error) { await releaseAdapter(); throw error; }
+    } catch (error) { releaseAdapter(); throw error; }
     this.alive = true;
 
     this.stderrTail = '';
@@ -380,13 +382,13 @@ export class AcpClient extends EventEmitter {
     // A scoped child shares this process's group; its scope owns teardown.
     if (!launch) liveAdapterGroups.add(child);
     this.child.on('exit', (code, signal) => {
-      void releaseAdapter();
+      releaseAdapter();
       liveAdapterGroups.delete(child);
       if (this.child === child) void this.handleChildExit(code, signal);
     });
 
     this.child.on('error', (err) => {
-      void releaseAdapter();
+      releaseAdapter();
       liveAdapterGroups.delete(child);
       // An ENOENT/unspawnable command never emits 'exit', so without this the
       // in-flight `initialize` request (and every later one) would hang until

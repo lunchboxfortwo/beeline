@@ -61,7 +61,7 @@ export async function checkAdapterSession(options: {
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) throw new Error('adapter session check cancelled before start');
     options.onStage?.('initialize');
-    await startAgentProcess(client);
+    await startAgentProcess(client, options.signal);
     if (negotiated?.protocolVersion !== 1) {
       throw new Error(`Unsupported ACP protocolVersion: ${String(negotiated?.protocolVersion)}`);
     }

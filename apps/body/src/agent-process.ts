@@ -1,13 +1,15 @@
 import { type AcpClient } from './acp.js';
 
 /** All production ACP process starts and stops pass through this module. */
-export async function startAgentProcess(client: AcpClient): Promise<void> {
+export async function startAgentProcess(client: AcpClient, signal?: AbortSignal): Promise<void> {
+  const abort = () => { void client.stopProcess().catch(() => undefined); };
+  signal?.addEventListener('abort', abort, { once: true });
   try {
-    await client.startProcess();
+    await client.startProcess(signal);
   } catch (error) {
     await client.stopProcess().catch(() => undefined);
     throw error;
-  }
+  } finally { signal?.removeEventListener('abort', abort); }
 }
 export async function stopAgentProcess(client: AcpClient): Promise<void> {
   await client.stopProcess();

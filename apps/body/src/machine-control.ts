@@ -118,8 +118,8 @@ export class MachineControl {
 export async function followHelperExit(stateRoot: string, predecessor: Pick<MachineAnswer, 'pid' | 'generation'>): Promise<void> {
   const lock = await tryLock(helperLockKey(stateRoot));
   if (lock.held) await lock.release();
-  else if (lock.holder.pid === predecessor.pid &&
-      lock.holder.generation === predecessor.generation) await lock.released();
+  else if (lock.holder.key === helperLockKey(stateRoot) && lock.holder.pid === predecessor.pid &&
+      (lock.holder.generation === undefined || lock.holder.generation === predecessor.generation)) await lock.released();
   else lock.close();
 }
 

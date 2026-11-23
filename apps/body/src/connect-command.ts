@@ -431,7 +431,9 @@ export async function loadConnectModelCatalog(
       model,
     }) },
     input.model ? { model: input.model } : undefined,
+    input.signal,
   );
+  input.signal?.throwIfAborted();
   const effort = connectEffortPickerFromAxes(catalog.catalog, catalog.raw);
   const picker = connectModelPickerFromAxes(
     catalog.catalog,
@@ -446,7 +448,7 @@ export async function loadConnectModelCatalog(
     !catalog.catalog.some((axis) => axis.category === 'model' && axis.options.length) &&
     !catalog.raw.some((axis) => axis.category === 'model' && axis.options.length)
   ) {
-    const cliModels = await enumerateCursorModels();
+    const cliModels = await enumerateCursorModels(process.env, input.signal);
     if (cliModels) return { ...cliModels, ...(effort ? { effort } : {}) };
   }
   return {
@@ -801,12 +803,18 @@ export async function installCurrentRelease(
   fetchImpl: typeof fetch,
   step?: SpinnerStep,
 ): Promise<{ binary: string; version: string }> {
+  step?.signal.throwIfAborted();
   const layout = defaultBeelineInstallLayout(process.env);
   const binary = resolve(layout.binDir, 'beeline');
   // Connecting only needs the installed CLI. The serving helper owns its own
   // release channel and update lifecycle, independently of this npm bundle.
-  if (await resolveBundleEntrypoint(layout.libDir))
-    return { binary, version: (await readInstalledBundleIdentity(layout))?.version ?? 'unknown' };
+  const installed = await resolveBundleEntrypoint(layout.libDir);
+  step?.signal.throwIfAborted();
+  if (installed) {
+    const version = (await readInstalledBundleIdentity(layout))?.version ?? 'unknown';
+    step?.signal.throwIfAborted();
+    return { binary, version };
+  }
   const manifestUrl = resolveManifestUrl(process.env);
   const response = await ask(
     { url: manifestUrl, fetch: fetchImpl, ...(step ? { report: step.say } : {}) },
@@ -815,8 +823,13 @@ export async function installCurrentRelease(
   if (!response.ok)
     throw new Error(`fetching the Beeline release manifest failed: HTTP ${response.status}`);
   const published = parseUpdateManifest(await response.text(), hostPlatformKey()).bundle;
-  const { releaseId } = await prepareMachineRelease(layout, { manifest: { url: manifestUrl, bundle: published }, fetchImpl, logger: step?.say ?? (() => {}) });
-  await withInstallLock(layout, () => activateRelease(layout, releaseId));
+  step?.signal.throwIfAborted();
+  const { releaseId } = await prepareMachineRelease(layout, { manifest: { url: manifestUrl, bundle: published }, fetchImpl, logger: step?.say ?? (() => {}), ...(step ? { signal: step.signal } : {}) });
+  step?.signal.throwIfAborted();
+  await withInstallLock(layout, () => {
+    step?.signal.throwIfAborted();
+    return activateRelease(layout, releaseId, step ? { signal: step.signal } : {});
+  });
   return {
     binary,
     version: published.version ?? releaseId,

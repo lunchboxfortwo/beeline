@@ -463,14 +463,13 @@ export async function stageRelease(
     smokeTestCli?: boolean;
     logger?: (line: string) => void;
     force?: boolean;
+    signal?: AbortSignal;
   } = {},
 ): Promise<string> {
   assertInstallTestIsolation(layout);
+  opts.signal?.throwIfAborted();
   const fetchImpl: typeof fetch = (input, init) =>
-    (opts.fetchImpl ?? fetch)(input, {
-      ...init,
-
-    });
+    (opts.fetchImpl ?? fetch)(input, { ...init, ...(opts.signal ? { signal: opts.signal } : {}) });
   const log = opts.logger ?? ((line: string) => console.log(`[body] self-update: ${line}`));
   let releaseId = sanitizeReleaseId(
     (published.commit ?? published.version ?? `release-${Date.now()}`) +
@@ -522,7 +521,7 @@ export async function stageRelease(
 
     // Path-traversal guard, mirroring the installer.
     log(`checking archive paths for ${published.file}`);
-    const listing = await runOwned({ step: 'tar -tzf', file: 'tar', args: ['-tzf', tempArchive] });
+    const listing = await runOwned({ step: 'tar -tzf', file: 'tar', args: ['-tzf', tempArchive], signal: opts.signal });
     if (listing.code !== 0) throw new Error(`tar -tzf failed${listing.stderr ? `: ${listing.stderr.trim()}` : ''}`);
     const entries = listing.stdout
       .split('\n')
@@ -535,7 +534,7 @@ export async function stageRelease(
 
     log(`extracting ${published.file}`);
     const extract = await runOwned({
-      step: 'tar -xzf', file: 'tar', args: ['-xzf', tempArchive, '-C', releaseDir],
+      step: 'tar -xzf', file: 'tar', args: ['-xzf', tempArchive, '-C', releaseDir], signal: opts.signal,
     });
     if (extract.code !== 0) throw new Error(`extracting bundle failed: ${extract.stderr.slice(-4_000)}`);
 
@@ -578,7 +577,7 @@ export async function stageRelease(
     if (opts.smokeTestCli !== false) {
       log(`checking staged CLI startup for ${releaseId}`);
       const probe = await runOwned({
-        step: 'staged CLI --version', file: process.execPath, args: [join(releaseDir, BUNDLE_ENTRYPOINT), '--version'],
+        step: 'staged CLI --version', file: process.execPath, args: [join(releaseDir, BUNDLE_ENTRYPOINT), '--version'], signal: opts.signal,
       });
       if (probe.code !== 0) {
         throw new Error(
@@ -587,6 +586,7 @@ export async function stageRelease(
       }
     }
 
+    opts.signal?.throwIfAborted();
     await writeFile(okMarker, `${published.sha256}\n`, 'utf8');
     log(`staged release ${releaseId} (sha256 verified)`);
     return releaseId;
@@ -697,16 +697,22 @@ export async function prepareLatestRelease(
     logger?: (line: string) => void;
     force?: boolean;
     manifest?: { url: string; bundle: PublishedBundle };
+    signal?: AbortSignal;
   } = {},
 ): Promise<{ releaseId: string; identity: InstalledBundleIdentity }> {
+  options.signal?.throwIfAborted();
+  const fetchImpl: typeof fetch = (input, init) => (options.fetchImpl ?? fetch)(input, {
+    ...init, ...(options.signal ? { signal: options.signal } : {}),
+  });
   try {
     const manifestUrl = options.manifest?.url ?? resolveManifestUrl(options.env ?? process.env);
     const bundle =
       options.manifest?.bundle ??
       parseUpdateManifest(
-        await fetchText(manifestUrl, options.fetchImpl ?? fetch),
+        await fetchText(manifestUrl, fetchImpl),
         hostPlatformKey(),
       ).bundle;
+    options.signal?.throwIfAborted();
     const installed = await readInstalledBundleIdentity(layout);
     const active = await activeReleaseId(layout);
     if (active && installed?.version && bundle.version && installed.version !== bundle.version &&
@@ -724,10 +730,12 @@ export async function prepareLatestRelease(
       !options.force && pending && pendingDigest.trim() === bundle.sha256
         ? pending
         : await stageRelease(layout, manifestUrl, bundle, {
-            fetchImpl: options.fetchImpl,
+            fetchImpl,
             logger: options.logger,
             force: options.force,
+            signal: options.signal,
           });
+    options.signal?.throwIfAborted();
     await writeUpdateState(layout, {
       ...(await readUpdateState(layout)),
       lastCheckAt: Date.now(),

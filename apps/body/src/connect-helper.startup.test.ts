@@ -6,7 +6,7 @@ import { installCurrentRelease } from './connect-command.js';
 import { convergeMachine, prepareMachineRelease } from './recovery.js';
 import { MachineControl, machineControlPath, type MachineRequest } from './machine-control.js';
 import { ReleaseTransaction } from './managed-update.js';
-import { defaultBeelineInstallLayout, hostPlatformKey } from './self-update.js';
+import { activeReleaseId, defaultBeelineInstallLayout, hostPlatformKey } from './self-update.js';
 import type { HelperStatusFile } from './helper-status.js';
 import { convergeNativeHelper } from './native-helper.js';
 
@@ -123,4 +123,20 @@ it('still checks every enabled agent for an unscoped start or update', async () 
     await expect(convergeMachine({ layout: helper.layout })).rejects.toThrow('sign in required');
     expect(convergeNativeHelper).toHaveBeenCalled();
   } finally { await helper.close(); }
+});
+
+it('does not activate a cold install cancelled during release preparation', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'beeline-connect-cancel-'));
+  vi.stubEnv('HOME', home);
+  const cancel = new AbortController();
+  vi.mocked(prepareMachineRelease).mockImplementationOnce(async () => {
+    cancel.abort();
+    return { releaseId: 'cancelled', identity: { version: 'v0.1.201' } };
+  });
+  try {
+    await expect(installCurrentRelease(async () => Response.json({ bundles: {
+      [hostPlatformKey()]: { file: 'bundle.tar.gz', sha256: 'a'.repeat(64), version: 'v0.1.201' },
+    } }), { signal: cancel.signal, say: () => {} })).rejects.toBe(cancel.signal.reason);
+    expect(await activeReleaseId(defaultBeelineInstallLayout())).toBeUndefined();
+  } finally { await rm(home, { recursive: true, force: true }); }
 });

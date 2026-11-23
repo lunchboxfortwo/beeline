@@ -201,27 +201,28 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
     }
     const abort = () => killGroup(child);
     command.signal?.addEventListener('abort', abort, { once: true });
-    let settled = false;
-    const finish = (code: number | null, signal: NodeJS.Signals | null, error?: Error) => {
-      if (settled) return;
-      settled = true;
+    let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    let failure: Error | undefined;
+    const leave = () => {
       killGroup(child);
-      owned.delete(child);
       command.signal?.removeEventListener('abort', abort);
-      for (const stream of ['stdout', 'stderr'] as const) {
-        const pipe = child[stream];
-        pipe?.removeAllListeners('data');
-        let chunk: string | null;
-        while ((chunk = pipe?.read() as string | null) != null) read(stream)(chunk);
-        pipe?.destroy();
-        if (pending[stream]) onLine(pending[stream], stream);
-      }
-      if (error) reject(error);
-      else resolve({ code, signal, ...output });
     };
-    child.once('error', (error) => finish(null, null, new Error(`${command.step}: ${error.message}`)));
-    child.once('exit', (code, signal) => finish(code, signal, command.signal?.aborted
-      ? new Error(`${command.step}: cancelled; process group killed`) : undefined));
+    child.once('error', (error) => {
+      failure = new Error(`${command.step}: ${error.message}`);
+      leave();
+    });
+    child.once('exit', (code, signal) => {
+      exited = { code, signal };
+      leave();
+    });
+    child.once('close', () => {
+      owned.delete(child);
+      for (const stream of ['stdout', 'stderr'] as const)
+        if (pending[stream]) onLine(pending[stream], stream);
+      if (failure) reject(failure);
+      else if (command.signal?.aborted) reject(new Error(`${command.step}: cancelled; process group killed`));
+      else resolve({ ...exited!, ...output });
+    });
   });
 }
 

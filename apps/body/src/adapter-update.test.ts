@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { withAdapterCandidateLock, withAdapterInstallLock } from './adapter-install-lock.js';
+import { initializeAdapterCandidate, useAdapterCommand, withIdleAdapterCandidate, withAdapterCandidateLock, withAdapterInstallLock } from './adapter-install-lock.js';
 import { adapterStatePath, readAdapterState } from './adapter-store.js';
 import { updateAgentAdapter, type AdapterUpdateOptions } from './adapter-update.js';
 import type { AdapterInstallCommand } from './agent-command.js';
@@ -140,6 +140,7 @@ describe('adapter refresh', () => {
       'superseded-candidate-left',
     ]) {
       await mkdir(join(store, name, 'node_modules/.bin'), { recursive: true });
+      initializeAdapterCandidate(join(store, name));
     }
     await writeFile(
       adapterStatePath('claude', env),
@@ -297,7 +298,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
   const { startAgentProcess, stopAgentProcess } = await import('./agent-process.js');
   const clients = Array.from({ length: 2 }, () => new AcpClient({ agentCommand: command, agentEnv: env, resourceScope: 'none' }));
   try {
-    for (const client of clients) await startAgentProcess(client);
+    await withAdapterInstallLock(() => Promise.all(clients.map(client => startAgentProcess(client))), env);
     await promote('2.0.0'); await promote('3.0.0');
     expect(await readFile(command, 'utf8')).toBe(body);
     await stopAgentProcess(clients[0]!);
@@ -307,4 +308,25 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
     await promote('5.0.0');
     expect(await readdir(store)).not.toContain(prefix.split('/').at(-1));
   } finally { for (const client of clients) await stopAgentProcess(client); }
+});
+
+it('cannot admit a new user after pruning atomically retires an empty usage directory', async () => {
+  const { store } = await scratch();
+  const prefix = join(store, 'candidate-retired');
+  await mkdir(prefix, { recursive: true });
+  initializeAdapterCandidate(prefix);
+  const command = join(prefix, 'node_modules/.bin/claude-agent-acp');
+  await expect(withIdleAdapterCandidate(prefix, async () => {
+    expect(() => useAdapterCommand(command)).toThrow(expect.objectContaining({ code: 'ENOENT' }));
+  })).resolves.toBe(true);
+  await expect(withIdleAdapterCandidate(prefix, async () => {})).resolves.toBe(true);
+});
+
+it('preserves untracked legacy prefixes during pruning', async () => {
+  const { store } = await scratch();
+  const prefix = join(store, 'candidate-legacy');
+  await mkdir(prefix, { recursive: true });
+  let pruned = false;
+  await expect(withIdleAdapterCandidate(prefix, async () => { pruned = true; })).resolves.toBe(false);
+  expect(pruned).toBe(false);
 });

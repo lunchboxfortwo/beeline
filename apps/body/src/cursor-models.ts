@@ -1,11 +1,9 @@
-import { spawn } from 'node:child_process';
+import { runOwned } from './wait.js';
 
 export interface CursorModelCatalog {
   currentValue: string;
   options: Array<{ id: string; name?: string }>;
 }
-
-/** Bounded wait for the CLI; a slow or missing binary must not hang connect. */
 
 /**
  * Parse `cursor-agent models` output. Each model prints as one line:
@@ -39,21 +37,13 @@ export function parseCursorModelsOutput(output: string): CursorModelCatalog | un
  */
 export async function enumerateCursorModels(
   env: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
 ): Promise<CursorModelCatalog | undefined> {
-  return new Promise((resolve) => {
-    const child = spawn('cursor-agent', ['models'], {
-      env,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    let output = '';
-    child.stdout?.on('data', (chunk: Buffer) => {
-      output += chunk.toString();
-    });
-    child.on('error', () => {
-      resolve(undefined);
-    });
-    child.on('close', (code) => {
-      resolve(code === 0 ? parseCursorModelsOutput(output) : undefined);
-    });
-  });
+  try {
+    const result = await runOwned({ step: 'cursor-agent models', file: 'cursor-agent', args: ['models'], env, signal });
+    return result.code === 0 ? parseCursorModelsOutput(result.stdout) : undefined;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return undefined;
+  }
 }
