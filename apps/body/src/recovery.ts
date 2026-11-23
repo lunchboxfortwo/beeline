@@ -101,7 +101,7 @@ export async function convergeMachine(
     if (answer.outcome === 'handoff' || legacy) {
       progress(`helper pid ${answer.pid} is handing off to release ${options.releaseId}; following its exit` +
         (legacy ? ' (this helper predates one-answer control; Ctrl-C stops waiting, the helper continues)' : ''));
-      await followHelperExit(stateRoot);
+      await followHelperExit(stateRoot, answer);
       if (options.run) await options.run(['start', SYSTEMD_HELPER_UNIT_NAME]);
       else await startNativeHelper(env);
       status = await askMachine(stateRoot, { operation: 'status' });

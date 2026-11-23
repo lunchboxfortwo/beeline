@@ -1,7 +1,7 @@
 
 import { afterEach as m40_afterEach, describe as m40_describe, expect as m40_expect, it as m40_it, vi as m40_vi } from 'vitest';
 
-import { mkdtempSync as m40_mkdtempSync, readdirSync as m40_readdirSync, renameSync as m40_renameSync, writeFileSync as m40_writeFileSync, rmSync as m40_rmSync } from 'node:fs';
+import { mkdtempSync as m40_mkdtempSync, rmSync as m40_rmSync } from 'node:fs';
 
 import { tmpdir as m40_tmpdir } from 'node:os';
 
@@ -9,11 +9,9 @@ import { join as m40_join } from 'node:path';
 
 import { Agent as m40_Agent } from 'undici';
 
-import { renderMention as m40_renderMention, renderWake as m40_renderWake, acceptMemberDelivery as m40_acceptMemberDelivery, toolViaOutbox as m40_toolViaOutbox, serveOutboxes } from "./bridge.js";
+import { renderMention as m40_renderMention, renderWake as m40_renderWake, acceptMemberDelivery as m40_acceptMemberDelivery } from "./bridge.js";
 
 import { memberStream as m40_memberStream } from "./beeline-api.js";
-import { bridgeOwnerKey as m40_bridgeOwnerKey } from "./bridge-socket.js";
-import { tryLock as m40_tryLock } from "../wait.js";
 
 import { queueInboxOnce as m40_queueInboxOnce, readState as m40_readState, takeInbox as m40_takeInbox, updateState as m40_updateState, type JoinedSession as m40_JoinedSession } from "./store.js";
 import { describe as mergedDescribe40 } from 'vitest';
@@ -100,38 +98,7 @@ m40_describe('durable member delivery ownership',()=>{
     await m40_expect(m40_acceptMemberDelivery(dir,joined.key,runner,{v:1,type:'checkpoint',cursor:{epoch,through:7},mentionCursor:'1'})).rejects.toThrow('backwards');
     m40_expect(m40_readState(dir).sessions[0]).toMatchObject({cursor:'2',streamCursor:{epoch,through:8}});
   });
-  m40_it('retains the selected Codex member through a shared-folder outbox', async () => {
-    const dir=scratch(),cwd=scratch();
-    await m40_updateState(dir,state=>{state.sessions=['a','b'].map(id=>({...joined,cwd,key:`codex:${id}`,
-      accessToken:`token-${id}`,accessExpiresAt:Date.now()+60_000}));});
-    const fetched=m40_vi.fn(async (_url: string, init?: RequestInit) =>
-      Response.json({result:{content:[{type:'text',text:JSON.stringify({data:{principal:(init?.headers as Record<string,string>).authorization}})}]}}));
-    m40_vi.stubGlobal('fetch',fetched);
-    // The serving bridge holds its owner lock.
-    const bridge=await m40_tryLock(m40_bridgeOwnerKey(dir));m40_expect(bridge.held).toBe(true);
-    const waiting=m40_toolViaOutbox(dir,cwd,'list_chats',{},'codex:b');
-    m40_expect(await serveOutboxes(dir)).toBe(1);
-    m40_expect(await waiting).toEqual({ok:true,data:{principal:'Bearer token-b'}});
-    if(bridge.held)await bridge.release();
-  });
-  m40_it.each([false,true])('waits for the outbox result without timed fallback (claimed=%s)',async claimed=>{
-    const dir=scratch(),cwd=scratch();
-    const bridge=await m40_tryLock(m40_bridgeOwnerKey(dir));m40_expect(bridge.held).toBe(true);
-    m40_vi.useFakeTimers();
-    let settled=false;
-    const waiting=m40_toolViaOutbox(dir,cwd,'send_message',{text:'synthetic'}).then(result=>{settled=true;return result;});
-    const folder=m40_join(cwd,'.beeline','outbox');
-    const request=m40_readdirSync(folder).find(name=>name.endsWith('.request.json'))!;
-    if(claimed)m40_renameSync(m40_join(folder,request),m40_join(folder,request+'.taking'));
-    await m40_vi.advanceTimersByTimeAsync(24*60*60*1000);
-    m40_expect(settled).toBe(false);
-    m40_vi.useRealTimers();
-    const result=m40_join(folder,request.replace('.request.json','.result.json'));
-    m40_writeFileSync(result+'.tmp',JSON.stringify({ok:true,data:'committed'}));
-    m40_renameSync(result+'.tmp',result);
-    m40_expect(await waiting).toEqual({ok:true,data:'committed'});
-    if(bridge.held)await bridge.release();
-  });
+
 });
 
 

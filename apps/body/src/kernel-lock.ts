@@ -10,7 +10,7 @@ export class KernelLockBusyError extends Error {
 /** Cache reuse is optional: never queue a serving agent behind its owner. */
 export async function tryWithKernelLock<T>(key: string, work: () => Promise<T>): Promise<T | undefined> {
   const lock = await tryLock(key);
-  if (!lock.held) return undefined;
+  if (!lock.held) { lock.close(); return undefined; }
   try {
     return await work();
   } finally {
@@ -22,10 +22,10 @@ export async function tryWithKernelLock<T>(key: string, work: () => Promise<T>):
 export async function withKernelLock<T>(
   key: string,
   work: () => Promise<T>,
-  about: { step?: string; log?: string } = {},
+  about: { step?: string; log?: string; generation?: string } = {},
 ): Promise<T> {
   const lock = await tryLock(key, about);
-  if (!lock.held) throw new KernelLockBusyError(lock.holder);
+  if (!lock.held) { lock.close(); throw new KernelLockBusyError(lock.holder); }
   try {
     return await work();
   } finally {

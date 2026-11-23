@@ -68,13 +68,8 @@ export class AgentChannel {
   }
   #dispatch(pending: {frame:Record<string,unknown>;sent:boolean}): void {
     if (!this.isOpen()) return;
-    if (pending.sent) {
-      this.send({type:'request-result',requestId:pending.frame.requestId});
-      return;
-    }
+    if (pending.sent) return;
     const input = {...pending.frame.input as Record<string,unknown>};
-    // Waiting work binds to the newly authenticated source. Sent work is only
-    // read by id: its original effect and source must never be rewritten.
     if (['publishAgentUsageAccount','attachAgentUsageAccount'].includes(String(pending.frame.operation))) input.source = this.usageAccountScope()?.source;
     if (pending.frame.operation === 'postAgentUsage' && input.usageSource)
       input.usageSource = {...input.usageSource as object,source:this.usageAccountScope()?.source};
@@ -135,14 +130,9 @@ export class AgentChannel {
     }
     if (event.type === 'unregistered') {
       // A newer connection owns this agent; this socket never answers its work.
-      this.socketClosed();
       const reason = typeof event.reason === 'string' ? event.reason : 'unregistered';
+      this.socketClosed(false, Object.assign(new Error(`Agent registration ended: ${reason}`), {code:'unregistered'}));
       this.#end(Object.assign(new Error(`Agent registration ended: ${reason}`), {code:'unregistered'}));
-      return;
-    }
-    if (event.type === 'request-missing' && typeof event.requestId === 'string') {
-      const pending = this.#requests.get(event.requestId);
-      if (pending) { pending.sent = false; this.#dispatch(pending); }
       return;
     }
     if (event.type === 'daemon-operation-result' && typeof event.requestId === 'string') {
@@ -174,12 +164,17 @@ export class AgentChannel {
         : cause);
     }
   }
-  socketClosed(ended = false):void {
+  socketClosed(ended = false, cause = Object.assign(new Error('Agent connection closed'), {code:'connection_closed'})):void {
     const registered = this.#registered;
     this.#registered = false;
     this.#registrationSent = false;
     this.#ended = undefined;
     this.overlay.suspend();
+    for (const [requestId, pending] of this.#requests) {
+      if (!pending.sent) continue;
+      this.#requests.delete(requestId);
+      pending.reject(Object.assign(new Error(`${cause.message}; outcome unknown`), {code:cause.code}));
+    }
     if (ended) {
       for(const waiter of this.#waiters)waiter.reject(new Error('Agent runtime ended'));
       this.#waiters.clear();

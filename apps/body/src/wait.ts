@@ -122,15 +122,13 @@ export interface OwnedResult {
 
 const owned = new Set<ChildProcess>();
 const groupLeaders = new WeakSet<ChildProcess>();
-/** Set in every owned child: one owned tree shares its outermost owner's process group. */
-const OWNED_GROUP = 'BEELINE_OWNED_GROUP';
+const linkedWorkers = new WeakSet<ChildProcess>();
 let ownerHooks = false;
 function killGroup(child: ChildProcess): void {
   if (!child.pid) return;
   try {
-    // A terminal program, or a child inside an outer owner's group, is killed
-    // by pid; the outermost owner kills the whole group.
-    process.kill(groupLeaders.has(child) ? -child.pid : child.pid, 'SIGKILL');
+    process.kill(groupLeaders.has(child) ? -child.pid : child.pid,
+      linkedWorkers.has(child) && child.exitCode === null && child.signalCode === null ? 'SIGTERM' : 'SIGKILL');
   } catch {
     // The group is already gone.
   }
@@ -169,12 +167,8 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       reject(new Error(`${command.step}: cancelled before start`));
       return;
     }
-    // The outermost owner puts its child in a new process group, so the whole
-    // tree, including nested owners' children, dies with one kill.
-    const leader = !command.interactive && process.env[OWNED_GROUP] !== '1';
+    const leader = !command.interactive;
     const env = { ...(command.env ?? process.env) };
-    if (command.interactive) delete env[OWNED_GROUP];
-    else env[OWNED_GROUP] = '1';
     if (command.ownerLink) env.BEELINE_OWNER_LINK = '1';
     else delete env.BEELINE_OWNER_LINK;
     const child = spawn(command.file, [...command.args], {
@@ -186,6 +180,7 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
         : [command.input === undefined && !command.ownerLink ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     if (leader) groupLeaders.add(child);
+    if (command.ownerLink) linkedWorkers.add(child);
     owned.add(child);
     const output = { stdout: '', stderr: '' };
     const pending = { stdout: '', stderr: '' };
@@ -206,31 +201,27 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
     }
     const abort = () => killGroup(child);
     command.signal?.addEventListener('abort', abort, { once: true });
-    let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-    const finish = (error?: Error) => {
+    let settled = false;
+    const finish = (code: number | null, signal: NodeJS.Signals | null, error?: Error) => {
+      if (settled) return;
+      settled = true;
+      killGroup(child);
       owned.delete(child);
       command.signal?.removeEventListener('abort', abort);
-      for (const stream of ['stdout', 'stderr'] as const)
+      for (const stream of ['stdout', 'stderr'] as const) {
+        const pipe = child[stream];
+        pipe?.removeAllListeners('data');
+        let chunk: string | null;
+        while ((chunk = pipe?.read() as string | null) != null) read(stream)(chunk);
+        pipe?.destroy();
         if (pending[stream]) onLine(pending[stream], stream);
+      }
       if (error) reject(error);
-      else resolve({ ...exited!, ...output });
+      else resolve({ code, signal, ...output });
     };
-    child.once('error', (error) => {
-      killGroup(child);
-      finish(new Error(`${command.step}: ${error.message}`));
-    });
-    child.once('exit', (code, signal) => {
-      exited = { code, signal };
-      // Settled by exit: leftover pipe holders in the group die now.
-      if (leader) killGroup(child);
-    });
-    // After the group is gone the pipes reach EOF; `close` only collects output.
-    child.once('close', () => {
-      if (!exited) return;
-      if (command.signal?.aborted)
-        finish(new Error(`${command.step}: cancelled; process group killed`));
-      else finish();
-    });
+    child.once('error', (error) => finish(null, null, new Error(`${command.step}: ${error.message}`)));
+    child.once('exit', (code, signal) => finish(code, signal, command.signal?.aborted
+      ? new Error(`${command.step}: cancelled; process group killed`) : undefined));
   });
 }
 
@@ -240,10 +231,11 @@ export interface LockHolder {
   since: string;
   step?: string;
   log?: string;
+  generation?: string;
 }
 export type LockAttempt =
   | { held: true; release: () => Promise<void> }
-  | { held: false; holder: LockHolder; released: () => Promise<void> };
+  | { held: false; holder: LockHolder; released: () => Promise<void>; close: () => void };
 
 function lockAddress(key: string): { path: string } | { port: number; host: string } {
   const hash = createHash('sha256').update(key).digest();
@@ -262,66 +254,53 @@ function lockAddress(key: string): { path: string } | { port: number; host: stri
  */
 export async function tryLock(
   key: string,
-  about: { step?: string; log?: string } = {},
+  about: { step?: string; log?: string; generation?: string } = {},
 ): Promise<LockAttempt> {
   const address = lockAddress(key);
-  // A second bind happens only when the holder closed between our bind and its answer.
-  for (const last of [false, true]) {
-    const peers = new Set<Socket>();
-    const since = new Date().toISOString();
-    const server = createServer((peer) => {
-      peers.add(peer);
-      peer.on('error', () => undefined);
-      peer.once('close', () => peers.delete(peer));
-      peer.write(`${JSON.stringify({ pid: process.pid, key, since, ...about })}\n`);
+  const peers = new Set<Socket>();
+  const since = new Date().toISOString();
+  const server = createServer((peer) => {
+    peers.add(peer);
+    peer.on('error', () => undefined);
+    peer.once('close', () => peers.delete(peer));
+    peer.write(`${JSON.stringify({ pid: process.pid, key, since, ...about })}\n`);
+  });
+  const bound = await new Promise<boolean>((resolve, reject) => {
+    server.once('error', (error: NodeJS.ErrnoException) =>
+      error.code === 'EADDRINUSE' ? resolve(false) : reject(error),
+    );
+    server.listen(address, () => resolve(true));
+  });
+  if (bound) return {
+    held: true,
+    release: () => new Promise<void>((done) => {
+      for (const peer of peers) peer.destroy();
+      server.close(() => done());
+    }),
+  };
+  return new Promise<LockAttempt>((resolve, reject) => {
+    const peer = createConnection(address);
+    let input = '';
+    let answered = false;
+    const released = new Promise<void>((done) => peer.once('close', () => done()));
+    peer.setEncoding('utf8');
+    peer.on('data', (chunk: string) => {
+      if (answered) return;
+      input += chunk;
+      const end = input.indexOf('\n');
+      if (end < 0) return;
+      try {
+        const holder = JSON.parse(input.slice(0, end)) as LockHolder;
+        answered = true;
+        peer.unref();
+        resolve({ held: false, holder, close: () => peer.destroy(), released: () => { peer.ref(); return released; } });
+      } catch {
+        peer.destroy(new Error('Lock holder returned an unreadable record'));
+      }
     });
-    const bound = await new Promise<boolean>((resolve, reject) => {
-      server.once('error', (error: NodeJS.ErrnoException) =>
-        error.code === 'EADDRINUSE' ? resolve(false) : reject(error),
-      );
-      server.listen(address, () => resolve(true));
+    peer.once('error', reject);
+    peer.once('close', () => {
+      if (!answered) reject(new Error('Lock holder closed before answering'));
     });
-    if (bound)
-      return {
-        held: true,
-        release: () =>
-          new Promise<void>((done) => {
-            for (const peer of peers) peer.destroy();
-            server.close(() => done());
-          }),
-      };
-    // The holder answers its record on connect.
-    const holder = await new Promise<LockHolder | undefined>((resolve) => {
-      const peer = createConnection(address);
-      let input = '';
-      peer.setEncoding('utf8');
-      peer.on('data', (chunk: string) => {
-        input += chunk;
-        const end = input.indexOf('\n');
-        if (end < 0) return;
-        peer.destroy();
-        try {
-          resolve(JSON.parse(input.slice(0, end)) as LockHolder);
-        } catch {
-          resolve(undefined);
-        }
-      });
-      peer.once('error', () => resolve(undefined));
-      peer.once('close', () => resolve(undefined));
-    });
-    if (holder || last)
-      return {
-        held: false,
-        holder: holder ?? { pid: 0, key, since: 'unknown' },
-        released: () =>
-          new Promise<void>((done) => {
-            const peer = createConnection(address);
-            // Consume the record so a released holder's connection reaches EOF.
-            peer.on('data', () => undefined);
-            peer.once('close', () => done());
-            peer.once('error', () => done());
-          }),
-      };
-  }
-  throw new Error('unreachable');
+  });
 }

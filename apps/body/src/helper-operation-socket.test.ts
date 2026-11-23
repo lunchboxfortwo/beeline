@@ -71,29 +71,29 @@ it('elapsed time, pongs, and refused requests never reconnect a living socket',a
   sockets[0]!.receive({type:'daemon-operation-result',requestId:frame.requestId,error:'access denied',status:403});
   expect(await outcome).toMatchObject({status:403,retryable:false});expect(machine.link.reconnects).toBe(0);expect(sockets).toHaveLength(1);
 });
-it('re-reads an in-flight request by id after close without replaying its operation',async()=>{
+it('ends an in-flight request on close and independently reconnects',async()=>{
   const {api,sockets,machine}=fixture();const request=api.execute('getAgentConfiguration',{agentId});
+  const outcome=request.catch(error=>error);
   sockets[0]!.open();sockets[0]!.register();await flush();
-  const frame=sockets[0]!.frames.find(frame=>frame.type==='daemon-operation')!;
   sockets[0]!.close();await flush();expect(sockets).toHaveLength(2);
+  expect(await outcome).toMatchObject({message:'Agent connection closed; outcome unknown'});
   sockets[1]!.open();sockets[1]!.register(2);await flush();
-  expect(sockets[1]!.frames).toContainEqual({type:'request-result',requestId:frame.requestId,agentId});
-  expect(sockets[1]!.frames.some(frame=>frame.type==='daemon-operation')).toBe(false);
-  sockets[1]!.receive({type:'daemon-operation-result',requestId:frame.requestId,result:{id:'original'}});
-  await expect(request).resolves.toEqual({id:'original'});expect(machine.link.reconnects).toBe(1);
+  expect(sockets[1]!.frames.some(frame=>['daemon-operation','request-result'].includes(frame.type))).toBe(false);
+  expect(machine.link.reconnects).toBe(1);
 });
-it('sends waiting requests once and only dispatches a missing in-flight id after the server proves it absent',async()=>{
+it('sends unsent waiting requests once after reconnect without replaying failed work',async()=>{
   const {api,sockets}=fixture();const first=api.execute('getAgentConfiguration',{agentId});
+  const outcome=first.catch(error=>error);
   sockets[0]!.open();sockets[0]!.register();await flush();
   const original=sockets[0]!.frames.find(frame=>frame.type==='daemon-operation')!;
   sockets[0]!.close();const waiting=api.execute('getDaemonBootstrap',{agentId});await flush();
   sockets[1]!.open();sockets[1]!.register(2);await flush();
-  expect(sockets[1]!.frames.filter(frame=>frame.type==='daemon-operation')).toHaveLength(1);
   sockets[1]!.receive({type:'request-missing',requestId:original.requestId});await flush();
-  const operations=sockets[1]!.frames.filter(frame=>frame.type==='daemon-operation');expect(operations).toHaveLength(2);
-  expect(operations[1]!.requestId).toBe(original.requestId);
+  const operations=sockets[1]!.frames.filter(frame=>frame.type==='daemon-operation');expect(operations).toHaveLength(1);
+  expect(operations[0]!.requestId).not.toBe(original.requestId);
   for(const frame of operations)sockets[1]!.receive({type:'daemon-operation-result',requestId:frame.requestId,result:{id:'ok'}});
-  await Promise.all([first,waiting]);
+  expect(await outcome).toMatchObject({message:expect.stringContaining('outcome unknown')});
+  await expect(waiting).resolves.toEqual({id:'ok'});
 });
 it('uses one operation path for answers, usage, and queue reads',async()=>{
   const {api,sockets}=fixture();const ready=api.waitForConnection();sockets[0]!.open();sockets[0]!.register();await ready;

@@ -115,10 +115,12 @@ export class MachineControl {
 }
 
 /** Follow the serving helper's kernel lock until the kernel releases it on that process's exit. */
-export async function followHelperExit(stateRoot: string): Promise<void> {
+export async function followHelperExit(stateRoot: string, predecessor: Pick<MachineAnswer, 'pid' | 'generation'>): Promise<void> {
   const lock = await tryLock(helperLockKey(stateRoot));
   if (lock.held) await lock.release();
-  else await lock.released();
+  else if (lock.holder.pid === predecessor.pid &&
+      lock.holder.generation === predecessor.generation) await lock.released();
+  else lock.close();
 }
 
 /** No helper is listening: its socket is missing or refused. Any other failure is reported as is. */

@@ -1,3 +1,4 @@
+import { useAdapterCommand } from './adapter-install-lock.js';
 import { AcpRuntimeExitedError,flattenHarnessCause,isPiAcpHarness,killChildProcessGroup,STDERR_TAIL_MAX_CHARS } from './acp-stderr-tail-max-chars.js';
 import { maskCredentialResult } from './mask-credential-result.js';
 
@@ -338,17 +339,19 @@ export class AcpClient extends EventEmitter {
     this.resourceScope = this.useResourceScope
       ? new AcpResourceScope(this.resourceScopeMemoryMaxBytes) : undefined;
     const launch = this.resourceScope?.launch(this.agentCommand, this.agentArgs, childEnv);
-    // Managed adapters are immutable; a candidate install never blocks sessions.
-    this.child = spawn(launch?.command ?? this.agentCommand, launch?.args ?? this.agentArgs, {
-      // agentEnv is the child's whole environment: buildAgentEnv's allowlist is
-      // a real boundary, not a decorative one layered over a full inherit.
-      env: launch?.env ?? childEnv,
-      ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
-      // Managed Linux sessions use a cgroup scope. The process-group fallback
-      // covers helpers without a user systemd manager.
-      detached: !launch && process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const releaseAdapter = await useAdapterCommand(this.harnessCommand);
+    try {
+      this.child = spawn(launch?.command ?? this.agentCommand, launch?.args ?? this.agentArgs, {
+        // agentEnv is the child's whole environment: buildAgentEnv's allowlist is
+        // a real boundary, not a decorative one layered over a full inherit.
+        env: launch?.env ?? childEnv,
+        ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
+        // Managed Linux sessions use a cgroup scope. The process-group fallback
+        // covers helpers without a user systemd manager.
+        detached: !launch && process.platform !== 'win32',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) { await releaseAdapter(); throw error; }
     this.alive = true;
 
     this.stderrTail = '';
@@ -377,11 +380,13 @@ export class AcpClient extends EventEmitter {
     // A scoped child shares this process's group; its scope owns teardown.
     if (!launch) liveAdapterGroups.add(child);
     this.child.on('exit', (code, signal) => {
+      void releaseAdapter();
       liveAdapterGroups.delete(child);
       if (this.child === child) void this.handleChildExit(code, signal);
     });
 
     this.child.on('error', (err) => {
+      void releaseAdapter();
       liveAdapterGroups.delete(child);
       // An ENOENT/unspawnable command never emits 'exit', so without this the
       // in-flight `initialize` request (and every later one) would hang until

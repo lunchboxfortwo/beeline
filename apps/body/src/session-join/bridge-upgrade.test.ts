@@ -60,7 +60,7 @@ it('parks on a terminal stream response without rotating its permanent access to
   expect(readFileSync(requests, 'utf8')).toBe('stream\n');
 });
 
-it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path and catches up before delivering live Claude tags', async length => {
+it.each(['short', 'long'])('replaces a living channel-owned bridge at a %s state path and catches up before delivering live Claude tags', async length => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-upgrade-')); folders.push(dir);
   const stateRoot = length === 'long' ? join(dir, 'state-'.repeat(30)) : dir;
   const env = { ...process.env, HOME: dir, XDG_STATE_HOME: stateRoot, CLAUDE_CONFIG_DIR: join(dir, '.claude') };
@@ -72,7 +72,10 @@ it.each(['short', 'long'])('replaces a living legacy bridge at a %s state path a
     sessionId: 'synthetic-session', pid: process.pid, joinedAt: '', deliveryGeneration:'bound-upgrade',deliveryMechanism:'local' };
   await updateState(stateDir, state => { state.sessions = [joined]; });
   const oldBundle = join(dir, 'usebeeline.mjs');
-  writeFileSync(oldBundle, `import { createServer } from 'node:net';
+  writeFileSync(oldBundle, `import { tsImport } from ${JSON.stringify(createRequire(import.meta.url).resolve('tsx/esm/api'))};
+    const { tryLock } = await tsImport(${JSON.stringify(resolve('src/wait.ts'))}, import.meta.url);
+    await tryLock(${JSON.stringify('beeline-session-bridge-owner:' + resolve(stateDir))});
+    import { createServer } from 'node:net';
     import { writeFileSync } from 'node:fs';
     createServer().listen(${JSON.stringify(join(dir, 'old.sock'))}, () => {
       writeFileSync(${JSON.stringify(join(stateDir, 'bridge.pid'))}, String(process.pid));

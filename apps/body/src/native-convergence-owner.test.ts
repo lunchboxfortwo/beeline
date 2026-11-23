@@ -9,7 +9,7 @@ import { expect, it, vi } from 'vitest';
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-it('fails a second native convergence at once and leaves no owner behind when the CLI exits', async () => {
+it.each(['SIGTERM', 'SIGKILL'] as const)('leaves no native owner behind when the CLI receives %s', async signal => {
   // Audit: observers left at 600 s while the detached owner kept the native lock; the next
   // command then waited up to 600 s behind it.
   const home = await mkdtemp(join(tmpdir(), 'beeline-native-owner-'));
@@ -25,7 +25,11 @@ it('fails a second native convergence at once and leaves no owner behind when th
   await writeFile(entry, `import { register } from ${JSON.stringify(register)};
 register();
 const m=await import(${JSON.stringify(source)});
-if(process.argv[2]==='native-converge-worker') console.log(JSON.stringify({pid:await m.runNativeConvergenceWorker()}));
+if(process.argv[2]==='native-converge-worker') {
+  const { exitWithOwner }=await import(${JSON.stringify(fileURLToPath(new URL('./owner-link.ts', import.meta.url)))});
+  exitWithOwner();
+  console.log(JSON.stringify({pid:await m.runNativeConvergenceWorker()}));
+}
 else try {console.log(await m.convergeNativeHelper({}));} catch(e){console.error(e.message);process.exitCode=1;}
 `);
   // A wedged user manager: daemon-reload never returns.
@@ -49,8 +53,8 @@ if(args[0]==='daemon-reload') setInterval(()=>{},1000);
     const second = await execute(process.execPath, [entry], { env }).then(value => ({ value }), error => ({ error }));
     expect(second).toMatchObject({ error: { stderr: expect.stringContaining('native service convergence already running as pid') } });
     // The CLI leaves (Ctrl-C/TERM): its owned worker and the wedged systemctl die with it.
-    running.child.kill('SIGTERM');
-    expect(await first).toMatchObject({ error: { signal: 'SIGTERM' } });
+    running.child.kill(signal);
+    expect(await first).toMatchObject({ error: { signal } });
     await vi.waitFor(() => expect(alive(wedged)).toBe(false), { timeout: 10_000 });
   } finally {
     await rm(home, { recursive: true, force: true });

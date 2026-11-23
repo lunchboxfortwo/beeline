@@ -8,11 +8,10 @@ export function exitWithOwner(): void {
   if (process.env.BEELINE_OWNER_LINK !== '1') return;
   process.stdin.resume();
   process.stdin.on('end', () => {
-    try {
-      process.kill(0, 'SIGKILL');
-    } catch {
-      process.exit(1);
-    }
+    process.once('exit', () => {
+      try { process.kill(0, 'SIGKILL'); } catch { /* already gone */ }
+    });
+    process.exit(1);
   });
   // The link must not keep a finished worker alive.
   process.stdin.unref?.();

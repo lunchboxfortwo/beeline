@@ -95,11 +95,13 @@ async function writeState(
   kind: ManagedAdapterKind,
   env: NodeJS.ProcessEnv,
   state: AdapterState,
+  signal?: AbortSignal,
 ): Promise<void> {
   const path = adapterStatePath(kind, env);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const staged = `${path}.${process.pid}.tmp`;
   await writeFile(staged, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  if (signal?.aborted) { await rm(staged, { force: true }); throw new Error(`${kind} adapter refresh cancelled`); }
   await rename(staged, path);
 }
 
@@ -279,14 +281,17 @@ export async function updateAgentAdapter(
         return false;
       }
       return await withAdapterInstallLock(async () => {
+        if (signal?.aborted) throw new Error(`${kind} adapter refresh cancelled; ${adapter.packageName}@${version} was not promoted`);
         const state = readAdapterState(kind, env);
-        if (state.active?.version === version) {
-          log(
-            `[beeline] ${kind} adapter current at ${version}; a concurrent refresh adopted it first`,
-          );
+        if (state.rejected?.[version]) {
+          log(`[beeline] ${kind} adapter ${version} was rejected by a concurrent check; keeping ${state.active?.version ?? 'the installed copy'}`);
           return false;
         }
-        await writeState(kind, env, { ...state, active: { version, command, negotiated } });
+        if (JSON.stringify(state.active) !== JSON.stringify(current.active)) {
+          log(`[beeline] ${kind} adapter ${version} was superseded by a concurrent refresh; keeping ${state.active?.version ?? 'the installed copy'}`);
+          return false;
+        }
+        await writeState(kind, env, { ...state, active: { version, command, negotiated } }, signal);
         adopted = true;
         superseded = await supersededPrefixes(
           directory,

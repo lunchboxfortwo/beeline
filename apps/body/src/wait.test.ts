@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { preparePrivateSocketDirectory } from './local-socket.js';
-import { askMachine, helperAbsent, machineControlPath } from './machine-control.js';
+import { askMachine, followHelperExit, helperAbsent, helperLockKey, machineControlPath } from './machine-control.js';
 import { downloadBytes } from './update-download.js';
 import { PeerRefusal, runOwned, tryLock } from './wait.js';
 
@@ -258,4 +258,37 @@ it('ends a linked worker and its group when the owner is SIGKILLed', async () =>
     expect(alive(linked!)).toBe(false);
     expect(alive(grandchild!)).toBe(false);
   });
+});
+
+it('follows the recorded holder connection even if a successor binds before following', async () => {
+  const key = `lock-successor-${process.pid}-${Math.random()}`;
+  const owner = await tryLock(key);
+  if (!owner.held) throw new Error('expected owner');
+  const follower = await tryLock(key);
+  if (follower.held) throw new Error('expected follower');
+  await owner.release();
+  const successor = await tryLock(key);
+  if (!successor.held) throw new Error('expected successor');
+  try { await follower.released(); }
+  finally { await successor.release(); }
+});
+
+it('does not follow a successor helper generation after an acknowledged handoff', async () => {
+  const root = `helper-successor-${process.pid}-${Math.random()}`;
+  const successor = await tryLock(helperLockKey(root), { generation: 'successor' });
+  if (!successor.held) throw new Error('expected successor');
+  try { await followHelperExit(root, { pid: process.pid, generation: 'predecessor' }); }
+  finally { await successor.release(); }
+});
+
+it('a nested owner settles when its own child exits with a background pipe holder', async () => {
+  const worker = `import { runOwned } from ${JSON.stringify(resolve(__dirname, 'wait.ts'))};
+    const result = await runOwned({ step: 'nested install', file: process.execPath,
+      args: ['-e', "require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'inherit'}).unref(); console.log('done');"],
+      onLine: () => {} });
+    console.log(result.stdout.trim());`;
+  const result = await runOwned({ step: 'worker', file: process.execPath,
+    args: ['--import', 'tsx', '--input-type=module', '-e', worker], onLine: () => {} });
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe('done\n');
 });

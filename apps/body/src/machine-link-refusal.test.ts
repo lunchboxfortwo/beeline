@@ -93,7 +93,7 @@ it('a refused registration ends waiting and unsent work with the refusal code', 
   expect(sockets).toHaveLength(1);
 });
 
-it('a sent operation re-read after a reconnect is outcome unknown when that registration is refused', async () => {
+it('a sent operation ends on close before a successor registration is refused', async () => {
   const { channel, sockets } = fixture();
   const operation = settled(
     channel.requestOperation('postRoomMessage', {
@@ -110,8 +110,8 @@ it('a sent operation re-read after a reconnect is outcome unknown when that regi
   sockets[1]!.open();
   sockets[1]!.receive({ type: 'register-refused', code: 'registration_failed' });
   expect(await operation).toEqual({
-    error: 'Agent registration refused: registration_failed; outcome unknown',
-    code: 'registration_failed',
+    error: 'Agent connection closed; outcome unknown',
+    code: 'connection_closed',
   });
 });
 

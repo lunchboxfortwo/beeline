@@ -9,18 +9,15 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { ensureBridge, toolViaBridge, toolViaOutbox } from './bridge.js';
+import { ensureBridge, toolViaBridge } from './bridge.js';
 
-const BRIDGE_EXITED = 'Beeline bridge exited; the call was not sent';
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
 import { runSessionCommand } from './command.js';
 import { fill, HERMES_PLUGIN, OPENCODE_PLUGIN, PI_EXTENSION } from './templates.js';
@@ -268,37 +265,6 @@ describe('fix 8: session tool calls through the bridge', () => {
     expect(existsSync(join(home, '.beeline', 'outbox'))).toBe(false);
   });
 
-  it('fails as not sent and removes the request when no bridge owns the outbox', async () => {
-    const dir = scratch(),
-      cwd = scratch();
-    writeFileSync(join(dir, 'bridge.pid'), String(await deadPid()));
-    expect(await toolViaOutbox(dir, cwd, 'post', { address: 'r', text: 'hi' }, 'k')).toEqual({
-      ok: false,
-      error: BRIDGE_EXITED,
-    });
-    expect(readdirSync(join(cwd, '.beeline', 'outbox'))).toEqual([]);
-  });
-
-  it.each([false, true])('ends the outbox wait when the bridge dies (taken=%s)', async (taken) => {
-    const dir = scratch(),
-      cwd = scratch();
-    const bridge = await holdLock(bridgeOwnerKey(dir));
-    const waiting = toolViaOutbox(dir, cwd, 'post', { address: 'r', text: 'hi' }, 'k');
-    const folder = join(cwd, '.beeline', 'outbox');
-    const request = readdirSync(folder).find((name) => name.endsWith('.request.json'))!;
-    if (taken) renameSync(join(folder, request), join(folder, `${request}.taking`));
-    bridge.kill('SIGKILL');
-    const answer = await waiting;
-    expect(answer).toEqual({
-      ok: false,
-      error: taken
-        ? 'Beeline bridge exited after taking the call; its result is unknown'
-        : BRIDGE_EXITED,
-    });
-    // A stale request is never replayed by a later bridge.
-    expect(readdirSync(folder)).toEqual([]);
-  });
-
   describe('bridge socket', () => {
     const serve = async (
       dir: string,
@@ -530,4 +496,30 @@ describe('fix 13 and 15: join sign-in', () => {
     expect(output).toContain('client_id=registered');
     expect(output).not.toContain('[beeline]');
   });
+});
+
+it('refuses takeover of a legacy bridge without an owner channel', async () => {
+  const dir = scratch();
+  const oldDir = join(dir, 'old'); mkdirSync(oldDir);
+  const old = spawn(process.execPath, [entry(oldDir, 'setInterval(() => {}, 1000);'), 'session', 'bridge'], { stdio: 'ignore' });
+  children.push(old);
+  await once(old, 'spawn');
+  writeFileSync(join(dir, 'bridge.pid'), String(old.pid));
+  const candidateDir = join(dir, 'new'); mkdirSync(candidateDir);
+  const candidate = entry(candidateDir, "process.send('ready'); setInterval(() => {}, 1000);");
+  await expect(ensureBridge(dir, { node: process.execPath, bundle: candidate })).rejects.toThrow('no followable owner channel');
+  expect(old.exitCode).toBeNull(); expect(old.signalCode).toBeNull();
+});
+
+it('leaves held sign-in completion under the transport read-failure policy', async () => {
+  const { finishSignIn, signInLink } = await import('./beeline-api.js');
+  const calls: RequestInit[] = [];
+  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    calls.push(init);
+    throw new Error('transport read failure');
+  });
+  await expect(finishSignIn('https://synthetic.invalid', 'client', signInLink('https://synthetic.invalid', 'client', 'member')))
+    .rejects.toThrow('completion is still pending');
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).not.toHaveProperty('dispatcher');
 });

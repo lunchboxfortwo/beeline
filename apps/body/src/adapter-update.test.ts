@@ -243,3 +243,68 @@ await updateAgentAdapter('claude', { env: ${JSON.stringify(env)},
     );
   }, 30_000);
 });
+
+it.each(['active', 'rejected'] as const)('does not promote over a concurrent %s decision', async change => {
+  const { env } = await scratch();
+  const options: AdapterUpdateOptions = {
+    env, readRegistry: registry, install: installAdapter('#!/bin/sh\n'), log: () => undefined,
+    alert: async () => {},
+    checkSession: async () => {
+      await updateAgentAdapter('claude', {
+        env, install: installAdapter('#!/bin/sh\n'), log: () => undefined, alert: async () => {},
+        readRegistry: async () => ({ 'dist-tags': { latest: change === 'active' ? '2.0.0' : '1.0.0' },
+          time: { '1.0.0': '2000-01-01T00:00:00Z', '2.0.0': '2000-01-01T00:00:00Z' } }),
+        checkSession: async () => {
+          if (change === 'rejected') throw new Error('protocol refused');
+          return { protocolVersion: 1, agentCapabilities: {} };
+        },
+      });
+      return { protocolVersion: 1, agentCapabilities: {} };
+    },
+  };
+  await expect(updateAgentAdapter('claude', options)).resolves.toBe(false);
+  const state = readAdapterState('claude', env);
+  if (change === 'active') expect(state.active?.version).toBe('2.0.0');
+  else { expect(state.active).toBeUndefined(); expect(state.rejected?.['1.0.0']).toEqual({ error: 'protocol refused' }); }
+});
+
+it('leaves a successfully checked candidate unpromoted when its caller cancels', async () => {
+  const { env } = await scratch();
+  const caller = new AbortController();
+  await expect(updateAgentAdapter('claude', {
+    env, readRegistry: registry, install: installAdapter('#!/bin/sh\n'), log: () => undefined,
+    signal: caller.signal,
+    checkSession: async () => { caller.abort(); return { protocolVersion: 1, agentCapabilities: {} }; },
+  })).rejects.toThrow('cancelled');
+  expect(readAdapterState('claude', env)).toEqual({});
+});
+
+it('retains an old prefix across promotions until every ACP session exits', async () => {
+  const { env, store } = await scratch();
+  const body = `#!${process.execPath}
+require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+  const r=JSON.parse(line); if(r.id!==undefined) process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:r.id,result:{protocolVersion:1,agentCapabilities:{}}})+'\\n');
+});`;
+  const promote = (version: string) => updateAgentAdapter('claude', {
+    env, readRegistry: async () => ({ 'dist-tags': { latest: version }, time: { [version]: '2000-01-01T00:00:00Z' } }),
+    install: installAdapter(body), log: () => undefined,
+    checkSession: async () => ({ protocolVersion: 1, agentCapabilities: {} }),
+  });
+  await promote('1.0.0');
+  const command = readAdapterState('claude', env).active!.command;
+  const prefix = resolve(command, '../../..');
+  const { AcpClient } = await import('./acp.js');
+  const { startAgentProcess, stopAgentProcess } = await import('./agent-process.js');
+  const clients = Array.from({ length: 2 }, () => new AcpClient({ agentCommand: command, agentEnv: env, resourceScope: 'none' }));
+  try {
+    for (const client of clients) await startAgentProcess(client);
+    await promote('2.0.0'); await promote('3.0.0');
+    expect(await readFile(command, 'utf8')).toBe(body);
+    await stopAgentProcess(clients[0]!);
+    await promote('4.0.0');
+    expect(await readFile(command, 'utf8')).toBe(body);
+    await stopAgentProcess(clients[1]!);
+    await promote('5.0.0');
+    expect(await readdir(store)).not.toContain(prefix.split('/').at(-1));
+  } finally { for (const client of clients) await stopAgentProcess(client); }
+});

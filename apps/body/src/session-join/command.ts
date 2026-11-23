@@ -8,7 +8,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { AGENTS, agentLabel, defaultName, detectAgent, isAgentId, pickName, type AgentId } from './agents.js';
 import { accessToken, attachLocalDelivery, callTool, DEFAULT_SERVER, finishSignIn, NOT_JOINED, registerClient, signInLink, SignInEndedError, type SignIn } from './beeline-api.js';
-import { bridgeRunning, ensureBridge, notifyBridgeSessions, renderAttachments, renderMention, renderRules, renderWake, runBridge, toolViaBridge, toolViaOutbox, type Mention, type Runner, type Wake } from './bridge.js';
+import { bridgeRunning, ensureBridge, notifyBridgeSessions, renderAttachments, renderMention, renderRules, renderWake, runBridge, toolViaBridge, type Mention, type Runner, type Wake } from './bridge.js';
 import { chosenName, claudeTranscript, heldBy, inboundSetting, permissionMode, postToClaude, scanClaude } from './claude.js';
 import { acceptClaudeInbound, assertClaudePolicy, restoreClaudeInbound } from './claude-inbound.js';
 import { hasClaudeMcp, runClaudeMcp } from './claude-mcp.js';
@@ -185,8 +185,9 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
     else if(!signedIn.code&&!signedIn.tokens&&!signedIn.exchangeStarted&&previous.pending.startedAt+600_000<=Date.now()&&
       finisher.holder.key===finisherKey(previous.file)&&finisher.holder.pid>0){
       // The link expired and the server never ends its finisher's held wait, so a fresh link replaces it.
+      finisher.close();
       try{process.kill(finisher.holder.pid,'SIGTERM');}catch{/* It already ended. */}
-    }else available=false;
+    }else { finisher.close(); available=false; }
   }
   const known=previous?.pending.signIn.tokens;
   const resume=previous&&(available!==true||Boolean(known)||
@@ -322,9 +323,7 @@ function own(args: string[], env: NodeJS.ProcessEnv): JoinedSession {
 
 /** The session's own tool call: through the bridge first, which works inside a network sandbox, else direct. */
 async function ownTool(dir: string, joined: JoinedSession, name: string, args: Record<string, unknown>): Promise<any> {
-  let bridged = await toolViaBridge(dir, joined.key, name, args);
-  // A sandbox that refuses the socket still lets the session write its own folder, which only a live bridge serves.
-  if (!bridged && bridgeRunning(dir) && process.cwd().startsWith(joined.cwd)) bridged = await toolViaOutbox(dir, joined.cwd, name, args, joined.key);
+  const bridged = await toolViaBridge(dir, joined.key, name, args);
   if (bridged) {
     if (!bridged.ok) throw new Error(bridged.error ?? 'Beeline refused the call');
     return bridged.data;

@@ -16,7 +16,7 @@ import { LiveHub } from '../../server/src/live.js';
 const agentId='ab'.repeat(32);
 const gate=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};};
 
-it('DROP-24: delivers every answer across repeated mid-answer drops with one reconnect per drop and no failed requests',async()=>{
+it('DROP-24: ends unanswered requests across drops while independently recovering the connection',async()=>{
   const database=await migratedDatabase();
   const owner='a'.repeat(64),workspace=randomUUID(),rooms=Array.from({length:24},()=>randomUUID());
   await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Agent')`,[owner,agentId]);
@@ -71,30 +71,31 @@ it('DROP-24: delivers every answer across repeated mid-answer drops with one rec
   };
   try{
     await vi.waitFor(()=>expect(api.channel.isOpen()).toBe(true));
-    const turns=rooms.map(async roomId=>{
-      await api.execute('postRoomMessage',{roomId,requestId:requests.get(roomId)!,text:'answer'});
-      await api.execute('postAgentTurnReceipt',{agentId,roomId,requestId:requests.get(roomId)!,outcome:'answered'});
-    });
-    for(const turn of turns)void turn.catch(error=>{failures.push(error);});
+    const turns=rooms.map(roomId=>api.execute('postRoomMessage',{roomId,requestId:requests.get(roomId)!,text:'answer'})
+      .catch(error=>{failures.push(error);return error;}));
     await vi.waitFor(()=>expect(answered.size).toBe(24));
-    await drop();await drop(); // Every answer is on the wire, none acknowledged.
-    answerGate.resolve();
-    // 24 real answer writes run here; the 1 s default is not this proof's subject.
-    await vi.waitFor(()=>expect(traced.size).toBe(24),{timeout:10_000});
-    await drop();await drop(); // Diagnostics sent, results still withheld.
-    traceGate.resolve();
+    await drop();await drop();
     await Promise.all(turns);
-    expect(failures).toEqual([]);
-    expect(answered.size).toBe(24);
+    expect(failures).toHaveLength(24);
+    for(const failure of failures)expect(failure).toMatchObject({message:expect.stringContaining('outcome unknown')});
+    answerGate.resolve();
+    for(const roomId of rooms)await vi.waitFor(async()=>{
+      expect((await database.query(`SELECT count(*)::int n FROM messages WHERE room_id=$1 AND author_id=$2 AND text='answer'`,[roomId,agentId])).rows).toEqual([{n:1}]);
+    },{timeout:10_000});
+    const receipts=rooms.map(roomId=>api.execute('postAgentTurnReceipt',{agentId,roomId,requestId:requests.get(roomId)!,outcome:'answered'})
+      .catch(error=>error));
+    await vi.waitFor(()=>expect(traced.size).toBe(24));
+    await drop();await drop();
+    for(const result of await Promise.all(receipts))expect(result).toMatchObject({message:expect.stringContaining('outcome unknown')});
+    traceGate.resolve();
     expect(machine.link.reconnects).toBe(4);
     expect(sockets).toHaveLength(5);
     expect(fetcher).not.toHaveBeenCalled();
     for(const roomId of rooms){
-      expect(calls.get(JSON.stringify(['postRoomMessage',roomId]))).toBeGreaterThanOrEqual(1);
-      expect((await database.query(`SELECT count(*)::int n FROM messages WHERE room_id=$1 AND author_id=$2 AND text='answer'`,[roomId,agentId])).rows).toEqual([{n:1}]);
+      expect(calls.get(JSON.stringify(['postRoomMessage',roomId]))).toBe(1);
       expect(calls.get(JSON.stringify(['postAgentTurnReceipt',roomId]))).toBe(1);
     }
-    expect(frames.flat().filter(frame=>frame.type==='request-result').length).toBeGreaterThanOrEqual(96);
+    expect(frames.flat().filter(frame=>frame.type==='request-result')).toHaveLength(0);
     for(const sent of frames){
       expect(sent.filter(frame=>frame.type==='register-machine')).toHaveLength(1);
       expect(sent.filter(frame=>frame.type==='subscribe-queue')).toHaveLength(1);

@@ -102,7 +102,8 @@ async function serveMachineHelper(
     exitProcess?: (code: number) => void;
     /** Image-owned helpers have no self-update transaction. */
     freeAgent?: boolean;
-  } = {},
+  },
+  generation: string,
 ): Promise<{ reason: HelperExitReason; lifecycle: HelperLifecycle; settled: Promise<void> }> {
   const runAgent = options.runAgent ?? runAgentRuntime;
   const env = options.env ?? process.env;
@@ -191,7 +192,6 @@ async function serveMachineHelper(
   let update: ReleaseTransaction | undefined;
   /** The helper's own pruning holds the install lock; its update preparation follows it rather than failing busy. */
   let pruning: Promise<unknown> = Promise.resolve();
-  const generation = randomUUID();
   let control: MachineControl | undefined;
   let stoppingStatus = 'helper stopped';
   let helperError: string | undefined;
@@ -738,8 +738,9 @@ async function serveMachineHelper(
 export async function runMachineHelper(
   options: Parameters<typeof serveMachineHelper>[0] = {},
 ): ReturnType<typeof serveMachineHelper> {
+  const generation = randomUUID();
   return withKernelLock(helperLockKey(defaultSupervisorRoot(options?.env)), () =>
-    serveMachineHelper(options),
-  { step: 'machine helper' });
+    serveMachineHelper(options, generation),
+  { step: 'machine helper', generation });
 }
 

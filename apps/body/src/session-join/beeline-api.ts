@@ -47,7 +47,7 @@ async function request(url: string, body: unknown, headers: Record<string,string
   if(held){if(stream)throw new Error('Held MCP completion mode invalid');admitHeldMcpCompletion(url,body);}
   if(stream&&new URL(url).pathname!=='/mcp/member-stream')throw new Error('MCP member stream route unavailable');
   const init:RequestInit&{dispatcher?:Agent}={method:stream?'GET':'POST',headers:{'content-type':'application/json',...headers},
-    ...((stream||held)?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined};
+    ...(stream?{dispatcher:memberStreamAgent}:{}),...(!stream?{body:JSON.stringify(body)}:{}),signal:stream ?? cancellation ?? undefined};
   // A named step prints one line naming the host before the wait; the transport's own failure ends a silent one.
   return ask(step?{url,peer:`${new URL(url).host} to ${step}`}:{url,report:false},init);
 }
