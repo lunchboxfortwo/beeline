@@ -380,7 +380,9 @@ const fixture = monolithFixture();
           [cornerId],
         )
       ).rows,
-    ).toHaveLength(0);
+      // Only the implementer's own revision from the Room woke its thread session;
+      // the refused outsider revision queued nothing.
+    ).toHaveLength(1);
     const stale = await fixture.daemonOperation('reviseCornerBrief', {
       roomId: ROOM,
       cornerId,

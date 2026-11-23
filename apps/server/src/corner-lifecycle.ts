@@ -509,8 +509,8 @@ async function writeCornerAdvance(
           // this thread. A revision it wrote from another place (its parent chat) is
           // news to its thread session, so that session is woken with it. The queued
           // command stays pending until the implementer's helper next connects.
-          const selfInThread = corner.worker_agent_id === event.command.agent_id && event.command.room_id === cornerId;
-          const agentId = selfInThread ? null : corner.worker_agent_id;
+          const agentId = corner.worker_agent_id !== event.command.agent_id || event.command.room_id !== cornerId ? corner.worker_agent_id : null;
+          const selfInThread = Boolean(corner.worker_agent_id) && !agentId;
           const command = agentId
             ? await createAgentCommand(db, {
                 roomId: cornerId,
