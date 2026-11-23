@@ -137,7 +137,8 @@ export function harnessEnforcement(agentCommand: string | undefined): HarnessPro
 }
 
 /**
- * Does this harness honor ACP `session/new`'s top-level `systemPrompt` field?
+ * Does this harness retain the session rules in its system slot, including
+ * adapter-specific delivery outside ACP's top-level `systemPrompt` field?
  *
  * Measured against the installed adapters, not assumed from the protocol:
  *  - `claude-agent-acp` ignores the top-level field but honors

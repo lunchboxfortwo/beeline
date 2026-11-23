@@ -138,8 +138,7 @@ export class SessionResources {
         }
       })
       .catch((error) => {
-        if (current())
-          this.status[key] = error instanceof Error ? error.message : String(error);
+        if (current()) this.status[key] = error instanceof Error ? error.message : String(error);
       });
   }
 

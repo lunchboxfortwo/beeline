@@ -36,6 +36,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 
 ### Updates and startup
 
+- **Pi rules live in its system slot.** `installPiSystemPrompt` (`pi-session-instructions.ts`) writes the session rules to `PI_CODING_AGENT_DIR/SYSTEM.md` before `session/new`, replacing Pi's default system prompt. Turn messages carry no rule prefix, including after compaction. Coverage: `pi-session-instructions.test.ts`, `pi-chat-turn.test.ts`.
 - **A helper update never waits for agents.** `ReleaseTransaction` (`managed-update.ts`) hands off as soon as a verified release is prepared; queued and in-flight items stay on the server and are answered by the next helper. Preparation and handoff each have a three-minute cancellable deadline (`managed-update.startup.test.ts`).
 - **ACP scopes bind to the helper's lifetime without ordering after its readiness.** `AcpResourceScope` (`apps/body/src/acp-resource-scope.ts`) keeps `BindsTo` without `After` (`acp-resource-scope.startup.test.ts`).
 - **Native conversation memory survives helper restarts.** A place session loads its harness conversation from private `agent-home/warm-transcript.json` when the model, persona, command and folder match; otherwise it starts cold.
