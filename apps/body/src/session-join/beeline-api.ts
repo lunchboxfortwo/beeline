@@ -4,7 +4,6 @@ import { createHash, randomBytes } from 'node:crypto';
 import { Agent } from 'undici';
 import { readState, withLock, writeState, type JoinedSession } from './store.js';
 import { ask } from '../wait.js';
-export { setMachineReadOutput } from '../wait.js';
 
 export const DEFAULT_SERVER = 'https://server.usebeeline.app';
 
@@ -75,7 +74,6 @@ async function request(
   stream?: AbortSignal,
   cancellation?: AbortSignal,
   held = false,
-  step?: string,
 ): Promise<Response> {
   if (held) {
     if (stream) throw new Error('Held MCP completion mode invalid');
@@ -90,17 +88,15 @@ async function request(
     ...(!stream ? { body: JSON.stringify(body) } : {}),
     signal: stream ?? cancellation ?? undefined,
   };
-  // Every wait names its peer on stderr unless this process's output is machine-read (see setMachineReadOutput).
-  const peer = step ? `${new URL(url).host} to ${step}` : undefined;
-  return ask({ url, ...(peer ? { peer } : {}) }, init);
+  return ask({ url }, init);
 }
 async function postJson(
   url: string,
   body: unknown,
   headers: Record<string, string> = {},
-  { signal, held = false, step }: { signal?: AbortSignal; held?: boolean; step?: string } = {},
+  { signal, held = false }: { signal?: AbortSignal; held?: boolean } = {},
 ): Promise<{ status: number; value: Record<string, unknown> }> {
-  const response = await request(url, body, headers, undefined, signal, held, step);
+  const response = await request(url, body, headers, undefined, signal, held);
   const text = await response.text();
   let value: Record<string, unknown> = {};
   try {
@@ -119,8 +115,6 @@ export async function attachLocalDelivery(
   const { status, value } = await postJson(
     `${server}/mcp/oauth/delivery-attach`,
     { secret },
-    {},
-    { step: 'attach this host to the consented member' },
   );
   if (
     status !== 200 ||
@@ -149,8 +143,6 @@ export async function registerClient(server: string, clientName: string): Promis
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
     },
-    {},
-    { step: 'register this session' },
   );
   if (status !== 201 || typeof value.client_id !== 'string')
     throw new Error(`Beeline refused the registration (HTTP ${status})`);
@@ -311,7 +303,6 @@ export async function callTool(
   token: string,
   name: string,
   args: Record<string, unknown>,
-  step?: string,
 ): Promise<any> {
   const { status, value } = await postJson(
     `${session.server}/mcp`,
@@ -321,7 +312,6 @@ export async function callTool(
       'mcp-protocol-version': '2026-07-28',
       accept: 'application/json',
     },
-    { step },
   );
   if (status === 401) throw new Error(DISCONNECTED);
   if (status !== 200) throw new Error(`Beeline answered HTTP ${status}`);

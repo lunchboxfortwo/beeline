@@ -13,7 +13,6 @@ export function watchFreeAgentResume(onResume: () => void, source?: Readable): (
       file: 'dmesg',
       args: ['--follow-new', '--raw'],
       captureOutput: false,
-      machineRead: true,
       signal: reading.signal,
       onSpawn: (child) => {
         input = child.stdout!;

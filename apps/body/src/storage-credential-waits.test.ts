@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -24,7 +25,7 @@ async function scratch(): Promise<string> {
 /** A local server; `answer` undefined means it accepts and never responds. */
 async function server(
   answer?: (path: string) => unknown,
-): Promise<{ baseUrl: string; host: string }> {
+): Promise<{ baseUrl: string; http: Server }> {
   const held: ServerResponse[] = [];
   const http: Server = createServer((request, response) => {
     if (!answer) {
@@ -45,7 +46,7 @@ async function server(
       }),
   );
   const host = `127.0.0.1:${(http.address() as { port: number }).port}`;
-  return { baseUrl: `http://${host}`, host };
+  return { baseUrl: `http://${host}`, http };
 }
 
 /** Run `call` from `module` in a child with an isolated HOME/XDG tree. */
@@ -78,20 +79,11 @@ ${call}
     });
     const output = { stdout: '', stderr: '' };
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => (output.stdout += chunk));
-    const stderrLines: Array<(text: string) => void> = [];
-    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
-      output.stderr += chunk;
-      for (const listener of stderrLines) listener(output.stderr);
-    });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => (output.stderr += chunk));
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
       child.on('exit', (code, signal) => resolve({ code, signal })),
     );
-    return {
-      child,
-      output,
-      exited,
-      onStderr: (listener: (text: string) => void) => stderrLines.push(listener),
-    };
+    return { child, output, exited };
   });
 }
 
@@ -108,27 +100,26 @@ async function storageFixture(root: string, baseUrl: string): Promise<void> {
   );
 }
 
-it('storage names the host and step before a silent read, and Ctrl-C ends it', async () => {
+it('Ctrl-C ends a silent storage read', async () => {
   const root = await scratch();
-  const { baseUrl, host } = await server();
+  const { baseUrl, http } = await server();
   await storageFixture(root, baseUrl);
+  const requested = once(http, 'request');
   const run = await runChild(
     root,
     './storage-report.ts',
     `await m.runStorageReportCommand(['--orphans']);`,
   );
-  const line = `[beeline] waiting for ${host} for agent ${AGENT.slice(0, 12)} (POST /v1/daemon/operations/getDaemonBootstrap)`;
-  run.onStderr((text) => {
-    if (text.includes(line)) run.child.kill('SIGINT');
-  });
+  const [request] = await requested;
+  expect(request.url).toBe('/v1/daemon/operations/getDaemonBootstrap');
+  run.child.kill('SIGINT');
   expect(await run.exited).toEqual({ code: null, signal: 'SIGINT' });
-  expect(run.output.stderr).toContain(line);
   expect(run.output.stdout).toBe('');
 });
 
-it('storage reports each sequential read on stderr and keeps stdout one JSON report', async () => {
+it('storage keeps stdout to one JSON report', async () => {
   const root = await scratch();
-  const { baseUrl, host } = await server((path) =>
+  const { baseUrl } = await server((path) =>
     path.endsWith('/getDaemonBootstrap')
       ? { rooms: [{ roomId: 'room-1' }], workspaceIds: ['ws'] }
       : { corners: [{ cornerId: 'room-1', archived: true }] },
@@ -140,12 +131,6 @@ it('storage reports each sequential read on stderr and keeps stdout one JSON rep
     `await m.runStorageReportCommand(['--orphans']);`,
   );
   expect(await run.exited).toEqual({ code: 0, signal: null });
-  expect(run.output.stderr).toContain(
-    `[beeline] waiting for ${host} for agent ${AGENT.slice(0, 12)} (POST /v1/daemon/operations/getDaemonBootstrap)`,
-  );
-  expect(run.output.stderr).toContain(
-    `[beeline] waiting for ${host} for room room-1 (POST /v1/daemon/operations/listRoomCorners)`,
-  );
   expect(run.output.stderr).toContain('[storage dry-run] running /usr/bin/python3 (payload scan)');
   expect(JSON.parse(run.output.stdout)).toEqual({
     mode: 'dry-run',
@@ -161,9 +146,9 @@ it('storage reports each sequential read on stderr and keeps stdout one JSON rep
   });
 });
 
-it('corner-read-token names the host and step before a silent read, and Ctrl-C ends it', async () => {
+it('Ctrl-C ends a silent corner-read-token request', async () => {
   const root = await scratch();
-  const { baseUrl, host } = await server();
+  const { baseUrl, http } = await server();
   const identity = identityFromKey('01'.repeat(32), 'fixture');
   const configPath = await writeRuntimeRecord({
     version: 2,
@@ -177,15 +162,14 @@ it('corner-read-token names the host and step before a silent read, and Ctrl-C e
     mcpBinary: 'unused',
     transport: { kind: 'monolith', baseUrl, daemonToken: TOKEN },
   });
+  const requested = once(http, 'request');
   const run = await runChild(
     root,
     './daemon-api-client.ts',
     `await m.DaemonApiClient.readRepositoryCredential(${JSON.stringify(configPath)}, 'fixture-room');`,
   );
-  const line = `[beeline] waiting for ${host} (POST /v1/daemon/operations/getRoomGitHubToken)`;
-  run.onStderr((text) => {
-    if (text.includes(line)) run.child.kill('SIGINT');
-  });
+  const [request] = await requested;
+  expect(request.url).toBe('/v1/daemon/operations/getRoomGitHubToken');
+  run.child.kill('SIGINT');
   expect(await run.exited).toEqual({ code: null, signal: 'SIGINT' });
-  expect(run.output.stderr).toContain(line);
 });

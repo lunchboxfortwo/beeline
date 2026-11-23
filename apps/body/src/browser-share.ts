@@ -32,7 +32,6 @@ export async function findChromiumPage(debugUrl: string, target?: string): Promi
     throw new Error('Chromium debug URL is invalid');
   const response = await ask({
     url: new URL('/json/list', origin),
-    peer: 'Chromium debugging endpoint',
   });
   if (!response.ok) throw new Error('Chromium debugging endpoint is unavailable');
   const pages = (await response.json()) as ChromiumPage[];

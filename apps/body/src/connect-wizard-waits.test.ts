@@ -38,7 +38,7 @@ it('streams connect-finish lines while the child runs, and cancel kills its grou
   const root = await scratch();
   const binary = await fakeBeeline(
     root,
-    `console.error('[beeline] waiting for server.test (POST /v1/auth/daemon/exchange)');
+    `console.error('[body] imported provider credentials');
 console.log('[body] openrouter routing for z-ai/glm: a, b');
 process.stdin.resume(); setInterval(() => {}, 1 << 30);`,
   );
@@ -55,7 +55,7 @@ process.stdin.resume(); setInterval(() => {}, 1 << 30);`,
   await expect(finishing).rejects.toThrow('cancelled; process group killed');
   expect(said).toEqual(
     expect.arrayContaining([
-      '[beeline] waiting for server.test (POST /v1/auth/daemon/exchange)',
+      '[body] imported provider credentials',
       '[body] openrouter routing for z-ai/glm: a, b',
     ]),
   );

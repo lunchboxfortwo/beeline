@@ -328,7 +328,6 @@ export class AgentSignIn {
         env: launch.env,
         cwd: this.options.operatorHome,
         captureOutput: false,
-        machineRead: true,
         onSpawn: (spawned) => {
           child = spawned;
           this.#pending.set(attemptId, { kind: 'cli', child: spawned });

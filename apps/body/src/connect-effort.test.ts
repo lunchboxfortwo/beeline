@@ -97,9 +97,7 @@ it('covers the provider key check and the final model read with spinners', async
     text: vi.fn(),
     password: vi.fn(async () => 'sk-or-new'),
   } as ConnectPrompts;
-  const verifyKey = vi.fn(async (_input: unknown, step?: { say: (line: string) => void }) => {
-    step?.say('waiting for openrouter.ai to verify the OpenRouter key (GET /api/v1/key)');
-  });
+  const verifyKey = vi.fn(async () => {});
   const result = await collectConnectWizard(
     prompts,
     loadModels,
@@ -117,7 +115,6 @@ it('covers the provider key check and the final model read with spinners', async
   expect(spinners).toEqual([
     'start Checking Pi…',
     'start Checking the OpenRouter key…',
-    'message waiting for openrouter.ai to verify the OpenRouter key (GET /api/v1/key)',
     'start Reading Pi models…',
   ]);
 });

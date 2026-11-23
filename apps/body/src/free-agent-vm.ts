@@ -74,7 +74,6 @@ async function freeAgentInput(model: string): Promise<Array<'text' | 'image'>> {
   try {
     const response = await ask({
       url: `https://openrouter.ai/api/v1/models/${model}/endpoints`,
-      peer: 'OpenRouter',
     });
     if (!response.ok) return ['text'];
     return (

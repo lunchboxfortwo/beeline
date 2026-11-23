@@ -75,7 +75,7 @@ export async function sessionToolRequest(
   let body: { error?: string };
   try {
     const response = await ask(
-      { url: new URL(route, `${endpoint.url}/`), peer: 'Beeline session tools', machineRead: true },
+      { url: new URL(route, `${endpoint.url}/`) },
       {
         method: 'POST',
         headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },

@@ -153,7 +153,7 @@ async function callServer(server, request, signal) {
   const run = runOwned({
     step: server.name, file: server.command, args: server.args,
     env: { ...process.env, ...server.env }, ...(server.cwd ? { cwd: server.cwd } : {}),
-    stdin: 'pipe', group: 'caller', captureOutput: false, machineRead: true, signal: done.signal,
+    stdin: 'pipe', group: 'caller', captureOutput: false, signal: done.signal,
     onSpawn: (spawned) => {
       child = spawned;
       spawned.once('error', (error) => { startError = error; });
@@ -229,7 +229,7 @@ async function authorizeSquire(signal) {
   if (![context.roomId, context.requestId].every((value) => typeof value === 'string' && value.length > 0))
     throw new Error('Squire requires an active server command.');
   // Pi reads this extension's process output: the wait stays silent.
-  const response = await ask({ url: new URL('/v1/daemon/operations/authorizeSquireCall', env.BEELINE_DAEMON_BASE_URL), machineRead: true }, {
+  const response = await ask({ url: new URL('/v1/daemon/operations/authorizeSquireCall', env.BEELINE_DAEMON_BASE_URL) }, {
     method: 'POST',
     headers: { authorization: 'Bearer ' + env.BEELINE_DAEMON_TOKEN, 'content-type': 'application/json',
       'x-beeline-helper-version': env.BEELINE_HELPER_VERSION || 'v0.0.0' },

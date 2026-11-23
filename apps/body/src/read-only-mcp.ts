@@ -439,7 +439,6 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
     const response = await ask(
       {
         url: new URL(`/v1/daemon/operations/${name}`, `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`),
-        machineRead: true,
       },
       {
         method: 'POST',
@@ -615,7 +614,7 @@ async function squireRelayCall(
 ): Promise<Response> {
   const context = await activeCommandContext();
   return ask(
-    { url: new URL('/mcp', relayUrl), machineRead: true },
+    { url: new URL('/mcp', relayUrl) },
     {
       method: 'POST',
       headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
@@ -767,7 +766,6 @@ export async function daemonUploadArtifact(
   const response = await ask(
     {
       url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`),
-      machineRead: true,
     },
     {
       method: 'POST',

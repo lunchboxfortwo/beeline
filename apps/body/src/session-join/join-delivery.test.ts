@@ -173,7 +173,6 @@ describe('JOIN-DELIVERY local hosts', () => {
           conversation: session.sessionId,
           installed: true,
         },
-        'set up delivery',
       );
       expect(readState(dir).sessions[0]).toMatchObject({
         deliveryGeneration: 'bound-generation',

@@ -283,14 +283,14 @@ it('ask answers a half-closed request with everything before orderly EOF', async
     });
   });
   const output = await ask<string>(
-    { socket: path, peer: 'host', framing: 'eof', machineRead: true },
+    { socket: path, peer: 'host', framing: 'eof' },
     '"hello"',
   );
   expect(JSON.parse(output)).toEqual({ echo: 'hello' });
   // A peer that goes away mid-request is the transport's failure, never an answer.
   const reset = await server((peer) => peer.destroy());
   await expect(
-    ask({ socket: reset, peer: 'host', framing: 'eof', machineRead: true }, 'x'.repeat(1 << 20)),
+    ask({ socket: reset, peer: 'host', framing: 'eof' }, 'x'.repeat(1 << 20)),
   ).rejects.toThrow(/^host(:| closed)/);
 });
 
@@ -336,7 +336,7 @@ it('ask decodes a byte frame incrementally while the peer keeps the connection o
     return input.length < 8 + length ? undefined : input.subarray(8, 8 + length).toString();
   };
   await expect(
-    ask({ socket: path, peer: 'adb', framing: { read }, machineRead: true }, '000chost:devices'),
+    ask({ socket: path, peer: 'adb', framing: { read } }, '000chost:devices'),
   ).resolves.toBe(payload);
 });
 
@@ -374,7 +374,7 @@ it('a requester that leaves during the held answer does not hold the other hando
   cleanup.push(() => control.stop());
   const update = (socketPath: string) =>
     ask<MachineAnswer>(
-      { socket: socketPath, peer: 'helper update', machineRead: true },
+      { socket: socketPath, peer: 'helper update' },
       {
         operation: 'update',
       },
@@ -415,7 +415,7 @@ it('the standalone module runs answer and watchChanges in a separate process', a
 
 it('a shared-signal child is left to the service manager signal instead of being killed first', async () => {
   const owner = `import { runOwned } from ${JSON.stringify(resolve(__dirname, 'wait.ts'))};
-    void runOwned({ step: 'broker', file: process.execPath, interactive: true, sharedSignals: true, machineRead: true,
+    void runOwned({ step: 'broker', file: process.execPath, interactive: true, sharedSignals: true,
       args: ['-e', "process.on('SIGTERM', () => {}); console.log(process.pid); setInterval(() => {}, 1000)"] });`;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', owner], {
     stdio: ['ignore', 'pipe', 'inherit'],

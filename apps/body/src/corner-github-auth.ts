@@ -451,7 +451,7 @@ async function repoSlug(args) {
 async function github(pathname, options, value) {
   const base = (process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\\/$/, '');
   // The agent reads this gh stand-in's output: the wait stays silent.
-  const response = await ask({ url: base + pathname, machineRead: true }, {
+  const response = await ask({ url: base + pathname }, {
     ...options,
     headers: {
       accept: 'application/vnd.github+json',

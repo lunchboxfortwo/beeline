@@ -207,7 +207,7 @@ if(args.some(a=>mutations.has(a)) && !args.includes('--package-lock-only') && !p
  process.exit(1);
 }
 import(${JSON.stringify(ownedCommandModule())}).then(async ({runOwned})=>{
-const result=await runOwned({step:'npm',file:${JSON.stringify(npm)},args:args.includes('--package-lock-only')?[...args,'--ignore-scripts']:args,interactive:true,machineRead:true});
+const result=await runOwned({step:'npm',file:${JSON.stringify(npm)},args:args.includes('--package-lock-only')?[...args,'--ignore-scripts']:args,interactive:true});
 process.exitCode=result.code??1;
 }).catch(error=>{console.error(error);process.exitCode=1;});
 `;

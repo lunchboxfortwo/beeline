@@ -85,7 +85,6 @@ export async function storageTree(
     file: '/usr/bin/python3',
     args: ['-c', TREE_INVENTORY, root],
     captureOutput: false,
-    machineRead: true,
     onSpawn: (started) => {
       child = started as ChildProcessWithoutNullStreams;
     },

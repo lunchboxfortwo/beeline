@@ -717,7 +717,6 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
       stdin: 'pipe',
       group: 'caller',
       captureOutput: false,
-      machineRead: true,
       onSpawn: (spawned) => {
         started = spawned;
         spawned.stderr?.pipe(process.stderr, { end: false });
@@ -800,7 +799,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
         }
         // The MCP client reads this process's stdout: the wait stays silent.
         const response = await ask(
-          { url: launch.url!, machineRead: true },
+          { url: launch.url! },
           {
             method: 'POST',
             headers: {

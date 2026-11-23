@@ -15,28 +15,6 @@ import { createHash } from 'node:crypto';
 import { watch } from 'node:fs';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 
-const waitSay = (line: string) => process.stderr.write(`[beeline] ${line}\n`);
-
-let waitMachineReadOutput = false;
-export function setMachineReadOutput(machineRead: boolean): void {
-  waitMachineReadOutput = machineRead;
-}
-
-/**
- * The switch for `ask` and `runOwned` wait lines. Each prints one stderr line
- * naming its peer or step, so a human-facing command is never silent. Only a caller
- * whose stdout/stderr is read by a machine (session tool JSON, hook output,
- * the MCP stdio tool process and what it calls) sets `machineRead: true`, and
- * then no line is written.
- */
-interface WaitReport {
-  report?: (line: string) => void;
-  machineRead?: boolean;
-}
-function waitCommandReporter(channel: WaitReport): ((line: string) => void) | undefined {
-  return waitMachineReadOutput || channel.machineRead ? undefined : (channel.report ?? waitSay);
-}
-
 /**
  * How an `ask` writes its request and reads the answer. `line` (the default)
  * writes one JSON line and answers with the first JSON line back, where
@@ -50,15 +28,14 @@ function waitCommandReporter(channel: WaitReport): ((line: string) => void) | un
 export type AskFraming = 'line' | 'eof' | 'flush' | { read: (input: Buffer) => unknown };
 
 /** A stream peer: a local socket path or a loopback TCP port. */
-export interface SocketChannel extends WaitReport {
+export interface SocketChannel {
   socket: string | { host: string; port: number };
   peer: string;
   framing?: AskFraming;
 }
 /** An HTTP peer; the transport's own read failure ends a silent wait. */
-export interface HttpChannel extends WaitReport {
+export interface HttpChannel {
   url: string | URL;
-  peer?: string;
   fetch?: typeof fetch;
 }
 
@@ -81,14 +58,7 @@ export async function ask(
   request?: unknown,
   net: SocketOpener = { createConnection },
 ): Promise<unknown> {
-  const report = waitCommandReporter(channel);
-  if ('url' in channel) {
-    const init = request as RequestInit | undefined;
-    const peer = channel.peer ?? new URL(channel.url).host;
-    report?.(`waiting for ${peer} (${init?.method ?? 'GET'} ${new URL(channel.url).pathname})`);
-    return (channel.fetch ?? fetch)(channel.url, init);
-  }
-  report?.(`waiting for ${channel.peer}`);
+  if ('url' in channel) return (channel.fetch ?? fetch)(channel.url, request as RequestInit);
   const framing = channel.framing ?? 'line';
   return new Promise((resolve, reject) => {
     const socket: Socket = net.createConnection(
@@ -156,8 +126,8 @@ export async function ask(
   });
 }
 
-export interface OwnedCommand extends WaitReport {
-  /** Names the child in progress lines and errors. */
+export interface OwnedCommand {
+  /** Names the child in errors. */
   step: string;
   file: string;
   args: readonly string[];
@@ -177,6 +147,8 @@ export interface OwnedCommand extends WaitReport {
   onSpawn?: (child: ChildProcess) => void;
   /** Called for each output line as it arrives. By default stdout and stderr lines stream to the terminal. */
   onLine?: (line: string, stream: 'stdout' | 'stderr') => void;
+  /** Capture the child's output without echoing it to stderr by default. */
+  machineRead?: boolean;
   /** A terminal program: inherits stdio and stays in the terminal's process group. */
   interactive?: boolean;
   /**
@@ -248,18 +220,16 @@ export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promi
       process.prependOnceListener(name, onSignal);
     }
   }
-  const report = waitCommandReporter(command);
   const onLine =
     command.onLine ??
     ((line: string) => {
-      if (report) process.stderr.write(`${line}\n`);
+      if (!command.machineRead) process.stderr.write(`${line}\n`);
     });
   return new Promise((resolve, reject) => {
     if (command.signal?.aborted) {
       reject(new Error(`${command.step}: cancelled before start`));
       return;
     }
-    report?.(`waiting for ${command.step}`);
     const leader = !command.interactive && command.group !== 'caller';
     const env = { ...(command.env ?? process.env) };
     if (command.ownerLink) env.BEELINE_OWNER_LINK = '1';
@@ -743,11 +713,9 @@ export function ownedCommandModule(): string {
   const source = `import { spawn } from 'node:child_process';
 import { watch } from 'node:fs';
 import { createConnection } from 'node:net';
-const waitSay = line => process.stderr.write('[beeline] ' + line + '\\n');
 const __name = fn => fn;
-let waitMachineReadOutput = false, waitOwnerHooks = false;
+let waitOwnerHooks = false;
 const waitOwnedChildren = new Set(), waitGroupLeaders = new WeakSet(), waitLinkedWorkers = new WeakSet(), waitSharedSignals = new WeakSet();
-${waitCommandReporter.toString()}
 ${waitKillGroup.toString()}
 ${waitLatched.toString()}
 const PeerRefusal = ${PeerRefusal.toString()};

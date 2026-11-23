@@ -555,7 +555,6 @@ export class CursorAcpServer {
       env: this.env,
       group: 'caller',
       captureOutput: false,
-      machineRead: true,
       onSpawn: (child) => {
         session.child = child;
         child.once('error', (error) => {

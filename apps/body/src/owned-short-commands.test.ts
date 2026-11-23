@@ -121,8 +121,8 @@ it('asks an HTTP peer and a socket peer through the standalone module of a bundl
         (await bundledWait()) +
           `
       const { ask: askStandalone } = await import(ownedCommandModule());
-      const response = await askStandalone({ url: 'http://127.0.0.1:${port}/probe', machineRead: true }, { method: 'POST' });
-      const refusal = await askStandalone({ socket: ${JSON.stringify(socketPath)}, peer: 'fixture peer', machineRead: true }, {}).catch(error => error);
+      const response = await askStandalone({ url: 'http://127.0.0.1:${port}/probe' }, { method: 'POST' });
+      const refusal = await askStandalone({ socket: ${JSON.stringify(socketPath)}, peer: 'fixture peer' }, {}).catch(error => error);
       console.log(JSON.stringify({ status: response.status, text: await response.text(), refusal: refusal.constructor.name + ': ' + refusal.message }));`,
       ],
       machineRead: true,

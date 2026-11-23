@@ -82,7 +82,7 @@ import {
   recordHookSession,
 } from './store.js';
 import { tryWithKernelLock } from '../kernel-lock.js';
-import { answer, ask, launchDetached, runOwnedFile, setMachineReadOutput } from '../wait.js';
+import { answer, ask, launchDetached, runOwnedFile } from '../wait.js';
 
 interface Pending {
   server: string;
@@ -275,8 +275,6 @@ function serverUrl(args: string[], env: NodeJS.ProcessEnv): string {
 }
 
 async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
-  // A person reads join's output: its waits name their peer.
-  setMachineReadOutput(false);
   const host = flag(args, '--host');
   if (host) {
     if (!isAgentId(host)) throw new Error('Unknown join host');
@@ -657,10 +655,6 @@ const VALUED = [
 async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   const [sub, ...rest] = args;
   const dir = stateDir(env);
-  // The one place session commands choose: these outputs are parsed by the host app or agent.
-  setMachineReadOutput(
-    ['hook', 'reply', 'read', 'tool', 'status', 'mcp', 'claude-mcp'].includes(sub ?? ''),
-  );
   if (sub === 'bridge') return runBridge(dir, runner(dir, env));
   if (sub === 'finish-join') return finishJoin(rest[0] ?? '', env);
   if (sub === 'mcp') return runZcodeMcp(dir);
@@ -782,10 +776,7 @@ async function session(args: string[], env: NodeJS.ProcessEnv): Promise<void> {
   if (sub === 'leave') {
     const joined = own(rest, env);
     await ask(
-      {
-        url: `${joined.server}/mcp/oauth/revoke`,
-        peer: `${new URL(joined.server).host} to revoke this session`,
-      },
+      { url: `${joined.server}/mcp/oauth/revoke` },
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

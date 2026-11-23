@@ -63,15 +63,13 @@ export async function helperStorageReport(
         throw new Error('no existing daemon token; no exchange attempted');
       // Operator storage inspection must also work with the helper stopped.
       // Only these two lifecycle reads may use the existing token, never a claim.
-      // Each read names its host and step on stderr before it waits; Ctrl-C ends it.
       const operation = async <T>(
         name: 'getDaemonBootstrap' | 'listRoomCorners',
         operationInput: unknown,
-        about: string,
       ): Promise<T> => {
         const url = new URL(`/v1/daemon/operations/${name}`, runtime.transport!.baseUrl);
         const response = await ask(
-          { url, peer: `${url.host} for ${about}` },
+          { url },
           {
             method: 'POST',
             headers: {
@@ -102,7 +100,6 @@ export async function helperStorageReport(
       const bootstrap = await operation<DaemonBootstrapResult>(
         'getDaemonBootstrap',
         { agentId: runtime.agent.publicKey },
-        `agent ${agent.name.slice(0, 12)}`,
       );
       let agentStates: readonly StorageRoomState[] = bootstrap.storageRooms ?? [];
       if (!bootstrap.storageRooms) {
@@ -114,7 +111,6 @@ export async function helperStorageReport(
             const listed = await operation<CornerListResult>(
               'listRoomCorners',
               { roomId: room.roomId },
-              `room ${room.roomId}`,
             );
             for (const corner of listed.corners)
               if (typeof corner.archived === 'boolean')
