@@ -100,6 +100,18 @@ runs:
         ROLLBACK_SERVER_IMAGE: ${{ inputs.rollback_server_image_ref }}
         BEELINE_ACTION_VALUE_0: ${{ steps.fleet.outputs.image_ref }}
 
+    - name: Require a committed reply from the candidate free agent
+      id: candidate_reply
+      if: env.BEELINE_LOCAL_RELEASE == 'true'
+      shell: bash
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" candidate_reply
+      env:
+        IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
+        FREE_AGENT_IMAGE_TOKEN: ${{ inputs.free_agent_image_token }}
+        SERVER_IMAGE_REF: ${{ steps.fleet.outputs.image_ref }}
+        RELEASE_SHA: ${{ inputs.release_sha }}
+        RELEASE_VERSION: ${{ inputs.release_version }}
+
     - name: Run schema migrations and backfills once before Machine updates
       id: migrate
       if: steps.fleet.outputs.shipped != 'true'
@@ -136,6 +148,7 @@ runs:
         bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step13
 
     - name: Require a real free-agent reply in the review proof Workspace
+      if: env.BEELINE_LOCAL_RELEASE != 'true'
       shell: bash
       run: |-
         bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" free_agent_reply

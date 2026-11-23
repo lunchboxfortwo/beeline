@@ -421,6 +421,8 @@ jobs:
         run: |
           shipped=false
           if manifest=$(curl -fsSL --max-time 15 "$MANIFEST_URL"); then
+            mkdir -p "$RUNNER_TEMP/helper-linux"
+            printf '%s' "$manifest" > "$RUNNER_TEMP/helper-linux/served-manifest.json"
             shipped=$(printf '%s' "$manifest" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);process.stdout.write(String(m.version===process.env.RELEASE_VERSION&&m.sourceCommit===process.env.RELEASE_SHA))})' || echo false)
           fi
           echo "shipped=$shipped" | tee -a "$GITHUB_OUTPUT"
@@ -635,17 +637,6 @@ jobs:
           npm run build -w @beeline/nostr
           npm run build -w @beeline/api-contract
           npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
-      - uses: ./.github/actions/daemon-leg
-        if: needs.helper_linux.outputs.shipped != 'true'
-        env:
-          CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        with:
-          phase: promote
-          channel: ${{ needs.initialize.outputs.channel }}
-          release_sha: ${{ needs.initialize.outputs.release_sha }}
-          release_version: ${{ needs.initialize.outputs.release_version }}
-          manifest_url: ${{ needs.initialize.outputs.channel == 'next' && 'https://usebeeline.app/dl/next/manifest.json' || 'https://usebeeline.app/dl/manifest.json' }}
       - name: Pack and smoke the exact helper CLI package
         id: helper_package
         timeout-minutes: 5
@@ -660,6 +651,16 @@ jobs:
           tarball="$package_dir/usebeeline-${RELEASE_VERSION#v}.tgz"
           node packages/scripts/smoke-helper-package.mjs "$tarball" "${RELEASE_VERSION#v}"
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/daemon-leg
+        env:
+          CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        with:
+          phase: ${{ needs.helper_linux.outputs.shipped == 'true' && 'prove' || 'promote' }}
+          channel: ${{ needs.initialize.outputs.channel }}
+          release_sha: ${{ needs.initialize.outputs.release_sha }}
+          release_version: ${{ needs.initialize.outputs.release_version }}
+          manifest_url: ${{ needs.initialize.outputs.channel == 'next' && 'https://usebeeline.app/dl/next/manifest.json' || 'https://usebeeline.app/dl/manifest.json' }}
       - name: Publish the exact helper CLI package
         # npm accepts usebeeline only through trusted publishing (OIDC) from
         # this workflow on GitHub Actions. A local release attaches its exact
@@ -676,7 +677,8 @@ jobs:
           set -euo pipefail
           if [ "${BEELINE_LOCAL_RELEASE:-}" = true ]; then
             . packages/scripts/gh-release-retry.sh
-            ghr_upload_verified "$RELEASE_VERSION" "$HELPER_TARBALL"
+            sha256sum "$HELPER_TARBALL" | cut -d' ' -f1 > "$HELPER_TARBALL.sha256"
+            ghr_upload_verified "$RELEASE_VERSION" "$HELPER_TARBALL" "$HELPER_TARBALL.sha256"
             dispatched=$(gh workflow run unified-release.yml -R "$GITHUB_REPOSITORY" --ref main -f selection=npm-publish \
               -f channel="$CHANNEL" -f release_version="$RELEASE_VERSION" -f dispatched_by="$DISPATCHED_BY")
             run_url=$(grep -Eo 'https://github\.com/[^ ]+/actions/runs/[0-9]+' <<< "$dispatched" | tail -n 1 || true)
@@ -688,7 +690,11 @@ jobs:
           npm install --global npm@^11.15.0
           publish_args=(--no-provenance)
           if [ "$CHANNEL" = next ]; then publish_args+=(--tag next); fi
-          npm view "usebeeline@${RELEASE_VERSION#v}" version >/dev/null 2>&1 || npm publish "${publish_args[@]}" "$HELPER_TARBALL"
+          if integrity=$(npm view "usebeeline@${RELEASE_VERSION#v}" dist.integrity); then
+            test -n "$integrity" && test "$integrity" = "sha512-$(openssl dgst -sha512 -binary "$HELPER_TARBALL" | openssl base64 -A)"
+          else
+            npm publish "${publish_args[@]}" "$HELPER_TARBALL"
+          fi
   npm_publish:
     # Publish-only path (selection=npm-publish) that a local release's helper
     # leg dispatches: npm's trusted publisher for usebeeline is this workflow.
@@ -711,12 +717,18 @@ jobs:
         run: |
           set -euo pipefail
           tarball="$RUNNER_TEMP/usebeeline-${RELEASE_VERSION#v}.tgz"
-          gh release download "$RELEASE_VERSION" -R "$GITHUB_REPOSITORY" --pattern "${tarball##*/}" --dir "$RUNNER_TEMP"
-          sha256sum "$tarball"
+          gh release download "$RELEASE_VERSION" -R "$GITHUB_REPOSITORY" --pattern "${tarball##*/}" --pattern "${tarball##*/}.sha256" --dir "$RUNNER_TEMP"
+          if [ -f "$tarball.sha256" ]; then
+            printf '%s  %s\n' "$(cat "$tarball.sha256")" "$tarball" | sha256sum --check
+          fi
           npm install --global npm@^11.15.0
           publish_args=(--no-provenance)
           if [ "$CHANNEL" = next ]; then publish_args+=(--tag next); fi
-          npm view "usebeeline@${RELEASE_VERSION#v}" version >/dev/null 2>&1 || npm publish "${publish_args[@]}" "$tarball"
+          if integrity=$(npm view "usebeeline@${RELEASE_VERSION#v}" dist.integrity); then
+            test -n "$integrity" && test "$integrity" = "sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          else
+            npm publish "${publish_args[@]}" "$tarball"
+          fi
   release_proof:
     needs: [initialize, release_validation]
     if: needs.release_validation.result == 'success' && needs.initialize.outputs.run_mobile_ota == 'true' && inputs.run_release_proof == true
@@ -1345,7 +1357,7 @@ jobs:
           soft_limit_seconds=$(node -e 'process.stdout.write(String(require(process.argv[1]).softLimitSeconds))' "$RUNNER_TEMP/release-classification.json")
           if [ -n "$failure_class" ]; then
             node packages/scripts/unified-release.mjs finalize --state "$state" --outcome failure --failure-class "$failure_class"
-            if [ -n "${DELIVERY_REPORT:-}" ]; then node packages/scripts/release-delivery.mjs record "$state"; fi
+            if [ -n "${DELIVERY_REPORT:-}" ] || [ "${BEELINE_LOCAL_RELEASE:-}" = true ]; then node packages/scripts/release-delivery.mjs record "$state"; fi
             {
               echo "outcome=failure"
               echo "failure_class=$failure_class"
@@ -1412,6 +1424,7 @@ jobs:
         if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true'
         env:
           NEEDS: ${{ toJSON(needs) }}
+          TRIGGER_EPOCH: ${{ needs.initialize.outputs.trigger_epoch }}
           RELEASE_PROOF_UNPROVEN: ${{ needs.initialize.outputs.run_mobile_ota == 'true' && inputs.run_release_proof != true }}
         run: |
           state="$RUNNER_TEMP/release/release.json"
@@ -1480,7 +1493,7 @@ jobs:
           fi
           [ ! -f "$previous" ] || ghr_upload_verified "$RELEASE_VERSION" "$previous"
           [ "${#assets[@]}" -eq 0 ] || ghr_upload_verified "$RELEASE_VERSION" "${assets[@]}"
-          # A local release keeps its full-check results beside its record.
+          # A local release keeps its quick-check results beside its record.
           checks="$RUNNER_TEMP/release/release-checks.json"
           [ ! -f "$checks" ] || ghr_upload_verified "$RELEASE_VERSION" "$checks"
           # Per-job check evidence is useful, not required: a failed upload is logged.

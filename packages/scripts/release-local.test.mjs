@@ -7,10 +7,10 @@ import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
-import { attribution, dryInitializeJob, dryRun, loadEnvironment, localHooks, missingReleaseCredentials, parseArguments, releaseChecks, remoteJob } from './release-local.mjs';
+import { attribution, dryInitializeJob, dryRun, localHooks, missingReleaseCredentials, parseArguments, releaseChecks, remoteJob } from './release-local.mjs';
 import { setupJava } from './release-local-java.mjs';
 import { condition, evaluate, readCommandFile, render } from './release-local-expressions.mjs';
-import { Processes } from './release-local-process.mjs';
+import { loadEnvironment, Processes } from './release-local-process.mjs';
 import { mergeBeelineBundles } from './merge-beeline-bundles.mjs';
 import { validateBundleDirectory } from './pages-site.mjs';
 import { initializeRelease, planOutputs, restoreReleasePlan } from './unified-release.mjs';
@@ -18,7 +18,7 @@ import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { promptAudit, acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
+import { acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -38,15 +38,6 @@ test('execution is explicit and requires immutable identity and complete attribu
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
 });
-test('prompt audit is advisory and writes beside nightly checks', () => {
-  const commands = [];
-  promptAudit('/source', '/state/prompt-audit', (command, args, options) => {
-    commands.push([command, ...args, options.cwd]);
-    if (args[0] === 'run' && args[1] === 'prompt-audit') throw new Error('promptdoctor unavailable');
-  });
-  assert.deepEqual(commands, [['npx', 'turbo', 'run', 'build', '--filter=@beeline/body', '--filter=@beeline/server', '/source'],
-    ['npm', 'run', 'prompt-audit', '--', '--out', '/state/prompt-audit', '/source']]);
-});
 test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {
   const config = 'ios: {\n runtimeVersion: runtimeVersionOverride || "41",\n},\nandroid: {\n runtimeVersion: runtimeVersionOverride || "53",\n}';
   const pins = pinnedRuntimes(config);
@@ -56,7 +47,7 @@ test('a store release is needed only when a pinned runtime is not the newest liv
   assert.equal(storeReleaseNeeded(pins, live('49', '41')), true);
   assert.equal(storeReleaseNeeded(pins, { ...live('53', '41'), ios: { status: 'unavailable' } }), true);
 });
-test('release lock clears only a dead owner and spans both channel runs', async () => {
+test('release lock clears only a dead owner', async () => {
   const directory = temporary(), lock = join(directory, 'release.lock');
   try {
     mkdirSync(lock);
@@ -69,7 +60,7 @@ test('release lock clears only a dead owner and spans both channel runs', async 
     assert.throws(() => readFileSync(join(lock, 'owner')), /ENOENT/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('release source refreshes main and sees the rc tag created before promotion', async () => {
+test('release source refreshes main and pins the published next even after main advances', async () => {
   const directory = temporary();
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
   try {
@@ -91,12 +82,16 @@ test('release source refreshes main and sees the rc tag created before promotion
     assert.equal(readFileSync(join(prepared.source, 'source'), 'utf8'), 'current main');
     assert.equal(git(operator, 'rev-parse', 'HEAD'), old);
     git(upstream, 'tag', 'v0.1.2-rc.1');
-    assert.throws(() => git(prepared.source, 'rev-parse', '--verify', 'refs/tags/v0.1.2-rc.1'));
-    const hook = localHooks(state, new Processes({}, () => {}));
-    await hook.step({ step: { id: 'identity', run: 'node packages/scripts/release-record.mjs identity' },
-      context: { github: { job: 'initialize' }, inputs: { channel: 'latest' } },
-      env: { ...process.env, GITHUB_WORKSPACE: prepared.source } });
-    assert.equal(git(prepared.source, 'rev-parse', 'refs/tags/v0.1.2-rc.1'), current);
+    const advanced = commit('advanced main');
+    const promotionState = join(directory, 'promotion');
+    mkdirSync(promotionState);
+    const promotion = prepareReleaseSource(operator, promotionState, execFileSync, source => ({
+      sourceSha: git(source, 'rev-parse', 'refs/tags/v0.1.2-rc.1'), version: 'v0.1.2',
+    }));
+    assert.equal(promotion.sha, current);
+    assert.equal(promotion.version, 'v0.1.2');
+    assert.equal(git(promotion.source, 'rev-parse', 'HEAD'), current);
+    assert.equal(git(promotion.source, 'rev-parse', 'origin/main'), advanced);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('OTA branch inventory paginates so orphaned high rc numbers are reserved', async () => {
@@ -114,10 +109,12 @@ test('local preflight requires user GitHub authority instead of App credentials'
   assert.equal(missing.includes('BEELINE_GITHUB_APP_ID'), false);
   assert.equal(missing.includes('BEELINE_GITHUB_APP_PRIVATE_KEY'), false);
   assert.equal(missing.includes('GITHUB_TOKEN or GH_TOKEN'), true);
-  const latest = missingReleaseCredentials({ channel: 'latest' }, {});
+  const latest = missingReleaseCredentials({}, {}, { channel: 'latest', run_website: 'true' });
   assert.equal(latest.includes('CLOUDFLARE_PAGES_TOKEN'), true);
   assert.equal(latest.includes('CLOUDFLARE_ACCOUNT_ID'), true);
   assert.equal(missing.includes('CLOUDFLARE_PAGES_TOKEN'), false);
+  const next = missingReleaseCredentials({}, { SERVER_CANARY_PHONE_TOKEN: 'legacy-token' }, { run_server: 'true' });
+  assert.ok(next.includes('SERVER_CANARY_REVIEW_SECRET') && next.includes('BEELINE_FREE_AGENT_MODEL_KEY'));
   const policy = localHooks(tmpdir(), new Processes({}, () => {}));
   await assert.rejects(policy.step({ step: { id: 'app_token' }, context: { github: { job: 'initialize' } }, result: { outputs: {} } }), /requires GITHUB_TOKEN or GH_TOKEN/);
 });
@@ -230,11 +227,13 @@ test('Play credentials are optional for OTA and required only for selected nativ
   assert.equal(missingReleaseCredentials(args, {}, { run_mobile_native: 'true', native_android: 'false' }).includes('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'), false);
   assert.equal(missingReleaseCredentials(args, {}, { run_mobile_native: 'true', native_android: 'true' }).includes('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON'), true);
   const policy = localHooks(tmpdir(), new Processes({}, () => {}));
-  const context = { secrets: {} }, step = { name: 'Produce the inspectable release plan' };
-  await policy.afterStep({ step, context, result: { outputs: { run_mobile_native: 'false', native_android: 'true' } } });
-  await assert.rejects(policy.afterStep({ step, context, result: { outputs: { run_mobile_native: 'true', native_android: 'true' } } }), /GOOGLE_PLAY_SERVICE_ACCOUNT_JSON/);
+  const context = { github: { job: 'initialize' }, inputs: { dispatched_by: '{}' },
+    secrets: Object.fromEntries(['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8', 'GITHUB_TOKEN'].map(key => [key, 'fixture'])) };
+  const engine = { variables: {} }, step = { id: 'plan', name: 'Produce the inspectable release plan' };
+  await policy.afterStep({ step, context, engine, result: { outputs: { run_mobile_native: 'false', native_android: 'true' } } });
+  await assert.rejects(policy.afterStep({ step, context, engine, result: { outputs: { run_mobile_native: 'true', native_android: 'true' } } }), /GOOGLE_PLAY_SERVICE_ACCOUNT_JSON/);
   context.secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = 'test-only-key';
-  await policy.afterStep({ step, context, result: { outputs: { run_mobile_native: 'true', native_android: 'true' } } });
+  await policy.afterStep({ step, context, engine, result: { outputs: { run_mobile_native: 'true', native_android: 'true' } } });
 });
 test('Node selection honors an installed compatible repository pin through fnm', async () => {
   const directory = temporary(), calls = [];
@@ -306,10 +305,10 @@ test('secret input is private data outside the checkout, never shell execution',
   const directory = temporary(), env = join(directory, 'release.env');
   try {
     writeFileSync(env, 'TOKEN=$(touch never-executed)\nPRIVATE_KEY="line1\\nline2"\n', { mode: 0o600 });
-    assert.deepEqual(loadEnvironment(env), { TOKEN: '$(touch never-executed)', PRIVATE_KEY: 'line1\nline2' });
+    assert.deepEqual(loadEnvironment(env, repository), { TOKEN: '$(touch never-executed)', PRIVATE_KEY: 'line1\nline2' });
     assert.throws(() => loadEnvironment(env, directory), /outside/);
     chmodSync(env, 0o644);
-    assert.throws(() => loadEnvironment(env), /mode 600/);
+    assert.throws(() => loadEnvironment(env, repository), /mode 600/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('setup-java selects a matching JDK outside PATH despite a JAVA_TOOL_OPTIONS notice', async () => {
@@ -368,29 +367,6 @@ fs.writeFileSync(process.env.GITHUB_OUTPUT, 'version=21.0.1\\n');`);
       assert.equal(call.env['INPUT_JAVA-PACKAGE'], 'jdk');
       assert.equal(call.env.RUNNER_TOOL_CACHE, join(directory, 'tool-cache'));
     }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-test('nightly dispatch is unavailable locally without a network attempt or failing dependent jobs', async () => {
-  const directory = temporary(), messages = [];
-  try {
-    const original = parse(readFileSync(join(repository, '.github/workflows/unified-release.yml'), 'utf8')).jobs.nightly_checks;
-    writeFileSync(join(directory, 'workflow.yml'), JSON.stringify({ jobs: {
-      nightly_checks: { ...original, needs: [], if: true },
-      following: { needs: 'nightly_checks', steps: [{ run: 'true' }] },
-    } }));
-    const processes = new Processes({}, line => messages.push(line));
-    const engine = new LocalActions({ root: directory, directory: join(directory, 'state'), secrets: {}, processes, hooks: localHooks(directory, processes) });
-    const results = await engine.workflow('workflow.yml', { channel: 'next' }, { github: { sha, repository: 'owner/repo' } });
-    assert.equal(results.nightly_checks.result, 'success');
-    assert.equal(results.following.result, 'success');
-    assert.match(messages.join('\n'), /dispatch is not available/);
-    assert.match(readFileSync(join(directory, 'state/jobs/nightly_checks-local/summary.md'), 'utf8'), /GitHub Actions unavailable/);
-    const hosted = new LocalActions({ root: directory, directory, secrets: {}, processes });
-    let intercepted = false;
-    processes.run = async () => { intercepted = true; throw new Error('hosted dispatch still runs'); };
-    const hostedResults = await hosted.workflow('workflow.yml', {}, { github: { sha } });
-    assert.equal(intercepted, true);
-    assert.equal(hostedResults.nightly_checks.result, 'failure');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('checks-only execution uses the complete reusable release gate without initialization or delivery', async () => {

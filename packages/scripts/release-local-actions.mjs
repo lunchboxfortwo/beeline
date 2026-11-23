@@ -40,7 +40,6 @@ export class LocalActions {
     this.artifacts = new Map();
     this.records = new Map();
     this.counter = 0;
-    this.verdictWaitMs = 0;
     this.cancelled = false;
     this.abortController = new AbortController();
     // Do not leak the operator's production environment into test jobs.
@@ -255,9 +254,8 @@ export class LocalActions {
       };
       if (process.platform === 'win32') for (const key of ['GITHUB_OUTPUT', 'GITHUB_ENV', 'GITHUB_PATH']) env[key] = env[key].replaceAll('\\', '/');
       for (const path of [env.GITHUB_OUTPUT, env.GITHUB_ENV, env.GITHUB_PATH]) privateWrite(path, '');
-      // Time spent waiting for the full-checks verdict does not count against job deadlines.
-      const timeout = Math.min((step['timeout-minutes'] ?? 60) * 60_000, context.deadline + this.verdictWaitMs - Date.now());
-      const stepName = step.name ?? step.uses ?? id, startedAt = Date.now(), waitedBefore = this.verdictWaitMs;
+      const timeout = Math.min((step['timeout-minutes'] ?? 60) * 60_000, context.deadline - Date.now());
+      const stepName = step.name ?? step.uses ?? id, startedAt = Date.now();
       this.processes.log(`  ${stepName}`);
       try {
         if (timeout <= 0) throw new Error('Job deadline exceeded');
@@ -285,7 +283,7 @@ export class LocalActions {
         context.steps[id] = result;
         if (previousStatus === 'failure') context.job.status = 'failure';
         context.job.timings?.push({ name: stepName, started_at: new Date(startedAt).toISOString(),
-          seconds: Math.round((Date.now() - startedAt - (this.verdictWaitMs - waitedBefore)) / 100) / 10, outcome: result.outcome });
+          seconds: Math.round((Date.now() - startedAt) / 100) / 10, outcome: result.outcome });
       }
     }
   }

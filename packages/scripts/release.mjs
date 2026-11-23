@@ -1,23 +1,30 @@
 #!/usr/bin/env node
-// One operator command: current main -> next -> latest. Nothing dispatches CI.
+// Deliver current main to next, or promote the published next on owner command.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { promotionSource } from './release-channel.mjs';
+import { loadEnvironment } from './release-local-process.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 export function releaseArguments(argv) {
   const options = {};
+  const usage = 'Usage: node packages/scripts/release.mjs [--promote --dispatched-by <JSON> [--store-track production]] [--no-store] [--skip-full-checks <owner message id>] [--desktop-mode build|carry] [--mac-helpers build|carry]';
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--skip-full-checks' && argv[i + 1]?.trim() && !argv[i + 1].startsWith('--')) options.skipFullChecks = argv[++i].trim();
+    else if (argv[i] === '--promote') options.promote = true;
+    else if (argv[i] === '--store-track' && argv[i + 1] === 'production') { options.store = true; i++; }
     else if (argv[i] === '--no-store') options.noStore = true;
     else if (argv[i] === '--desktop-mode' && ['build', 'carry'].includes(argv[i + 1])) options.desktopMode = argv[++i];
     else if (argv[i] === '--mac-helpers' && ['build', 'carry'].includes(argv[i + 1])) options.macHelpers = argv[++i];
     else if (argv[i] === '--dispatched-by' && i + 1 < argv.length) options.dispatchedBy = JSON.parse(argv[++i]);
-    else throw new Error('Usage: node packages/scripts/release.mjs [--no-store] [--skip-full-checks <owner message id>] [--desktop-mode build|carry] [--mac-helpers build|carry] [--dispatched-by <JSON>]');
+    else throw new Error(usage);
   }
+  if ((options.promote && (!options.dispatchedBy || options.skipFullChecks)) ||
+      (options.store && (!options.promote || options.noStore))) throw new Error(usage);
   return options;
 }
 
@@ -53,17 +60,19 @@ export function acquireReleaseLock(lock, directory, { alive = pid => {
   return () => rmSync(lock, { recursive: true });
 }
 
-export function prepareReleaseSource(repository, directory, run = execFileSync) {
+export function prepareReleaseSource(repository, directory, run = execFileSync, selectPromotion) {
   const git = (args, cwd = repository) => run('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const source = join(directory, 'source');
   const origin = git(['remote', 'get-url', 'origin']);
   git(['clone', '--quiet', '--no-checkout', '--no-hardlinks', repository, source]);
   git(['remote', 'set-url', 'origin', origin], source);
   git(['fetch', '--tags', 'origin'], source);
-  const sha = git(['rev-parse', 'refs/remotes/origin/main'], source);
+  const promotion = selectPromotion?.(source);
+  const sha = promotion?.sourceSha ?? git(['rev-parse', 'refs/remotes/origin/main'], source);
+  git(['merge-base', '--is-ancestor', sha, 'refs/remotes/origin/main'], source);
   git(['checkout', '--quiet', '--detach', sha], source);
   git(['branch', '--force', 'main', sha], source);
-  return { source, sha };
+  return { source, sha, version: promotion?.version };
 }
 
 export async function readOtaVersions(env, fetchImpl = fetch) {
@@ -82,51 +91,24 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
   }
 }
 
-// Next is the OTA beta only; store binaries go to production, with latest.
-// The release list is empty during the outage, so each leg finds the previous
-// release through git tags. Latest must see the tag Next just created.
-const fetchTags = source => execFileSync('git', ['fetch', '--tags', 'origin'], { cwd: source, stdio: 'ignore' });
-
-// Advisory: the rendered prompts and findings land with the nightly results and never fail the run.
-export function promptAudit(source, out, run = execFileSync) {
-  try {
-    run('npx', ['turbo', 'run', 'build', '--filter=@beeline/body', '--filter=@beeline/server'], { cwd: source, stdio: 'inherit' });
-    run('npm', ['run', 'prompt-audit', '--', '--out', out], { cwd: source, stdio: 'inherit' });
-  } catch (error) { console.warn(`Prompt audit did not complete: ${error.message}`); }
+function readPromotion(source, directory, secrets) {
+  const record = join(directory, 'next-release.json');
+  execFileSync(process.execPath, [join(root, 'packages/scripts/release-record.mjs'), 'previous',
+    '--channel', 'next', '--rc-only', 'true', '--output', record], {
+    cwd: source, env: { ...process.env, GH_TOKEN: secrets.GITHUB_TOKEN || secrets.GH_TOKEN,
+      GITHUB_REPOSITORY: 'lunchboxfortwo/beeline', BEELINE_LOCAL_RELEASE: 'true' }, stdio: 'inherit',
+  });
+  return promotionSource(JSON.parse(readFileSync(record, 'utf8')));
 }
 
-export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode = 'build', macHelpers = 'build', skipFullChecks }, runLocalRelease, refreshTags = fetchTags, audit = promptAudit) {
-  const checks = { sourceSha: sha, result: skipFullChecks ? 'skipped' : 'running',
-    ...(skipFullChecks ? { ownerMessageId: skipFullChecks } : { resultsPath: join(directory, 'full-checks', 'release-checks.json') }) };
-  const checksGate = skipFullChecks ? Promise.resolve() : Promise.resolve().then(async () => {
-    audit(source, join(directory, 'prompt-audit'));
-    const startedAt = Date.now();
-    try {
-      await runLocalRelease({ mode: 'execute', leg: 'release_checks', channel: 'latest',
-        'release-sha': sha, 'state-dir': join(directory, 'full-checks'),
-      }, { repository: source, secrets });
-      checks.result = 'success';
-    } catch (error) { checks.result = 'failure'; throw error; }
-    finally {
-      checks.wallSeconds = (Date.now() - startedAt) / 1000;
-      checks.completedAt = new Date().toISOString();
-    }
-  });
-  const delivery = (async () => {
-    for (const channel of ['next', 'latest']) {
-      if (channel === 'latest') refreshTags(source);
-      await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha,
-        'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
-        'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
-        'desktop-mode': desktopMode, 'mac-helpers': macHelpers, checks,
-      }, { repository: source, secrets, checksGate });
-      await checksGate;
-    }
-  })();
-  // Keep the release lock and private sources until both siblings have stopped,
-  // including a build or suite still running when the other sibling fails.
-  const results = await Promise.allSettled([checksGate, delivery]);
-  for (const result of results) if (result.status === 'rejected') throw result.reason;
+export async function releaseSequence({ source, sha, version, directory, secrets, dispatchedBy, otaVersions, store,
+  desktopMode = 'build', macHelpers = 'build', skipFullChecks }, runLocalRelease) {
+  const channel = version ? 'latest' : 'next';
+  await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha, 'release-version': version,
+    'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
+    'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
+    'desktop-mode': desktopMode, 'mac-helpers': macHelpers, skipFullChecks,
+  }, { repository: source, secrets });
 }
 
 // A finished release keeps only what it published (release.json,
@@ -167,23 +149,25 @@ async function main(argv) {
   const unlock = acquireReleaseLock(join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`), directory);
   let sha;
   try {
-    const prepared = prepareReleaseSource(root, directory), source = prepared.source;
+    const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), root);
+    const prepared = prepareReleaseSource(root, directory, execFileSync,
+      options.promote ? source => readPromotion(source, directory, secrets) : undefined);
+    const { source, version } = prepared;
     sha = prepared.sha;
     execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: source, stdio: 'inherit' });
-    const { loadEnvironment, attribution, runLocalRelease } = await import(pathToFileURL(join(source, 'packages/scripts/release-local.mjs')));
-    const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), source);
+    const { attribution, runLocalRelease } = await import(pathToFileURL(join(source, 'packages/scripts/release-local.mjs')));
     const dispatchedBy = attribution(JSON.stringify(options.dispatchedBy ?? localAttribution()));
     const otaVersions = await readOtaVersions(secrets);
     let store = false;
-    if (!options.noStore) {
+    if (options.store) {
       const { readStores } = await import(pathToFileURL(join(source, 'packages/scripts/read-store-runtimes.mjs')));
       const { easBuildInventory } = await import(pathToFileURL(join(source, 'packages/scripts/store-build-runtime.mjs')));
       const stores = await readStores({ builds: await easBuildInventory(secrets).catch(() => []), env: secrets });
       store = storeReleaseNeeded(pinnedRuntimes(readFileSync(join(source, 'apps/mobile/app.config.js'), 'utf8')), stores);
     }
     console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
-    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers, skipFullChecks: options.skipFullChecks }, runLocalRelease);
-    console.log(`Released ${sha} to next and latest${store ? ' with production store builds' : ''}.`);
+    await releaseSequence({ source, sha, version, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers, skipFullChecks: options.skipFullChecks }, runLocalRelease);
+    console.log(`Released ${sha} to ${version ? 'latest' : 'next'}${store ? ' with production store builds' : ''}.`);
   } finally {
     // Cleanup never changes the release outcome, whether it succeeded or failed.
     if (sha) try { removeStaleReleaseImages(sha); } catch { /* Docker unavailable */ }

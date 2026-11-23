@@ -5,19 +5,19 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { localHooks } from './release-local.mjs';
 
-test('published local release records include full-check evidence and honest Mac verification', async t => {
+test('published local release records include quick-check evidence and honest Mac verification', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'release-record-checks-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   mkdirSync(join(directory, 'release'));
   const path = join(directory, 'release/release.json');
   const results = join(directory, 'release-checks.json');
   writeFileSync(results, '{"typecheck":{"result":"success"}}\n');
-  const records = JSON.stringify([{ id: 'server-local', conclusion: 'success', steps: [
-    { name: 'Build the exact Fly image', seconds: 201.4, started_at: '2026-11-21T03:20:00.000Z', outcome: 'success' },
-    { name: 'Wait for the full-checks verdict', seconds: 1300, started_at: '2026-11-21T03:24:00.000Z', outcome: 'success' }] }]);
+  const checked = { id: 'release_checks/typecheck-local', conclusion: 'success', steps: [] };
+  const records = JSON.stringify([checked, { id: 'server-local', conclusion: 'success', steps: [
+    { name: 'Build the exact Fly image', seconds: 201.4, started_at: '2026-11-21T03:20:00.000Z', outcome: 'success' }] }]);
   writeFileSync(join(directory, 'records.json'), records);
   writeFileSync(join(directory, 'release-checks-timing.json'), '{"wallSeconds":2442.5}');
-  const checks = { sourceSha: 'a'.repeat(40), result: 'success', resultsPath: results,
+  const checks = { profile: 'quick', sourceSha: 'a'.repeat(40), result: 'success', resultsPath: results,
     wallSeconds: 2442.5, completedAt: '2026-11-21T03:56:45.000Z' };
   const triggerEpoch = Date.parse('2026-11-21T03:16:07Z') / 1000;
   const checkedEpoch = Date.parse(checks.completedAt) / 1000, completedAt = checkedEpoch + 834;
@@ -36,10 +36,10 @@ test('published local release records include full-check evidence and honest Mac
   assert.equal(checks.resultsPath, results);
   const copied = readFileSync(join(directory, 'release/release-checks.json'), 'utf8');
   assert.equal(copied, readFileSync(results, 'utf8'));
-  assert.equal(readFileSync(join(directory, 'release/records.json'), 'utf8'), records);
+  assert.deepEqual(JSON.parse(readFileSync(join(directory, 'release/records.json'), 'utf8')), [checked]);
   assert.equal(readFileSync(join(directory, 'release/release-checks-timing.json'), 'utf8'), '{"wallSeconds":2442.5}');
   assert.deepEqual(record.delivery.live.profile, { server: [
-    { name: 'Build the exact Fly image', seconds: 201.4 }, { name: 'Wait for the full-checks verdict', seconds: 1300 }] });
+    { name: 'Build the exact Fly image', seconds: 201.4 }] });
   const { live } = record.delivery;
   assert.equal(live.checksSeconds, checkedEpoch - triggerEpoch);
   assert.equal(live.deploySeconds, 834);
@@ -53,9 +53,9 @@ test('check evidence holding a release secret or credential stays unpublished', 
   mkdirSync(join(directory, 'release'));
   const path = join(directory, 'release/release.json'), results = join(directory, 'release-checks.json');
   writeFileSync(results, '{}');
-  writeFileSync(join(directory, 'records.json'), '[{"id":"a","note":"fixture-release-secret"}]');
+  writeFileSync(join(directory, 'records.json'), '[{"id":"release_checks/fixture","note":"fixture-release-secret"}]');
   writeFileSync(join(directory, 'release-checks-timing.json'), `{"note":"gh${'p'}_${'a'.repeat(36)}"}`);
-  const checks = { sourceSha: 'a'.repeat(40), result: 'success', resultsPath: results };
+  const checks = { profile: 'quick', sourceSha: 'a'.repeat(40), result: 'success', resultsPath: results };
   writeFileSync(path, JSON.stringify({ version: 'v0.1.242-rc.1', components: {}, delivery: {} }));
   const logged = [];
   await localHooks(directory, { masks: new Set(['fixture-release-secret']), log: line => logged.push(line) }).afterStep({
@@ -90,9 +90,13 @@ test('finalization preserves carry age accumulated since the channel manifest la
   } }));
   writeFileSync(join(directory, 'jobs/helper-local/daemon-release/manifest.json'), JSON.stringify({ bundles: { 'darwin-arm64': carried(1) } }));
   const path = join(directory, 'release/release.json');
-  writeFileSync(path, JSON.stringify({ components: { helper: {}, website: {} }, delivery: {} }));
+  const sourceSha = 'a'.repeat(40), checks = { profile: 'quick', sourceSha, result: 'success', resultsPath: 'https://fixture/next/release-checks.json' };
+  writeFileSync(join(directory, 'next-release.json'), JSON.stringify({ sourceSha, checks }));
+  writeFileSync(path, JSON.stringify({ sourceSha, components: { helper: {}, website: {} }, delivery: {} }));
   await localHooks(directory, {}).afterStep({ step: { name: 'Finalize the release record' }, context: {
     runner: { temp: directory }, inputs: { channel: 'latest', dispatched_by: '{}' },
   }, engine: { variables: { macHelperMode: 'carry' } } });
-  assert.equal(JSON.parse(readFileSync(path, 'utf8')).components.helper.platforms['darwin-arm64'].carriedFrom.releases, 3);
+  const record = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(record.components.helper.platforms['darwin-arm64'].carriedFrom.releases, 3);
+  assert.deepEqual(record.checks, { ...checks, reusedFrom: 'next' });
 });

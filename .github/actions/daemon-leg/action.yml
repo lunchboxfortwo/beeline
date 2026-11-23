@@ -12,7 +12,7 @@ inputs:
   channel:
     default: latest
   phase:
-    description: collect | promote
+    description: collect | promote | prove
     required: true
   release_sha:
     required: true
@@ -57,11 +57,12 @@ runs:
           const { run } = await import(`${process.env.GITHUB_WORKSPACE}/packages/scripts/release-steps/daemon-leg-step1.mjs`);
           await run({ github, core, context });
     - name: Prove a real helper update through the download route
-      if: inputs.phase == 'promote'
+      if: inputs.phase == 'promote' || inputs.phase == 'prove'
       shell: bash
       env:
         MANIFEST_URL: ${{ inputs.manifest_url }}
-        BEELINE_ACTION_VALUE_0: ${{ runner.temp }}
+        EXPECTED_MANIFEST: ${{ format('{0}/daemon-release/manifest.json', runner.temp) }}
+        SERVED_MANIFEST: ${{ inputs.phase == 'prove' && format('{0}/helper-linux/served-manifest.json', runner.temp) || '' }}
       run: >-
         bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/daemon-leg.sh" step2
     - name: Record asynchronous fleet uptake without blocking the release

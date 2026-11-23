@@ -31,6 +31,11 @@ function log(line) {
   console.log(`${new Date().toISOString()} [machines] ${line}`);
 }
 
+// Docker masks procfs submounts by default, which prevents bwrap from
+// mounting a fresh /proc in its child user/PID namespace.
+const sandboxArgs = ['--security-opt', 'seccomp=unconfined', '--security-opt', 'apparmor=unconfined',
+  '--security-opt', 'systempaths=unconfined', '--cap-add', 'SYS_ADMIN'];
+
 createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -53,9 +58,7 @@ createServer(async (request, response) => {
         'run', '-d', '--name', machine, '--network', 'host',
         '--memory', `${config.guest.memory_mb}m`, '--cpus', String(config.guest.cpus),
         '--label', `beeline_agent=${config.metadata.beeline_agent}`,
-        // bwrap needs user namespaces inside the container, as on a Fly VM.
-        '--security-opt', 'seccomp=unconfined', '--security-opt', 'apparmor=unconfined',
-        '--cap-add', 'SYS_ADMIN', '-v', `${machine}-home:/root`,
+        ...sandboxArgs, '-v', `${machine}-home:/root`,
         ...env, config.image,
       );
       log(`create ${machine}`);
