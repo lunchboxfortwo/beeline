@@ -4,7 +4,7 @@ import { watch } from 'node:fs/promises';
 // Apps that collect Beeline messages themselves: ZCode through a small MCP server of ours, Antigravity's App through
 // a sidecar that hands them to `agentapi`. Ported from Reason Network (src/setup/zcode.rs, src/antigravity.rs),
 // Copyright 2026 Reason Machines, Inc., MIT OR Apache-2.0. See ./NOTICE and ./UPSTREAM.json for the copied commit.
-import { execFile } from 'node:child_process';
+import { runOwned } from '../wait.js';
 import { createInterface } from 'node:readline';
 import { hookSessions, queueInbox, readState, takeInbox, type HookSession } from './store.js';
 import { NOT_JOINED } from './beeline-api.js';
@@ -46,8 +46,11 @@ export async function runZcodeMcp(dir: string, cwd = process.cwd()): Promise<voi
 
 export type SendMessage = (sessionId: string, text: string) => Promise<void>;
 
-const agentapi: SendMessage = (sessionId, text) => new Promise((resolve, reject) =>
-  execFile('agentapi', ['send-message', sessionId, text], { timeout: 30_000 }, error => error ? reject(error) : resolve()));
+const agentapi: SendMessage = async (sessionId, text) => {
+  const args = ['send-message', sessionId, text];
+  const result = await runOwned({ step: 'agentapi send-message', file: 'agentapi', args, onLine: () => undefined });
+  if (result.code !== 0) throw new Error(`Command failed: ${['agentapi', ...args].join(' ')}\n${result.stderr}`);
+};
 
 /** Hands what waits for each joined Antigravity conversation to the App; a failed handoff stays waiting. */
 const failedHandoffs=new Map<string,string>();

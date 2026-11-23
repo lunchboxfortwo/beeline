@@ -1,6 +1,7 @@
 import { squireHostPaths, squireHostRewriteEnv } from "./squire-host.js";
 import { homedir } from "node:os";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
+import { runOwned } from "./wait.js";
 import type { ConnectorStep, ConnectorBrowserLocation, ConnectorSignIn } from "@beeline/api-contract/daemon";
 import { PAGE_READY_TIMEOUT_MS, installSquireAttempt } from './connector-squire-install-squire-attempt.js';
 
@@ -122,22 +123,10 @@ export type ShellRunner = (
 
 
 export const defaultShellRunner: ShellRunner = (command, args) =>
-  new Promise((resolve) => {
-    execFile(
-      command,
-      [...args],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
-      (error, stdout, stderr) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const code = (error as any)?.code;
-        resolve({
-          code: typeof code === 'number' ? code : error ? 1 : 0,
-          stdout: String(stdout ?? ''),
-          stderr: String(stderr ?? ''),
-        });
-      },
-    );
-  });
+  runOwned({ step: [command, ...args].join(' '), file: command, args, onLine: () => undefined }).then(
+    (result) => ({ code: result.code ?? 1, stdout: result.stdout, stderr: result.stderr }),
+    () => ({ code: 1, stdout: '', stderr: '' }),
+  );
 
 
 

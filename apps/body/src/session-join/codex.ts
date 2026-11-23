@@ -5,11 +5,11 @@
 // `codex queue --thread <id> --message <text>` hands a message to a running thread: it runs after the current turn,
 // or at once if the thread is idle.
 import { sessionAgentBehavior } from '../agent-command.js';
-import { execFile } from 'node:child_process';
 import { closeSync, fstatSync, openSync, readSync, readdirSync, readlinkSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fromProcessName, processCommand } from './agents.js';
+import { runOwned } from '../wait.js';
 
 export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
   return env.CODEX_HOME || join(env.HOME || homedir(), '.codex');
@@ -93,11 +93,9 @@ export function scanCodex(proc = '/proc'): CodexSession[] {
 }
 
 /** Hands text to a Codex thread with Codex's own CLI. */
-export function codexQueue(threadId: string, text: string, bin = 'codex', timeoutMs = 30_000): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile(bin, ['queue', '--thread', threadId, '--message', text], { timeout: timeoutMs }, (error, _stdout, stderr) => {
-      if (error) reject(new Error(String(stderr).trim() || error.message));
-      else resolve();
-    });
-  });
+export async function codexQueue(threadId: string, text: string, bin = 'codex'): Promise<void> {
+  const args = ['queue', '--thread', threadId, '--message', text];
+  const result = await runOwned({ step: `${bin} queue`, file: bin, args, onLine: () => undefined });
+  if (result.code !== 0)
+    throw new Error(result.stderr.trim() || `Command failed: ${[bin, ...args].join(' ')}\n`);
 }

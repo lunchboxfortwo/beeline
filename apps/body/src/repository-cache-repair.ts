@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { lstat, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { resolve } from 'node:path';
 import { repositoryCacheDamagedFault } from '@beeline/api-contract/daemon';
-
-const GIT_BUFFER = 4 * 1024 * 1024;
+import { runOwned } from './wait.js';
 
 /**
  * Git does not fsync loose objects by default, so after a power loss ext4 can
@@ -47,21 +45,24 @@ function diagnosticText(error: unknown): string {
   return `${message}\n${stderr}`;
 }
 
-function git(gitDir: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}) {
-  return new Promise<string>((done, fail) => {
-    const child = execFile(
-      'git',
-      [`--git-dir=${gitDir}`, ...args],
-      { ...(options.env ? { env: options.env } : {}), maxBuffer: GIT_BUFFER, timeout: 120_000, killSignal: 'SIGKILL' },
-      (error, stdout, stderr) => {
-        if (error) fail(Object.assign(error, { stderr }));
-        else done(stdout);
-      },
-    );
-    // Git may exit before reading stdin; its callback still owns the result.
-    child.stdin?.on('error', () => {});
-    child.stdin?.end(options.input ?? '');
+async function git(gitDir: string, args: readonly string[], options: { env?: NodeJS.ProcessEnv; input?: string } = {}) {
+  const argv = [`--git-dir=${gitDir}`, ...args];
+  const result = await runOwned({
+    step: `git ${args[0] ?? ''}`.trim(),
+    file: 'git',
+    args: argv,
+    ...(options.env ? { env: options.env } : {}),
+    input: options.input ?? '',
+    onLine: () => undefined,
   });
+  if (result.code !== 0)
+    throw Object.assign(new Error(`Command failed: git ${argv.join(' ')}\n${result.stderr}`), {
+      code: result.code,
+      signal: result.signal,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    });
+  return result.stdout;
 }
 
 /** Loose objects with a name and no bytes. Only hex-named files; temp files are never touched. */

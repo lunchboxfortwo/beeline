@@ -12,7 +12,6 @@
  * `--allow-keychain-prompt` nor `--allow-claude-inference` is ever passed. Its
  * output carries no token.
  */
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -28,10 +27,10 @@ import {
 import { agentBehavior, type AgentKind } from './agent-command.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { cliProxyDir, machineCliProxy, type CliProxy, type ProxiedProvider } from './cliproxy.js';
+import { runOwned } from './wait.js';
 
 /** Bundled next to `beeline-cli.mjs` by `packages/scripts/build-beeline-bundle.mjs`. */
 export const QUOTA_AXI_BUNDLE_FILE = 'quota-axi.mjs';
-const READ_TIMEOUT_MS = 30_000;
 /** One vendor read per plan account per interval keeps clear of usage-endpoint limits. */
 export const QUOTA_READ_INTERVAL_MS = 5 * 60_000;
 /** A refresh this soon after the last read shares that read instead of asking again. */
@@ -225,15 +224,15 @@ export function quotaAxiArgs(provider: string): string[] {
 }
 
 /** Exit 1 still prints the report (every provider failed), so read stdout either way. */
-const runQuotaAxi: QuotaAxiRun = (launch, env) =>
-  new Promise((resolve, reject) => {
-    execFile(
-      launch.command,
-      launch.args,
-      { env, timeout: READ_TIMEOUT_MS, maxBuffer: 1024 * 1024, windowsHide: true },
-      (error, stdout) => (stdout ? resolve(stdout) : reject(error ?? new Error('quota-axi printed nothing'))),
-    );
-  });
+const runQuotaAxi: QuotaAxiRun = async (launch, env) => {
+  const result = await runOwned({ step: 'quota-axi', file: launch.command, args: launch.args, env, onLine: () => undefined });
+  if (result.stdout) return result.stdout;
+  throw new Error(
+    result.code === 0
+      ? 'quota-axi printed nothing'
+      : `Command failed: ${[launch.command, ...launch.args].join(' ')}\n${result.stderr}`,
+  );
+};
 
 type ReadSlot = {
   lastStartedAt: number;

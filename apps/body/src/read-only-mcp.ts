@@ -285,7 +285,7 @@ export function optionalPath(args: JsonObject): string | undefined {
   return displayPath(path);
 }
 
-export function callTool(name: string, args: JsonObject): string {
+export async function callTool(name: string, args: JsonObject): Promise<string> {
   if (name === 'repository_io') {
     const operation = REPOSITORY_ROUTES[String(args.action)];
     if (!operation) throw new Error('unknown repository_io action');

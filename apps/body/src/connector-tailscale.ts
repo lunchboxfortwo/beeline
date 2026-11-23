@@ -6,14 +6,14 @@
  * bounded wait. An unauthenticated client prints a browser URL; that URL is
  * returned to the Workbench ceremony and no auth key ever enters Beeline.
  */
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { ConnectorSignIn, ConnectorStep } from '@beeline/api-contract/daemon';
+import { runOwned } from './wait.js';
 
-const COMMAND_TIMEOUT_MS = 2 * 60_000;
 const OUTPUT_LIMIT = 32 * 1024;
 const LOGIN_URL = /https:\/\/login\.tailscale\.com\/[A-Za-z0-9_/-]+/u;
 
@@ -50,22 +50,10 @@ function clipped(value: string): string {
 }
 
 export const runTailscaleCommand: TailscaleCommandRunner = (command, args) =>
-  new Promise((resolve) => {
-    execFile(
-      command,
-      [...args],
-      { timeout: COMMAND_TIMEOUT_MS, maxBuffer: OUTPUT_LIMIT * 2 },
-      (error, stdout, stderr) => {
-        const code =
-          error && 'code' in error && typeof error.code === 'number'
-            ? error.code
-            : error
-              ? null
-              : 0;
-        resolve({ code, stdout: clipped(stdout), stderr: clipped(stderr) });
-      },
-    );
-  });
+  runOwned({ step: [command, ...args].join(' '), file: command, args, onLine: () => undefined }).then(
+    (result) => ({ code: result.code, stdout: clipped(result.stdout), stderr: clipped(result.stderr) }),
+    () => ({ code: null, stdout: '', stderr: '' }),
+  );
 
 type TailscaleStatus = {
   readonly BackendState?: string;

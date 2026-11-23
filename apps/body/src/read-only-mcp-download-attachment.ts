@@ -4,7 +4,7 @@ import { realpathSync, existsSync, statSync, readFileSync } from "node:fs";
 import { type ArtifactMimeType, ARTIFACT_MIME_TYPES, ARTIFACT_MIME_BY_EXTENSION } from "@beeline/api-contract/daemon";
 import { validateArtifact } from "./artifact-validation.js";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
+import { runOwned } from "./wait.js";
 import { MESSAGE_REACTION_EMOJIS, type MessageReactionEmoji, SUBSCRIBABLE_EVENT_KINDS, isPerItemEventKind, perItemSubscriptionRefusal, isSubscribableEventKind, isServerEventKind, isAgentKind, AGENT_EVENT_SLUG_MAX_LENGTH, MAX_EVENT_CONSEQUENCE_LENGTH, MAX_MENTIONS_PER_EVENT } from "@beeline/api-contract/phone";
 import { JsonObject, requiredEnv, daemonUploadArtifact, daemonExecute, stringArg, MAX_ATTACH_BYTES, gitBinary, asObject } from './read-only-mcp.js';
 
@@ -255,7 +255,7 @@ export const NAMED_PATH = /(?:^|[\s(<[=:])(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`
 
 
 /** Recognize private paths even when missing or unreadable for delivery advice. */
-export function namedPrivateFiles(roots: string[], text: string, includeRelative = false): { named: string; resolved: string }[] {
+export async function namedPrivateFiles(roots: string[], text: string, includeRelative = false): Promise<{ named: string; resolved: string }[]> {
   const home = process.env.HOME?.trim();
   const found: { named: string; resolved: string }[] = [];
   for (const match of text.matchAll(NAMED_PATH)) {
@@ -274,10 +274,10 @@ export function namedPrivateFiles(roots: string[], text: string, includeRelative
       const checkout = roots[0];
       if (checkout && gitBinary && withinRoot(realpathSync(checkout), resolved)) {
         try {
-          execFileSync(gitBinary, ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+          const tracked = await runOwned({ step: 'git ls-files', file: gitBinary, args: ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
             '--literal-pathspecs', '-C', checkout, 'ls-files', '--error-unmatch', '--', relative(realpathSync(checkout), resolved)],
-          { stdio: 'ignore', timeout: 1000, env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' } });
-          continue;
+          env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' }, machineRead: true });
+          if (tracked.code === 0) continue;
         } catch { /* Untracked files (or unavailable index evidence) need attachments. */ }
       }
       if (!found.some(file => file.resolved === resolved)) found.push({ named, resolved });
@@ -350,7 +350,7 @@ export async function bindBriefFiles(brief: JsonObject, given?: PostArtifactDeps
     const { path: _path, ...rest } = item;
     bound.push({ ...rest, objectId });
   }
-  const unattached = namedPrivateFiles(roots, typeof brief.spec === 'string' ? brief.spec : '')
+  const unattached = (await namedPrivateFiles(roots, typeof brief.spec === 'string' ? brief.spec : ''))
     .filter((file) => !attached.has(file.resolved));
   if (unattached.length)
     throw new Error(

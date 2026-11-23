@@ -240,7 +240,7 @@
       },
       "ownerSites": 18,
       "strict": true,
-      "total": 152,
+      "total": 137,
       "fix": "use ask/runOwned/tryLock in apps/body/src/wait.ts: ask for one request and one answer (socket or HTTP), runOwned for a child you own and stream, tryLock for a lock that never queues. Do not wait for a condition and do not add a timer; the agent stay-warm countdown AgentRunner.armIdle is the only timer owned outside wait.ts."
     },
     {
