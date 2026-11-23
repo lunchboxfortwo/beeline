@@ -39,12 +39,11 @@ forbidden calls and verifies the real architecture check rejects them.
 The strict `helper.waits` rule covers `apps/body/src`: a helper command or agent
 tool waits only for the answer to its own request or the exit of a child it owns,
 never for a condition, and arms no timer. `ask`, `runOwned` and `tryLock` in
-`apps/body/src/wait.ts` own every wait; the agent stay-warm countdown
+`apps/body/src/wait.ts` are the shared wait owners; the agent stay-warm countdown
 `AgentRunner.armIdle` is the one timer owned outside it. The sites outside them
 today are a strict one-way ratchet: CI rejects a raised `total`, so it only
 falls as areas move to the owner. `packages/scripts/helper-waits.test.mjs` plants
 waits and timers and verifies the real check rejects them.
-
 
 ## Storage registry (bloat inside a module)
 
@@ -57,7 +56,7 @@ each with its owner module and a one-line reason it cannot be derived:
   registered under `storage.jsonb.<col>`, and on a registered column with no
   writer or no reader in non-test code (`unusedTotal` ratchets today's 197).
 - Today's storage carries the reason `existing before the registry; weekly
-  audit reviews`, counted by `bootstrapTotal`; a new entry needs its own reason.
+audit reviews`, counted by `bootstrapTotal`; a new entry needs its own reason.
 
 For a column scheduled for deletion, replace its reason string with an object:
 `{ "reason": "The existing reason.", "drop": "release 1.2.3" }`. A table can
@@ -76,10 +75,10 @@ each app so a module cannot grow a second path for the same job.
 
 ## Changing a rule
 
-| Change | Review |
-| --- | --- |
-| Lower a `total`, add a rule, reword `invariant`/`fix`/`module`, register storage or mark it for deletion, lower `bootstrapTotal`/`unusedTotal` | Normal CI and merge authority. |
-| Remove a rule whose pattern matches nothing any more | None. |
+| Change                                                                                                                                                                           | Review                                                                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Lower a `total`, add a rule, reword `invariant`/`fix`/`module`, register storage or mark it for deletion, lower `bootstrapTotal`/`unusedTotal`                                   | Normal CI and merge authority.                                                  |
+| Remove a rule whose pattern matches nothing any more                                                                                                                             | None.                                                                           |
 | Raise a `total`, `bootstrapTotal` or `unusedTotal`, remove a live rule, change `pattern`/`flags`/`scope`/`owners`/`distinct` or the storage `scope`, or change the guard scripts | Candidate invariants must pass CI; owner reviews the diff weekly after merging. |
 
 Non-strict invariant changes pass CI when the candidate satisfies its declared
