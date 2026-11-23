@@ -820,7 +820,8 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
        WHERE room.id=$1 AND room.parent_id IS NULL AND room.repository_resolution='repository' AND icon.icon_hash=$2`,
       [repositoryIcon[1], repositoryIcon[2]])).rows[0]?.icon_png;
     if (!png) { json(response, 404, { error: 'repository_icon_unavailable' }); return; }
-    const bytes = Buffer.from(png);
+    // The app asks for its physical pixel size, so the picture is scaled once, here, with the right kernel.
+    const { bytes } = await sizeCompanyLogo({ bytes: Buffer.from(png), mime: 'image/png' }, url.searchParams.get('size'));
     response.writeHead(200, { 'content-type': 'image/png', 'content-length': String(bytes.length),
       'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff',
       'content-security-policy': "default-src 'none'; sandbox" });

@@ -165,9 +165,10 @@ function cachedIcon(key: string, load: () => Promise<Image | undefined>): Promis
 }
 
 // The chat picture follows t3code's ProjectFaviconResolver (pingdotgg/t3code
-// apps/server/src/project/ProjectFaviconResolver.ts): its well-known paths in order, first existing file wins;
-// else the first icon <link> in its source files. One step t3 lacks: when the repository root yields nothing,
-// the same search runs under each apps/*/ then packages/*/ directory, first hit wins.
+// apps/server/src/project/ProjectFaviconResolver.ts) for where to look: its well-known paths, then the icon <link>s
+// in its source files. Two steps t3 lacks: when the repository root yields nothing, the same search runs under each
+// apps/*/ then packages/*/ directory, first directory with any icon wins; and within that directory the largest
+// readable icon wins (its <link> `sizes`, else its decoded size), so a 48 px favicon.ico loses to a linked icon-512.png.
 const FAVICON_CANDIDATES = [
   'favicon.svg', 'favicon.ico', 'favicon.png', 'public/favicon.svg', 'public/favicon.ico', 'public/favicon.png',
   'app/favicon.ico', 'app/favicon.png', 'app/icon.svg', 'app/icon.png', 'app/icon.ico', 'src/favicon.ico', 'src/favicon.svg',
@@ -180,8 +181,10 @@ const ICON_SOURCE_SCAN_BYTES = 128 * 1024;
 const HTML_LINK_RE = /<link\b[^<>]*>/gi;
 const HTML_ICON_REL_RE = /\brel=["'](?:icon|shortcut icon)["']/i;
 const HTML_ICON_HREF_RE = /\bhref=["']([^"'?]+)/i;
+const HTML_ICON_SIZES_RE = /\bsizes=["']([^"']+)["']/i;
 const ICON_REL_RE = /\brel\s*:\s*["'](?:icon|shortcut icon)["']/i;
 const ICON_HREF_RE = /\bhref\s*:\s*["']([^"'?]+)/i;
+const ICON_SIZES_RE = /\bsizes\s*:\s*["']([^"']+)["']/i;
 const ICON_FILE_NAMES = new Set([...FAVICON_CANDIDATES, ...ICON_SOURCE_FILES].map(path => path.slice(path.lastIndexOf('/') + 1)));
 
 /** Whether a changed repository path can change the picked icon: a well-known icon or icon source file name,
@@ -190,19 +193,30 @@ export function isRepositoryIconPath(path: string): boolean {
   return ICON_FILE_NAMES.has(path.slice(path.lastIndexOf('/') + 1));
 }
 
-/** t3code's `extractIconHref`: an HTML icon `<link>`, else a `rel: "icon"` object in route source. */
-export function extractIconHref(source: string): string | undefined {
+/** The largest `WxH` in a `sizes` attribute; none for `any` or a missing or unreadable value. */
+function declaredSize(sizes: string | undefined): number | undefined {
+  const sides = [...(sizes ?? '').matchAll(/(\d+)x(\d+)/gi)].map(([, width, height]) => Math.max(Number(width), Number(height)));
+  return sides.length ? Math.max(...sides) : undefined;
+}
+
+type IconLink = { href: string; size?: number };
+/** Every HTML icon `<link>`, then every `rel: "icon"` object in route source, with its declared size. */
+function extractIconLinks(source: string): IconLink[] {
+  const links: IconLink[] = [];
   for (const [tag] of source.matchAll(HTML_LINK_RE)) {
-    if (!HTML_ICON_REL_RE.test(tag)) continue;
-    const href = tag.match(HTML_ICON_HREF_RE)?.[1];
-    if (href) return href;
+    const href = HTML_ICON_REL_RE.test(tag) ? tag.match(HTML_ICON_HREF_RE)?.[1] : undefined;
+    if (href) links.push({ href, size: declaredSize(tag.match(HTML_ICON_SIZES_RE)?.[1]) });
   }
   for (const run of source.split('}')) {
-    if (!ICON_REL_RE.test(run)) continue;
-    const href = run.match(ICON_HREF_RE)?.[1];
-    if (href) return href;
+    const href = ICON_REL_RE.test(run) ? run.match(ICON_HREF_RE)?.[1] : undefined;
+    if (href) links.push({ href, size: declaredSize(run.match(ICON_SIZES_RE)?.[1]) });
   }
-  return undefined;
+  return links;
+}
+
+/** t3code's `extractIconHref`: the first HTML icon `<link>`, else the first `rel: "icon"` object in route source. */
+export function extractIconHref(source: string): string | undefined {
+  return extractIconLinks(source)[0]?.href;
 }
 
 /** `base` + a repository-relative path, normalized; undefined when it leaves `base`. */
@@ -222,38 +236,59 @@ function projectRoots(paths: readonly string[]): string[] {
 }
 
 type SourceRead = (path: string) => Promise<string | undefined>;
-/** The picked icon file's repository path from one tree listing (`files`), reading only icon source files. */
-export async function pickRepositoryIconPath(files: ReadonlySet<string>, readSource: SourceRead): Promise<string | undefined> {
+/** An icon file's pixel size (Infinity for vector art), or none when it does not decode. */
+export type IconMeasure = (path: string) => Promise<number | undefined>;
+/** The picked icon file's repository path from one tree listing (`files`), reading only icon source files and,
+ * when a directory has more than one icon, measuring each (`measure`); ties keep the earlier candidate. */
+export async function pickRepositoryIconPath(files: ReadonlySet<string>, readSource: SourceRead,
+  measure: IconMeasure = async () => 0): Promise<string | undefined> {
   for (const base of projectRoots([...files])) {
-    const known = FAVICON_CANDIDATES.map(candidate => base + candidate).find(path => files.has(path));
-    if (known) return known;
+    const candidates = new Map<string, number | undefined>();
+    for (const path of FAVICON_CANDIDATES.map(candidate => base + candidate)) if (files.has(path)) candidates.set(path, undefined);
     for (const sourceFile of ICON_SOURCE_FILES) {
       if (!files.has(base + sourceFile)) continue;
-      const href = extractIconHref((await readSource(base + sourceFile))?.slice(0, ICON_SOURCE_SCAN_BYTES) ?? '');
-      if (!href) continue;
-      // Browsers strip surrounding whitespace from URL attributes; resolved against public/ first, then the root.
-      const clean = href.trim().replace(/^\//, '');
-      const target = [within(base, posix.join('public', clean)), within(base, clean)].find(path => path && files.has(path));
-      if (target) return target;
+      for (const { href, size } of extractIconLinks((await readSource(base + sourceFile))?.slice(0, ICON_SOURCE_SCAN_BYTES) ?? '')) {
+        // Browsers strip surrounding whitespace from URL attributes; resolved against public/ first, then the root.
+        const clean = href.trim().replace(/^\//, '');
+        const target = [within(base, posix.join('public', clean)), within(base, clean)].find(path => path && files.has(path));
+        if (target && candidates.get(target) === undefined) candidates.set(target, size);
+      }
     }
+    if (candidates.size <= 1) { const [only] = candidates.keys(); if (only) return only; continue; }
+    let best: { path: string; size: number } | undefined;
+    for (const [path, declared] of candidates) {
+      const decoded = await measure(path);
+      if (decoded === undefined) continue;
+      const size = decoded === Infinity ? decoded : declared ?? decoded;
+      if (!best || size > best.size) best = { path, size };
+    }
+    return best?.path;
   }
   return undefined;
 }
 
 type RepositoryRead = (path: string) => Promise<unknown>;
-/** The repository's picked icon file as a 64 px PNG with its path, else none. Uncached;
+/** The repository's picked icon file as a 256 px PNG with its path, else none. Uncached;
  * repository-icons.ts owns storage and when to resolve again. */
 export async function resolveRepositoryIcon(branch: string, read: RepositoryRead): Promise<{ image: Image; path: string } | undefined> {
   const tree = await read(`git/trees/${encodeURIComponent(branch)}?recursive=1`) as { tree?: { path?: unknown; type?: unknown; sha?: unknown }[] } | undefined;
   const blobs = new Map<string, string>();
   for (const entry of tree?.tree ?? [])
     if (entry.type === 'blob' && typeof entry.path === 'string' && typeof entry.sha === 'string') blobs.set(entry.path, entry.sha);
-  const blob = async (path: string) => {
+  const held = new Map<string, Promise<Buffer | undefined>>();
+  const blob = (path: string) => held.get(path) ?? held.set(path, (async () => {
     const body = await read(`git/blobs/${encodeURIComponent(blobs.get(path)!)}`) as { content?: unknown } | undefined;
     return typeof body?.content === 'string' ? Buffer.from(body.content, 'base64') : undefined;
-  };
+  })()).get(path)!;
   const path = await pickRepositoryIconPath(new Set(blobs.keys()), async source =>
-    (await blob(source))?.subarray(0, ICON_SOURCE_SCAN_BYTES).toString('utf8'));
+    (await blob(source))?.subarray(0, ICON_SOURCE_SCAN_BYTES).toString('utf8'), async candidate => {
+    const bytes = await blob(candidate);
+    if (!bytes) return undefined;
+    try {
+      const { width, height, format } = await (icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false })).metadata();
+      return format === 'svg' ? Infinity : width && height ? Math.max(width, height) : undefined;
+    } catch { return undefined; }
+  });
   if (!path) return undefined;
   const bytes = await blob(path);
   if (!bytes) return undefined;
@@ -261,13 +296,54 @@ export async function resolveRepositoryIcon(branch: string, read: RepositoryRead
   catch { return undefined; /* unreadable pick: the caller can try the homepage icon */ }
 }
 
-/** An icon file as the stored chat picture: 64 px square with transparent padding; a small raster scales up
- * without blur. SVG text needs the server's fonts (the runtime image installs them). */
+const CHAT_PICTURE = 256;
+/** Below this many pixels a source is treated as pixel art: enlarged with nearest-neighbour so it stays crisp. */
+const PIXEL_ART = 64;
+/** A stored chat picture enlarged from pixel art records its source size in a PNG text chunk, so a later
+ * resize still knows the 256 px picture was drawn at, say, 16 px. */
+const PIXEL_ART_KEY = 'beeline-pixel-art';
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(bytes: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of bytes) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+/** `png` with a tEXt chunk naming its pixel-art source size, inserted before IEND. */
+function markPixelArt(png: Buffer, size: number): Buffer {
+  const body = Buffer.concat([Buffer.from('tEXt'), Buffer.from(`${PIXEL_ART_KEY}\0${size}`, 'latin1')]);
+  const chunk = Buffer.alloc(body.length + 8);
+  chunk.writeUInt32BE(body.length - 4, 0); body.copy(chunk, 4); chunk.writeUInt32BE(crc32(body), body.length + 4);
+  return Buffer.concat([png.subarray(0, png.length - 12), chunk, png.subarray(png.length - 12)]);
+}
+/** The pixel-art source size `markPixelArt` recorded, if any. */
+function markedPixelArt(png: Buffer): number | undefined {
+  for (let at = 8; at + 8 <= png.length;) {
+    const length = png.readUInt32BE(at), type = png.toString('latin1', at + 4, at + 8);
+    if (type === 'IEND' || at + 12 + length > png.length) break;
+    if (type === 'tEXt') {
+      const [key, value] = png.toString('latin1', at + 8, at + 8 + length).split('\0');
+      if (key === PIXEL_ART_KEY && Number(value) >= 1) return Number(value);
+    }
+    at += length + 12;
+  }
+  return undefined;
+}
+
+/** An icon file as the stored chat picture: 256 px square with transparent padding. A pixel-art raster (under
+ * 64 px) scales up without blur and is marked as pixel art; anything larger is resampled smoothly. SVG text
+ * needs the server's fonts (the runtime image installs them). */
 async function chatPicture(bytes: Buffer): Promise<Buffer> {
   const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
-  const { width, format } = await image.clone().metadata();
-  return image.resize(64, 64, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
-    ...(format !== 'svg' && (width ?? 64) < 64 ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
+  const { width, height, format } = await image.clone().metadata();
+  const source = Math.max(width ?? PIXEL_ART, height ?? PIXEL_ART);
+  const pixelArt = format !== 'svg' && source < PIXEL_ART;
+  const png = await image.resize(CHAT_PICTURE, CHAT_PICTURE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
+    ...(pixelArt ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
+  return pixelArt ? markPixelArt(png, source) : png;
 }
 
 /** The repository homepage's site icon (its icon links, then /favicon.ico) as the chat picture, with the
@@ -278,10 +354,16 @@ export async function resolveHomepageIcon(homepage: string): Promise<{ image: Im
   return url && image ? { image, path: url.href } : undefined;
 }
 
-/** Native requests physical pixels so Image can display pixel art without resampling. */
+/** Native requests physical pixels so Image draws the picture without resampling it again. Enlarging pixel art
+ * (a source under 64 px: a marked chat picture's recorded size, else the image's own size) keeps hard edges;
+ * everything else is resampled smoothly. */
 export async function sizeCompanyLogo(image: Image, size: string | null): Promise<Image> {
   const pixels = Number(size);
   if (!Number.isInteger(pixels) || pixels < 1 || pixels > 512) return image;
-  return { bytes: await sharp(image.bytes).resize(pixels, pixels, { fit: 'contain', kernel: 'nearest',
+  const input = sharp(image.bytes);
+  const { width, height } = await input.clone().metadata();
+  const source = markedPixelArt(image.bytes) ?? Math.max(width ?? PIXEL_ART, height ?? PIXEL_ART);
+  return { bytes: await input.resize(pixels, pixels, { fit: 'contain',
+    ...(source < PIXEL_ART && pixels > source ? { kernel: 'nearest' as const } : {}),
     background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer(), mime: 'image/png' };
 }
