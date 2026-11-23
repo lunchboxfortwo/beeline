@@ -47,7 +47,7 @@ export class AgentChannel {
   #registered = false;
   #registrationSent = false;
   #capabilities: Record<string, unknown> = {};
-  /** Why this socket will not register the agent again; cleared by the next socket. */
+  /** Registration failure; cleared on socket close unless this channel is retired. */
   #ended: Error | undefined;
   #retired = false;
   initialSnapshotsV1 = true;

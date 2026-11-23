@@ -1,23 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { isBackgroundCommand } from '@beeline/api-contract/daemon';
-import { dirname,resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { resolveSessionIdleMs } from './agent-process.js';
 import { answer } from './wait.js';
-import { AnswerStore,type StoredAnswer } from './answer-store.js';
+import { AnswerStore, type StoredAnswer } from './answer-store.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import type { BodyConfig } from './config.js';
-import { captureConnectionUsage,ConnectorUsageRecorder } from './connector-runner.js';
-import { isAgentRemovedError,type DaemonApiClient } from './daemon-api-client.js';
-import { GrantCommandRunner,GrantRunnerServer,type GrantRunnerEndpoint } from './grant-runner.js';
+import { captureConnectionUsage, ConnectorUsageRecorder } from './connector-runner.js';
+import { isAgentRemovedError, type DaemonApiClient } from './daemon-api-client.js';
+import { GrantCommandRunner, GrantRunnerServer, type GrantRunnerEndpoint } from './grant-runner.js';
 import { mergeHarnessTurnMetrics } from './harness-turn-tokens.js';
 import { openRouterRoutingCacheDir } from './openrouter-routing.js';
-import { PlaceSession,type Answer } from './place-session.js';
+import { PlaceSession, type Answer } from './place-session.js';
 import { PlaceStorage } from './place-storage.js';
-import { runtimeIdentity,type AgentRuntimeRecord } from './runtime.js';
+import { runtimeIdentity, type AgentRuntimeRecord } from './runtime.js';
 import { publishStorageFacts } from './storage-owners.js';
-import { distillTurnFailureReason,redactToolDetail } from './turn-failure-reason.js';
-import { TurnTrace,turnTraceDirectory } from './turn-trace.js';
+import { distillTurnFailureReason, redactToolDetail } from './turn-failure-reason.js';
+import { TurnTrace, turnTraceDirectory } from './turn-trace.js';
 import { workspaceAssetRoot } from './workspace-assets.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 
@@ -90,46 +90,80 @@ export class AgentRunner {
     private readonly runtime: AgentRuntimeRecord,
     private readonly configPath: string,
     private readonly baseConfig: BodyConfig,
-    private readonly options: { daemonApi: DaemonApiClient; onConfigChanged?: () => void | Promise<void> },
+    private readonly options: {
+      daemonApi: DaemonApiClient;
+      onConfigChanged?: () => void | Promise<void>;
+    },
   ) {
     const runtimeDir = dirname(configPath);
     this.agent = runtimeIdentity(runtime.agent);
     this.answers = new AnswerStore(resolve(runtimeDir, 'answers'));
-    this.restored = this.answers.all().then(answers => {
+    this.restored = this.answers.all().then((answers) => {
       for (const saved of answers) {
         // Retire generated notices left in an older helper's durable outbox.
-        const retiredNotice = saved.text.startsWith(`${this.agent.name} stopped while answering this: `);
-        const answer = retiredNotice ? { ...saved, text: '', harnessEnded: true, steps: undefined } : saved;
+        const retiredNotice = saved.text.startsWith(
+          `${this.agent.name} stopped while answering this: `,
+        );
+        const answer = retiredNotice
+          ? { ...saved, text: '', harnessEnded: true, steps: undefined }
+          : saved;
         this.stored.set(answer.itemId, answer);
         if (!retiredNotice) this.durable.add(answer.itemId);
         for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.add(id);
       }
     });
-    this.grantRunner = new GrantCommandRunner({ api: options.daemonApi, agentId: this.agent.publicKey });
-    this.grantRunnerServer = new GrantRunnerServer(this.grantRunner, (placeId, parentRoomId) => prepareWorkspace({
-      api: options.daemonApi, config: this.baseConfig, supervisorRoot: runtime.supervisorRoot,
-      workspaceId: runtime.communityId, agent: this.agent, placeId, ...(parentRoomId ? { parentRoomId } : {}),
-    }), async (placeId, input) => {
-      if (input.action === 'operation') return options.daemonApi.execute(
-        input.operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,input.input as never);
-      const session = this.places.get(placeId)?.session;
-      if (!session) throw new Error('This place has no live session');
-      if (input.action === 'context') {
-        if (input.prepare === true) await session.resources.prepare();
-        return session.resources.read();
-      }
-      if (!session.current) throw new Error('Registry MCP requires the current request');
-      return session.resources.mcp(input, { roomId: session.current.roomId, requestId: session.current.turnRequestId });
+    this.grantRunner = new GrantCommandRunner({
+      api: options.daemonApi,
+      agentId: this.agent.publicKey,
     });
+    this.grantRunnerServer = new GrantRunnerServer(
+      this.grantRunner,
+      (placeId, parentRoomId) =>
+        prepareWorkspace({
+          api: options.daemonApi,
+          config: this.baseConfig,
+          supervisorRoot: runtime.supervisorRoot,
+          workspaceId: runtime.communityId,
+          agent: this.agent,
+          placeId,
+          ...(parentRoomId ? { parentRoomId } : {}),
+        }),
+      async (placeId, input) => {
+        if (input.action === 'operation')
+          return options.daemonApi.execute(
+            input.operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,
+            input.input as never,
+          );
+        const session = this.places.get(placeId)?.session;
+        if (!session) throw new Error('This place has no live session');
+        if (input.action === 'context') {
+          if (input.prepare === true) await session.resources.prepare();
+          return session.resources.read();
+        }
+        if (!session.current) throw new Error('Registry MCP requires the current request');
+        return session.resources.mcp(input, {
+          roomId: session.current.roomId,
+          requestId: session.current.turnRequestId,
+        });
+      },
+    );
     this.storage = new PlaceStorage({
-      supervisorRoot: runtime.supervisorRoot, runtimeDir, workspaceId: runtime.communityId,
-      agentId: this.agent.publicKey, api: options.daemonApi,
-      live: placeId => this.places.get(placeId)?.session.alive === true,
+      supervisorRoot: runtime.supervisorRoot,
+      runtimeDir,
+      workspaceId: runtime.communityId,
+      agentId: this.agent.publicKey,
+      api: options.daemonApi,
+      live: (placeId) => this.places.get(placeId)?.session.alive === true,
     });
-    options.daemonApi.setQueueListener((commands, completed, stopped) => this.queueChanged(commands, completed, stopped));
+    options.daemonApi.setQueueListener((commands, completed, stopped) =>
+      this.queueChanged(commands, completed, stopped),
+    );
     options.daemonApi.setConfigChangedListener(() => this.configChanged());
-    options.daemonApi.setRoomsChangedListener(() => { this.pendingBootstrap = true; this.wake?.(); });
-    options.daemonApi.setCornerCompleteListener(cornerId => void this.cornerComplete(cornerId));
+    options.daemonApi.setRoomsChangedListener(() => {
+      this.pendingBootstrap = true;
+      this.wake?.();
+    });
+    options.daemonApi.setCornerCompleteListener((cornerId) => void this.cornerComplete(cornerId));
     this.releaseLiveOpen = options.daemonApi.onLiveOpen(() => {
       // Registration interrupts the old connection's turn projections, while
       // these harnesses keep working. Reassert only their started invocations,
@@ -141,11 +175,16 @@ export class AgentRunner {
 
   private placeConfig(placeId: string): BodyConfig {
     const runtimeDir = dirname(this.configPath);
-    const workspaceRoot = this.runtime.rooms.find(room => room.channelId === placeId)?.root ?? resolve(runtimeDir, 'rooms', placeId);
+    const workspaceRoot =
+      this.runtime.rooms.find((room) => room.channelId === placeId)?.root ??
+      resolve(runtimeDir, 'rooms', placeId);
     return {
       ...this.baseConfig,
       workspaceRoot,
-      agentSharedAssetRoot: workspaceAssetRoot(this.runtime.supervisorRoot, this.runtime.communityId),
+      agentSharedAssetRoot: workspaceAssetRoot(
+        this.runtime.supervisorRoot,
+        this.runtime.communityId,
+      ),
       agentPrivateRoot: resolve(workspaceRoot, 'agent-private'),
       agentMemoryRoot: resolve(runtimeDir, 'memory'),
       openRouterRoutingCacheDir: openRouterRoutingCacheDir(runtimeDir),
@@ -161,9 +200,14 @@ export class AgentRunner {
     const created: Place = {
       waiting: [],
       session: new PlaceSession({
-        agent: this.agent, runtime: this.runtime, config: this.placeConfig(placeId), api: this.options.daemonApi,
+        agent: this.agent,
+        runtime: this.runtime,
+        config: this.placeConfig(placeId),
+        api: this.options.daemonApi,
         grantRunnerFile: resolve(dirname(this.configPath), 'session-tools.json'),
-        placeId, ...(item.parentRoomId ? { parentRoomId: item.parentRoomId } : {}), workspaceId: this.runtime.communityId,
+        placeId,
+        ...(item.parentRoomId ? { parentRoomId: item.parentRoomId } : {}),
+        workspaceId: this.runtime.communityId,
         ...(this.endpoint ? { grantRunner: this.endpoint } : {}),
         onExit: () => this.sessionExited(placeId),
         cancelGrantedCommands: () => this.grantRunner.cancel(placeId),
@@ -178,7 +222,11 @@ export class AgentRunner {
   }
 
   /** The server's whole list of this agent's undone items, oldest first. */
-  private queueChanged(commands: readonly AgentCommand[], completed: readonly string[] = [], stopped: readonly string[] = []): void {
+  private queueChanged(
+    commands: readonly AgentCommand[],
+    completed: readonly string[] = [],
+    stopped: readonly string[] = [],
+  ): void {
     for (const id of completed) this.completed.add(id);
     // A person stopped a run after its reply: the item is already done, so
     // queue absence cannot carry the Stop. Its closing receipt still follows.
@@ -189,27 +237,43 @@ export class AgentRunner {
     this.latest = commands;
     for (const item of commands)
       if (!this.answered.has(item.id)) this.place(item).session.resources.receiveCommand(item);
-    void this.restored.then(() => this.reconcileQueue()).catch(error => console.error('[body] queue delivery failed:', error));
+    void this.restored
+      .then(() => this.reconcileQueue())
+      .catch((error) => console.error('[body] queue delivery failed:', error));
   }
 
   private reconcileQueue(): void {
     const commands = this.latest;
-    const listed = new Set(commands.map(item => item.id));
-    const running = new Set([...this.places.values()].map(place => place.running?.id));
+    const listed = new Set(commands.map((item) => item.id));
+    const running = new Set([...this.places.values()].map((place) => place.running?.id));
     for (const id of this.completed) if (!running.has(id)) this.completed.delete(id);
-    for (const id of this.suppressionRetried) if (!listed.has(id)) {this.suppressionRetried.delete(id);this.awaitingInput.delete(id);}
-    for (const id of this.answered) if (!listed.has(id) && !this.stored.has(id)) this.answered.delete(id);
+    for (const id of this.suppressionRetried)
+      if (!listed.has(id)) {
+        this.suppressionRetried.delete(id);
+        this.awaitingInput.delete(id);
+      }
+    for (const id of this.answered)
+      if (!listed.has(id) && !this.stored.has(id)) this.answered.delete(id);
     void this.resendStoredAnswers(listed);
     for (const place of this.places.values()) {
       // A reply tool completes the queue item while its harness is still
       // running. Only disappearance without a committed answer means Stop.
-      if (place.running && !listed.has(place.running.id) && !this.answered.has(place.running.id)
-        && !this.completed.has(place.running.id)) place.session.cancel();
-      place.waiting = place.waiting.filter(item => listed.has(item.id));
+      if (
+        place.running &&
+        !listed.has(place.running.id) &&
+        !this.answered.has(place.running.id) &&
+        !this.completed.has(place.running.id)
+      )
+        place.session.cancel();
+      place.waiting = place.waiting.filter((item) => listed.has(item.id));
     }
-    const known = (item: AgentCommand) => this.answered.has(item.id) || [...this.places.values()]
-      .some(place => place.running?.id === item.id || place.waiting.some(waiting => waiting.id === item.id));
-    for (const item of commands.filter(item => !known(item))) {
+    const known = (item: AgentCommand) =>
+      this.answered.has(item.id) ||
+      [...this.places.values()].some(
+        (place) =>
+          place.running?.id === item.id || place.waiting.some((waiting) => waiting.id === item.id),
+      );
+    for (const item of commands.filter((item) => !known(item))) {
       const place = this.place(item);
       place.waiting.push(item);
     }
@@ -220,7 +284,10 @@ export class AgentRunner {
    * acknowledgement: a membership change can hide an item that is still owed. */
   private async resendStoredAnswers(listed: ReadonlySet<string>): Promise<void> {
     for (const answer of this.stored.values()) {
-      if ([answer.itemId, ...(answer.queuedRequestIds ?? [])].some(id => listed.has(id)) && !this.posting.has(answer.itemId)) {
+      if (
+        [answer.itemId, ...(answer.queuedRequestIds ?? [])].some((id) => listed.has(id)) &&
+        !this.posting.has(answer.itemId)
+      ) {
         void this.post(answer);
       }
     }
@@ -229,8 +296,9 @@ export class AgentRunner {
   /** Hand the next waiting item of one place to its session; one at a time per place. */
   private async pump(placeId: string): Promise<void> {
     const place = this.places.get(placeId);
-    const ready = place?.waiting.some(item => !this.awaitingInput.has(item.id));
-    const item = place && ready && !place.running && !this.stopped ? place.waiting.shift() : undefined;
+    const ready = place?.waiting.some((item) => !this.awaitingInput.has(item.id));
+    const item =
+      place && ready && !place.running && !this.stopped ? place.waiting.shift() : undefined;
     if (place && !place.running) this.armIdle(place, Boolean(item));
     if (place && item) await this.deliver(placeId, place, item);
   }
@@ -241,76 +309,134 @@ export class AgentRunner {
     // acceptance does not prove the running answer covered that new request.
     // Controls form a boundary: a restart never becomes harness input or consumes later work.
     const batch = item.action === 'restart' ? [item] : turnBatch(item, place.waiting);
-    const batched = new Set(batch.map(next => next.id));
+    const batched = new Set(batch.map((next) => next.id));
     let started = false;
-    const invocation = {id:randomUUID(),requestId:item.turnRequestId};
+    const invocation = { id: randomUUID(), requestId: item.turnRequestId };
     try {
       if (item.action === 'restart') {
         await place.session.stop();
         started = true;
-        await this.store({ itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: '' });
+        await this.store({
+          itemId: item.id,
+          roomId: item.roomId,
+          requestId: item.turnRequestId,
+          text: '',
+        });
       } else {
         // Required item credentials and provider configuration precede ACP startup.
         await place.session.start(item);
         place.turnStarted = item;
-        await this.options.daemonApi.execute('startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,invocationId:invocation.id});
+        await this.options.daemonApi.execute('startAgentTurn', {
+          roomId: item.roomId,
+          requestId: item.turnRequestId,
+          invocationId: invocation.id,
+        });
         started = true;
         const answer = await place.session.deliver(item, batch, invocation);
         place.turnStarted = undefined;
         // Empty background work closes quietly; an unanswered request stays owed.
         const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
         // Stop wall: a stopped item gets no answer.
-        const pendingBatch = batch.filter(next => this.latest.some(listed => listed.id === next.id));
-        if (pendingBatch.length || this.completed.has(item.id)) await this.store({
-          itemId: (pendingBatch[0] ?? item).id, roomId: item.roomId, requestId: (pendingBatch[0] ?? item).turnRequestId, invocation,
-          queuedRequestIds: pendingBatch.slice(1).map(next => next.id), text: answer.text, harnessEnded: true, ...steps,
-        });
-        place.waiting = place.waiting.filter(next => !batched.has(next.id));
-        void Promise.resolve().then(() => this.afterAnswer(item, answer))
-          .catch(error => console.warn('[body] answer diagnostics failed:', error));
+        const pendingBatch = batch.filter((next) =>
+          this.latest.some((listed) => listed.id === next.id),
+        );
+        if (pendingBatch.length || this.completed.has(item.id))
+          await this.store({
+            itemId: (pendingBatch[0] ?? item).id,
+            roomId: item.roomId,
+            requestId: (pendingBatch[0] ?? item).turnRequestId,
+            invocation,
+            queuedRequestIds: pendingBatch.slice(1).map((next) => next.id),
+            text: answer.text,
+            harnessEnded: true,
+            ...steps,
+          });
+        place.waiting = place.waiting.filter((next) => !batched.has(next.id));
+        void Promise.resolve()
+          .then(() => this.afterAnswer(item, answer))
+          .catch((error) => console.warn('[body] answer diagnostics failed:', error));
       }
     } catch (error) {
       console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
-      if (started && this.completed.has(item.id) && !this.stopped &&
-        !batch.some(next => this.latest.some(listed => listed.id === next.id))) await this.store({
-        itemId: item.id, roomId: item.roomId, requestId: item.turnRequestId, text: '', harnessEnded: true, invocation,
-      });
-      if (batch.some(next => this.latest.some(listed => listed.id === next.id) && !this.answered.has(next.id))) {
+      if (
+        started &&
+        this.completed.has(item.id) &&
+        !this.stopped &&
+        !batch.some((next) => this.latest.some((listed) => listed.id === next.id))
+      )
+        await this.store({
+          itemId: item.id,
+          roomId: item.roomId,
+          requestId: item.turnRequestId,
+          text: '',
+          harnessEnded: true,
+          invocation,
+        });
+      if (
+        batch.some(
+          (next) =>
+            this.latest.some((listed) => listed.id === next.id) && !this.answered.has(next.id),
+        )
+      ) {
         if (!this.stopped && !item.modelCredential) this.reportOwnerBlocker(item, error);
         if (started && !this.stopped) {
-          const pending = batch.filter(next => this.latest.some(listed => listed.id === next.id));
-          if (pending.length) await this.store({
-            itemId: pending[0]!.id, roomId: item.roomId, requestId: pending[0]!.turnRequestId,
-            queuedRequestIds: pending.slice(1).map(next => next.id), text: '', harnessEnded: true, invocation,
-            failureReason:redactToolDetail(distillTurnFailureReason(error).text).slice(0,2_000),
-          });
-        } else if (!this.stopped && (item.modelCredential || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN)) {
+          const pending = batch.filter((next) =>
+            this.latest.some((listed) => listed.id === next.id),
+          );
+          if (pending.length)
+            await this.store({
+              itemId: pending[0]!.id,
+              roomId: item.roomId,
+              requestId: pending[0]!.turnRequestId,
+              queuedRequestIds: pending.slice(1).map((next) => next.id),
+              text: '',
+              harnessEnded: true,
+              invocation,
+              failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
+            });
+        } else if (
+          !this.stopped &&
+          (item.modelCredential || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN)
+        ) {
           await this.options.daemonApi.execute('startAgentTurn', {
-            roomId: item.roomId, requestId: item.turnRequestId, available: false,
-            failureReason:redactToolDetail(distillTurnFailureReason(error).text).slice(0,2_000),
+            roomId: item.roomId,
+            requestId: item.turnRequestId,
+            available: false,
+            failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
           });
           this.answered.add(item.id);
           started = true;
         } else {
           place.waiting.unshift(item);
-          if (!this.stopped) void this.options.daemonApi.execute('startAgentTurn', {
-            roomId: item.roomId, requestId: item.turnRequestId, available: false,
-          }).catch(error => console.warn('[body] offline status not written:', error));
+          if (!this.stopped)
+            void this.options.daemonApi
+              .execute('startAgentTurn', {
+                roomId: item.roomId,
+                requestId: item.turnRequestId,
+                available: false,
+              })
+              .catch((error) => console.warn('[body] offline status not written:', error));
         }
       }
-      if (started) place.waiting = place.waiting.filter(next => !batched.has(next.id));
-      await place.session.stop().catch(stopError => console.warn('[body] session stop failed:', stopError));
+      if (started) place.waiting = place.waiting.filter((next) => !batched.has(next.id));
+      await place.session
+        .stop()
+        .catch((stopError) => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
       place.turnStarted = undefined;
-      if (place.retryOwed) {place.retryOwed=false;this.reconcileQueue();}
+      if (place.retryOwed) {
+        place.retryOwed = false;
+        this.reconcileQueue();
+      }
     }
     if (started) void this.pump(placeId);
   }
 
   private recordTurnStart(item: AgentCommand): void {
-    void this.options.daemonApi.execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
-      .catch(error => console.warn('[body] delivery status not written:', error));
+    void this.options.daemonApi
+      .execute('startAgentTurn', { roomId: item.roomId, requestId: item.turnRequestId })
+      .catch((error) => console.warn('[body] delivery status not written:', error));
   }
 
   /** A harness that needs its owner (a sign-in, a spent allowance) names it on
@@ -318,32 +444,54 @@ export class AgentRunner {
   private reportOwnerBlocker(item: AgentCommand, error: unknown): void {
     const { text, kind } = distillTurnFailureReason(error);
     if (kind !== 'not-signed-in' && kind !== 'allowance-spent') return;
-    void this.options.daemonApi.execute('postAgentTurnReceipt', {
-      agentId: this.agent.publicKey, roomId: item.roomId, requestId: item.turnRequestId,
-      outcome: 'failed', reason: redactToolDetail(text).slice(0, 2_000), reasonKind: kind,
-    }).catch(receiptError => console.warn('[body] failed turn receipt not written:', receiptError));
+    void this.options.daemonApi
+      .execute('postAgentTurnReceipt', {
+        agentId: this.agent.publicKey,
+        roomId: item.roomId,
+        requestId: item.turnRequestId,
+        outcome: 'failed',
+        reason: redactToolDetail(text).slice(0, 2_000),
+        reasonKind: kind,
+      })
+      .catch((receiptError) =>
+        console.warn('[body] failed turn receipt not written:', receiptError),
+      );
   }
 
   /** Usage and diagnostics follow the answer and never hold it. */
   private afterAnswer(item: AgentCommand, answer: Answer): void {
-    void answer.cleanup().catch(error => console.warn('[body] answer cleanup failed:', error));
-    captureConnectionUsage(this.connectionUsage, {
-      requestId: item.turnRequestId, agentId: this.agent.publicKey,
-      ...(item.parentRoomId ? { cornerId: item.roomId } : { roomId: item.roomId }),
-    }, answer.toolCalls);
-    void this.connectionUsage.flush(this.options.daemonApi, item.turnRequestId)
-      .catch(error => console.warn('[body] usage diagnostics failed:', error));
-    const trace = new TurnTrace({ surface: item.parentRoomId ? 'corner' : 'room', agentId: this.agent.publicKey,
-      roomId: item.roomId, requestId: item.turnRequestId });
+    void answer.cleanup().catch((error) => console.warn('[body] answer cleanup failed:', error));
+    captureConnectionUsage(
+      this.connectionUsage,
+      {
+        requestId: item.turnRequestId,
+        agentId: this.agent.publicKey,
+        ...(item.parentRoomId ? { cornerId: item.roomId } : { roomId: item.roomId }),
+      },
+      answer.toolCalls,
+    );
+    void this.connectionUsage
+      .flush(this.options.daemonApi, item.turnRequestId)
+      .catch((error) => console.warn('[body] usage diagnostics failed:', error));
+    const trace = new TurnTrace({
+      surface: item.parentRoomId ? 'corner' : 'room',
+      agentId: this.agent.publicKey,
+      roomId: item.roomId,
+      requestId: item.turnRequestId,
+    });
     trace.toolCalls([...answer.toolCalls]);
     const replay = trace.replay();
-    void this.options.daemonApi.execute('postAgentTurnReceipt', {
-      agentId: this.agent.publicKey, roomId: item.roomId, requestId: item.turnRequestId,
-      outcome: answer.text ? 'answered' : 'silent', toolCalls: answer.toolCalls.length,
-      ...mergeHarnessTurnMetrics(undefined, answer.tokenUsage),
-      ...(replay ? { trace: replay } : {}),
-    }).catch(error => console.warn('[body] turn diagnostics not written:', error));
-
+    void this.options.daemonApi
+      .execute('postAgentTurnReceipt', {
+        agentId: this.agent.publicKey,
+        roomId: item.roomId,
+        requestId: item.turnRequestId,
+        outcome: answer.text ? 'answered' : 'silent',
+        toolCalls: answer.toolCalls.length,
+        ...mergeHarnessTurnMetrics(undefined, answer.tokenUsage),
+        ...(replay ? { trace: replay } : {}),
+      })
+      .catch((error) => console.warn('[body] turn diagnostics not written:', error));
   }
 
   private async store(answer: StoredAnswer): Promise<void> {
@@ -369,48 +517,75 @@ export class AgentRunner {
         await this.answers.save(answer);
         this.durable.add(answer.itemId);
       }
-      const restart = this.latest.find(item => item.id === answer.itemId)?.action === 'restart';
-      const receipt = restart ? await api.execute('markAgentTurnSilent', {
-        roomId: answer.roomId, requestId: answer.itemId,
-      }) : await api.execute('postRoomMessage', {
-        roomId: answer.roomId, requestId: answer.itemId, text: answer.text, presentation: 'message',
-        ...(answer.harnessEnded ? { harnessEnded: true } : {}),
-        ...(answer.invocation ? {invocation:answer.invocation} : {}),
-        ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
-        ...(answer.steps ? { steps: answer.steps } : {}),
-      });
+      const restart = this.latest.find((item) => item.id === answer.itemId)?.action === 'restart';
+      const receipt = restart
+        ? await api.execute('markAgentTurnSilent', {
+            roomId: answer.roomId,
+            requestId: answer.itemId,
+          })
+        : await api.execute('postRoomMessage', {
+            roomId: answer.roomId,
+            requestId: answer.itemId,
+            text: answer.text,
+            presentation: 'message',
+            ...(answer.harnessEnded ? { harnessEnded: true } : {}),
+            ...(answer.invocation ? { invocation: answer.invocation } : {}),
+            ...(answer.queuedRequestIds?.length
+              ? { queuedRequestIds: answer.queuedRequestIds }
+              : {}),
+            ...(answer.steps ? { steps: answer.steps } : {}),
+          });
       if ('suppressed' in receipt && receipt.suppressed) {
         await this.answers.remove(answer.itemId);
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
-        for (const id of [answer.itemId,...(answer.queuedRequestIds ?? [])]) {
+        for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) {
           this.answered.delete(id);
           if (this.suppressionRetried.has(id)) this.awaitingInput.add(id);
           else this.suppressionRetried.add(id);
         }
         // Resume still-owed work through the normal queue after this execution releases.
-        const place=this.places.get(answer.roomId);
-        if (place?.running) place.retryOwed=true;
+        const place = this.places.get(answer.roomId);
+        if (place?.running) place.retryOwed = true;
         else this.reconcileQueue();
-      } else if (receipt.answered!==false) {
+      } else if (receipt.answered !== false) {
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
-        void this.answers.remove(answer.itemId).catch(error => console.warn('[body] answer cleanup failed:', error));
-      } else if (!answer.text && this.latest.some(item =>
-        [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id) && !isBackgroundCommand(item.reason))) {
-        const pending = this.latest.filter(item => [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id));
-        const hosted = answer.harnessEnded && (pending.some(item => item.modelCredential)
-          || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
-        if (hosted) for (const item of pending) await api.execute('startAgentTurn', {
-          roomId: item.roomId, requestId: item.turnRequestId, available: false,
-          failureReason: answer.failureReason ?? 'Agent harness ended without a public answer',
-        });
+        void this.answers
+          .remove(answer.itemId)
+          .catch((error) => console.warn('[body] answer cleanup failed:', error));
+      } else if (
+        !answer.text &&
+        this.latest.some(
+          (item) =>
+            [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id) &&
+            !isBackgroundCommand(item.reason),
+        )
+      ) {
+        const pending = this.latest.filter((item) =>
+          [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id),
+        );
+        const hosted =
+          answer.harnessEnded &&
+          (pending.some((item) => item.modelCredential) ||
+            this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID ||
+            this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
+        if (hosted)
+          for (const item of pending)
+            await api.execute('startAgentTurn', {
+              roomId: item.roomId,
+              requestId: item.turnRequestId,
+              available: false,
+              failureReason: answer.failureReason ?? 'Agent harness ended without a public answer',
+            });
         // Hosted turns close visibly; personal helpers retain the owed request
         // for their next queue delivery after the server refused an empty answer.
         await this.answers.remove(answer.itemId);
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
-        if (!hosted) for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.delete(id);
+        if (!hosted)
+          for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])])
+            this.answered.delete(id);
       }
     } catch (error) {
       // A queued item still owns its stored answer, including after a refusal.
@@ -444,7 +619,9 @@ export class AgentRunner {
       place.session.configurationChanged();
       if (!place.running) void place.session.stop().then(() => this.pump(placeId));
     }
-    void Promise.resolve(this.options.onConfigChanged?.()).catch(error => console.error('[body] config-change refresh failed', error));
+    void Promise.resolve(this.options.onConfigChanged?.()).catch((error) =>
+      console.error('[body] config-change refresh failed', error),
+    );
   }
 
   private async cornerComplete(cornerId: string): Promise<void> {
@@ -453,20 +630,24 @@ export class AgentRunner {
       await place.session.stop();
       this.places.delete(cornerId);
     }
-    await this.storage.reapCorner(cornerId).catch(error => console.warn(`[body] thread ${cornerId} cleanup deferred:`, error));
+    await this.storage
+      .reapCorner(cornerId)
+      .catch((error) => console.warn(`[body] thread ${cornerId} cleanup deferred:`, error));
   }
 
   /** The `workspace` tool's loopback door, shared with run_granted_command. */
   grantRunnerEndpoint(): Promise<GrantRunnerEndpoint | undefined> {
-    return this.grantEndpoint ??= this.grantRunnerServer.start().catch(error => {
+    return (this.grantEndpoint ??= this.grantRunnerServer.start().catch((error) => {
       console.error('[body] grant runner unavailable:', error);
       return undefined;
-    });
+    }));
   }
 
   /** Membership and storage facts; never part of delivery. */
   private async bootstrap(): Promise<'member' | 'not-member' | 'unknown'> {
-    const bootstrap = await this.options.daemonApi.execute('getDaemonBootstrap', { agentId: this.agent.publicKey });
+    const bootstrap = await this.options.daemonApi.execute('getDaemonBootstrap', {
+      agentId: this.agent.publicKey,
+    });
     publishStorageFacts(this.runtime.supervisorRoot, bootstrap.storageRooms ?? []);
     if (!bootstrap.workspaceIds.includes(this.runtime.communityId)) {
       this.removalReads += 1;
@@ -477,15 +658,23 @@ export class AgentRunner {
     return 'member';
   }
 
-  async run(opts: {
-    signal?: AbortSignal;
-    onEstablished?: () => void | Promise<void>;
-    onProgress?: (status: string, fault?: unknown) => void | Promise<void>;
-  } = {}): Promise<'aborted' | 'agent-removed'> {
-    void this.grantRunnerEndpoint().then(async endpoint => {
-      this.endpoint = endpoint;
-      if (endpoint) await writePrivateFileAtomically(resolve(dirname(this.configPath), 'session-tools.json'), JSON.stringify(endpoint));
-    }).catch(error => console.warn('[body] session tools unavailable:', error));
+  async run(
+    opts: {
+      signal?: AbortSignal;
+      onEstablished?: () => void | Promise<void>;
+      onProgress?: (status: string, fault?: unknown) => void | Promise<void>;
+    } = {},
+  ): Promise<'aborted' | 'agent-removed'> {
+    void this.grantRunnerEndpoint()
+      .then(async (endpoint) => {
+        this.endpoint = endpoint;
+        if (endpoint)
+          await writePrivateFileAtomically(
+            resolve(dirname(this.configPath), 'session-tools.json'),
+            JSON.stringify(endpoint),
+          );
+      })
+      .catch((error) => console.warn('[body] session tools unavailable:', error));
     this.options.daemonApi.subscribeQueue();
     let established = false;
     try {
@@ -496,11 +685,17 @@ export class AgentRunner {
             const membership = await this.bootstrap();
             if (membership === 'not-member') return 'agent-removed';
             if (membership === 'unknown') this.pendingBootstrap = true;
-            if (!established) { established = true; await opts.onEstablished?.(); }
+            if (!established) {
+              established = true;
+              await opts.onEstablished?.();
+            }
             await opts.onProgress?.('');
           } catch (error) {
             if (isAgentRemovedError(error)) return 'agent-removed';
-            await opts.onProgress?.(`degraded: ${error instanceof Error ? error.message : String(error)}`, error);
+            await opts.onProgress?.(
+              `degraded: ${error instanceof Error ? error.message : String(error)}`,
+              error,
+            );
           }
         }
         if (opts.signal?.aborted) break;
@@ -517,7 +712,9 @@ export class AgentRunner {
       this.stopped = true;
       this.releaseLiveOpen();
       for (const place of this.places.values()) clearTimeout(place.idleTimer);
-      await Promise.all([...this.places.values()].map(place => place.session.dispose().catch(() => undefined)));
+      await Promise.all(
+        [...this.places.values()].map((place) => place.session.dispose().catch(() => undefined)),
+      );
       await this.grantRunnerServer.close();
     }
   }

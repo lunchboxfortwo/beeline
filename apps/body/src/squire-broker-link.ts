@@ -32,8 +32,10 @@
  * An established connection loss admits an immediate replacement. If the
  * broker is still restarting, publication of its Unix socket admits the next
  * attempt, without a retry timer. Initialization and one tool inventory read
- * reconcile each replacement; pending tool calls retain an unknown outcome
- * and are never replayed. No path launches a broker.
+ * reconcile each replacement. Requests may wait during a connect attempt or
+ * initialization replay; with no socket and no attempt, they fail as not-sent.
+ * Failed attempts also end queued requests as not-sent; sent requests lose
+ * their outcome on disconnect and are never replayed. No path launches a broker.
  */
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';

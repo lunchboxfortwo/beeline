@@ -1,365 +1,436 @@
 import { harnessApprovalIntent } from '@beeline/api-contract/phone';
 import { agentMessageChunkText } from './acp-stderr-tail-max-chars.js';
-import { AcpClient, flattenHarnessCause, AcpRuntimeExitedError, SessionUpdate, SteerResult, AcpRequestError, parseAcpUsage, parseAvailableCommands, AcpPermissionRequest, AcpPermissionDecision } from './acp.js';
+import {
+  AcpClient,
+  flattenHarnessCause,
+  AcpRuntimeExitedError,
+  SessionUpdate,
+  SteerResult,
+  AcpRequestError,
+  parseAcpUsage,
+  parseAvailableCommands,
+  AcpPermissionRequest,
+  AcpPermissionDecision,
+} from './acp.js';
 import { answer } from './wait.js';
 
-
-
-  /**
-   * Inject follow-up input into the prompt currently running for this session.
-   * buzz-agent advertises the target run through ACP session metadata; binding
-   * the request to that id prevents a late message from steering a newer turn.
-   */
-  export async function acpClientSessionSteer(ctx: AcpClient, sessionId: string, text: string): Promise<SteerResult> {
-    if (ctx.supportsStandardSteering) {
-      const raw = (await ctx.request(
-        '_session/steering',
-        {
-          sessionId,
-          prompt: [{ type: 'text', text }],
-        },
-      )) as { outcome?: string };
-      if (!raw.outcome || raw.outcome === 'failed') {
-        throw new Error('ACP session steering failed');
-      }
-      return {
-        runId: ctx.activeRunId(sessionId) ?? `session:${sessionId}`,
-        messageId: raw.outcome,
-      };
+/**
+ * Inject follow-up input into the prompt currently running for this session.
+ * buzz-agent advertises the target run through ACP session metadata; binding
+ * the request to that id prevents a late message from steering a newer turn.
+ */
+export async function acpClientSessionSteer(
+  ctx: AcpClient,
+  sessionId: string,
+  text: string,
+): Promise<SteerResult> {
+  if (ctx.supportsStandardSteering) {
+    const raw = (await ctx.request('_session/steering', {
+      sessionId,
+      prompt: [{ type: 'text', text }],
+    })) as { outcome?: string };
+    if (!raw.outcome || raw.outcome === 'failed') {
+      throw new Error('ACP session steering failed');
     }
-    const expectedRunId = await ctx.waitForActiveRun(sessionId);
-    const raw = (await ctx.request(
-      '_goose/unstable/session/steer',
-      {
-        sessionId,
-        prompt: [{ type: 'text', text }],
-        expectedRunId,
-      },
-    )) as { runId?: string; messageId?: string };
-    if (!raw.runId || !raw.messageId) {
-      throw new Error('ACP session steer response missing runId or messageId');
+    return {
+      runId: ctx.activeRunId(sessionId) ?? `session:${sessionId}`,
+      messageId: raw.outcome,
+    };
+  }
+  const expectedRunId = await ctx.waitForActiveRun(sessionId);
+  const raw = (await ctx.request('_goose/unstable/session/steer', {
+    sessionId,
+    prompt: [{ type: 'text', text }],
+    expectedRunId,
+  })) as { runId?: string; messageId?: string };
+  if (!raw.runId || !raw.messageId) {
+    throw new Error('ACP session steer response missing runId or messageId');
+  }
+  return { runId: raw.runId, messageId: raw.messageId };
+}
+
+/** Active ACP run for a session, if the agent has advertised one. */
+export function acpClientActiveRunId(ctx: AcpClient, sessionId: string): string | undefined {
+  return (
+    ctx.activeRunIds.get(sessionId) ??
+    (ctx.activePromptSessions.has(sessionId) ? `session:${sessionId}` : undefined)
+  );
+}
+
+export function acpClientSessionCancel(ctx: AcpClient, sessionId: string): void {
+  ctx.notify('session/cancel', { sessionId });
+}
+
+/**
+ * The portable model/effort setter, confirmed round-tripping on pi/codex/
+ * claude (runtime audit §3.2). The
+ * param is `configId`, not `optionId`. Harnesses that advertise this shape
+ * must use it; `session/set_model` is reserved for the distinct standard
+ * `session/new.models` shape. Returns the runtime's updated `configOptions`.
+ * Callers must validate `configId`/`value` against the
+ * allow-listed catalog before calling this — see
+ * `apps/body/src/model-config.ts`'s `assertModelConfigOptionAllowed`; this
+ * method performs no policy checks of its own.
+ */
+export async function acpClientSetConfigOption(
+  ctx: AcpClient,
+  sessionId: string,
+  configId: string,
+  value: string,
+): Promise<unknown> {
+  return ctx.request('session/set_config_option', { sessionId, configId, value });
+}
+
+/**
+ * Standard ACP model setter used only when `session/new.models` supplied the
+ * corresponding safe model axis. Most Beeline harnesses use configOptions;
+ * Grok currently exposes models through this standard method instead.
+ */
+export async function acpClientSetModel(
+  ctx: AcpClient,
+  sessionId: string,
+  modelId: string,
+): Promise<unknown> {
+  return ctx.request('session/set_model', { sessionId, modelId });
+}
+
+export function acpClientOnData(ctx: AcpClient, chunk: string): void {
+  ctx.buf += chunk;
+  let nl: number;
+  while ((nl = ctx.buf.indexOf('\n')) >= 0) {
+    const line = ctx.buf.slice(0, nl).trim();
+    ctx.buf = ctx.buf.slice(nl + 1);
+    if (!line) continue;
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
     }
-    return { runId: raw.runId, messageId: raw.messageId };
+    ctx.handleMessage(msg);
   }
+}
 
-
-  /** Active ACP run for a session, if the agent has advertised one. */
-  export function acpClientActiveRunId(ctx: AcpClient, sessionId: string): string | undefined {
-    return (
-      ctx.activeRunIds.get(sessionId) ??
-      (ctx.activePromptSessions.has(sessionId) ? `session:${sessionId}` : undefined)
-    );
-  }
-
-
-  export function acpClientSessionCancel(ctx: AcpClient, sessionId: string): void {
-    ctx.notify('session/cancel', { sessionId });
-  }
-
-
-  /**
-   * The portable model/effort setter, confirmed round-tripping on pi/codex/
-   * claude (runtime audit §3.2). The
-   * param is `configId`, not `optionId`. Harnesses that advertise this shape
-   * must use it; `session/set_model` is reserved for the distinct standard
-   * `session/new.models` shape. Returns the runtime's updated `configOptions`.
-   * Callers must validate `configId`/`value` against the
-   * allow-listed catalog before calling this — see
-   * `apps/body/src/model-config.ts`'s `assertModelConfigOptionAllowed`; this
-   * method performs no policy checks of its own.
-   */
-  export async function acpClientSetConfigOption(ctx: AcpClient, sessionId: string, configId: string, value: string): Promise<unknown> {
-    return ctx.request('session/set_config_option', { sessionId, configId, value });
-  }
-
-
-  /**
-   * Standard ACP model setter used only when `session/new.models` supplied the
-   * corresponding safe model axis. Most Beeline harnesses use configOptions;
-   * Grok currently exposes models through this standard method instead.
-   */
-  export async function acpClientSetModel(ctx: AcpClient, sessionId: string, modelId: string): Promise<unknown> {
-    return ctx.request('session/set_model', { sessionId, modelId });
-  }
-
-
-  export function acpClientOnData(ctx: AcpClient, chunk: string): void {
-    ctx.buf += chunk;
-    let nl: number;
-    while ((nl = ctx.buf.indexOf('\n')) >= 0) {
-      const line = ctx.buf.slice(0, nl).trim();
-      ctx.buf = ctx.buf.slice(nl + 1);
-      if (!line) continue;
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
+export function acpClientHandleMessage(ctx: AcpClient, msg: Record<string, unknown>): void {
+  const id = msg.id;
+  const method = msg.method as string | undefined;
+  // Response to our request.
+  if (id !== undefined && !method) {
+    const n = Number(id);
+    const p = ctx.pending.get(n);
+    if (!p) return;
+    ctx.pending.delete(n);
+    if (msg.error) {
+      const err = msg.error as { code?: number; message?: string; data?: { details?: unknown } };
+      const details =
+        typeof err.data?.details === 'string' && err.data.details.trim()
+          ? err.data.details.replace(/\s+/g, ' ').trim()
+          : '';
+      const meaningful = flattenHarnessCause(ctx.stderrTail);
+      const extra = [details, meaningful ? `harness stderr: ${meaningful}` : '']
+        .filter(Boolean)
+        .join('; ');
+      p.reject(
+        new AcpRequestError(
+          err.code,
+          `ACP error ${err.code}: ${err.message}${extra ? `; ${extra}` : ''}`,
+        ),
+      );
+    } else {
+      const result = msg.result as { stopReason?: unknown } | undefined;
+      if (p.sessionId && typeof result?.stopReason === 'string') {
+        console.info(
+          '[harness-terminal]',
+          JSON.stringify({
+            harness: ctx.agentLabel,
+            sessionId: p.sessionId,
+            event: 'acp-result',
+            rpcRequestId: n,
+            stopReason: result.stopReason,
+          }),
+        );
       }
-      ctx.handleMessage(msg);
+      p.resolve(msg.result);
     }
+    return;
   }
 
-
-  export function acpClientHandleMessage(ctx: AcpClient, msg: Record<string, unknown>): void {
-    const id = msg.id;
-    const method = msg.method as string | undefined;
-    // Response to our request.
-    if (id !== undefined && !method) {
-      const n = Number(id);
-      const p = ctx.pending.get(n);
-      if (!p) return;
-      ctx.pending.delete(n);
-      if (msg.error) {
-        const err = msg.error as { code?: number; message?: string; data?: { details?: unknown } };
-        const details =
-          typeof err.data?.details === 'string' && err.data.details.trim()
-            ? err.data.details.replace(/\s+/g, ' ').trim()
-            : '';
-        const meaningful = flattenHarnessCause(ctx.stderrTail);
-        const extra = [details, meaningful ? `harness stderr: ${meaningful}` : '']
-          .filter(Boolean)
-          .join('; ');
-        p.reject(new AcpRequestError(err.code, `ACP error ${err.code}: ${err.message}${extra ? `; ${extra}` : ''}`));
-      } else {
-        const result = msg.result as { stopReason?: unknown } | undefined;
-        if (p.sessionId && typeof result?.stopReason === 'string') {
-          console.info('[harness-terminal]', JSON.stringify({ harness: ctx.agentLabel,
-            sessionId: p.sessionId, event: 'acp-result', rpcRequestId: n, stopReason: result.stopReason }));
-        }
-        p.resolve(msg.result);
-      }
+  // Agent → client request (has id + method).
+  if (method && id !== undefined) {
+    if (method === 'session/request_permission') {
+      void ctx.handlePermission(id, msg.params);
       return;
     }
+    // Unknown request — cancel/empty result.
+    ctx.write({ jsonrpc: '2.0', id, result: {} });
+    return;
+  }
 
-    // Agent → client request (has id + method).
-    if (method && id !== undefined) {
-      if (method === 'session/request_permission') {
-        void ctx.handlePermission(id, msg.params);
-        return;
-      }
-      // Unknown request — cancel/empty result.
-      ctx.write({ jsonrpc: '2.0', id, result: {} });
-      return;
-    }
-
-    // Notifications (no id).
-    if (method === '_claude/sdkMessage') {
-      const params = msg.params as { sessionId?: string; message?: {
-        type?: string; subtype?: string; parent_tool_use_id?: unknown;
-        stop_reason?: string; is_error?: boolean; message?: { stop_reason?: string };
-      } } | undefined;
-      const native = params?.message;
-      const stopReason = native?.type === 'assistant' ? native.message?.stop_reason : native?.stop_reason;
-      if (params?.sessionId && (native?.type === 'result' ||
-          (native?.type === 'assistant' && stopReason === 'end_turn'))) {
-        console.info('[harness-terminal]', JSON.stringify({ harness: ctx.agentLabel,
-          sessionId: params.sessionId, event: `claude-${native.type}`, stopReason,
-          ...(native.type === 'result' ? { subtype: native.subtype, isError: native.is_error === true } : {}),
-          subagent: native.parent_tool_use_id != null }));
-      }
-      return;
-    }
-    if (method === 'session/update') {
-      const params = msg.params as { sessionId?: string; update?: Record<string, unknown> };
-      if (params?.sessionId && params.update) {
-        if (params.update.sessionUpdate === 'compaction_update' ||
-            params.update.sessionUpdate === 'compaction_summary_chunk')
-          ctx.promptDeliveries.get(params.sessionId)?.invalidate();
-        // Harness-advertised slash commands/skills: captured here so the daemon
-        // can republish them as the agent's durable command list (see
-        // `agent-commands.ts` in buzz-client). Arrival is adapter-driven — all
-        // shipped adapters push it at session start and on mid-session change.
-        if (params.update.sessionUpdate === 'usage_update') {
-          const usage = parseAcpUsage(params.update, ctx.sessionUsage.get(params.sessionId));
-          if (usage) {
-            ctx.sessionUsage.set(params.sessionId, usage);
-            ctx.usageHandler?.(usage);
-          }
+  // Notifications (no id).
+  if (method === '_claude/sdkMessage') {
+    const params = msg.params as
+      | {
+          sessionId?: string;
+          message?: {
+            type?: string;
+            subtype?: string;
+            parent_tool_use_id?: unknown;
+            stop_reason?: string;
+            is_error?: boolean;
+            message?: { stop_reason?: string };
+          };
         }
-        if (params.update.sessionUpdate === 'available_commands_update') {
-          const commands = parseAvailableCommands(params.update.availableCommands);
-          ctx.sessionCommands.set(params.sessionId, commands);
-          ctx.commandsHandler?.(commands);
-          ctx.emit('commands', { sessionId: params.sessionId, commands });
-        }
-        const narration = agentMessageChunkText(params.update);
-        if (narration) ctx.permissionNarration.set(params.sessionId, (ctx.permissionNarration.get(params.sessionId) ?? '') + narration);
-        const toolCallId = params.update.toolCallId;
-        const sessionUpdate = params.update.sessionUpdate;
-        if (
-          typeof toolCallId === 'string' &&
-          (sessionUpdate === 'tool_call' || sessionUpdate === 'tool_call_update')
-        ) {
-          const metadataKey = `${params.sessionId}\0${toolCallId}`;
-          const status = params.update.status;
-          if (status === 'completed' || status === 'failed') {
-            ctx.toolCallMetadata.delete(metadataKey);
-          } else {
-            const existing = ctx.toolCallMetadata.get(metadataKey);
-            ctx.toolCallMetadata.set(metadataKey, {
-              ...existing,
-              toolCallId,
-              ...harnessApprovalIntent(String(params.update.title ?? existing?.title ?? params.update.name ?? 'Run a command'), ctx.permissionNarration.get(params.sessionId)),
-              ...(typeof params.update.name === 'string' ? { name: params.update.name } : {}),
-              ...(typeof params.update.title === 'string' ? { title: params.update.title } : {}),
-              ...(typeof params.update.kind === 'string' ? { kind: params.update.kind } : {}),
-              ...('rawInput' in params.update ? { rawInput: params.update.rawInput } : {}),
-              // `content`/`locations` carry the touched file paths for adapters
-              // whose permission request omits them (codex-acp's file-change
-              // request has no rawInput at all) — the corner worktree guard in
-              // `session-sandbox.ts` reads them.
-              ...('content' in params.update ? { content: params.update.content } : {}),
-              ...('locations' in params.update ? { locations: params.update.locations } : {}),
-            });
-          }
-        }
-        const u: SessionUpdate = {
+      | undefined;
+    const native = params?.message;
+    const stopReason =
+      native?.type === 'assistant' ? native.message?.stop_reason : native?.stop_reason;
+    if (
+      params?.sessionId &&
+      (native?.type === 'result' || (native?.type === 'assistant' && stopReason === 'end_turn'))
+    ) {
+      console.info(
+        '[harness-terminal]',
+        JSON.stringify({
+          harness: ctx.agentLabel,
           sessionId: params.sessionId,
-          update: params.update,
-        };
-        const activeRunId = ctx.activeRunIdFromUpdate(params.update);
-        if (activeRunId) ctx.activeRunIds.set(params.sessionId, activeRunId);
-        ctx.emit('session/update', u);
+          event: `claude-${native.type}`,
+          stopReason,
+          ...(native.type === 'result'
+            ? { subtype: native.subtype, isError: native.is_error === true }
+            : {}),
+          subagent: native.parent_tool_use_id != null,
+        }),
+      );
+    }
+    return;
+  }
+  if (method === 'session/update') {
+    const params = msg.params as { sessionId?: string; update?: Record<string, unknown> };
+    if (params?.sessionId && params.update) {
+      if (
+        params.update.sessionUpdate === 'compaction_update' ||
+        params.update.sessionUpdate === 'compaction_summary_chunk'
+      )
+        ctx.promptDeliveries.get(params.sessionId)?.invalidate();
+      // Harness-advertised slash commands/skills: captured here so the daemon
+      // can republish them as the agent's durable command list (see
+      // `agent-commands.ts` in buzz-client). Arrival is adapter-driven — all
+      // shipped adapters push it at session start and on mid-session change.
+      if (params.update.sessionUpdate === 'usage_update') {
+        const usage = parseAcpUsage(params.update, ctx.sessionUsage.get(params.sessionId));
+        if (usage) {
+          ctx.sessionUsage.set(params.sessionId, usage);
+          ctx.usageHandler?.(usage);
+        }
       }
-      return;
+      if (params.update.sessionUpdate === 'available_commands_update') {
+        const commands = parseAvailableCommands(params.update.availableCommands);
+        ctx.sessionCommands.set(params.sessionId, commands);
+        ctx.commandsHandler?.(commands);
+        ctx.emit('commands', { sessionId: params.sessionId, commands });
+      }
+      const narration = agentMessageChunkText(params.update);
+      if (narration)
+        ctx.permissionNarration.set(
+          params.sessionId,
+          (ctx.permissionNarration.get(params.sessionId) ?? '') + narration,
+        );
+      const toolCallId = params.update.toolCallId;
+      const sessionUpdate = params.update.sessionUpdate;
+      if (
+        typeof toolCallId === 'string' &&
+        (sessionUpdate === 'tool_call' || sessionUpdate === 'tool_call_update')
+      ) {
+        const metadataKey = `${params.sessionId}\0${toolCallId}`;
+        const status = params.update.status;
+        if (status === 'completed' || status === 'failed') {
+          ctx.toolCallMetadata.delete(metadataKey);
+        } else {
+          const existing = ctx.toolCallMetadata.get(metadataKey);
+          ctx.toolCallMetadata.set(metadataKey, {
+            ...existing,
+            toolCallId,
+            ...harnessApprovalIntent(
+              String(
+                params.update.title ?? existing?.title ?? params.update.name ?? 'Run a command',
+              ),
+              ctx.permissionNarration.get(params.sessionId),
+            ),
+            ...(typeof params.update.name === 'string' ? { name: params.update.name } : {}),
+            ...(typeof params.update.title === 'string' ? { title: params.update.title } : {}),
+            ...(typeof params.update.kind === 'string' ? { kind: params.update.kind } : {}),
+            ...('rawInput' in params.update ? { rawInput: params.update.rawInput } : {}),
+            // `content`/`locations` carry the touched file paths for adapters
+            // whose permission request omits them (codex-acp's file-change
+            // request has no rawInput at all) — the corner worktree guard in
+            // `session-sandbox.ts` reads them.
+            ...('content' in params.update ? { content: params.update.content } : {}),
+            ...('locations' in params.update ? { locations: params.update.locations } : {}),
+          });
+        }
+      }
+      const u: SessionUpdate = {
+        sessionId: params.sessionId,
+        update: params.update,
+      };
+      const activeRunId = ctx.activeRunIdFromUpdate(params.update);
+      if (activeRunId) ctx.activeRunIds.set(params.sessionId, activeRunId);
+      ctx.emit('session/update', u);
+    }
+    return;
+  }
+}
+
+export function acpClientActiveRunIdFromUpdate(
+  _ctx: AcpClient,
+  update: Record<string, unknown>,
+): string | undefined {
+  const meta = update._meta as Record<string, unknown> | undefined;
+  const goose = meta?.goose as Record<string, unknown> | undefined;
+  return typeof goose?.activeRunId === 'string' && goose.activeRunId
+    ? goose.activeRunId
+    : undefined;
+}
+
+export function acpClientWaitForActiveRun(ctx: AcpClient, sessionId: string): Promise<string> {
+  const current = ctx.activeRunIds.get(sessionId);
+  if (current) return Promise.resolve(current);
+  if (!ctx.activePromptSessions.has(sessionId))
+    return Promise.reject(new Error('No active prompt to steer'));
+
+  // This session's advertised run; the runtime's exit, or this session's own
+  // prompt end, fails it (another session ending never does).
+  let onUpdate: ((update: SessionUpdate) => void) | undefined;
+  let ended: ((event: { sessionId: string }) => void) | undefined;
+  return answer<string>(
+    'ACP active run',
+    [
+      [
+        ctx,
+        'exit',
+        () => new AcpRuntimeExitedError('runtime exited before an active run was advertised'),
+      ],
+    ],
+    ({ resolve, reject }) => {
+      onUpdate = (update: SessionUpdate) => {
+        if (update.sessionId !== sessionId) return;
+        const runId = ctx.activeRunIdFromUpdate(update.update);
+        if (runId) resolve(runId);
+      };
+      ended = (event: { sessionId: string }) => {
+        if (event.sessionId === sessionId)
+          reject(new Error('Prompt ended before an active run was advertised'));
+      };
+      ctx.on('prompt/end', ended);
+      ctx.on('session/update', onUpdate);
+    },
+  ).finally(() => {
+    if (onUpdate) ctx.off('session/update', onUpdate);
+    if (ended) ctx.off('prompt/end', ended);
+  });
+}
+
+export async function acpClientHandlePermission(
+  ctx: AcpClient,
+  id: unknown,
+  params: unknown,
+): Promise<void> {
+  const p = (params ?? {}) as AcpPermissionRequest;
+  if (p.sessionId && ctx.terminalSessions.has(p.sessionId)) {
+    ctx.write({ jsonrpc: '2.0', id, result: { outcome: { outcome: 'cancelled' } } });
+    return;
+  }
+  const toolCallId = p.toolCall?.toolCallId;
+  const metadataKey = p.sessionId && toolCallId ? `${p.sessionId}\0${toolCallId}` : undefined;
+  const tracked = metadataKey ? ctx.toolCallMetadata.get(metadataKey) : undefined;
+  if (tracked) p.toolCall = { ...tracked, ...p.toolCall };
+  const intent = harnessApprovalIntent(
+    String(p.toolCall?.title ?? 'Run a command'),
+    ctx.permissionNarration.get(p.sessionId ?? ''),
+  );
+  p.action = p.toolCall?.action ?? intent.action;
+  p.purpose = p.toolCall?.purpose ?? intent.purpose;
+  let decision: AcpPermissionDecision = ctx.autoApprove ? 'allow' : 'reject';
+  if (!ctx.autoApprove && ctx.permissionAllowlist) {
+    try {
+      decision = ctx.permissionAllowlist(p) ? 'allow' : 'reject';
+    } catch (error) {
+      ctx.emit('permission/error', error);
+      decision = 'reject';
+    }
+  } else if (ctx.permissionHandler) {
+    try {
+      decision = await ctx.permissionHandler(p);
+    } catch (error) {
+      ctx.emit('permission/error', error);
+      decision = 'reject';
     }
   }
-
-
-  export function acpClientActiveRunIdFromUpdate(_ctx: AcpClient, update: Record<string, unknown>): string | undefined {
-    const meta = update._meta as Record<string, unknown> | undefined;
-    const goose = meta?.goose as Record<string, unknown> | undefined;
-    return typeof goose?.activeRunId === 'string' && goose.activeRunId
-      ? goose.activeRunId
-      : undefined;
-  }
-
-
-  export function acpClientWaitForActiveRun(ctx: AcpClient, sessionId: string): Promise<string> {
-    const current = ctx.activeRunIds.get(sessionId);
-    if (current) return Promise.resolve(current);
-    if (!ctx.activePromptSessions.has(sessionId)) return Promise.reject(new Error('No active prompt to steer'));
-
-    // This session's advertised run; the runtime's exit, or this session's own
-    // prompt end, fails it (another session ending never does).
-    let onUpdate: ((update: SessionUpdate) => void) | undefined;
-    let ended: ((event: { sessionId: string }) => void) | undefined;
-    return answer<string>(
-      'ACP active run',
-      [[ctx, 'exit', () => new AcpRuntimeExitedError('runtime exited before an active run was advertised')]],
-      ({ resolve, reject }) => {
-        onUpdate = (update: SessionUpdate) => {
-          if (update.sessionId !== sessionId) return;
-          const runId = ctx.activeRunIdFromUpdate(update.update);
-          if (runId) resolve(runId);
-        };
-        ended = (event: { sessionId: string }) => {
-          if (event.sessionId === sessionId) reject(new Error('Prompt ended before an active run was advertised'));
-        };
-        ctx.on('prompt/end', ended);
-        ctx.on('session/update', onUpdate);
-      },
-    ).finally(() => {
-      if (onUpdate) ctx.off('session/update', onUpdate);
-      if (ended) ctx.off('prompt/end', ended);
-    });
-  }
-
-
-  export async function acpClientHandlePermission(ctx: AcpClient, id: unknown, params: unknown): Promise<void> {
-    const p = (params ?? {}) as AcpPermissionRequest;
-    if (p.sessionId && ctx.terminalSessions.has(p.sessionId)) {
-      ctx.write({ jsonrpc: '2.0', id, result: { outcome: { outcome: 'cancelled' } } });
-      return;
-    }
-    const toolCallId = p.toolCall?.toolCallId;
-    const metadataKey = p.sessionId && toolCallId ? `${p.sessionId}\0${toolCallId}` : undefined;
-    const tracked = metadataKey ? ctx.toolCallMetadata.get(metadataKey) : undefined;
-    if (tracked) p.toolCall = { ...tracked, ...p.toolCall };
-    const intent = harnessApprovalIntent(String(p.toolCall?.title ?? 'Run a command'), ctx.permissionNarration.get(p.sessionId ?? ''));
-    p.action = p.toolCall?.action ?? intent.action;
-    p.purpose = p.toolCall?.purpose ?? intent.purpose;
-    let decision: AcpPermissionDecision = ctx.autoApprove ? 'allow' : 'reject';
-    if (!ctx.autoApprove && ctx.permissionAllowlist) {
-      try {
-        decision = ctx.permissionAllowlist(p) ? 'allow' : 'reject';
-      } catch (error) {
-        ctx.emit('permission/error', error);
-        decision = 'reject';
-      }
-    } else if (ctx.permissionHandler) {
-      try {
-        decision = await ctx.permissionHandler(p);
-      } catch (error) {
-        ctx.emit('permission/error', error);
-        decision = 'reject';
-      }
-    }
-    if (p.sessionId && ctx.terminalSessions.has(p.sessionId)) decision = 'reject';
-    if (decision === 'allow') {
-      const allow =
-        p?.options?.find((o) => o.kind === 'allow_once' || o.kind === 'allow_always') ??
-        p?.options?.[0];
-      if (allow?.optionId) {
-        if (metadataKey) ctx.toolCallMetadata.delete(metadataKey);
-        ctx.write({
-          jsonrpc: '2.0',
-          id,
-          result: {
-            outcome: { outcome: 'selected', optionId: allow.optionId },
-          },
-        });
-        return;
-      }
-    }
-    // Reject if we cannot approve.
-    const reject = p?.options?.find((o) => o.kind === 'reject_once' || o.kind === 'reject_always');
-    if (reject?.optionId) {
+  if (p.sessionId && ctx.terminalSessions.has(p.sessionId)) decision = 'reject';
+  if (decision === 'allow') {
+    const allow =
+      p?.options?.find((o) => o.kind === 'allow_once' || o.kind === 'allow_always') ??
+      p?.options?.[0];
+    if (allow?.optionId) {
       if (metadataKey) ctx.toolCallMetadata.delete(metadataKey);
       ctx.write({
         jsonrpc: '2.0',
         id,
         result: {
-          outcome: { outcome: 'selected', optionId: reject.optionId },
+          outcome: { outcome: 'selected', optionId: allow.optionId },
         },
       });
       return;
     }
+  }
+  // Reject if we cannot approve.
+  const reject = p?.options?.find((o) => o.kind === 'reject_once' || o.kind === 'reject_always');
+  if (reject?.optionId) {
     if (metadataKey) ctx.toolCallMetadata.delete(metadataKey);
     ctx.write({
       jsonrpc: '2.0',
       id,
-      result: { outcome: { outcome: 'cancelled' } },
+      result: {
+        outcome: { outcome: 'selected', optionId: reject.optionId },
+      },
     });
+    return;
   }
+  if (metadataKey) ctx.toolCallMetadata.delete(metadataKey);
+  ctx.write({
+    jsonrpc: '2.0',
+    id,
+    result: { outcome: { outcome: 'cancelled' } },
+  });
+}
 
+/** Responses and transport loss settle requests; silence never starts a retry. */
+export function acpClientRequest(
+  ctx: AcpClient,
+  method: string,
+  params: unknown,
+): Promise<unknown> {
+  if (!ctx.child || !ctx.alive)
+    return Promise.reject(new AcpRuntimeExitedError('ACP process is not running'));
+  const id = ctx.nextId++;
+  // The reply to this id; the runtime's exit or failure rejects every pending one.
+  return answer<unknown>('ACP agent', [], ({ resolve, reject }) => {
+    const sessionId = (params as { sessionId?: string })?.sessionId;
+    ctx.pending.set(id, { resolve, reject, ...(sessionId ? { sessionId } : {}) });
+    ctx.write({ jsonrpc: '2.0', id, method, params });
+  });
+}
 
-  /** Responses and transport loss settle requests; silence never starts a retry. */
-  export function acpClientRequest(ctx: AcpClient, method: string, params: unknown): Promise<unknown> {
-    if (!ctx.child || !ctx.alive)
-      return Promise.reject(new AcpRuntimeExitedError('ACP process is not running'));
-    const id = ctx.nextId++;
-    // The reply to this id; the runtime's exit or failure rejects every pending one.
-    return answer<unknown>('ACP agent', [], ({ resolve, reject }) => {
-      const sessionId = (params as { sessionId?: string })?.sessionId;
-      ctx.pending.set(id, { resolve, reject, ...(sessionId ? { sessionId } : {}) });
-      ctx.write({ jsonrpc: '2.0', id, method, params });
-    });
+export function acpClientNotify(ctx: AcpClient, method: string, params: unknown): void {
+  ctx.write({ jsonrpc: '2.0', method, params });
+}
+
+export function acpClientWrite(ctx: AcpClient, obj: unknown): void {
+  if (!ctx.child?.stdin.writable) {
+    if (ctx.child) ctx.failRuntime(`ACP agent ${ctx.agentLabel} stdin pipe closed`);
+    return;
   }
-
-
-  export function acpClientNotify(ctx: AcpClient, method: string, params: unknown): void {
-    ctx.write({ jsonrpc: '2.0', method, params });
-  }
-
-
-  export function acpClientWrite(ctx: AcpClient, obj: unknown): void {
-    if (!ctx.child?.stdin.writable) {
-      if (ctx.child) ctx.failRuntime(`ACP agent ${ctx.agentLabel} stdin pipe closed`);
-      return;
-    }
-    ctx.child.stdin.write(JSON.stringify(obj) + '\n', (error) => {
-      if (error) ctx.failRuntime(`stdin: ${error.message}`);
-    });
-  }
+  ctx.child.stdin.write(JSON.stringify(obj) + '\n', (error) => {
+    if (error) ctx.failRuntime(`stdin: ${error.message}`);
+  });
+}
