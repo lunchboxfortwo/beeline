@@ -1,8 +1,8 @@
+import { runOwnedFile } from './wait.js';
 import { lstat, readdir, readFile, readlink } from 'node:fs/promises';
 import { resolve, sep, relative } from 'node:path';
-import { execFile, type ExecFileOptions } from 'node:child_process';
-import { promisify } from 'node:util';
-const execFileAsync = promisify(execFile);
+import { type ExecFileOptions } from 'node:child_process';
+const execFileAsync = runOwnedFile;
 import {
   canonicalStoragePath,
   ordinaryDirectory,

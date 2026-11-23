@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
+import { ownedCommandModule, runOwnedFile } from './wait.js';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, readdir, realpath, lstat, rm, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, delimiter } from 'node:path';
-import { promisify } from 'node:util';
 import { tryWithKernelLock } from './kernel-lock.js';
 import type { DependencyLayer } from './bwrap-sandbox.js';
 import {
@@ -14,7 +13,7 @@ import {
   isContainedTreePath,
 } from './warm-node-modules.js';
 
-const exec = promisify(execFile);
+const exec = runOwnedFile;
 const marker = '.beeline-generation';
 export const dependencyRequest = '.beeline-dependency-request';
 
@@ -26,13 +25,14 @@ export async function extraDependencyRoots(root: string, home?: string): Promise
     throw error;
   });
   if (!registryInfo) return [];
-  if (!registryInfo.isDirectory() || registryInfo.isSymbolicLink()) throw new Error('Invalid extra dependency registry');
+  if (!registryInfo.isDirectory() || registryInfo.isSymbolicLink())
+    throw new Error('Invalid extra dependency registry');
   const entries = await readdir(registry).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return [];
     throw error;
   });
   if (entries.length > 128) throw new Error('Too many extra dependency requests');
-  const allowed = await Promise.all([root, ...(home ? [home] : [])].map(path => realpath(path)));
+  const allowed = await Promise.all([root, ...(home ? [home] : [])].map((path) => realpath(path)));
   const roots = new Set<string>();
   for (const name of entries.sort()) {
     if (!/^[a-f0-9]{64}$/.test(name)) continue;
@@ -45,10 +45,13 @@ export async function extraDependencyRoots(root: string, home?: string): Promise
       throw error;
     });
     if (!canonical) continue; // A removed disposable rig no longer pins dependencies.
-    if (!allowed.some(parent => {
-      const child = relative(parent, canonical);
-      return child !== '' && child !== '..' && !child.startsWith('../') && !isAbsolute(child);
-    })) throw new Error('Extra dependencies must be inside this thread or its agent home');
+    if (
+      !allowed.some((parent) => {
+        const child = relative(parent, canonical);
+        return child !== '' && child !== '..' && !child.startsWith('../') && !isAbsolute(child);
+      })
+    )
+      throw new Error('Extra dependencies must be inside this thread or its agent home');
     roots.add(canonical);
   }
   return [...roots].sort();
@@ -56,7 +59,12 @@ export async function extraDependencyRoots(root: string, home?: string): Promise
 
 export async function dependencyFingerprint(root: string, home?: string): Promise<string> {
   return JSON.stringify([
-    await Promise.all((await extraDependencyRoots(root, home)).map(async path => [path, await dependencyFingerprintForCopy(path)])),
+    await Promise.all(
+      (await extraDependencyRoots(root, home)).map(async (path) => [
+        path,
+        await dependencyFingerprintForCopy(path),
+      ]),
+    ),
     await readFile(resolve(root, dependencyRequest), 'utf8').catch(() => ''),
     await Promise.all(
       ['', 'apps/mobile'].map(async (part) => {
@@ -100,15 +108,19 @@ export async function prepareDependencyGeneration(input: {
   for (const tree of new Set([
     ...plan.trees,
     ...(installed?.trees ?? []).filter(isContainedTreePath),
-  ])) await rm(resolve(input.root, tree), { recursive: true, force: true });
-  let seeded = await withStore(() => seedWarmNodeModules({ worktreePath: input.root, storeRoot: input.store }));
+  ]))
+    await rm(resolve(input.root, tree), { recursive: true, force: true });
+  let seeded = await withStore(() =>
+    seedWarmNodeModules({ worktreePath: input.root, storeRoot: input.store }),
+  );
   if (seeded?.reason !== 'seeded') {
     if (input.install) await input.install();
-    else await exec(input.npm, ['ci', '--no-audit', '--no-fund'], {
-      cwd: input.root,
-      env: { ...process.env, npm_config_cache: input.cache },
-      maxBuffer: 16 * 1024 * 1024,
-    });
+    else
+      await exec(input.npm, ['ci', '--no-audit', '--no-fund'], {
+        cwd: input.root,
+        env: { ...process.env, npm_config_cache: input.cache },
+        maxBuffer: 16 * 1024 * 1024,
+      });
     if ((await missingInstalledPackages(input.root)).length)
       throw new Error('Dependency generation failed: incomplete private install');
   }
@@ -116,7 +128,10 @@ export async function prepareDependencyGeneration(input: {
   // it with the same mounts. Only an immediately available owner may share it.
   if (seeded?.reason !== 'seeded') {
     await withStore(async () => {
-      const harvested = await harvestWarmNodeModules({ worktreePath: input.root, storeRoot: input.store });
+      const harvested = await harvestWarmNodeModules({
+        worktreePath: input.root,
+        storeRoot: input.store,
+      });
       if (!['stored', 'already-warm'].includes(harvested.reason))
         throw new Error(`Dependency generation failed: ${harvested.reason}`);
       for (const tree of plan.trees)
@@ -143,18 +158,26 @@ export async function openDependencyLayer(layer: string): Promise<void> {
  * private `root`. A new generation (a new tree or marker) starts a clean layer,
  * so files written over an older generation never shadow its replacement.
  */
-export async function dependencyLayers(root: string, trees: readonly string[]): Promise<DependencyLayer[]> {
+export async function dependencyLayers(
+  root: string,
+  trees: readonly string[],
+): Promise<DependencyLayer[]> {
   const hash = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16);
   const existing = await readdir(root).catch(() => [] as string[]);
-  return Promise.all(trees.map(async (tree) => {
-    const generation = await readFile(resolve(tree, marker), 'utf8').catch(() => '');
-    const prefix = hash(tree), name = `${prefix}-${hash(`${(await lstat(tree)).ino}\0${generation}`)}`;
-    for (const stale of existing.filter(entry => entry.startsWith(`${prefix}-`) && entry !== name)) {
-      await openDependencyLayer(resolve(root, stale));
-      await rm(resolve(root, stale), { recursive: true, force: true });
-    }
-    return { tree, upper: resolve(root, name, 'upper'), work: resolve(root, name, 'work') };
-  }));
+  return Promise.all(
+    trees.map(async (tree) => {
+      const generation = await readFile(resolve(tree, marker), 'utf8').catch(() => '');
+      const prefix = hash(tree),
+        name = `${prefix}-${hash(`${(await lstat(tree)).ino}\0${generation}`)}`;
+      for (const stale of existing.filter(
+        (entry) => entry.startsWith(`${prefix}-`) && entry !== name,
+      )) {
+        await openDependencyLayer(resolve(root, stale));
+        await rm(resolve(root, stale), { recursive: true, force: true });
+      }
+      return { tree, upper: resolve(root, name, 'upper'), work: resolve(root, name, 'work') };
+    }),
+  );
 }
 
 /** PATH guard gives npm's normal mutating commands a useful error before EROFS. */
@@ -166,7 +189,7 @@ export async function installDependencyNpmGuard(
 ): Promise<string> {
   const bin = resolve(root, 'dependency-bin');
   await mkdir(bin, { recursive: true });
-  const program = `#!${process.execPath}\nconst {spawnSync}=require('node:child_process');
+  const program = `#!${process.execPath}\n
 const args=process.argv.slice(2);
 const {existsSync,realpathSync}=require('node:fs');
 const {resolve,relative,isAbsolute}=require('node:path');
@@ -184,9 +207,10 @@ if(args.some(a=>mutations.has(a)) && !args.includes('--package-lock-only') && !p
  console.error('Beeline dependencies are read-only. Use npm install --package-lock-only --ignore-scripts <package> (or edit package.json and package-lock.json). Beeline installs and mounts the new generation automatically at the next turn.');
  process.exit(1);
 }
-const result=spawnSync(${JSON.stringify(npm)},args.includes('--package-lock-only')?[...args,'--ignore-scripts']:args,{stdio:'inherit'});
-if(result.error) throw result.error;
-process.exit(result.status??1);
+import(${JSON.stringify(ownedCommandModule())}).then(async ({runOwned})=>{
+const result=await runOwned({step:'npm',file:${JSON.stringify(npm)},args:args.includes('--package-lock-only')?[...args,'--ignore-scripts']:args,interactive:true,machineRead:true});
+process.exitCode=result.code??1;
+}).catch(error=>{console.error(error);process.exitCode=1;});
 `;
   await writeFile(resolve(bin, 'npm'), program, { mode: 0o755 });
   return `${bin}${delimiter}${inheritedPath}`;
@@ -215,7 +239,9 @@ export async function collectUnusedGenerations(store: string): Promise<string[]>
 }
 
 export async function collectDependencyStore(store: string): Promise<string[]> {
-  return await tryWithKernelLock(`dependency-store:${resolve(store)}`, () =>
-    collectUnusedGenerations(store),
-  ) ?? [];
+  return (
+    (await tryWithKernelLock(`dependency-store:${resolve(store)}`, () =>
+      collectUnusedGenerations(store),
+    )) ?? []
+  );
 }

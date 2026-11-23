@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import {
   closeSync,
   existsSync,
@@ -18,7 +18,7 @@ import { pidAlive, readState, hasLocalDelivery, stateDir } from './store.js';
 import type { Runner } from './bridge.js';
 import { notifyBridgeSessions } from './bridge.js';
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
-import { tryLock } from '../wait.js';
+import { runOwned, tryLock } from '../wait.js';
 
 export function bridgeRunning(dir: string): boolean {
   try {
@@ -42,7 +42,7 @@ function bridgeOwner(dir: string): { pid: number; digest: string } | undefined {
 }
 
 /** A stale private pid file must never authorize signalling an unrelated process. */
-function isBridgeProcess(pid: number): boolean {
+async function isBridgeProcess(pid: number): Promise<boolean> {
   try {
     if (process.platform === 'linux') {
       const args = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
@@ -54,9 +54,14 @@ function isBridgeProcess(pid: number): boolean {
         args[3] === 'bridge'
       );
     }
-    const args = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'args='], {
-      encoding: 'utf8',
-    }).trim();
+    const listed = await runOwned({
+      step: 'ps',
+      file: 'ps',
+      args: ['-ww', '-p', String(pid), '-o', 'args='],
+      onLine: () => undefined,
+    });
+    if (listed.code !== 0) return false;
+    const args = listed.stdout.trim();
     return /(?:^|\/)node\s+.*\/(?:beeline|usebeeline\.mjs|recovery-cli\.mjs) session bridge$/.test(
       args,
     );
@@ -101,7 +106,7 @@ export async function ensureBridge(
     let old: number | undefined;
     if (bridgeRunning(dir)) {
       old = Number(readFileSync(pidFile, 'utf8'));
-      if (!isBridgeProcess(old))
+      if (!(await isBridgeProcess(old)))
         throw new Error('Beeline bridge PID belongs to an unrecognized process; refusing takeover');
       const owner = bridgeOwner(dir);
       if (owner?.pid === old && owner.digest === digest) {

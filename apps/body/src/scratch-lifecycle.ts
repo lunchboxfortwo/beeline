@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
 import { lstat } from 'node:fs/promises';
-import { promisify } from 'node:util';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 export const CORNER_SCRATCH_BUDGET_BYTES = 5 * 1024 ** 3;
 
 /** du counts allocated blocks once per inode and never follows symlinks. */
@@ -12,7 +11,8 @@ export async function allocatedDirectoryBytes(path: string): Promise<number> {
     maxBuffer: 1024 * 1024,
   }).then((result) => result.stdout);
   const bytes = Number(output.split(/\s+/)[0]);
-  if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error('scratch usage could not be measured');
+  if (!Number.isSafeInteger(bytes) || bytes < 0)
+    throw new Error('scratch usage could not be measured');
   return bytes;
 }
 
@@ -28,6 +28,8 @@ export async function assertScratchWriteBudget(
 ): Promise<void> {
   const usage = await allocatedDirectoryBytes(root);
   if (usage + incomingBytes > budget) {
-    throw new Error(`${scratchBudgetMessage(usage, budget)} Requested write: ${incomingBytes} bytes.`);
+    throw new Error(
+      `${scratchBudgetMessage(usage, budget)} Requested write: ${incomingBytes} bytes.`,
+    );
   }
 }

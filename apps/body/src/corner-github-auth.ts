@@ -1,3 +1,4 @@
+import { ownedCommandModule } from './wait.js';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, resolve } from 'node:path';
 import { anchorLayout, BUNDLE_ENTRYPOINT, releaseIdFromPath } from './self-update.js';
@@ -54,7 +55,7 @@ export async function installCornerGitHubWrappers(input: {
     // Sessions outlive helper updates. Keep the install anchor unresolved so
     // release pruning cannot delete the CLI their credential launcher calls.
     cli: releaseIdFromPath(input.cliEntrypoint)
-      ? resolve(anchorLayout(dirname(input.cliEntrypoint)).libDir,BUNDLE_ENTRYPOINT)
+      ? resolve(anchorLayout(dirname(input.cliEntrypoint)).libDir, BUNDLE_ENTRYPOINT)
       : input.cliEntrypoint,
     config: input.runtimeConfigPath,
     room: input.roomId,
@@ -93,15 +94,18 @@ export async function installCornerGitHubWrappers(input: {
  * - including one whose URL cannot be resolved - keeps the restriction. With
  * no origin knowledge the default enforces everywhere.
  */
-export function cornerGitHubCommandRefusal(
+export async function cornerGitHubCommandRefusal(
   launcher: 'git' | 'gh',
   argv: readonly string[],
   featureBranch: string,
   targetBranch: string,
-  resolvePushBranch: (source?: string) => { branch?: string; tag?: boolean } = () => ({}),
-  pushesOrigin: (remote?: string) => boolean = () => true,
+  resolvePushBranch: (
+    source?: string,
+  ) =>
+    { branch?: string; tag?: boolean } | Promise<{ branch?: string; tag?: boolean }> = () => ({}),
+  pushesOrigin: (remote?: string) => boolean | Promise<boolean> = () => true,
   onWrite: () => void = () => {},
-): string | undefined {
+): Promise<string | undefined> {
   const refusal = `beeline: this thread may push only ${featureBranch}`;
   // The branch rule protects every remote except a local fixture a test suite
   // owns. `pushesOrigin` proves locality from the URL git will actually push
@@ -191,35 +195,37 @@ export function cornerGitHubCommandRefusal(
       : positionals.length > 0
         ? positionals[0]
         : undefined;
-  if (!pushesOrigin(remoteName)) return undefined;
+  if (!(await pushesOrigin(remoteName))) return undefined;
   onWrite();
   if (dangerous) return refusal;
   const refspecs = repositoryOption !== undefined ? positionals : positionals.slice(1);
   const destinations = refspecs.length
-    ? refspecs.map((raw) => {
-        if (raw.startsWith('+')) return { refused: true };
-        const separator = raw.indexOf(':');
-        const source = separator >= 0 ? raw.slice(0, separator) : raw;
-        const explicitDestination = separator >= 0 ? raw.slice(separator + 1) : undefined;
-        if (!source || source === ':' || /(?:^|\/)refs\/tags\//.test(source))
-          return { refused: true };
-        // A bare `HEAD` refspec names the branch checked out right now, so it
-        // resolves to that branch rather than the literal string `HEAD`. A
-        // detached HEAD resolves to no branch and stays refused.
-        const resolved = resolvePushBranch(source);
-        if (resolved.tag) return { refused: true };
-        const branch = explicitDestination
-          ? branchName(explicitDestination)
-          : resolved.branch
-            ? branchName(resolved.branch)
-            : undefined;
-        return {
-          branch,
-          refused:
-            explicitDestination !== undefined && explicitDestination.startsWith('refs/tags/'),
-        };
-      })
-    : [resolvePushBranch()];
+    ? await Promise.all(
+        refspecs.map(async (raw) => {
+          if (raw.startsWith('+')) return { refused: true };
+          const separator = raw.indexOf(':');
+          const source = separator >= 0 ? raw.slice(0, separator) : raw;
+          const explicitDestination = separator >= 0 ? raw.slice(separator + 1) : undefined;
+          if (!source || source === ':' || /(?:^|\/)refs\/tags\//.test(source))
+            return { refused: true };
+          // A bare `HEAD` refspec names the branch checked out right now, so it
+          // resolves to that branch rather than the literal string `HEAD`. A
+          // detached HEAD resolves to no branch and stays refused.
+          const resolved = await resolvePushBranch(source);
+          if (resolved.tag) return { refused: true };
+          const branch = explicitDestination
+            ? branchName(explicitDestination)
+            : resolved.branch
+              ? branchName(resolved.branch)
+              : undefined;
+          return {
+            branch,
+            refused:
+              explicitDestination !== undefined && explicitDestination.startsWith('refs/tags/'),
+          };
+        }),
+      )
+    : [await resolvePushBranch()];
   if (
     destinations.some(
       (destination) =>
@@ -233,9 +239,12 @@ export function cornerGitHubCommandRefusal(
   return undefined;
 }
 
-async function writeLauncher(path: string, config: Record<string, string | boolean>): Promise<void> {
+async function writeLauncher(
+  path: string,
+  config: Record<string, string | boolean>,
+): Promise<void> {
   const source = `#!/usr/bin/env node
-import { spawn, spawnSync } from 'node:child_process';
+import { runOwned } from ${JSON.stringify(ownedCommandModule())};
 import { readFileSync, writeFileSync } from 'node:fs';
 const config = ${JSON.stringify(config)};
 const cornerGitHubCommandRefusal = ${cornerGitHubCommandRefusal.toString()};
@@ -253,21 +262,21 @@ const gitContext = (() => {
   }
   return out;
 })();
-function git(args, options) { return spawnSync(config.gitCommand, gitContext.concat(args), options); }
-function resolvePushBranch(source) {
+async function git(args) { const result = await runOwned({ step: 'git probe', file: config.gitCommand, args: gitContext.concat(args), machineRead: true }).catch(() => ({ code: 1, stdout: '', stderr: '' })); return { ...result, status: result.code }; }
+async function resolvePushBranch(source) {
   if (source === 'HEAD') {
     // git push origin HEAD targets the branch checked out now; read it
     // directly and fail closed in a detached HEAD.
-    const current = git(['symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8' });
+    const current = await git(['symbolic-ref', '--short', 'HEAD']);
     return current.status === 0 ? { branch: current.stdout.trim() } : {};
   }
   if (source) {
-    const tag = git(['show-ref', '--verify', '--quiet', 'refs/tags/' + source], { stdio: 'ignore' }).status === 0;
+    const tag = (await git(['show-ref', '--verify', '--quiet', 'refs/tags/' + source])).status === 0;
     return { branch: source, tag };
   }
-  const tracked = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}'], { encoding: 'utf8' });
+  const tracked = await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}']);
   if (tracked.status === 0) return { branch: tracked.stdout.trim().replace(/^[^/]+\\//, '') };
-  const current = git(['symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8' });
+  const current = await git(['symbolic-ref', '--short', 'HEAD']);
   return current.status === 0 ? { branch: current.stdout.trim() } : {};
 }
 const looksLikeUrl = (value) => /^[a-z][a-z0-9+.-]*:\\/\\//i.test(value) || value.startsWith('/') || value.startsWith('.') || value.startsWith('~') || value.includes('@');
@@ -281,11 +290,11 @@ const isLocalPushUrl = (value) => {
   // A bare path - absolute or relative - is the only other local form.
   return true;
 };
-function pushesOrigin(remote) {
+async function pushesOrigin(remote) {
   if (!config.originUrl) return true;
   let name = remote;
   if (!name) {
-    const status = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}'], { encoding: 'utf8' });
+    const status = await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{push}']);
     const full = status.status === 0 ? status.stdout.trim() : '';
     if (full) name = full.includes('/') ? full.slice(0, full.indexOf('/')) : full;
     if (!name) name = 'origin';
@@ -295,14 +304,14 @@ function pushesOrigin(remote) {
     // A raw path or URL is rewritten by url.<base>.insteadOf before git pushes
     // to it. ls-remote --get-url applies those rewrites but not pushInsteadOf,
     // so a raw target is proven local only when no url insteadOf rule exists.
-    const resolved = git(['ls-remote', '--get-url', name], { encoding: 'utf8' });
+    const resolved = await git(['ls-remote', '--get-url', name]);
     url = resolved.status === 0 ? resolved.stdout.trim() : undefined;
-    if (url && git(['config', '--get-regexp', '^url[.].*insteadof$'], { encoding: 'utf8' }).status === 0)
+    if (url && (await git(['config', '--get-regexp', '^url[.].*insteadof$'])).status === 0)
       url = undefined;
   } else {
     // '--push' is the URL git will actually use, so it follows pushurl and
     // insteadOf rewrites that a raw remote.<name>.url read would miss.
-    const resolved = git(['remote', 'get-url', '--push', name], { encoding: 'utf8' });
+    const resolved = await git(['remote', 'get-url', '--push', name]);
     url = resolved.status === 0 ? resolved.stdout.trim() : undefined;
   }
   // Only a push whose effective URL is a local path or file:// is exempt.
@@ -311,7 +320,7 @@ function pushesOrigin(remote) {
   return !isLocalPushUrl(url);
 }
 let threadWrite = false;
-const refusal = cornerGitHubCommandRefusal(config.launcher, argv, config.featureBranch, config.targetBranch, resolvePushBranch, pushesOrigin, () => { threadWrite = true; });
+const refusal = await cornerGitHubCommandRefusal(config.launcher, argv, config.featureBranch, config.targetBranch, resolvePushBranch, pushesOrigin, () => { threadWrite = true; });
 if (refusal) { process.stderr.write(refusal + '\\n'); process.exitCode = 1; }
 function needsToken(args) {
   if (config.launcher === 'gh') return !args.some(arg => arg === '--help' || arg === '--version');
@@ -337,10 +346,10 @@ function needsToken(args) {
   if (args[index] === 'ls-remote' && args.includes('--get-url')) return false;
   return !local.has(args[index]);
 }
-function token() {
+async function token() {
   // The credential belongs to this repository session until GitHub's expiry.
   // Writes still ask the server for current implementer authority every time.
-  const remote = git(['remote', 'get-url', 'origin'], { encoding: 'utf8' });
+  const remote = await git(['remote', 'get-url', 'origin']);
   const scope = JSON.stringify([config.room, config.config, config.cli, remote.status === 0 ? remote.stdout.trim() : '']);
   if (!threadWrite) {
     try {
@@ -350,8 +359,8 @@ function token() {
         return issued.token;
     } catch {}
   }
-  const result = spawnSync(config.node, [config.cli, 'corner-read-token', '--json', '--config', config.config, '--room', threadWrite ? config.corner : config.room,
-    ...(threadWrite ? ['--write'] : [])], { encoding: 'utf8' });
+  const result = await runOwned({ step: 'repository credential', file: config.node, args: [config.cli, 'corner-read-token', '--json', '--config', config.config, '--room', threadWrite ? config.corner : config.room,
+    ...(threadWrite ? ['--write'] : [])], machineRead: true }).then(result => ({ ...result, status: result.code })).catch(error => ({ status: 1, stdout: '', stderr: error.message }));
   if (result.status === 0 && result.stdout.trim()) {
     const output = result.stdout.trim();
     let issued;
@@ -371,11 +380,7 @@ function token() {
 }
 function runCommand(command, args, value, quiet) {
   const env = { ...process.env, GH_TOKEN: value, GITHUB_TOKEN: value, GIT_TERMINAL_PROMPT: '0' };
-  const child = spawn(command, args, { env, stdio: quiet ? 'ignore' : 'inherit' });
-  return new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', (status) => resolve({ status }));
-  });
+  return runOwned({ step: command, file: command, args, env, interactive: !quiet, machineRead: true }).then(result => ({ status: result.code }));
 }
 function isPushCommand(args) {
   const optionsWithValue = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env']);
@@ -430,16 +435,16 @@ function editPositionals(args) {
   }
   return positional;
 }
-function gitOutput(args) {
-  const result = spawnSync(config.gitCommand, args, { encoding: 'utf8' });
+async function gitOutput(args) {
+  const result = await runOwned({ step: 'git probe', file: config.gitCommand, args, machineRead: true }).then(result => ({ ...result, status: result.code })).catch(() => ({ status: 1, stdout: '' }));
   return result.status === 0 ? result.stdout.trim() : '';
 }
-function repoSlug(args) {
+async function repoSlug(args) {
   const explicit = flagValue(args, ['--repo', '-R']);
   if (explicit) return explicit.replace(/^https?:\\/\\/[^/]+\\//, '').replace(/\\.git$/, '');
   if (process.env.GH_REPO) return process.env.GH_REPO;
   if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
-  const remote = gitOutput(['remote', 'get-url', 'origin']) || gitOutput(['config', '--get', 'remote.origin.url']);
+  const remote = await gitOutput(['remote', 'get-url', 'origin']) || await gitOutput(['config', '--get', 'remote.origin.url']);
   const match = remote.match(/github\\.com[:/]([^/]+)\\/(.+?)(?:\\.git)?$/);
   return match ? match[1] + '/' + match[2] : '';
 }
@@ -469,7 +474,7 @@ function readBodyFile(path) {
   return readFileSync(path === '-' ? 0 : path, 'utf8');
 }
 async function runRest(args, value) {
-  const slug = repoSlug(args);
+  const slug = await repoSlug(args);
   const action = args[0] === 'pr' ? args[1] : undefined;
   if (!slug) {
     process.stderr.write('Beeline: no GitHub repository resolved for gh ' + args.slice(0, 2).join(' ') + '; pass --repo owner/repo.\\n');
@@ -486,8 +491,8 @@ async function runRest(args, value) {
       }
     }
     if (hasFlag(args, ['--fill', '-f'])) {
-      if (title === undefined) title = gitOutput(['log', '-1', '--pretty=%s']);
-      if (body === undefined) body = gitOutput(['log', '-1', '--pretty=%b']);
+      if (title === undefined) title = await gitOutput(['log', '-1', '--pretty=%s']);
+      if (body === undefined) body = await gitOutput(['log', '-1', '--pretty=%b']);
     }
     if (title === undefined || title === '') {
       process.stderr.write('gh: a title is required (--title or --fill)\\n');
@@ -623,7 +628,7 @@ async function execute(args, value) {
 }
 if (!refusal) {
   const authenticated = needsToken(argv);
-  const value = authenticated ? token() : '';
+  const value = authenticated ? await token() : '';
   if (value !== undefined) {
     const result = await execute(argv, value);
     if (config.launcher === 'git' && result.status === 0 && isPushCommand(argv))

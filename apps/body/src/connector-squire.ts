@@ -1,12 +1,16 @@
-import { squireHostPaths, squireHostRewriteEnv } from "./squire-host.js";
-import { homedir } from "node:os";
-import { execFile, spawn } from "node:child_process";
-import type { ConnectorStep, ConnectorBrowserLocation, ConnectorSignIn } from "@beeline/api-contract/daemon";
-import { PAGE_READY_TIMEOUT_MS, installSquireAttempt } from './connector-squire-install-squire-attempt.js';
-
-
-
-
+import { squireHostPaths, squireHostRewriteEnv } from './squire-host.js';
+import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { runOwned } from './wait.js';
+import type {
+  ConnectorStep,
+  ConnectorBrowserLocation,
+  ConnectorSignIn,
+} from '@beeline/api-contract/daemon';
+import {
+  PAGE_READY_TIMEOUT_MS,
+  installSquireAttempt,
+} from './connector-squire-install-squire-attempt.js';
 
 /** The one Squire MCP contract this connector speaks. */
 export interface SquireMcpClient {
@@ -15,13 +19,9 @@ export interface SquireMcpClient {
   reconnect?(): void;
 }
 
-
-
 /** The one Squire connect package, tracked at the release that carries the
  *  machine-readable `--json` connect report the helper reads. */
 export const SQUIRE_MCP_NAME = '@trusty-squire/mcp';
-
-
 
 /**
  * The npm dist-tag the Squire connect package tracks. `latest` carries the
@@ -33,10 +33,7 @@ export const SQUIRE_MCP_NAME = '@trusty-squire/mcp';
  */
 export const SQUIRE_CONNECT_VERSION = 'latest';
 
-
 export const SQUIRE_CONNECT_PACKAGE = `${SQUIRE_MCP_NAME}@${SQUIRE_CONNECT_VERSION}`;
-
-
 
 /**
  * The helper's one Squire connect browser-session claim. The connect process
@@ -54,22 +51,16 @@ export type ConnectSessionClaim = {
   readonly onExit?: (listener: () => void) => () => void;
 };
 
-
-
 /**
  * Claims per agent: one helper process hosts every agent on the machine, and
  * one agent's fresh connect must never abort another agent's sign-in.
  */
 export const connectSessions = new Map<string, ConnectSessionClaim>();
 
-
-
 /** The connect session this agent currently claims, if any. */
 export function squireConnectSession(owner = ''): ConnectSessionClaim | undefined {
   return connectSessions.get(owner);
 }
-
-
 
 /** Whether a process id is still running (`kill(pid, 0)`; EPERM means alive). */
 export function isProcessAlive(pid: number | undefined): boolean {
@@ -81,8 +72,6 @@ export function isProcessAlive(pid: number | undefined): boolean {
     return (error as NodeJS.ErrnoException)?.code === 'EPERM';
   }
 }
-
-
 
 /**
  * Release whatever connect session this helper still claims, so a fresh
@@ -105,41 +94,26 @@ export function releaseSquireConnectSession(log?: (message: string) => void, own
   }
 }
 
-
-
 /** The profile Squire serializes on, matching `@trusty-squire/mcp` host rewrite. */
 export function squireChromeProfileDir(): string {
   return process.env.TRUSTY_SQUIRE_PROFILE_DIR ?? squireHostPaths(homedir()).profileDir;
 }
-
-
 
 export type ShellRunner = (
   command: string,
   args: readonly string[],
 ) => Promise<{ code: number | null; stdout: string; stderr: string }>;
 
-
-
 export const defaultShellRunner: ShellRunner = (command, args) =>
-  new Promise((resolve) => {
-    execFile(
-      command,
-      [...args],
-      { timeout: 120_000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' },
-      (error, stdout, stderr) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const code = (error as any)?.code;
-        resolve({
-          code: typeof code === 'number' ? code : error ? 1 : 0,
-          stdout: String(stdout ?? ''),
-          stderr: String(stderr ?? ''),
-        });
-      },
-    );
-  });
-
-
+  runOwned({
+    step: [command, ...args].join(' '),
+    file: command,
+    args,
+    onLine: () => undefined,
+  }).then(
+    (result) => ({ code: result.code ?? 1, stdout: result.stdout, stderr: result.stderr }),
+    () => ({ code: 1, stdout: '', stderr: '' }),
+  );
 
 /**
  * The result of a streamed shell command that resolves when a sign-in report
@@ -162,8 +136,6 @@ export type StreamedCommandResult = {
   readonly abort: () => void;
 };
 
-
-
 /** Env for every helper-spawned Squire process. The three host rewrite
  *  variables point at one broker inode and one Chrome; `--target=codex`
  *  otherwise reads that agent's config and can steal a foreign profile. */
@@ -177,8 +149,6 @@ export function squireConnectProcessEnv(
   };
 }
 
-
-
 export type StreamedShellRunner = (
   command: string,
   args: readonly string[],
@@ -187,12 +157,8 @@ export type StreamedShellRunner = (
   owner?: string,
 ) => Promise<StreamedCommandResult>;
 
-
-
 /** Safety bound for the connect process, and the life of the ceremony it prints. */
 export const CONNECT_TIMEOUT_MS = 300_000;
-
-
 
 /** How long a connect that reported `connected` may keep running before it is ended. */
 
@@ -214,8 +180,6 @@ export function killConnectTree(child: { pid?: number; kill: () => boolean }): v
   }
   child.kill();
 }
-
-
 
 export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, owner = '') =>
   new Promise((resolve) => {
@@ -338,15 +302,15 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
     });
   });
 
-
-
-export const step = (label: string, status: ConnectorStep['status'], reason?: string): ConnectorStep => ({
+export const step = (
+  label: string,
+  status: ConnectorStep['status'],
+  reason?: string,
+): ConnectorStep => ({
   label,
   status,
   ...(reason ? { reason } : {}),
 });
-
-
 
 /**
  * The connect report fields this helper reads. Re-declared here because the
@@ -366,8 +330,6 @@ export interface SquireConnectAccount {
   readonly providers: readonly string[] | null;
 }
 
-
-
 export interface SquireConnectReport {
   readonly state: string;
   readonly terminal: boolean;
@@ -378,13 +340,9 @@ export interface SquireConnectReport {
   readonly browser_location: unknown;
 }
 
-
-
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
-
-
 
 export function connectAccount(raw: unknown): SquireConnectAccount | null {
   if (!isRecord(raw) || typeof raw.id !== 'string') return null;
@@ -398,8 +356,6 @@ export function connectAccount(raw: unknown): SquireConnectAccount | null {
       : null,
   };
 }
-
-
 
 /**
  * One line of Squire's `connect --json` stream, or undefined when the line is
@@ -424,8 +380,6 @@ export function parseConnectReport(line: string): SquireConnectReport | undefine
   };
 }
 
-
-
 /**
  * Whether this report leaves a sign-in outstanding: a run that has not ended
  * (`terminal` false), names a page, and names a placement somebody can be
@@ -442,8 +396,6 @@ export function isOutstandingSignIn(report: SquireConnectReport): boolean {
   return location.kind !== 'none' && location.kind !== 'unreachable';
 }
 
-
-
 /**
  * Whether this report is the run's answer, or whether another line is still
  * coming: the line that ended the run, or the one that hands a person a page
@@ -452,8 +404,6 @@ export function isOutstandingSignIn(report: SquireConnectReport): boolean {
 export function isPublishableConnectReport(report: SquireConnectReport): boolean {
   return report.terminal || isOutstandingSignIn(report);
 }
-
-
 
 /** Squire's reason codes, in the words a person reads. The code is the
  *  contract; this map is only its wording. */
@@ -467,8 +417,6 @@ export const CONNECT_REASON_LINES: Record<string, string> = {
   run_failed: 'the connect run failed before it could finish',
 };
 
-
-
 /** Who holds the bot profile, as the report named them. */
 export function holderLine(raw: unknown): string | undefined {
   if (!isRecord(raw)) return undefined;
@@ -481,8 +429,6 @@ export function holderLine(raw: unknown): string | undefined {
   if (raw.kind === 'unknown') return 'another process may be using the browser';
   return undefined;
 }
-
-
 
 /**
  * What blocks a connect, in one line for the person, from the typed report
@@ -513,8 +459,6 @@ export function connectBlockedLine(report: SquireConnectReport): string | undefi
   return `Trusty Squire reported the connect state "${report.state}"`;
 }
 
-
-
 /**
  * Where the report says the sign-in page opened, as the wire carries it. The
  * helper reads Squire's own placement answer; it never detects a display.
@@ -529,8 +473,7 @@ export function connectBrowserLocation(raw: unknown): ConnectorBrowserLocation |
     case 'unreachable':
       return {
         kind: 'unreachable',
-        reason:
-          typeof raw.reason === 'string' ? raw.reason : 'the sign-in page could not be shown',
+        reason: typeof raw.reason === 'string' ? raw.reason : 'the sign-in page could not be shown',
       };
     case 'none':
       return { kind: 'none' };
@@ -540,8 +483,6 @@ export function connectBrowserLocation(raw: unknown): ConnectorBrowserLocation |
       return undefined;
   }
 }
-
-
 
 export type InstallSquireOptions = {
   readonly workspaceId: string;
@@ -581,8 +522,6 @@ export type InstallSquireOptions = {
   readonly awaitPage?: (url: string) => Promise<boolean>;
 };
 
-
-
 export type InstallSquireResult = {
   readonly signedInAs?: string;
   readonly status: 'connected' | 'error' | 'installing';
@@ -591,8 +530,6 @@ export type InstallSquireResult = {
   readonly squireVersion?: string;
   readonly errorMessage?: string;
 };
-
-
 
 /**
  * The version npx resolves for one Squire package spec, straight from the
@@ -614,8 +551,6 @@ export async function installedSquireVersion(
   return version;
 }
 
-
-
 /**
  * The registry's version for the connect spec this helper runs. Undefined
  * when the registry is unreachable — verification is then skipped (never
@@ -626,8 +561,6 @@ export async function currentSquireRelease(run: ShellRunner): Promise<string | u
   if (probe.code !== 0) return undefined;
   return probe.stdout.match(/\d+\.\d+\.\d+[^\s]*/)?.[0];
 }
-
-
 
 /**
  * What `npx` must be told to run the Squire release whose `--json` connect
@@ -645,8 +578,6 @@ export type SquireConnectResolution = {
   /** True when the first probe resolved a stale copy and we re-resolved. */
   readonly reResolved: boolean;
 };
-
-
 
 export async function resolveSquireConnectSpec(run: ShellRunner): Promise<SquireConnectResolution> {
   const currentRelease = await currentSquireRelease(run);
@@ -680,8 +611,6 @@ export async function resolveSquireConnectSpec(run: ShellRunner): Promise<Squire
   };
 }
 
-
-
 /**
  * Install and pair Squire on this helper, reporting every step in order.
  *
@@ -703,16 +632,19 @@ export async function installSquire(options: InstallSquireOptions): Promise<Inst
   return installSquireAttempt(options, true);
 }
 
-
-
 /** One admitted readiness observation. A pending tunnel never schedules another
  * GET; another explicit setup action or actual report can observe it anew. */
-export async function awaitPublicPage(url: string, _timeoutMs = PAGE_READY_TIMEOUT_MS): Promise<boolean> {
+export async function awaitPublicPage(
+  url: string,
+  _timeoutMs = PAGE_READY_TIMEOUT_MS,
+): Promise<boolean> {
   try {
     const response = await fetch(url, { method: 'GET', redirect: 'manual', signal: undefined });
     await response.body?.cancel().catch(() => undefined);
     return response.status < 500;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 export { pairSquire } from './connector-squire-install-squire-attempt.js';
 export { vaultConnectionMeta } from './connector-squire-install-squire-attempt.js';

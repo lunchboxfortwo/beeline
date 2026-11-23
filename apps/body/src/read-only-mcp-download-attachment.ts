@@ -1,27 +1,42 @@
-import { relative, sep, isAbsolute, join, resolve, basename } from "node:path";
-import { homedir } from "node:os";
-import { realpathSync, existsSync, statSync, readFileSync } from "node:fs";
-import { type ArtifactMimeType, ARTIFACT_MIME_TYPES, ARTIFACT_MIME_BY_EXTENSION } from "@beeline/api-contract/daemon";
-import { validateArtifact } from "./artifact-validation.js";
-import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
-import { MESSAGE_REACTION_EMOJIS, type MessageReactionEmoji, SUBSCRIBABLE_EVENT_KINDS, isPerItemEventKind, perItemSubscriptionRefusal, isSubscribableEventKind, isServerEventKind, isAgentKind, AGENT_EVENT_SLUG_MAX_LENGTH, MAX_EVENT_CONSEQUENCE_LENGTH, MAX_MENTIONS_PER_EVENT } from "@beeline/api-contract/phone";
-import { JsonObject, requiredEnv, daemonUploadArtifact, daemonExecute, stringArg, MAX_ATTACH_BYTES, gitBinary, asObject } from './read-only-mcp.js';
-
-
-
-
-
-
-
+import { relative, sep, isAbsolute, join, resolve, basename } from 'node:path';
+import { homedir } from 'node:os';
+import { realpathSync, existsSync, statSync, readFileSync } from 'node:fs';
+import {
+  type ArtifactMimeType,
+  ARTIFACT_MIME_TYPES,
+  ARTIFACT_MIME_BY_EXTENSION,
+} from '@beeline/api-contract/daemon';
+import { validateArtifact } from './artifact-validation.js';
+import { fileURLToPath } from 'node:url';
+import { runOwned } from './wait.js';
+import {
+  MESSAGE_REACTION_EMOJIS,
+  type MessageReactionEmoji,
+  SUBSCRIBABLE_EVENT_KINDS,
+  isPerItemEventKind,
+  perItemSubscriptionRefusal,
+  isSubscribableEventKind,
+  isServerEventKind,
+  isAgentKind,
+  AGENT_EVENT_SLUG_MAX_LENGTH,
+  MAX_EVENT_CONSEQUENCE_LENGTH,
+  MAX_MENTIONS_PER_EVENT,
+} from '@beeline/api-contract/phone';
+import {
+  JsonObject,
+  requiredEnv,
+  daemonUploadArtifact,
+  daemonExecute,
+  stringArg,
+  MAX_ATTACH_BYTES,
+  gitBinary,
+  asObject,
+} from './read-only-mcp.js';
 
 export function withinRoot(root: string, resolved: string): boolean {
   const rel = relative(root, resolved);
   return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
-
-
-
 
 /** Resolve a post_artifact `path` inside the session checkout or anywhere in
  *  the session's writable home overlay (wherever a harness put a file it
@@ -56,16 +71,10 @@ export function resolveAttachPath(roots: string[], input: string): string {
   throw notFoundError instanceof Error ? notFoundError : new Error(errorMessage());
 }
 
-
-
-
 export function finishResolvedAttachPath(resolved: string): string {
   if (!statSync(resolved).isFile()) throw new Error('path is not a regular file');
   return resolved;
 }
-
-
-
 
 /** The daemon-facing artifacts pass-through's response: `postArtifact` only
  *  reads `url`, the rest of `UploadArtifactResult`
@@ -77,9 +86,6 @@ export interface DaemonArtifactUploadResult {
   title?: string;
 }
 
-
-
-
 export interface PostArtifactDeps {
   roomId: string;
   /** Legal source roots for the `path` argument: the session checkout and
@@ -90,21 +96,12 @@ export interface PostArtifactDeps {
   queue: (attachment: JsonObject) => Promise<void>;
 }
 
-
-
-
 export const POSTED_MEDIA_ID =
   /\/v1\/media\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:$|[?#])/i;
-
-
-
 
 export function isArtifactMime(value: unknown): value is ArtifactMimeType {
   return typeof value === 'string' && (ARTIFACT_MIME_TYPES as readonly string[]).includes(value);
 }
-
-
-
 
 /** The viewer cannot open `application/octet-stream`, so content that falls
  *  through to it (inline `html`/`bytes`, or an unknown or missing extension)
@@ -132,17 +129,13 @@ export function sniffArtifactMime(bytes: Buffer, fromHtml: boolean): ArtifactMim
   return 'application/octet-stream';
 }
 
-
-
-
 /** The caller's checkout and writable home, where only it can open files. */
 export function attachRootsFromEnv(): string[] {
-  return [process.env.BEELINE_ATTACH_ROOT?.trim(), process.env.BEELINE_ATTACH_SCRATCH_ROOT?.trim()]
-    .filter((root): root is string => Boolean(root));
+  return [
+    process.env.BEELINE_ATTACH_ROOT?.trim(),
+    process.env.BEELINE_ATTACH_SCRATCH_ROOT?.trim(),
+  ].filter((root): root is string => Boolean(root));
 }
-
-
-
 
 export function postArtifactDepsFromEnv(): PostArtifactDeps {
   const scratchRoot = process.env.BEELINE_ATTACH_SCRATCH_ROOT?.trim();
@@ -155,9 +148,6 @@ export function postArtifactDepsFromEnv(): PostArtifactDeps {
     },
   };
 }
-
-
-
 
 /** post_artifact: validate, upload through the artifacts pass-through, then
  *  queue the attachment on this turn's final reply. Content comes either
@@ -238,24 +228,24 @@ export async function postArtifact(
   );
 }
 
-
-
-
 /** Rendered formats are validated as self-contained mocks; a working file
  *  such as a game template or a build page is source, so it travels inert. */
-export const BRIEF_FILE_INERT_MIMES = new Set(['text/html', 'image/svg+xml', 'application/vnd.beeline.game+html']);
-
-
-
+export const BRIEF_FILE_INERT_MIMES = new Set([
+  'text/html',
+  'image/svg+xml',
+  'application/vnd.beeline.game+html',
+]);
 
 /** File citations, including Markdown links, file URLs and key=value text. */
-export const NAMED_PATH = /(?:^|[\s(<[=:])(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`|(file:\/\/[^\s`'"()<>\]]+|[^\s`'"()<>\]=:]+))/g;
-
-
-
+export const NAMED_PATH =
+  /(?:^|[\s(<[=:])(?:"([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`|(file:\/\/[^\s`'"()<>\]]+|[^\s`'"()<>\]=:]+))/g;
 
 /** Recognize private paths even when missing or unreadable for delivery advice. */
-export function namedPrivateFiles(roots: string[], text: string, includeRelative = false): { named: string; resolved: string }[] {
+export async function namedPrivateFiles(
+  roots: string[],
+  text: string,
+  includeRelative = false,
+): Promise<{ named: string; resolved: string }[]> {
   const home = process.env.HOME?.trim();
   const found: { named: string; resolved: string }[] = [];
   for (const match of text.matchAll(NAMED_PATH)) {
@@ -263,24 +253,59 @@ export function namedPrivateFiles(roots: string[], text: string, includeRelative
     const named = quoted ?? match[4]!.replace(/[.,;:!?*]+$/, '');
     let path = named;
     if (path.startsWith('file://')) {
-      try { path = fileURLToPath(path); } catch { continue; }
+      try {
+        path = fileURLToPath(path);
+      } catch {
+        continue;
+      }
     }
     if (!isAbsolute(path) && !path.startsWith('~/')) {
       // Source citations travel with the repository. Generated proof files do
       // not: only existing relative files inside this session are candidates.
-      if (!includeRelative || !/^(?:\.{1,2}\/)?[\w@ .-]+(?:\/[\w@ .-]+)*\.[a-zA-Z0-9]{1,12}$/.test(path)) continue;
+      if (
+        !includeRelative ||
+        !/^(?:\.{1,2}\/)?[\w@ .-]+(?:\/[\w@ .-]+)*\.[a-zA-Z0-9]{1,12}$/.test(path)
+      )
+        continue;
       let resolved: string;
-      try { resolved = resolveAttachPath(roots, path); } catch { continue; }
+      try {
+        resolved = resolveAttachPath(roots, path);
+      } catch {
+        continue;
+      }
       const checkout = roots[0];
       if (checkout && gitBinary && withinRoot(realpathSync(checkout), resolved)) {
         try {
-          execFileSync(gitBinary, ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
-            '--literal-pathspecs', '-C', checkout, 'ls-files', '--error-unmatch', '--', relative(realpathSync(checkout), resolved)],
-          { stdio: 'ignore', timeout: 1000, env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_OPTIONAL_LOCKS: '0' } });
-          continue;
-        } catch { /* Untracked files (or unavailable index evidence) need attachments. */ }
+          const tracked = await runOwned({
+            step: 'git ls-files',
+            file: gitBinary,
+            args: [
+              '-c',
+              'core.fsmonitor=false',
+              '-c',
+              'core.hooksPath=/dev/null',
+              '--literal-pathspecs',
+              '-C',
+              checkout,
+              'ls-files',
+              '--error-unmatch',
+              '--',
+              relative(realpathSync(checkout), resolved),
+            ],
+            env: {
+              PATH: '/usr/bin:/bin',
+              GIT_CONFIG_NOSYSTEM: '1',
+              GIT_CONFIG_GLOBAL: '/dev/null',
+              GIT_OPTIONAL_LOCKS: '0',
+            },
+            machineRead: true,
+          });
+          if (tracked.code === 0) continue;
+        } catch {
+          /* Untracked files (or unavailable index evidence) need attachments. */
+        }
       }
-      if (!found.some(file => file.resolved === resolved)) found.push({ named, resolved });
+      if (!found.some((file) => file.resolved === resolved)) found.push({ named, resolved });
       continue;
     }
     const absolute = path.startsWith('~/') ? (home ? join(home, path.slice(2)) : '') : path;
@@ -291,15 +316,13 @@ export function namedPrivateFiles(roots: string[], text: string, includeRelative
       resolved = resolveAttachPath(roots, absolute);
     } catch {
       // A named private path still needs advice if it cannot be read.
-      if (!inRoots && !/^(?:~\/|\/(?:tmp|var\/tmp|home|Users|root|private\/var)\/)/.test(path)) continue;
+      if (!inRoots && !/^(?:~\/|\/(?:tmp|var\/tmp|home|Users|root|private\/var)\/)/.test(path))
+        continue;
     }
     if (!found.some((file) => file.resolved === resolved)) found.push({ named, resolved });
   }
   return found;
 }
-
-
-
 
 /**
  * A brief attachment may name a working file by `path` instead of an object
@@ -310,7 +333,10 @@ export function namedPrivateFiles(roots: string[], text: string, includeRelative
  * spec names but does not attach also refuses, because the worker cannot
  * open it.
  */
-export async function bindBriefFiles(brief: JsonObject, given?: PostArtifactDeps): Promise<JsonObject> {
+export async function bindBriefFiles(
+  brief: JsonObject,
+  given?: PostArtifactDeps,
+): Promise<JsonObject> {
   const roots = given?.roots ?? attachRootsFromEnv();
   const attachments = Array.isArray(brief.attachments) ? (brief.attachments as JsonObject[]) : [];
   const attached = new Set<string>();
@@ -338,20 +364,31 @@ export async function bindBriefFiles(brief: JsonObject, given?: PostArtifactDeps
       );
     }
     const fileName = basename(resolved);
-    const extension = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase() : '';
+    const extension = fileName.includes('.')
+      ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
+      : '';
     const known = ARTIFACT_MIME_BY_EXTENSION[extension];
-    const mime = known && !BRIEF_FILE_INERT_MIMES.has(known) ? known : known ? 'text/plain' : 'application/octet-stream';
+    const mime =
+      known && !BRIEF_FILE_INERT_MIMES.has(known)
+        ? known
+        : known
+          ? 'text/plain'
+          : 'application/octet-stream';
     validateArtifact(mime, bytes, fileName);
     const uploaded = await deps.upload(bytes, mime, fileName);
     const objectId = uploaded.url ? POSTED_MEDIA_ID.exec(uploaded.url)?.[1] : undefined;
-    if (!objectId) throw new Error(`brief attachment ${path} cannot be delivered: the upload returned no object`);
+    if (!objectId)
+      throw new Error(
+        `brief attachment ${path} cannot be delivered: the upload returned no object`,
+      );
     await deps.queue({ url: uploaded.url, name: fileName, mimeType: mime, size: bytes.length });
     attached.add(resolved);
     const { path: _path, ...rest } = item;
     bound.push({ ...rest, objectId });
   }
-  const unattached = namedPrivateFiles(roots, typeof brief.spec === 'string' ? brief.spec : '')
-    .filter((file) => !attached.has(file.resolved));
+  const unattached = (
+    await namedPrivateFiles(roots, typeof brief.spec === 'string' ? brief.spec : '')
+  ).filter((file) => !attached.has(file.resolved));
   if (unattached.length)
     throw new Error(
       `the brief names ${unattached.map((file) => file.named).join(', ')}, which only you can open; ` +
@@ -361,20 +398,11 @@ export async function bindBriefFiles(brief: JsonObject, given?: PostArtifactDeps
   return attachments.length ? { ...brief, attachments: bound } : brief;
 }
 
-
-
-
 export function agentScheduleRoomId(): string {
   return process.env.BEELINE_DAEMON_CORNER_ID?.trim() || requiredEnv('BEELINE_DAEMON_ROOM_ID');
 }
 
-
-
-
 export const MIN_SCHEDULE_MINUTES = 1;
-
-
-
 
 export function parseScheduleCadence(args: JsonObject): {
   cadence: JsonObject;
@@ -410,24 +438,15 @@ export function parseScheduleCadence(args: JsonObject): {
   throw new Error('cadence kind must be interval or cron');
 }
 
-
-
-
 export interface AgentScheduleDeps {
   roomId: string;
   selfOnly?: boolean;
   execute: (name: string, input: JsonObject) => Promise<JsonObject>;
 }
 
-
-
-
 export function agentScheduleDepsFromEnv(): AgentScheduleDeps {
   return { roomId: agentScheduleRoomId(), execute: daemonExecute };
 }
-
-
-
 
 export async function reactToMessage(
   args: JsonObject,
@@ -446,9 +465,6 @@ export async function reactToMessage(
   });
   return `Reacted ${emoji} to message ${messageId}.`;
 }
-
-
-
 
 export async function createSchedule(
   args: JsonObject,
@@ -477,9 +493,6 @@ export async function createSchedule(
     ' Use wake(action:delete, scheduleId) to remove it.'
   );
 }
-
-
-
 
 export async function listSchedules(
   deps: AgentScheduleDeps = agentScheduleDepsFromEnv(),
@@ -510,14 +523,13 @@ export async function listSchedules(
       return [
         `${String(schedule.scheduleId)} (${typeof schedule.agentHandle === 'string' ? `@${schedule.agentHandle}` : `agent ${String(schedule.agentId)}`}): ${cadenceText}${runs}${nextRunAt} — ${String(schedule.prompt)}` +
           (schedule.workflowName ? ` · Workflow ${String(schedule.workflowName)}` : '') +
-          (Array.isArray(schedule.activeRunIds) ? ` · Active run IDs: ${schedule.activeRunIds.join(', ') || 'none'}` : ''),
+          (Array.isArray(schedule.activeRunIds)
+            ? ` · Active run IDs: ${schedule.activeRunIds.join(', ') || 'none'}`
+            : ''),
       ];
     })
     .join('\n');
 }
-
-
-
 
 /**
  * The agent's own event subscriptions, written by the agent.
@@ -534,7 +546,9 @@ export async function subscribeEvents(
 ): Promise<string> {
   const requested = args.kinds;
   if (!Array.isArray(requested))
-    throw new Error(`kinds must be an array of event kinds: ${SUBSCRIBABLE_EVENT_KINDS.join(', ')}`);
+    throw new Error(
+      `kinds must be an array of event kinds: ${SUBSCRIBABLE_EVENT_KINDS.join(', ')}`,
+    );
   const perItem = requested.filter(isPerItemEventKind);
   if (perItem.length) throw new Error(perItemSubscriptionRefusal(String(perItem[0])));
   const unknown = requested.filter((kind) => !isSubscribableEventKind(kind));
@@ -551,9 +565,6 @@ export async function subscribeEvents(
   return describeSubscriptions(result, 'You now react to');
 }
 
-
-
-
 export async function listEventSubscriptions(
   deps: AgentScheduleDeps = agentScheduleDepsFromEnv(),
 ): Promise<string> {
@@ -561,18 +572,12 @@ export async function listEventSubscriptions(
   return describeSubscriptions(result, 'You react to');
 }
 
-
-
-
 export function describeSubscriptions(result: JsonObject, lead: string): string {
   const kinds = (Array.isArray(result.kinds) ? result.kinds : []).map(String);
   return kinds.length
     ? `${lead} ${kinds.join(', ')} in this chat; each one wakes you for a turn.`
     : 'You react to no events in this chat; a person’s tag or an addressed message wakes you. Agents ask agents with message, never tags.';
 }
-
-
-
 
 /**
  * One event this agent emits into the Room it is answering in.
@@ -619,9 +624,6 @@ export async function emitEvent(
     : `Posted ${kind} in this chat.`;
 }
 
-
-
-
 export async function updateSchedule(
   args: JsonObject,
   deps: AgentScheduleDeps = agentScheduleDepsFromEnv(),
@@ -632,7 +634,13 @@ export async function updateSchedule(
   if (args.prompt !== undefined && !prompt) throw new Error('prompt must be a non-empty string');
   if (prompt && prompt.length > 2000) throw new Error('prompt exceeds 2000 characters');
   const parsed = args.cadence === undefined ? undefined : parseScheduleCadence(args);
-  if (prompt === undefined && parsed === undefined && args.maxRuns === undefined && args.title === undefined && !stringArg(args, 'workflowName'))
+  if (
+    prompt === undefined &&
+    parsed === undefined &&
+    args.maxRuns === undefined &&
+    args.title === undefined &&
+    !stringArg(args, 'workflowName')
+  )
     throw new Error('give a prompt, cadence, title, or workflowName to change');
   const updated = await deps.execute('updateAgentSchedule', {
     roomId: deps.roomId,
@@ -651,15 +659,16 @@ export async function updateSchedule(
   return `Schedule ${scheduleId} updated.${nextRunAt}`;
 }
 
-
-
-
 export async function deleteSchedule(
   args: JsonObject,
   deps: AgentScheduleDeps = agentScheduleDepsFromEnv(),
 ): Promise<string> {
   const scheduleId = stringArg(args, 'scheduleId')?.trim();
   if (!scheduleId) throw new Error('scheduleId must be a non-empty string');
-  await deps.execute('deleteAgentSchedule', { roomId: deps.roomId, scheduleId, ...(deps.selfOnly ? { selfOnly: true } : {}) });
+  await deps.execute('deleteAgentSchedule', {
+    roomId: deps.roomId,
+    scheduleId,
+    ...(deps.selfOnly ? { selfOnly: true } : {}),
+  });
   return `Schedule ${scheduleId} deleted.`;
 }

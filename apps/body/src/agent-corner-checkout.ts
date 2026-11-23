@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { runOwnedFile } from './wait.js';
 import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import {
@@ -16,12 +16,10 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, relative, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 
-const execFileAsync = promisify(execFile);
-const git = (args: string[], env?: NodeJS.ProcessEnv) =>
-  execFileAsync('git', args, { env, timeout: 120_000, killSignal: 'SIGKILL' });
+const execFileAsync = runOwnedFile;
+const git = (args: string[], env?: NodeJS.ProcessEnv) => execFileAsync('git', args, { env });
 
 /** Private refs let agents check out the same public branch independently. */
 export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId: string) {
@@ -212,10 +210,9 @@ export async function materializeAgentCornerCheckout(input: {
         .split('\n')
         .filter((ref) => ref && ref !== `refs/heads/${input.branch}`);
       if (!legacy) inherited.push('refs/stash');
-      const prune = git([`--git-dir=${staging}`, 'update-ref', '--stdin']);
-      prune.child.stdin?.on('error', () => undefined);
-      prune.child.stdin?.end(inherited.map((ref) => `delete ${ref}\n`).join(''));
-      await prune;
+      await execFileAsync('git', [`--git-dir=${staging}`, 'update-ref', '--stdin'], {
+        input: inherited.map((ref) => `delete ${ref}\n`).join(''),
+      });
 
       if (legacy) await writeFile(resolve(staging, 'beeline-legacy-pending'), legacy);
       // PlaceSession may already bind this directory into a live sandbox.

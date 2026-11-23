@@ -403,3 +403,49 @@ it('keeps owned step and output quiet under the shared machine-output switch', a
     writes.mockRestore();
   }
 });
+
+it.each(['stdout', 'stderr'] as const)(
+  'stops a child when %s exceeds the existing Git byte budget',
+  async (stream) => {
+    const limit = 2 * 1024 * 1024;
+    let pid = 0;
+    let delivered = 0;
+    await expect(
+      runOwned({
+        step: 'bounded git output',
+        file: process.execPath,
+        args: [
+          '-e',
+          `const fs = require('node:fs'); const chunk = Buffer.alloc(65536, 120);
+      for (;;) fs.writeSync(${stream === 'stdout' ? 1 : 2}, chunk);`,
+        ],
+        maxBuffer: limit,
+        machineRead: true,
+        onSpawn: (child) => {
+          pid = child.pid!;
+        },
+        onLine: (line) => {
+          delivered += Buffer.byteLength(line);
+        },
+      }),
+    ).rejects.toThrow(`${stream} maxBuffer exceeded`);
+    expect(delivered).toBeLessThanOrEqual(limit);
+    expect(alive(pid)).toBe(false);
+  },
+);
+
+it('accepts output exactly at the byte budget on both streams', async () => {
+  const result = await runOwned({
+    step: 'exact output budget',
+    file: process.execPath,
+    args: [
+      '-e',
+      "const fs = require('node:fs'); for (const fd of [1, 2]) fs.writeSync(fd, 'é'.repeat(512));",
+    ],
+    maxBuffer: 1024,
+    machineRead: true,
+  });
+  expect(result.code).toBe(0);
+  expect(result.stdout).toBe('é'.repeat(512));
+  expect(result.stderr).toBe('é'.repeat(512));
+});

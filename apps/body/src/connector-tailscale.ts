@@ -6,14 +6,14 @@
  * bounded wait. An unauthenticated client prints a browser URL; that URL is
  * returned to the Workbench ceremony and no auth key ever enters Beeline.
  */
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import type { ConnectorSignIn, ConnectorStep } from '@beeline/api-contract/daemon';
+import { runOwned } from './wait.js';
 
-const COMMAND_TIMEOUT_MS = 2 * 60_000;
 const OUTPUT_LIMIT = 32 * 1024;
 const LOGIN_URL = /https:\/\/login\.tailscale\.com\/[A-Za-z0-9_/-]+/u;
 
@@ -50,22 +50,19 @@ function clipped(value: string): string {
 }
 
 export const runTailscaleCommand: TailscaleCommandRunner = (command, args) =>
-  new Promise((resolve) => {
-    execFile(
-      command,
-      [...args],
-      { timeout: COMMAND_TIMEOUT_MS, maxBuffer: OUTPUT_LIMIT * 2 },
-      (error, stdout, stderr) => {
-        const code =
-          error && 'code' in error && typeof error.code === 'number'
-            ? error.code
-            : error
-              ? null
-              : 0;
-        resolve({ code, stdout: clipped(stdout), stderr: clipped(stderr) });
-      },
-    );
-  });
+  runOwned({
+    step: [command, ...args].join(' '),
+    file: command,
+    args,
+    onLine: () => undefined,
+  }).then(
+    (result) => ({
+      code: result.code,
+      stdout: clipped(result.stdout),
+      stderr: clipped(result.stderr),
+    }),
+    () => ({ code: null, stdout: '', stderr: '' }),
+  );
 
 type TailscaleStatus = {
   readonly BackendState?: string;
@@ -126,25 +123,55 @@ async function readStatus(run: TailscaleCommandRunner): Promise<TailscaleStatus 
  * no server operation runs on this cadence. */
 export function watchTailscaleSignIn(
   onConnected: () => void,
-  options: { run?: TailscaleCommandRunner; watch?: (changed:()=>void)=>()=>void } = {},
+  options: { run?: TailscaleCommandRunner; watch?: (changed: () => void) => () => void } = {},
 ): () => void {
-  const run=options.run??runTailscaleCommand;
-  let stopped=false,reading=false,dirty=false;
-  const stop=()=>{stopped=true;off();};
-  const probe=async()=>{
-    dirty=true;if(stopped||reading)return;reading=true;
-    try{do{dirty=false;const status=await readStatus(run);
-      if(!stopped&&status?.BackendState==='Running'){stop();onConnected();return;}
-    }while(dirty&&!stopped);}catch{/* A new local bus notification can supply the next read. */}finally{reading=false;}
+  const run = options.run ?? runTailscaleCommand;
+  let stopped = false,
+    reading = false,
+    dirty = false;
+  const stop = () => {
+    stopped = true;
+    off();
   };
-  const off=(options.watch??(changed=>{
-    const child=spawn('tailscale',['debug','watch-ipn','--initial'],{stdio:['ignore','pipe','ignore']});
-    child.stdout.on('data',changed);child.once('error',()=>{stopped=true;});
-    return ()=>{child.kill();};
-  }))(()=>{void probe();});
+  const probe = async () => {
+    dirty = true;
+    if (stopped || reading) return;
+    reading = true;
+    try {
+      do {
+        dirty = false;
+        const status = await readStatus(run);
+        if (!stopped && status?.BackendState === 'Running') {
+          stop();
+          onConnected();
+          return;
+        }
+      } while (dirty && !stopped);
+    } catch {
+      /* A new local bus notification can supply the next read. */
+    } finally {
+      reading = false;
+    }
+  };
+  const off = (
+    options.watch ??
+    ((changed) => {
+      const child = spawn('tailscale', ['debug', 'watch-ipn', '--initial'], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      child.stdout.on('data', changed);
+      child.once('error', () => {
+        stopped = true;
+      });
+      return () => {
+        child.kill();
+      };
+    })
+  )(() => {
+    void probe();
+  });
   void probe();
   return stop;
-
 }
 
 async function ensureInstalled(
@@ -257,7 +284,10 @@ export async function installTailscale(
   if (pendingUrl) {
     return {
       status: 'installing',
-      steps: [...installed.steps, step('Tailnet signed in', 'running', { command: 'tailscale up' })],
+      steps: [
+        ...installed.steps,
+        step('Tailnet signed in', 'running', { command: 'tailscale up' }),
+      ],
       signIn: { method: 'oauth', url: pendingUrl, browserLocation: { kind: 'none' } },
     };
   }

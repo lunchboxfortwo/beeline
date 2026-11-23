@@ -1,18 +1,26 @@
+import { runOwnedFile } from './wait.js';
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { decodeNsec, getPublicKey } from '@beeline/nostr';
-import { DEFAULT_ACCESS_POLICY, LEGACY_ACCESS_POLICY, type AgentAccessPolicy } from './access-policy.js';
-import { agentBehavior, resolveAgentCommand, type AgentCommand, type AgentKind } from './agent-command.js';
+import {
+  DEFAULT_ACCESS_POLICY,
+  LEGACY_ACCESS_POLICY,
+  type AgentAccessPolicy,
+} from './access-policy.js';
+import {
+  agentBehavior,
+  resolveAgentCommand,
+  type AgentCommand,
+  type AgentKind,
+} from './agent-command.js';
 import { activeAdapterCommand } from './adapter-store.js';
 import type { ExternalMcpCapability } from './external-mcp-capabilities.js';
 import type { SandboxPolicy } from './bwrap-sandbox.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runOwnedFile;
 const DEFAULT_AGENT_IDENTITY_NAME = 'beeline-agent';
 const DEFAULT_BODY_IDENTITY_NAME = 'beeline-body';
 export const DEFAULT_DAEMON_MONOLITH_BASE_URL = 'https://server.usebeeline.app';
@@ -102,7 +110,8 @@ function storeIdentity(identity: Identity, fallback: string): StoredIdentity {
 
 export function runtimeIdentity(identity: StoredIdentity): Identity {
   const restored = identityFromKey(identity.secretKeyHex, identity.name);
-  if (restored.publicKey !== identity.publicKey) throw new Error('stored identity public key mismatch');
+  if (restored.publicKey !== identity.publicKey)
+    throw new Error('stored identity public key mismatch');
   return restored;
 }
 
@@ -120,7 +129,10 @@ export function runtimeAgentCommand(
   }
   return {
     kind: runtime.agentKind ?? 'reference',
-    command: activeAdapterCommand(runtime.agentKind ?? '', env) ?? runtime.agentCommand ?? runtime.agentBinary,
+    command:
+      activeAdapterCommand(runtime.agentKind ?? '', env) ??
+      runtime.agentCommand ??
+      runtime.agentBinary,
     args: runtime.agentArgs ?? [],
   };
 }
@@ -214,7 +226,9 @@ export async function stageMonolithAgentRuntime(input: {
       transport.baseUrl === baseUrl &&
       ('daemonToken' in transport || transport.exchangeToken === input.daemonExchangeToken);
     if (!sameRuntime) {
-      throw new Error(`agent identity ${input.agentIdentity.publicKey} already has another runtime`);
+      throw new Error(
+        `agent identity ${input.agentIdentity.publicKey} already has another runtime`,
+      );
     }
     return { runtime: existing, configPath };
   } catch (error) {
@@ -247,9 +261,17 @@ export async function stageMonolithAgentRuntime(input: {
 async function runtimePaths(root: string): Promise<string[]> {
   const agents = resolve(root, 'beeline', 'agents');
   const entries = await readdir(agents, { withFileTypes: true }).catch(() => []);
-  const paths = entries.filter((entry) => entry.isDirectory()).map((entry) => resolve(agents, entry.name, 'runtime.json'));
-  const present = await Promise.all(paths.map((path) =>
-    stat(path).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')));
+  const paths = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => resolve(agents, entry.name, 'runtime.json'));
+  const present = await Promise.all(
+    paths.map((path) =>
+      stat(path).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => error.code !== 'ENOENT',
+      ),
+    ),
+  );
   return paths.filter((_, index) => present[index]);
 }
 
@@ -345,12 +367,16 @@ async function daemonIsThisRuntime(pid: number, configPath: string): Promise<boo
     const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(Boolean);
     if (isMachineHelperArgv(argv)) return true;
     const flag = argv.lastIndexOf('--config');
-    return flag > 0 && argv[flag - 1] === 'daemon' && resolve(argv[flag + 1]!) === resolve(configPath);
+    return (
+      flag > 0 && argv[flag - 1] === 'daemon' && resolve(argv[flag + 1]!) === resolve(configPath)
+    );
   } catch {
     try {
       const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command=']);
-      return stdout.includes(' daemon ') &&
-        (stdout.includes(' --machine') || stdout.includes(resolve(configPath)));
+      return (
+        stdout.includes(' daemon ') &&
+        (stdout.includes(' --machine') || stdout.includes(resolve(configPath)))
+      );
     } catch {
       return false;
     }
@@ -382,7 +408,10 @@ export async function writeHelperPidRecord(supervisorRoot: string, pid: number):
   if (birth) await writeFile(helperBirthPath(supervisorRoot), `${birth}\n`, { mode: 0o600 });
 }
 
-export async function clearHelperPidRecordIfPid(supervisorRoot: string, pid: number): Promise<void> {
+export async function clearHelperPidRecordIfPid(
+  supervisorRoot: string,
+  pid: number,
+): Promise<void> {
   const recorded = Number(
     (await readFile(helperPidPath(supervisorRoot), 'utf8').catch(() => '')).trim(),
   );
@@ -402,7 +431,9 @@ export async function runningHelperPid(supervisorRoot: string): Promise<number |
   } catch {
     return null;
   }
-  const recordedBirth = (await readFile(helperBirthPath(supervisorRoot), 'utf8').catch(() => '')).trim();
+  const recordedBirth = (
+    await readFile(helperBirthPath(supervisorRoot), 'utf8').catch(() => '')
+  ).trim();
   const liveBirth = processBirthIdentity(pid);
   if (recordedBirth && liveBirth) return recordedBirth === liveBirth ? pid : null;
   try {
@@ -419,11 +450,15 @@ export function agentStoppedPath(configPath: string): string {
 }
 
 export async function isAgentStopped(configPath: string): Promise<boolean> {
-  return stat(agentStoppedPath(configPath)).then(() => true, () => false);
+  return stat(agentStoppedPath(configPath)).then(
+    () => true,
+    () => false,
+  );
 }
 
 export async function setAgentStopped(configPath: string, stopped: boolean): Promise<void> {
-  if (stopped) await writeFile(agentStoppedPath(configPath), `${new Date().toISOString()}\n`, { mode: 0o600 });
+  if (stopped)
+    await writeFile(agentStoppedPath(configPath), `${new Date().toISOString()}\n`, { mode: 0o600 });
   else await unlink(agentStoppedPath(configPath)).catch(() => undefined);
 }
 
@@ -446,7 +481,9 @@ export async function runtimeDaemonPid(configPath: string): Promise<number | nul
       await reclaimStaleDaemonRecord(configPath);
       return null;
     }
-    const recordedBirth = (await readFile(daemonBirthPath(configPath), 'utf8').catch(() => '')).trim();
+    const recordedBirth = (
+      await readFile(daemonBirthPath(configPath), 'utf8').catch(() => '')
+    ).trim();
     const liveBirth = runtimeOwnerIdentity(pid);
     // Legacy records contain only ticks since boot. They cannot prove identity
     // across reboots, so require command-line ownership for their migration.
