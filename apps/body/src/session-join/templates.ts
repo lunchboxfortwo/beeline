@@ -163,7 +163,6 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     id = ctx.sessionManager.getSessionId()
     cwd = ctx.cwd
-    await hook(["status", "--state", "idle"])
     // A delivery is written under deliveries/ (older helpers wrote inbox/); a
     // change without a name is any change. If the watcher fails, deliveries
     // still arrive at the next turn end or settle.
@@ -172,6 +171,8 @@ export default function (pi: ExtensionAPI) {
     stopWatching??=watchChanges(sessions,(name: string | null)=>{
       if(name===null||/^(?:deliveries|inbox)(?:\\/|$)/.test(name)) void deliver("poll")
     },{recursive:true,onError:()=>{}})
+    await hook(["status", "--state", "idle"])
+    await deliver("poll")
   })
   pi.on("agent_start", async () => {
     busy = true

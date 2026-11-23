@@ -113,20 +113,23 @@ export async function runAntigravitySidecar(dir: string): Promise<void> {
 }
 /** One drain at a time; a change during a drain runs one more. Ends only when its watcher fails. */
 async function watchAntigravity(dir: string): Promise<never> {
-  let draining = false,
-    dirty = false;
-  const drain = async () => {
+  let draining: Promise<void> | undefined;
+  let dirty = false,
+    stopped = false;
+  const drain = () => {
+    if (stopped) return;
     dirty = true;
     if (draining) return;
-    draining = true;
-    try {
-      while (dirty) {
-        dirty = false;
-        await antigravityOnce(dir, hookSessions(dir)).catch(() => 0);
+    draining = (async () => {
+      try {
+        while (dirty && !stopped) {
+          dirty = false;
+          await antigravityOnce(dir, hookSessions(dir)).catch(() => 0);
+        }
+      } finally {
+        draining = undefined;
       }
-    } finally {
-      draining = false;
-    }
+    })();
   };
   return answer<never>('session inbox watcher', [], ({ reject }) => {
     // Subscribe before the first drain, so nothing written in between is missed.
@@ -135,7 +138,14 @@ async function watchAntigravity(dir: string): Promise<never> {
       (name) => {
         if (name === null || /^(?:inbox|deliveries)(?:\/|$)/.test(name)) void drain();
       },
-      { recursive: true, onError: () => reject(new Error('session inbox watcher closed')) },
+      {
+        recursive: true,
+        onError: (error) => {
+          stopped = true;
+          dirty = false;
+          void Promise.resolve(draining).then(() => reject(error), () => reject(error));
+        },
+      },
     );
     void drain();
   });

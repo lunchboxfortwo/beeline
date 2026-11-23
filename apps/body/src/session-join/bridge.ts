@@ -325,46 +325,66 @@ export async function flush(
 async function serveTools(dir: string, path: string, sessionsChanged: () => void) {
   if (dirname(path) !== dir) await preparePrivateSocketDirectory(path);
   rmSync(path, { force: true });
+  const requests = new Set<Promise<void>>();
+  let closing = false;
   const server = createServer((connection) => {
+    if (closing) {
+      connection.destroy();
+      return;
+    }
     let buffer = '',
       taken = false;
     connection.setEncoding('utf8');
-    connection.on('data', async (chunk) => {
+    connection.on('data', (chunk) => {
+      if (closing) return;
       buffer += chunk;
       const end = buffer.indexOf('\n');
       if (end < 0 || taken) return;
       taken = true;
-      let answer: object;
-      try {
-        const request = JSON.parse(buffer.slice(0, end)) as {
-          type?: string;
-          key: string;
-          name: string;
-          args: Record<string, unknown>;
-        };
-        if (request.type === 'sessions-changed') {
-          sessionsChanged();
-          answer = { ok: true };
-        } else {
-          const joined = readState(dir).sessions.find((s) => s.key === request.key);
-          if (!joined) throw new Error('This session has not joined Beeline');
-          const token = await accessToken(dir, joined.key);
-          if (token !== joined.accessToken) sessionsChanged();
-          answer = {
-            ok: true,
-            data: await callTool(joined, token, request.name, request.args ?? {}),
+      const request = (async () => {
+        let answer: object;
+        try {
+          const request = JSON.parse(buffer.slice(0, end)) as {
+            type?: string;
+            key: string;
+            name: string;
+            args: Record<string, unknown>;
           };
+          if (request.type === 'sessions-changed') {
+            sessionsChanged();
+            answer = { ok: true };
+          } else {
+            const joined = readState(dir).sessions.find((s) => s.key === request.key);
+            if (!joined) throw new Error('This session has not joined Beeline');
+            const token = await accessToken(dir, joined.key);
+            if (token !== joined.accessToken) sessionsChanged();
+            answer = {
+              ok: true,
+              data: await callTool(joined, token, request.name, request.args ?? {}),
+            };
+          }
+        } catch (error) {
+          answer = { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
-      } catch (error) {
-        answer = { ok: false, error: error instanceof Error ? error.message : String(error) };
-      }
-      connection.end(JSON.stringify(answer) + '\n');
+        connection.end(JSON.stringify(answer) + '\n');
+      })();
+      requests.add(request);
+      void request.then(() => requests.delete(request), () => requests.delete(request));
     });
   });
   const listening = await listen(server, path);
   chmodSync(path, 0o600);
   server.unref();
-  return listening;
+  let closed: Promise<void> | undefined;
+  return {
+    close: () => {
+      closing = true;
+      return (closed ??= (async () => {
+        await Promise.allSettled(requests);
+        await listening.close();
+      })());
+    },
+  };
 }
 
 /** Calls a tool through the bridge; undefined when no bridge answers, so the caller goes direct. */
@@ -481,7 +501,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     dir,
     (path) => {
       // A new subdirectory can be reported by its own name only.
-      if (path === null || /^(?:hooks|inbox|deliveries)(?:\/|$)/.test(path)) changed();
+      if (path === null || /^(?:hooks|inbox|deliveries|claude-mcp)(?:\/|$)/.test(path)) changed();
     },
     {
       recursive: true,
