@@ -55,7 +55,7 @@ export async function installCornerGitHubWrappers(input: {
     // Sessions outlive helper updates. Keep the install anchor unresolved so
     // release pruning cannot delete the CLI their credential launcher calls.
     cli: releaseIdFromPath(input.cliEntrypoint)
-      ? resolve(anchorLayout(dirname(input.cliEntrypoint)).libDir,BUNDLE_ENTRYPOINT)
+      ? resolve(anchorLayout(dirname(input.cliEntrypoint)).libDir, BUNDLE_ENTRYPOINT)
       : input.cliEntrypoint,
     config: input.runtimeConfigPath,
     room: input.roomId,
@@ -239,7 +239,10 @@ export async function cornerGitHubCommandRefusal(
   return undefined;
 }
 
-async function writeLauncher(path: string, config: Record<string, string | boolean>): Promise<void> {
+async function writeLauncher(
+  path: string,
+  config: Record<string, string | boolean>,
+): Promise<void> {
   const source = `#!/usr/bin/env node
 import { runOwned } from ${JSON.stringify(ownedCommandModule())};
 import { readFileSync, writeFileSync } from 'node:fs';

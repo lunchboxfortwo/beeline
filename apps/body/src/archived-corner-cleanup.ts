@@ -2,7 +2,13 @@ import { runOwnedFile } from './wait.js';
 /** Destructive cleanup is called only with a persisted server-confirmed archive fact. */
 import { lstat, readdir, rm } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { ordinaryDirectory, storageTree, hasMount, type WholeStorageOptions, type StorageReclaimEntry } from './helper-storage.js';
+import {
+  ordinaryDirectory,
+  storageTree,
+  hasMount,
+  type WholeStorageOptions,
+  type StorageReclaimEntry,
+} from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 import { DEPENDENCY_LAYERS_DIR, openDependencyLayer } from './dependency-generation.js';
 const exec = runOwnedFile;
@@ -102,69 +108,138 @@ async function stopDarwinProcesses(roots: string[]): Promise<number> {
   roots = roots.map(canonicalStoragePath);
   const snapshot = async () => {
     const { stdout } = await exec('/bin/ps', ['-axo', 'pid=,ppid=,uid=,lstart=,command=']);
-    return stdout.split('\n').flatMap(line => {
+    return stdout.split('\n').flatMap((line) => {
       const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+((?:\S+\s+){4}\S+)\s+(.+)$/);
-      return match ? [{ pid: Number(match[1]), parent: Number(match[2]), uid: Number(match[3]), birth: match[4]!, command: match[5]! }] : [];
+      return match
+        ? [
+            {
+              pid: Number(match[1]),
+              parent: Number(match[2]),
+              uid: Number(match[3]),
+              birth: match[4]!,
+              command: match[5]!,
+            },
+          ]
+        : [];
     });
   };
   const files = async (pid: number): Promise<string[]> => {
     try {
       const { stdout } = await exec('/usr/sbin/lsof', ['-a', '-p', String(pid), '-Fn']);
-      return stdout.split('\n').filter(line => line.startsWith('n/')).map(line => canonicalStoragePath(line.slice(1)));
-    } catch { return []; }
+      return stdout
+        .split('\n')
+        .filter((line) => line.startsWith('n/'))
+        .map((line) => canonicalStoragePath(line.slice(1)));
+    } catch {
+      return [];
+    }
   };
-  const inside = (path: string | undefined) => path !== undefined && roots.some(root => path === root || path.startsWith(`${root}/`));
+  const inside = (path: string | undefined) =>
+    path !== undefined && roots.some((root) => path === root || path.startsWith(`${root}/`));
   const attributed = async (pid: number): Promise<boolean> => {
     if ((await files(pid)).some(inside)) return true;
     try {
       const { stdout } = await exec('/usr/bin/python3', ['-c', DARWIN_ARGV, JSON.stringify([pid])]);
       const args = (JSON.parse(stdout) as Record<string, string[]>)[pid] ?? [];
-      return args.some(arg => arg.startsWith('/') && inside(canonicalStoragePath(arg)));
-    } catch { return false; }
+      return args.some((arg) => arg.startsWith('/') && inside(canonicalStoragePath(arg)));
+    } catch {
+      return false;
+    }
   };
   const rows = await snapshot();
   const protectedPids = new Set([process.pid]);
-  let parent = rows.find(row => row.pid === process.pid)?.parent;
+  let parent = rows.find((row) => row.pid === process.pid)?.parent;
   while (parent && !protectedPids.has(parent)) {
-    protectedPids.add(parent); parent = rows.find(row => row.pid === parent)?.parent;
+    protectedPids.add(parent);
+    parent = rows.find((row) => row.pid === parent)?.parent;
   }
-  const brokers = new Set(rows.filter(row => row.command.split(/\s+/).slice(0, 2).some(arg => arg.includes('trusty-squire'))).map(row => row.pid));
+  const brokers = new Set(
+    rows
+      .filter((row) =>
+        row.command
+          .split(/\s+/)
+          .slice(0, 2)
+          .some((arg) => arg.includes('trusty-squire')),
+      )
+      .map((row) => row.pid),
+  );
   for (let changed = true; changed;) {
     changed = false;
-    for (const row of rows) if (brokers.has(row.parent) && !brokers.has(row.pid)) { brokers.add(row.pid); changed = true; }
+    for (const row of rows)
+      if (brokers.has(row.parent) && !brokers.has(row.pid)) {
+        brokers.add(row.pid);
+        changed = true;
+      }
   }
   // One host-wide file inventory and one kernel argv collector avoid paying
   // lsof/Python startup for every unrelated process while holding storage idle.
-  const candidates = rows.filter(row => !protectedPids.has(row.pid) && !brokers.has(row.pid) && row.uid === process.getuid?.());
+  const candidates = rows.filter(
+    (row) => !protectedPids.has(row.pid) && !brokers.has(row.pid) && row.uid === process.getuid?.(),
+  );
   if (!candidates.length) return 0;
   const fileOwners = new Set<number>();
   {
-    const { stdout } = await exec('/usr/sbin/lsof', ['-nP', '-a', '-u', String(process.getuid!()), '-Fpn'], { maxBuffer: 32 * 1024 * 1024 });
+    const { stdout } = await exec(
+      '/usr/sbin/lsof',
+      ['-nP', '-a', '-u', String(process.getuid!()), '-Fpn'],
+      { maxBuffer: 32 * 1024 * 1024 },
+    );
     let pid: number | undefined;
     for (const line of stdout.split('\n')) {
       if (line.startsWith('p')) pid = Number(line.slice(1));
-      else if (pid !== undefined && line.startsWith('n/') && inside(canonicalStoragePath(line.slice(1)))) fileOwners.add(pid);
+      else if (
+        pid !== undefined &&
+        line.startsWith('n/') &&
+        inside(canonicalStoragePath(line.slice(1)))
+      )
+        fileOwners.add(pid);
     }
   }
-  const { stdout: argvOutput } = await exec('/usr/bin/python3', ['-c', DARWIN_ARGV, JSON.stringify(candidates.map(row => row.pid))], { maxBuffer: 32 * 1024 * 1024 });
+  const { stdout: argvOutput } = await exec(
+    '/usr/bin/python3',
+    ['-c', DARWIN_ARGV, JSON.stringify(candidates.map((row) => row.pid))],
+    { maxBuffer: 32 * 1024 * 1024 },
+  );
   const argumentsByPid = JSON.parse(argvOutput) as Record<string, string[]>;
   let stopped = 0;
   for (const row of candidates) {
-    if (!fileOwners.has(row.pid) && !(argumentsByPid[row.pid] ?? []).some(arg => arg.startsWith('/') && inside(canonicalStoragePath(arg)))) continue;
+    if (
+      !fileOwners.has(row.pid) &&
+      !(argumentsByPid[row.pid] ?? []).some(
+        (arg) => arg.startsWith('/') && inside(canonicalStoragePath(arg)),
+      )
+    )
+      continue;
     for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
-      const current = (await snapshot()).find(candidate => candidate.pid === row.pid);
-      if (!current || current.birth !== row.birth || current.command !== row.command || !await attributed(row.pid)) break;
-      try { process.kill(row.pid, signal); if (signal === 'SIGTERM') stopped++; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+      const current = (await snapshot()).find((candidate) => candidate.pid === row.pid);
+      if (
+        !current ||
+        current.birth !== row.birth ||
+        current.command !== row.command ||
+        !(await attributed(row.pid))
+      )
+        break;
+      try {
+        process.kill(row.pid, signal);
+        if (signal === 'SIGTERM') stopped++;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
     }
   }
   return stopped;
 }
 
-export async function removeArchivedCornerData(supervisorRoot: string, cornerId: string, checkout: string, options: WholeStorageOptions & { runtimeDir?: string } = {}): Promise<StorageReclaimEntry[]> {
+export async function removeArchivedCornerData(
+  supervisorRoot: string,
+  cornerId: string,
+  checkout: string,
+  options: WholeStorageOptions & { runtimeDir?: string } = {},
+): Promise<StorageReclaimEntry[]> {
   if (!/^[a-zA-Z0-9-]{1,80}$/.test(cornerId)) throw new Error('invalid archived thread id');
   const base = resolve(supervisorRoot, 'beeline');
-  if (resolve(checkout) !== resolve(base, 'corners', basename(checkout))) throw new Error('invalid archived checkout root');
+  if (resolve(checkout) !== resolve(base, 'corners', basename(checkout)))
+    throw new Error('invalid archived checkout root');
   const roots = [checkout];
   if (options.runtimeDir) roots.push(resolve(options.runtimeDir, 'rooms', cornerId));
   // The private repository has the same deterministic key as the recorded
@@ -181,18 +256,23 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
     for (const path of roots) if (await ordinaryDirectory(path)) existing.push(path);
     if (!options.dryRun) {
       if (existing.length) {
-        if (process.platform !== 'linux' && process.platform !== 'darwin') throw new Error('unsupported archived process attribution platform');
+        if (process.platform !== 'linux' && process.platform !== 'darwin')
+          throw new Error('unsupported archived process attribution platform');
         if (process.platform === 'darwin') {
           const stopped = await stopDarwinProcesses(existing);
-          console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
+          console.log(
+            `[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`,
+          );
         } else {
-        const result = await exec(
-          '/usr/bin/python3',
-          ['-c', STOP, JSON.stringify(existing), String(process.pid)],
-          { maxBuffer: 1024 },
-        );
-        const { stopped } = JSON.parse(result.stdout) as { stopped: number };
-        console.log(`[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`);
+          const result = await exec(
+            '/usr/bin/python3',
+            ['-c', STOP, JSON.stringify(existing), String(process.pid)],
+            { maxBuffer: 1024 },
+          );
+          const { stopped } = JSON.parse(result.stdout) as { stopped: number };
+          console.log(
+            `[helper] archived thread ${cornerId} stopped ${stopped} attributed processes`,
+          );
         }
       }
     }
@@ -200,25 +280,47 @@ export async function removeArchivedCornerData(supervisorRoot: string, cornerId:
       // A remaining mount is an operational failure, never permission
       // to walk into an unrelated mounted filesystem.
       if (await hasMount(path)) throw new Error(`archived thread mount still present: ${path}`);
-      let allocatedBytes = 0, freedBytes = 0;
+      let allocatedBytes = 0,
+        freedBytes = 0;
       const tree = await storageTree(path, options.progress).catch(() => undefined);
-      const seen = new Map<string, { bytes: number; links: number; count: number; directory: boolean }>();
+      const seen = new Map<
+        string,
+        { bytes: number; links: number; count: number; directory: boolean }
+      >();
       for (const item of tree?.values() ?? []) {
         const key = `${item.dev}:${item.ino}`;
-        const inode = seen.get(key) ?? { bytes: item.blocks, links: item.links, count: 0, directory: item.directory };
-        inode.count++; seen.set(key, inode);
+        const inode = seen.get(key) ?? {
+          bytes: item.blocks,
+          links: item.links,
+          count: 0,
+          directory: item.directory,
+        };
+        inode.count++;
+        seen.set(key, inode);
       }
-      for (const item of seen.values()) { allocatedBytes += item.bytes; if (item.directory || item.count >= item.links) freedBytes += item.bytes; }
+      for (const item of seen.values()) {
+        allocatedBytes += item.bytes;
+        if (item.directory || item.count >= item.links) freedBytes += item.bytes;
+      }
       if (!options.dryRun) {
         const layers = resolve(path, DEPENDENCY_LAYERS_DIR);
-        for (const layer of await readdir(layers).catch(() => [])) await openDependencyLayer(resolve(layers, layer));
+        for (const layer of await readdir(layers).catch(() => []))
+          await openDependencyLayer(resolve(layers, layer));
         await rm(path, { recursive: true, force: true });
       }
-      const entry: StorageReclaimEntry = { roomId: cornerId, path, kind: 'archived', allocatedBytes, freedBytes };
-      entries.push(entry); options.log?.(entry);
+      const entry: StorageReclaimEntry = {
+        roomId: cornerId,
+        path,
+        kind: 'archived',
+        allocatedBytes,
+        freedBytes,
+      };
+      entries.push(entry);
+      options.log?.(entry);
     }
     // Missing roots are already clean, including after an interrupted prior pass.
-    if (!options.dryRun && await lstat(checkout).catch(() => undefined)) throw new Error('archived checkout survived cleanup');
+    if (!options.dryRun && (await lstat(checkout).catch(() => undefined)))
+      throw new Error('archived checkout survived cleanup');
   } catch (error) {
     // One attempt per caller trigger. A leftover must not stall the host sweep.
     console.warn(`[helper] archived thread ${cornerId} cleanup failed:`, error);

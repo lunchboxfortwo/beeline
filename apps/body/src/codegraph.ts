@@ -1,6 +1,6 @@
 import { runOwnedFile } from './wait.js';
-import { access,appendFile,mkdir,readFile } from 'node:fs/promises';
-import { dirname,isAbsolute,resolve } from 'node:path';
+import { access, appendFile, mkdir, readFile } from 'node:fs/promises';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
 
@@ -9,7 +9,11 @@ const execFileAsync = runOwnedFile;
 const CODEGRAPH_INDEX_PATH = '.codegraph/codegraph.db';
 
 /** Release-owned, repository-scoped CodeGraph MCP server. */
-export function codegraphMcpServer(config: BodyConfig, cwd: string, options: { readonly: boolean }): McpServerWire | undefined {
+export function codegraphMcpServer(
+  config: BodyConfig,
+  cwd: string,
+  options: { readonly: boolean },
+): McpServerWire | undefined {
   if (!config.codegraphCommand) return undefined;
   return {
     name: 'codegraph',
@@ -17,7 +21,10 @@ export function codegraphMcpServer(config: BodyConfig, cwd: string, options: { r
     args: ['serve', '--mcp', '--path', resolve(cwd), ...(options.readonly ? ['--no-watch'] : [])],
     // One MCP child per harness session is easier to contain than a daemon
     // that can outlive the place whose index and permissions it used.
-    env: [{ name: 'CODEGRAPH_TELEMETRY', value: '0' }, { name: 'CODEGRAPH_NO_DAEMON', value: '1' }],
+    env: [
+      { name: 'CODEGRAPH_TELEMETRY', value: '0' },
+      { name: 'CODEGRAPH_NO_DAEMON', value: '1' },
+    ],
   };
 }
 

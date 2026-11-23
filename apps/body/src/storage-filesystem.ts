@@ -9,16 +9,28 @@ import { trustySquireLegacyStorePaths } from './trusty-squire-storage.js';
 /** macOS exposes /var and /tmp through OS-owned /private aliases. */
 export function canonicalStoragePath(path: string): string {
   const absolute = resolve(path);
-  return process.platform === 'darwin' ? absolute.replace(/^\/(var|tmp|etc)(?=\/|$)/, '/private/$1') : absolute;
+  return process.platform === 'darwin'
+    ? absolute.replace(/^\/(var|tmp|etc)(?=\/|$)/, '/private/$1')
+    : absolute;
 }
 
 /** Refuse operator/agent links in every ancestor, including the runtime root. */
 export async function ordinaryDirectory(path: string): Promise<boolean> {
   const info = await lstat(path).catch(() => undefined);
-  return Boolean(info?.isDirectory() && canonicalStoragePath(await realpath(path)) === canonicalStoragePath(path));
+  return Boolean(
+    info?.isDirectory() &&
+    canonicalStoragePath(await realpath(path)) === canonicalStoragePath(path),
+  );
 }
 
-export type TreeEntry = { dev: number; ino: number; blocks: number; links: number; directory: boolean; lastUsed: number };
+export type TreeEntry = {
+  dev: number;
+  ino: number;
+  blocks: number;
+  links: number;
+  directory: boolean;
+  lastUsed: number;
+};
 // Node's directory APIs cannot request O_NOATIME. Linux's read-only inventory
 // uses Python's fd-based listdir, so neither a dry run nor an eligibility scan
 // changes the access dates it is deciding from. No file contents are read.
@@ -37,7 +49,10 @@ def visit(path):
 visit(root)
 
 `;
-export async function storageTree(root: string, progress?: () => Promise<void>): Promise<Map<string, TreeEntry>> {
+export async function storageTree(
+  root: string,
+  progress?: () => Promise<void>,
+): Promise<Map<string, TreeEntry>> {
   let lastProgress = 0;
   const advanced = async () => {
     if (progress && Date.now() - lastProgress >= 1_000) {
@@ -50,8 +65,14 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
     const visit = async (path: string): Promise<void> => {
       const info = await lstat(path);
       await advanced();
-      tree.set(path, { dev: info.dev, ino: info.ino, blocks: info.blocks * 512, links: info.nlink,
-        directory: info.isDirectory(), lastUsed: Math.max(info.atimeMs, info.mtimeMs) });
+      tree.set(path, {
+        dev: info.dev,
+        ino: info.ino,
+        blocks: info.blocks * 512,
+        links: info.nlink,
+        directory: info.isDirectory(),
+        lastUsed: Math.max(info.atimeMs, info.mtimeMs),
+      });
       if (info.isDirectory() && !isSquirePath(path))
         for (const name of await readdir(path)) await visit(resolve(path, name));
     };
@@ -70,13 +91,24 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
     },
   });
   const tree = new Map<string, TreeEntry>();
-  let pending = '', stderr = '';
+  let pending = '',
+    stderr = '';
   child.stderr.setEncoding('utf8');
-  child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8192); });
+  child.stderr.on('data', (chunk) => {
+    stderr = (stderr + chunk).slice(-8192);
+  });
   // Attach the rejection handler before consuming the pipe.
   void completed.catch(() => undefined);
   const add = (line: string) => {
-    const [path, dev, ino, blocks, links, directory, lastUsed] = JSON.parse(line) as [string, number, number, number, number, boolean, number];
+    const [path, dev, ino, blocks, links, directory, lastUsed] = JSON.parse(line) as [
+      string,
+      number,
+      number,
+      number,
+      number,
+      boolean,
+      number,
+    ];
     tree.set(path, { dev, ino, blocks, links, directory, lastUsed });
   };
   child.stdout.setEncoding('utf8');
@@ -85,7 +117,8 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
     await advanced();
     let newline: number;
     while ((newline = pending.indexOf('\n')) >= 0) {
-      add(pending.slice(0, newline)); pending = pending.slice(newline + 1);
+      add(pending.slice(0, newline));
+      pending = pending.slice(newline + 1);
     }
   }
   const result = await completed;
@@ -96,38 +129,63 @@ export async function storageTree(root: string, progress?: () => Promise<void>):
 /** Hard exclusion at every depth, including the host/legacy Squire stores. */
 export function isSquirePath(path: string): boolean {
   const absolute = resolve(path);
-  return absolute.split(sep).some((part, index, parts) => ['.trusty-squire', 'squire-host-config'].includes(part) ||
-    part === 'trusty-squire' && parts[index - 1] !== 'skills') ||
-    trustySquireLegacyStorePaths().some(root => absolute === root || absolute.startsWith(`${root}${sep}`));
+  return (
+    absolute
+      .split(sep)
+      .some(
+        (part, index, parts) =>
+          ['.trusty-squire', 'squire-host-config'].includes(part) ||
+          (part === 'trusty-squire' && parts[index - 1] !== 'skills'),
+      ) ||
+    trustySquireLegacyStorePaths().some(
+      (root) => absolute === root || absolute.startsWith(`${root}${sep}`),
+    )
+  );
 }
 
 /** Downloaded tools often ship directories mode 0500/0555. Make only owned
  * directories in this disposable object writable; never follow a link or touch Squire. */
-const removalIndexes = new WeakMap<Map<string, TreeEntry>, { excluded: string[]; directories: string[] }>();
-export async function removeStoragePath(root: string, knownTree?: Map<string, TreeEntry>): Promise<void> {
-  const original = knownTree ?? await storageTree(root);
+const removalIndexes = new WeakMap<
+  Map<string, TreeEntry>,
+  { excluded: string[]; directories: string[] }
+>();
+export async function removeStoragePath(
+  root: string,
+  knownTree?: Map<string, TreeEntry>,
+): Promise<void> {
+  const original = knownTree ?? (await storageTree(root));
   let index = removalIndexes.get(original);
   if (!index) {
-    index = { excluded: [...original.keys()].filter(isSquirePath),
-      directories: [...original].filter(([, item]) => item.directory).map(([path]) => path).sort() };
+    index = {
+      excluded: [...original.keys()].filter(isSquirePath),
+      directories: [...original]
+        .filter(([, item]) => item.directory)
+        .map(([path]) => path)
+        .sort(),
+    };
     removalIndexes.set(original, index);
   }
   const { excluded, directories } = index;
-  if (excluded.some(path => path === root || path.startsWith(`${root}/`)))
+  if (excluded.some((path) => path === root || path.startsWith(`${root}/`)))
     throw new Error('refusing removal of Trusty Squire storage');
   if (isSquirePath(root)) throw new Error('refusing removal of Trusty Squire storage');
   // Repair before starting rm: recursive rm runs sibling removals concurrently,
   // so after an EACCES its other children can still be disappearing. A second
   // inventory then races those removals (observed on macOS as ENOENT).
   const prefix = `${root}/`;
-  let low = 0, high = directories.length;
+  let low = 0,
+    high = directories.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
     if (directories[middle]! < prefix) low = middle + 1;
     else high = middle;
   }
   const ownedDirectories = original.get(root)?.directory ? [root] : [];
-  for (let cursor = low; cursor < directories.length && directories[cursor]!.startsWith(prefix); cursor++)
+  for (
+    let cursor = low;
+    cursor < directories.length && directories[cursor]!.startsWith(prefix);
+    cursor++
+  )
     ownedDirectories.push(directories[cursor]!);
   for (const path of ownedDirectories) {
     const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {

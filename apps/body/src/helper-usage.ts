@@ -70,7 +70,11 @@ else:
 print(json.dumps({'categories':totals,'errors':errors}))
 `;
 
-export async function sampleHelperUsage(root: string, mode: 'disk' | 'process', signal?: AbortSignal): Promise<unknown> {
+export async function sampleHelperUsage(
+  root: string,
+  mode: 'disk' | 'process',
+  signal?: AbortSignal,
+): Promise<unknown> {
   const { stdout } = await exec(
     '/usr/bin/python3',
     ['-c', INVENTORY, root, mode, String(process.pid)],
@@ -83,11 +87,19 @@ export async function sampleHelperUsage(root: string, mode: 'disk' | 'process', 
 }
 
 /** Missing lifecycle evidence is unknown, never proof that a folder is orphaned. */
-export async function countCornerFolders(supervisorRoot: string, states: ReadonlyMap<string, boolean>) {
+export async function countCornerFolders(
+  supervisorRoot: string,
+  states: ReadonlyMap<string, boolean>,
+) {
   const counts = { open: 0, orphaned: 0, unknown: 0 };
-  const owners = new Map((await readStorageOwners(supervisorRoot))
-    .filter(owner => owner.kind === 'corners').map(owner => [owner.itemId, owner]));
-  const folders = await readdir(resolve(supervisorRoot, 'beeline/corners'), { withFileTypes: true });
+  const owners = new Map(
+    (await readStorageOwners(supervisorRoot))
+      .filter((owner) => owner.kind === 'corners')
+      .map((owner) => [owner.itemId, owner]),
+  );
+  const folders = await readdir(resolve(supervisorRoot, 'beeline/corners'), {
+    withFileTypes: true,
+  });
   for (const folder of folders) {
     if (!folder.isDirectory()) continue;
     const owner = owners.get(folder.name);
@@ -108,38 +120,74 @@ export function monitorHelperUsage(supervisorRoot: string): {
   const controller = new AbortController();
   const root = resolve(supervisorRoot, 'beeline');
   const lifecycle = new Map<string, boolean>();
-  let disk: unknown = null, diskAt: number | null = null, diskError = false;
-  let nextDiskAt = 0, scanning = false, sampling = false;
-  let cleanupActions = 0, freedBytes = 0;
+  let disk: unknown = null,
+    diskAt: number | null = null,
+    diskError = false;
+  let nextDiskAt = 0,
+    scanning = false,
+    sampling = false;
+  let cleanupActions = 0,
+    freedBytes = 0;
   const tick = async () => {
     if (sampling || controller.signal.aborted) return;
     sampling = true;
     if (!scanning && Date.now() >= nextDiskAt) {
       scanning = true;
       nextDiskAt = Date.now() + DISK_INTERVAL_MS;
-      void sampleHelperUsage(root, 'disk', controller.signal).then(value => {
-        disk = value; diskAt = Date.now(); diskError = false;
-      }, () => { diskError = true; }).finally(() => { scanning = false; });
+      void sampleHelperUsage(root, 'disk', controller.signal)
+        .then(
+          (value) => {
+            disk = value;
+            diskAt = Date.now();
+            diskError = false;
+          },
+          () => {
+            diskError = true;
+          },
+        )
+        .finally(() => {
+          scanning = false;
+        });
     }
     try {
       const processes = await sampleHelperUsage(root, 'process', controller.signal);
       const cornerFolders = await countCornerFolders(supervisorRoot, lifecycle).catch(() => null);
-      if (!controller.signal.aborted) console.log('[helper] usage ' + JSON.stringify({
-        version: 1, at: Date.now(), diskAt, disk, diskError, diskScanning: scanning,
-        processes, cornerFolders, cleanupActions, freedBytes,
-      }));
+      if (!controller.signal.aborted)
+        console.log(
+          '[helper] usage ' +
+            JSON.stringify({
+              version: 1,
+              at: Date.now(),
+              diskAt,
+              disk,
+              diskError,
+              diskScanning: scanning,
+              processes,
+              cornerFolders,
+              cleanupActions,
+              freedBytes,
+            }),
+        );
     } catch {
       if (!controller.signal.aborted) console.warn('[helper] usage process sample unavailable');
-    } finally { sampling = false; }
+    } finally {
+      sampling = false;
+    }
   };
   void tick();
   return {
-    cleanup: entry => { cleanupActions++; freedBytes += entry.freedBytes; void tick(); },
-    observe: states => {
+    cleanup: (entry) => {
+      cleanupActions++;
+      freedBytes += entry.freedBytes;
+      void tick();
+    },
+    observe: (states) => {
       for (const state of states) {
         if (lifecycle.get(state.roomId) !== true) lifecycle.set(state.roomId, state.archived);
       }
     },
-    stop: () => { controller.abort(); },
+    stop: () => {
+      controller.abort();
+    },
   };
 }

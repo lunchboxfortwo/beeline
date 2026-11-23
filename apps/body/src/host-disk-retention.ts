@@ -3,7 +3,11 @@ import { lstat, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 const execFileAsync = runOwnedFile;
-import { storageOperation, reclaimWholeStorageObject, type WholeStorageOptions } from './helper-storage.js';
+import {
+  storageOperation,
+  reclaimWholeStorageObject,
+  type WholeStorageOptions,
+} from './helper-storage.js';
 import { canonicalStoragePath } from './storage-filesystem.js';
 
 export function isDeletedRuntimeName(name: string): boolean {
@@ -11,19 +15,31 @@ export function isDeletedRuntimeName(name: string): boolean {
 }
 
 /** Tombstone creation already records a settled ended-agent answer. */
-export async function pruneDeletedRuntimes(supervisorRoot: string, _now = Date.now(), options: WholeStorageOptions = {}): Promise<string[]> {
+export async function pruneDeletedRuntimes(
+  supervisorRoot: string,
+  _now = Date.now(),
+  options: WholeStorageOptions = {},
+): Promise<string[]> {
   options = storageOperation(options);
   const root = resolve(supervisorRoot, 'beeline', 'deleted-runtimes');
   const removed: string[] = [];
   for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
     if (!entry.isDirectory() || !isDeletedRuntimeName(entry.name)) continue;
-    removed.push(...(await reclaimWholeStorageObject(join(root, entry.name), true, options)).map(item => item.path));
+    removed.push(
+      ...(await reclaimWholeStorageObject(join(root, entry.name), true, options)).map(
+        (item) => item.path,
+      ),
+    );
   }
   return removed;
 }
 
 /** Expire an unused bare clone only after git confirms it has no linked worktrees. */
-export async function pruneRepositoryCaches(supervisorRoot: string, now = Date.now(), options: WholeStorageOptions = {}): Promise<string[]> {
+export async function pruneRepositoryCaches(
+  supervisorRoot: string,
+  now = Date.now(),
+  options: WholeStorageOptions = {},
+): Promise<string[]> {
   options = storageOperation(options);
   const root = resolve(supervisorRoot, 'beeline', 'repositories');
   const removed: string[] = [];
@@ -33,30 +49,59 @@ export async function pruneRepositoryCaches(supervisorRoot: string, now = Date.n
     const info = await lstat(path);
     if (!info.isDirectory()) continue;
     const published = async (): Promise<boolean> => {
-      const listing = await execFileAsync('git', [`--git-dir=${path}`, 'worktree', 'list', '--porcelain'])
-        .then((result) => result.stdout, () => undefined);
+      const listing = await execFileAsync('git', [
+        `--git-dir=${path}`,
+        'worktree',
+        'list',
+        '--porcelain',
+      ]).then(
+        (result) => result.stdout,
+        () => undefined,
+      );
       if (listing === undefined) return false;
       for (const line of listing.split('\n')) {
-        if (line.startsWith('worktree ') && canonicalStoragePath(line.slice(9)) !== canonicalStoragePath(path) && await lstat(line.slice(9)).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; })) return false;
+        if (
+          line.startsWith('worktree ') &&
+          canonicalStoragePath(line.slice(9)) !== canonicalStoragePath(path) &&
+          (await lstat(line.slice(9)).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return undefined;
+            throw error;
+          }))
+        )
+          return false;
       }
       // A remote tip advancing does not make its older local ancestor unpushed.
       const unpublished = await execFileAsync('git', [
-        `--git-dir=${path}`, 'rev-list', '--branches', '--not', '--remotes=origin',
-      ]).then(result => result.stdout, () => undefined);
+        `--git-dir=${path}`,
+        'rev-list',
+        '--branches',
+        '--not',
+        '--remotes=origin',
+      ]).then(
+        (result) => result.stdout,
+        () => undefined,
+      );
       if (unpublished === undefined || unpublished.trim()) return false;
       return true;
     };
-    removed.push(...(await reclaimWholeStorageObject(path, false, { ...options, now, beforeRemove: published })).map(item => item.path));
+    removed.push(
+      ...(
+        await reclaimWholeStorageObject(path, false, { ...options, now, beforeRemove: published })
+      ).map((item) => item.path),
+    );
   }
   return removed;
 }
 
 /** Machine caches have no credential/session data. Model/tool generations stay
  * whole; npm and turbo expire old files independently of recently used siblings. */
-export async function pruneMachineStorage(supervisorRoot: string, options: WholeStorageOptions = {}): Promise<string[]> {
+export async function pruneMachineStorage(
+  supervisorRoot: string,
+  options: WholeStorageOptions = {},
+): Promise<string[]> {
   options = storageOperation(options);
   const root = resolve(supervisorRoot, 'beeline');
-  const objects = ['npm-cache', 'turbo-cache', 'cargo-target'].map(name => resolve(root, name));
+  const objects = ['npm-cache', 'turbo-cache', 'cargo-target'].map((name) => resolve(root, name));
   for (const category of ['node-modules', 'node-modules-mobile', 'model-cache']) {
     const parent = resolve(root, category);
     for (const entry of await readdir(parent, { withFileTypes: true }).catch(() => [])) {
@@ -78,8 +123,14 @@ export async function pruneMachineStorage(supervisorRoot: string, options: Whole
   }
   const removed: string[] = [];
   for (const path of objects) {
-    removed.push(...(await reclaimWholeStorageObject(path, false, { ...options, expireFiles: /(?:^|\/)npm(?:-cache)?$/.test(path) || path.endsWith('/turbo-cache'),
-    })).map(item => item.path));
+    removed.push(
+      ...(
+        await reclaimWholeStorageObject(path, false, {
+          ...options,
+          expireFiles: /(?:^|\/)npm(?:-cache)?$/.test(path) || path.endsWith('/turbo-cache'),
+        })
+      ).map((item) => item.path),
+    );
   }
   return removed;
 }

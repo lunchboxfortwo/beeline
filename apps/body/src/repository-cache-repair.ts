@@ -32,7 +32,10 @@ function isRepositoryCacheCorruption(error: unknown): boolean {
 
 /** A cache the helper could not repair. Carries no git stderr, only the plain line. */
 export class RepositoryCacheDamagedError extends Error {
-  constructor(label: string, readonly diagnostic: string) {
+  constructor(
+    label: string,
+    readonly diagnostic: string,
+  ) {
     super(repositoryCacheDamagedFault(label, hostname()));
     this.name = 'RepositoryCacheDamagedError';
   }
@@ -87,7 +90,9 @@ async function emptyLooseObjects(gitDir: string): Promise<string[]> {
 
 async function missingObjects(gitDir: string, oids: readonly string[]): Promise<Set<string>> {
   if (!oids.length) return new Set();
-  const output = await git(gitDir, ['cat-file', '--batch-check'], { input: `${oids.join('\n')}\n` });
+  const output = await git(gitDir, ['cat-file', '--batch-check'], {
+    input: `${oids.join('\n')}\n`,
+  });
   return new Set(
     output
       .split('\n')
@@ -111,17 +116,23 @@ async function repairRepositoryCache(
   gitDir: string,
   diagnostic = '',
 ): Promise<RepositoryCacheRepair> {
-  const corrupt = [...diagnostic.matchAll(/loose object ([0-9a-f]{40,64}) \(stored in [^)]*\) is corrupt/gi)]
-    .map((match) => match[1]!.toLowerCase());
+  const corrupt = [
+    ...diagnostic.matchAll(/loose object ([0-9a-f]{40,64}) \(stored in [^)]*\) is corrupt/gi),
+  ].map((match) => match[1]!.toLowerCase());
   const removedObjects = [...new Set([...(await emptyLooseObjects(gitDir)), ...corrupt])];
   for (const oid of removedObjects)
     await rm(resolve(gitDir, 'objects', oid.slice(0, 2), oid.slice(2)), { force: true });
 
-  const refs = (await git(gitDir, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/remotes']))
+  const refs = (
+    await git(gitDir, ['for-each-ref', '--format=%(objectname) %(refname)', 'refs/remotes'])
+  )
     .split('\n')
     .map((line) => line.trim().split(' '))
     .filter((parts): parts is [string, string] => parts.length === 2);
-  const missing = await missingObjects(gitDir, refs.map(([oid]) => oid));
+  const missing = await missingObjects(
+    gitDir,
+    refs.map(([oid]) => oid),
+  );
   const removedRefs: string[] = [];
   for (const [oid, ref] of refs) {
     if (!missing.has(oid)) continue;
@@ -157,7 +168,12 @@ async function fetchedHistoryIsComplete(gitDir: string, args: readonly string[])
   const present: string[] = [];
   for (const ref of refs) {
     if (ref.startsWith('--glob=')) present.push(ref);
-    else if (await git(gitDir, ['rev-parse', '--verify', '-q', ref]).then(() => true, () => false))
+    else if (
+      await git(gitDir, ['rev-parse', '--verify', '-q', ref]).then(
+        () => true,
+        () => false,
+      )
+    )
       present.push(ref);
   }
   if (!present.length) return true;
@@ -187,7 +203,7 @@ export async function fetchRepositoryCache(input: {
   // retained history, and withholds the discovery watchdog acknowledgement.
   let check = checked.get(gitDir);
   if (!check) {
-    check = checkRepository(gitDir, label).catch(error => {
+    check = checkRepository(gitDir, label).catch((error) => {
       console.error(`[thin-core] repo cache ${label} check failed:`, error);
     });
     checked.set(gitDir, check);
@@ -197,7 +213,10 @@ export async function fetchRepositoryCache(input: {
     git(gitDir, ['fetch', ...extra, ...args], input.env ? { env: input.env } : {});
   const damaged = (error: unknown): never => {
     if (!isRepositoryCacheCorruption(error)) throw error;
-    console.error(`[thin-core] repo cache ${label} could not be repaired:`, diagnosticText(error).trim());
+    console.error(
+      `[thin-core] repo cache ${label} could not be repaired:`,
+      diagnosticText(error).trim(),
+    );
     throw new RepositoryCacheDamagedError(label, diagnosticText(error));
   };
   const marker = resolve(gitDir, REPAIR_PENDING_FILE);
@@ -225,7 +244,10 @@ export async function fetchRepositoryCache(input: {
 
 async function checkRepository(gitDir: string, label: string): Promise<void> {
   for (const [key, value] of CRASH_SAFE_GIT_CONFIG) {
-    const current = await git(gitDir, ['config', '--get', key]).then((out) => out.trim(), () => '');
+    const current = await git(gitDir, ['config', '--get', key]).then(
+      (out) => out.trim(),
+      () => '',
+    );
     if (current !== value) await git(gitDir, ['config', key, value]);
   }
   if (!(await emptyLooseObjects(gitDir)).length) return;

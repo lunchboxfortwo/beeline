@@ -368,7 +368,7 @@ export async function tryLock(
 export async function runOwnedFile(
   file: string,
   args: readonly string[],
-  options: ExecFileOptions = {},
+  options: ExecFileOptions & { input?: string } = {},
 ): Promise<OwnedResult> {
   const result = await runOwned({
     step: [file, ...args].join(' '),
@@ -376,6 +376,7 @@ export async function runOwnedFile(
     args,
     cwd: options.cwd === undefined ? undefined : String(options.cwd),
     env: options.env,
+    input: options.input,
     signal: options.signal,
     machineRead: true,
     maxBuffer: options.maxBuffer,

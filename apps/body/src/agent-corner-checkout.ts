@@ -210,10 +210,9 @@ export async function materializeAgentCornerCheckout(input: {
         .split('\n')
         .filter((ref) => ref && ref !== `refs/heads/${input.branch}`);
       if (!legacy) inherited.push('refs/stash');
-      const prune = git([`--git-dir=${staging}`, 'update-ref', '--stdin']);
-      prune.child.stdin?.on('error', () => undefined);
-      prune.child.stdin?.end(inherited.map((ref) => `delete ${ref}\n`).join(''));
-      await prune;
+      await execFileAsync('git', [`--git-dir=${staging}`, 'update-ref', '--stdin'], {
+        input: inherited.map((ref) => `delete ${ref}\n`).join(''),
+      });
 
       if (legacy) await writeFile(resolve(staging, 'beeline-legacy-pending'), legacy);
       // PlaceSession may already bind this directory into a live sandbox.

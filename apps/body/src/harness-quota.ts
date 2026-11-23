@@ -44,7 +44,10 @@ const XAI_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828';
  * The quota-axi provider for a harness, or undefined when the agent bills
  * through OpenRouter (its key spend is read instead) or quota-axi has none.
  */
-export function quotaAxiProvider(kind: AgentKind | undefined, openRouter: boolean): string | undefined {
+export function quotaAxiProvider(
+  kind: AgentKind | undefined,
+  openRouter: boolean,
+): string | undefined {
   if (openRouter) return;
   switch (kind) {
     case 'claude':
@@ -82,9 +85,14 @@ function record(value: unknown): Record<string, unknown> | undefined {
 function quotaAxiRead(state: Record<string, unknown> | undefined, at: number): UsageRead {
   const status = state?.status;
   const reason = usageReason(state?.error);
-  const retryAfter = typeof state?.retryAfter === 'string' ? Date.parse(state.retryAfter) / 1000 : NaN;
+  const retryAfter =
+    typeof state?.retryAfter === 'string' ? Date.parse(state.retryAfter) / 1000 : NaN;
   if (status === 'fresh' && state?.stale !== true) return { status: 'fresh', at };
-  if (status === 'auth_required' || state?.reason === 'credentials_expired' || state?.authStatus === 'unusable')
+  if (
+    status === 'auth_required' ||
+    state?.reason === 'credentials_expired' ||
+    state?.authStatus === 'unusable'
+  )
     return { status: 'signed_out', at };
   if (status === 'rate_limited' || Number.isFinite(retryAfter))
     return { status: 'rate_limited', at, ...(Number.isFinite(retryAfter) ? { retryAfter } : {}) };
@@ -107,13 +115,19 @@ export function quotaAxiUsage(
   const entry = providers.map(record).find((p) => p?.provider === provider);
   if (!entry) return;
   const state = record(entry.state);
-  const refreshedAt = typeof state?.refreshedAt === 'string' ? Date.parse(state.refreshedAt) / 1000 : NaN;
+  const refreshedAt =
+    typeof state?.refreshedAt === 'string' ? Date.parse(state.refreshedAt) / 1000 : NaN;
   const readAt = Number.isFinite(refreshedAt) ? Math.min(refreshedAt, now) : now;
   const windows = new Map<string, UsageWindow>();
   for (const raw of Array.isArray(entry.windows) ? entry.windows : []) {
     const w = record(raw);
     const remaining = w?.percentRemaining;
-    if (!w || typeof w.id !== 'string' || typeof remaining !== 'number' || !Number.isFinite(remaining))
+    if (
+      !w ||
+      typeof w.id !== 'string' ||
+      typeof remaining !== 'number' ||
+      !Number.isFinite(remaining)
+    )
       continue;
     const rateLimitType = w.id
       .toLowerCase()
@@ -157,7 +171,10 @@ export function quotaAxiUsage(
 }
 
 const digest = (...parts: string[]) =>
-  createHash('sha256').update(['beeline-usage-account-v1', ...parts].join('\0')).digest('hex').slice(0, 32);
+  createHash('sha256')
+    .update(['beeline-usage-account-v1', ...parts].join('\0'))
+    .digest('hex')
+    .slice(0, 32);
 
 /**
  * The plan account a report was read from, when the vendor verified it: a
@@ -168,7 +185,12 @@ export function quotaAxiAccountKey(report: unknown, provider: string): string | 
   const providers = record(report)?.providers;
   if (!Array.isArray(providers)) return;
   const account = record(providers.map(record).find((p) => p?.provider === provider)?.account);
-  if (account?.identityStatus !== 'verified' || typeof account.accountId !== 'string' || !account.accountId) return;
+  if (
+    account?.identityStatus !== 'verified' ||
+    typeof account.accountId !== 'string' ||
+    !account.accountId
+  )
+    return;
   return `id:${digest(provider, account.accountId, typeof account.organization === 'string' ? account.organization : '')}`;
 }
 
@@ -177,21 +199,57 @@ class SignedOut extends Error {}
 const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
 
 /** Where quota-axi reads each proxied login, and that login as its store holds it. */
-const QUOTA_STORES: Readonly<Record<ProxiedProvider, {
-  dir: string; file: string; homeEnv: string;
-  store: (accessToken: string | undefined, expiresAt: number, login: Record<string, unknown>) => unknown;
-}>> = {
-  claude: { dir: 'claude', file: '.credentials.json', homeEnv: 'CLAUDE_CONFIG_DIR',
-    store: (accessToken, expiresAt) => ({ claudeAiOauth: { accessToken, expiresAt, scopes: ['user:inference', 'user:profile'] } }) },
-  codex: { dir: 'codex', file: 'auth.json', homeEnv: 'CODEX_HOME',
-    store: (accessToken, _expiresAt, login) => ({ auth_mode: 'chatgpt',
-      tokens: { id_token: text(login.id_token), access_token: accessToken, account_id: text(login.account_id) } }) },
-  xai: { dir: 'grok', file: 'auth.json', homeEnv: 'GROK_HOME',
-    store: (accessToken, expiresAt, login) => ({ [`${XAI_ISSUER}::${XAI_CLIENT_ID}`]: {
-      key: accessToken, auth_mode: 'oidc', email: text(login.email),
-      expires_at: Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : undefined,
-      oidc_issuer: XAI_ISSUER, oidc_client_id: XAI_CLIENT_ID,
-    } }) },
+const QUOTA_STORES: Readonly<
+  Record<
+    ProxiedProvider,
+    {
+      dir: string;
+      file: string;
+      homeEnv: string;
+      store: (
+        accessToken: string | undefined,
+        expiresAt: number,
+        login: Record<string, unknown>,
+      ) => unknown;
+    }
+  >
+> = {
+  claude: {
+    dir: 'claude',
+    file: '.credentials.json',
+    homeEnv: 'CLAUDE_CONFIG_DIR',
+    store: (accessToken, expiresAt) => ({
+      claudeAiOauth: { accessToken, expiresAt, scopes: ['user:inference', 'user:profile'] },
+    }),
+  },
+  codex: {
+    dir: 'codex',
+    file: 'auth.json',
+    homeEnv: 'CODEX_HOME',
+    store: (accessToken, _expiresAt, login) => ({
+      auth_mode: 'chatgpt',
+      tokens: {
+        id_token: text(login.id_token),
+        access_token: accessToken,
+        account_id: text(login.account_id),
+      },
+    }),
+  },
+  xai: {
+    dir: 'grok',
+    file: 'auth.json',
+    homeEnv: 'GROK_HOME',
+    store: (accessToken, expiresAt, login) => ({
+      [`${XAI_ISSUER}::${XAI_CLIENT_ID}`]: {
+        key: accessToken,
+        auth_mode: 'oidc',
+        email: text(login.email),
+        expires_at: Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : undefined,
+        oidc_issuer: XAI_ISSUER,
+        oidc_client_id: XAI_CLIENT_ID,
+      },
+    }),
+  },
 };
 
 /**
@@ -246,9 +304,9 @@ type ReadSlot = {
   last?: AgentUsage;
   /** Each agent's post of the latest read, so it lands once per agent. */
   posts: Map<string, { boundary: string; result: Promise<void> }>;
-  publicationScope?:string;
-  publicationSourceValid?:()=>boolean;
-  publicationSourceInvalid?:boolean;
+  publicationScope?: string;
+  publicationSourceValid?: () => boolean;
+  publicationSourceInvalid?: boolean;
   /** The account the last verified read named, for reads that cannot say. */
   accountKey?: string;
 };
@@ -284,7 +342,12 @@ export class HarnessQuotaReader {
     private readonly options: {
       agentId: string;
       post: (usage: AgentUsage) => Promise<unknown>;
-      accountPublisher?:{scopeKey:()=>string;publicationKey?:()=>string;captureSource?:()=>()=>boolean;deliver:(usage:AgentUsage)=>Promise<boolean>};
+      accountPublisher?: {
+        scopeKey: () => string;
+        publicationKey?: () => string;
+        captureSource?: () => () => boolean;
+        deliver: (usage: AgentUsage) => Promise<boolean>;
+      };
       slots?: Map<string, ReadSlot>;
       run?: QuotaAxiRun;
       launch?: () => { command: string; args: string[] };
@@ -309,24 +372,33 @@ export class HarnessQuotaReader {
     force: boolean,
   ): Promise<UsageRefreshOutcome | undefined> {
     const now = this.options.now?.() ?? Date.now();
-    const publicationScope=this.options.accountPublisher?.scopeKey()??'legacy';
+    const publicationScope = this.options.accountPublisher?.scopeKey() ?? 'legacy';
     const login = `${publicationScope}:${provider}`;
     const slots = this.options.slots ?? ACCOUNT_READ_SLOTS;
     let slot = slots.get(login);
     if (!slot) slots.set(login, (slot = { lastStartedAt: -Infinity, posts: new Map() }));
     if (slot.running) return this.deliver(slot, slot.running, login);
-    if(slot.publicationSourceInvalid)Object.assign(slot,{lastStartedAt:-Infinity,last:undefined,posts:new Map(),accountKey:undefined,publicationSourceInvalid:false});
+    if (slot.publicationSourceInvalid)
+      Object.assign(slot, {
+        lastStartedAt: -Infinity,
+        last: undefined,
+        posts: new Map(),
+        accountKey: undefined,
+        publicationSourceInvalid: false,
+      });
     const intervalMs = this.options.intervalMs ?? QUOTA_READ_INTERVAL_MS;
     const since = now - slot.lastStartedAt;
     if (since < (force ? REFRESH_REUSE_MS : intervalMs))
-      return slot.last ? this.deliver(slot, Promise.resolve(slot.last), login) : Promise.resolve(undefined);
+      return slot.last
+        ? this.deliver(slot, Promise.resolve(slot.last), login)
+        : Promise.resolve(undefined);
     // Turn-loop tests must never read the developer's real vendor quota.
     if (!this.options.run && process.env.VITEST) return Promise.resolve(undefined);
     const held = slot;
     held.lastStartedAt = now;
-    held.publicationScope=publicationScope;
-    held.publicationSourceValid=this.options.accountPublisher?.captureSource?.();
-    held.publicationSourceInvalid=false;
+    held.publicationScope = publicationScope;
+    held.publicationSourceValid = this.options.accountPublisher?.captureSource?.();
+    held.publicationSourceInvalid = false;
     held.posts = new Map();
     held.running = this.read(provider, env, held, login, now).finally(() => {
       held.running = undefined;
@@ -353,7 +425,7 @@ export class HarnessQuotaReader {
         if (!login) throw new SignedOut();
         await mkdir(cliProxyDir(env.HOME || homedir()), { recursive: true, mode: 0o700 });
         home = await mkdtemp(join(cliProxyDir(env.HOME || homedir()), 'quota-'));
-        runEnv = { ...env, ...await proxiedQuotaHome(proxied, login, home) };
+        runEnv = { ...env, ...(await proxiedQuotaHome(proxied, login, home)) };
       }
       const launch = (this.options.launch ?? quotaAxiLaunch)();
       const stdout = await (this.options.run ?? runQuotaAxi)(
@@ -364,13 +436,23 @@ export class HarnessQuotaReader {
       const accountKey = quotaAxiAccountKey(report, provider);
       if (accountKey) slot.accountKey = accountKey;
       usage = quotaAxiUsage(report, provider, now) ?? {
-        updatedAt: now, windows: [], read: { status: 'failed', at: now, reason: 'no plan numbers' },
+        updatedAt: now,
+        windows: [],
+        read: { status: 'failed', at: now, reason: 'no plan numbers' },
       };
     } catch (error) {
-      if (error instanceof SignedOut) usage = { updatedAt: now, windows: [], read: { status: 'signed_out', at: now } };
+      if (error instanceof SignedOut)
+        usage = { updatedAt: now, windows: [], read: { status: 'signed_out', at: now } };
       else {
-        console.error(`[agent-usage] quota-axi ${provider} read failed`, error instanceof Error ? error.message : error);
-        usage = { updatedAt: now, windows: [], read: { status: 'failed', at: now, reason: "usage reader didn't run" } };
+        console.error(
+          `[agent-usage] quota-axi ${provider} read failed`,
+          error instanceof Error ? error.message : error,
+        );
+        usage = {
+          updatedAt: now,
+          windows: [],
+          read: { status: 'failed', at: now, reason: "usage reader didn't run" },
+        };
       }
     } finally {
       if (home) await rm(home, { recursive: true, force: true });
@@ -378,24 +460,36 @@ export class HarnessQuotaReader {
     // Without a verified account the read stays with this machine's login, so
     // two different accounts are never merged.
     const key = slot.accountKey ?? `local:${digest(hostname(), login)}`;
-    slot.publicationSourceInvalid=slot.publicationSourceValid?.()===false;
+    slot.publicationSourceInvalid = slot.publicationSourceValid?.() === false;
     slot.last = { ...usage, account: { provider, key } };
     return slot.last;
   }
 
-  private async deliver(slot: ReadSlot, reading: Promise<AgentUsage>, login: string): Promise<UsageRefreshOutcome> {
+  private async deliver(
+    slot: ReadSlot,
+    reading: Promise<AgentUsage>,
+    login: string,
+  ): Promise<UsageRefreshOutcome> {
     const usage = await reading;
-    if((this.options.slots??ACCOUNT_READ_SLOTS).get(login)!==slot||slot.publicationSourceInvalid||slot.publicationScope!==undefined&&slot.publicationScope!==(this.options.accountPublisher?.scopeKey()??'legacy'))
-      return {status:'failed',reason:'usage ownership changed during read'};
+    if (
+      (this.options.slots ?? ACCOUNT_READ_SLOTS).get(login) !== slot ||
+      slot.publicationSourceInvalid ||
+      (slot.publicationScope !== undefined &&
+        slot.publicationScope !== (this.options.accountPublisher?.scopeKey() ?? 'legacy'))
+    )
+      return { status: 'failed', reason: 'usage ownership changed during read' };
     const agentId = this.options.agentId;
-    const boundary=this.options.accountPublisher?.publicationKey?.()??this.options.accountPublisher?.scopeKey()??'legacy';
+    const boundary =
+      this.options.accountPublisher?.publicationKey?.() ??
+      this.options.accountPublisher?.scopeKey() ??
+      'legacy';
     let posted = slot.posts.get(agentId);
-    if (!posted || posted.boundary!==boundary) {
-      const result = (async()=>{
-        if(await this.options.accountPublisher?.deliver(usage))return;
+    if (!posted || posted.boundary !== boundary) {
+      const result = (async () => {
+        if (await this.options.accountPublisher?.deliver(usage)) return;
         await this.options.post(usage);
       })();
-      posted={boundary,result};
+      posted = { boundary, result };
       // Keep only this agent's latest actor; connection churn cannot grow the
       // shared provider read's post bookkeeping.
       slot.posts.set(agentId, posted);
@@ -404,7 +498,10 @@ export class HarnessQuotaReader {
       await posted.result;
     } catch (error) {
       if (slot.posts.get(agentId) === posted) slot.posts.delete(agentId);
-      console.error('[agent-usage] quota post failed', error instanceof Error ? error.message : error);
+      console.error(
+        '[agent-usage] quota post failed',
+        error instanceof Error ? error.message : error,
+      );
       return { status: 'failed', reason: "couldn't save the read" };
     }
     return outcomeOf(usage);

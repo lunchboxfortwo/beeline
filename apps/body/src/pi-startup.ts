@@ -97,10 +97,7 @@ async function __beelineReadPiVersion(cwd = process.cwd()) {
 `;
 
 /** NODE_OPTIONS reaches sandbox wrappers too; only pi-acp registers a hook. */
-export function piStartupEnvironment(
-  label: string,
-  env: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
+export function piStartupEnvironment(label: string, env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   if (!/(^|[/\\])pi-acp(?:\.[a-z]+)?$/i.test(label)) return env;
   const loader = LOADER.replace(
     '__BEELINE_PREAMBLE__',

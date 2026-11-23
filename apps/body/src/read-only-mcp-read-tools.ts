@@ -1,21 +1,28 @@
-import { readdirSync, statSync, type Dirent, lstatSync, realpathSync } from "node:fs";
-import { resolve, isAbsolute, relative, sep } from "node:path";
+import { readdirSync, statSync, type Dirent, lstatSync, realpathSync } from 'node:fs';
+import { resolve, isAbsolute, relative, sep } from 'node:path';
 import { runOwned } from './wait.js';
-import { DEFAULT_IGNORED_DIRECTORIES, JsonObject, existingPath, stringArg, integerArg, displayPath, booleanArg, MAX_SEARCH_TOTAL_BYTES, MAX_SEARCH_FILE_BYTES, readTextFile, gitBinary, repositoryRoot, MAX_GIT_BYTES, approvedAgentRoots, revisionArg, optionalPath } from './read-only-mcp.js';
-
-
-
-
-
-
-
+import {
+  DEFAULT_IGNORED_DIRECTORIES,
+  JsonObject,
+  existingPath,
+  stringArg,
+  integerArg,
+  displayPath,
+  booleanArg,
+  MAX_SEARCH_TOTAL_BYTES,
+  MAX_SEARCH_FILE_BYTES,
+  readTextFile,
+  gitBinary,
+  repositoryRoot,
+  MAX_GIT_BYTES,
+  approvedAgentRoots,
+  revisionArg,
+  optionalPath,
+} from './read-only-mcp.js';
 
 export function shouldSkipDirectory(name: string): boolean {
   return DEFAULT_IGNORED_DIRECTORIES.has(name);
 }
-
-
-
 
 export function listFiles(args: JsonObject): string {
   const start = existingPath(stringArg(args, 'path', '.')!, 'directory');
@@ -50,9 +57,6 @@ export function listFiles(args: JsonObject): string {
   return `${output.join('\n')}${output.length >= limit ? `\n[truncated at ${limit} entries]` : ''}`;
 }
 
-
-
-
 export function searchableFiles(start: string): string[] {
   const details = statSync(start);
   if (details.isFile()) return [start];
@@ -72,9 +76,6 @@ export function searchableFiles(start: string): string[] {
   visit(start);
   return files.sort();
 }
-
-
-
 
 export function searchText(args: JsonObject): string {
   const query = stringArg(args, 'query') ?? '';
@@ -109,9 +110,6 @@ export function searchText(args: JsonObject): string {
   const truncated = matches.length >= maxResults || inspectedBytes >= MAX_SEARCH_TOTAL_BYTES;
   return `${matches.join('\n')}${truncated ? `\n[truncated at ${matches.length} matches]` : ''}`;
 }
-
-
-
 
 export async function runGit(args: string[]): Promise<string> {
   if (!gitBinary) throw new Error('trusted system git is unavailable');
@@ -153,9 +151,6 @@ export async function runGit(args: string[]): Promise<string> {
   if (result.code !== 0) throw new Error(result.stderr.trim() || 'git inspection command failed');
   return result.stdout.trimEnd();
 }
-
-
-
 
 export function readAgentFile(args: JsonObject): string {
   const area = stringArg(args, 'area');
@@ -204,9 +199,6 @@ export function readAgentFile(args: JsonObject): string {
     .join('\n')}${requestedEnd > endLine ? '\n[truncated at 1000 lines]' : ''}`;
 }
 
-
-
-
 export function gitLog(args: JsonObject): Promise<string> {
   const limit = integerArg(args, 'limit', 20, 1, 100);
   const revision = revisionArg(args, 'revision', 'HEAD');
@@ -221,9 +213,6 @@ export function gitLog(args: JsonObject): Promise<string> {
     ...(path ? ['--', path] : []),
   ]);
 }
-
-
-
 
 export function gitShow(args: JsonObject): Promise<string> {
   const revision = revisionArg(args, 'revision', 'HEAD');
@@ -242,9 +231,6 @@ export function gitShow(args: JsonObject): Promise<string> {
   ]);
 }
 
-
-
-
 export function gitDiff(args: JsonObject): Promise<string> {
   const from = revisionArg(args, 'from', 'HEAD~1');
   const to = revisionArg(args, 'to', 'HEAD');
@@ -261,9 +247,6 @@ export function gitDiff(args: JsonObject): Promise<string> {
     ...(path ? ['--', path] : []),
   ]);
 }
-
-
-
 
 export function gitStatus(args: JsonObject): Promise<string> {
   const path = optionalPath(args);
