@@ -27,6 +27,9 @@ import { INK } from '@/buzz/faces/animals';
 import { identityPalette } from '@/buzz/identity-mark';
 import { defaultConfig } from '@tamagui/config/v6';
 import { WORKSPACE_RAIL_TILE } from '@/buzz/workspace-tile';
+import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
+import { PillRow } from '@/ui/screens/transcript/PillRow';
+import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -153,5 +156,57 @@ describe('Workspace plate corners', () => {
     expect(defaultConfig.tokens.radius.md).toBe(6);
     expect(body.props.rx).toBe(frame.props.rx);
     await act(async () => tree.unmount());
+  });
+});
+
+describe('canonical agent artwork across transcript consumers', () => {
+  const canonical = '/v1/agent-avatars/11111111-1111-4111-8111-111111111111';
+  const stale = '/v1/agent-avatars/22222222-2222-4222-8222-222222222222';
+
+  it.each([undefined, '', stale])('uses persisted profile artwork with soul artwork %s', async (avatar) => {
+    const display = resolveAgentDisplayIdentity('claude', {
+      pubkey: 'claude', displayName: 'Claude', avatar: canonical, face: 'whale',
+      soulProfile: { name: 'Claude', soul: 'Helpful', avatarSeed: 'old-seed', avatar,
+        authoredBy: 'owner', updatedAt: 1, communityId: 'workspace', agentPubkey: 'claude',
+        raw: { id: 'soul', pubkey: 'owner', created_at: 1, kind: 0, tags: [], content: '', sig: '' } },
+    });
+    expect(display.avatarUrl).toBe(canonical);
+    expect(display.avatarSeed).toBe('claude');
+    const mark = { kind: 'agent' as const, seed: 'claude', name: display.name,
+      avatarUrl: display.avatarUrl, face: display.face };
+    const tree = await render(<>
+      <PillRow items={[{ id: 'message', from: mark, time: '22:22', system: false, body: null,
+        run: [{ id: 'entry', from: mark, time: '22:22' }] }]} />
+      <TranscriptLine sender={{ name: display.name, stamp: '22:22', mark }} />
+    </>);
+    expect(tree.root.findAll((node: any) => node.type === 'Image').map((node: any) => node.props.source.uri))
+      .toEqual([canonical, canonical]);
+    await act(async () => tree.unmount());
+  });
+
+  it('does not resurrect soul artwork when the canonical profile has no artwork', async () => {
+    const display = resolveAgentDisplayIdentity('claude', {
+      pubkey: 'claude', displayName: 'Claude',
+      soulProfile: { name: 'Claude', soul: 'Helpful', avatarSeed: 'old-seed', avatar: stale,
+        authoredBy: 'owner', updatedAt: 1, communityId: 'workspace', agentPubkey: 'claude',
+        raw: { id: 'soul', pubkey: 'owner', created_at: 1, kind: 0, tags: [], content: '', sig: '' } },
+    });
+    expect(display.avatarUrl).toBeUndefined();
+    const mark = { kind: 'agent' as const, seed: 'claude', name: display.name,
+      avatarUrl: display.avatarUrl, face: display.face };
+    const tree = await render(<>
+      <PillRow items={[{ id: 'message', from: mark, time: '22:22', system: false, body: null,
+        run: [{ id: 'entry', from: mark, time: '22:22' }] }]} />
+      <TranscriptLine sender={{ name: display.name, stamp: '22:22', mark }} />
+    </>);
+    expect(tree.root.findAll((node: any) => node.type === 'Image')).toHaveLength(0);
+    expect(tree.root.findAll((node: any) => node.type === 'G' && node.props.testID === 'face-figure')).toHaveLength(2);
+    await act(async () => tree.unmount());
+  });
+
+  it('uses canonical artwork without a soul', () => {
+    expect(resolveAgentDisplayIdentity('claude', {
+      pubkey: 'claude', displayName: 'Claude', avatar: canonical,
+    }).avatarUrl).toBe(canonical);
   });
 });
