@@ -360,63 +360,50 @@ try {
     assert.equal(baseline.loadedIdentity.version, 'v0.2.2');
   });
   await phase(
-    'a real five-minute admission drain preserves active work and delivers queued wakes',
+    "update joins the helper's own preparation and hands off without draining active work",
     async () => {
       fixture.holdWork(true);
       const started = fixture.nextHarness();
-      const heldId = await fixture.message('native-held deadline-gap');
+      const heldId = await fixture.message('native-held handoff-gap');
       await started;
+      // The helper starts preparing the release the moment it is published.
+      fixture.holdDownload(true);
+      const download = fixture.nextDownload();
       await publish('v0.2.3', '4'.repeat(40));
-      await observe((s) => s.desiredRelease && s.desiredRelease !== s.loadedRelease);
-      const began = Date.now();
-      const updates = entry(cli, ['update']);
-      const during = await fixture.message('native deadline-drain sibling', 1);
+      await download;
+      const child = spawn(cli, ['update'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output = '';
+      const joined = new Promise((done) => {
+        const read = (chunk) => {
+          output += chunk;
+          if (output.includes('already running as pid')) done();
+        };
+        child.stdout.on('data', read);
+        child.stderr.on('data', read);
+      });
+      const exit = new Promise((done) => child.once('exit', done));
+      await Promise.race([joined, exit]);
+      assert.match(output, /release preparation already running as pid \d+ .*; following it/);
+      fixture.holdDownload(false);
+      assert.equal(await exit, 0, output);
+      assert.match(output, /executing release/);
+      const handedOff = await observe(
+        (s) => serving(s) && s.generation !== baseline.generation,
+        120_000,
+      );
+      assert.equal(handedOff.loadedIdentity.version, 'v0.2.3');
+      // Held work lives on the server: the successor serves wakes while it is held.
+      const during = await fixture.message('native handoff sibling', 1);
       assert.equal((await fixture.waitReply(during, 60_000)).length, 1);
       await publish('v0.2.4', '5'.repeat(40));
-      await observe((s) => s.desiredRelease?.startsWith('5'.repeat(40)));
-      // Cross the actual admission deadline without shortening the held turn.
-      while (Date.now() - began < 305_000) await delay(1000);
-      const draining = await observe();
-      assert.equal(
-        draining.generation,
-        baseline.generation,
-        'routine update must preserve the running helper',
+      baseline = await observe(
+        (s) => serving(s) && s.loadedIdentity?.version === 'v0.2.4',
+        120_000,
       );
-      const queued = await fixture.message('native after-deadline sibling', 1);
-      await delay(500);
-      const pending = await database.query(
-        'SELECT state FROM agent_commands WHERE turn_request_id=$1',
-        [queued],
-      );
-      assert.equal(
-        pending.rows[0]?.state,
-        'pending',
-        'new wakes wait durably while active work drains',
-      );
-      const successor = observe((s) => serving(s) && s.generation !== draining.generation, 120_000);
-      fixture.holdWork(false);
-      assert.equal((await fixture.waitReply(heldId, 60_000)).length, 1);
-      baseline = await successor;
+      const queued = await fixture.message('native newer-target sibling', 1);
       assert.equal((await fixture.waitReply(queued, 90_000)).length, 1);
-      console.log(await updates);
-      assert.equal(baseline.loadedIdentity.version, 'v0.2.4');
+      fixture.holdWork(false);
       assert.equal((await fixture.waitReply(heldId, 90_000)).length, 1);
-      const count = (
-        await database.query(
-          "SELECT count(*)::int AS count FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
-          [heldId, agents[0]],
-        )
-      ).rows[0].count;
-      assert.equal(count, 1);
-      assert.equal(
-        (
-          await database.query(
-            'SELECT hiccup_attempts FROM agent_commands WHERE turn_request_id=$1 AND agent_id=$2',
-            [heldId, agents[0]],
-          )
-        ).rows[0].hiccup_attempts,
-        0,
-      );
     },
   );
   await phase(

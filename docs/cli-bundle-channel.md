@@ -205,7 +205,10 @@ the old helper's kernel lock to its exit, runs the native start/status command, 
 reads the successor's status once. systemd start completes on native READY;
 launchd print reports its current job without asserting readiness. `start` and `update` report each agent as the
 helper answered; nothing waits for agents to serve. Locks never queue: a busy lock
-fails at once naming its holder's pid and step. Preparation, dependency and native
+fails at once naming its holder's pid and step. The one exception is release
+preparation already running on the install (such as the helper's own, right after a
+publish): a second preparation prints that holder, follows its lock to its end and
+reuses its verified staging. Preparation, dependency and native
 convergence workers are owned children: their output streams to the CLI, and they
 die with it. Non-interactive children have separate process groups; interactive
 children keep the terminal's foreground group so the TTY and Ctrl-C reach them. Adapter installation streams npm

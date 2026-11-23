@@ -52,14 +52,16 @@ export function holderVanished(error: unknown): boolean {
  * A busy lock is followed to its holder's close, which the kernel delivers on
  * release or death, and then contended again; a holder that vanishes between
  * the busy bind and its record is contended again at once. Every step waits
- * on a kernel event, with no timer and no count. Residual: under endless
- * contention a caller can keep losing the race (starvation), and a live but
- * stuck holder is followed for as long as it holds.
+ * on a kernel event, with no timer and no count. A holder that `follows`
+ * declines is refused at once. Residual: under endless contention a caller
+ * can keep losing the race (starvation), and a live but stuck holder is
+ * followed for as long as it holds.
  */
 export async function withKernelLockWhenFree<T>(
   key: string,
   work: () => Promise<T>,
   about: { step?: string; log?: string } = {},
+  follows: (holder: LockHolder) => boolean = () => true,
 ): Promise<T> {
   for (;;) {
     const lock = await tryLock(key, about).catch((error: unknown) => {
@@ -69,7 +71,7 @@ export async function withKernelLockWhenFree<T>(
     if (!lock) continue;
     if (lock.held) return holding(lock, work);
     // A different key on the same address (a Darwin port collision) is never followed.
-    if (lock.holder.key !== key) {
+    if (lock.holder.key !== key || !follows(lock.holder)) {
       lock.close();
       throw new KernelLockBusyError(lock.holder);
     }
