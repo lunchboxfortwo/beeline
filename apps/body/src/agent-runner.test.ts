@@ -22,7 +22,7 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   followUp = harness.steer;
   stop = harness.stop;
   cancel = harness.cancel;
-  resources={refresh:harness.refresh,refreshConfiguration:harness.refreshConfiguration};
+  resources={refresh:harness.refresh,refreshConfiguration:harness.refreshConfiguration,receiveCommand() {}};
   configurationChanged(){harness.configurationChanged(this);this.stale=true;void this.resources.refreshConfiguration();}
   grantPlace() { return {}; }
   async writeContext() {}

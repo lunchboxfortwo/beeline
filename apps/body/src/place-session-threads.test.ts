@@ -105,3 +105,40 @@ it.each(['pending', 'failed'])('delivers legacy commands when optional thread re
     expect(f.prompt.mock.calls[0]![1]).not.toContain('Current threads you belong to');
   } finally { await f.session.dispose(); }
 });
+
+it.each([false, true])('uses the newest received threads for a waiting command (batch=%s)', async batch => {
+  const f = await fixture();
+  const checkout = agentCornerCheckoutPaths(f.root, 'opened-thread', f.agent.publicKey).path;
+  await mkdir(checkout, { recursive: true });
+  const opened = { corners: [{ cornerId: 'opened-thread', parentRoomId: 'room', name: 'Game fix',
+    createdBy: f.agent.publicKey, archived: false, objective: 'Repair the start button' }] };
+  let finish!: () => void;
+  const active = new Promise<void>(resolve => { finish = resolve; });
+  f.prompt.mockImplementationOnce(async () => {
+    await active;
+    return { agentText: 'Done', stopReason: 'end_turn', updates: [], toolCalls: [] };
+  });
+  f.execute.mockImplementation(() => new Promise(() => {}));
+  try {
+    await f.session.start();
+    const first = f.session.deliver(f.item);
+    await vi.waitFor(() => expect(f.prompt).toHaveBeenCalledOnce());
+    const waiting = { ...f.item, id: 'waiting', turnRequestId: 'waiting', threads: { corners: [] } };
+    const sibling = { ...waiting, id: 'sibling', turnRequestId: 'sibling' };
+    f.session.resources.receiveCommand(waiting);
+    f.session.resources.receiveCommand(sibling);
+    finish();
+    await first;
+    f.execute.mockImplementation(name => name === 'listRoomCorners'
+      ? Promise.resolve(opened) : new Promise(() => {}));
+    await f.session.resources.refreshThreads();
+    f.execute.mockImplementation(() => new Promise(() => {}));
+    await f.session.deliver(waiting, batch ? [waiting, sibling] : []);
+    expect(f.prompt.mock.calls[1]![1]).toContain('Game fix (opened-thread)');
+    expect(f.prompt.mock.calls[1]![1]).toContain(`checkout ${checkout}`);
+
+    f.session.resources.receiveCommand({ ...waiting, threads: { corners: [] } });
+    await f.session.deliver(waiting);
+    expect(f.prompt.mock.calls[2]![1]).not.toContain('Game fix (opened-thread)');
+  } finally { finish(); await f.session.dispose(); }
+});

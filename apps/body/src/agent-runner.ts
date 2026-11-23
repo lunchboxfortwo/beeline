@@ -186,6 +186,8 @@ export class AgentRunner {
     // A new server delivery is the normal retry boundary, including reconnect.
     this.awaitingInput.clear();
     this.latest = commands;
+    for (const item of commands)
+      if (!this.answered.has(item.id)) this.place(item).session.resources.receiveCommand(item);
     void this.restored.then(() => this.reconcileQueue()).catch(error => console.error('[body] queue delivery failed:', error));
   }
 

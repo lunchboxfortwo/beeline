@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
+import type { AgentCommand, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import type { AgentModelConfigOption } from './model-types.js';
@@ -38,6 +38,9 @@ function toolsMatching(result: unknown, query: unknown): unknown {
 
 export class SessionResources {
   readonly context: Partial<Context> = {};
+  private threadsReceivedAt = 0;
+  private readonly receivedCommands = new WeakSet<AgentCommand>();
+  private commandThreads?: { value: Context['threads']; receivedAt: number };
   readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
   private readonly connections = new Map<string, Promise<string>>();
   private writes = Promise.resolve();
@@ -79,6 +82,18 @@ export class SessionResources {
       .catch(() => {});
   }
 
+  receiveCommand(item: AgentCommand): void {
+    this.receivedCommands.add(item);
+    if (item.threads) this.commandThreads = { value: item.threads, receivedAt: performance.now() };
+  }
+
+  threadsForDelivery(items: readonly AgentCommand[]): Context['threads'] | undefined {
+    for (const item of items)
+      if (!this.receivedCommands.has(item)) this.receiveCommand(item);
+    return this.commandThreads && this.commandThreads.receivedAt > this.threadsReceivedAt
+      ? this.commandThreads.value : this.context.threads;
+  }
+
   refresh(): void {
     const { api, agentId, placeId, parentRoomId, workspaceId } = this.options;
     this.refreshConfiguration();
@@ -99,7 +114,7 @@ export class SessionResources {
     return this.load(
       'threads',
       () => api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
-      undefined,
+      () => { this.threadsReceivedAt = performance.now(); },
       () => read === this.threadReads,
     );
   }

@@ -800,7 +800,8 @@ export class PlaceSession {
       names: this.names,
       notes: this.notes,
       turnPrefix: this.turnPrefix,
-      threads: memberThreads(this.surface, item.threads ?? this.resources.context.threads, this.options),
+      threads: memberThreads(this.surface,
+        this.resources.threadsForDelivery(batch.length ? batch : [item]), this.options),
       fresh: !this.windowDelivered,
     };
     this.windowDelivered = true;
