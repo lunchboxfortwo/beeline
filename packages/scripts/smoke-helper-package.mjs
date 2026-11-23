@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export function smokeHelperPackage(tarball, version) {
+const ROOT_README = resolve(dirname(fileURLToPath(import.meta.url)), '../../README.md');
+
+export function smokeHelperPackage(tarball, version, { readme = ROOT_README } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'helper-package-smoke-'));
   try {
     const home = join(directory, 'home');
@@ -15,6 +17,10 @@ export function smokeHelperPackage(tarball, version) {
     const installed = join(prefix, 'lib/node_modules/usebeeline');
     const metadata = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
     if (metadata.name !== 'usebeeline' || metadata.version !== version) throw new Error(`Unexpected installed package: ${metadata.name}@${metadata.version}; expected usebeeline@${version}`);
+    // npm shows the package README: it must be the GitHub README, byte for byte.
+    let packed;
+    try { packed = readFileSync(join(installed, 'README.md')); } catch { throw new Error('Package README.md is missing'); }
+    if (!packed.equals(readFileSync(readme))) throw new Error('Package README.md differs from the repository README.md');
     // start --help returns before any install, pairing, or daemon operation.
     const output = execFileSync(join(prefix, 'bin/beeline'), ['start', '--help'], { env, timeout: 20_000, encoding: 'utf8' });
     if (!output.includes('beeline start [--all|--agent <public key>]')) throw new Error(`Unexpected CLI help: ${output}`);
