@@ -57,23 +57,37 @@ it.each([
 });
 
 it('follows a handoff through the native start job to one status read of the successor', async () => {
-  const { run, result } = await gate(request => request.operation === 'update'
-    ? { ...snapshot('old', 'predecessor'), outcome: 'handoff' as const }
-    : vi.mocked(askMachine).mock.calls.length > 2 ? snapshot('target') : snapshot('old', 'predecessor'));
+  let handedOff = false;
+  const { run, result } = await gate(request => {
+    if (request.operation === 'update') { handedOff = true; return { ...snapshot('old', 'predecessor'), outcome: 'handoff' }; }
+    return handedOff ? snapshot('target') : snapshot('old', 'predecessor');
+  });
   expect(run).toHaveBeenCalledWith(['start', 'beeline-helper.service']);
   expect(result).toMatchObject({ generation: 'successor', loadedRelease: 'target' });
-  expect(vi.mocked(askMachine).mock.calls.map(([, request]) => request.operation)).toEqual(['status', 'update', 'status']);
+  expect(vi.mocked(askMachine).mock.calls.map(([, request]) => request.operation)).toEqual(['status', 'status', 'update', 'status']);
 });
 
 it('follows a helper that predates one-answer control to its successor', async () => {
-  // v0.1.244 answers an update with the snapshot it had, then hands off by itself.
-  const { run, result } = await gate(request => request.operation === 'update' || vi.mocked(askMachine).mock.calls.length < 3
-    ? snapshot('old', 'predecessor') : snapshot('target'));
+  let handedOff = false;
+  const { run, result } = await gate(request => {
+    if (request.operation === 'update') { handedOff = true; return snapshot('old', 'predecessor'); }
+    return handedOff ? snapshot('target') : snapshot('old', 'predecessor');
+  });
   expect(run).toHaveBeenCalledWith(['start', 'beeline-helper.service']);
   expect(result.loadedRelease).toBe('target');
-  // Already running the target: nothing to follow.
   const current = await gate(request => request.operation === 'status' ? snapshot('old', 'predecessor') : snapshot('target', 'predecessor'));
   expect(current.run).not.toHaveBeenCalledWith(['start', 'beeline-helper.service']);
+});
+
+it('addresses the helper generation installed by native convergence', async () => {
+  let generation = 'before-native';
+  vi.mocked(convergeNativeHelper).mockImplementationOnce(async () => { generation = 'after-native'; return process.pid; });
+  const { result } = await gate(request => {
+    if (request.operation === 'status') return snapshot('old', generation);
+    if (request.sourceGeneration !== generation) throw new Error('stale helper generation');
+    return { ...snapshot('target', generation), outcome: 'current' };
+  });
+  expect(result.generation).toBe('after-native');
 });
 
 it('never restarts a helper after a protocol failure', async () => {

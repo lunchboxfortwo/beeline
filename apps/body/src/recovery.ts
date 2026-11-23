@@ -72,7 +72,7 @@ export async function convergeMachine(
   assertLifecycleTestIsolation(env, Boolean(options.run));
   const layout = options.layout ?? beelineInstallLayout(env) ?? discoveredBeelineInstallLayout(env);
   const stateRoot = env.XDG_STATE_HOME || resolve(env.HOME || '', '.local/state');
-  const current = await askMachine(stateRoot, { operation: 'status' }).catch(
+  let current = await askMachine(stateRoot, { operation: 'status' }).catch(
     error => { if (helperAbsent(error)) return undefined; throw error; },
   );
   const hasControl = Boolean(current);
@@ -82,12 +82,15 @@ export async function convergeMachine(
     await withInstallLock(layout, () => activateRelease(layout, options.releaseId!), 'release activation');
   // A live helper can pick up one paired runtime directly. Avoid rewriting its
   // native service from a potentially older connect bundle.
-  if (!hasControl || !options.agentIds) await convergeNativeHelper({
-    env: { ...env, BEELINE_LIB_DIR: layout.libDir },
-    ...(options.run ? { run: options.run } : {}),
-    // A pre-control helper cannot acknowledge this protocol. Its first forward migration replaces it once.
-    restart: !hasControl,
-  });
+  if (!hasControl || !options.agentIds) {
+    await convergeNativeHelper({
+      env: { ...env, BEELINE_LIB_DIR: layout.libDir },
+      ...(options.run ? { run: options.run } : {}),
+      // A pre-control helper cannot acknowledge this protocol. Its first forward migration replaces it once.
+      restart: !hasControl,
+    });
+    if (options.releaseId && hasControl) current = await askMachine(stateRoot, { operation: 'status' });
+  }
   let status: MachineAnswer;
   if (options.releaseId && hasControl) {
     const answer = await askMachine(stateRoot, {

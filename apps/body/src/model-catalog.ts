@@ -196,6 +196,7 @@ export async function validateAgentModelSelection(
   agent: ModelCatalogAgent,
   agentEnv: Record<string, string>,
   selection: { model?: string; effort?: string },
+  signal?: AbortSignal,
 ): Promise<{ raw: AgentModelConfigOption[]; catalog: AgentModelConfigOption[] }> {
   return withAgentModelCatalog(
     agent,
@@ -210,5 +211,6 @@ export async function validateAgentModelSelection(
       );
       return { raw, catalog: applied.options };
     },
+    signal,
   );
 }

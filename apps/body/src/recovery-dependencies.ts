@@ -7,6 +7,7 @@ export async function convergeDependencies(
   layout: ReturnType<typeof discoveredBeelineInstallLayout>,
   releaseId?: string,
   env: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
 ): Promise<void> {
   const libDir = releaseId ? resolve(layout.releasesRoot, releaseId) : layout.libDir;
   const entry = await resolveBundleEntrypoint(libDir);
@@ -19,6 +20,7 @@ export async function convergeDependencies(
     env: { ...env, BEELINE_LIB_DIR: libDir, BEELINE_INTERNAL_RECOVERY: '1' },
     streamStdout: true,
     ownerLink: true,
+    ...(signal ? { signal } : {}),
   });
   if (child.code !== 0) throw new Error(`${step}: child exited ${child.code ?? child.signal}`);
 }

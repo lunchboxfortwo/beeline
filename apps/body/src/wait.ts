@@ -115,6 +115,9 @@ export interface OwnedCommand {
    * the worker sees EOF when the owner dies, even by SIGKILL (see owner-link.ts).
    */
   ownerLink?: boolean;
+  stdin?: 'pipe';
+  captureOutput?: boolean;
+  onSpawn?: (child: ChildProcess) => void;
   /** Called for each output line as it arrives. By default stderr lines stream to the terminal. */
   onLine?: (line: string, stream: 'stdout' | 'stderr') => void;
   /** Forward stdout lines too (the child's stdout is progress, not a result). */
@@ -188,7 +191,7 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
       detached: leader,
       stdio: command.interactive
         ? 'inherit'
-        : [command.input === undefined && !command.ownerLink ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+        : [command.input === undefined && !command.ownerLink && command.stdin !== 'pipe' ? 'ignore' : 'pipe', 'pipe', 'pipe'],
     });
     if (leader) groupLeaders.add(child);
     if (command.ownerLink) linkedWorkers.add(child);
@@ -204,8 +207,11 @@ export function runOwned(command: OwnedCommand): Promise<OwnedResult> {
         pending[stream] = pending[stream].slice(end + 1);
       }
     };
-    child.stdout?.setEncoding('utf8').on('data', read('stdout'));
-    child.stderr?.setEncoding('utf8').on('data', read('stderr'));
+    if (command.captureOutput !== false) {
+      child.stdout?.setEncoding('utf8').on('data', read('stdout'));
+      child.stderr?.setEncoding('utf8').on('data', read('stderr'));
+    }
+    command.onSpawn?.(child);
     if (command.input !== undefined) {
       child.stdin?.on('error', () => undefined);
       child.stdin?.end(command.input);

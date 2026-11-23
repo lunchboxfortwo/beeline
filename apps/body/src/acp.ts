@@ -1,3 +1,4 @@
+import { runOwned } from './wait.js';
 import { useAdapterCommand } from './adapter-install-lock.js';
 import { AcpRuntimeExitedError,flattenHarnessCause,isPiAcpHarness,killChildProcessGroup,STDERR_TAIL_MAX_CHARS } from './acp-stderr-tail-max-chars.js';
 import { maskCredentialResult } from './mask-credential-result.js';
@@ -343,16 +344,21 @@ export class AcpClient extends EventEmitter {
     const launch = this.resourceScope?.launch(this.agentCommand, this.agentArgs, childEnv);
     const releaseAdapter = useAdapterCommand(this.harnessCommand);
     try {
-      this.child = spawn(launch?.command ?? this.agentCommand, launch?.args ?? this.agentArgs, {
-        // agentEnv is the child's whole environment: buildAgentEnv's allowlist is
-        // a real boundary, not a decorative one layered over a full inherit.
-        env: launch?.env ?? childEnv,
+      if (launch) this.child = spawn(launch.command, launch.args, {
+        env: launch.env,
         ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
-        // Managed Linux sessions use a cgroup scope. The process-group fallback
-        // covers helpers without a user systemd manager.
-        detached: !launch && process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      else {
+        this.child = null;
+        const operation = runOwned({ step: `ACP agent ${this.agentLabel}`, file: this.agentCommand,
+          args: this.agentArgs, env: childEnv, ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
+          stdin: 'pipe', captureOutput: false, ...(signal ? { signal } : {}),
+          onSpawn: child => { this.child = child as ChildProcessWithoutNullStreams; },
+        });
+        void operation.catch(() => undefined);
+        if (!this.child) { await operation; throw new Error(`ACP agent ${this.agentLabel} did not start`); }
+      }
     } catch (error) { releaseAdapter(); throw error; }
     this.alive = true;
 

@@ -1,3 +1,4 @@
+import { withCallerSignal } from './owner-link.js';
 import type { AgentAccessPolicy } from './access-policy.js';
 import type { AgentCommand, AgentKind } from './agent-command.js';
 import { loadBodyConfig } from './config.js';
@@ -73,6 +74,7 @@ async function rollbackPairing(grant: DevicePairingGrant, fetchImpl?: DaemonFetc
 async function pairDevice(
   grant: DevicePairingGrant,
   options: {
+    signal?: AbortSignal;
     fetchImpl?: DaemonFetch;
     supervisorRoot?: string;
     selectedAgent?: AgentCommand;
@@ -81,68 +83,75 @@ async function pairDevice(
       agent: AgentCommand,
       env: Record<string, string>,
       selection: { model?: string; effort?: string },
+      signal?: AbortSignal,
     ) => Promise<void>;
     launch?: (configPath: string, agentPubkey: string) => Promise<number>;
   } = {},
 ): Promise<DeviceConnectionResult> {
-  const selectedAgent =
-    options.selectedAgent ??
-    (await selectPairAgentCommand({
-      explicitKind: grant.harness,
-      env: process.env,
-      cwd: process.cwd(),
-      interactive: true,
-      confirmInstall: async () => true,
-    }));
-  const localConfig =
-    options.localConfig ??
-    loadBodyConfig({
-      workspaceRoot: process.cwd(),
-      ...(grant.llmEnvFile ? { llmEnvFile: grant.llmEnvFile } : {}),
-      agent: selectedAgent,
-    });
-  const modelSelection = {
-    model: grant.model,
-    ...(grant.effort ? { effort: grant.effort } : {}),
-  };
-  await (options.validateSelection ?? validateAgentModelSelection)(
-    selectedAgent,
-    localConfig.agentEnv,
-    modelSelection,
-  );
-  const agentIdentity = identityFromKey(grant.agentSecretKey, grant.agentName);
-  const staged = await stageMonolithAgentRuntime({
-    workspaceId: grant.workspaceId,
-    pairedBy: grant.pairedBy,
-    monolithBaseUrl: grant.monolithBaseUrl,
-    daemonExchangeToken: grant.daemonExchangeToken,
-    ...(grant.llmEnvFile ? { llmEnvFile: grant.llmEnvFile } : {}),
-    agentBinary: localConfig.agentBinary,
-    agentKind: selectedAgent.kind,
-    agentCommand: selectedAgent.command,
-    agentArgs: selectedAgent.args,
-    modelSelection,
-    ...(grant.accessPolicy ? { accessPolicy: grant.accessPolicy } : {}),
-    mcpBinary: localConfig.mcpBinary,
-    agentIdentity,
-    bodyIdentity: identityFromKey(grant.bodySecretKey, DEFAULT_BODY_IDENTITY_NAME),
-    ...(options.supervisorRoot ? { supervisorRoot: options.supervisorRoot } : {}),
-  });
-  const activated = await activateDaemonTransport(staged.configPath, options.fetchImpl);
-  if (!activated) throw new Error('monolith daemon transport activation failed');
-  let pid: number;
-  try {
-    pid = await (
-      options.launch ??
-      (async () => (await convergeMachine({ agentIds: [agentIdentity.publicKey] })).pid)
-    )(staged.configPath, agentIdentity.publicKey);
-  } catch (error) {
-    throw new Error(
-      `agent ${agentIdentity.publicKey} is connected, but its daemon did not start: ${
-        error instanceof Error ? error.message : String(error)
-      }. Run \`beeline start --agent ${agentIdentity.publicKey}\`.`,
-      { cause: error },
+  return withCallerSignal(async signal => {
+    signal.throwIfAborted();
+    const selectedAgent =
+      options.selectedAgent ??
+      (await selectPairAgentCommand({
+        signal,
+        explicitKind: grant.harness,
+        env: process.env,
+        cwd: process.cwd(),
+        interactive: true,
+        confirmInstall: async () => true,
+      }));
+    const localConfig =
+      options.localConfig ??
+      loadBodyConfig({
+        workspaceRoot: process.cwd(),
+        ...(grant.llmEnvFile ? { llmEnvFile: grant.llmEnvFile } : {}),
+        agent: selectedAgent,
+      });
+    const modelSelection = {
+      model: grant.model,
+      ...(grant.effort ? { effort: grant.effort } : {}),
+    };
+    await (options.validateSelection ?? validateAgentModelSelection)(
+      selectedAgent,
+      localConfig.agentEnv,
+      modelSelection,
+      signal,
     );
-  }
-  return { runtime: activated.runtime, configPath: staged.configPath, pid };
+    signal.throwIfAborted();
+    const agentIdentity = identityFromKey(grant.agentSecretKey, grant.agentName);
+    const staged = await stageMonolithAgentRuntime({
+      workspaceId: grant.workspaceId,
+      pairedBy: grant.pairedBy,
+      monolithBaseUrl: grant.monolithBaseUrl,
+      daemonExchangeToken: grant.daemonExchangeToken,
+      ...(grant.llmEnvFile ? { llmEnvFile: grant.llmEnvFile } : {}),
+      agentBinary: localConfig.agentBinary,
+      agentKind: selectedAgent.kind,
+      agentCommand: selectedAgent.command,
+      agentArgs: selectedAgent.args,
+      modelSelection,
+      ...(grant.accessPolicy ? { accessPolicy: grant.accessPolicy } : {}),
+      mcpBinary: localConfig.mcpBinary,
+      agentIdentity,
+      bodyIdentity: identityFromKey(grant.bodySecretKey, DEFAULT_BODY_IDENTITY_NAME),
+      ...(options.supervisorRoot ? { supervisorRoot: options.supervisorRoot } : {}),
+    });
+    const activated = await activateDaemonTransport(staged.configPath, options.fetchImpl);
+    if (!activated) throw new Error('monolith daemon transport activation failed');
+    let pid: number;
+    try {
+      pid = await (
+        options.launch ??
+        (async () => (await convergeMachine({ agentIds: [agentIdentity.publicKey] })).pid)
+      )(staged.configPath, agentIdentity.publicKey);
+    } catch (error) {
+      throw new Error(
+        `agent ${agentIdentity.publicKey} is connected, but its daemon did not start: ${
+          error instanceof Error ? error.message : String(error)
+        }. Run \`beeline start --agent ${agentIdentity.publicKey}\`.`,
+        { cause: error },
+      );
+    }
+    return { runtime: activated.runtime, configPath: staged.configPath, pid };
+  }, options.signal);
 }

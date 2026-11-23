@@ -1,3 +1,4 @@
+import { withCallerSignal } from './owner-link.js';
 import { stdin, stdout } from 'node:process';
 import * as clack from '@clack/prompts';
 
@@ -47,7 +48,7 @@ async function clackSelectAgent(candidates: DetectedAgentCommand[]): Promise<Age
   return unwrapPrompt(picked, 'Pairing cancelled.');
 }
 
-type InstallOptions = { cwd?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void };
+type InstallOptions = { cwd?: string; env?: NodeJS.ProcessEnv; log?: (line: string) => void; signal?: AbortSignal };
 
 /** `updateAgentAdapter` logs its own decision (current version, or the exact install). */
 async function installAdapter(
@@ -70,6 +71,7 @@ function missingAdapterMessage(
 }
 
 export async function selectPairAgentCommand(opts: {
+  signal?: AbortSignal;
   explicitKind?: AgentKind;
   customCommand?: string;
   env?: NodeJS.ProcessEnv;
@@ -85,142 +87,155 @@ export async function selectPairAgentCommand(opts: {
     opts: InstallOptions,
   ) => Promise<void>;
 }): Promise<AgentCommand> {
-  const output = opts.output ?? stdout;
-  const interactive = opts.interactive ?? Boolean(stdin.isTTY && stdout.isTTY);
-  const selectAgent = opts.selectAgent ?? clackSelectAgent;
-  const confirmInstall = opts.confirmInstall ?? clackConfirmInstall;
-  const runInstall = opts.install ?? installAdapter;
-  const installOptions: InstallOptions = {
-    cwd: opts.cwd,
-    env: opts.env,
-    log: (line) => output.write(`${line}\n`),
-  };
+  return withCallerSignal(async signal => {
+    signal.throwIfAborted();
+    const output = opts.output ?? stdout;
+    const interactive = opts.interactive ?? Boolean(stdin.isTTY && stdout.isTTY);
+    const selectAgent = opts.selectAgent ?? clackSelectAgent;
+    const confirmInstall = opts.confirmInstall ?? clackConfirmInstall;
+    const runInstall = opts.install ?? installAdapter;
+    const installOptions: InstallOptions = {
+      signal,
+      cwd: opts.cwd,
+      env: opts.env,
+      log: (line) => output.write(`${line}\n`),
+    };
 
-  const useReadyAgent = async (agent: AgentCommand, label: string): Promise<AgentCommand> => {
-    const refresh = latestAdapterInstallCommand(agent.kind);
-    if (!refresh) {
-      output.write(`[beeline] using ${agent.kind} (${label})\n`);
-      return agent;
-    }
-    try {
-      await runInstall(refresh, installOptions);
-      const refreshed = resolveAgentCommand({
-        kind: agent.kind,
-        env: opts.env,
-        cwd: opts.cwd,
-      });
-      output.write(`[beeline] using ${refreshed.kind} (${label}; adapter current)\n`);
-      return refreshed;
-    } catch (installError) {
-      output.write(`[beeline] keeping ${agent.kind} adapter: ${errorMessage(installError)}\n`);
-      return agent;
-    }
-  };
-
-  if (opts.explicitKind !== undefined) {
-    try {
-      const selected = resolveAgentCommand({
-        kind: opts.explicitKind,
-        customCommand: opts.customCommand,
-        env: opts.env,
-        cwd: opts.cwd,
-      });
-      return await useReadyAgent(selected, 'selected');
-    } catch (resolutionError) {
-      const candidate = detectInstalledAgentCommands({ env: opts.env, cwd: opts.cwd }).find(
-        (detected) => detected.kind === opts.explicitKind && detected.status === 'missing-adapter',
-      );
-      if (!candidate || candidate.status !== 'missing-adapter') throw resolutionError;
-
-      const manual = missingAdapterMessage(candidate);
-      if (!interactive) {
-        output.write(`${manual}\n`);
-        throw new Error(
-          `${candidate.kind} cannot be used non-interactively until its adapter is installed.`,
-        );
+    const useReadyAgent = async (agent: AgentCommand, label: string): Promise<AgentCommand> => {
+      const refresh = latestAdapterInstallCommand(agent.kind);
+      if (!refresh) {
+        output.write(`[beeline] using ${agent.kind} (${label})\n`);
+        return agent;
       }
-      const install = await confirmInstall(`${manual}. Install now?`);
-      if (!install) throw new Error(manual);
       try {
-        await runInstall(candidate.install, installOptions);
-        const selected = resolveAgentCommand({
-          kind: candidate.kind,
+        await runInstall(refresh, installOptions);
+        signal.throwIfAborted();
+        const refreshed = resolveAgentCommand({
+          kind: agent.kind,
           env: opts.env,
           cwd: opts.cwd,
         });
-        output.write(`[beeline] using ${selected.kind} (adapter installed)\n`);
-        return selected;
+        output.write(`[beeline] using ${refreshed.kind} (${label}; adapter current)\n`);
+        return refreshed;
       } catch (installError) {
+        signal.throwIfAborted();
+        output.write(`[beeline] keeping ${agent.kind} adapter: ${errorMessage(installError)}\n`);
+        return agent;
+      }
+    };
+
+    if (opts.explicitKind !== undefined) {
+      try {
+        const selected = resolveAgentCommand({
+          kind: opts.explicitKind,
+          customCommand: opts.customCommand,
+          env: opts.env,
+          cwd: opts.cwd,
+        });
+        return await useReadyAgent(selected, 'selected');
+      } catch (resolutionError) {
+        signal.throwIfAborted();
+        const candidate = detectInstalledAgentCommands({ env: opts.env, cwd: opts.cwd }).find(
+          (detected) => detected.kind === opts.explicitKind && detected.status === 'missing-adapter',
+        );
+        if (!candidate || candidate.status !== 'missing-adapter') throw resolutionError;
+
+        const manual = missingAdapterMessage(candidate);
+        if (!interactive) {
+          output.write(`${manual}\n`);
+          throw new Error(
+            `${candidate.kind} cannot be used non-interactively until its adapter is installed.`,
+          );
+        }
+        const install = await confirmInstall(`${manual}. Install now?`);
+        signal.throwIfAborted();
+        if (!install) throw new Error(manual);
+        try {
+          await runInstall(candidate.install, installOptions);
+          signal.throwIfAborted();
+          const selected = resolveAgentCommand({
+            kind: candidate.kind,
+            env: opts.env,
+            cwd: opts.cwd,
+          });
+          output.write(`[beeline] using ${selected.kind} (adapter installed)\n`);
+          return selected;
+        } catch (installError) {
+          signal.throwIfAborted();
+          throw new Error(
+            `Could not install the ${candidate.kind} adapter: ${errorMessage(installError)}. ${manual}`,
+          );
+        }
+      }
+    }
+    if (opts.customCommand !== undefined) {
+      throw new Error('--agent-command may only be used with --agent custom');
+    }
+
+    const detected = detectInstalledAgentCommands({ env: opts.env, cwd: opts.cwd });
+    if (detected.length === 0) throw new Error(NO_AGENT_MESSAGE);
+
+    const ready = detected.filter(
+      (candidate): candidate is Extract<DetectedAgentCommand, { status: 'ready' }> =>
+        candidate.status === 'ready',
+    );
+    const missing = detected.filter(
+      (candidate): candidate is Extract<DetectedAgentCommand, { status: 'missing-adapter' }> =>
+        candidate.status === 'missing-adapter',
+    );
+
+    if (!interactive) {
+      missing.forEach((candidate) => output.write(`${missingAdapterMessage(candidate)}\n`));
+      if (ready.length === 0) {
         throw new Error(
-          `Could not install the ${candidate.kind} adapter: ${errorMessage(installError)}. ${manual}`,
+          'Installed coding agents need ACP adapter setup; install an adapter above, then retry.',
         );
       }
-    }
-  }
-  if (opts.customCommand !== undefined) {
-    throw new Error('--agent-command may only be used with --agent custom');
-  }
-
-  const detected = detectInstalledAgentCommands({ env: opts.env, cwd: opts.cwd });
-  if (detected.length === 0) throw new Error(NO_AGENT_MESSAGE);
-
-  const ready = detected.filter(
-    (candidate): candidate is Extract<DetectedAgentCommand, { status: 'ready' }> =>
-      candidate.status === 'ready',
-  );
-  const missing = detected.filter(
-    (candidate): candidate is Extract<DetectedAgentCommand, { status: 'missing-adapter' }> =>
-      candidate.status === 'missing-adapter',
-  );
-
-  if (!interactive) {
-    missing.forEach((candidate) => output.write(`${missingAdapterMessage(candidate)}\n`));
-    if (ready.length === 0) {
+      if (ready.length === 1) {
+        return useReadyAgent(ready[0]!.agent, 'auto-detected');
+      }
+      const readyKinds = ready.map((candidate) => candidate.kind).join(', ');
       throw new Error(
-        'Installed coding agents need ACP adapter setup; install an adapter above, then retry.',
+        `Detected multiple ACP-capable coding agents: ${readyKinds}. ` +
+          'This session is non-interactive; pass `--agent <name>` explicitly.',
       );
     }
-    if (ready.length === 1) {
-      return useReadyAgent(ready[0]!.agent, 'auto-detected');
-    }
-    const readyKinds = ready.map((candidate) => candidate.kind).join(', ');
-    throw new Error(
-      `Detected multiple ACP-capable coding agents: ${readyKinds}. ` +
-        'This session is non-interactive; pass `--agent <name>` explicitly.',
-    );
-  }
 
-  if (detected.length === 1 && detected[0]!.status === 'ready') {
-    return useReadyAgent(detected[0]!.agent, 'auto-detected');
-  }
-
-  // A failed install for one candidate loops back to the picker rather than
-  // aborting outright, so a menu with several candidates can recover by
-  // choosing another one; a lone missing-adapter candidate has nothing left
-  // to fall back to and throws instead.
-  while (true) {
-    const pickedKind = await selectAgent(detected);
-    const selected = detected.find((candidate) => candidate.kind === pickedKind)!;
-    if (selected.status === 'ready') {
-      return useReadyAgent(selected.agent, 'selected');
+    if (detected.length === 1 && detected[0]!.status === 'ready') {
+      return useReadyAgent(detected[0]!.agent, 'auto-detected');
     }
-    const manual = missingAdapterMessage(selected);
-    try {
-      await runInstall(selected.install, installOptions);
-      const installed = resolveAgentCommand({
-        kind: selected.kind,
-        env: opts.env,
-        cwd: opts.cwd,
-      });
-      output.write(`[beeline] using ${installed.kind} (adapter installed)\n`);
-      return installed;
-    } catch (installError) {
-      output.write(
-        `[beeline] could not install the ${selected.kind} adapter: ${errorMessage(installError)}\n${manual}\n`,
-      );
-      if (detected.length === 1) {
-        throw new Error(`Adapter installation failed for ${selected.kind}.`);
+
+    // A failed install for one candidate loops back to the picker rather than
+    // aborting outright, so a menu with several candidates can recover by
+    // choosing another one; a lone missing-adapter candidate has nothing left
+    // to fall back to and throws instead.
+    while (true) {
+      const pickedKind = await selectAgent(detected);
+      signal.throwIfAborted();
+      const selected = detected.find((candidate) => candidate.kind === pickedKind)!;
+      if (selected.status === 'ready') {
+        return useReadyAgent(selected.agent, 'selected');
+      }
+      const manual = missingAdapterMessage(selected);
+      try {
+        await runInstall(selected.install, installOptions);
+        signal.throwIfAborted();
+        const installed = resolveAgentCommand({
+          kind: selected.kind,
+          env: opts.env,
+          cwd: opts.cwd,
+        });
+        output.write(`[beeline] using ${installed.kind} (adapter installed)\n`);
+        return installed;
+      } catch (installError) {
+        signal.throwIfAborted();
+        output.write(
+          `[beeline] could not install the ${selected.kind} adapter: ${errorMessage(installError)}\n${manual}\n`,
+        );
+        if (detected.length === 1) {
+          throw new Error(`Adapter installation failed for ${selected.kind}.`);
+        }
       }
     }
-  }
+  }, opts.signal);
 }

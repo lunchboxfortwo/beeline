@@ -73,3 +73,16 @@ it('falls back to the innermost message when no code is present', () => {
     'inner reason',
   );
 });
+
+it('preserves a streamed refusal and reports an interrupted stream as an unknown outcome', async () => {
+  useRunner(await runner((request, response) => {
+    response.writeHead(200, { 'content-type': 'application/x-ndjson' });
+    response.end(JSON.stringify(request.url === '/run'
+      ? { type: 'result', status: 400, value: { error: 'not this chat' } }
+      : { type: 'output', stream: 'stderr', text: 'working\n' }) + '\n');
+  }));
+  await expect(sessionToolRequest('/run', {})).rejects.toThrow('not this chat');
+  const lines: string[] = [];
+  await expect(sessionToolRequest('/session', {}, line => lines.push(line.text))).rejects.toThrow('the outcome is unknown');
+  expect(lines).toEqual(['working\n']);
+});

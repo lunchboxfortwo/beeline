@@ -1,3 +1,4 @@
+import type { GrantOutputLine } from './grant-runner-output.js';
 import { readFile } from 'node:fs/promises';
 import type { GrantRunnerEndpoint } from './grant-runner.js';
 import { ask } from './wait.js';
@@ -27,23 +28,52 @@ export function transportCause(error: unknown): string {
   return message;
 }
 
-export async function sessionToolRequest(route: string, input: unknown): Promise<unknown> {
+async function streamResult(response: Response, output: (line: GrantOutputLine) => void): Promise<{ status: number; body: unknown }> {
+  if (!response.body) throw new Error('Session tool stream has no body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error('Session tool stream ended before its result');
+      pending += decoder.decode(chunk.value, { stream: true });
+      let end: number;
+      while ((end = pending.indexOf('\n')) >= 0) {
+        const value = JSON.parse(pending.slice(0, end));
+        pending = pending.slice(end + 1);
+        if (value.type === 'result' && Number.isInteger(value.status)) return { status: value.status, body: value.value };
+        if (value.type !== 'output' || !['stdout', 'stderr'].includes(value.stream) || typeof value.text !== 'string')
+          throw new Error('Session tool stream returned an invalid frame');
+        output({ stream: value.stream, text: value.text });
+      }
+    }
+  } finally { await reader.cancel().catch(() => undefined); }
+}
+
+export async function sessionToolRequest(route: string, input: unknown,
+  output: (line: GrantOutputLine) => void = line => { process.stderr.write(line.text); }): Promise<unknown> {
   const endpoint = await sessionToolConnection();
-  let response: Response;
+  let status: number;
   let body: { error?: string };
   try {
-    // stdout/stderr here belong to the MCP protocol and the agent; no wait line.
-    response = await ask({ url: new URL(route, `${endpoint.url}/`), peer: 'Beeline session tools', report: false }, {
+    const response = await ask({ url: new URL(route, `${endpoint.url}/`), peer: 'Beeline session tools', report: false }, {
       method: 'POST', headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
-    body = await response.json() as { error?: string };
+    if (response.headers.get('content-type')?.startsWith('application/x-ndjson')) {
+      const result = await streamResult(response, output);
+      status = result.status;
+      body = result.body as { error?: string };
+    } else {
+      status = response.status;
+      body = await response.json() as { error?: string };
+    }
   } catch (error) {
     if (error instanceof SyntaxError) throw error;
-    // The helper may still be doing the work; only the answer was lost.
     throw new Error(`Beeline session tools did not answer ${route.replace(/^\//, '')} ` +
       `(${transportCause(error)}); the outcome is unknown`, { cause: error });
   }
-  if (!response.ok) throw new Error(body.error ?? `Session tool failed (${response.status})`);
+  if (status < 200 || status >= 300) throw new Error(body.error ?? `Session tool failed (${status})`);
   return body;
 }

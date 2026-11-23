@@ -372,3 +372,16 @@ describe('pair agent selection — clack cancel handling', () => {
     }
   });
 });
+
+it('ends pairing cancellation instead of retaining an adapter after its refresh is cancelled', async () => {
+  const directory = await executables('claude', 'claude-agent-acp');
+  const cancel = new AbortController();
+  const selected = selectPairAgentCommand({ explicitKind: 'claude', signal: cancel.signal,
+    env: { ...PATH_ONLY, HOME: directory, PATH: directory }, interactive: false, output: capture().output,
+    install: async (_command, options) => {
+      expect(options.signal).toBe(cancel.signal);
+      cancel.abort();
+    },
+  });
+  await expect(selected).rejects.toBe(cancel.signal.reason);
+});

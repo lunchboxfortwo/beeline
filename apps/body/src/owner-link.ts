@@ -16,3 +16,17 @@ export function exitWithOwner(): void {
   // The link must not keep a finished worker alive.
   process.stdin.unref?.();
 }
+
+export async function withCallerSignal<T>(work: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal) return work(signal);
+  const controller = new AbortController();
+  const abort = (name: 'SIGINT' | 'SIGTERM') => {
+    controller.abort(new Error('Operation cancelled'));
+    process.kill(process.pid, name);
+  };
+  const interrupt = () => abort('SIGINT'), terminate = () => abort('SIGTERM');
+  process.once('SIGINT', interrupt);
+  process.once('SIGTERM', terminate);
+  try { return await work(controller.signal); }
+  finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', terminate); }
+}

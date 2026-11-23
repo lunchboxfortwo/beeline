@@ -16,7 +16,7 @@ it('uses the target gate and reports a stuck agent on the direct body CLI', asyn
   const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
   await runUpdateCommand(['update', '--force']);
-  expect(convergeDependencies).toHaveBeenCalledWith(expect.anything(), 'target');
+  expect(convergeDependencies).toHaveBeenCalledWith(expect.anything(), 'target', undefined, expect.any(AbortSignal));
   expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ releaseId: 'target', reportAgentsOnly: true, force: true }));
   expect(stderr.mock.calls.flat().join('')).toContain('sleepy: starting since startup-time; discovery pending; snapshot snapshot-time');
   expect(stdout.mock.calls.flat().join('')).toContain('helper pid 123 serving');
