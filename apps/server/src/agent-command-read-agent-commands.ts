@@ -8,7 +8,6 @@ import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } fr
 import { advanceCorner } from './corner-lifecycle.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
-import { daemonCorners } from './daemon/corner-reads.js';
 import { savedScheduleCommand } from './scheduled-command-authority.js';
 
 
@@ -52,6 +51,8 @@ export async function readAgentCommands(
   roomId?: string,
 ): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
   const rows = await readAgentQueueRows(db,agentId,roomId);
+  // Loaded here: a static import closes a module cycle through the migrations.
+  const { daemonCorners } = await import('./daemon/corner-reads.js');
   const threads = new Map(await Promise.all(
     [...new Set(rows.rows.map(item => item.parent_room_id ?? item.room_id))]
       .map(async placeId => [placeId, await daemonCorners({ database: db }, placeId, agentId, true)] as const),

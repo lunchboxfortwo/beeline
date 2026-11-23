@@ -145,10 +145,14 @@ it('does not ask to rename a human thread after its name and brief are set', asy
 it('supplies current active threads on the shared command delivery boundary', async () => {
   await send('@hoots work on the code');
   const [chat] = await commands(A);
-  expect(chat!.threads?.corners).toEqual([expect.objectContaining({ cornerId: C, parentRoomId: R, name: 'Corner' })]);
+  expect(chat!.threads?.corners).toEqual([
+    expect.objectContaining({ cornerId: C, parentRoomId: R, archived: false }),
+  ]);
   await send('@hoots continue', C);
   const [thread] = await commands(A, C);
-  expect(thread!.threads?.corners).toEqual([expect.objectContaining({ cornerId: C, parentRoomId: R, name: 'Corner' })]);
+  expect(thread!.threads?.corners).toEqual([
+    expect.objectContaining({ cornerId: C, parentRoomId: R, archived: false }),
+  ]);
   await rootFixture.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [C]);
   const [updated] = await commands(A);
   expect(updated!.threads).toEqual({ corners: [] });

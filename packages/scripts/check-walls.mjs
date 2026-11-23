@@ -195,7 +195,6 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   // message b89f12c2): a commanded model switch takes effect before the first
   // prompt it governs.
   'this.modelSwitch',
-  'this.resources.refreshThreads',
   // Final history drains the protocol writes already emitted during the session.
   'liveSteps.remaining']);
 
