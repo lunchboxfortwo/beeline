@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { helperAbsent, requestMachine } from './machine-control.js';
@@ -21,6 +22,7 @@ import {
   type BeelineInstallLayout,
 } from './self-update.js';
 import type { HelperStatusFile } from './helper-status.js';
+import { runtimeConfigPath } from './runtime.js';
 import { assertLifecycleTestIsolation } from './lifecycle-test-guard.js';
 
 export async function prepareMachineRelease(
@@ -151,8 +153,14 @@ export async function convergeMachine(
           agent.state === 'needs-config' ||
           agent.state === 'removed',
       );
-      if (refused.length)
-        throw new Error(refused.map(([id, agent]) => `agent ${id}: ${agent.status}`).join('; '));
+      // The helper forgets a retired agent's slot once its runtime record is gone.
+      const retired = [...required].filter((id) => !status.agents[id] &&
+        /^[0-9a-f]{64}$/i.test(id) && !existsSync(runtimeConfigPath(stateRoot, id)));
+      if (refused.length || retired.length)
+        throw new Error([
+          ...refused.map(([id, agent]) => `agent ${id}: ${agent.status}`),
+          ...retired.map((id) => `agent ${id}: removed from this machine`),
+        ].join('; '));
       if ([...required].some((id) => !status.agents[id] || status.agents[id]?.enabled === false))
         return false;
       return (
