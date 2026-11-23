@@ -371,7 +371,7 @@ describe('thread message attribution', () => {
   });
 
 
-  it('does not retry an empty review when checks return', async () => {
+  it('requests review once when checks return after a review without a verdict', async () => {
     // A reviewer that ends its turn to WAIT for CI has not finished reviewing.
     // Pushing the worker here would send it at a pull request still mid-run.
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
@@ -388,10 +388,10 @@ describe('thread message attribution', () => {
     expect(await commands(A, C)).toEqual([]);
     await greenHead(14, '1'.repeat(40));
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-    expect(await commands(B, C)).toEqual([]);
+    expect(await commands(B, C)).toMatchObject([{ reason: 'corner_review_dispatch' }]);
   });
 
-  it('Reproduction C3-1: a green re-report on the same head does not re-wake a reviewer that already reviewed it', async () => {
+  it('Reproduction C3-1: a green check event waits for an active implementer handback', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(21, '7'.repeat(40));
     const [review] = await commands(B, C);
@@ -404,16 +404,13 @@ describe('thread message attribution', () => {
     const reviewerWakes = (await commands(B, C)).filter(
       (command) => command.reason === 'corner_review_dispatch',
     );
-    console.info(
-      `Reproduction C3-1: wrong=1 re-wake of a reviewed head; right=0; observed=${reviewerWakes.length}`,
-    );
     expect(reviewerWakes).toHaveLength(0);
   });
 
 
   it.each(['FAIL: fix the demonstration.', '**FAIL**: A1 is unmet.', 'Verdict: FAIL: A1 is unmet.', 'PASS', '',
     'FAIL: the diff is empty; there is nothing to review.'])(
-    'Reproduction REVIEW-QUIET-1: a verdicted head is not reviewed again and a later head carries %s', async verdict => {
+    'Reproduction REVIEW-QUIET-1: a later green event reviews after %s unless the head has PASS', async verdict => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = '9'.repeat(40);
       await greenHead(71, head);
@@ -430,11 +427,6 @@ describe('thread message attribution', () => {
         expect(handbacks[0]).toMatchObject({ reason: 'reply', roomId: C, source: { body: verdict } });
         await claim(handbacks[0]!);
         await result(handbacks[0]!, '');
-      } else if (verdict === '') {
-        // A review with neither approval nor findings hands ownership back once, privately.
-        expect(handbacks).toMatchObject([{ reason: 'corner_review_needed', roomId: C }]);
-        await claim(handbacks[0]!);
-        await result(handbacks[0]!, '');
       } else expect(handbacks).toEqual([]);
       expect(await commands(A, R)).toEqual([]);
       expect((await rootFixture.db.query('SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2', [R, B])).rowCount).toBe(0);
@@ -442,8 +434,7 @@ describe('thread message attribution', () => {
       await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
       await greenHead(71, head);
       for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-      // A verdict on this head and brief revision ends its automatic review.
-      expect(await commands(B, C)).toEqual([]);
+      expect(await commands(B, C)).toHaveLength(verdict === 'PASS' ? 0 : 1);
       await greenHead(71, '8'.repeat(40));
       const [continuation] = await commands(B, C);
       if (findings) {
@@ -860,7 +851,7 @@ describe('thread message attribution', () => {
   });
 
 
-  it('Reproduction STALE-6: no review wake reaches the reviewer once its head has FAIL findings', async () => {
+  it('Reproduction STALE-6: earlier FAIL findings do not cancel another review request', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     const head = '7'.repeat(40);
     await greenHead(46, head);
@@ -876,16 +867,7 @@ describe('thread message attribution', () => {
     await rootFixture.daemon.execute('message', { roomId: C, requestId: answered.turnRequestId,
       to: { agent: 'implementer', place: C }, text: `FAIL on ${head}: attach the demonstration.` }, B);
     expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [other.id])).rows[0]?.state).toBe('pending');
-    const stale = (await commands(B, C)).filter(command => command.id === queued!.id);
-    console.info(`Reproduction STALE-6: review wakes for a head with FAIL findings delivered=${stale.length}; wrong=1 right=0`);
-    expect(stale).toEqual([]);
-    await result(answered, 'Findings sent to the implementer.');
-    // A new green run on the same head and brief revision queues no wake.
-    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`, [C]);
-    await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
-    await greenHead(46, head);
-    for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-    expect(await commands(B, C)).toEqual([]);
+    expect((await commands(B, C)).some(command => command.id === queued!.id)).toBe(true);
   });
 
 

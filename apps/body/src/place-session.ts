@@ -26,7 +26,7 @@ import {
 import { machineCliProxy, machineCliProxyEndpoint } from './cliproxy.js';
 import { HostPlaces, startAgentProcess, stopAgentProcess } from './agent-process.js';
 import {
-  credentialMaskPaths,
+  sessionCredentialMaskPaths,
   harnessHomeStateDirs,
   sandboxMountPlan,
   siblingAgentMaskPaths,
@@ -233,10 +233,7 @@ export class PlaceSession {
               harnessStateDirs: [config.agentHomeRoot, config.agentPrivateRoot].filter(
                 (path): path is string => Boolean(path),
               ),
-              maskPaths: credentialMaskPaths(
-                config.sandboxMaskPaths,
-                config.operatorHome ?? homedir(),
-              ),
+              maskPaths: sessionCredentialMaskPaths(config, config.operatorHome ?? homedir()),
             },
       turn: () =>
         this.current
@@ -511,7 +508,7 @@ export class PlaceSession {
         ...(attachScratchRoot ? [attachScratchRoot] : []),
       ],
       maskPaths: [
-        ...credentialMaskPaths(config.sandboxMaskPaths, operatorHome),
+        ...sessionCredentialMaskPaths(config, operatorHome),
         ...siblingAgentMaskPaths(runtimeDirectory(runtime.supervisorRoot, runtime.agent.publicKey)),
       ],
     };

@@ -1,16 +1,19 @@
 import { createAgentCommand } from './agent-command.js';
+import { setRoomEventSubscriptions } from './agent-subscriptions.js';
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { afterAll,beforeAll,describe,expect,it,vi } from 'vitest';
 import { TokenAuth } from './auth.js';
 import { BACKGROUND_DUE_SOURCE_SCHEMA } from './background-due-source.js';
 import { migrate } from './database.js';
 import { LiveHub } from './live.js';
-import { clearOwedMention,owedMentions } from './owed-mentions.js';
+import { clearOwedMention,owedMentions,recordOwedMention } from './owed-mentions.js';
 import { PhoneService } from './phone-service.js';
 import { deliverMcpMemberWebhooks,recordMcpMemberWebhook,recordMcpMention } from './rooms-mcp-members.js';
 import { RoomsMcpOAuth,type McpPrincipal } from './rooms-mcp-oauth.js';
 import { ROOMS_MCP_SCHEMA } from './rooms-mcp-schema.js';
 import { RoomsMcp } from './rooms-mcp.js';
+import { ensureSystemIdentity, systemLine } from './system-line.js';
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
@@ -30,9 +33,9 @@ describe('owed chat tags', () => {
     (mcp as unknown as { call(p: McpPrincipal, n: string, a: Record<string, unknown>): Promise<any> }).call(principal(memberId), name, args);
   async function tag(target = member, text = 'please answer') {
     const message = id();
-    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [message, room, owner, text]);
+    const handle = (await db.query<{handle:string}>('SELECT beeline_room_handle($1,$2) handle', [target,room])).rows[0]!.handle;
+    await db.query('INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)', [message, room, owner, `@${handle} ${text}`]);
     await createAgentCommand(db,{roomId:room,agentId:target,sourceMessageId:message,reason:'human_tag'});
-    await recordMcpMention(db,target,room,message);
     return message;
   }
   beforeAll(async () => {
@@ -357,4 +360,28 @@ describe('owed chat tags', () => {
     expect((await owedMentions(db,member)).map(m=>m.messageId)).toContain(pending);
   });
 
+  it('delivers subscribed joins as wakes and keeps the mention list for tags and DMs', async () => {
+    await setRoomEventSubscriptions(db, room, member, ['joined']);
+    await ensureSystemIdentity(db);
+    const join = await systemLine(db, { roomId:room, kind:'joined', verb:'recorded',
+      subject:{kind:'system',id:SYSTEM_IDENTITY_ID,name:'Beeline'} });
+    const wake = (await db.query<{id:string; source_message_id:string}>(
+      "SELECT id,source_message_id FROM agent_commands WHERE agent_id=$1 AND reason='subscribed_event'", [member],
+    )).rows[0]!;
+    expect(wake.source_message_id).toBeTruthy();
+    expect((await db.query('SELECT 1 FROM rooms_mcp_mentions WHERE member_id=$1 AND message_id=ANY($2)',
+      [member,[join.id,wake.source_message_id]])).rowCount).toBe(0);
+
+    // An older deployment could already have stored this wake as a mention.
+    await recordOwedMention(db, member, room, wake.source_message_id);
+    const handle = (await db.query<{handle:string}>('SELECT beeline_room_handle($1,$2) handle', [member,room])).rows[0]!.handle;
+    const tagged = await phone.execute('sendRoomMessage', { roomId:room, text:`@${handle} please answer` }, owner);
+    const dm = await phone.execute('resolveDirectMessage', { workspaceId:workspace, participantId:member }, owner);
+    const direct = await phone.execute('sendRoomMessage', { roomId:dm.id, text:'A direct question' }, owner);
+    const page = await call('list_mentions');
+    const mentioned = page.mentions.map((mention:{id:string}) => mention.id);
+    expect(mentioned).toEqual(expect.arrayContaining([tagged.messageId,direct.messageId]));
+    expect(mentioned).not.toContain(wake.source_message_id);
+    expect(page.wakes).toContainEqual(expect.objectContaining({id:wake.id,reason:'subscribed_event'}));
+  });
 });

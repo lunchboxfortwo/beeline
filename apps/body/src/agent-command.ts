@@ -6,6 +6,7 @@ import { runOwned, runOwnedFile } from './wait.js';
 import type { AgentId } from './session-join/agents.js';
 import type { AdapterUpdateOptions } from './adapter-update.js';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { ProxiedProvider } from './cliproxy.js';
 
@@ -17,6 +18,7 @@ export const AGENT_KINDS = [
   'grok',
   'cursor',
   'opencode',
+  'antigravity',
   'reference',
   'custom',
 ] as const;
@@ -230,6 +232,7 @@ export const AGENT_BEHAVIORS: Readonly<Record<AgentKind, AgentBehavior>> = {
       pollText: true,
     },
   },
+  antigravity: { label: 'Antigravity', nativeLoginDirs: ['.gemini/antigravity-cli'] },
   reference: {},
   custom: { modelLaunch: 'command' },
 };
@@ -293,13 +296,41 @@ export function sessionAgentBehavior(
  * relative to the operator's real `$HOME`; `target` to the isolated dir.
  * Every other harness login lives only in the machine's CLIProxyAPI.
  */
-export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string; target: string }> =
+export const SHARED_CREDENTIALS: Array<{
+  dir: 'cursor' | 'user';
+  source: string;
+  target: string;
+  /** Only this harness's sessions get the link; every other session has it masked. */
+  kind?: AgentKind;
+}> =
   [
     // cursor-agent keeps chat/MCP state under CURSOR_HOME but reads its login
     // from ~/.config/cursor/auth.json, so the isolated HOME needs it linked.
     { dir: 'cursor', source: '.cursor/agent-cli-state.json', target: 'agent-cli-state.json' },
     { dir: 'user', source: '.config/cursor/auth.json', target: '.config/cursor/auth.json' },
+    // agy acp reads its cached sign-in from ~/.gemini/antigravity-cli; the
+    // isolated HOME links that one file, never a copy of it.
+    {
+      dir: 'user',
+      kind: 'antigravity',
+      source: '.gemini/antigravity-cli/antigravity-oauth-token',
+      target: '.gemini/antigravity-cli/antigravity-oauth-token',
+    },
   ];
+
+/**
+ * Operator login directories a session of `kind` must not see: those of every
+ * harness-scoped shared login that belongs to another harness. Absolute paths.
+ */
+export function foreignLoginMaskPaths(kind: AgentKind | undefined, operatorHome: string): string[] {
+  return [
+    ...new Set(
+      SHARED_CREDENTIALS.filter((item) => item.kind && item.kind !== kind).map((item) =>
+        resolve(operatorHome, item.source, '..'),
+      ),
+    ),
+  ];
+}
 
 /**
  * Provider API keys a session copies from a native store it no longer links:
@@ -323,6 +354,7 @@ export const AUTO_DETECT_AGENT_KINDS = [
   'grok',
   'cursor',
   'opencode',
+  'antigravity',
 ] as const;
 
 export interface AgentCommand {
@@ -356,6 +388,7 @@ const AGENT_EXECUTABLES: Record<(typeof AUTO_DETECT_AGENT_KINDS)[number], string
   grok: 'grok',
   cursor: 'cursor-agent',
   opencode: 'opencode',
+  antigravity: 'agy',
 };
 
 /** Install hints verified against the upstream docs; see docs/agent-programs.md. */
@@ -380,6 +413,11 @@ const AGENT_PROGRAMS = {
     install: 'curl https://cursor.com/install -fsS | bash',
   },
   opencode: { name: 'OpenCode', binary: 'opencode', install: 'npm install -g opencode-ai' },
+  antigravity: {
+    name: 'Antigravity CLI',
+    binary: 'agy',
+    install: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+  },
 } as const;
 
 export function missingAgentProgramMessage(kind: keyof typeof AGENT_PROGRAMS): string {
@@ -819,6 +857,24 @@ export function resolveAgentCommand(opts: {
     return { kind: typedKind, command, args: ['agent', 'stdio'] };
   }
 
+  if (typedKind === 'antigravity') {
+    // `agy acp` is Antigravity's own ACP server (1.5.0 and later). Its top-level
+    // help lists the subcommand, so an older CLI is told to update instead of
+    // being started with an argument it would read as something else.
+    const command = requireExecutable(
+      'agy',
+      env,
+      cwd,
+      `Antigravity CLI not found. Install it with \`${AGENT_PROGRAMS.antigravity.install}\`, then retry with \`--agent antigravity\`.`,
+    );
+    if (!antigravityHasAcp(command, env, cwd)) {
+      throw new Error(
+        `This Antigravity CLI (${command}) has no \`acp\` command. Update it with \`${AGENT_PROGRAMS.antigravity.install}\` (1.5.0 or later), then retry with \`--agent antigravity\`.`,
+      );
+    }
+    return { kind: typedKind, command, args: ['acp'] };
+  }
+
   if (typedKind === 'custom') {
     const parsed = parseAgentCommand(opts.customCommand ?? '');
     return {
@@ -853,6 +909,22 @@ export function resolveAgentCommand(opts: {
   return { kind: typedKind, command, args: [] };
 }
 
+/** True when `agy --help` lists the `acp` subcommand; a slow or failing CLI counts as no. */
+function antigravityHasAcp(command: string, env: NodeJS.ProcessEnv, cwd: string): boolean {
+  const help = spawnSync(command, ['--help'], {
+    env,
+    cwd,
+    encoding: 'utf8',
+    timeout: 10_000,
+    maxBuffer: 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (help.error || help.status !== 0) return false;
+  const text = `${help.stdout ?? ''}\n${help.stderr ?? ''}`;
+  const subcommands = text.split(/^Available subcommands:\s*$/m)[1] ?? '';
+  return /^\s+acp\b/m.test(subcommands);
+}
+
 /** Detect installed user-owned agents, retaining an actionable missing-adapter state. */
 export function detectInstalledAgentCommands(
   opts: {
@@ -873,7 +945,7 @@ export function detectInstalledAgentCommands(
     } catch {
       // Native ACP agents have no separable adapter to install (cursor uses
       // Beeline's own bridge), so a failed resolution has no install step.
-      if (kind !== 'goose' && kind !== 'grok' && kind !== 'cursor' && kind !== 'opencode') {
+      if (kind === 'codex' || kind === 'claude' || kind === 'pi') {
         detected.push({
           kind,
           status: 'missing-adapter',

@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
-import { credentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
+import { sessionCredentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { agentGitIdentity } from './agent-git-identity.js';
@@ -238,7 +238,7 @@ async function readyCheckout(input: {
           cwd: path,
           additionalWritablePaths: [path, cache, tmp],
           maskPaths: [
-            ...credentialMaskPaths(config.sandboxMaskPaths, config.operatorHome ?? homedir()),
+            ...sessionCredentialMaskPaths(config, config.operatorHome ?? homedir()),
             ...siblingAgentMaskPaths(runtimeDirectory(input.supervisorRoot, input.agentId)),
           ],
         },

@@ -1,7 +1,7 @@
 import type { PostCornerRemoteStateInput } from '@beeline/api-contract/daemon';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { AgentCommandInput,CommandRow } from './agent-command.js';
-import { cornerGateChecksSql, type CornerCiGate } from './corner-ci-gate.js';
+import { cornerReviewChecksSql, type CornerCiGate } from './corner-ci-gate.js';
 
 
 
@@ -17,8 +17,8 @@ ALTER TABLE corner_facts ADD COLUMN IF NOT EXISTS machine jsonb;
 
 
 // Compare check results, not refresh timestamps, attempts or run URLs.
-// The status is the head's CI gate verdict (`cornerGateChecksSql`).
-export const reviewChecksSql = `jsonb_build_object('status',${cornerGateChecksSql('lifecycle')},'checks',
+// Review uses the required checks when configured and the whole rollup otherwise.
+export const reviewChecksSql = `jsonb_build_object('status',${cornerReviewChecksSql('lifecycle')},'checks',
   (SELECT jsonb_agg(jsonb_build_object('name',item->>'name','status',item->>'status') ORDER BY item->>'name')
    FROM jsonb_array_elements(COALESCE(lifecycle->'checksSummary'->'checks','[]'::jsonb)) item))`;
 

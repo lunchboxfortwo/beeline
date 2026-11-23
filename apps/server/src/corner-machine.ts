@@ -87,7 +87,7 @@ export type CornerMachineFacts = {
   /** An actual request for this head; reviewer activity also includes event notices. */
   reviewRequestActive?: boolean;
   reviewRequests?: number;
-  reviewEnded?: { id: string; findings?: string; emptyCount?: number; delivered?: boolean };
+  reviewEnded?: { id: string; findings?: string; delivered?: boolean };
   idleSince?: string;
   idleEligible?: boolean;
   checkSourceId?: string;
@@ -141,8 +141,8 @@ export function transitionCorner(
     if (!effects.includes(key)) notifications.push({ kind, key });
   };
   const checks = f.lifecycle?.checks ?? f.lifecycle?.checksSummary?.status;
-  // Review and landing follow the head's CI gate; repair wakes follow the displayed checks.
   const gateChecks = cornerGateChecks(f.lifecycle, headSha);
+  const reviewReady = cornerGateChecks(f.lifecycle, headSha, 'review') === 'passing';
   const checksUnderway =
     checks === 'pending' ||
     f.lifecycle?.checksSummary?.checks.some((check) => check.status === 'pending') ||
@@ -192,24 +192,22 @@ export function transitionCorner(
   // Explicit blocks remain visible until closure; native waits yield to running work.
   // Red and green facts retain their existing admission through the wait.
   const review = f.reviewEnded;
-  const exhausted = (review?.emptyCount ?? 0) >= 1;
   if (
     headSha &&
-    gateChecks === 'passing' &&
+    reviewReady &&
     !f.approved &&
-    !exhausted &&
     !(f.reviewRequestActive ?? f.reviewerActive) &&
     ((sameTarget && current.reviewDue) || event.kind === 'checks' || event.kind === 'brief-revised')
   )
     base.reviewDue = true;
   if (
-    review &&
+    review?.findings &&
+    !review.delivered &&
     f.implementerAvailable &&
     headSha &&
     !f.approved &&
     !f.turnRunning &&
-    !f.blocker &&
-    (exhausted || (review.findings && !review.delivered))
+    !f.blocker
   )
     wake('review-findings', `review-failed:${headSha}:${review.id}`);
   if (
@@ -221,17 +219,18 @@ export function transitionCorner(
     wake('checks-failed', redKey);
   // Only a live GitHub read emits this event; a stored verdict never wakes.
   if (event.kind === 'merge-conflict' && f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
-  if (gateChecks === 'passing' && headSha) {
+  if (headSha) {
     if (f.approved || f.reviewerRequired === false) {
       if (
+        gateChecks === 'passing' &&
         !f.mergeHeld &&
         (event.kind === 'approval' || event.kind === 'checks' || event.kind === 'hold-released')
       )
         wake('land');
     } else if (
+      reviewReady &&
       !(f.implementerActive ?? f.turnRunning) &&
       !(f.reviewRequestActive ?? f.reviewerActive) &&
-      !exhausted &&
       !wakes.some((effect) => effect.kind === 'review-findings' || effect.kind === 'revision') &&
       (base.reviewDue || !f.reviewRequests)
     ) {
@@ -254,7 +253,7 @@ export function transitionCorner(
   else if (
     f.reviewerActive ||
     wakes.some((w) => w.kind === 'review') ||
-    (gateChecks === 'passing' &&
+    (reviewReady &&
       Boolean(headSha) &&
       f.reviewerConfigured !== undefined &&
       f.reviewerRequired !== false &&

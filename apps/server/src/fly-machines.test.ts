@@ -28,10 +28,13 @@ it('treats identical digests under different tags as the same image',()=>{
   expect(sameMachineImage('image:old@sha256:same','image:new@sha256:same')).toBe(true);
   expect(sameMachineImage('image:old@sha256:other','image:new@sha256:same')).toBe(false);
 });
-it('exposes the native VMGenID resume event on new free-agent machines',async()=>{
-  const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({id:'new-machine'}));
-  await new FlyMachines('fixture','lab',request).create({agentId:'agent',image:'image',region:'iad',env:{},cpus:1,memoryMb:2048});
-  expect(JSON.parse(String(request.mock.calls[0]![1]!.body)).config.init.kernel_args).toContain('acpi=force');
+it('prepares a Machine without launching it and preserves native VMGenID support',async()=>{
+  const request=vi.fn<typeof fetch>().mockResolvedValue(Response.json({id:'new-machine',instance_id:'first-version'}));
+  const created=await new FlyMachines('fixture','lab',request).create({agentId:'agent',image:'image',region:'iad',env:{},cpus:1,memoryMb:2048,skipLaunch:true});
+  expect(created.instance_id).toBe('first-version');
+  expect(JSON.parse(String(request.mock.calls[0]![1]!.body))).toMatchObject({
+    skip_launch:true,config:{image:'image',init:{kernel_args:['acpi=force']}},
+  });
 });
 it('enables resume events when replacing an existing image without dropping its boot configuration',async()=>{
   const machine={id:'m1',state:'suspended',instance_id:'old',config:{image:'old',init:{exec:['/entrypoint'],kernel_args:['quiet','acpi=off']}}};

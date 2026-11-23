@@ -3,6 +3,7 @@ import { agentMessageText } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { agentHandleFromName } from '@beeline/api-contract/phone';
+import { typedMentionHandles } from './message-mentions.js';
 import { createHash,randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { Agent,request as httpsRequest } from 'node:https';
@@ -19,7 +20,7 @@ joinRooms,
 removeIdentityMemberships,
 restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
-import { mentionRouting } from './owed-mentions.js';
+import { mentionRouting, recordOwedMention } from './owed-mentions.js';
 import { notifyMcpWebhook } from './postgres-live.js';
 import { connectorHostAcceptedSql,connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
 import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
@@ -200,13 +201,28 @@ export async function recordMcpMention(
   db: SqlDatabase, memberId: string, roomId: string, messageId: string,
 ): Promise<void> {
   await db.transaction(async tx => {
-    const inserted = await tx.query(
-      `INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES($1,$2,$3)
-       ON CONFLICT(member_id,message_id) DO NOTHING RETURNING seq`,
-      [memberId, roomId, messageId],
-    );
-    if (inserted.rowCount) await queueMcpMentionEvents(tx, memberId, roomId, messageId);
+    if (await recordOwedMention(tx, memberId, roomId, messageId))
+      await queueMcpMentionEvents(tx, memberId, roomId, messageId);
   });
+}
+
+type QueuedMentionKind = 'connector' | 'helper';
+
+export function queuedMentionKind(roomId: string, reason: string,
+  source: { room_id: string; presentation?: string; system_event?: unknown; text: string } | null,
+  target?: { handle: string | null; mcp: boolean },
+): QueuedMentionKind | undefined {
+  if (source?.room_id !== roomId || source.presentation !== 'message' || source.system_event ||
+    !['human_tag', 'direct_message', 'agent_tag'].includes(reason)) return;
+  if (!target?.mcp) return 'helper';
+  if (reason === 'direct_message') return 'connector';
+  for (const handle of typedMentionHandles(source.text))
+    if (handle.toLowerCase() === target.handle?.toLowerCase()) return 'connector';
+}
+
+export async function recordQueuedMention(db: SqlDatabase, kind: QueuedMentionKind, memberId: string, roomId: string, messageId: string) {
+  if (kind === 'connector') await recordMcpMention(db, memberId, roomId, messageId);
+  else await recordOwedMention(db, memberId, roomId, messageId);
 }
 
 /**

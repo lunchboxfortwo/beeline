@@ -45,9 +45,7 @@ describe('corner transition table', () => {
     ['reviewer processing only a check notice', { ...green, reviewerActive: true, reviewRequestActive: false }, observe, 'review', 'review'],
     ['reviewer has an actual review request', { ...green, reviewerActive: true, reviewRequestActive: true }, observe, 'review', undefined],
     ['review requests changes', { ...green, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'working', 'review-findings'],
-    ['first review ends without verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'working', 'review-findings'],
-    ['second review ends without verdict', { ...green, reviewRequests: 2, reviewEnded: { id: 'review', emptyCount: 2 } }, observe, 'working', 'review-findings'],
-    ['empty review without an implementer rests idle', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', emptyCount: 1 } }, observe, 'idle', undefined],
+    ['review ends without a verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review' } }, observe, 'idle', undefined],
     ['findings without an implementer cannot hand back', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'idle', undefined],
     ['no reviewer needs no approval', { ...green, reviewerConfigured: false, reviewerRequired: false }, observe, 'idle', undefined],
     ['green without reviewer lands', { ...green, reviewerConfigured: false, reviewerRequired: false }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
@@ -126,13 +124,11 @@ describe('corner transition table', () => {
     expect(run(f, observe, { state: 'idle', headSha: 'old-head', effects: ['idle:person-epoch:0'] }).notifications)
       .toEqual([]);
   });
-  it('hands back findings and a second missing verdict once per exact review', () => {
-    for (const findings of [undefined, 'FAIL: attach evidence']) {
-      const f = { ...green, reviewRequests: 1, reviewEnded: { id: 'review', findings, emptyCount: findings ? 0 : 2 } };
-      const first = run(f);
-      expect(first.wakes).toHaveLength(1);
-      expect(run(f, observe, { ...first.state, effects: [first.wakes[0]!.key] }).wakes).toEqual([]);
-    }
+  it('hands back findings once per review', () => {
+    const f = { ...green, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: attach evidence' } };
+    const first = run(f);
+    expect(first.wakes).toHaveLength(1);
+    expect(run(f, observe, { ...first.state, effects: [first.wakes[0]!.key] }).wakes).toEqual([]);
   });
   it('repairs a lost failed-check wake without repeating a retained command', () => {
     const red = { ...green, lifecycle: { ...green.lifecycle!, checks: 'failing' as const }, checkSourceId: 'red' };
@@ -190,11 +186,10 @@ describe('corner transition table', () => {
     }
   });
 
-  it('an owed green handoff cannot exceed the two-empty-turn cap', () => {
-    const ended = run({ ...green, reviewRequests: 2, reviewEnded: { id: 'second', emptyCount: 2 } }, observe,
+  it('dispatches an owed green handoff after two reviews ended without a verdict', () => {
+    const ended = run({ ...green, reviewRequests: 2, reviewEnded: { id: 'second' } }, observe,
       { state: 'working', headSha: head, pullRequest: 7, reviewDue: true });
-    expect(ended.state.reviewDue).toBeUndefined();
-    expect(ended.wakes.map(wake => wake.kind)).toEqual(['review-findings']);
+    expect(ended.wakes.map(wake => wake.kind)).toEqual(['review']);
   });
 
 });
