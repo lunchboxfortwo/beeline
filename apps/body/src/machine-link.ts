@@ -148,15 +148,12 @@ export class AgentChannel {
     this.machine.link.reconnect();
   }
   start(): void {
-    if (this.#wanted) return;
-    // An explicit start renews a retired channel's lifetime.
-    this.#retired = false;
-    this.#ended = undefined;
+    if (this.#wanted || this.#retired) return;
     this.#wanted = true;
     this.machine.want(this);
   }
   stop(): void {
-    if (!this.#wanted) return;
+    if (this.#retired) return;
     if (this.isOpen()) this.send({ type: 'unregister' });
     this.#wanted = false;
     this.retire();
@@ -173,9 +170,9 @@ export class AgentChannel {
     }),
   ): void {
     // Sent work gets "<cause>; outcome unknown"; waiters and unsent work get the cause.
-    this.socketClosed(false, cause);
-    this.#end(cause);
     this.#retired = true;
+    this.#end(cause);
+    this.socketClosed(false, cause);
   }
   send(frame: Record<string, unknown>): boolean {
     return this.isOpen() && this.machine.send({ ...frame, agentId: this.agentId });
@@ -187,7 +184,7 @@ export class AgentChannel {
     this.machine.link.requireUpdate(minVersion);
   }
   registration(): Record<string, unknown> | undefined {
-    if (!this.#wanted || this.#registered || this.#registrationSent) return;
+    if (this.#retired || !this.#wanted || this.#registered || this.#registrationSent) return;
     this.#registrationSent = true;
     return {
       ...this.handlers.registration(),
@@ -199,6 +196,7 @@ export class AgentChannel {
     };
   }
   receive(event: Record<string, unknown>): void {
+    if (this.#retired) return;
     if (event.type === 'registered') {
       if (!this.#wanted || this.#registered) return;
       this.#registered = true;
@@ -316,6 +314,7 @@ export class MachineLink {
   readonly #channels = new Map<string, AgentChannel>();
   #identity: { releaseVersion: string; sourceSha?: string } = { releaseVersion: 'v0.0.0' };
   #reconciledOnSocket = false;
+  #terminalCause: (Error & { code: string }) | undefined;
   #pendingRelease: Record<string, unknown> | undefined;
   #vaultSnapshot: { content?: string } = {};
   #vaultRefresh: Promise<void> | undefined;
@@ -356,10 +355,11 @@ export class MachineLink {
       },
       onUpdateRequired: (minVersion) => {
         // The link stops for good: its work ends now rather than waiting for a registration.
+        this.#terminalCause = Object.assign(new Error('Helper update required'), {
+          code: 'update_required',
+        });
         for (const channel of [...this.#channels.values()]) {
-          channel.retire(
-            Object.assign(new Error('Helper update required'), { code: 'update_required' }),
-          );
+          channel.retire(this.#terminalCause);
           channel.updateRequired(minVersion);
         }
       },
@@ -456,11 +456,17 @@ export class MachineLink {
 
   /** A later channel for the same agent (an in-process restart) replaces the earlier one. */
   attach(agentId: string, handlers: AgentChannelHandlers): AgentChannel {
-    return new AgentChannel(this, agentId, handlers);
+    const channel = new AgentChannel(this, agentId, handlers);
+    if (this.#terminalCause) channel.retire(this.#terminalCause);
+    return channel;
   }
 
   /** @internal */
   want(channel: AgentChannel): void {
+    if (this.#terminalCause) {
+      channel.retire(this.#terminalCause);
+      return;
+    }
     const previous = this.#channels.get(channel.agentId);
     this.#channels.set(channel.agentId, channel);
     if (previous && previous !== channel) previous.retire();

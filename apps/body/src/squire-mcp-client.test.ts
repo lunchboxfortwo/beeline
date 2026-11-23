@@ -76,10 +76,15 @@ describe('StdioSquireMcpClient', () => {
       .mockReturnValue(fresh.child);
     const client = new StdioSquireMcpClient({ scope: { agentId: 'agent', roomId: 'room' }, spawn: launch });
     try {
-      await expect(client.requestMcp('tools/list', {})).resolves.toEqual({ tools: [] });
+      const pending = client.requestMcp('tools/list', {});
+      if (method === 'initialize') {
+        await expect(pending).rejects.toMatchObject({ outcome: { accepted: false, completed: false } });
+      } else {
+        await expect(pending).resolves.toEqual({ tools: [] });
+      }
       await closed;
       expect(original.signalCode).toBe('SIGTERM');
-      expect(launch).toHaveBeenCalledTimes(2);
+      expect(launch).toHaveBeenCalledTimes(method === 'initialize' ? 1 : 2);
       await expect(client.requestMcp('tools/list', {})).resolves.toEqual({ tools: [] });
       expect(launch).toHaveBeenCalledTimes(2);
     } finally { client.close(); }
@@ -95,14 +100,65 @@ describe('StdioSquireMcpClient', () => {
     try {
       const pending = client.requestMcp('tools/list', {});
       if (!event.startsWith('already-')) {
-        await Promise.resolve();
-        await Promise.resolve();
+        for (let index = 0; index < 8; index++) await Promise.resolve();
+        expect(old.written.map(line => JSON.parse(line).method)).toContain('tools/list');
         old.child.stdout.emit(event, ...(event === 'error' ? [new Error('broken stdout')] : []));
       }
-      await expect(pending).resolves.toEqual({ tools: [] });
+      if (event.startsWith('already-')) {
+        await expect(pending).rejects.toMatchObject({ outcome: { accepted: false, completed: false } });
+      } else {
+        await expect(pending).resolves.toEqual({ tools: [] });
+      }
       expect(old.child.killed).toBe(true);
       old.child.emit('exit', 0);
       await expect(client.requestMcp('tools/list', {})).resolves.toEqual({ tools: [] });
+      expect(launch).toHaveBeenCalledTimes(2);
+    } finally { client.close(); }
+  });
+
+  it.each(['tools/call', 'tools/list'] as const)('reports %s as unsent when initialize loses its connection', async method => {
+    const original = fakeChild({});
+    const write = original.child.stdin.write;
+    original.child.stdin.write = chunk => {
+      write(chunk);
+      if (JSON.parse(chunk).method === 'initialize') original.child.stdout.emit('end');
+      return true;
+    };
+    const launch = vi.fn().mockReturnValue(original.child);
+    const client = new StdioSquireMcpClient({ scope: { agentId: 'agent', roomId: 'room' }, spawn: launch });
+    try {
+      await expect(client.requestMcp(method, { name: 'operate_start' })).rejects.toMatchObject({
+        outcome: { accepted: false, completed: false },
+      });
+      expect(original.written.map(line => JSON.parse(line).method)).toEqual(['initialize']);
+      expect(launch).toHaveBeenCalledOnce();
+    } finally { client.close(); }
+  });
+
+  it('preserves a submitted action as unknown when receipt initialization fails', async () => {
+    const original = fakeChild({ initialize: {} });
+    const replacement = fakeChild({});
+    const write = original.child.stdin.write;
+    original.child.stdin.write = chunk => {
+      write(chunk);
+      if (JSON.parse(chunk).method === 'tools/call') original.child.stdout.emit('end');
+      return true;
+    };
+    const replacementWrite = replacement.child.stdin.write;
+    replacement.child.stdin.write = chunk => {
+      replacementWrite(chunk);
+      if (JSON.parse(chunk).method === 'initialize') replacement.child.stdout.emit('end');
+      return true;
+    };
+    const launch = vi.fn().mockReturnValueOnce(original.child).mockReturnValueOnce(replacement.child);
+    const client = new StdioSquireMcpClient({ scope: { agentId: 'agent', roomId: 'room' }, spawn: launch });
+    try {
+      await expect(client.requestMcp('tools/call', { name: 'operate_start' })).rejects.toMatchObject({
+        outcome: { accepted: null, completed: false },
+      });
+      expect(original.written.map(line => JSON.parse(line).method))
+        .toEqual(['initialize', 'notifications/initialized', 'tools/call']);
+      expect(replacement.written.map(line => JSON.parse(line).method)).toEqual(['initialize']);
       expect(launch).toHaveBeenCalledTimes(2);
     } finally { client.close(); }
   });

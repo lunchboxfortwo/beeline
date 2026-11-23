@@ -108,6 +108,19 @@ export class StdioSquireMcpClient {
     const operationId = randomUUID();
     try {
       await this.ensureSession();
+    } catch (error) {
+      throw new SquireOperationError(
+        'Squire initialization failed; the requested action was not sent.',
+        {
+          cause: error instanceof SquireOperationError ? error.outcome.cause : 'connection-lost',
+          operationId,
+          accepted: false,
+          completed: false,
+        },
+        { cause: error },
+      );
+    }
+    try {
       return await this.request(method, {
         ...params,
         _meta: { ...(params._meta as Record<string, unknown>), beelineOperationId: operationId },
@@ -122,8 +135,7 @@ export class StdioSquireMcpClient {
       if (error.outcome.reconnect === 'failed') throw error;
       // The broker link answered "never sent" while the broker restarts: nothing
       // can have happened, so no receipt is read and nothing is asked again.
-      if (error.outcome.accepted === false && error.outcome.reconnect === 'in-progress')
-        throw error;
+      if (error.outcome.accepted === false) throw error;
       if (error.outcome.reconnect !== 'in-progress') this.reconnect();
       try {
         await this.ensureSession();
