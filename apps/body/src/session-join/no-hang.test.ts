@@ -305,7 +305,9 @@ describe('fix 8: session tool calls through the bridge', () => {
 
     it('uses the HTTP machine-output switch for bridge tools and hook notifications', async () => {
       const dir = scratch();
-      const server = await serve(dir, (connection) => connection.end('{"ok":true,"data":{"id":"m"}}\n'));
+      const server = await serve(dir, (connection) =>
+        connection.end('{"ok":true,"data":{"id":"m"}}\n'),
+      );
       const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
       try {
         setMachineReadOutput(false);

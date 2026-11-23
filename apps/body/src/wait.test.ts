@@ -362,23 +362,24 @@ it('names the peer of every wait on stderr unless the output is machine-read', a
   }
 });
 
-
 it('announces an owned step before spawning and streams both outputs while retaining its result', async () => {
   const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   try {
     const result = await runOwned({
-      step: 'registry lookup', file: process.execPath,
+      step: 'registry lookup',
+      file: process.execPath,
       args: ['-e', "console.log('registry result'); console.error('registry progress');"],
-      onSpawn: () => expect(writes.mock.calls.map(([chunk]) => String(chunk))).toEqual([
-        '[beeline] waiting for registry lookup\n',
-      ]),
+      onSpawn: () =>
+        expect(writes.mock.calls.map(([chunk]) => String(chunk))).toEqual([
+          '[beeline] waiting for registry lookup\n',
+        ]),
     });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe('registry result\n');
     expect(result.stderr).toBe('registry progress\n');
-    expect(writes.mock.calls.map(([chunk]) => String(chunk))).toEqual(expect.arrayContaining([
-      'registry result\n', 'registry progress\n',
-    ]));
+    expect(writes.mock.calls.map(([chunk]) => String(chunk))).toEqual(
+      expect.arrayContaining(['registry result\n', 'registry progress\n']),
+    );
   } finally {
     writes.mockRestore();
   }
@@ -389,7 +390,8 @@ it('keeps owned step and output quiet under the shared machine-output switch', a
   setMachineReadOutput(true);
   try {
     const result = await runOwned({
-      step: 'machine lookup', file: process.execPath,
+      step: 'machine lookup',
+      file: process.execPath,
       args: ['-e', "console.log('result'); console.error('progress');"],
     });
     expect(result.code).toBe(0);

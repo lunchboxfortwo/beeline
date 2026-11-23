@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { verifyProviderKey } from './provider-key-check.js';
 
 function keyResponse(status: number): Response {
-  return new Response(status === 200 ? JSON.stringify({ data: [] }) : JSON.stringify({ error: {} }), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
+  return new Response(
+    status === 200 ? JSON.stringify({ data: [] }) : JSON.stringify({ error: {} }),
+    {
+      status,
+      headers: { 'content-type': 'application/json' },
+    },
+  );
 }
 
 describe('provider key check', () => {
@@ -34,7 +37,11 @@ describe('provider key check', () => {
       ['xai', 401, 'xAI'],
     ] as const) {
       await expect(
-        verifyProviderKey({ provider, apiKey: 'bogus', fetchImpl: async () => keyResponse(status) }),
+        verifyProviderKey({
+          provider,
+          apiKey: 'bogus',
+          fetchImpl: async () => keyResponse(status),
+        }),
       ).rejects.toThrow(`${label} rejected the key (${status}).`);
     }
   });
@@ -74,10 +81,20 @@ describe('provider key check', () => {
         else init?.signal?.addEventListener('abort', aborted);
       })) as typeof fetch;
     const checking = verifyProviderKey({
-      provider: 'openrouter', apiKey: 'sk-or-real', fetchImpl: silent,
-      report: (line) => { lines.push(line); cancel.abort(); }, signal: cancel.signal,
+      provider: 'openrouter',
+      apiKey: 'sk-or-real',
+      fetchImpl: silent,
+      report: (line) => {
+        lines.push(line);
+        cancel.abort();
+      },
+      signal: cancel.signal,
     });
-    await expect(checking).rejects.toThrow('Could not reach OpenRouter to verify the key (This operation was aborted)');
-    expect(lines).toEqual(['waiting for openrouter.ai to verify the OpenRouter key (GET /api/v1/key)']);
+    await expect(checking).rejects.toThrow(
+      'Could not reach OpenRouter to verify the key (This operation was aborted)',
+    );
+    expect(lines).toEqual([
+      'waiting for openrouter.ai to verify the OpenRouter key (GET /api/v1/key)',
+    ]);
   });
 });

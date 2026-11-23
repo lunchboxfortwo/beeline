@@ -24,32 +24,52 @@ it('logs the real decision, streams npm with --loglevel=http and promotes; a cur
   await mkdir(bin);
   await writeFile(join(bin, 'npm'), fakeNpm, { mode: 0o700 });
   const npmLog = join(home, 'npm.log');
-  const env = { ...process.env, HOME: home, XDG_DATA_HOME: join(home, 'data'), PATH: bin + ':' + process.env.PATH, FAKE_NPM_LOG: npmLog };
+  const env = {
+    ...process.env,
+    HOME: home,
+    XDG_DATA_HOME: join(home, 'data'),
+    PATH: bin + ':' + process.env.PATH,
+    FAKE_NPM_LOG: npmLog,
+  };
   const lines: string[] = [];
-  const refresh = () => refreshRuntimeHarnessAdapters({ env, configPaths: ['fixture'],
-    readRuntime: async () => ({ agentKind: 'pi' }),
-    checkSession: async ({ command }) => {
-      expect(await readFile(command, 'utf8')).toBe('installed');
-      return { protocolVersion: 1, agentCapabilities: {} };
-    }, log: (line) => lines.push(line),
-  });
+  const refresh = () =>
+    refreshRuntimeHarnessAdapters({
+      env,
+      configPaths: ['fixture'],
+      readRuntime: async () => ({ agentKind: 'pi' }),
+      checkSession: async ({ command }) => {
+        expect(await readFile(command, 'utf8')).toBe('installed');
+        return { protocolVersion: 1, agentCapabilities: {} };
+      },
+      log: (line) => lines.push(line),
+    });
   try {
     await refresh();
     const active = readAdapterState('pi', env).active;
     expect(active?.version).toBe('1.0.0');
     const prefix = active!.command.replace(/\/node_modules\/\.bin\/pi-acp$/, '');
     expect(lines.join('\n')).not.toContain('npm install -g');
-    expect(lines).toContain(`[beeline] installing pi adapter 1.0.0 (keeping the installed copy until it passes): npm install --prefix ${prefix} --no-save --no-audit --no-fund pi-acp@1.0.0 --omit=optional --loglevel=http --foreground-scripts`);
+    expect(lines).toContain(
+      `[beeline] installing pi adapter 1.0.0 (keeping the installed copy until it passes): npm install --prefix ${prefix} --no-save --no-audit --no-fund pi-acp@1.0.0 --omit=optional --loglevel=http --foreground-scripts`,
+    );
     expect(lines).toContain('npm http fetch GET 200 http://registry.invalid/pi-acp 12ms');
     expect(lines).toContain('added 1 package in 1s');
     expect(lines).toContain('[beeline] pi adapter promoted to 1.0.0 (was none)');
-    const installs = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[]);
+    const installs = (await readFile(npmLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as string[]);
     expect(installs.filter((argv) => argv[0] === 'install')).toHaveLength(1);
 
     lines.length = 0;
     await refresh();
     expect(lines).toEqual(['[beeline] pi adapter current at 1.0.0']);
-    const after = (await readFile(npmLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as string[]);
+    const after = (await readFile(npmLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as string[]);
     expect(after.filter((argv) => argv[0] === 'install')).toHaveLength(1);
-  } finally { await rm(home, { recursive: true, force: true }); }
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });

@@ -4,21 +4,47 @@ import { convergeMachine, prepareMachineRelease } from './recovery.js';
 import { convergeDependencies } from './recovery-dependencies.js';
 vi.mock('./recovery.js', () => ({ prepareMachineRelease: vi.fn(), convergeMachine: vi.fn() }));
 vi.mock('./recovery-dependencies.js', () => ({ convergeDependencies: vi.fn(async () => {}) }));
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.clearAllMocks(); });
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
 
 it('uses the target gate and reports a stuck agent on the direct body CLI', async () => {
   vi.stubEnv('BEELINE_LIB_DIR', '/tmp/beeline-direct-cli/lib/beeline');
-  vi.mocked(prepareMachineRelease).mockResolvedValue({ releaseId: 'target', identity: { version: 'v1.2.3' } });
-  vi.mocked(convergeMachine).mockResolvedValue({ pid: 123, generation: 'new', loadedRelease: 'target',
-    processState: 'serving', updatedAt: 'snapshot-time', agents: { sleepy: {
-      state: 'starting', status: 'discovery pending', since: 'startup-time',
-    } } });
+  vi.mocked(prepareMachineRelease).mockResolvedValue({
+    releaseId: 'target',
+    identity: { version: 'v1.2.3' },
+  });
+  vi.mocked(convergeMachine).mockResolvedValue({
+    pid: 123,
+    generation: 'new',
+    loadedRelease: 'target',
+    processState: 'serving',
+    updatedAt: 'snapshot-time',
+    agents: {
+      sleepy: {
+        state: 'starting',
+        status: 'discovery pending',
+        since: 'startup-time',
+      },
+    },
+  });
   const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   const stdout = vi.spyOn(console, 'log').mockImplementation(() => {});
   await runUpdateCommand(['update', '--force']);
-  expect(convergeDependencies).toHaveBeenCalledWith(expect.anything(), 'target', undefined, expect.any(AbortSignal));
-  expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ releaseId: 'target', reportAgentsOnly: true, force: true }));
-  expect(stderr.mock.calls.flat().join('')).toContain('sleepy: starting since startup-time; discovery pending; snapshot snapshot-time');
+  expect(convergeDependencies).toHaveBeenCalledWith(
+    expect.anything(),
+    'target',
+    undefined,
+    expect.any(AbortSignal),
+  );
+  expect(convergeMachine).toHaveBeenCalledWith(
+    expect.objectContaining({ releaseId: 'target', reportAgentsOnly: true, force: true }),
+  );
+  expect(stderr.mock.calls.flat().join('')).toContain(
+    'sleepy: starting since startup-time; discovery pending; snapshot snapshot-time',
+  );
   expect(stdout.mock.calls.flat().join('')).toContain('helper pid 123 serving');
 });
 

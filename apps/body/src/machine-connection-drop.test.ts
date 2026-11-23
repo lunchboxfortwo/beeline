@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { randomUUID,randomBytes } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { createAgentCommand } from '../../server/src/agent-command.js';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
@@ -13,96 +13,195 @@ import type { TokenAuth } from '../../server/src/auth.js';
 import type { PhoneService } from '../../server/src/phone-service.js';
 import { LiveHub } from '../../server/src/live.js';
 
-const agentId='ab'.repeat(32);
-const gate=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};};
+const agentId = 'ab'.repeat(32);
+const gate = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
 
-it('DROP-24: ends unanswered requests across drops while independently recovering the connection',async()=>{
-  const database=await migratedDatabase();
-  const owner='a'.repeat(64),workspace=randomUUID(),rooms=Array.from({length:24},()=>randomUUID());
-  await database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Agent')`,[owner,agentId]);
-  await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)',[agentId,owner]);
-  await database.query("INSERT INTO workspaces(id,name) VALUES($1,'Drop proof')",[workspace]);
-  const requests=new Map<string,string>();
-  for(const roomId of rooms){
-    await database.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Drop')",[roomId,workspace]);
-    for(const id of [owner,agentId])await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[workspace,roomId,id]);
-    const source=randomBytes(32).toString('hex');
-    await database.query("INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Request')",[source,roomId,owner]);
-    requests.set(roomId,(await createAgentCommand(database,{roomId,agentId,sourceMessageId:source,reason:'human_tag'}))!.id);
+it('DROP-24: ends unanswered requests across drops while independently recovering the connection', async () => {
+  const database = await migratedDatabase();
+  const owner = 'a'.repeat(64),
+    workspace = randomUUID(),
+    rooms = Array.from({ length: 24 }, () => randomUUID());
+  await database.query(
+    `INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner'),($2,'agent','Agent')`,
+    [owner, agentId],
+  );
+  await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [agentId, owner]);
+  await database.query("INSERT INTO workspaces(id,name) VALUES($1,'Drop proof')", [workspace]);
+  const requests = new Map<string, string>();
+  for (const roomId of rooms) {
+    await database.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Drop')", [
+      roomId,
+      workspace,
+    ]);
+    for (const id of [owner, agentId])
+      await database.query(
+        `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,
+        [workspace, roomId, id],
+      );
+    const source = randomBytes(32).toString('hex');
+    await database.query(
+      "INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Request')",
+      [source, roomId, owner],
+    );
+    requests.set(
+      roomId,
+      (await createAgentCommand(database, {
+        roomId,
+        agentId,
+        sourceMessageId: source,
+        reason: 'human_tag',
+      }))!.id,
+    );
   }
-  const live=new LiveHub(),real=new DaemonService(database,live);
-  const answerGate=gate(),traceGate=gate();
-  const answered=new Set<string>(),traced=new Set<string>();
-  const calls=new Map<string,number>();
-  const daemon={execute:vi.fn(async(name:string,input:Record<string,any>)=>{
-    const key=JSON.stringify([name,input.roomId]);calls.set(key,(calls.get(key)??0)+1);
-    if(name==='getAgentCommands')return {commandProtocol:2,commands:[]};
-    if(name==='postRoomMessage'){
-      answered.add(input.roomId);await answerGate.promise;return real.execute(name,input as never,agentId);
-    }
-    if(name==='postAgentTurnReceipt'){
-      traced.add(input.roomId);await traceGate.promise;return {id:input.requestId,createdAt:1};
-    }
-    return {id:'ok',createdAt:1};
-  })} as unknown as DaemonService;
-  const server=createBeelineServer({database,daemon,
-    auth:{authenticateDaemon:async()=>agentId,retiredDaemonAgent:async()=>null} as unknown as TokenAuth,
-    phone:{canReadRooms:async(ids:string[])=>new Set(ids)} as unknown as PhoneService,
-    live,mediaMaximumBytes:1});
-  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const sockets:WebSocket[]=[];
-  const frames:Record<string,any>[][]=[];
-  const machine=new MachineLink({baseUrl:`http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    factory:(url,protocols,options)=>{
-      const socket=new WebSocket(url,protocols,options);sockets.push(socket);const sent:Record<string,any>[]=[];frames.push(sent);
-      const send=socket.send.bind(socket);socket.send=((data:any,...args:any[])=>{sent.push(JSON.parse(String(data)));return (send as any)(data,...args);}) as typeof socket.send;
+  const live = new LiveHub(),
+    real = new DaemonService(database, live);
+  const answerGate = gate(),
+    traceGate = gate();
+  const answered = new Set<string>(),
+    traced = new Set<string>();
+  const calls = new Map<string, number>();
+  const daemon = {
+    execute: vi.fn(async (name: string, input: Record<string, any>) => {
+      const key = JSON.stringify([name, input.roomId]);
+      calls.set(key, (calls.get(key) ?? 0) + 1);
+      if (name === 'getAgentCommands') return { commandProtocol: 2, commands: [] };
+      if (name === 'postRoomMessage') {
+        answered.add(input.roomId);
+        await answerGate.promise;
+        return real.execute(name, input as never, agentId);
+      }
+      if (name === 'postAgentTurnReceipt') {
+        traced.add(input.roomId);
+        await traceGate.promise;
+        return { id: input.requestId, createdAt: 1 };
+      }
+      return { id: 'ok', createdAt: 1 };
+    }),
+  } as unknown as DaemonService;
+  const server = createBeelineServer({
+    database,
+    daemon,
+    auth: {
+      authenticateDaemon: async () => agentId,
+      retiredDaemonAgent: async () => null,
+    } as unknown as TokenAuth,
+    phone: { canReadRooms: async (ids: string[]) => new Set(ids) } as unknown as PhoneService,
+    live,
+    mediaMaximumBytes: 1,
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const sockets: WebSocket[] = [];
+  const frames: Record<string, any>[][] = [];
+  const machine = new MachineLink({
+    baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    factory: (url, protocols, options) => {
+      const socket = new WebSocket(url, protocols, options);
+      sockets.push(socket);
+      const sent: Record<string, any>[] = [];
+      frames.push(sent);
+      const send = socket.send.bind(socket);
+      socket.send = ((data: any, ...args: any[]) => {
+        sent.push(JSON.parse(String(data)));
+        return (send as any)(data, ...args);
+      }) as typeof socket.send;
       return socket;
-    }});
-  const fetcher=vi.fn(()=>{throw new Error('machine requests must not use HTTP');});
-  const api=new DaemonApiClient(machine.origin,'bdt_test',agentId,fetcher,undefined,undefined,machine);
-  const failures:unknown[]=[];
+    },
+  });
+  const fetcher = vi.fn(() => {
+    throw new Error('machine requests must not use HTTP');
+  });
+  const api = new DaemonApiClient(
+    machine.origin,
+    'bdt_test',
+    agentId,
+    fetcher,
+    undefined,
+    undefined,
+    machine,
+  );
+  const failures: unknown[] = [];
   api.subscribeQueue();
-  const drop=async()=>{
-    const socket=sockets.at(-1)!;
-    const count=sockets.length;
+  const drop = async () => {
+    const socket = sockets.at(-1)!;
+    const count = sockets.length;
     socket.terminate();
-    await vi.waitFor(()=>expect(sockets.length).toBe(count+1));
-    await vi.waitFor(()=>expect(api.channel.isOpen()).toBe(true));
+    await vi.waitFor(() => expect(sockets.length).toBe(count + 1));
+    await vi.waitFor(() => expect(api.channel.isOpen()).toBe(true));
   };
-  try{
-    await vi.waitFor(()=>expect(api.channel.isOpen()).toBe(true));
-    const turns=rooms.map(roomId=>api.execute('postRoomMessage',{roomId,requestId:requests.get(roomId)!,text:'answer'})
-      .catch(error=>{failures.push(error);return error;}));
-    await vi.waitFor(()=>expect(answered.size).toBe(24));
-    await drop();await drop();
+  try {
+    await vi.waitFor(() => expect(api.channel.isOpen()).toBe(true));
+    const turns = rooms.map((roomId) =>
+      api
+        .execute('postRoomMessage', { roomId, requestId: requests.get(roomId)!, text: 'answer' })
+        .catch((error) => {
+          failures.push(error);
+          return error;
+        }),
+    );
+    await vi.waitFor(() => expect(answered.size).toBe(24));
+    await drop();
+    await drop();
     await Promise.all(turns);
     expect(failures).toHaveLength(24);
-    for(const failure of failures)expect(failure).toMatchObject({message:expect.stringContaining('outcome unknown')});
+    for (const failure of failures)
+      expect(failure).toMatchObject({ message: expect.stringContaining('outcome unknown') });
     answerGate.resolve();
-    for(const roomId of rooms)await vi.waitFor(async()=>{
-      expect((await database.query(`SELECT count(*)::int n FROM messages WHERE room_id=$1 AND author_id=$2 AND text='answer'`,[roomId,agentId])).rows).toEqual([{n:1}]);
-    },{timeout:10_000});
-    const receipts=rooms.map(roomId=>api.execute('postAgentTurnReceipt',{agentId,roomId,requestId:requests.get(roomId)!,outcome:'answered'})
-      .catch(error=>error));
-    await vi.waitFor(()=>expect(traced.size).toBe(24));
-    await drop();await drop();
-    for(const result of await Promise.all(receipts))expect(result).toMatchObject({message:expect.stringContaining('outcome unknown')});
+    for (const roomId of rooms)
+      await vi.waitFor(
+        async () => {
+          expect(
+            (
+              await database.query(
+                `SELECT count(*)::int n FROM messages WHERE room_id=$1 AND author_id=$2 AND text='answer'`,
+                [roomId, agentId],
+              )
+            ).rows,
+          ).toEqual([{ n: 1 }]);
+        },
+        { timeout: 10_000 },
+      );
+    const receipts = rooms.map((roomId) =>
+      api
+        .execute('postAgentTurnReceipt', {
+          agentId,
+          roomId,
+          requestId: requests.get(roomId)!,
+          outcome: 'answered',
+        })
+        .catch((error) => error),
+    );
+    await vi.waitFor(() => expect(traced.size).toBe(24));
+    await drop();
+    await drop();
+    for (const result of await Promise.all(receipts))
+      expect(result).toMatchObject({ message: expect.stringContaining('outcome unknown') });
     traceGate.resolve();
     expect(machine.link.reconnects).toBe(4);
     expect(sockets).toHaveLength(5);
     expect(fetcher).not.toHaveBeenCalled();
-    for(const roomId of rooms){
-      expect(calls.get(JSON.stringify(['postRoomMessage',roomId]))).toBe(1);
-      expect(calls.get(JSON.stringify(['postAgentTurnReceipt',roomId]))).toBe(1);
+    for (const roomId of rooms) {
+      expect(calls.get(JSON.stringify(['postRoomMessage', roomId]))).toBe(1);
+      expect(calls.get(JSON.stringify(['postAgentTurnReceipt', roomId]))).toBe(1);
     }
-    expect(frames.flat().filter(frame=>frame.type==='request-result')).toHaveLength(0);
-    for(const sent of frames){
-      expect(sent.filter(frame=>frame.type==='register-machine')).toHaveLength(1);
-      expect(sent.filter(frame=>frame.type==='subscribe-queue')).toHaveLength(1);
+    expect(frames.flat().filter((frame) => frame.type === 'request-result')).toHaveLength(0);
+    for (const sent of frames) {
+      expect(sent.filter((frame) => frame.type === 'register-machine')).toHaveLength(1);
+      expect(sent.filter((frame) => frame.type === 'subscribe-queue')).toHaveLength(1);
     }
-  }finally{
-    answerGate.resolve();traceGate.resolve();machine.stop();
-    for(const socket of sockets)socket.terminate();
-    const closed=once(server,'close');server.close();await closed;await database.close();
+  } finally {
+    answerGate.resolve();
+    traceGate.resolve();
+    machine.stop();
+    for (const socket of sockets) socket.terminate();
+    const closed = once(server, 'close');
+    server.close();
+    await closed;
+    await database.close();
   }
-},30_000);
+}, 30_000);
