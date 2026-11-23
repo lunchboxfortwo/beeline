@@ -237,7 +237,7 @@ export function selectComposerAckPresentation(
     });
     return {
       agents,
-      label: `${agents.map(agent => agent.name).join(', ')} are working`,
+      label: `${agents.length === 2 ? agents.map(agent => agent.name).join(', ') : `${agents.length} agents`} brewing…`,
       startedAt: Math.min(...agents.map(agent => agent.startedAt)),
     };
   }
@@ -281,7 +281,7 @@ export function selectComposerAckPresentation(
       const stoppable = viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend);
       return {
         agents,
-        label: `${subject} is working`,
+        label: `${subject} ${verb.gerund.toLowerCase()}…`,
         turnKey,
         verb,
         ...(input.receivedSteer?.agentPubkey === state.agentPubkey &&
@@ -299,7 +299,7 @@ export function selectComposerAckPresentation(
           : {}),
       };
     }
-    return { agents, label: `${subject} is working` };
+    return { agents, label: `${subject} thinking…` };
   }
   return { label: 'sending…' };
 }

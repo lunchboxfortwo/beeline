@@ -84,7 +84,7 @@ it.each([1, 3])('keeps the spinner and agent avatars together for %i working age
   act(() => tree.unmount());
 });
 
-it('overlaps two avatars and exposes each working status and individual Stop on tap', async () => {
+it('overlaps two avatars and exposes each elapsed counter and individual Stop on tap', async () => {
   vi.useFakeTimers(); vi.setSystemTime(200_000);
   const stop = vi.fn(async (_stop: {agentPubkey:string;requestId:string}) => true); let tree: any;
   try {
@@ -94,7 +94,7 @@ it('overlaps two avatars and exposes each working status and individual Stop on 
     act(() => tree.root.findByProps({testID:'working-agents-toggle'}).props.onPress());
     expect(tree.root.findByProps({testID:'stop-all-agents'}).props.label).toBe('Stop all');
     const list = tree.root.findByProps({testID:'working-agents-list'});
-    expect(list.findAllByType('T').map((node:any)=>node.props.children)).toEqual(['Ruby','Ruby is working','Jellybean','Jellybean is working']);
+    expect(list.findAllByType('T').map((node:any)=>node.props.children)).toEqual(['Ruby','1m 40s','Jellybean','1m 20s']);
     await act(async () => tree.root.findByProps({testID:'stop-agent-Jellybean'}).props.onPress());
     expect(stop).toHaveBeenCalledExactlyOnceWith(agents[1].stop);
     expect(tree.root.findByProps({testID:'stop-agent-Jellybean'}).props.disabled).toBe(true);
@@ -112,15 +112,4 @@ it('caps four agents at three avatars, counts the remainder and retries a failed
   await act(async () => tree.root.findByProps({testID:'stop-agent-Bee'}).props.onPress());
   expect(tree.root.findByProps({testID:'stop-agent-Bee'}).props.disabled).toBe(false);
   act(()=>tree.unmount());
-});
-
-it('shows only the working sentence without a timer or received details', () => {
-  vi.useFakeTimers(); let tree: any;
-  try {
-    act(() => { tree = create(<TurnProgressLine label="Ruby is working" startedAt={1} received testID="exact" />); });
-    expect(texts(tree)).toEqual(['Ruby is working']);
-    expect(vi.getTimerCount()).toBe(0);
-    act(() => vi.advanceTimersByTime(30 * 24 * 60 * 60 * 1000));
-    expect(texts(tree)).toEqual(['Ruby is working']);
-  } finally { act(() => tree?.unmount()); vi.useRealTimers(); }
 });

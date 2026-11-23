@@ -82,7 +82,7 @@ describe.each(['bone', 'obsidian'] as const)('%s approved one-line style', (them
   });
 });
 
-it('keeps a native working receipt, Stop ahead of an external acknowledgement', () => {
+it('keeps a native working receipt, its counter and Stop ahead of an external acknowledgement', () => {
   const input = { isCorner: false, now: Date.now(), activeTurnPubkey: 'native',
     activeTurnRequestId: 'turn', activeTurnStartedAt: 95, viewerPubkey: 'person', viewerCanSend: true };
   const native = selectComposerAckPresentation(input);
@@ -94,7 +94,7 @@ it('keeps a native working receipt, Stop ahead of an external acknowledgement', 
   expect(native?.stop).toEqual({ agentPubkey: 'native', requestId: 'turn' });
 });
 
-it('shows Monarch working from claim with no transcript, thoughts, tools or drafts', () => {
+it('shows Monarch working from claim at 0s with no transcript, thoughts, tools or drafts', () => {
   const turn: RoomViewAgentTurn = { agentPubkey: 'monarch', requestId: 'turn', generationId: 'generation',
     status: 'working', startedAt: Date.now() / 1_000, createdAt: Date.now() / 1_000 };
   const room = { messages: [], latestAgentTurns: [turn] };
@@ -105,12 +105,12 @@ it('shows Monarch working from claim with no transcript, thoughts, tools or draf
     conversationIdentities: new Map([['monarch', { pubkey: 'monarch', kind: 'agent', name: 'Monarch' }]]),
   });
   expect(room.messages).toEqual([]);
-  expect(presentation?.label).toBe('Monarch is working');
+  expect(presentation?.label).toBe(`Monarch ${presentation!.verb!.gerund.toLowerCase()}…`);
   act(() => { tree = create(<TurnProgressLine {...presentation!} testID="claim-progress" />); });
-  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label]);
+  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '0s']);
   expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
   act(() => vi.advanceTimersByTime(3_000));
-  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label]);
+  expect(tree.root.findAllByType('Text').map((node: { props: { children: unknown } }) => node.props.children)).toEqual([presentation!.label, '3s']);
 });
 
 it('a newer accepted send receives its own full three seconds and releases its deadline on unmount', () => {
