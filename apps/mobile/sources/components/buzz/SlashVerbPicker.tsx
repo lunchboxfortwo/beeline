@@ -7,6 +7,9 @@ import { SuggestionCard, SuggestionRow } from '@/ui/screens/composer/Suggestions
 
 /** At most six rows show before the list scrolls inside the card. */
 const VISIBLE_ROWS = 6;
+const ROW_HEIGHT = 56;
+/** Overflow smaller than this (a sliver of the last row) neither scrolls nor fades. */
+const OVERFLOW_SLACK = 8;
 
 export function SlashVerbPicker({
   verbs,
@@ -35,6 +38,13 @@ export function SlashVerbPicker({
   onSelectCommand: (name: string) => void;
 }) {
   const commandCount = commands?.length ?? 0;
+  // Fade only a list that really scrolls. Until both sizes are measured, guess from the row count.
+  const [viewportHeight, setViewportHeight] = React.useState<number | null>(null);
+  const [contentHeight, setContentHeight] = React.useState<number | null>(null);
+  const overflows =
+    viewportHeight !== null && contentHeight !== null
+      ? contentHeight - viewportHeight > OVERFLOW_SLACK
+      : commandCount + verbs.length > VISIBLE_ROWS;
   return (
     <SuggestionCard
       title={agentName ? `Commands · ${agentName}` : 'Commands'}
@@ -45,8 +55,12 @@ export function SlashVerbPicker({
     >
       {commandCount > 0 || verbs.length > 0 ? (
         <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
-          // Above the keyboard the card can end mid-row; Android fades that edge so the cut row reads as more below.
-          fadingEdgeLength={{ start: 0, end: 48 }} maxHeight={VISIBLE_ROWS * 56} flexShrink={1} testID="slash-verb-scroll">
+          // When the rows run past the card (over six, or squeezed above the keyboard), Android fades the
+          // bottom edge so the cut row reads as more below. A list that fits gets no fade and does not scroll.
+          fadingEdgeLength={{ start: 0, end: overflows ? 48 : 0 }} scrollEnabled={overflows}
+          onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+          onContentSizeChange={(_width, height) => setContentHeight(height)}
+          flexGrow={0} maxHeight={VISIBLE_ROWS * ROW_HEIGHT} flexShrink={1} testID="slash-verb-scroll">
           {agentLacksCommands && commandCount === 0 ? (
             <YStack paddingVertical="2" testID="slash-agent-no-commands">
               <T v="meta" color="secondary" numberOfLines={2}>

@@ -283,4 +283,60 @@ describe('SlashVerbPicker agent command palette', () => {
     );
     expect(scroll.props.flexShrink).toBe(1);
   });
+
+  function pickerScroll(rowCount: number) {
+    const commands = Array.from({ length: rowCount }, (_, i) => ({
+      name: `cmd-${i}`,
+      description: `Command ${i}`,
+    }));
+    const renderer = render(
+      React.createElement(SlashVerbPicker, {
+        verbs: [], query: '', highlightedIndex: 0, onDismiss: () => undefined, onSelect: () => undefined,
+        commands, agentName: 'niglet', agentLacksCommands: false, onSelectCommand: () => undefined,
+      }),
+    );
+    const scroll = () =>
+      renderer.root.find(
+        (node: any) => node.type === 'ScrollView' && node.props.testID === 'slash-verb-scroll',
+      );
+    const measure = (viewport: number, content: number) =>
+      act(() => {
+        scroll().props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 360, height: viewport } } });
+        scroll().props.onContentSizeChange(360, content);
+      });
+    return { scroll, measure };
+  }
+
+  it('draws no bottom fade and does not scroll when one command fits', () => {
+    const { scroll, measure } = pickerScroll(1);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 0 });
+    expect(scroll().props.scrollEnabled).toBe(false);
+    measure(56, 56);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 0 });
+    expect(scroll().props.scrollEnabled).toBe(false);
+  });
+
+  it('keeps the bottom fade while a list of more than six rows can scroll', () => {
+    const { scroll, measure } = pickerScroll(8);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 48 });
+    expect(scroll().props.scrollEnabled).toBe(true);
+    measure(6 * 56, 8 * 56);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 48 });
+    expect(scroll().props.scrollEnabled).toBe(true);
+  });
+
+  it('fades a short list once the keyboard squeezes it below its rows', () => {
+    const { scroll, measure } = pickerScroll(3);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 0 });
+    measure(100, 3 * 56);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 48 });
+    expect(scroll().props.scrollEnabled).toBe(true);
+  });
+
+  it('ignores a sliver of overflow so one squeezed row stays crisp', () => {
+    const { scroll, measure } = pickerScroll(1);
+    measure(52, 56);
+    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 0 });
+    expect(scroll().props.scrollEnabled).toBe(false);
+  });
 });
