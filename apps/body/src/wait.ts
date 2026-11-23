@@ -180,9 +180,15 @@ export interface OwnedCommand extends WaitReport {
   /** A terminal program: inherits stdio and stays in the terminal's process group. */
   interactive?: boolean;
   /**
-   * With `interactive`: the service manager or terminal signals this child itself
-   * (it shares the caller's process group or cgroup), so SIGINT/SIGTERM leave it
-   * to shut down on its own instead of killing it first. Exit still kills it.
+   * `caller`: a piped child that stays in this process's group (or resource
+   * scope), so whoever ends this process's group also ends it. Exit and the
+   * caller's abort kill only the child itself, not a group. Default `own`.
+   */
+  group?: 'own' | 'caller';
+  /**
+   * For a child in the caller's group (`interactive` or `group: 'caller'`):
+   * the service manager or terminal signals it itself, so SIGINT/SIGTERM leave
+   * it to shut down on its own instead of killing it first. Exit still kills it.
    */
   sharedSignals?: boolean;
   /** The caller left: kill the child's process group. */
@@ -252,7 +258,7 @@ export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promi
       return;
     }
     report?.(`waiting for ${command.step}`);
-    const leader = !command.interactive;
+    const leader = !command.interactive && command.group !== 'caller';
     const env = { ...(command.env ?? process.env) };
     if (command.ownerLink) env.BEELINE_OWNER_LINK = '1';
     else delete env.BEELINE_OWNER_LINK;
@@ -272,7 +278,7 @@ export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promi
     });
     if (leader) waitGroupLeaders.add(child);
     if (command.ownerLink) waitLinkedWorkers.add(child);
-    if (command.interactive && command.sharedSignals) waitSharedSignals.add(child);
+    if (!leader && command.sharedSignals) waitSharedSignals.add(child);
     waitOwnedChildren.add(child);
     const output = { stdout: '', stderr: '' };
     const bytes = { stdout: 0, stderr: 0 };

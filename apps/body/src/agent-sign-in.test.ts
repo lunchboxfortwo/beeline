@@ -15,6 +15,8 @@ import { HarnessQuotaReader, invalidateQuotaReads } from './harness-quota.js';
 import { CODEX_DEVICE_OUTPUT, CURSOR_LOGIN_OUTPUT, GROK_DEVICE_OUTPUT } from '../../../packages/test-helpers/helpers/helper.js';
 
 const ATTEMPT = '00000000-0000-4000-8000-000000000001';
+// The login's outcome is read from its owned run, which settles after `close`.
+const closed = () => new Promise<void>((done) => setImmediate(done));
 const CARD = 'c'.repeat(64);
 
 class FakeChild extends EventEmitter {
@@ -120,6 +122,7 @@ describe('@agent login on the agent machine', () => {
       await started;
       children[0]!.print(harness === 'cursor' ? '' : harness === 'grok' ? 'Authentication saved to /proxy/auth/xai-owner.json\nxAI authentication successful!\n' : 'Authentication saved to /proxy/auth/codex-owner.json\nCodex device authentication successful!\n');
       children[0]!.finish(0);
+      await closed();
     }
     await expect(reader.publish(harness, { HOME: home }, true)).resolves.toEqual({ status: 'fresh' });
     expect(run).toHaveBeenCalledTimes(2);
@@ -143,6 +146,7 @@ describe('@agent login on the agent machine', () => {
     expect(results).toEqual([]);
     children[0]!.print('Authentication saved to /proxy/auth/codex-owner@example.com-pro.json\nCodex device authentication successful!\n');
     children[0]!.emit('close', 0, null);
+    await closed();
     expect(results).toEqual([{ attemptId: ATTEMPT, result: { ok: true } }]);
     expect(signedIn).toHaveBeenCalledTimes(1);
     // The proxy saved it; Beeline writes no login anywhere.
@@ -174,6 +178,7 @@ describe('@agent login on the agent machine', () => {
     expect(spawnCalls[0]!.args[0]).toBe(flag);
     children[0]!.print(provider === 'xai' ? 'Authentication saved to /proxy/auth/xai-owner.json\nxAI authentication successful!\n' : 'Authentication saved to /proxy/auth/codex-owner.json\nCodex device authentication successful!\n');
     children[0]!.finish(0);
+    await closed();
     expect(results).toEqual([{ attemptId: ATTEMPT, result: { ok: true } }]);
   });
 
@@ -203,6 +208,7 @@ describe('@agent login on the agent machine', () => {
     children[0]!.print('Authentication successful\n');
     children[0]!.print(`${harness === 'grok' ? 'xAI' : 'Codex device'} authentication failed: permission denied\n`);
     children[0]!.finish(0);
+    await closed();
     expect(results).toEqual([{ attemptId: ATTEMPT,
       result: { ok: false, error: `\`${harness} login\` stopped: ${harness === 'grok' ? 'xAI' : 'Codex device'} authentication failed: permission denied` } }]);
     expect(signedIn).not.toHaveBeenCalled();
@@ -243,6 +249,7 @@ describe('@agent login on the agent machine', () => {
     await expect(started).resolves.toMatchObject({ kind: 'device-code', userCode: 'DC7F-7GCV' });
     children[0]!.print('Error: authorization denied\n');
     children[0]!.finish(1);
+    await closed();
     await vi.waitFor(() => expect(results).toEqual([
       {
         attemptId: ATTEMPT,

@@ -1,7 +1,7 @@
 import { squireHostPaths, squireHostRewriteEnv } from './squire-host.js';
 import { homedir } from 'node:os';
-import { spawn } from 'node:child_process';
-import { ask, runOwned } from './wait.js';
+import type { ChildProcess } from 'node:child_process';
+import { answer, ask, runOwned } from './wait.js';
 import type {
   ConnectorStep,
   ConnectorBrowserLocation,
@@ -179,13 +179,7 @@ export function killConnectTree(child: { pid?: number; kill: () => boolean }): v
 }
 
 export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, owner = '') =>
-  new Promise((resolve) => {
-    const child = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: env ?? squireConnectProcessEnv(),
-      detached: true,
-    });
-
+  answer<StreamedCommandResult>('Trusty Squire connect', [], ({ resolve }) => {
     let stdout = '';
     let stderr = '';
     let resolved = false;
@@ -193,6 +187,31 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
     // The one copy of the run's answer: the last report received. Nothing
     // else is remembered and nothing is inferred from it.
     let report: SquireConnectReport | undefined;
+
+    let child!: ChildProcess;
+    // The connect process is owned: its own group, killed on exit or abort.
+    // The run settles on its exit; the answer usually settles earlier, on
+    // the first publishable report, while the ceremony keeps running.
+    const run = runOwned({
+      step: 'Trusty Squire connect',
+      file: command,
+      args,
+      env: env ?? squireConnectProcessEnv(),
+      captureOutput: false,
+      machineRead: true,
+      onSpawn: (spawned) => {
+        child = spawned;
+        spawned.stdout?.on('data', (chunk: Buffer | string) => {
+          stdout += String(chunk);
+          publishSignIn();
+        });
+        // stderr is captured for diagnostics only. Under `--json` Squire keeps
+        // human copy there, and none of it ever reaches the person.
+        spawned.stderr?.on('data', (chunk: Buffer | string) => {
+          stderr += String(chunk);
+        });
+      },
+    });
 
     const abort = () => {
       killConnectTree(child);
@@ -270,33 +289,23 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
       }
     };
 
-    child.stdout?.on('data', (chunk: Buffer | string) => {
-      stdout += String(chunk);
-      publishSignIn();
-    });
-
-    // stderr is captured for diagnostics only. Under `--json` Squire keeps
-    // human copy there, and none of it ever reaches the person.
-    child.stderr?.on('data', (chunk: Buffer | string) => {
-      stderr += String(chunk);
-    });
-
-    child.on('close', () => {
-      notifyExit();
-      consumeReports(true);
-      settle({
-        stdout,
-        stderr,
-        pid: child.pid ?? undefined,
-        report,
-        abort: () => {},
-      });
-    });
-
-    child.on('error', () => {
-      notifyExit();
-      settle({ stdout, stderr, pid: child.pid ?? undefined, report, abort: () => {} });
-    });
+    run.then(
+      () => {
+        notifyExit();
+        consumeReports(true);
+        settle({
+          stdout,
+          stderr,
+          pid: child.pid ?? undefined,
+          report,
+          abort: () => {},
+        });
+      },
+      () => {
+        notifyExit();
+        settle({ stdout, stderr, pid: child?.pid ?? undefined, report, abort: () => {} });
+      },
+    );
   });
 
 export const step = (

@@ -17,7 +17,7 @@ import { runOwnedFile } from './wait.js';
  * device login or hands it Beeline's Claude login once; plan reads use its
  * current login (`readLogin`).
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -29,7 +29,7 @@ import { parse } from 'yaml';
 import { agentBehavior, type AgentKind } from './agent-command.js';
 import { readJsonObject, writePrivateFileAtomically } from './atomic-private-file.js';
 import { downloadBytes } from './update-download.js';
-import { ask, runOwned } from './wait.js';
+import { answer, ask, listen, onEnd, runOwned } from './wait.js';
 
 const execFileAsync = runOwnedFile;
 const RELEASES = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
@@ -92,14 +92,12 @@ export async function installLatestCliProxy(
   return target;
 }
 
-function freePort(): Promise<number> {
-  return new Promise((done, fail) => {
-    const server = createServer().once('error', fail);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address() as { port: number };
-      server.close(() => done(port));
-    });
-  });
+async function freePort(): Promise<number> {
+  const server = createServer();
+  const bound = await listen(server, { port: 0, host: '127.0.0.1' });
+  const { port } = server.address() as { port: number };
+  await bound.close();
+  return port;
 }
 
 export class CliProxy {
@@ -148,35 +146,57 @@ export class CliProxy {
     // A child left by a helper that died without its service manager would
     // refresh the same logins beside this one.
     await execFileAsync('pkill', ['-f', `${BINARY} -config ${config}`]).catch(() => undefined);
-    const child = spawn(this.#binary, ['-config', config], {
+    let output = '';
+    let started!: () => void;
+    const read = (chunk: Buffer) => {
+      output = `${output}${chunk.toString('utf8')}`.slice(-4_000);
+      if (output.includes('API server started successfully')) started();
+    };
+    let child!: ChildProcess;
+    // The proxy runs for this helper's life; its raw output carries the ready line.
+    void runOwned({
+      step: 'CLIProxyAPI',
+      file: this.#binary,
+      args: ['-config', config],
       cwd: dir,
       env: { HOME: dir, PATH: process.env.PATH ?? '' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+      captureOutput: false,
+      machineRead: true,
+      onSpawn: (spawned) => {
+        child = spawned;
+        spawned.stdout?.on('data', read);
+        spawned.stderr?.on('data', read);
+      },
+    }).catch(() => undefined);
     this.#child = child;
-    child.once('exit', () => {
+    onEnd(child, ['exit', 'error'], () => {
       if (this.#child === child) this.#child = undefined;
     });
-    await new Promise<void>((ready, fail) => {
-      let output = '';
-      const read = (chunk: Buffer) => {
-        output = `${output}${chunk.toString('utf8')}`.slice(-4_000);
-        if (output.includes('API server started successfully')) ready();
-      };
-      child.stdout?.on('data', read);
-      child.stderr?.on('data', read);
-      child.once('error', fail);
-      child.once('exit', (code) =>
-        fail(new Error(`CLIProxyAPI exited ${code}: ${output.trim().split('\n').at(-1) ?? ''}`)),
-      );
-    });
+    await answer<void>(
+      'CLIProxyAPI',
+      [
+        [child, 'error'],
+        [
+          child,
+          'exit',
+          (code: number | null) =>
+            new Error(`CLIProxyAPI exited ${code}: ${output.trim().split('\n').at(-1) ?? ''}`),
+        ],
+      ],
+      ({ resolve }) => {
+        started = () => resolve();
+      },
+    );
   }
 
   /** Stop the child; resolves once it has exited. */
   stop(): Promise<void> {
     const child = this.#child;
     if (!child) return Promise.resolve();
-    const exited = new Promise<void>((done) => child.once('exit', () => done()));
+    const exited = answer<void>('CLIProxyAPI', [
+      [child, 'exit', 'answer'],
+      [child, 'error', 'answer'],
+    ]);
     child.kill('SIGTERM');
     return exited;
   }

@@ -41,6 +41,7 @@ import { invalidateQuotaReads } from './harness-quota.js';
 import { cliProxyLogin, machineCliProxy, type CliProxy, type ProxiedProvider } from './cliproxy.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { verifyProviderKey } from './provider-key-check.js';
+import { answer, runOwned, type Settle } from './wait.js';
 
 export type CliSignIn = {
   /** The program the card names; `proxyFlag` runs the machine proxy's login instead. */
@@ -241,60 +242,78 @@ export class AgentSignIn {
     }
     // Cursor's own login lands in the operator's home, never an isolated one.
     const { CURSOR_HOME: _isolated, ...ambient } = process.env;
-    const run = login.proxyFlag ? (await this.#proxy()).login(login.proxyFlag) : { command: login.command, args: [...login.args],
+    const launch = login.proxyFlag ? (await this.#proxy()).login(login.proxyFlag) : { command: login.command, args: [...login.args],
       env: { ...ambient, HOME: this.options.operatorHome, PATH: this.options.agentEnv.PATH || process.env.PATH || '', ...login.env } };
-    return new Promise((resolve, reject) => {
-      let output = '';
-      let answered = false;
-      let child: ChildProcess;
-      try {
-        child = this.#spawn(run.command, run.args, {
-          env: run.env,
-          cwd: this.options.operatorHome,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-      } catch {
-        reject(new Error(`\`${login.command}\` is not installed on the agent's machine.`));
-        return;
-      }
-      this.#pending.set(attemptId, {kind:'cli',child});
-      const read = (chunk: Buffer) => {
-        output = `${output}${chunk.toString('utf8')}`.slice(-16_000);
-        if (answered) return;
-        const link = login.parse(output.replace(ANSI, '').replace(/\r/g, ''), this.#now());
-        if (!link) return;
-        answered = true;
-        resolve(link);
-      };
-      child.stdout?.on('data', read);
-      child.stderr?.on('data', read);
-      child.once('error', (error) => {
-        this.#pending.delete(attemptId);
-        const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
-        const message = missing
-          ? `\`${login.command}\` is not installed on the agent's machine.`
-          : `\`${login.command}\` could not start: ${error.message}`;
-        if (!answered) {
-          answered = true;
-          reject(new Error(message));
-        }
-      });
-      child.once('close', (code, signal) => {
+    let output = '';
+    let child: ChildProcess | undefined;
+    let link!: Settle<AgentSignInLink>;
+    // The link arrives on the login's own output; the run settling first fails it.
+    const linked = answer<AgentSignInLink>(`${login.command} login`, [], (settle) => {
+      link = settle;
+    });
+    let answered = false;
+    const fail = (message: string) => {
+      if (answered) return;
+      answered = true;
+      link.reject(new Error(message));
+    };
+    const read = (chunk: Buffer) => {
+      output = `${output}${chunk.toString('utf8')}`.slice(-16_000);
+      if (answered) return;
+      const parsed = login.parse(output.replace(ANSI, '').replace(/\r/g, ''), this.#now());
+      if (!parsed) return;
+      answered = true;
+      link.resolve(parsed);
+    };
+    const run = runOwned(
+      {
+        step: `${login.command} login`,
+        file: launch.command,
+        args: launch.args,
+        env: launch.env,
+        cwd: this.options.operatorHome,
+        captureOutput: false,
+        machineRead: true,
+        onSpawn: (spawned) => {
+          child = spawned;
+          this.#pending.set(attemptId, { kind: 'cli', child: spawned });
+          spawned.once('error', (error) => {
+            this.#pending.delete(attemptId);
+            const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
+            fail(
+              missing
+                ? `\`${login.command}\` is not installed on the agent's machine.`
+                : `\`${login.command}\` could not start: ${error.message}`,
+            );
+          });
+          spawned.stdout?.on('data', read);
+          spawned.stderr?.on('data', read);
+        },
+      },
+      { spawn: this.#spawn },
+    );
+    run.then(
+      ({ code, signal }) => {
         const owned = this.#pending.get(attemptId);
         if (owned?.kind === 'cli' && owned.child === child) this.#pending.delete(attemptId);
         else return; // replaced, expired, or stopped: its outcome is already decided
         const failure = `\`${login.command} login\` stopped: ${lastLine(output) || (signal ?? `exit ${code}`)}`;
         if (!answered) {
           answered = true;
-          reject(new Error(failure));
+          link.reject(new Error(failure));
           return;
         }
         // The proxy's login exits 0 either way; only its success line means saved.
         const ok = code === 0 && (!login.proxyFlag || /^(?:Codex device|xAI) authentication successful!$/.test(lastLine(output)));
         if (ok) this.#signedIn();
         this.options.onResult(attemptId, ok ? { ok: true } : { ok: false, error: failure });
-      });
-    });
+      },
+      () => {
+        // Without a child the spawn itself threw, as for a command that is not installed.
+        if (!child) fail(`\`${login.command}\` is not installed on the agent's machine.`);
+      },
+    );
+    return linked;
   }
 
   async #startKey(attemptId: string, model: string | undefined): Promise<AgentSignInLink> {

@@ -11,13 +11,14 @@
  * notifications so `acp.ts` sees real `agent_message_chunk` text.
  */
 import { agentBehavior, CURSOR_ACP_BRIDGE_LABEL } from './agent-command.js';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { chmod, lstat, mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { basename, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { enumerateCursorModels, type CursorModelCatalog } from './cursor-models.js';
+import { runOwned } from './wait.js';
 
 /** Hidden CLI flag so a bundled `beeline` process can be the ACP child. */
 export { CURSOR_ACP_BRIDGE_FLAG } from './agent-command.js';
@@ -365,18 +366,6 @@ function promptTextFromParams(params: unknown, systemPrompt?: string): string {
   return systemPrompt ? `${systemPrompt}\n\n${user}` : user;
 }
 
-function defaultSpawnCursorAgent(input: {
-  argv: string[];
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-}): ChildProcess {
-  return spawn('cursor-agent', input.argv, {
-    cwd: input.cwd,
-    env: input.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
 export interface CursorAcpServerOptions {
   write: CursorAcpWriter;
   spawnCursorAgent?: CursorAgentSpawn;
@@ -390,7 +379,7 @@ export interface CursorAcpServerOptions {
  */
 export class CursorAcpServer {
   private readonly write: CursorAcpWriter;
-  private readonly spawnCursorAgent: CursorAgentSpawn;
+  private readonly spawnCursorAgent?: CursorAgentSpawn;
   private readonly enumerateModels: (env?: NodeJS.ProcessEnv) => Promise<CursorModelCatalog | undefined>;
   private readonly env: NodeJS.ProcessEnv;
   private readonly sessions = new Map<string, BridgeSession>();
@@ -398,7 +387,7 @@ export class CursorAcpServer {
 
   constructor(options: CursorAcpServerOptions) {
     this.write = options.write;
-    this.spawnCursorAgent = options.spawnCursorAgent ?? defaultSpawnCursorAgent;
+    this.spawnCursorAgent = options.spawnCursorAgent;
     this.enumerateModels = options.enumerateModels ?? enumerateCursorModels;
     this.env = options.env ?? process.env;
   }
@@ -558,42 +547,58 @@ export class CursorAcpServer {
       }
     };
 
-    const child = this.spawnCursorAgent({ argv, cwd: session.cwd, env: this.env });
-    session.child = child;
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (chunk: string) => {
-      stderr = `${stderr}${chunk}`.slice(-STDERR_TAIL_MAX_CHARS);
-    });
-    child.stdout?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      pending.push(chunk);
-      const joined = pending.join('');
-      const lines = joined.split(/\r?\n/);
-      pending.length = 0;
-      const rest = lines.pop();
-      if (rest) pending.push(rest);
-      for (const line of lines) consumeLine(line);
-    });
+    const inject = this.spawnCursorAgent;
+    // cursor-agent stays in this bridge's process group, so a hard kill of
+    // the bridge's group also ends the turn it is running.
+    const run = runOwned(
+      {
+        step: 'cursor-agent',
+        file: 'cursor-agent',
+        args: argv,
+        cwd: session.cwd,
+        env: this.env,
+        group: 'caller',
+        captureOutput: false,
+        machineRead: true,
+        onSpawn: (child) => {
+          session.child = child;
+          child.once('error', (error) => {
+            spawnError = error instanceof Error ? error.message : String(error);
+          });
+          child.stderr?.setEncoding('utf8');
+          child.stderr?.on('data', (chunk: string) => {
+            stderr = `${stderr}${chunk}`.slice(-STDERR_TAIL_MAX_CHARS);
+          });
+          child.stdout?.setEncoding('utf8');
+          child.stdout?.on('data', (chunk: string) => {
+            pending.push(chunk);
+            const joined = pending.join('');
+            const lines = joined.split(/\r?\n/);
+            pending.length = 0;
+            const rest = lines.pop();
+            if (rest) pending.push(rest);
+            for (const line of lines) consumeLine(line);
+          });
+        },
+      },
+      inject
+        ? {
+            spawn: ((_file: string, args: readonly string[], options: { cwd?: string; env?: NodeJS.ProcessEnv }) =>
+              inject({ argv: [...args], cwd: options.cwd ?? session.cwd, env: options.env ?? this.env })) as never,
+          }
+        : undefined,
+    );
 
     try {
-      const { code, signal } = await new Promise<{
-        code: number | null;
-        signal: NodeJS.Signals | null;
-      }>((resolve) => {
-        let settled = false;
-        const finish = (exitCode: number | null, exitSignal: NodeJS.Signals | null): void => {
-          if (settled) return;
-          settled = true;
-          resolve({ code: exitCode, signal: exitSignal });
-        };
-        child.once('error', (error) => {
-          spawnError = error instanceof Error ? error.message : String(error);
-          finish(1, null);
-        });
-        child.once('close', (exitCode, exitSignal) => {
-          finish(exitCode, exitSignal);
-        });
-      });
+      const { code, signal } = await run.then(
+        (result) => ({ code: result.code, signal: result.signal }),
+        (error: unknown) => {
+          // Without a child the spawn itself threw; otherwise its error is spawnError.
+          if (!session.child) throw error;
+          spawnError ??= error instanceof Error ? error.message : String(error);
+          return { code: 1 as number | null, signal: null as NodeJS.Signals | null };
+        },
+      );
       if (pending.length) consumeLine(pending.join(''));
       const failure = describeCursorTurnFailure({
         isError: resultEvent ? cursorResultIsError(resultEvent) : false,

@@ -255,7 +255,7 @@
       },
       "ownerSites": 26,
       "strict": true,
-      "total": 75,
+      "total": 47,
       "fix": "use the owners in apps/body/src/wait.ts: ask for one request and one answer (socket or HTTP), runOwned for a child you own and stream, tryLock for a lock that never queues, answer for a reply that arrives later on a channel you already hold, listen to bind a server, connect to open a stream, watchChanges for a filesystem push subscription, launchDetached for a process that must outlive you, onEnd for teardown on a channel's end. Do not wait for a condition and do not add a timer; the agent stay-warm countdown AgentRunner.armIdle and the granted-command limit grantCommandLimit are the only timers owned outside wait.ts."
     },
     {

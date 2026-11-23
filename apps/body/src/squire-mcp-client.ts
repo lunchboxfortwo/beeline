@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { SquireOperationError } from './squire-outcome.js';
+import { answer } from './wait.js';
 /**
  * The REAL Squire MCP client — one stdio JSON-RPC session with the Squire MCP
  * server process on this helper. Everything the connector lifecycle does
@@ -214,8 +215,9 @@ export class StdioSquireMcpClient {
     const id = this.nextId++;
     const child = this.child;
     if (!child) return Promise.reject(new SquireOperationError('Squire connection is not running',{cause:'connection-lost',accepted:false,completed:false}));
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+    // The reply to this id; the child's exit or a reconnect rejects every pending one.
+    return answer('Squire MCP', [], (settle) => {
+      this.pending.set(id, settle);
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
     });
   }
