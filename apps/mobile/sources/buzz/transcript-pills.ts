@@ -1,5 +1,6 @@
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
+import { isGitHubLifecycleItem } from '@/buzz/pr-lifecycle';
 
 /**
  * Pills (build spec, decision 15): an agent's message() to another agent and a
@@ -7,7 +8,9 @@ import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
  * reads the message. A plain tag stays a message, and every other system line
  * keeps its own `LedgerSystemLine` row.
  * Consecutive pills share one wrapping row, so the transcript folds a run of
- * them into one host row. PR lifecycle runs keep their own counted disclosure.
+ * them into one host row. GitHub PR, issue, commit, check and thread-opened
+ * events are pills too and fold with the agents' messages; payment and wallet
+ * runs keep their own rows.
  */
 
 type PillFields = Pick<
@@ -51,7 +54,13 @@ export function isPillMessage(message: PillFields): boolean {
   return message.agentCommand?.recipient.kind === 'agent' && Boolean(author) && author !== SYSTEM_IDENTITY_PUBKEY;
 }
 
-/** Fold consecutive avatar pills into `pillRun`; lifecycle disclosures and lone pills stay separate. */
+/** A folded lifecycle run of GitHub and thread events only: it folds with agent pills. */
+export function isGitHubEventRun(message: Pick<ChatDisplayMessage, 'notificationLifecycleRun' | 'deleted'>): boolean {
+  const items = message.notificationLifecycleRun?.items;
+  return Boolean(items?.length && !message.deleted && items.every(isGitHubLifecycleItem));
+}
+
+/** Fold consecutive avatar pills and GitHub event runs into `pillRun`; payment runs and lone pills stay separate. */
 export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDisplayMessage[] {
   const result: ChatDisplayMessage[] = [];
   let run: ChatDisplayMessage[] = [];
@@ -75,8 +84,8 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
     run = [];
   };
   for (const message of messages) {
-    // Lifecycle runs already own a counted disclosure; keep it visible between pills.
-    if (isPillMessage(message) && !message.notificationLifecycleRun) {
+    // Payment and wallet runs keep their own row between pills.
+    if (isPillMessage(message) && (!message.notificationLifecycleRun || isGitHubEventRun(message))) {
       run.push(message);
       continue;
     }

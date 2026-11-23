@@ -9,7 +9,8 @@ vi.mock('lucide-react-native', async () => (await import('./grammar-hosts.test-s
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 
-import { PillRow, type PillItem } from './PillRow';
+import { PillRow, type PillEvent, type PillItem, type PillRunEntry } from './PillRow';
+import { Copy, T } from '@/ui/grammar';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 const items: PillItem[] = [
@@ -112,8 +113,12 @@ describe('PillRow', () => {
         act(() => { tree = create(<PillRow items={[mixed]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
         expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
-        expect(pill.findAll((node: any) => node.type === 'IdentityMark' && node.props.size === 22).map((face: any) => face.props.seed))
+        expect(pill.findAll((node: any) => node.type === 'IdentityMark' && node.props.seed !== SYSTEM_IDENTITY_PUBKEY).map((face: any) => face.props.seed))
             .toEqual(['owner', 'ruby']);
+        // In a dark theme a person's ink plate would vanish on the pill, so it gets a 1 px edge in the same 22 box.
+        const edge = pill.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-face-edge');
+        expect(edge.props).toMatchObject({ width: 22, height: 22, borderWidth: 1, borderColor: 'strongStroke' });
+        expect(edge.find((node: any) => node.type === 'IdentityMark').props).toMatchObject({ seed: 'owner', size: 20 });
         expect(text(pill)).toEqual(['3 messages']);
         expect(pill.props['aria-label']).toBe('Read 3 messages between Ruby, Claude and owner, 2 from Beeline, 10:02');
         act(() => pill.props.onPress());
@@ -177,5 +182,90 @@ describe('PillRow', () => {
         expect(pill.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(0);
         expect(text(pill)).toEqual([]);
         expect(pill.props['aria-label']).toBe('Owner stopped Ruby');
+    });
+
+    describe('GitHub events', () => {
+        const github = { kind: 'github', name: 'GitHub' } as const;
+        const alan = { kind: 'agent', seed: 'alan', name: 'Alan' } as const;
+        const jimmy = { kind: 'agent', seed: 'jimmy', name: 'Jimmy' } as const;
+        const event = (id: string, number: number, title: string, fields: Partial<PillEvent> = {}): PillRunEntry => ({
+            id, from: github, time: '21:02', event: { verb: 'Merged', number: String(number), title, mark: 'merged',
+                spoken: `Merged PR #${number} ${title}`, counted: true, open: { label: 'Opens GitHub', onPress: vi.fn() }, ...fields } });
+        const message = (id: string): PillRunEntry => ({ id, from: alan, to: jimmy, time: '21:10', body: React.createElement('Text', null, `body ${id}`) });
+        const strings = (node: any): string[] => node.findAll((child: any) => child.type === 'Text')
+            .flatMap((child: any) => [child.props.children].flat()).filter((part: any) => typeof part === 'string');
+        const mixed: PillItem = { id: 'e1', system: false, from: github, time: '21:11', body: null, run: [
+            event('e1', 74, 'Stop ends a stale working line'), event('e2', 75, 'Composer tray keeps its draft'),
+            message('m1'), event('e3', 77, 'Delete the offline-host line'), message('m2'),
+            event('e4', 77, 'Delete the offline-host line', { counted: false }),
+            event('e5', 78, 'Publish every release'), event('e6', 79, 'Restore the timer'), event('e7', 80, 'Wake the implementer'),
+        ] };
+
+        it('draws a lone event as the GitHub ring and its state mark, with no text', () => {
+            let tree: any;
+            const lone: PillItem = { ...event('solo', 77, 'Delete the offline-host line'), system: false, body: null };
+            act(() => { tree = create(<PillRow items={[lone]} />); });
+            const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'event-pill');
+            expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(1);
+            expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-event-mark-merged')).toHaveLength(1);
+            expect(pill.findAll((node: any) => node.type === 'Icon.GitMerge')).toHaveLength(1);
+            expect(strings(pill)).toEqual([]);
+            expect(pill.props['aria-label']).toBe('Read GitHub event: Merged PR #77 Delete the offline-host line, 21:02');
+            act(() => pill.props.onPress());
+            expect(tree.root.findAll((node: any) => node.props?.testID === 'pill-event-solo' && typeof node.type === 'string')).not.toHaveLength(0);
+        });
+
+        it('folds messages and events into one pill of faces and a count, with no event text in it', () => {
+            let tree: any;
+            act(() => { tree = create(<PillRow items={[mixed]} />); });
+            const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+            expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(1);
+            expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
+            // The repeated #77 merge line counts once.
+            expect(strings(pill)).toEqual(['2 messages · 6 events']);
+            expect(strings(pill).join(' ')).not.toContain('offline-host');
+            // The label is meta at the quiet ink.
+            const label = pill.find((node: any) => node.type === Copy);
+            expect(label.props).toMatchObject({ small: true, quiet: true });
+            expect(pill.props['aria-label']).toBe('Read 2 messages and 6 GitHub events between Alan and Jimmy, 21:11');
+        });
+
+        it('opens messages and events in send order, back-to-back events under one GitHub heading in body type', () => {
+            let tree: any;
+            act(() => { tree = create(<PillRow items={[mixed]} />); });
+            act(() => tree.root.find((node: any) => node.type === 'Button').props.onPress());
+            const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+            const blocks = open.findAll((node: any) => node.type === 'YStack' && /^pill-(event-group|run-entry)-/.test(node.props.testID ?? ''))
+                .map((node: any) => node.props.testID);
+            expect(blocks).toEqual(['pill-event-group-e1', 'pill-run-entry-m1', 'pill-event-group-e3', 'pill-run-entry-m2', 'pill-event-group-e4']);
+            const group = open.find((node: any) => node.props.testID === 'pill-event-group-e1' && node.type === 'YStack');
+            expect(group.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(1);
+            expect(strings(group)).toContain('· 21:02');
+            // Every event reads in body type: verb in ink, #number in brass, title in secondary. No heading or strong role.
+            const line = group.find((node: any) => node.type === T && node.props.testID === 'pill-event-text-e1');
+            expect(line.props).toMatchObject({ v: 'body', color: 'secondary' });
+            const parts = line.findAll((node: any) => node.type === T).filter((node: any) => node !== line);
+            expect(parts.map((node: any) => [node.props.v, node.props.color, node.props.children])).toEqual([
+                ['body', 'ink', 'Merged '], ['body', 'needsYou', '#74 ']]);
+            expect(open.findAll((node: any) => node.type === T && ['heading', 'metaStrong'].includes(node.props.v))).toHaveLength(0);
+            // A tap opens the event's destination.
+            const target = open.find((node: any) => node.props.testID === 'pill-event-open-e1' && typeof node.type === 'string');
+            expect(target.props.accessibilityLabel).toBe('Merged PR #74 Stop ends a stale working line. Opens GitHub');
+            act(() => target.props.onPress());
+            expect(mixed.run![0]!.event!.open!.onPress).toHaveBeenCalled();
+        });
+
+        it('shows two events and "N more" when a group holds more than three', () => {
+            let tree: any;
+            act(() => { tree = create(<PillRow items={[mixed]} />); });
+            act(() => tree.root.find((node: any) => node.type === 'Button').props.onPress());
+            const shown = () => tree.root.findAll((node: any) => typeof node.type === 'string' && /^pill-event-e\d$/.test(node.props.testID ?? ''))
+                .map((node: any) => node.props.testID);
+            expect(shown()).toEqual(['pill-event-e1', 'pill-event-e2', 'pill-event-e3', 'pill-event-e4', 'pill-event-e5']);
+            const more = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-event-more-e4');
+            expect(more.props.accessibilityLabel).toBe('2 more GitHub events');
+            act(() => more.props.onPress());
+            expect(shown()).toEqual(['pill-event-e1', 'pill-event-e2', 'pill-event-e3', 'pill-event-e4', 'pill-event-e5', 'pill-event-e6', 'pill-event-e7']);
+        });
     });
 });

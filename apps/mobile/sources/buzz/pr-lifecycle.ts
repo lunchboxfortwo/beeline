@@ -182,10 +182,19 @@ export function lifecycleItem(message: SystemLineMessage): LifecycleItem | undef
   };
 }
 
-/** Each group carries its noun, even for one item or when earlier states are absent. */
-export function lifecycleSummary(items: readonly LifecycleItem[]): string {
-  const counts = new Map<string, { kind: string; state: string; count: number }>();
+/** Payments and wallet grants keep their own rows; every other lifecycle item is a GitHub or thread event. */
+export function isGitHubLifecycleItem(item: Pick<LifecycleItem, 'kind'>): boolean {
+  return item.kind !== 'payment' && item.kind !== 'wallet';
+}
+
+/**
+ * Each event's summary group, in order. Stored webhook and subscription lines
+ * can describe the same PR event, so a repeat of one is dropped here: it
+ * counts once per run, while each committed line still reads when opened.
+ */
+function distinctLifecycleEvents(items: readonly LifecycleItem[]): { key: string; kind: string; state: string; item: LifecycleItem }[] {
   const seenPrEvents = new Set<string>();
+  const events: { key: string; kind: string; state: string; item: LifecycleItem }[] = [];
   for (const item of items) {
     let kind =
       item.kind === 'pull-request'
@@ -207,14 +216,26 @@ export function lifecycleSummary(items: readonly LifecycleItem[]): string {
     else if (state === 'requested review of') { kind = 'review'; state = 'requested'; }
     else if (state === 'found failing checks on') { kind = 'check'; state = 'failed'; }
     const key = `${kind}:${state}`;
-    // Stored webhook and subscription lines can describe the same PR event.
-    // Count it once per run, keeping each committed line in the disclosure.
     if (item.kind === 'pull-request' && item.url) {
       const url = item.url.split(/[?#]/)[0].replace(/\/$/, '').toLowerCase();
       const eventKey = `${url}:${key}`;
       if (seenPrEvents.has(eventKey)) continue;
       seenPrEvents.add(eventKey);
     }
+    events.push({ key, kind, state, item });
+  }
+  return events;
+}
+
+/** The ids of the items a count includes: a repeated PR event counts once. */
+export function countedLifecycleItemIds(items: readonly LifecycleItem[]): Set<string> {
+  return new Set(distinctLifecycleEvents(items).map(({ item }) => item.id));
+}
+
+/** Each group carries its noun, even for one item or when earlier states are absent. */
+export function lifecycleSummary(items: readonly LifecycleItem[]): string {
+  const counts = new Map<string, { kind: string; state: string; count: number }>();
+  for (const { key, kind, state, item } of distinctLifecycleEvents(items)) {
     const group = counts.get(key) ?? { kind, state, count: 0 };
     group.count += kind === 'commit' ? Number(item.displayText?.match(/^(\d+) commits? pushed/)?.[1] ?? 1) : 1;
     counts.set(key, group);
@@ -247,7 +268,7 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
     /^(?:failed a check|Check failed ·)/.test(message.systemEvent.verb)
   ).map(message => message.systemEvent!.object!.headSha));
   const result: T[] = [];
-  let run: { anchor: T; ids: string[]; boundaries: { id: string; orderAtMs: number }[]; items: LifecycleItem[]; index: number } | undefined;
+  let run: { anchor: T; ids: string[]; boundaries: { id: string; orderAtMs: number }[]; items: LifecycleItem[]; index: number; github: boolean } | undefined;
   for (const message of messages) {
     const fact = message.deleted ? undefined : message.daemonFact;
     if (
@@ -273,8 +294,10 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
       result.push(message);
       continue;
     }
+    // GitHub events fold into the pill row; payments and wallet grants keep their own run.
+    if (run && run.github !== isGitHubLifecycleItem(item)) run = undefined;
     if (!run) {
-      run = { anchor: message, ids: [], boundaries: [], items: [], index: result.length };
+      run = { anchor: message, ids: [], boundaries: [], items: [], index: result.length, github: isGitHubLifecycleItem(item) };
       result.push(message);
     }
     run.ids.push(message.id);

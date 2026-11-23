@@ -9,6 +9,7 @@ export const CONCEPT_ICONS = {
   previous: 'ChevronLeft', next: 'ChevronRight', contract: 'ChevronUp',
   clipboard: 'Clipboard', copy: 'Copy', reply: 'CornerUpLeft', download: 'Download',
   external: 'ExternalLink', document: 'FileText', file: 'File', codeFile: 'FileCode', filter: 'Filter', pullRequest: 'GitPullRequest',
+  merged: 'GitMerge', closedPullRequest: 'GitPullRequestClosed', failed: 'CircleX',
   public: 'Globe', image: 'Image', keyboard: 'Keyboard', link: 'Link', private: 'Lock',
   signOut: 'LogOut', email: 'Mail', maximize: 'Maximize2', microphone: 'Mic',
   mutedMicrophone: 'MicOff', subtract: 'Minus', overflow: 'MoreHorizontal', edit: 'Pencil',

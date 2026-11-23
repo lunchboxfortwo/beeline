@@ -267,6 +267,9 @@
     "components/buzz/ForwardMessagePickerSheet.tsx": [
       "ForwardMessagePickerSheet"
     ],
+    "components/buzz/GitHubMark.tsx": [
+      "GitHubMark"
+    ],
     "components/buzz/GrantRequestCard.tsx": [
       "GrantRequestCard",
       "GrantRequestPill"
