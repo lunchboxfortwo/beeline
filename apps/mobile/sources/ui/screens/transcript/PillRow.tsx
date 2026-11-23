@@ -96,10 +96,16 @@ export function isNotice(entry: PillRunEntry): boolean {
     return Boolean(entry.system) && !(entry.stop && entry.from.kind === 'agent');
 }
 
+/** True when an entry's own heading draws the ringed Beeline face. */
+function beelineHeaded(entry: PillRunEntry): boolean {
+    return entry.from.kind === 'system' || entry.to?.kind === 'system';
+}
+
 /**
- * The faces a folded run shows, at most `RUN_FACES`. A run that holds a Beeline
- * notice leads with the ringed Beeline logo, then whoever stopped a turn, then
- * everyone else, so a person's stop stays visible while folded.
+ * The faces a folded run shows, at most `RUN_FACES`, and only faces its opened
+ * headings draw. Whoever stopped a turn leads, so a person's stop stays
+ * visible while folded; the ringed Beeline logo leads only when an opened
+ * entry is headed by it.
  */
 function foldedFaces(item: PillItem): PillFace[] {
     const run = item.run ?? [];
@@ -107,7 +113,7 @@ function foldedFaces(item: PillItem): PillFace[] {
     if (!run.some(notice)) return runFaces(run).slice(0, RUN_FACES);
     const stoppers = run.filter((entry) => entry.stop && notice(entry)).map((entry) => entry.from);
     const seen = new Set<string>();
-    const ordered = [BEELINE_FACE, ...stoppers, ...runFaces(run)].filter((face) => {
+    const ordered = [...(run.some(beelineHeaded) ? [BEELINE_FACE] : []), ...stoppers, ...runFaces(run)].filter((face) => {
         const key = faceKey(face);
         if (seen.has(key)) return false;
         seen.add(key);
@@ -129,7 +135,8 @@ function pillLabel(item: PillItem, expanded: boolean): string {
     }
     if (item.run) {
         const between = names(runFaces(item.run).filter((face) => face.kind !== 'system'));
-        const notices = item.run.filter(isNotice).length;
+        // Only messages Beeline itself sent count as from Beeline; a person's stop is the person's.
+        const notices = item.run.filter((entry) => entry.from.kind === 'system').length;
         return `${verb} ${item.run.length} messages between ${between}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
     }
     if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;
