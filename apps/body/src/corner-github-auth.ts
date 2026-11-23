@@ -244,7 +244,7 @@ async function writeLauncher(
   config: Record<string, string | boolean>,
 ): Promise<void> {
   const source = `#!/usr/bin/env node
-import { runOwned } from ${JSON.stringify(ownedCommandModule())};
+import { ask, runOwned } from ${JSON.stringify(ownedCommandModule())};
 import { readFileSync, writeFileSync } from 'node:fs';
 const config = ${JSON.stringify(config)};
 const cornerGitHubCommandRefusal = ${cornerGitHubCommandRefusal.toString()};
@@ -450,7 +450,8 @@ async function repoSlug(args) {
 }
 async function github(pathname, options, value) {
   const base = (process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\\/$/, '');
-  const response = await fetch(base + pathname, {
+  // The agent reads this gh stand-in's output: the wait stays silent.
+  const response = await ask({ url: base + pathname, machineRead: true }, {
     ...options,
     headers: {
       accept: 'application/vnd.github+json',

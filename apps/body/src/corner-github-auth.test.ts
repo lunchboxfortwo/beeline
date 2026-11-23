@@ -152,6 +152,29 @@ it('reports a GitHub CLI refusal once without replaying the request through REST
   } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
 });
 
+it('answers gh pr view over GitHub REST when the machine has no GitHub CLI', async () => {
+  const root=await mkdtemp(join(tmpdir(),'beeline-github-rest-')); roots.push(root);
+  const cli=join(root,'credential.mjs'),git=join(root,'git');
+  await writeFile(cli,"process.stdout.write('fixture-token');");
+  await writeFile(git,'#!/bin/sh\necho https://github.com/acme/repo.git\n'); await chmod(git,0o755);
+  const seen:Array<{url?:string;authorization?:string}>=[];
+  const server=createServer((request,response)=>{
+    seen.push({url:request.url,authorization:request.headers.authorization});
+    response.end(JSON.stringify({html_url:'https://github.com/acme/repo/pull/1'}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  try {
+    await installCornerGitHubWrappers({root,runtimeConfigPath:join(root,'runtime.json'),roomId:'chat',
+      cliEntrypoint:cli,gitBinary:git,featureBranch:'feature/test',targetBranch:'main'});
+    const result=await promisify(execFile)(process.execPath,[join(root,'beeline-github-bin/gh'),'pr','view','1','--repo','acme/repo'],{
+      env:{...process.env,GITHUB_API_URL:`http://127.0.0.1:${(server.address() as {port:number}).port}`},
+    });
+    // The agent reads this output: only GitHub's answer, no wait line.
+    expect(result).toMatchObject({stdout:'https://github.com/acme/repo/pull/1\n',stderr:''});
+    expect(seen).toEqual([{url:'/repos/acme/repo/pulls/1',authorization:'Bearer fixture-token'}]);
+  } finally { await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve())); }
+});
+
 it('routes launcher credentials through the real CLI command parser', async () => {
   const root = await mkdtemp(join(tmpdir(), 'beeline-wrapper-cli-')); roots.push(root);
   const cli = join(root, 'credential.mjs'), binary = join(root, 'git');

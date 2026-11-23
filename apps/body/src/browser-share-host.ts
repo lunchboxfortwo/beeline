@@ -3,6 +3,7 @@ import { chmodSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { shareChromiumPage, type ChromiumPage } from './browser-share.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
+import { ask } from './wait.js';
 
 export function browserShareHostPath(stateRoot: string, agentId: string): string {
   return privateSocketPath(JSON.stringify(['browser-share', resolve(stateRoot), process.pid, agentId]));
@@ -44,12 +45,20 @@ export class BrowserShareHost {
             // The hosted share can outlive its model/MCP process; this closed
             // session-end receipt has its own lifetime, without a turn source.
             onEnded: async () => {
-              await fetch(new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl), {
-                method: 'POST',
-                headers: { authorization: `Bearer ${request.daemonToken}`, 'content-type': 'application/json' },
-                body: JSON.stringify({ roomId: request.roomId, sessionId: request.page.id }),
-                signal: undefined,
-              }).catch(() => {});
+              await ask(
+                {
+                  url: new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl),
+                  peer: 'Beeline server',
+                },
+                {
+                  method: 'POST',
+                  headers: {
+                    authorization: `Bearer ${request.daemonToken}`,
+                    'content-type': 'application/json',
+                  },
+                  body: JSON.stringify({ roomId: request.roomId, sessionId: request.page.id }),
+                },
+              ).catch(() => {});
             },
           });
           socket.end(JSON.stringify({ ok: true }));

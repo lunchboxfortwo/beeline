@@ -1,16 +1,13 @@
 import { squireHostPaths, squireHostRewriteEnv } from './squire-host.js';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { runOwned } from './wait.js';
+import { ask, runOwned } from './wait.js';
 import type {
   ConnectorStep,
   ConnectorBrowserLocation,
   ConnectorSignIn,
 } from '@beeline/api-contract/daemon';
-import {
-  PAGE_READY_TIMEOUT_MS,
-  installSquireAttempt,
-} from './connector-squire-install-squire-attempt.js';
+import { installSquireAttempt } from './connector-squire-install-squire-attempt.js';
 
 /** The one Squire MCP contract this connector speaks. */
 export interface SquireMcpClient {
@@ -634,12 +631,12 @@ export async function installSquire(options: InstallSquireOptions): Promise<Inst
 
 /** One admitted readiness observation. A pending tunnel never schedules another
  * GET; another explicit setup action or actual report can observe it anew. */
-export async function awaitPublicPage(
-  url: string,
-  _timeoutMs = PAGE_READY_TIMEOUT_MS,
-): Promise<boolean> {
+export async function awaitPublicPage(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url, { method: 'GET', redirect: 'manual', signal: undefined });
+    const response = await ask(
+      { url, peer: 'Squire sign-in page' },
+      { method: 'GET', redirect: 'manual' },
+    );
     await response.body?.cancel().catch(() => undefined);
     return response.status < 500;
   } catch {

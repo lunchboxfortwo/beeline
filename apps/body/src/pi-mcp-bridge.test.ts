@@ -1,6 +1,18 @@
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect,it,vi } from 'vitest';
 import { piMcpBridgeSource } from './pi-mcp-bridge.js';
+import { ask } from './wait.js';
+
+type Tool={execute:(id:string,args:object)=>Promise<unknown>};
+/** The generated extension with its imports supplied: spawn, readFile and the standalone ask. */
+function loadBridge(source:string,spawn:unknown,readFile:unknown){
+  const body=source
+    .replace(/^import .* from (?:'node:[^']+'|"data:[^"]+");\n/gm,'')
+    .replace('export default function','return function');
+  return new Function('spawn','readFile','ask',body)(spawn,readFile,ask);
+}
 
 it('loads the Pi extension and permits prompts without contacting an unresponsive MCP child', async () => {
   const child=Object.assign(new EventEmitter(),{
@@ -9,13 +21,10 @@ it('loads the Pi extension and permits prompts without contacting an unresponsiv
     stdin:{write:vi.fn()},kill:vi.fn(),
   });
   const spawn=vi.fn(()=>child);
-  const tools:Array<{execute:(id:string,args:object)=>Promise<unknown>}>=[];
+  const tools:Tool[]=[];
   const on=vi.fn();
-  const source=piMcpBridgeSource([{name:'optional',command:'fixture'}])
-    .replace(/^import .* from 'node:[^']+';\n/gm,'')
-    .replace('export default function','return function');
-  const extension=new Function('spawn','readFile',source)(spawn,vi.fn());
-  await extension({registerTool:(tool:typeof tools[number])=>tools.push(tool),on});
+  const extension=loadBridge(piMcpBridgeSource([{name:'optional',command:'fixture'}]),spawn,vi.fn());
+  await extension({registerTool:(tool:Tool)=>tools.push(tool),on});
   expect(spawn).not.toHaveBeenCalled();
   expect(on).not.toHaveBeenCalled();
   expect(tools).toHaveLength(1);
@@ -27,4 +36,39 @@ it('loads the Pi extension and permits prompts without contacting an unresponsiv
   const failed=expect(discovery).rejects.toThrow('exited before answering');
   child.emit('close',1,null);
   await failed;
+});
+
+it("asks the Beeline server before a Squire call and keeps its refusal", async () => {
+  const seen:Array<{url?:string;authorization?:string;body:string}>=[];
+  const server=createServer((request,response)=>{
+    let body='';
+    request.on('data',(chunk)=>{body+=chunk;});
+    request.on('end',()=>{
+      seen.push({url:request.url,authorization:request.headers.authorization,body});
+      response.setHeader('content-type','application/json');
+      response.end(JSON.stringify({allowed:false}));
+    });
+  });
+  await new Promise<void>((done)=>server.listen(0,'127.0.0.1',done));
+  try {
+    const {port}=server.address() as AddressInfo;
+    const spawn=vi.fn();
+    const readFile=vi.fn(async()=>JSON.stringify({roomId:'room-1',requestId:'request-1'}));
+    const tools:Tool[]=[];
+    const extension=loadBridge(piMcpBridgeSource([
+      {name:'beeline-agent',command:'agent',env:[
+        {name:'BEELINE_DAEMON_BASE_URL',value:`http://127.0.0.1:${port}`},
+        {name:'BEELINE_DAEMON_TOKEN',value:'daemon-token'},
+        {name:'BEELINE_TURN_CONTEXT_FILE',value:'/turn.json'},
+      ]},
+      {name:'squire',command:'squire-route',env:[{name:'TRUSTY_SQUIRE_BROKER_SOCKET',value:'/broker.sock'}]},
+    ]),spawn,readFile);
+    await extension({registerTool:(tool:Tool)=>tools.push(tool),on:vi.fn()});
+    await expect(tools[1]!.execute('call',{name:'operate_start'})).rejects.toThrow('Squire requires approval from its owner');
+    expect(seen).toEqual([{url:'/v1/daemon/operations/authorizeSquireCall',authorization:'Bearer daemon-token',
+      body:JSON.stringify({roomId:'room-1',requestId:'request-1'})}]);
+    expect(spawn).not.toHaveBeenCalled();
+  } finally {
+    server.close();
+  }
 });

@@ -163,11 +163,6 @@ export async function installSquireAttempt(
 
 
 
-/** How long the helper waits for a fresh sign-in page to answer. */
-export const PAGE_READY_TIMEOUT_MS = 30_000;
-
-
-
 /** Probe the mounted Squire MCP to confirm the account is live on this helper. */
 export async function pairSquire(
   mcp: SquireMcpClient | undefined,

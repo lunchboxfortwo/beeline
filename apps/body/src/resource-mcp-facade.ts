@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { TurnStoppedError } from './turn-stop.js';
+import { ask } from './wait.js';
 
 export const RESOURCE_FACADE_FLAG = '--resource-mcp-facade';
 export function resourceFacadeArgs(): string[] {
@@ -711,17 +712,21 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
           started.stdin!.write(`${JSON.stringify(upstream)}\n`);
           return;
         }
-        const response = await fetch(launch.url!, {
-          method: 'POST',
-          headers: {
-            ...launch.headers,
-            'content-type': 'application/json',
-            accept: 'application/json, text/event-stream',
-            ...(session ? { 'mcp-session-id': session } : {}),
+        // The MCP client reads this process's stdout: the wait stays silent.
+        const response = await ask(
+          { url: launch.url!, machineRead: true },
+          {
+            method: 'POST',
+            headers: {
+              ...launch.headers,
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              ...(session ? { 'mcp-session-id': session } : {}),
+            },
+            body: JSON.stringify(upstream),
+            signal: transport.signal,
           },
-          body: JSON.stringify(upstream),
-          signal: transport.signal,
-        });
+        );
         if (!response.ok) throw new Error('resource transport refused the call');
         session = response.headers.get('mcp-session-id') ?? session;
         if (response.status === 202 || response.status === 204) return;

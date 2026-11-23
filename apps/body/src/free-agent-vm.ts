@@ -2,6 +2,7 @@ import { parseOpenRouterEndpoints, piInputModalities } from './openrouter-routin
 import { readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
+import { ask } from './wait.js';
 import { LEGACY_ACCESS_POLICY } from './access-policy.js';
 import { agentBehavior, resolveAgentCommand } from './agent-command.js';
 import { loadBodyConfig, parseEnvFile } from './config.js';
@@ -66,8 +67,9 @@ export function freeAgentPiConfig(grant: Pick<FreeAgentGrant, 'modelBaseUrl' | '
 
 async function freeAgentInput(model: string): Promise<Array<'text' | 'image'>> {
   try {
-    const response = await fetch(`https://openrouter.ai/api/v1/models/${model}/endpoints`, {
-      signal: undefined,
+    const response = await ask({
+      url: `https://openrouter.ai/api/v1/models/${model}/endpoints`,
+      peer: 'OpenRouter',
     });
     if (!response.ok) return ['text'];
     return piInputModalities(parseOpenRouterEndpoints(await response.json()).inputModalities) ?? ['text'];

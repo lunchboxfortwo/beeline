@@ -16,6 +16,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { AGENT_SIGN_IN_ATTEMPT_TTL_MS } from '@beeline/api-contract/daemon';
+import { ask } from './wait.js';
 
 export const CLAUDE_OAUTH = {
   clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
@@ -154,12 +155,14 @@ export class ClaudeSignIn {
         client_id: CLAUDE_OAUTH.clientId, code_verifier: attempt.verifier, state: attempt.state };
       let response: Response;
       try {
-        response = await this.#fetch(CLAUDE_OAUTH.tokenUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(request),
-          signal: undefined,
-        });
+        response = await ask(
+          { url: CLAUDE_OAUTH.tokenUrl, peer: "Claude's sign-in service", fetch: this.#fetch },
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(request),
+          },
+        );
       } catch {
         throw new Error("Could not reach Claude's sign-in service from the agent's machine. Try again.");
       }
