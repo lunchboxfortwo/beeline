@@ -1,11 +1,38 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { request } from 'node:http';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { StdioSquireMcpClient } from './squire-mcp-client.js';
 import { SquireTaskRelay } from './squire-task-relay.js';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
+
+it('closing the relay terminates an authenticated unfinished request', async () => {
+  const relay = new SquireTaskRelay('agent', 'room', '', async () => true);
+  cleanups.push(() => relay.close());
+  const { url, token } = await relay.listen();
+  const pending = request(`${url}/mcp`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-length': '100',
+      expect: '100-continue',
+    },
+  });
+  cleanups.push(() => pending.destroy());
+  pending.on('error', () => {});
+  const closed = new Promise<void>((done) => pending.once('close', done));
+  await new Promise<void>((done, reject) => {
+    pending.once('continue', done);
+    pending.once('error', reject);
+    pending.flushHeaders();
+  });
+  pending.write('{');
+  relay.close();
+  await closed;
+  expect(pending.destroyed).toBe(true);
+});
 
 describe('Squire shared-session continuation', () => {
   it('resumes the shared signed-in session across turns while preserving explicit sessions and other sites', async () => {

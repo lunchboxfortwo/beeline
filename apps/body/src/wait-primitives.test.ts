@@ -450,14 +450,16 @@ it.runIf(process.platform === 'linux')(
   async () => {
     const root = join(await scratch(), 'state');
     const key = helperLockKey(root);
+    let connections = 0;
     const exiting = createServer((peer) => {
-      // The holder is exiting: it resets the follower and its socket goes away.
+      connections++;
       peer.destroy();
-      exiting.close();
     });
     const address = `\0beeline-lock-${createHash('sha256').update(key).digest('hex')}`;
     await new Promise<void>((done) => exiting.listen(address, done));
+    cleanup.push(() => new Promise<void>((done) => exiting.close(() => done())));
     await followHelperExit(root, { pid: 999_999, generation: 'predecessor' });
-    expect(exiting.listening).toBe(false);
+    expect(exiting.listening).toBe(true);
+    expect(connections).toBe(1);
   },
 );
