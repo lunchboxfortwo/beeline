@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
+import { foreignLoginMaskPaths, type AgentKind } from './agent-command.js';
 
 
 
@@ -182,6 +183,18 @@ export function credentialMaskPaths(
   return masks.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+
+/**
+ * {@link credentialMaskPaths} for one session: also hides, present or not,
+ * every harness-scoped operator login that belongs to a different harness.
+ */
+export function sessionCredentialMaskPaths(
+  config: { sandboxMaskPaths?: string[]; agentKind?: AgentKind },
+  home: string = homedir(),
+): MaskedPath[] {
+  const foreign = foreignLoginMaskPaths(config.agentKind, home);
+  return credentialMaskPaths([...(config.sandboxMaskPaths ?? []), ...foreign], home, undefined, foreign);
+}
 
 /**
  * Every OTHER agent's runtime directory on this host, masked absent.

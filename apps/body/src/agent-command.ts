@@ -296,7 +296,13 @@ export function sessionAgentBehavior(
  * relative to the operator's real `$HOME`; `target` to the isolated dir.
  * Every other harness login lives only in the machine's CLIProxyAPI.
  */
-export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string; target: string }> =
+export const SHARED_CREDENTIALS: Array<{
+  dir: 'cursor' | 'user';
+  source: string;
+  target: string;
+  /** Only this harness's sessions get the link; every other session has it masked. */
+  kind?: AgentKind;
+}> =
   [
     // cursor-agent keeps chat/MCP state under CURSOR_HOME but reads its login
     // from ~/.config/cursor/auth.json, so the isolated HOME needs it linked.
@@ -306,10 +312,25 @@ export const SHARED_CREDENTIALS: Array<{ dir: 'cursor' | 'user'; source: string;
     // isolated HOME links that one file, never a copy of it.
     {
       dir: 'user',
+      kind: 'antigravity',
       source: '.gemini/antigravity-cli/antigravity-oauth-token',
       target: '.gemini/antigravity-cli/antigravity-oauth-token',
     },
   ];
+
+/**
+ * Operator login directories a session of `kind` must not see: those of every
+ * harness-scoped shared login that belongs to another harness. Absolute paths.
+ */
+export function foreignLoginMaskPaths(kind: AgentKind | undefined, operatorHome: string): string[] {
+  return [
+    ...new Set(
+      SHARED_CREDENTIALS.filter((item) => item.kind && item.kind !== kind).map((item) =>
+        resolve(operatorHome, item.source, '..'),
+      ),
+    ),
+  ];
+}
 
 /**
  * Provider API keys a session copies from a native store it no longer links:

@@ -6,7 +6,7 @@ import { afterEach, expect, it } from 'vitest';
 import type { AgentKind } from './agent-command.js';
 import { harnessLoginWritablePaths, harnessStateDirsFromEnv, prepareRoomAgentCredentials, prepareRoomAgentHome } from './agent-home.js';
 import { writeOpenCodeKey } from './agent-sign-in.js';
-import { harnessHomeStateDirs, wrapAgentCommand } from './bwrap-sandbox.js';
+import { harnessHomeStateDirs, sessionCredentialMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const run = promisify(execFile);
@@ -34,11 +34,12 @@ const proxied: Array<{ kind: AgentKind; source: string; privateFile: string }> =
   { kind: 'opencode', source: '.local/share/opencode/auth.json', privateFile: 'user/.local/share/opencode/auth.json' },
 ];
 
-async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<string, string>, kind: AgentKind, operatorHome: string, script: string, harness?: string) {
+async function sandboxed(mode: 'readonly' | 'edit', root: string, env: Record<string, string>, kind: AgentKind, operatorHome: string, script: string, opts: { harness?: string; masked?: boolean } = {}) {
   const { stateDirs, tmpDir } = harnessStateDirsFromEnv(env);
   const command = wrapAgentCommand({ bwrapPath: '/usr/bin/bwrap',
-    spec: { mode, cwd: root, harnessStateDirs: stateDirs, tmpDir, harnessHomeStateDirs: harnessHomeStateDirs(harness, env.HOME),
-      additionalWritablePaths: harnessLoginWritablePaths(kind, operatorHome) },
+    spec: { mode, cwd: root, harnessStateDirs: stateDirs, tmpDir, harnessHomeStateDirs: harnessHomeStateDirs(opts.harness, env.HOME),
+      additionalWritablePaths: harnessLoginWritablePaths(kind, operatorHome),
+      ...(opts.masked ? { maskPaths: sessionCredentialMaskPaths({ agentKind: kind }, operatorHome) } : {}) },
     command: process.execPath, args: ['--input-type=module', '-e',
       `import fs from 'node:fs';\nimport assert from 'node:assert/strict';\n${script}`] });
   await run(command.command, command.args, { env: { ...process.env, ...env } });
@@ -64,7 +65,7 @@ for (const mode of ['readonly', 'edit'] as const) {
       fs.renameSync(target + '.next', target);
       // The harness's own bookkeeping beside the link stays writable too.
       fs.writeFileSync(${JSON.stringify(join(dirname(credential), 'state.next'))}, 'state');
-      assert.throws(() => fs.writeFileSync(${JSON.stringify(join(operatorHome, 'unrelated.json'))}, 'escape'), { code: 'EROFS' });`, harness);
+      assert.throws(() => fs.writeFileSync(${JSON.stringify(join(operatorHome, 'unrelated.json'))}, 'escape'), { code: 'EROFS' });`, { harness, masked: true });
     expect(JSON.parse(await readFile(shared, 'utf8'))).toEqual({ refreshed: true });
     expect(await readFile(join(operatorHome, 'unrelated.json'), 'utf8')).toBe('unrelated');
   });
@@ -90,6 +91,24 @@ for (const mode of ['readonly', 'edit'] as const) {
       assert.throws(() => fs.writeFileSync(${JSON.stringify(shared)}, 'escape'), { code: 'EROFS' });`);
     expect(await readFile(shared, 'utf8')).toBe(oauth);
     expect(JSON.stringify(env)).not.toContain('operator-refresh');
+  });
+
+  it.each(['codex', 'cursor', undefined] as const)('%s session cannot see the Antigravity sign-in in ' + mode + ' mode', async (kind) => {
+    const root = await mkdtemp(`${testTmpDir()}/beeline-login-mounts-`); roots.push(root);
+    const operatorHome = join(root, 'operator');
+    const cache = join(operatorHome, '.gemini/antigravity-cli');
+    await mkdir(cache, { recursive: true });
+    await writeFile(join(cache, 'antigravity-oauth-token'), 'operator-agy-token');
+    const privateRoot = join(root, 'private');
+    // A home that served Antigravity before keeps a stale link until repaired.
+    await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: 'antigravity' }).then(env => tmpLinks.push(env.TMPDIR!));
+    const privateLogin = join(privateRoot, 'user/.gemini/antigravity-cli/antigravity-oauth-token');
+    expect(await readFile(privateLogin, 'utf8')).toBe('operator-agy-token');
+    const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: kind });
+    await sandboxed(mode, root, env, kind as AgentKind, operatorHome, `
+      assert.equal(fs.existsSync(${JSON.stringify(privateLogin)}), false);
+      assert.deepEqual(fs.readdirSync(${JSON.stringify(cache)}), []);`, { masked: true });
+    expect(await readFile(join(cache, 'antigravity-oauth-token'), 'utf8')).toBe('operator-agy-token');
   });
 }
 
