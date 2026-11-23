@@ -57,7 +57,7 @@ export async function noteReviewDispatchFailure(
 
 
 /** The newest FAIL evidence for one review request: its repair, report or answer text. */
-export function reviewVerdictSql(command: string, pattern: string): string {
+function reviewVerdictSql(command: string, pattern: string): string {
   return `(
        SELECT repair.private_payload->>'text' text,true delivered FROM agent_commands repair
        WHERE repair.parent_command_id=${command}.id AND repair.reason IN ('order','message','reply')
@@ -82,12 +82,12 @@ export function reviewVerdictSql(command: string, pattern: string): string {
 }
 
 /** FAIL findings as `loadCornerReviewState` recognizes them. */
-export const REVIEW_FINDINGS_PATTERN = String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?((done|failed|blocked):[[:space:]]*)?(verdict:[[:space:]]*)?FAIL([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`;
+const REVIEW_FINDINGS_PATTERN = String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?((done|failed|blocked):[[:space:]]*)?(verdict:[[:space:]]*)?FAIL([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`;
 
 
 export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, headSha: string | undefined) {
   const empty = {pending:false,requests:0,ended:undefined as undefined | {
-    id:string;findings?:string;emptyCount:number;delivered:boolean;
+    id:string;findings?:string;delivered:boolean;
   }};
   if(!headSha) return empty;
   const rows=(await db.query<{id:string;state:string;ended:boolean;findings:string|null;delivered:boolean;current:boolean}>(
@@ -109,12 +109,10 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
     [cornerId,headSha,REVIEW_FINDINGS_PATTERN],
   )).rows;
   const latest=rows[0];
-  let emptyCount=0;
-  for(const row of rows) {if(!row.ended || row.findings) break; emptyCount++;}
   // A request queued under an older brief revision is replaced, not awaited.
   return {pending:rows.some(row=>row.state==='pending'&&row.current),requests:rows.length,
     ended:latest && (latest.ended||latest.findings) ? {id:latest.id,findings:latest.findings??undefined,
-      emptyCount,delivered:latest.delivered}:undefined};
+      delivered:latest.delivered}:undefined};
 }
 
 

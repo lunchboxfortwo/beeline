@@ -284,11 +284,7 @@ export const REVIEWER_DISPATCH_REASONS = [
   'order',
   'report',
 ] as const;
-/**
- * Automatic dispatch and returning verdicts must not repeat a reviewed head.
- * An explicit tag or order may request another review after a repair that
- * changes evidence or the PR description without creating a new commit.
- */
+/** Review dispatch and verdict reports carry the assigned head. */
 export function reviewerDispatchCarriesHead(
   reason: string,
   sourceKind: string | undefined,

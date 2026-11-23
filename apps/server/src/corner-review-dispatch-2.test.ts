@@ -14,7 +14,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('requests review again on a verdicted head only under a newer brief revision', async () => {
+  it('requests review again after a check rerun and after a newer brief revision', async () => {
     const head = 'f'.repeat(40);
     /** A check verdict on `head`, as the GitHub webhook writes it. */
     const verdict = async (kind: 'check-passed' | 'rerun') => {
@@ -43,9 +43,9 @@ describe('corner message attribution', () => {
     for(const repair of repairs) { await claim(repair); await result(repair,''); }
     // A CI re-run on the same head and the same brief revision.
     await verdict('rerun');
-    const repeated = (await commands(B, C)).length;
-    console.info(`Reproduction REVIEW-DUP-1: review wakes for an already reviewed head=${repeated}; wrong=1 right=0`);
-    expect(repeated).toBe(0);
+    const rerun = await commands(B, C);
+    expect(rerun).toHaveLength(1);
+    expect(rerun[0]?.id).not.toBe(review!.id);
     // A revised brief keys a new review to the same head.
     await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
       VALUES($1,2,'Brief','Brief with the waiver',$2,$3)`, [C, A, R]);

@@ -21,7 +21,7 @@ describe('revision 4 simple corner review model', () => {
       AND reason='corner_review_dispatch'`,[C,B])).rowCount).toBe(1);
   });
 
-  it('C-2: a completed FAIL ends automatic review of the same head and brief revision', async () => {
+  it('C-2: new green checks request review again after a completed FAIL', async () => {
     const head='5'.repeat(40);
     await rootFixture.phone.execute('updateRoom', {roomId:R,reviewerAgentId:B},H);
     await greenHead(105,head);
@@ -37,7 +37,9 @@ describe('revision 4 simple corner review model', () => {
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
     await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
     await greenHead(105,head);
-    expect((await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch')).toEqual([]);
+    const [next] = (await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
+    expect(next?.id).toBeDefined();
+    expect(next?.id).not.toBe(review?.id);
   });
   it('C-2: unrelated peer activity preserves Review and the green-head review dispatch', async () => {
     const peer='d'.repeat(64);
@@ -55,7 +57,7 @@ describe('revision 4 simple corner review model', () => {
       .toEqual([{state:'review'}]);
   });
 
-  it('C-2: a green handoff during same-head repair queues no automatic review of the verdicted head', async () => {
+  it('C-2: a green handoff waits until the same-head repair ends', async () => {
     const head='7'.repeat(40);
     await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
     await greenHead(107,head);
@@ -72,8 +74,7 @@ describe('revision 4 simple corner review model', () => {
     expect(await commands(B,C)).toEqual([]);
     await result(repair!,'');
     for(let event=0;event<3;event++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    // Another review of this head is an explicit request (RUBY-18).
-    expect(await commands(B,C)).toEqual([]);
+    expect((await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch')).toHaveLength(1);
   });
 
 });
@@ -111,28 +112,27 @@ it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archive
   await expect(rootFixture.daemon.execute('order',{...args,address:archived},A)).rejects.toThrow('archived');
 });
 
-it.each(['reply','silent'])('Reproduction REVIEW-EMPTY-HANDBACK: a %s review with no verdict hands back to the implementer once, privately', async ending => {
+it.each(['decline','silent'])('Reproduction REVIEW-EMPTY: a %s review ends until the next green event', async ending => {
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   await greenHead(108,'8'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
-  if(ending==='reply') {
-    await result(review!,'The review is complete.');
+  if(ending==='decline') {
+    await result(review!,'I already reviewed this item.');
     const [reply]=(await commands(A,C)).filter(command=>command.reason==='reply');
     await claim(reply!);
     await result(reply!,'');
   } else await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
   for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-  const handback=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
-  expect(handback).toHaveLength(1);
-  expect(handback[0]!.source.body).toContain('the reviewer gave no verdict; arrange review or report the blocker to its commander');
-  expect(handback[0]!.source.body).not.toContain('FAIL');
-  const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
-  expect(lines.some(line=>/no verdict|arrange review/.test(line.text))).toBe(false);
-  // Answering a System wake posts without waking anyone, and the tool result says so.
-  await claim(handback[0]!);
-  expect(await rootFixture.daemon.execute('reply',{id:handback[0]!.id,text:'Blocked: no reviewer verdict'},A)).toMatchObject({delivered:true,
-    receipt:'Message stored and visible. No agents woken. A reply to a System wake is posted, not delivered to anyone; use message() to reach someone.'});
+  expect((await commands(A,C)).filter(command=>command.reason==='corner_review_needed')).toEqual([]);
+  expect(await commands(B,C)).toEqual([]);
+  await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
+  await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
+  await greenHead(108,'8'.repeat(40));
+  for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
+  const next=(await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
+  expect(next).toHaveLength(1);
+  expect(next[0]?.id).not.toBe(review?.id);
   await rootFixture.db.backgroundWork.drain();
 });
 
@@ -141,9 +141,11 @@ it('Reproduction REVIEW-STUCK: a recorded review handback with no command (prod 
   await greenHead(109,'9'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
+  await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id)
+    VALUES('lost-review-findings',$1,$2,'FAIL: add missing evidence.',$3)`,[C,B,review!.turnRequestId]);
   await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
   await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-  // The old server recorded review-failed:<head>:<review> and queued nothing: recreate that state.
+  // Recreate a review handback receipt without its queued command.
   const [first]=(await commands(A,C)).filter(command=>command.reason==='corner_review_needed');
   await rootFixture.db.query('DELETE FROM agent_commands WHERE id=$1',[first!.id]);
   const effects=async()=>(await rootFixture.db.query<{effects:string[]}>(

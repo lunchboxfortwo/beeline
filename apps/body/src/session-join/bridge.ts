@@ -562,66 +562,56 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
       entry: Stream = { fingerprint: fingerprint(joined), controller, recovered };
     streams.set(joined.key, entry);
     const job = (async () => {
-      while (!controller.signal.aborted) {
-        let opened = false,
-          terminal = false;
-        try {
-          const token = await accessToken(dir, joined.key);
-          const current = readState(dir).sessions.find((session) => session.key === joined.key);
-          if (!current) {
-            failedStartup('session disappeared');
-            changed();
-            return;
-          }
-          if (staged && !activated) entry.fingerprint = fingerprint(current);
-          if (fingerprint(current) !== entry.fingerprint) {
-            changed();
-            return;
-          }
-          for await (const raw of memberStream(current, token, controller.signal, () => {
-            opened = true;
-            if (staged && !activated) {
-              openedKeys.add(joined.key);
-              if ([...expected].every((key) => openedKeys.has(key))) process.send?.('ready');
-            }
-          })) {
-            // A candidate has a live stream before it can commit or deliver.
-            // The old owner drains first; replay then joins durable identities.
-            const frame = memberStreamFrame(raw);
-            if (frame.type === 'ended' && !activated)
-              failedStartup(`member stream ended: ${frame.reason}`);
-            await activation;
-            if (controller.signal.aborted) return;
-            if (staged && frame.type === 'checkpoint') {
-              const committed = readState(dir).sessions.find(
-                (session) => session.key === joined.key,
-              )?.streamCursor;
-              if (
-                committed?.epoch === frame.cursor.epoch &&
-                committed.through > frame.cursor.through
-              )
-                continue;
-            }
-            if (frame.type === 'ended') {
-              terminal = true;
-              break;
-            }
-            if (await acceptMemberDelivery(dir, joined.key, runner, frame)) {
-              entry.recovered = false;
-              await flush(dir, sources);
-            }
-          }
-        } catch (error) {
-          failedStartup(error);
-          if (!controller.signal.aborted)
-            log(dir, `${joined.key}: ${error instanceof Error ? error.message : String(error)}`);
+      let failure: unknown = 'member stream ended before activation';
+      try {
+        const token = await accessToken(dir, joined.key);
+        const current = readState(dir).sessions.find((session) => session.key === joined.key);
+        if (!current) {
+          failedStartup('session disappeared');
+          changed();
+          return;
         }
-        if (!activated) failedStartup('member stream ended before activation');
-        if (controller.signal.aborted || terminal || !opened || entry.recovered) return;
-        // One replacement after an established stream drops. A failed initial
-        // or replacement connection parks until credentials/join state changes.
-        entry.recovered = true;
+        if (staged && !activated) entry.fingerprint = fingerprint(current);
+        if (fingerprint(current) !== entry.fingerprint) {
+          changed();
+          return;
+        }
+        for await (const raw of memberStream(current, token, controller.signal, () => {
+          if (staged && !activated) {
+            openedKeys.add(joined.key);
+            if ([...expected].every((key) => openedKeys.has(key))) process.send?.('ready');
+          }
+        })) {
+          const frame = memberStreamFrame(raw);
+          if (frame.type === 'ended') {
+            failure = `member stream ended: ${frame.reason}`;
+            failedStartup(failure);
+            break;
+          }
+          // The old owner drains before the candidate can commit or deliver.
+          await activation;
+          if (controller.signal.aborted) return;
+          if (staged && frame.type === 'checkpoint') {
+            const committed = readState(dir).sessions.find(
+              (session) => session.key === joined.key,
+            )?.streamCursor;
+            if (committed?.epoch === frame.cursor.epoch && committed.through > frame.cursor.through)
+              continue;
+          }
+          const queued = await acceptMemberDelivery(dir, joined.key, runner, frame);
+          if (queued || frame.type === 'checkpoint') entry.recovered = false;
+          if (queued) await flush(dir, sources);
+        }
+      } catch (error) {
+        failure = error;
+        if (!controller.signal.aborted)
+          log(dir, `${joined.key}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      if (controller.signal.aborted) return;
+      // Reopen once from the durable cursor. If catch-up also fails, wait
+      // for a binding change.
+      if (!entry.recovered && (activated || !openedKeys.has(joined.key))) start(joined, true);
+      else failedStartup(failure);
     })();
     jobs.add(job);
     void job.finally(() => jobs.delete(job));
@@ -661,7 +651,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
         const old = streams.get(joined.key);
         if (!old || old.fingerprint !== fingerprint(joined)) {
           // Token rotation replaces this owner too; retain its one recovery
-          // allowance until a real delivery proves the replacement works.
+          // allowance until the replacement catches up.
           old?.controller.abort();
           start(joined, old?.recovered);
         }
