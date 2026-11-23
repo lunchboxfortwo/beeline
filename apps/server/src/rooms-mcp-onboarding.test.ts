@@ -1,9 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { MUSE_SETUP_RECIPE } from '@beeline/api-contract/phone';
-it('publishes the owner-approved Muse instruction on both public join surfaces', () => {
-  for (const path of ['../assets/mcp/join.html', '../../site/connect/index.html']) {
-    const html = readFileSync(new URL(path, import.meta.url), 'utf8');
-    expect(html).toContain(MUSE_SETUP_RECIPE);
-  }
+it('publishes the owner-approved Muse instruction on the public connect page', () => {
+  expect(readFileSync(new URL('../../site/connect/index.html', import.meta.url), 'utf8')).toContain(MUSE_SETUP_RECIPE);
 });

@@ -62,12 +62,12 @@ describe('Invite an external agent', () => {
         expect(text(tree)).toContain('Copied');
     });
 
-    it('opens the full list of agents at join.usebeeline.app', async () => {
+    it('opens the full list of agents at usebeeline.app/connect/', async () => {
         const tree = await openExternal();
         const link = byTestID(tree, 'agent-full-list');
         expect(link.props.accessibilityRole).toBe('link');
         await act(async () => { link.props.onPress(); });
-        expect(openExternalUrl).toHaveBeenCalledWith('https://join.usebeeline.app/');
+        expect(openExternalUrl).toHaveBeenCalledWith('https://usebeeline.app/connect/');
     });
 
     it('shows the invite failure in place of the prompt and link', async () => {

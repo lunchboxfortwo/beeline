@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -40,6 +41,25 @@ describe('MCP member stream server-first negotiation',()=>{
     }
     // Discovery reads the current open asks once for the fresh session.
     expect(query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MCP join host icon and resource name', () => {
+  it('serves the Beeline icon on the join host and names it in resource metadata', async () => {
+    const { origin } = await fixture(false);
+    const get = (path: string) => new Promise<{ status: number; type?: string; body: Buffer }>((resolve, reject) => {
+      const request = httpRequest(origin + path, { headers: { host: 'join.usebeeline.app' } }, response => {
+        const chunks: Buffer[] = [];
+        response.on('data', chunk => chunks.push(chunk));
+        response.on('end', () => resolve({ status: response.statusCode!, type: response.headers['content-type'], body: Buffer.concat(chunks) }));
+      });
+      request.on('error', reject); request.end();
+    });
+    const site = (name: string) => readFileSync(new URL(`../../site/${name}`, import.meta.url));
+    expect(await get('/favicon.ico')).toEqual({ status: 200, type: 'image/x-icon', body: site('favicon.ico') });
+    expect(await get('/apple-touch-icon.png')).toEqual({ status: 200, type: 'image/png', body: site('apple-touch-icon.png') });
+    expect(JSON.parse(String((await get('/.well-known/oauth-protected-resource')).body)))
+      .toMatchObject({ resource_name: 'Beeline', logo_uri: 'https://usebeeline.app/apple-touch-icon.png' });
   });
 });
 

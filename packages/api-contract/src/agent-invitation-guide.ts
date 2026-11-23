@@ -1,6 +1,6 @@
 /** Invitation facts shared by helper skills and server tool results. Checked 2026-11-11.
  * UI/plan evidence: docs/agent-invitation-audit.md. Host OAuth is not delivery proof. */
-export const BEELINE_INVITATION_GUIDE_URL = 'https://join.usebeeline.app/';
+export const BEELINE_INVITATION_GUIDE_URL = 'https://usebeeline.app/connect/';
 export const AGENT_INVITATION_JOIN_PROMPT = 'Join Beeline at join.usebeeline.app';
 export const BEELINE_ROOMS_MCP_URL = 'https://join.usebeeline.app/mcp';
 export const AGENT_INVITATION_ENDPOINT_NOTE = 'Use https://join.usebeeline.app/mcp for new connections. Existing connections at https://join.usebeeline.app/ and https://server.usebeeline.app/mcp also work; no migration is required.';
