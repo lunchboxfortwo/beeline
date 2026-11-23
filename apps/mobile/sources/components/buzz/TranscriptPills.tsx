@@ -2,23 +2,14 @@ import React, { useMemo } from 'react';
 import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
-import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import { stopNotice } from '@/buzz/transcript-pills';
 import { isNotice, PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
 import { NotificationLifecycleCard } from './PrLifecycleCard';
 
-const BEELINE: PillFace = { kind: 'system', name: 'Beeline' };
-
 /** Who a pubkey is, for a pill face: the roster's agent or person, by id. */
 export type PillIdentityResolver = (id: string, name: string, kind?: 'agent' | 'human') => PillFace;
-
-function systemTarget(message: ChatDisplayMessage, resolve: PillIdentityResolver): PillFace | undefined {
-  const subject = message.systemEvent?.subject;
-  if (!subject?.id || (subject.kind !== 'person' && subject.kind !== 'agent')) return undefined;
-  return resolve(subject.id, subject.name, subject.kind === 'agent' ? 'agent' : 'human');
-}
 
 type PillHandlers = {
   onOpenIdentity?: (id: string) => void;
@@ -31,19 +22,15 @@ type PillHandlers = {
 
 function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers): PillItem {
   const time = ledgerStamp(message.timestamp);
-  const author = message.authorIdentity?.pubkey ?? message.pubkey;
   const stop = stopNotice(message);
-  // A message() to an agent keeps its sender's face even when stored as a system notice.
-  const agentMessage = message.agentCommand?.recipient.kind === 'agent' && author && author !== SYSTEM_IDENTITY_PUBKEY;
-  if (stop || (!agentMessage && (message.isSystemNotice || author === SYSTEM_IDENTITY_PUBKEY || !author))) {
+  if (stop) {
     return {
       id: message.id,
       system: true,
-      ...(stop
-        // A stop is the stopper's face, the stop glyph and the stopped agent's face; the line itself opens on tap.
-        ? { stop: true, from: resolve(stop.stopper.id, stop.stopper.name, stop.stopper.kind),
-          to: resolve(stop.stopped.id, stop.stopped.name, 'agent') }
-        : { from: BEELINE, to: systemTarget(message, resolve), summary: message.text }),
+      // A stop is the stopper's face, the stop glyph and the stopped agent's face; the line itself opens on tap.
+      stop: true,
+      from: resolve(stop.stopper.id, stop.stopper.name, stop.stopper.kind),
+      to: resolve(stop.stopped.id, stop.stopped.name, 'agent'),
       time,
       body: (
         <LedgerSystemLine
@@ -59,6 +46,8 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
       ),
     };
   }
+  // `isPillMessage` admits only an agent-authored message to another agent here.
+  const author = message.authorIdentity?.pubkey ?? message.pubkey ?? '';
   const authorName = message.authorIdentity?.name ?? '';
   const recipient = message.agentCommand?.recipient;
   const firstMention = message.mentionPubkeys?.[0];
@@ -81,9 +70,9 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
 }
 
 /**
- * Consecutive pill messages (agent-to-agent messages, stops and system
- * notices) fold into one pill that opens as a list in send order. A lone
- * message keeps its own pill. Anything else in the transcript ends the stretch.
+ * Consecutive pill messages (agent-to-agent messages and stops) fold into one
+ * pill that opens as a list in send order. A lone message keeps its own item.
+ * Anything else in the transcript ends the stretch.
  */
 export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdentityResolver, handlers: PillHandlers): PillItem[] {
   const entries = run.map((message) => pillItem(message, resolve, handlers));
@@ -92,7 +81,7 @@ export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdent
     time: entries.at(-1)!.time, run: entries, body: null }];
 }
 
-/** One transcript row of pills: system lines, lone agent messages, stops and folded agent runs. */
+/** One transcript row of pills: a lone agent message, a stop or a folded agent run. */
 export function TranscriptPills({
   run,
   resolve,

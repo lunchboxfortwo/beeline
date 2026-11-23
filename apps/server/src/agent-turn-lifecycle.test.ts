@@ -216,6 +216,17 @@ it('replacement closes the phone running indicator and redelivers the unanswered
   expect((await notices()).rowCount).toBe(0);
 });
 
+it('a host disconnect ends a working line without posting a system line', async () => {
+  const c = await ask();
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: c.turnRequestId, invocationId: 'offline-run' }, A);
+  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(true);
+  const before = await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system'", [R]);
+  await releaseAgentConnection(db, live, A, owner.connectionId);
+  await db.backgroundWork.drain();
+  expect((await phone.readRoom(R, H))?.latestAgentTurns?.some(turn => turn.status === 'working')).toBe(false);
+  expect((await db.query("SELECT id FROM messages WHERE room_id=$1 AND presentation='system'", [R])).rows).toEqual(before.rows);
+});
+
 it('an initially offline mention waits for connection without an offline notice',async()=>{
   await releaseAgentConnection(db,live,A,owner.connectionId);
   const sent=await phone.execute('sendRoomMessage',{roomId:R,text:'@candy A request while offline'},H);

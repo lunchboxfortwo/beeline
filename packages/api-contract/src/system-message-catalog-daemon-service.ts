@@ -1,5 +1,4 @@
 export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
-  'agent-turn.host-offline': { parts: ['has an offline host'], variables: [] },
   'agent-turn.failed': { parts: ['failed'], variables: [] },
   'agent-turn.failure-reason': { parts: ['', ''], variables: ['reason'] },
 

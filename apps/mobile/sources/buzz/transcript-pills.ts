@@ -2,9 +2,10 @@ import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 
 /**
- * Pills (build spec, decision 15): system messages and an agent's message() to another
- * agent render as avatar-only pills (from face → to face); a tap reads the message.
- * A plain tag stays a message.
+ * Pills (build spec, decision 15): an agent's message() to another agent and a
+ * stop render as avatar pills (from face → to face, or face ■ face); a tap
+ * reads the message. A plain tag stays a message, and every other system line
+ * keeps its own `LedgerSystemLine` row.
  * Consecutive pills share one wrapping row, so the transcript folds a run of
  * them into one host row. PR lifecycle runs keep their own counted disclosure.
  */
@@ -16,7 +17,7 @@ type PillFields = Pick<
   | 'vaultSave' | 'roomUpdate' | 'writePermission' | 'grantRequest' | 'squireApproval' | 'computerSession'
   | 'voiceCall' | 'onboarding' | 'choice' | 'appSignIn' | 'agentSignIn' | 'connectorOffer'
   | 'notificationLifecycleRun' | 'walletTx' | 'walletInsufficient' | 'walletDelegation'
-  | 'targetBranchProposal' | 'corner' | 'githubEvent' | 'daemonFact'
+  | 'targetBranchProposal' | 'corner' | 'githubEvent' | 'daemonFact' | 'systemEvent'
 >;
 
 /** A row that the transcript draws as a card or nothing, never as a pill. */
@@ -33,17 +34,21 @@ function ownsCard(message: PillFields): boolean {
   );
 }
 
+/** A server-phrased notice or a Beeline-account row: drawn by `LedgerSystemLine`, never as a pill. */
+export function isSystemLine(message: PillFields): boolean {
+  return Boolean(message.isSystemNotice) || (message.authorIdentity?.pubkey ?? message.pubkey) === SYSTEM_IDENTITY_PUBKEY;
+}
+
 /**
- * A system line (from the Beeline account), a folded PR / thread lifecycle
- * run (a system notice; its rows read inside the opened pill), or an agent's
- * order/report to another agent.
+ * A folded PR / thread lifecycle run (its rows read inside the opened card),
+ * a stop of an agent's turn, or an agent's message to another agent.
  */
 export function isPillMessage(message: PillFields): boolean {
   if (message.notificationLifecycleRun && !message.deleted) return true;
   if (ownsCard(message)) return false;
-  if (message.agentCommand) return message.agentCommand.recipient.kind === 'agent';
-  if (message.isSystemNotice) return true;
-  return (message.authorIdentity?.pubkey ?? message.pubkey) === SYSTEM_IDENTITY_PUBKEY;
+  if (stopNotice(message)) return true;
+  const author = message.authorIdentity?.pubkey ?? message.pubkey;
+  return message.agentCommand?.recipient.kind === 'agent' && Boolean(author) && author !== SYSTEM_IDENTITY_PUBKEY;
 }
 
 /** Fold consecutive avatar pills into `pillRun`; lifecycle disclosures and lone pills stay separate. */

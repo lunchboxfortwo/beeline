@@ -39,10 +39,8 @@ export type PillItem = {
     time: string;
     /** A stop of an agent's turn: face, stop glyph, face, with no text. */
     stop?: boolean;
-    /** Consecutive pill messages (agent-to-agent, stops, system notices) folded into one pill: faces and a count. */
+    /** Consecutive pill messages (agent-to-agent messages and stops) folded into one pill: faces and a count. */
     run?: readonly PillRunEntry[];
-    /** A system fact's text: the folded pill's accessibility label; it shows only once opened. */
-    summary?: string;
     /** The message, read under the row once its pill is opened. */
     body: React.ReactNode;
     system: boolean;
@@ -135,7 +133,6 @@ function pillLabel(item: PillItem, expanded: boolean): string {
         return `${verb} ${item.run.length} messages between ${between}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
     }
     if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;
-    if (item.system && item.summary) return `${verb} ${item.summary}, ${item.time}`;
     return `${verb} message from ${heading(item)}, ${item.time}`;
 }
 
@@ -180,14 +177,23 @@ function RunList({ run }: { run: readonly PillRunEntry[] }) {
 }
 
 /**
- * System facts and agent-to-agent messages in one wrapping row. Every pill is
- * faces only; a tap opens the full message under the row.
+ * Stops and agent-to-agent messages in one wrapping row. Every pill is faces
+ * only; a tap opens the full message under the row.
  * A run of agent messages folds into one pill of faces and a count, and opens
- * as a plain list in send order. A stop is face, stop glyph, face.
+ * as a plain list in send order. A stop is face, stop glyph, face. A lone
+ * agent message has nothing to fold, so it reads as its open row with no pill.
  */
 export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?: string }) {
     const [openId, setOpenId] = useState<string | null>(null);
     const open = items.find((item) => item.id === openId);
+    const lone = items.length === 1 && !items[0]!.run && !items[0]!.stop && !items[0]!.system ? items[0] : undefined;
+    if (lone) {
+        return (
+            <YStack width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
+                <RunList run={[lone]} />
+            </YStack>
+        );
+    }
     return (
         <YStack gap="3" width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
             <XStack gap="2" flexWrap="wrap" alignItems="flex-start">
