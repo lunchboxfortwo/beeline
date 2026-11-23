@@ -183,13 +183,14 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
  * command write stays one statement.
  *
  * Its next is `agentMessageText`, written here in SQL. Parameters, in order,
- * starting at `first`: the live channel and `REQUEST_REASONS`.
+ * starting at `first`: the live channel, `REQUEST_REASONS` and mention delivery.
  */
-export function mcpCommandWakeSql(first: number): { cte: string; join: string; params: readonly unknown[] } {
+export function mcpCommandWakeSql(first: number, mentionDelivery: boolean): { cte: string; join: string; params: readonly unknown[] } {
   const channel = `$${first}`;
   const requests = `$${first + 1}`;
+  const mention = `$${first + 2}`;
   return {
-    params: [POSTGRES_LIVE_CHANNEL, REQUEST_REASONS],
+    params: [POSTGRES_LIVE_CHANNEL, REQUEST_REASONS, mentionDelivery],
     cte: `queued_mcp_wakes AS (
       INSERT INTO rooms_mcp_event_deliveries(subscription_id,command_id,room_id,event_id,body)
       SELECT s.id,command.id,command.room_id,'evt_'||s.id||'_cmd_'||command.id,
@@ -222,8 +223,7 @@ export function mcpCommandWakeSql(first: number): { cte: string; join: string; p
             AND beeline_mcp_delivery_owner(wake.member_id,'events',wake.id))))
       JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
       WHERE beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND command.state='pending' AND command.action='input' AND command.reason<>'mcp_call'
-        AND (command.source_message_id IS NULL OR command.private_payload IS NOT NULL
-          OR command.reason NOT IN ('human_tag','direct_message','agent_tag','human_message'))
+        AND NOT ${mention}::boolean
       ON CONFLICT(subscription_id,command_id) WHERE command_id IS NOT NULL DO NOTHING
       RETURNING room_id
     )`,

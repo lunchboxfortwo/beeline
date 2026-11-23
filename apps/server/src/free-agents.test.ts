@@ -32,6 +32,7 @@ import { resolveCurrentMemberMentions } from './message-mentions.js';
 import { LiveHub } from './live.js';
 import { agentMachineOfflineSql } from './machine-offline.js';
 import { PhoneService } from './phone-service.js';
+import { POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
 import { AuthStore, type TransactionalDatabase } from '@beeline/auth/store';
 import type { GitHubOperations } from './github-operations.js';
 import { ObjectService } from './object-service.js';
@@ -81,7 +82,7 @@ class FakeMachines implements FreeAgentMachines {
     const id = `m${++this.#next}`;
     this.calls.push(`create ${spec.agentId.slice(0, 4)}`);
     this.specs.push(spec);
-    this.states.set(id, 'started');
+    this.states.set(id, spec.skipLaunch ? 'stopped' : 'started');
     return { id };
   }
   async list() {
@@ -199,6 +200,30 @@ describe('free starter agents', () => {
   const finishWelcome = async (roomId: string, viewerId: string) => {
     await new StarterOnboardingService(db).enter(roomId, viewerId);
   };
+
+  it('prepares both starter Machines at creation and only starts the one addressed by the first message', async () => {
+    const stopWakes = freeAgents.subscribeToWakes(live);
+    const unlisten = await db.client.listen(POSTGRES_LIVE_CHANNEL, payload => {
+      const { table, operation, roomId, agentId } = JSON.parse(payload);
+      if (agentId) live.publish({ type: 'invalidate', reason: `postgres:${table}`, operation, roomId, targetAgentId: agentId });
+    });
+    try {
+      const workspace = await phone.execute('createWorkspace', { name: 'Prepared' }, OWNER);
+      await vi.waitFor(async () => {
+        expect((await db.query("SELECT 1 FROM free_agent_events WHERE kind='provisioned'")).rowCount).toBe(2);
+      });
+      expect([...machines.states.values()]).toEqual(['stopped', 'stopped']);
+      const agent = await freeAgentOf(workspace.id);
+      const started = `start ${agent.fly_machine_id}`;
+      await phone.execute('sendRoomMessage', { roomId: workspace.roomId!, text: '@beebee hello' }, OWNER);
+      await vi.waitFor(() => expect(machines.calls).toContain(started));
+      expect(machines.calls.filter(call => !call.startsWith('create '))).toEqual([started]);
+      expect(machines.specs).toHaveLength(2);
+    } finally {
+      await unlisten();
+      stopWakes();
+    }
+  });
 
   it('shows each banter agent typing 3.5 s, and keeps playback inside the 35 s reclaim window', () => {
     expect(STARTER_BANTER_TYPING_MS).toBe(3500);

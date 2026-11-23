@@ -35,8 +35,9 @@ soul. Existing free agents keep their names.
   single-agent operator path retains the legacy hello.
   The legacy hello teaches Room replies, corners and connectors, then asks what the person is working on. It contains no repository card; the agent offers one only for coding or GitHub-connection intent.
   The hello tags the owner through the normal mention/push path and uses the
-  agent's actual handle. It creates no model turn or Machine. The first real
-  queued work provisions the Machine through `FreeAgentService.reconcile` from its committed work event.
+  agent's actual handle. The committed agent creation signals
+  `FreeAgentService.reconcile` to prepare its Machine and pull the image without
+  starting the helper. Queued work starts the Machine.
   A creator owns at most
   `BEELINE_FREE_AGENT_MAX_PER_OWNER` (default 3) free agents.
 - **First boot.** The pinned image contains its compatible helper and Pi. The
@@ -68,9 +69,9 @@ soul. Existing free agents keep their names.
 - **Image replacement and wake.** The owner preserves the full machine config and
   persistent filesystem. A successful image POST does not establish readiness:
   the owner observes completion for the returned Fly version before deciding
-  whether an ordinary start is required. Fly launches a created machine and
-  reboots a running replacement; replacing a non-running machine leaves the new
-  version stopped. The owner observes that stopped version, then starts it only
+  whether an ordinary start is required. Fly reboots a running replacement;
+  replacing a non-running machine leaves the new version stopped.
+  The owner observes that stopped version, then starts it only
   for queued work. Stopped or suspended machines with work receive a start,
   followed by Fly's completion observation. A started machine awaits its real
   authenticated helper connection. A lost provider reply gets one authoritative
@@ -79,7 +80,7 @@ soul. Existing free agents keep their names.
   actual signal. No external-completion/eventual-recovery guarantee is implied.
   Connection registration manages connection facts only and cannot clear the
   lifecycle owner's token. Model credentials are issued in the queue-write
-  transaction and delivered on the item, before machine creation or connection.
+  transaction and delivered on the item, before the helper can claim it.
   Bootstrap tokens and connection negotiation do not grant model authority. Pi's
   required provider configuration is prepared before ACP startup. A harness that
   cannot start completes the item as failed and posts its real reason, without an
