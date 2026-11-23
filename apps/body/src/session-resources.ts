@@ -13,6 +13,7 @@ type Context = {
   repository: DaemonOperationMap['getRoomRepositoryState']['output'];
   restore: DaemonOperationMap['getCornerRestoreState']['output'];
   grants: DaemonOperationMap['listAgentGrants']['output'];
+  threads: DaemonOperationMap['listRoomCorners']['output'];
 };
 
 /** Exact tool names take precedence so unrelated descriptions do not inflate discovery. */
@@ -71,6 +72,7 @@ export class SessionResources {
           'repository',
           'restore',
           'modelCatalog',
+          'threads',
         ] as const)
           if (!this.context[key] && cached[key])
             Object.assign(this.context, { [key]: cached[key] });
@@ -88,6 +90,15 @@ export class SessionResources {
     this.load('grants', () => api.execute('listAgentGrants', { agentId, roomId: placeId }));
     if (parentRoomId)
       this.load('restore', () => api.execute('getCornerRestoreState', { cornerId: placeId }));
+    this.refreshThreads();
+  }
+
+  /** Open threads of this place's chat; also re-read after each turn, which may open one. */
+  refreshThreads(): void {
+    const { api, placeId, parentRoomId } = this.options;
+    this.load('threads', () =>
+      api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
+    );
   }
 
   refreshConfiguration(): void {

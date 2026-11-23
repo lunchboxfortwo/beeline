@@ -236,9 +236,7 @@ function shellLine(shell: RoomShellState | undefined): string {
 }
 
 function writableHomeLine(home: string | undefined): string {
-  return home
-    ? `You can write files only in your home, ${home} (~/), with your own write/edit tools or the shell; post_artifact posts files saved there.`
-    : '';
+  return home ? `post_artifact posts files saved in your home, ${home}.` : '';
 }
 
 /** One paragraph per rule group, skipping the groups that do not apply. */
@@ -394,7 +392,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
         'After Beeline errors, retries, refusals, contradictions, context gaps or corrections, call report_feedback(category:bug, summary:<one sentence>) once. Otherwise skip feedback.',
         surface === 'room' &&
           [
-            'Repository changes happen only in a thread. Open one on your own judgment or when your commander requests repository work.',
+            'Code work happens only in a thread.',
             'Before opening one, consult beeline-triage and beeline-spec, then call open_thread with the target chat address, a name of at most three words joined by hyphens (no whitespace), an objective of at most 24 words, and the brief (a spec plus optional opening context). The objective only titles the work; the brief is its authority. Opening requires no human approval. Include a dispatching message when available; otherwise the server records the opening agent as agent-initiated. Revisions retain their approval rule. When open_thread succeeds the server posts the thread card: do not restate it.',
             'Use read(facet:messages, address) across member chats. wake(action:create, trigger:lifecycle, address:cornerAddress) wakes only on opened or merged; open_thread watches automatically. Schedules and chatter never wake watchers.',
             'When the thread builds a backlog task, pass its id in open_thread workItems: the task moves to In progress, then Done when the thread lands, or back to Backlog if it closes unmerged.',
@@ -605,6 +603,8 @@ export type OpenCornerRow = {
   readonly closedAt?: number;
   readonly pullRequestNumber?: number;
   readonly mergeCommitSha?: string;
+  /** This agent's local checkout of the thread, when one exists. */
+  readonly checkout?: string;
 };
 
 /** One line per open corner, carrying every field the JSON dump carried; the objective is last because it is free text. */
@@ -614,6 +614,7 @@ export function renderOpenCornerLine(corner: OpenCornerRow): string {
     `created by ${corner.createdBy}`,
     corner.pullRequestNumber ? `PR #${corner.pullRequestNumber}` : '',
     corner.mergeCommitSha ? `merge commit ${corner.mergeCommitSha}` : '',
+    corner.checkout ? `checkout ${corner.checkout}` : '',
     corner.closedAt !== undefined ? `closed at ${corner.closedAt}` : '',
     corner.archived ? 'archived' : '',
   ].filter(Boolean);
@@ -845,6 +846,19 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     ].filter(Boolean).join('\n\n'),
   },
 ];
+
+/** The `turn.corners` section alone, for the live place prompt. */
+export function renderMemberThreads(
+  surface: PromptSurface,
+  corners: readonly OpenCornerRow[],
+): string {
+  return applicable(
+    TURN_SECTIONS.filter((section) => section.id === 'turn.corners'),
+    { surface, corners, task: { body: '' } },
+  )
+    .map((entry) => entry.text)
+    .join('');
+}
 
 export function assembleTurnPrompt(context: TurnPromptContext): {
   readonly text: string;

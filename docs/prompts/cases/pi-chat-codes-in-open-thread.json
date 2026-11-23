@@ -1,0 +1,108 @@
+{
+  "id": "pi-chat-codes-in-open-thread",
+  "section": "turn.corners",
+  "summary": "A Pi chat agent that already implements an open thread sends a code fix there, using the thread's checkout instead of searching the disk.",
+  "place": "room",
+  "session": {
+    "agentName": "Grunt",
+    "agentCommand": "/opt/beeline/adapters/pi/node_modules/.bin/pi-acp",
+    "repositoryPending": true,
+    "shell": { "available": true },
+    "writableHome": "/srv/beeline/agents/grunt/rooms/arcade/agent-home/user"
+  },
+  "tools": ["Bash"],
+  "turn": {
+    "task": {
+      "body": "@grunt the start button in the 3D game doesn't work on my phone. Please fix it.",
+      "fromName": "dana",
+      "commandReason": "human_tag"
+    },
+    "corners": [
+      {
+        "cornerId": "5c0f7a3e-91d2-5b47-8e0c-2f6a1d9b4c71",
+        "parentRoomId": "a41c2e7d-0b6f-5d38-9a14-7e2c8f3b5d60",
+        "name": "arcade-3d",
+        "objective": "Move the playable 3D slice into the repository and open a pull request.",
+        "createdBy": "grunt-id",
+        "archived": false,
+        "pullRequestNumber": 1,
+        "checkout": "/srv/beeline/corners/8e1d4c0b7a92f3e6"
+      }
+    ]
+  },
+  "pass": {
+    "all": [
+      {
+        "any": [
+          { "call": "message", "args": { "to.place": "5c0f7a3e-91d2-5b47-8e0c-2f6a1d9b4c71" } },
+          { "call": "revise_thread", "args": { "address": "5c0f7a3e-91d2-5b47-8e0c-2f6a1d9b4c71" } }
+        ]
+      },
+      {
+        "noCall": "Bash",
+        "args": { "command": { "matches": "\\b(find|grep -r\\S*)\\s+(\\S+\\s+)*/(\\s|$)" } }
+      }
+    ]
+  },
+  "scenario": {
+    "history": [],
+    "files": {},
+    "results": [
+      {
+        "call": "read",
+        "args": { "facet": "status" },
+        "result": {
+          "address": "5c0f7a3e-91d2-5b47-8e0c-2f6a1d9b4c71",
+          "name": "arcade-3d",
+          "lifecycle": "in-review",
+          "activity": "running",
+          "pr": { "number": 1 }
+        }
+      },
+      {
+        "call": "read",
+        "args": { "facet": "threads" },
+        "result": {
+          "corners": [
+            {
+              "cornerId": "5c0f7a3e-91d2-5b47-8e0c-2f6a1d9b4c71",
+              "parentRoomId": "a41c2e7d-0b6f-5d38-9a14-7e2c8f3b5d60",
+              "name": "arcade-3d",
+              "createdBy": "grunt-id",
+              "archived": false
+            }
+          ]
+        }
+      },
+      {
+        "call": "Bash",
+        "args": { "command": { "contains": "/srv/beeline/corners/8e1d4c0b7a92f3e6" } },
+        "result": { "stdout": "index.html\ngame.js\nthree.min.js\n", "exitCode": 0 }
+      },
+      {
+        "call": "message",
+        "args": {},
+        "result": { "id": "simulated-message", "delivered": true }
+      },
+      {
+        "call": "revise_thread",
+        "args": {},
+        "result": { "revision": 2, "wake": { "queued": true } }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
+      }
+    ],
+    "connect": {
+      "status": {
+        "apps": [],
+        "readiness": "No additional connected services recorded for this case."
+      },
+      "discover": { "apps": [] }
+    }
+  }
+}

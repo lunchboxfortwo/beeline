@@ -144,7 +144,9 @@ export function harnessEnforcement(agentCommand: string | undefined): HarnessPro
  *    `_meta.systemPrompt`, which `AcpClient.sessionNew` sends for exactly this
  *    case (`harnessReadsMetaSystemPrompt`) — so its sessions DO carry the
  *    Beeline prompt.
- *  - Legacy `codex-acp` and `pi-acp` drop the session prompt. Codex adapters
+ *  - `pi-acp` drops the field, so `AcpClient.sessionNew` writes the prompt to
+ *    Pi's `<agent-dir>/SYSTEM.md`, which replaces Pi's own system prompt.
+ *  - Legacy `codex-acp` drops the session prompt. Codex adapters
  *    that advertise structured systemPrompt now retain it; AcpClient gates
  *    CodexPromptDelivery on the measured adapter version and capability. This
  *    static fallback stays false so older and unknown adapters receive rules.
@@ -157,7 +159,7 @@ export function harnessEnforcement(agentCommand: string | undefined): HarnessPro
  */
 export function harnessHonorsSessionSystemPrompt(agentCommand: string | undefined): boolean {
   return Boolean(
-    agentCommand && /(^|[/\\])claude-(agent|code)-acp(\.[a-z]+)?$/i.test(agentCommand),
+    agentCommand && /(^|[/\\])(claude-(agent|code)-acp|pi-acp)(\.[a-z]+)?$/i.test(agentCommand),
   );
 }
 

@@ -49,8 +49,12 @@ import { openRouterRoutingInput } from './openrouter-routing.js';
 import { OwnedModelFiles } from './owned-model-files.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
-import { itemPrompt, offlineBatchPrompt } from './place-prompt.js';
-import { assembleSessionPrompt, cornerHasRepositoryWork } from './prompt-assembly.js';
+import { itemPrompt, memberThreads, offlineBatchPrompt } from './place-prompt.js';
+import {
+  assembleSessionPrompt,
+  cornerHasRepositoryWork,
+  type PromptSurface,
+} from './prompt-assembly.js';
 import { resourceCallFacts } from './resource-mcp-facade.js';
 import { roomPermissionDecision, unsandboxedPermissionDecision } from './room-permissions.js';
 import { beelineAgentMcpServer, readOnlyMcpServer } from './room-session.js';
@@ -119,6 +123,7 @@ export class PlaceSession {
   /** This session has received the bounded recent window. */
   private windowDelivered = false;
   private turnPrefix = '';
+  private surface: PromptSurface = 'room';
   private names = new Map<string, string>();
   private readonly warm: WarmTranscript;
   private readonly squireRelay: SquireTaskRelay;
@@ -617,15 +622,16 @@ export class PlaceSession {
     });
     await startAgentProcess(client);
     const brief = restore?.brief;
+    this.surface = corner
+      ? repository?.resolution === 'none'
+        ? 'repo-less-corner'
+        : 'code-corner'
+      : repository?.directParticipants?.length === 2
+        ? 'dm'
+        : 'room';
     const session = assembleSessionPrompt({
       squireAvailable: true,
-      surface: corner
-        ? repository?.resolution === 'none'
-          ? 'repo-less-corner'
-          : 'code-corner'
-        : repository?.directParticipants?.length === 2
-          ? 'dm'
-          : 'room',
+      surface: this.surface,
       repositoryPending,
       agentName: self?.name ?? agent.name,
       machineHost: { hostname: hostname() },
@@ -794,6 +800,7 @@ export class PlaceSession {
       names: this.names,
       notes: this.notes,
       turnPrefix: this.turnPrefix,
+      threads: memberThreads(this.surface, this.resources.context.threads, this.options),
       fresh: !this.windowDelivered,
     };
     this.windowDelivered = true;
@@ -852,6 +859,7 @@ export class PlaceSession {
       stream.close();
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
+      this.resources.refreshThreads();
     }
     const text = durableReplyText(result.agentText);
     let steps: Answer['steps'] = [];

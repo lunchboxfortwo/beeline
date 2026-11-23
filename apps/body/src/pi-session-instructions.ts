@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { piSessionFilePath } from './pi-turn-record.js';
 
 export async function piCompactionMarker(session: string, env: Record<string, string>): Promise<string | undefined> {
@@ -15,31 +17,15 @@ export async function piCompactionMarker(session: string, env: Record<string, st
   } catch { return undefined; }
 }
 
-/** Pi ignores ACP systemPrompt. Keep one copy in its conversation, and restore
- * it after a new/repaired conversation, changed rules, or Pi compaction.
- * A missing/unreadable journal never licenses omitting safety instructions. */
-export class PiSessionInstructions {
-  private readonly sessions = new Map<string, { instructions: string; delivered: boolean; compaction?: string }>();
-
-  remember(session: string, instructions: string): void {
-    this.sessions.set(session, { instructions, delivered: false });
-  }
-
-  failed(session: string): void {
-    const state = this.sessions.get(session);
-    if (state) state.delivered = false;
-  }
-
-  async prepare(session: string, text: string, env: Record<string, string>): Promise<string> {
-    const state = this.sessions.get(session);
-    if (!state?.instructions) return text;
-    const compaction = await piCompactionMarker(session, env);
-    const resend = !state.delivered || compaction === undefined ||
-      (state.compaction ?? '') !== compaction;
-    const prefix = state.instructions;
-    const body = text === prefix ? '' : text.startsWith(`${prefix}\n\n`) ? text.slice(prefix.length + 2) : text;
-    state.delivered = true;
-    state.compaction = compaction;
-    return resend ? [prefix, body].filter(Boolean).join('\n\n') : body;
-  }
+/** Pi ignores ACP systemPrompt but replaces its own system prompt with
+ * `<agent-dir>/SYSTEM.md`, read when its process starts. Write the session
+ * rules there before session/new so they sit in Pi's system slot, once, and
+ * survive compaction. Without a private agent dir the session cannot start. */
+export async function installPiSystemPrompt(
+  env: Record<string, string>,
+  instructions: string,
+): Promise<void> {
+  const agentDir = env.PI_CODING_AGENT_DIR;
+  if (!agentDir) throw new Error('Pi session has no PI_CODING_AGENT_DIR for its rules');
+  await writePrivateFileAtomically(resolve(agentDir, 'SYSTEM.md'), instructions);
 }

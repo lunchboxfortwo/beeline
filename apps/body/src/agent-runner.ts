@@ -494,7 +494,7 @@ export class AgentRunner {
             if (membership === 'not-member') return 'agent-removed';
             if (membership === 'unknown') this.pendingBootstrap = true;
             if (!established) { established = true; await opts.onEstablished?.(); }
-            await opts.onProgress?.(`serving; ${this.places.size} place${this.places.size === 1 ? '' : 's'} with sessions`);
+            await opts.onProgress?.('');
           } catch (error) {
             if (isAgentRemovedError(error)) return 'agent-removed';
             await opts.onProgress?.(`degraded: ${error instanceof Error ? error.message : String(error)}`, error);

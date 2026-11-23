@@ -1,7 +1,10 @@
 import { agentMessageText, replyNeeded, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
 import { parseGrantDecisionLine } from '@beeline/api-contract/agent-grants';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contract/scheduled-prompts';
+import { existsSync } from 'node:fs';
+import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
 import { attachmentMarkerLines } from './attachment-delivery.js';
+import { renderMemberThreads, type OpenCornerRow, type PromptSurface } from './prompt-assembly.js';
 
 /**
  * Whether this principal may start a turn. Agents are server-validated Room members
@@ -121,6 +124,27 @@ export function resumePrompt(item: { body: string; systemEvent?: SystemEvent }):
   ].join(' ');
 }
 
+/** This place's open threads, other than itself, each with this agent's checkout when one exists. */
+export function memberThreads(
+  surface: PromptSurface,
+  listed: { readonly corners: readonly OpenCornerRow[] } | undefined,
+  place: { placeId: string; runtime: { supervisorRoot: string }; agent: { publicKey: string } },
+): string {
+  return renderMemberThreads(
+    surface,
+    (listed?.corners ?? [])
+      .filter((corner) => corner.cornerId !== place.placeId && !corner.archived)
+      .map((corner) => {
+        const checkout = agentCornerCheckoutPaths(
+          place.runtime.supervisorRoot,
+          corner.cornerId,
+          place.agent.publicKey,
+        ).path;
+        return existsSync(checkout) ? { ...corner, checkout } : corner;
+      }),
+  );
+}
+
 const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squire-approval-decided']);
 
 /**
@@ -136,6 +160,8 @@ function itemPromptContext(item: AgentCommand, options: {
   notes?: readonly string[];
   /** Session rules for a harness that does not keep a system prompt. */
   turnPrefix?: string;
+  /** Open threads of this place, rendered by `renderMemberThreads`. */
+  threads?: string;
   /** The session has not received the recent window yet. */
   fresh?: boolean;
 }): string {
@@ -150,6 +176,7 @@ function itemPromptContext(item: AgentCommand, options: {
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
+    ...(options.threads ? [options.threads] : []),
     agentMessageText({ from: author, place, id: item.id, replyNeeded: replyNeeded(item.reason, item.ask),
       text: body.trim() || '(shared attachments)', attachments: attachmentMarkerLines(source.attachments) }),
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
@@ -181,6 +208,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
+    ...(options.threads ? [options.threads] : []),
     ...visible.map((item, index) => itemPromptContext(item, { names: options.names, fresh: index === 0 && options.fresh })),
     ...(asks ? [asks] : []),
   ].join('\n\n');

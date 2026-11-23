@@ -6,7 +6,7 @@ import { watch, readFileSync, writeFileSync, type FSWatcher } from 'node:fs';
 import { explainAgentProgramFailure } from './agent-command.js';
 import { harnessTurnTokens } from './harness-turn-tokens.js';
 
-import { piCompactionMarker } from './pi-session-instructions.js';
+import { installPiSystemPrompt, piCompactionMarker } from './pi-session-instructions.js';
 
 import type { SessionMode } from './config.js';
 import { cornerAutonomyModeCandidates, roomModeCandidates } from './harness-capabilities.js';
@@ -150,14 +150,14 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       meta.systemPrompt = { append: opts.systemPrompt };
     }
     if (Object.keys(meta).length > 0) params._meta = meta;
+    if (opts.systemPrompt && isPiAcpHarness(ctx.agentLabel))
+      await installPiSystemPrompt(ctx.agentEnv, opts.systemPrompt);
     const raw = (await ctx.request('session/new', params).catch(async error => { throw await explainAgentProgramFailure(error, ctx.agentEnv); })) as Record<
       string,
       unknown
     >;
     const sessionId = raw.sessionId as string | undefined;
     if (!sessionId) throw new Error('session/new missing sessionId');
-    if (/(^|[/\\])pi-acp(\.[a-z]+)?$/i.test(ctx.agentLabel) && opts.systemPrompt)
-      ctx.piSessionInstructions.remember(sessionId, opts.systemPrompt);
     if (!ctx.osSandbox) await ctx.applySessionMode(sessionId, raw, opts.mode);
     if (ctx.codexBlockDelivery)
       ctx.promptDeliveries.set(sessionId, new CodexPromptDelivery(isPiAcpHarness(ctx.agentLabel) ? undefined : opts.systemPrompt));
@@ -265,19 +265,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
     onToolCalls?: (calls: readonly ToolCallEntry[]) => void,
     _onBackgroundToolCompletion?: (call: ToolCallEntry) => void,
   ): Promise<PromptResult> {
-    if (typeof text === 'string') text = await ctx.piSessionInstructions.prepare(sessionId, text, ctx.agentEnv);
-    else {
-      const blocks = [...text];
-      const index = blocks.findIndex(block => block.type === 'text');
-      const block = blocks[index];
-      if (block?.type === 'text') blocks[index] = { ...block,
-        text: await ctx.piSessionInstructions.prepare(sessionId, block.text, ctx.agentEnv) };
-      else {
-        const prefix = await ctx.piSessionInstructions.prepare(sessionId, '', ctx.agentEnv);
-        if (prefix) blocks.unshift({ type: 'text', text: prefix });
-      }
-      text = blocks;
-    }
     ctx.lastPromptByteCount =
       typeof text === 'string' ? Buffer.byteLength(text, 'utf8') : undefined;
     const updates: SessionUpdate[] = [];
@@ -375,7 +362,6 @@ import { AcpClient, isPiAcpHarness, flattenHarnessCause, AcpRuntimeExitedError, 
       };
     } finally {
       ctx.promptDeliveries.get(sessionId)?.complete(completed);
-      if (!completed) ctx.piSessionInstructions.failed(sessionId);
       watcher?.close();
       for (const [id, pending] of ctx.pending) {
         if (terminalReason && pending.sessionId === sessionId) {
