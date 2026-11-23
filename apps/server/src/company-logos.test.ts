@@ -234,6 +234,18 @@ describe('repository icon files', () => {
     expect(await sharp(sized.bytes).metadata()).toMatchObject({ width: 150, height: 150 });
     expect(await largestStep(sized.bytes)).toBeLessThanOrEqual(32);
   });
+  it('resizes a large flat black and white icon smoothly, not as pixel art', async () => {
+    // Two colours and only two edges each way, but drawn at 512 px: a black square whose edges fall between
+    // output pixels must come back anti-aliased.
+    const flat = Buffer.alloc(512 * 512 * 3);
+    for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) flat.fill(x >= 101 && x < 411 && y >= 101 && y < 411 ? 0 : 255, (y * 512 + x) * 3, (y * 512 + x) * 3 + 3);
+    const icon = await resolveRepositoryIcon('main', repository({ 'favicon.png': await sharp(flat, { raw: { width: 512, height: 512, channels: 3 } }).png().toBuffer() }));
+    const sized = await sizeCompanyLogo(icon!.image, '150');
+    const { data } = await sharp(sized.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    expect([...new Set(data)].filter(value => value !== 0 && value !== 255).length).toBeGreaterThan(0);
+    const nearest = await sharp(icon!.image.bytes).resize(150, 150, { kernel: 'nearest' }).removeAlpha().raw().toBuffer();
+    expect(data.equals(nearest)).toBe(false);
+  });
   it('keeps a 16 px pixel-art icon hard-edged when stored at 256 px and served at 150 px', async () => {
     const checker = Buffer.alloc(16 * 16 * 3);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) checker.fill((x + y) % 2 ? 255 : 0, (y * 16 + x) * 3, (y * 16 + x) * 3 + 3);

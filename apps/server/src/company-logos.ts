@@ -299,25 +299,51 @@ export async function resolveRepositoryIcon(branch: string, read: RepositoryRead
 const CHAT_PICTURE = 256;
 /** Below this many pixels a source is treated as pixel art: enlarged with nearest-neighbour so it stays crisp. */
 const PIXEL_ART = 64;
+/** A stored chat picture enlarged from pixel art records its source size in a PNG text chunk, so a later
+ * resize still knows the 256 px picture was drawn at, say, 16 px. */
+const PIXEL_ART_KEY = 'beeline-pixel-art';
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(bytes: Buffer): number {
+  let c = 0xffffffff;
+  for (const byte of bytes) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+/** `png` with a tEXt chunk naming its pixel-art source size, inserted before IEND. */
+function markPixelArt(png: Buffer, size: number): Buffer {
+  const body = Buffer.concat([Buffer.from('tEXt'), Buffer.from(`${PIXEL_ART_KEY}\0${size}`, 'latin1')]);
+  const chunk = Buffer.alloc(body.length + 8);
+  chunk.writeUInt32BE(body.length - 4, 0); body.copy(chunk, 4); chunk.writeUInt32BE(crc32(body), body.length + 4);
+  return Buffer.concat([png.subarray(0, png.length - 12), chunk, png.subarray(png.length - 12)]);
+}
+/** The pixel-art source size `markPixelArt` recorded, if any. */
+function markedPixelArt(png: Buffer): number | undefined {
+  for (let at = 8; at + 8 <= png.length;) {
+    const length = png.readUInt32BE(at), type = png.toString('latin1', at + 4, at + 8);
+    if (type === 'IEND' || at + 12 + length > png.length) break;
+    if (type === 'tEXt') {
+      const [key, value] = png.toString('latin1', at + 8, at + 8 + length).split('\0');
+      if (key === PIXEL_ART_KEY && Number(value) >= 1) return Number(value);
+    }
+    at += length + 12;
+  }
+  return undefined;
+}
+
 /** An icon file as the stored chat picture: 256 px square with transparent padding. A pixel-art raster (under
- * 64 px) scales up without blur; anything larger is resampled smoothly. SVG text needs the server's fonts
- * (the runtime image installs them). */
+ * 64 px) scales up without blur and is marked as pixel art; anything larger is resampled smoothly. SVG text
+ * needs the server's fonts (the runtime image installs them). */
 async function chatPicture(bytes: Buffer): Promise<Buffer> {
   const image = icoImage(bytes) ?? sharp(bytes, { limitInputPixels: 1_000_000, animated: false });
   const { width, height, format } = await image.clone().metadata();
-  return image.resize(CHAT_PICTURE, CHAT_PICTURE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
-    ...(format !== 'svg' && Math.max(width ?? PIXEL_ART, height ?? PIXEL_ART) < PIXEL_ART ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
-}
-
-/** How many pixels across the picture was drawn at: one more than the most column-to-column or row-to-row
- * changes. A 16 px icon enlarged with nearest-neighbour to 256 px still counts 16 or fewer. */
-async function drawnSize(bytes: Buffer): Promise<number> {
-  const { data, info: { width, height } } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const pixel = (x: number, y: number) => data.readUInt32LE((y * width + x) * 4);
-  let columns = 0, rows = 0;
-  for (let x = 1; x < width; x++) for (let y = 0; y < height; y++) if (pixel(x, y) !== pixel(x - 1, y)) { columns++; break; }
-  for (let y = 1; y < height; y++) for (let x = 0; x < width; x++) if (pixel(x, y) !== pixel(x, y - 1)) { rows++; break; }
-  return Math.max(columns, rows) + 1;
+  const source = Math.max(width ?? PIXEL_ART, height ?? PIXEL_ART);
+  const pixelArt = format !== 'svg' && source < PIXEL_ART;
+  const png = await image.resize(CHAT_PICTURE, CHAT_PICTURE, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
+    ...(pixelArt ? { kernel: 'nearest' as const } : {}) }).png().toBuffer();
+  return pixelArt ? markPixelArt(png, source) : png;
 }
 
 /** The repository homepage's site icon (its icon links, then /favicon.ico) as the chat picture, with the
@@ -328,13 +354,16 @@ export async function resolveHomepageIcon(homepage: string): Promise<{ image: Im
   return url && image ? { image, path: url.href } : undefined;
 }
 
-/** Native requests physical pixels so Image draws the picture without resampling it again. Pixel art (drawn
- * under 64 px) being enlarged keeps hard edges; everything else is resampled smoothly. */
+/** Native requests physical pixels so Image draws the picture without resampling it again. Enlarging pixel art
+ * (a source under 64 px: a marked chat picture's recorded size, else the image's own size) keeps hard edges;
+ * everything else is resampled smoothly. */
 export async function sizeCompanyLogo(image: Image, size: string | null): Promise<Image> {
   const pixels = Number(size);
   if (!Number.isInteger(pixels) || pixels < 1 || pixels > 512) return image;
-  const drawn = await drawnSize(image.bytes);
-  return { bytes: await sharp(image.bytes).resize(pixels, pixels, { fit: 'contain',
-    ...(drawn < PIXEL_ART && pixels > drawn ? { kernel: 'nearest' as const } : {}),
+  const input = sharp(image.bytes);
+  const { width, height } = await input.clone().metadata();
+  const source = markedPixelArt(image.bytes) ?? Math.max(width ?? PIXEL_ART, height ?? PIXEL_ART);
+  return { bytes: await input.resize(pixels, pixels, { fit: 'contain',
+    ...(source < PIXEL_ART && pixels > source ? { kernel: 'nearest' as const } : {}),
     background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toBuffer(), mime: 'image/png' };
 }
