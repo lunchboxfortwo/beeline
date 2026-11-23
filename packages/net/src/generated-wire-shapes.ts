@@ -2109,7 +2109,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"union","choices":[6,134,135]}),
   shape({"kind":"union","choices":[6,1968]}),
   shape({"kind":"intersection","choices":[1447,2107]}),
-  shape({"kind":"object","properties":{"suppressed":{"node":20,"optional":true},"answered":{"node":20,"optional":true},"receipt":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"answered":{"node":20,"optional":true},"receipt":{"node":5,"optional":true}}}),
   shape({"kind":"intersection","choices":[257,2109,1444,1443,2110]}),
   shape({"kind":"object","properties":{"action":{"node":1,"optional":false},"purpose":{"node":1,"optional":false}}}),
   shape({"kind":"object","properties":{"tool":{"node":1,"optional":false},"title":{"node":1,"optional":false},"detail":{"node":1,"optional":false},"approvalUrl":{"node":1,"optional":false},"approvalId":{"node":5,"optional":true},"linkKind":{"node":263,"optional":false},"expiresAt":{"node":17,"optional":true},"signInUrl":{"node":5,"optional":true}}}),

@@ -10,7 +10,7 @@ import { H,B,CHAT,OTHER,db,daemon } from './messaging.test-support.js';
 
 const roots:string[]=[];
 afterEach(async()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
-it.each(['native','HTTP'] as const)('%s tool delivery binds an old-target reply to the executing invocation, not the target',async transport=>{
+it.each(['native','HTTP'] as const)('%s tool delivery to a different place leaves the final visible in the turn’s place',async transport=>{
  const task=()=>sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:CHAT}},text:'Task'});
  const current=await task(),old=await sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Old task'});
  const invocation={id:randomUUID(),requestId:current.id};
@@ -29,8 +29,9 @@ it.each(['native','HTTP'] as const)('%s tool delivery binds an old-target reply 
  // Caller-supplied metadata cannot replace the private execution context.
  await executeConversationOperation('reply',{id:old.id,text:'Explicit old answer',invocation:{id:'forged',requestId:old.id}});
  expect(requests[0]).toMatchObject({roomId:CHAT,requestId:current.id,invocation});
- const final=await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:current.id,text:'Replied to the old request',harnessEnded:true,invocation},B);
- expect(final).toMatchObject({suppressed:true,answered:false});
- expect((await db.query("SELECT text FROM messages WHERE author_id=$1 AND presentation='message'",[B])).rows).toEqual([{text:'Explicit old answer'}]);
- expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'pending'}]);
+ const final=await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:current.id,text:'Final in this turn',harnessEnded:true,invocation},B);
+ expect(final).toMatchObject({delivered:true});
+ expect((await db.query("SELECT room_id,text FROM messages WHERE author_id=$1 AND presentation='message' ORDER BY room_id",[B])).rows)
+   .toEqual([{room_id:CHAT,text:'Final in this turn'},{room_id:OTHER,text:'Explicit old answer'}]);
+ expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
 });

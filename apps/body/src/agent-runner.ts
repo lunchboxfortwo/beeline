@@ -29,7 +29,6 @@ interface Place {
   running?: AgentCommand;
   /** The running item from its turn start request until its harness returns. */
   turnStarted?: AgentCommand;
-  retryOwed?: boolean;
   idleTimer?: NodeJS.Timeout;
 }
 
@@ -63,8 +62,6 @@ export class AgentRunner {
   private readonly answered = new Set<string>();
   /** Server-confirmed tool replies can finish an item before the harness ends. */
   private readonly completed = new Set<string>();
-  private readonly suppressionRetried = new Set<string>();
-  private readonly awaitingInput = new Set<string>();
   private readonly answers: AnswerStore;
   private readonly stored = new Map<string, StoredAnswer>();
   private readonly posting = new Set<string>();
@@ -232,8 +229,6 @@ export class AgentRunner {
     // queue absence cannot carry the Stop. Its closing receipt still follows.
     for (const place of this.places.values())
       if (place.running && stopped.includes(place.running.id)) place.session.cancel();
-    // A new server delivery is the normal retry boundary, including reconnect.
-    this.awaitingInput.clear();
     this.latest = commands;
     for (const item of commands)
       if (!this.answered.has(item.id)) this.place(item).session.resources.receiveCommand(item);
@@ -247,11 +242,6 @@ export class AgentRunner {
     const listed = new Set(commands.map((item) => item.id));
     const running = new Set([...this.places.values()].map((place) => place.running?.id));
     for (const id of this.completed) if (!running.has(id)) this.completed.delete(id);
-    for (const id of this.suppressionRetried)
-      if (!listed.has(id)) {
-        this.suppressionRetried.delete(id);
-        this.awaitingInput.delete(id);
-      }
     for (const id of this.answered)
       if (!listed.has(id) && !this.stored.has(id)) this.answered.delete(id);
     void this.resendStoredAnswers(listed);
@@ -280,12 +270,12 @@ export class AgentRunner {
     for (const placeId of this.places.keys()) void this.pump(placeId);
   }
 
-  /** A visible queued item gets its stored answer again. Absence alone is not
-   * acknowledgement: a membership change can hide an item that is still owed. */
+  /** Replay answers for visible items and finals from runs whose replies already committed. */
   private async resendStoredAnswers(listed: ReadonlySet<string>): Promise<void> {
     for (const answer of this.stored.values()) {
       if (
-        [answer.itemId, ...(answer.queuedRequestIds ?? [])].some((id) => listed.has(id)) &&
+        (answer.finishesAnsweredItem ||
+          [answer.itemId, ...(answer.queuedRequestIds ?? [])].some((id) => listed.has(id))) &&
         !this.posting.has(answer.itemId)
       ) {
         void this.post(answer);
@@ -296,9 +286,7 @@ export class AgentRunner {
   /** Hand the next waiting item of one place to its session; one at a time per place. */
   private async pump(placeId: string): Promise<void> {
     const place = this.places.get(placeId);
-    const ready = place?.waiting.some((item) => !this.awaitingInput.has(item.id));
-    const item =
-      place && ready && !place.running && !this.stopped ? place.waiting.shift() : undefined;
+    const item = place && !place.running && !this.stopped ? place.waiting.shift() : undefined;
     if (place && !place.running) this.armIdle(place, Boolean(item));
     if (place && item) await this.deliver(placeId, place, item);
   }
@@ -345,6 +333,7 @@ export class AgentRunner {
             roomId: item.roomId,
             requestId: (pendingBatch[0] ?? item).turnRequestId,
             invocation,
+            ...(!pendingBatch.length ? { finishesAnsweredItem: true } : {}),
             queuedRequestIds: pendingBatch.slice(1).map((next) => next.id),
             text: answer.text,
             harnessEnded: true,
@@ -369,6 +358,7 @@ export class AgentRunner {
           requestId: item.turnRequestId,
           text: '',
           harnessEnded: true,
+          finishesAnsweredItem: true,
           invocation,
         });
       if (
@@ -424,10 +414,6 @@ export class AgentRunner {
     } finally {
       place.running = undefined;
       place.turnStarted = undefined;
-      if (place.retryOwed) {
-        place.retryOwed = false;
-        this.reconcileQueue();
-      }
     }
     if (started) void this.pump(placeId);
   }
@@ -534,20 +520,7 @@ export class AgentRunner {
               : {}),
             ...(answer.steps ? { steps: answer.steps } : {}),
           });
-      if ('suppressed' in receipt && receipt.suppressed) {
-        await this.answers.remove(answer.itemId);
-        this.stored.delete(answer.itemId);
-        this.durable.delete(answer.itemId);
-        for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) {
-          this.answered.delete(id);
-          if (this.suppressionRetried.has(id)) this.awaitingInput.add(id);
-          else this.suppressionRetried.add(id);
-        }
-        // Resume still-owed work through the normal queue after this execution releases.
-        const place = this.places.get(answer.roomId);
-        if (place?.running) place.retryOwed = true;
-        else this.reconcileQueue();
-      } else if (receipt.answered !== false) {
+      if (receipt.answered !== false) {
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
         void this.answers

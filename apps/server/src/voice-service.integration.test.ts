@@ -779,7 +779,7 @@ it('projects the same assigned face and generated portrait in voice and Room ide
   }
 });
 
-it.each([false,true])('voice explicit reply suppression preserves answer correlation (unrelated target: %s)',async unrelated=>{
+it.each([false,true])('voice closing text answers its own request after an explicit reply (unrelated target: %s)',async unrelated=>{
  const room=randomUUID();
  await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Voice suppression proof',$3)`,[room,W,DIRECT]);
  for(const id of [H,A])await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`,[W,room,id]);
@@ -795,12 +795,11 @@ it.each([false,true])('voice explicit reply suppression preserves answer correla
   await beginAgentInvocation(db,A,room,current.turnRequestId,invocation.id);
   const old=unrelated?await sendMessage(db,{route:{from:{agent:H,place:room},to:{agent:A,place:room}},text:'Older separate request'}):undefined;
   const reply=await replyToMessage(db,A,{roomId:room,invocation,id:old?.id ?? current.id,text:'The explicit result'});
-  expect(await answerQueuedMessage(db,A,{roomId:room,requestId:current.id,text:'Trailing voice recap',harnessEnded:true,invocation})).toMatchObject({suppressed:true,answered:false});
+  const final=await answerQueuedMessage(db,A,{roomId:room,requestId:current.id,text:'Final voice answer',harnessEnded:true,invocation});
   const eligible=(await db.query(`SELECT m.id FROM voice_orders o JOIN agent_commands c ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id
     JOIN messages m ON m.author_id=o.agent_id AND m.room_id=$2 AND (m.id=c.result_message_id OR m.request_id=c.id OR m.request_id=c.turn_request_id)
     WHERE o.call_id=$1 AND o.spoken_message_id IS NULL AND m.presentation='message' AND m.deleted_at IS NULL`,[joined.call.id,room])).rows;
-  expect(eligible).toEqual(unrelated?[]:[{id:reply.id}]);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:unrelated?'pending':'complete'}]);
-  expect((await db.query("SELECT 1 FROM messages WHERE room_id=$1 AND text='Trailing voice recap'",[room])).rowCount).toBe(0);
+  expect(eligible).toEqual([{id:unrelated ? final.id : reply.id}]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
  }finally{await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
 });
