@@ -88,10 +88,10 @@ export class SessionResources {
   }
 
   threadsForDelivery(items: readonly AgentCommand[]): Context['threads'] | undefined {
-    for (const item of items)
-      if (!this.receivedCommands.has(item)) this.receiveCommand(item);
+    for (const item of items) if (!this.receivedCommands.has(item)) this.receiveCommand(item);
     return this.commandThreads && this.commandThreads.receivedAt > this.threadsReceivedAt
-      ? this.commandThreads.value : this.context.threads;
+      ? this.commandThreads.value
+      : this.context.threads;
   }
 
   refresh(): void {
@@ -114,7 +114,9 @@ export class SessionResources {
     return this.load(
       'threads',
       () => api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
-      () => { this.threadsReceivedAt = performance.now(); },
+      () => {
+        this.threadsReceivedAt = performance.now();
+      },
       () => read === this.threadReads,
     );
   }
