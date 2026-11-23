@@ -13,6 +13,7 @@ export const AGENT_TURN_END_SCHEMA = `
 CREATE TABLE IF NOT EXISTS agent_invocations (
   command_id text NOT NULL REFERENCES agent_commands(id) ON DELETE CASCADE,
   invocation_id text NOT NULL,
+  -- Retired fields retained through serving and rollback overlap.
   replied boolean NOT NULL DEFAULT false,
   final_suppressed boolean NOT NULL DEFAULT false,
   PRIMARY KEY(command_id,invocation_id)

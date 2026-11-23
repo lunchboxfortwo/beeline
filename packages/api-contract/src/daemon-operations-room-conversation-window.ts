@@ -422,8 +422,6 @@ export type WriteResult = {
 };
 
 export type PostRoomMessageResult = WriteResult & {
-  /** Final consumed without publication or settling unanswered requests. */
-  readonly suppressed?: boolean;
   /** False when the final does not answer the request; the queue item stays owed. */
   readonly answered?: boolean;
   /** Non-fatal delivery warnings after a public reply has already posted. */

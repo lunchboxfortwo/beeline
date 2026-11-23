@@ -21,7 +21,7 @@ export async function beginAgentInvocation(database: SqlDatabase, agent: string,
 
 /** Lock the invocation before any target command locks. Both reply and final use this order. */
 export async function lockAgentInvocation(db: SqlDatabase, agent: string, room: string, invocation: AgentInvocation) {
-  const row = (await db.query<{command_id:string;replied:boolean;final_suppressed:boolean;state:string}>(`SELECT receipt.*,command.state
+  const row = (await db.query<{command_id:string;state:string}>(`SELECT receipt.command_id,command.state
     FROM agent_invocations receipt JOIN agent_commands command ON command.id=receipt.command_id
     WHERE command.agent_id=$1 AND command.room_id=$2 AND command.turn_request_id=$3 AND receipt.invocation_id=$4
     FOR UPDATE OF receipt`,[agent,room,invocation.requestId,invocation.id])).rows[0];
@@ -29,7 +29,7 @@ export async function lockAgentInvocation(db: SqlDatabase, agent: string, room: 
   return row;
 }
 
-/** Check once before fanout. A suppression is accepted, but never answers a request. */
+/** Close the recorded execution and publish only if it has not been replaced. */
 export async function finalizeAgentInvocation<T>(database: SqlDatabase, agent: string, room: string,
   invocation: AgentInvocation, publish: (db: SqlDatabase) => Promise<T>) {
   return database.transaction(async db => {
@@ -40,21 +40,12 @@ export async function finalizeAgentInvocation<T>(database: SqlDatabase, agent: s
     // Only a recorded replacement proves that this final belongs to an obsolete session.
     const replacement = await db.query(`SELECT 1 FROM agent_turns WHERE agent_id=$1 AND room_id=$2
       AND request_id=$3 AND invocation_id IS NOT NULL AND invocation_id<>$4`, [agent,room,invocation.requestId,invocation.id]);
-    if (replacement.rowCount) return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000),answered:false as const,suppressed:true as const};
-    if (!receipt.replied) {
-      const result = await publish(db);
-      await db.query(`SELECT ended.* FROM agent_turns turn
-        CROSS JOIN LATERAL beeline_interrupt_agent_turn($1,$2,$3,NULL,turn.started_at) ended
-        WHERE turn.agent_id=$1 AND turn.room_id=$2 AND turn.request_id=$3 AND (turn.invocation_id IS NULL OR turn.invocation_id=$4)`,
-        [agent,room,invocation.requestId,invocation.id]);
-      return result;
-    }
-    await db.query(`UPDATE agent_invocations SET final_suppressed=true WHERE command_id=$1 AND invocation_id=$2`,
-      [receipt.command_id,invocation.id]);
+    if (replacement.rowCount) return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000)};
+    const result = await publish(db);
     await db.query(`SELECT ended.* FROM agent_turns turn
         CROSS JOIN LATERAL beeline_interrupt_agent_turn($1,$2,$3,NULL,turn.started_at) ended
         WHERE turn.agent_id=$1 AND turn.room_id=$2 AND turn.request_id=$3 AND (turn.invocation_id IS NULL OR turn.invocation_id=$4)`,
         [agent,room,invocation.requestId,invocation.id]);
-    return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000),answered:false as const,suppressed:true as const};
+    return result;
   });
 }
