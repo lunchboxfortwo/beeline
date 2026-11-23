@@ -353,13 +353,17 @@ const PROXIED_LOGIN_FILES = [
 export async function repairRoomAgentCredentialLinks(input: {
   root: string;
   operatorHome?: string;
+  agentKind?: AgentKind;
 }): Promise<void> {
   const root = resolve(input.root);
   const operatorHome = input.operatorHome ?? homedir();
   for (const credential of SHARED_CREDENTIALS) {
     const source = resolve(operatorHome, credential.source);
     const target = resolve(root, credential.dir, credential.target);
-    if (
+    if (credential.kind && credential.kind !== input.agentKind) {
+      // Another harness's login: a home that changed harness drops the old link.
+      await rm(target, { force: true });
+    } else if (
       existsSync(source) &&
       resolve(dirname(target), await readlink(target).catch(() => '')) !== source
     ) {
@@ -488,7 +492,7 @@ async function provisionRoomAgentCredentials(
   await writeIsolatedHarnessFile(resolve(root, 'claude', '.claude.json'), '{"mcpServers":{}}');
   await writeIsolatedHarnessFile(resolve(root, 'pi', 'mcp.json'), '{"mcpServers":{}}');
 
-  await repairRoomAgentCredentialLinks({ root, operatorHome });
+  await repairRoomAgentCredentialLinks({ root, operatorHome, agentKind: input.agentKind });
   await mkdir(resolve(root, 'goose/config'), { recursive: true, mode: 0o700 });
   for (const name of GOOSE_SHARED_CONFIG_FILES) {
     const source = resolve(operatorHome, '.config/goose', name);

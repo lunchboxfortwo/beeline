@@ -387,6 +387,7 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
   await recordFreeAgentEvent(database, agent.publicKey, 'created', {
     workspaceId: input.workspaceId,
   });
+  await notifyLive(database, { table: 'free_agents', operation: 'INSERT', roomId: '', agentId: agent.publicKey });
   return agent.publicKey;
 }
 
@@ -524,20 +525,21 @@ export class FreeAgentService {
     return beebee;
   }
 
-  /** Fire-and-forget adapter for already committed work. */
-  kick(agentId: string): void {
-    void this.reconcile(agentId).catch(error => this.log(`agent ${agentId.slice(0,12)}: ${String(error)}`));
+  /** Fire-and-forget adapter for committed lifecycle signals. */
+  kick(agentId: string, prepare = false): void {
+    const work = prepare ? this.reconcile(agentId, false, true) : this.reconcile(agentId);
+    void work.catch(error => this.log(`agent ${agentId.slice(0,12)}: ${String(error)}`));
   }
 
-  reconcile(agentId: string, refreshImage = false): Promise<void> {
+  reconcile(agentId: string, refreshImage = false, prepare = false): Promise<void> {
     const previous = this.#inFlight.get(agentId) ?? Promise.resolve();
-    const work = previous.catch(() => {}).then(() => this.#reconcile(agentId, refreshImage))
+    const work = previous.catch(() => {}).then(() => this.#reconcile(agentId, refreshImage, prepare))
       .finally(() => { if (this.#inFlight.get(agentId) === work) this.#inFlight.delete(agentId); });
     this.#inFlight.set(agentId,work);
     return work;
   }
 
-  async #reconcile(agentId: string, refreshImage = false): Promise<void> {
+  async #reconcile(agentId: string, refreshImage: boolean, prepare: boolean): Promise<void> {
     const operationId = randomUUID();
     // A real signal is source evidence; idle time never renews ownership.
     await this.database.query(`INSERT INTO live_server_instances(instance_id,renewed_at) VALUES($1,clock_timestamp())
@@ -576,22 +578,20 @@ export class FreeAgentService {
         return;
       }
       const work = initial.pending || initial.connector;
-      // A disconnected idle helper needs no provider action. Connection/work
-      // events own waking and sleeping; only startup/release visits check images.
-      if (!work && !initial.connection_id && !refreshImage) return;
+      if (!work && !initial.connection_id && !refreshImage && (!prepare || machineId)) return;
       let machine = machineId ? await this.machines.read(machineId) : undefined;
       machine ??= await this.machines.find(agentId);
       if (!machine) {
-        if (!work || !await owns()) return;
+        if ((!work && !prepare) || !await owns()) return;
         const bootstrap = opaque('bfb');
         await this.database.query(`UPDATE free_agents SET bootstrap_hash=$3 WHERE agent_id=$1 AND runtime_operation_id=$2`,
           [agentId,operationId,tokenHash(bootstrap)]);
         mutationStarted = true;
         const created = await this.machines.create({ agentId,image:this.config.image,region:this.config.region,
-          cpus:this.config.cpus,memoryMb:this.config.memoryMb,
+          cpus:this.config.cpus,memoryMb:this.config.memoryMb,skipLaunch:!work,
           env:{BEELINE_FREE_AGENT_ID:agentId,BEELINE_FREE_AGENT_BOOTSTRAP:bootstrap,BEELINE_SERVER_URL:this.config.publicOrigin} });
         await adopt(created.id);
-        await this.machines.waitFor(created.id,'started',60);
+        await this.machines.waitFor(created.id,work ? 'started' : 'stopped',60,created.instance_id);
         completedEffect = true;
         await recordFreeAgentEvent(this.database,agentId,'provisioned',{machineId,operationId});
         return;
@@ -614,9 +614,13 @@ export class FreeAgentService {
         completedEffect = true;
       }
       if (machine.state === 'created') {
-        // Fly create already boots it. Observe that launch; never send a second start.
-        await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
-      } else if (machine.state === 'stopped' || machine.state === 'suspended') {
+        // A previous create can still be preparing its root filesystem.
+        await this.machines.waitFor(machine.id,['stopped','started'],60,machine.instance_id);
+        const observed = await this.machines.read(machine.id);
+        if (!observed || observed.instance_id !== machine.instance_id) return;
+        machine = observed;
+      }
+      if (machine.state === 'stopped' || machine.state === 'suspended') {
         if (work && await owns()) {
           mutationStarted = true;
           await this.machines.start(machine.id);
@@ -764,7 +768,7 @@ export class FreeAgentService {
       if (event.type !== 'invalidate') return;
       if (event.reason === 'postgres:free_agents' && !event.targetAgentId) catchUp();
       else if (event.targetAgentId && ['connector-assignment','postgres:agent_commands','postgres:free_agents'].includes(event.reason))
-        this.kick(event.targetAgentId);
+        this.kick(event.targetAgentId, event.reason === 'postgres:free_agents' && event.operation === 'INSERT');
     });
     return () => { stopEvents(); stopResync(); stopRecovery?.(); };
   }

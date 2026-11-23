@@ -238,7 +238,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       expect(readState(stateDir).sessions[0]?.accessToken).toBe(principal.hash);
       const revoked=once(connections[0]!.output,'close');
       await db.query(`UPDATE rooms_mcp_connections SET revoked_at=now()`);await revoked;
-      expect(connections[0]!.output.frames.at(-1)).toEqual({v:1,type:'ended',reason:'unavailable'});
+      expect(connections[0]!.output.frames.at(-1)).toEqual({v:1,type:'ended',reason:'expired'});
       await db.query(`INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES('member',$1,'after-revocation')`,[room]);
       await new Promise(resolve=>setTimeout(resolve,100));
       expect(refreshes).toHaveLength(0);expect(connections).toHaveLength(1);expect(messages).toHaveLength(2);
@@ -257,7 +257,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{mentionCursor:'1'},read as never);
     const ended=output.until(2);
     await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=now() WHERE hash='synthetic-token'`);
-    await ended;expect(output.frames[1]).toEqual({v:1,type:'ended',reason:'unavailable'});
+    await ended;expect(output.frames[1]).toEqual({v:1,type:'ended',reason:'expired'});
     expect(output.writableEnded).toBe(true);expect(read).toHaveBeenCalledTimes(1);
   });
   it.each(['token','consent','family','member','scope'])('keeps %s revocation terminal even when the access token has expired',async authority=>{
@@ -273,7 +273,7 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
       if(authority==='scope')await db.query(`UPDATE rooms_mcp_connections SET scope='rooms:write'`);
       const output=reply(),read=page();
       await serveMcpMemberStream(db,principal,output as unknown as ServerResponse,{mentionCursor:'1'},read);
-      expect(output.frames).toEqual([{v:1,type:'ended',reason:'unavailable'}]);expect(read).not.toHaveBeenCalled();
+      expect(output.frames).toEqual([{v:1,type:'ended',reason:'expired'}]);expect(read).not.toHaveBeenCalled();
     }finally{
       await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=NULL,expires_at=now()+interval '2 days',family_id=NULL;
         UPDATE rooms_mcp_connections SET revoked_at=NULL,scope='rooms:read';DELETE FROM rooms_mcp_families;`);
@@ -290,8 +290,8 @@ describe.each(['pglite',...(postgresUrl?['postgres']:[])])('P12 MCP committed me
     try{
       await serveMcpMemberStream(observed,principal,output as unknown as ServerResponse,{mentionCursor:'0'},read);
       expect(read).toHaveBeenCalledTimes(1);expect(transactions).toBe(2);
-      expect(output.frames).toEqual([{v:1,type:'ended',reason:'unavailable'}]);
-      expect(errors).toHaveBeenCalledWith('[mcp-member-stream] drain failed',expect.objectContaining({message:'member stream authority changed'}));
+      expect(output.frames).toEqual([{v:1,type:'ended',reason:'expired'}]);
+      expect(errors).toHaveBeenCalledWith('[mcp-member-stream] drain failed',expect.objectContaining({message:'member stream credential ended'}));
     }finally{errors.mockRestore();await db.query(`UPDATE rooms_mcp_tokens SET revoked_at=NULL`);}
   });
 });

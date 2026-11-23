@@ -303,6 +303,8 @@ description: Review a thread's current green head against its assigned brief and
 
 ## Inspect the assigned head
 
+If you already reviewed the item or see no value in repeating the review, you may reply to the task message with a one-line decline to end the request.
+
 Read the current server-assigned brief and every required file. Its stories, criteria, non-goals and risks define scope; the commander message and inherited human constraints win conflicts. The short objective and PR description cannot change scope.
 
 Read the whole diff on every round before creating a checkout. Use \`gh pr view N --json headRefOid,files\` and \`gh pr diff N\`. Review only that exact head; if it moves, start again. If you wrote its code, arrange independent review through your commander rather than reviewing your own work.

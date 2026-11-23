@@ -31,7 +31,7 @@ import { recordStarPromptReply } from './github-star-prompt.js';
 import { observeQueuedAnswer } from './signin-funnel.js';
 import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from './message-mentions.js';
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
-import { recordMcpMemberWebhook,recordMcpMention,noteOfflineConnectors } from './rooms-mcp-members.js';
+import { recordMcpMemberWebhook,queuedMentionKind,recordQueuedMention,noteOfflineConnectors } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
 import { modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
@@ -284,11 +284,7 @@ export const REVIEWER_DISPATCH_REASONS = [
   'order',
   'report',
 ] as const;
-/**
- * Automatic dispatch and returning verdicts must not repeat a reviewed head.
- * An explicit tag or order may request another review after a repair that
- * changes evidence or the PR description without creating a new commit.
- */
+/** Review dispatch and verdict reports carry the assigned head. */
 export function reviewerDispatchCarriesHead(
   reason: string,
   sourceKind: string | undefined,
@@ -744,7 +740,8 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const privateMessage = Boolean(payload) && input.reason !== 'schedule';
   const workflowDetail = await queuedWorkflowWakeDetail(db,chat.id,chat.source,input.sourceMessageId,
     input.resume || input.reason === 'resume' ? parent?.source_message_id : undefined);
-  const wake = mcpCommandWakeSql(19);
+  const mention = queuedMentionKind(chat.id, input.reason, chat.source, target);
+  const wake = mcpCommandWakeSql(19, mention === 'connector' && !privateMessage);
   let saved = (await db.query<CommandRow>(
     `WITH inserted AS (INSERT INTO agent_commands(id,room_id,agent_id,source_message_id,turn_request_id,action,reason,
        root_command_id,parent_command_id,root_source_message_id,agent_depth,avatar_job,private_payload,state,return_room_id,review_context,wake_context,report_address,message)
@@ -784,10 +781,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   if (saved) saved = await attachQueuedContext(db, saved, chat.members);
   if (saved && chat.parent_id && ['corner_objective','human_tag'].includes(input.reason))
     await initializeThreadImplementer(db, chat.id);
-  if (saved && input.sourceMessageId) await recordMcpMention(db,input.agentId,chat.id,input.sourceMessageId);
-  const member = chat.members.find(member => member.id === input.agentId);
-  const webhookSource = privateMessage ? null : input.sourceMessageId;
-  if (saved && input.reason !== 'mcp_call' && member?.mcp && member.callback) await recordMcpMemberWebhook(db, member.id, member.callback, chat.id, webhookSource ?? saved.id,
+  if (saved && mention && input.sourceMessageId) await recordQueuedMention(db,mention,input.agentId,chat.id,input.sourceMessageId);
+  const webhookSource = mention === 'connector' && !privateMessage ? input.sourceMessageId : null;
+  if (saved && input.reason !== 'mcp_call' && target?.mcp && target.callback) await recordMcpMemberWebhook(db, target.id, target.callback, chat.id, webhookSource ?? saved.id,
     webhookSource ? sourceText ?? '' : `${payload?.kind === 'order' ? 'Order' : 'Wake'} (${input.reason}): ${payload?.text ?? sourceText ?? ''}`);
   return saved;
 }

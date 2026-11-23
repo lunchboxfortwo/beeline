@@ -11,6 +11,7 @@ export interface FreeAgentMachineSpec {
   env: Record<string, string>;
   cpus: number;
   memoryMb: number;
+  skipLaunch?: boolean;
 }
 
 export interface FreeAgentMachine {
@@ -34,8 +35,8 @@ function resumeAwareInit(config: Record<string, unknown> = {}): Record<string, u
 }
 
 export interface FreeAgentMachines {
-  /** Create and boot one Machine; returns its Fly id. */
-  create(spec: FreeAgentMachineSpec): Promise<{ id: string }>;
+  /** Create one Machine, optionally preparing its image without booting. */
+  create(spec: FreeAgentMachineSpec): Promise<{ id: string; instance_id?: string }>;
   list(): Promise<FreeAgentMachine[]>;
   /** The Machine already created for this agent, if any. */
   find(agentId: string): Promise<FreeAgentMachine | undefined>;
@@ -46,9 +47,11 @@ export interface FreeAgentMachines {
   reconnect(): FreeAgentMachines;
   suspend(id: string): Promise<void>;
   destroy(id: string): Promise<void>;
-  /** Resolve once the Machine reaches `state` (Fly's own wait), or reject after the timeout. */
-  waitFor(id: string, state: 'suspended' | 'stopped' | 'started', timeoutSeconds: number, instanceId?: string): Promise<void>;
+  /** Resolve when Fly reports one of the requested states. */
+  waitFor(id: string, state: MachineWaitState | readonly MachineWaitState[], timeoutSeconds: number, instanceId?: string): Promise<void>;
 }
+
+type MachineWaitState = 'suspended' | 'stopped' | 'started';
 
 export class FlyApiError extends Error {
   constructor(
@@ -74,10 +77,11 @@ export class FlyMachines implements FreeAgentMachines {
     this.#base = `${apiOrigin.replace(/\/$/, '')}/v1/apps/${encodeURIComponent(app)}/machines`;
   }
 
-  async create(spec: FreeAgentMachineSpec): Promise<{ id: string }> {
-    const machine = await this.#request<{ id: string }>('create', '', 'POST', {
+  async create(spec: FreeAgentMachineSpec): Promise<{ id: string; instance_id?: string }> {
+    const { id, instance_id } = await this.#request<{ id: string; instance_id?: string }>('create', '', 'POST', {
       name: `free-agent-${spec.agentId.slice(0, 16)}-${Date.now().toString(36)}`,
       region: spec.region,
+      ...(spec.skipLaunch ? { skip_launch: true } : {}),
       config: {
         image: spec.image,
         env: spec.env,
@@ -92,7 +96,7 @@ export class FlyMachines implements FreeAgentMachines {
         metadata: { beeline_agent: spec.agentId },
       },
     });
-    return { id: machine.id };
+    return { id, instance_id };
   }
 
   async list(): Promise<FreeAgentMachine[]> {
@@ -142,9 +146,10 @@ export class FlyMachines implements FreeAgentMachines {
     }
   }
 
-  async waitFor(id: string, state: 'suspended' | 'stopped' | 'started', timeoutSeconds: number, instanceId?: string): Promise<void> {
+  async waitFor(id: string, state: MachineWaitState | readonly MachineWaitState[], timeoutSeconds: number, instanceId?: string): Promise<void> {
     const instance = instanceId ? `&instance_id=${encodeURIComponent(instanceId)}` : '';
-    await this.#request('wait', `/${id}/wait?state=${state}&timeout=${timeoutSeconds}${instance}`, 'GET');
+    const query = (typeof state === 'string' ? [state] : state).map(value => `state=${value}`).join('&');
+    await this.#request('wait', `/${id}/wait?${query}&timeout=${timeoutSeconds}${instance}`, 'GET');
   }
 
   async #request<T = unknown>(

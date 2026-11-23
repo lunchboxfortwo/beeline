@@ -106,7 +106,7 @@ it('uses the provisioned model credential through runtime catch-up', async () =>
 });
 
 
-function lab(initial = 'stopped', oldImage = 'old-release') {
+function lab(initial = 'stopped', oldImage = 'old-release', createdTarget = 'started') {
   let state=initial, currentImage=oldImage, version='original';
   const calls:string[]=[];
   const hooks:{update?:()=>Promise<void>;suspend?:()=>Promise<void>;failUpdate?:boolean}={};
@@ -124,10 +124,9 @@ function lab(initial = 'stopped', oldImage = 'old-release') {
     }
     if(path==='/m1/wait'){
       expect(address.searchParams.get('instance_id')).toBe(version);
-      // A create is already booting; waiting observes that launch. Image
-      // replacement above leaves non-running versions stopped instead.
-      if(state==='created'&&address.searchParams.get('state')==='started')state='started';
-      if(address.searchParams.get('state')!==state)return new Response('state not reached',{status:408});
+      const states=address.searchParams.getAll('state');
+      if(state==='created'&&states.includes(createdTarget))state=createdTarget;
+      if(!states.includes(state))return new Response('state not reached',{status:408});
     }
     else if(path==='/m1/start'){expect(['stopped','suspended','created']).toContain(state);state='started';}
     else if(path==='/m1/suspend'){await hooks.suspend?.();state='suspended';}
@@ -278,10 +277,10 @@ it('does not replace the image on queue or reconnect signals', async () => {
   expect(runtime.calls).toEqual(['POST /m1', 'GET /m1/wait']);
 });
 
-it('observes a just-created machine through concurrent reconciles without starting it again', async () => {
-  const runtime = lab('created', image);
-  await send('first work while Fly is booting');
+it.each(['started','stopped'])('observes a just-created machine become %s and starts it once if needed', async createdTarget => {
+  const runtime = lab('created', image, createdTarget);
+  await send('first work while Fly is preparing the Machine');
   await Promise.all([runtime.service().reconcile(MODEL_AGENT), runtime.service().reconcile(MODEL_AGENT)]);
-  expect(runtime.calls).toEqual(['GET /m1/wait']);
+  expect(runtime.calls).toEqual(['GET /m1/wait', ...(createdTarget==='stopped' ? ['POST /m1/start','GET /m1/wait'] : [])]);
   expect(runtime.state()).toBe('started');
 });

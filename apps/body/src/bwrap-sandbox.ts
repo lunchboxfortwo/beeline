@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
+import { foreignLoginMaskPaths, type AgentKind } from './agent-command.js';
 
 
 
@@ -71,6 +72,11 @@ export const HARNESS_HOME_STATE_DIRS: Array<{ match: RegExp; dirs: string[] }> =
   {
     match: /(^|[/\\])opencode(\.[a-z]+)?$/i,
     dirs: ['.local/share/opencode', '.config/opencode'],
+  },
+  {
+    // agy acp writes installation_id, logs and conversations here at start.
+    match: /(^|[/\\])agy(\.[a-z]+)?$/i,
+    dirs: ['.gemini/antigravity-cli'],
   },
 ];
 
@@ -177,6 +183,26 @@ export function credentialMaskPaths(
   return masks.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+
+/**
+ * {@link credentialMaskPaths} for one session: also hides, present or not,
+ * every harness-scoped operator login that belongs to a different harness.
+ */
+export function sessionCredentialMaskPaths(
+  config: { sandboxMaskPaths?: string[]; agentKind?: AgentKind },
+  home: string = homedir(),
+): MaskedPath[] {
+  // A symlinked cache is masked at the directory it resolves to; masking the
+  // link itself would only hide the link, not the login behind it.
+  const foreign = foreignLoginMaskPaths(config.agentKind, home).map((path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  });
+  return credentialMaskPaths([...(config.sandboxMaskPaths ?? []), ...foreign], home, undefined, foreign);
+}
 
 /**
  * Every OTHER agent's runtime directory on this host, masked absent.

@@ -2,6 +2,14 @@ import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 
+export async function recordOwedMention(db: SqlDatabase, memberId: string, roomId: string, messageId: string) {
+  return (await db.query(
+    `INSERT INTO rooms_mcp_mentions(member_id,room_id,message_id) VALUES($1,$2,$3)
+     ON CONFLICT(member_id,message_id) DO NOTHING RETURNING seq`,
+    [memberId, roomId, messageId],
+  )).rowCount;
+}
+
 export function mentionRouting(memberId: string, roomId: string, messageId: string, askerHandle: string | null) {
   return { roomId, messageId, memberId, replyRule: mentionReplyRule(messageId, askerHandle),
     idempotencyKey: `mention:${memberId}:${messageId}` };
@@ -38,7 +46,8 @@ export async function prepareMentionReplyInput(db: SqlDatabase, member: string,
  * prove an answer (historical failed activations also completed commands).
  */
 export const OWED_MENTION_OPEN_SQL = `
-  NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
+  m.presentation='message' AND m.system_event IS NULL
+  AND NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id
     AND reply.author_id=mention.member_id AND reply.reply_to_message_id=mention.message_id
     AND reply.deleted_at IS NULL AND reply.presentation IN ('message','card'))
   AND NOT EXISTS(SELECT 1 FROM messages reply WHERE reply.room_id=mention.room_id

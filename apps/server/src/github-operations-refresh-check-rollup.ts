@@ -144,8 +144,8 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
           const becameFailing = reportFailure;
           // A gate that opens before the displayed checks settle wakes review and
           // landing without a check note.
-          const gateOpened = ciGate?.checks === 'passing' && summary.status !== 'passing' &&
-            cornerGateChecks(current, checkHeadSha) !== 'passing';
+          const gateOpened = ciGate && (ciGate.checks ?? 'passing') === 'passing' && summary.status !== 'passing' &&
+            cornerGateChecks(current, checkHeadSha, ciGate.required ? 'review' : 'merge') !== 'passing';
           const suite = /check suite/i.test(providerCheck.name);
           const failureName = becameFailing || suite
             ? failedChecks.find(item => !/check suite/i.test(item.name))?.name

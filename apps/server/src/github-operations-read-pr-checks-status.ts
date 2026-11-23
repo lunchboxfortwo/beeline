@@ -14,7 +14,7 @@ import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { moveStoredCornerHead } from './github-operations-begin-identity.js';
 import { recordCornerGithubFact, advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
-import { ciGateChecks, cornerCiGate, cornerGateChecks } from './corner-ci-gate.js';
+import { ciGateChecks, cornerCiGate, storedCornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
 
 
@@ -121,12 +121,12 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       corner.lifecycle.checksSummary?.total === 0 &&
       corner.lifecycle.pr?.headSha === pr.headSha;
     const checks = completedWithoutChecks ? ('passed' as const) : rollup.state;
-    // Review and merging wait only for the CI gate: exactly the base branch's
-    // required checks, and none when it requires none. `checks` stays as shown.
     const gateChecks = rollup.required ? ciGateChecks(rollup) : checks;
     // A confirmed zero-check completion records its own green after this read.
-    const gateChanged = Boolean(rollup.required) && !zeroChecksConfirmed &&
-      cornerGateChecks(corner.lifecycle, pr.headSha) !== cornerCiGate(rollup, pr.headSha)?.checks;
+    const observedGate = cornerCiGate(rollup, pr.headSha);
+    const storedGate = storedCornerCiGate(corner.lifecycle, pr.headSha);
+    const gateChanged = observedGate && !zeroChecksConfirmed &&
+      (storedGate?.checks !== observedGate.checks || storedGate?.required !== observedGate.required);
     const summaryStatus = checks === 'passed' ? 'passing' : checks === 'failed' ? 'failing' : 'pending';
     const mergeabilityChanged = corner.lifecycle.pr?.mergeability !== pr.mergeability;
     const refreshEmptyGreen = corner.lifecycle.checks === 'passing' &&
@@ -165,7 +165,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     let reviewerWake = reviewerWakeFromFacts({
       configuredReviewerId,
       reviewerHandle: corner.reviewer_handle,
-      checks: gateChecks,
+      checks: rollup.required?.length ? gateChecks : checks,
       reviewWoken: corner.review_woken,
     });
     const mergeDecision = cornerMergeability({

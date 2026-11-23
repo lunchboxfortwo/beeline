@@ -349,8 +349,6 @@ async function readCornerAdvance(
     ).rows[0];
     const review = await loadCornerReviewState(db,cornerId,head);
     // Completed commands still prove delivery; only missing IDs invalidate their receipts.
-    // A review handback receipt names its deterministic command: one recorded without that
-    // command (an empty review before the handback was restored) is replanned once.
     const receipts = [...(corner.machine?.effects ?? []).filter(key => key.startsWith('command:red:')).map(marker => ({
       marker, key: marker.slice('command:'.length, marker.lastIndexOf(':')), id: marker.slice(marker.lastIndexOf(':') + 1),
     })), ...(corner.machine?.effects ?? []).filter(key => key.startsWith('review-failed:')).map(key => ({
@@ -609,9 +607,7 @@ async function writeCornerAdvance(
           );
           break;
         case 'review-findings': {
-          // A review with no usable verdict still returns ownership to the implementer once, privately.
-          const text = facts.reviewEnded?.emptyCount ? reviewBlockedText(corner, 'the reviewer gave no verdict')
-            : `FAIL: ${facts.reviewEnded?.findings ?? 'Review failed'}`;
+          const text = `FAIL: ${facts.reviewEnded?.findings ?? 'Review failed'}`;
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
             id:reviewHandbackId(cornerId, head!, facts.reviewEnded!.id),
             roomId:cornerId,agentId:corner.worker_agent_id,sourceMessageId:null,reason:'corner_review_needed',
@@ -705,13 +701,9 @@ export async function noteMissingReviewer(
 }
 
 
-/** The once-per-head-and-review handback command for a review without approval. */
+/** The once-per-head-and-review handback command for review findings. */
 const reviewHandbackId = (cornerId: string, head: string, reviewId: string) =>
   createHash('sha256').update(`review-failed:${cornerId}:${head}:${reviewId}`).digest('hex');
-
-/** The handback wording for a review gap, shared with a review that ended without a verdict. */
-const reviewBlockedText = (corner: CornerRow, reason: string) =>
-  `${corner.lifecycle.checks === 'passing' ? 'Checks passed; ' : ''}${reason}; arrange review or report the blocker to its commander`;
 
 /**
  * One handback for every review gap, in the thread. The implementer owns
@@ -733,7 +725,7 @@ export async function noteReviewBlocked(
         agentId: corner.worker_agent_id,
         sourceMessageId: null,
         privatePayload: {
-          text: systemText(reviewBlockedText(corner, reason)),
+          text: systemText(`${corner.lifecycle.checks === 'passing' ? 'Checks passed; ' : ''}${reason}; arrange review or report the blocker to its commander`),
           authorId: SYSTEM_AUTHOR_ID,
           fromRoomId: cornerId,
           kind: 'lifecycle',
@@ -784,13 +776,6 @@ export async function queueReviewerCommand(
     headSha !== undefined &&
     (await hasPendingCornerReview(db, input.roomId, input.agentId, headSha, pullRequest))
   )
-    return { blocked: true };
-  // FAIL findings on this head and brief revision are its verdict; an explicit
-  // request is the way to ask for another review of the same head.
-  const reviewed = headSha === undefined ? undefined : (await loadCornerReviewState(db, input.roomId, headSha)).ended;
-  if (reviewed?.findings && (await db.query(
-    `SELECT 1 FROM agent_commands WHERE id=$1 AND (review_context->>'briefRevision')::int=$2`,
-    [reviewed.id, brief?.revision ?? 0])).rowCount)
     return { blocked: true };
   const prior = (
     await db.query<{ text: string }>(
