@@ -325,18 +325,14 @@ describe('SlashVerbPicker agent command palette', () => {
     expect(scroll().props.scrollEnabled).toBe(true);
   });
 
-  it('fades a short list once the keyboard squeezes it below its rows', () => {
-    const { scroll, measure } = pickerScroll(3);
+  it.each([
+    { rows: 3, viewport: 100, content: 3 * 56 },
+    { rows: 1, viewport: 52, content: 56 },
+  ])('scrolls and fades $rows row(s) when the keyboard squeezes the viewport to $viewport px', ({ rows, viewport, content }) => {
+    const { scroll, measure } = pickerScroll(rows);
     expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 0 });
-    measure(100, 3 * 56);
+    measure(viewport, content);
     expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 48 });
     expect(scroll().props.scrollEnabled).toBe(true);
-  });
-
-  it('ignores a sliver of overflow so one squeezed row stays crisp', () => {
-    const { scroll, measure } = pickerScroll(1);
-    measure(52, 56);
-    expect(scroll().props.fadingEdgeLength).toEqual({ start: 0, end: 0 });
-    expect(scroll().props.scrollEnabled).toBe(false);
   });
 });

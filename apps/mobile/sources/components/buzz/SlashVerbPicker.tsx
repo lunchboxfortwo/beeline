@@ -8,8 +8,8 @@ import { SuggestionCard, SuggestionRow } from '@/ui/screens/composer/Suggestions
 /** At most six rows show before the list scrolls inside the card. */
 const VISIBLE_ROWS = 6;
 const ROW_HEIGHT = 56;
-/** Overflow smaller than this (a sliver of the last row) neither scrolls nor fades. */
-const OVERFLOW_SLACK = 8;
+/** Sub-pixel layout rounding; any larger overflow clips a row, so the list must scroll and fade. */
+const OVERFLOW_EPSILON = 0.5;
 
 export function SlashVerbPicker({
   verbs,
@@ -43,7 +43,7 @@ export function SlashVerbPicker({
   const [contentHeight, setContentHeight] = React.useState<number | null>(null);
   const overflows =
     viewportHeight !== null && contentHeight !== null
-      ? contentHeight - viewportHeight > OVERFLOW_SLACK
+      ? contentHeight - viewportHeight > OVERFLOW_EPSILON
       : commandCount + verbs.length > VISIBLE_ROWS;
   return (
     <SuggestionCard
