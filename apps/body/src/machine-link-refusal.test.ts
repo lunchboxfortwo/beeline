@@ -201,8 +201,9 @@ it('stopped channels cannot restart or accept stale registrations', async () => 
   expect(channel.registration()).toBeUndefined();
   expect(channel.isOpen()).toBe(false);
   expect(await settled(channel.operationReady())).toMatchObject({ code: 'runtime_ended' });
-  expect(await settled(channel.requestOperation('getAgentConfiguration', { agentId } as never)))
-    .toMatchObject({ code: 'runtime_ended' });
+  expect(
+    await settled(channel.requestOperation('getAgentConfiguration', { agentId } as never)),
+  ).toMatchObject({ code: 'runtime_ended' });
   expect(sockets).toHaveLength(1);
 });
 
@@ -212,7 +213,10 @@ it('a retired channel cannot displace its replacement after stop and start', asy
   sockets[0]!.receive({ type: 'registered', capabilities: {} });
   const replacement = machine.attach(agentId, {
     registration: () => ({ token: 'replacement' }),
-    onOpen: () => {}, onClose: () => {}, onMessage: () => {}, onUpdateRequired: () => {},
+    onOpen: () => {},
+    onClose: () => {},
+    onMessage: () => {},
+    onUpdateRequired: () => {},
   });
   replacement.start();
   channel.stop();
@@ -223,17 +227,24 @@ it('a retired channel cannot displace its replacement after stop and start', asy
   sockets[0]!.receive({ type: 'registered', capabilities: {} });
   await replacement.operationReady();
   const operation = replacement.requestOperation('getAgentConfiguration', { agentId } as never);
-  const frame = sockets[0]!.frames.find(item => item.type === 'daemon-operation')!;
-  sockets[0]!.receive({ type: 'daemon-operation-result', requestId: frame.requestId, result: { id: 'ok' } });
+  const frame = sockets[0]!.frames.find((item) => item.type === 'daemon-operation')!;
+  sockets[0]!.receive({
+    type: 'daemon-operation-result',
+    requestId: frame.requestId,
+    result: { id: 'ok' },
+  });
   await expect(operation).resolves.toEqual({ id: 'ok' });
-  expect(sockets[0]!.frames.filter(item => item.type === 'register-machine')).toHaveLength(2);
+  expect(sockets[0]!.frames.filter((item) => item.type === 'register-machine')).toHaveLength(2);
 });
 
 it('forced updates refuse channels attached or first wanted after the update', async () => {
   const { machine, channel, sockets } = fixture();
   const handlers = {
     registration: () => ({ token: 'late' }),
-    onOpen: () => {}, onClose: () => {}, onMessage: () => {}, onUpdateRequired: () => {},
+    onOpen: () => {},
+    onClose: () => {},
+    onMessage: () => {},
+    onUpdateRequired: () => {},
   };
   const dormant = machine.attach('dormant', handlers);
   const ready = settled(channel.operationReady());
@@ -245,8 +256,9 @@ it('forced updates refuse channels attached or first wanted after the update', a
   for (const candidate of [dormant, late]) {
     candidate.start();
     expect(await settled(candidate.operationReady())).toMatchObject({ code: 'update_required' });
-    expect(await settled(candidate.requestOperation('getAgentConfiguration', { agentId } as never)))
-      .toEqual({ code: 'update_required', error: 'Helper update required' });
+    expect(
+      await settled(candidate.requestOperation('getAgentConfiguration', { agentId } as never)),
+    ).toEqual({ code: 'update_required', error: 'Helper update required' });
     expect(candidate.registration()).toBeUndefined();
   }
   expect(sockets).toHaveLength(1);
