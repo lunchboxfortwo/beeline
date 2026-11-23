@@ -10,9 +10,9 @@ import type { DaemonApiClient } from './daemon-api-client.js';
 import { PlaceSession } from './place-session.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 
-const pendingRead = (name: string) =>
+export const pendingRead = (name: string) =>
   name === 'listRoomCorners' ? Promise.resolve({ corners: [] }) : new Promise(() => {});
-const roots: string[] = [];
+export const roots: string[] = [];
 afterEach(async () => {
   for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true });
 });

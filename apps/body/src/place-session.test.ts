@@ -8,7 +8,7 @@ import { distillTurnFailureReason } from './turn-failure-reason.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 import { runOwnedFile as execFileAsync } from './wait.js';
-import { fixture } from './place-session.test-support.js';
+import { fixture, pendingRead, roots } from './place-session.test-support.js';
 
 // Cache persistence is tested with real files by SessionResources; these prompt tests intentionally finish while optional background work is pending.
 vi.mock('./atomic-private-file.js', async (original) => {
