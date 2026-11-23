@@ -308,9 +308,7 @@ export async function hasPendingCornerReview(db: SqlDatabase, roomId: string, ag
       AND command.state='pending' AND ${greenReviewRequestSql('command')}
       AND command.review_context->>'headSha'=$3
       AND command.review_context->'pullRequest'=COALESCE($4::jsonb,
-        (SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1))
-      AND (command.review_context->>'briefRevision')::int IS NOT DISTINCT FROM
-        COALESCE((SELECT max(revision) FROM corner_brief_revisions WHERE corner_id=$1),0) LIMIT 1`,
+        (SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1)) AND (command.review_context->>'briefRevision')::int IS NOT DISTINCT FROM COALESCE((SELECT max(revision) FROM corner_brief_revisions WHERE corner_id=$1),0) LIMIT 1`,
     [roomId,agentId,headSha,pullRequest == null ? null : json(pullRequest)])).rowCount > 0;
 }
 export { turnRootMessageSql } from './message-route.js';
