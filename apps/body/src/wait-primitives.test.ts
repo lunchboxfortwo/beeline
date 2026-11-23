@@ -186,23 +186,30 @@ it('connect fails with the transport error and can be abandoned', async () => {
 });
 
 it.runIf(process.platform !== 'win32')(
-  'a synchronously failed socket preserves errno and its readiness probe exits cleanly',
+  'a failed socket preserves native errno and its readiness probe exits cleanly',
   () => {
-    // An overlong Unix address fails before createConnection returns, while
-    // Node delivers error on the next tick. The public probe must return false
-    // without an unhandled error killing its process.
+    // An overlong Unix address fails synchronously on newer Node versions,
+    // but older versions truncate it and report ENOENT asynchronously. Native
+    // createConnection supplies the errno oracle for the current runtime.
+    // The public probe must return false without an unhandled error killing it.
     const script = `import { connect } from ${JSON.stringify(resolve(__dirname, 'wait.ts'))};
       import { squireBrokerSocketReady } from ${JSON.stringify(resolve(__dirname, 'squire-host.ts'))};
+      import { createConnection } from 'node:net';
+      import { strictEqual } from 'node:assert';
       const path = 'x'.repeat(200);
+      const nativeError = await new Promise((resolve) => {
+        const socket = createConnection({ path });
+        socket.once('error', resolve);
+      });
       try { await connect(path, { peer: 'invalid address' }); process.exitCode = 2; }
-      catch (error) { if (error.code !== 'EINVAL') throw error; }
+      catch (error) { strictEqual(error.code, nativeError.code); }
       console.log(await squireBrokerSocketReady(path));`;
     const result = spawnSync(
       process.execPath,
       ['--import', 'tsx', '--input-type=module', '-e', script],
       { encoding: 'utf8' },
     );
-    expect(result.status).toBe(0);
+    expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe('false');
     expect(result.stderr).not.toContain('Unhandled');
   },
