@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,11 +39,74 @@ function fakeChild(handlers: Record<string, unknown>) {
 }
 
 const homes: string[] = [];
+const children: ChildProcess[] = [];
 afterEach(() => {
+  for (const child of children.splice(0)) child.kill('SIGKILL');
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
 describe('StdioSquireMcpClient', () => {
+  it.each(['initialize', 'tools/list'])('discards a live child with stdout EOF during %s', async method => {
+    const fresh = fakeChild({ initialize: {}, 'tools/list': { tools: [] } });
+    let original!: ChildProcess;
+    let closed!: Promise<void>;
+    const launch = vi.fn()
+      .mockImplementationOnce(() => {
+        original = spawn(process.execPath, ['-e', `
+          let buffer = '';
+          process.stdin.on('data', chunk => {
+            buffer += chunk;
+            let end;
+            while ((end = buffer.indexOf('\\n')) >= 0) {
+              const request = JSON.parse(buffer.slice(0, end));
+              buffer = buffer.slice(end + 1);
+              if (request.method === ${JSON.stringify(method)}) {
+                require('node:fs').closeSync(1);
+                return;
+              }
+              if (request.id !== undefined)
+                process.stdout.write(JSON.stringify({id: request.id, result: {}}) + '\\n');
+            }
+          });
+        `]);
+        children.push(original);
+        closed = new Promise(resolve => original.once('close', () => resolve()));
+        return original;
+      })
+      .mockReturnValue(fresh.child);
+    const client = new StdioSquireMcpClient({ scope: { agentId: 'agent', roomId: 'room' }, spawn: launch });
+    try {
+      await expect(client.requestMcp('tools/list', {})).resolves.toEqual({ tools: [] });
+      await closed;
+      expect(original.signalCode).toBe('SIGTERM');
+      expect(launch).toHaveBeenCalledTimes(2);
+      await expect(client.requestMcp('tools/list', {})).resolves.toEqual({ tools: [] });
+      expect(launch).toHaveBeenCalledTimes(2);
+    } finally { client.close(); }
+  });
+
+  it.each(['end', 'close', 'error', 'already-ended', 'already-closed'])('invalidates stdout on %s without affecting a replacement', async event => {
+    const old = fakeChild(event.startsWith('already-') ? {} : { initialize: {} });
+    if (event === 'already-ended') Object.assign(old.child.stdout, { readableEnded: true });
+    if (event === 'already-closed') Object.assign(old.child.stdout, { closed: true });
+    const fresh = fakeChild({ initialize: {}, 'tools/list': { tools: [] } });
+    const launch = vi.fn().mockReturnValueOnce(old.child).mockReturnValue(fresh.child);
+    const client = new StdioSquireMcpClient({ scope: { agentId: 'agent', roomId: 'room' }, spawn: launch });
+    try {
+      const pending = client.requestMcp('tools/list', {});
+      if (!event.startsWith('already-')) {
+        await Promise.resolve();
+        await Promise.resolve();
+        old.child.stdout.emit(event, ...(event === 'error' ? [new Error('broken stdout')] : []));
+      }
+      await expect(pending).resolves.toEqual({ tools: [] });
+      expect(old.child.killed).toBe(true);
+      old.child.emit('exit', 0);
+      await expect(client.requestMcp('tools/list', {})).resolves.toEqual({ tools: [] });
+      expect(launch).toHaveBeenCalledTimes(2);
+    } finally { client.close(); }
+  });
+
   it('returns an explicit malformed-request refusal without reconnecting or starting another process', async () => {
     const {child}=fakeChild({initialize:{}});
     const write=child.stdin.write;

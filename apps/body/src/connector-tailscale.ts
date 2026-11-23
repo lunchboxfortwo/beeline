@@ -6,7 +6,6 @@
  * bounded wait. An unauthenticated client prints a browser URL; that URL is
  * returned to the Workbench ceremony and no auth key ever enters Beeline.
  */
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
@@ -156,15 +155,24 @@ export function watchTailscaleSignIn(
   const off = (
     options.watch ??
     ((changed) => {
-      const child = spawn('tailscale', ['debug', 'watch-ipn', '--initial'], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      child.stdout.on('data', changed);
-      child.once('error', () => {
-        stopped = true;
+      // A push subscription for this connect; only its stdout drives probes.
+      const watching = new AbortController();
+      runOwned({
+        step: 'tailscale debug watch-ipn',
+        file: 'tailscale',
+        args: ['debug', 'watch-ipn', '--initial'],
+        captureOutput: false,
+        machineRead: true,
+        signal: watching.signal,
+        onSpawn: (child) => {
+          child.stdout?.on('data', changed);
+          child.stderr?.resume();
+        },
+      }).catch(() => {
+        if (!watching.signal.aborted) stopped = true;
       });
       return () => {
-        child.kill();
+        watching.abort();
       };
     })
   )(() => {

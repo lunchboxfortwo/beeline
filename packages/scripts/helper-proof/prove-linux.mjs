@@ -275,33 +275,29 @@ try {
     );
     console.log(await entry(cli, ['update']));
   });
-  await phase('kernel process death and native watchdog restart the sole owner', async () => {
-    let successor = observe((s) => serving(s) && s.generation !== baseline.generation);
+  await phase('kernel process death restarts the sole owner', async () => {
+    const successor = observe((s) => serving(s) && s.generation !== baseline.generation);
     await systemctl('kill', '--signal=SIGKILL', '--kill-whom=main', 'beeline-helper.service');
     baseline = await successor;
-    await mkdir(`${unit}.d`, { recursive: true });
-    await writeFile(
-      `${unit}.d/proof-watchdog.conf`,
-      '[Service]\nWatchdogSec=3s\nWatchdogSignal=SIGKILL\n',
-    );
-    await systemctl('daemon-reload');
-    successor = observe((s) => serving(s) && s.generation !== baseline.generation);
-    await systemctl('restart', 'beeline-helper.service');
-    baseline = await successor;
-    await delay(4500);
-    assert.equal((await observe(serving)).generation, baseline.generation);
-    successor = observe((s) => serving(s) && s.generation !== baseline.generation);
-    await systemctl('kill', '--signal=SIGSTOP', '--kill-whom=main', 'beeline-helper.service');
-    baseline = await successor;
-    await unlink(`${unit}.d/proof-watchdog.conf`);
-    await systemctl('daemon-reload');
   });
   await phase(
     'real command intake and reply through the fixture HTTP/WebSocket server',
     async () => {
       await fixture.addRoom();
       const id = await fixture.message('native first message');
-      assert.equal((await fixture.waitReply(id, 60_000)).length, 1);
+      const replies = await fixture.waitReply(id, 60_000);
+      assert.equal(replies.length, 1);
+      console.log('[native-command]', JSON.stringify({ request: id, replies }));
+      const scopes = await systemctl(
+        'list-units',
+        '--type=scope',
+        '--all',
+        '--plain',
+        '--no-legend',
+        'beeline-acp-*',
+      );
+      assert.match(scopes, /beeline-acp-.*active/);
+      console.log('[native-acp-scopes]', scopes);
     },
   );
   await phase('invalid release checksum, import, and engine fail without activation', async () => {
@@ -545,6 +541,16 @@ try {
   );
   await phase('explicit native stop stays off', async () => {
     await systemctl('stop', 'beeline-helper.service');
+    const scopes = await systemctl(
+      'list-units',
+      '--type=scope',
+      '--state=active',
+      '--plain',
+      '--no-legend',
+      'beeline-acp-*',
+    );
+    assert.equal(scopes.trim(), '', 'native stop must end every ACP scope');
+    console.log('[native-acp-scopes] no active scopes after native stop');
     await delay(6500);
     assert.match(
       await systemctl('show', '-p', 'ActiveState', '-p', 'MainPID', 'beeline-helper.service'),

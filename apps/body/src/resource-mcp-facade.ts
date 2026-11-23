@@ -5,11 +5,11 @@ import { squireApprovalAction, type SquireApprovalDetails } from '@beeline/api-c
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { TurnStoppedError } from './turn-stop.js';
-import { ask } from './wait.js';
+import { ask, onEnd, runOwned } from './wait.js';
 
 export const RESOURCE_FACADE_FLAG = '--resource-mcp-facade';
 export function resourceFacadeArgs(): string[] {
@@ -689,7 +689,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
     }
   };
   const authorizedResponseIds = new Set<string>();
-  let child: ReturnType<typeof spawn> | undefined;
+  let child: ChildProcess | undefined;
   let stopped = false;
   const transport = new AbortController();
   const stop = () => {
@@ -707,12 +707,24 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
   let responsePending = Promise.resolve();
   const resourceChild = () => {
     if (child) return child;
-    const started = spawn(command!, launch.args ?? [], {
+    let started!: ChildProcess;
+    // In the harness's group (see stop); its stderr still reaches ours.
+    void runOwned({
+      step: `${target} MCP`,
+      file: command!,
+      args: launch.args ?? [],
       env: childEnv,
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
+      stdin: 'pipe',
+      group: 'caller',
+      captureOutput: false,
+      machineRead: true,
+      onSpawn: (spawned) => {
+        started = spawned;
+        spawned.stderr?.pipe(process.stderr, { end: false });
+      },
+    }).catch(() => undefined);
     child = started;
-    const output = createInterface({ input: started.stdout });
+    const output = createInterface({ input: started.stdout! });
     output.on('line', (line) => {
       responsePending = responsePending.then(async () => {
         if (stopped) return;
@@ -727,12 +739,8 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
         }
       });
     });
-    started.on('error', () => {
-      process.exitCode = 1;
-      stop();
-    });
-    started.on('exit', (code) => {
-      process.exitCode = code ?? 1;
+    onEnd(started, ['exit', 'error'], (event, code) => {
+      process.exitCode = event === 'exit' ? ((code as number | null) ?? 1) : 1;
       stop();
     });
     return started;

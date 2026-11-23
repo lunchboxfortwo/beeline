@@ -359,7 +359,10 @@ export async function waitReply(requestId, timeoutMs = 30_000) {
     for (;;) {
       changed = false;
       const rows = await database.query(
-        `SELECT text FROM messages WHERE request_id=$1 AND author_id=ANY($2::text[]) AND presentation='message'`,
+        `SELECT text FROM messages WHERE author_id=ANY($2::text[]) AND presentation='message'
+          AND (request_id=$1 OR request_id IN (
+            SELECT turn_request_id FROM agent_commands WHERE source_message_id=$1 OR root_source_message_id=$1
+          ))`,
         [requestId, agents],
       );
       if (rows.rows.length) return rows.rows;

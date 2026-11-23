@@ -172,7 +172,7 @@ export interface OwnedCommand extends WaitReport {
   ownerLink?: boolean;
   stdin?: 'pipe';
   captureOutput?: boolean;
-  /** Byte limit per output stream; exceeding it kills the child group and rejects. */
+  /** Byte limit per output stream; exceeding it kills the owned child/group and rejects. */
   maxBuffer?: number;
   onSpawn?: (child: ChildProcess) => void;
   /** Called for each output line as it arrives. By default stdout and stderr lines stream to the terminal. */
@@ -180,12 +180,18 @@ export interface OwnedCommand extends WaitReport {
   /** A terminal program: inherits stdio and stays in the terminal's process group. */
   interactive?: boolean;
   /**
-   * With `interactive`: the service manager or terminal signals this child itself
-   * (it shares the caller's process group or cgroup), so SIGINT/SIGTERM leave it
-   * to shut down on its own instead of killing it first. Exit still kills it.
+   * `caller`: a piped child that stays in this process's group (or resource
+   * scope), so whoever ends this process's group also ends it. Exit and the
+   * caller's abort kill only the child itself, not a group. Default `own`.
+   */
+  group?: 'own' | 'caller';
+  /**
+   * For a child in the caller's group (`interactive` or `group: 'caller'`):
+   * the service manager or terminal signals it itself, so SIGINT/SIGTERM leave
+   * it to shut down on its own instead of killing it first. Exit still kills it.
    */
   sharedSignals?: boolean;
-  /** The caller left: kill the child's process group. */
+  /** The caller left: kill the owned group, or just the child with `group: 'caller'`. */
   signal?: AbortSignal;
 }
 export interface OwnedResult {
@@ -215,12 +221,14 @@ function waitKillGroup(child: ChildProcess): void {
 }
 /**
  * Run a child this caller owns until it exits. Output lines stream as they
- * arrive, so the child's own output is the progress. On exit the child's
- * process group is killed, so grandchildren holding its pipes die and the
- * output closes; nothing is left running after the result.
+ * arrive, so the child's own output is the progress. By default, exit kills
+ * the owned process group, including grandchildren holding its pipes. With
+ * `group: 'caller'` or `interactive`, teardown targets only the child; the
+ * surrounding group or resource scope owns descendants. The result settles
+ * after the child's output pipes close.
  */
 export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promise<OwnedResult> {
-  // Owned children never outlive their owner: exit and SIGINT/SIGTERM kill each group.
+  // Exit tears down each owned child/group; sharedSignals delegates SIGINT/SIGTERM.
   if (!waitOwnerHooks) {
     waitOwnerHooks = true;
     process.once('exit', () => {
@@ -252,7 +260,7 @@ export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promi
       return;
     }
     report?.(`waiting for ${command.step}`);
-    const leader = !command.interactive;
+    const leader = !command.interactive && command.group !== 'caller';
     const env = { ...(command.env ?? process.env) };
     if (command.ownerLink) env.BEELINE_OWNER_LINK = '1';
     else delete env.BEELINE_OWNER_LINK;
@@ -272,7 +280,7 @@ export function runOwned(command: OwnedCommand, childProcess = { spawn }): Promi
     });
     if (leader) waitGroupLeaders.add(child);
     if (command.ownerLink) waitLinkedWorkers.add(child);
-    if (command.interactive && command.sharedSignals) waitSharedSignals.add(child);
+    if (!leader && command.sharedSignals) waitSharedSignals.add(child);
     waitOwnedChildren.add(child);
     const output = { stdout: '', stderr: '' };
     const bytes = { stdout: 0, stderr: 0 };

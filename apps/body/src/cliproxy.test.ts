@@ -50,18 +50,18 @@ http.createServer((req, res) => {
 }).listen(port, '127.0.0.1', () => console.log('API server started successfully on: 127.0.0.1:' + port));
 `;
 
-async function installFake(home: string): Promise<void> {
+async function installFake(home: string, source = FAKE_PROXY): Promise<void> {
   const dir = join(cliProxyDir(home), 'bin', '1.0.0');
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, 'cli-proxy-api'), FAKE_PROXY);
+  await writeFile(join(dir, 'cli-proxy-api'), source);
   await chmod(join(dir, 'cli-proxy-api'), 0o755);
   await writeFile(join(cliProxyDir(home), 'bin', 'current'), '1.0.0\n');
 }
 
-async function proxyIn(): Promise<{ home: string; proxy: CliProxy }> {
+async function proxyIn(source?: string): Promise<{ home: string; proxy: CliProxy }> {
   const home = await mkdtemp(join(tmpdir(), 'cliproxy-'));
   roots.push(home);
-  await installFake(home);
+  await installFake(home, source);
   const proxy = new CliProxy(home);
   proxies.push(proxy);
   return { home, proxy };
@@ -99,6 +99,26 @@ it('writes private loopback configuration and replaces logins through management
   });
   expect(await proxy.readLogin('claude')).toMatchObject({ access_token: 'second' });
   expect(await proxy.readLogin('codex')).toBeUndefined();
+});
+
+it('fails a start whose proxy exits before its ready line, naming its last line', async () => {
+  const { proxy } = await proxyIn(
+    `#!${process.execPath}\nconsole.error('listen tcp: address already in use'); process.exit(3);\n`,
+  );
+  await expect(proxy.start()).rejects.toThrow(
+    'CLIProxyAPI exited 3: listen tcp: address already in use',
+  );
+  // A failed start leaves nothing running: the next start launches again.
+  await expect(proxy.start()).rejects.toThrow('CLIProxyAPI exited 3');
+});
+
+it('is ready on its ready phrase even before the line ends, and stop waits for its exit', async () => {
+  const { proxy } = await proxyIn(
+    `#!${process.execPath}\nprocess.stdout.write('API server started successfully'); setInterval(() => {}, 1000);\n`,
+  );
+  await proxy.start();
+  await proxy.stop();
+  await expect(proxy.stop()).resolves.toBeUndefined();
 });
 
 it('keeps its endpoint when the stopped proxy starts again', async () => {

@@ -1,4 +1,4 @@
-import { runOwned } from './wait.js';
+import { answer, runOwned } from './wait.js';
 import { useAdapterCommand } from './adapter-install-lock.js';
 import {
   AcpRuntimeExitedError,
@@ -31,7 +31,6 @@ import { explainAgentProgramFailure } from './agent-command.js';
  */
 import { readUsageWindow, type AgentUsage, type UsageWindow } from '@beeline/api-contract/daemon';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import {
   acpClientApplySessionMode,
@@ -446,32 +445,29 @@ export class AcpClient extends EventEmitter {
     const launch = this.resourceScope?.launch(this.agentCommand, this.agentArgs, childEnv);
     const releaseAdapter = useAdapterCommand(this.harnessCommand);
     try {
-      if (launch)
-        this.child = spawn(launch.command, launch.args, {
-          env: launch.env,
-          ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-      else {
-        this.child = null;
-        const operation = runOwned({
-          step: `ACP agent ${this.agentLabel}`,
-          file: this.agentCommand,
-          args: this.agentArgs,
-          env: childEnv,
-          ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
-          stdin: 'pipe',
-          captureOutput: false,
-          ...(signal ? { signal } : {}),
-          onSpawn: (child) => {
-            this.child = child as ChildProcessWithoutNullStreams;
-          },
-        });
-        void operation.catch(() => undefined);
-        if (!this.child) {
-          await operation;
-          throw new Error(`ACP agent ${this.agentLabel} did not start`);
-        }
+      // onSpawn sets it; a cast keeps the compiler from narrowing it to null.
+      this.child = null as ChildProcessWithoutNullStreams | null;
+      // A scoped launch stays in this process's group: its resource scope, not
+      // a process group, owns teardown, and the service manager's
+      // stop reaches the scope itself, so a stop signal is not a forced kill.
+      const operation = runOwned({
+        step: `ACP agent ${this.agentLabel}`,
+        file: launch?.command ?? this.agentCommand,
+        args: launch?.args ?? this.agentArgs,
+        env: launch?.env ?? childEnv,
+        ...(this.agentCwd ? { cwd: this.agentCwd } : {}),
+        stdin: 'pipe',
+        captureOutput: false,
+        ...(launch ? { group: 'caller' as const, sharedSignals: true } : {}),
+        ...(signal && !launch ? { signal } : {}),
+        onSpawn: (child) => {
+          this.child = child as ChildProcessWithoutNullStreams;
+        },
+      });
+      void operation.catch(() => undefined);
+      if (!this.child) {
+        await operation;
+        throw new Error(`ACP agent ${this.agentLabel} did not start`);
       }
     } catch (error) {
       releaseAdapter();
@@ -618,10 +614,13 @@ export class AcpClient extends EventEmitter {
       await scope.stop();
       if (this.resourceScope === scope) this.resourceScope = undefined;
     } else if (child) {
-      const exited =
-        !child.pid || child.exitCode !== null || child.signalCode !== null
-          ? Promise.resolve()
-          : new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      // The child's own exit, already latched or still to come; never a pipe close.
+      const exited = !child.pid
+        ? Promise.resolve()
+        : answer(`ACP agent ${this.agentLabel}`, [
+            [child, 'exit', 'answer'],
+            [child, 'error', 'answer'],
+          ]);
       try {
         killChildProcessGroup(child, 'SIGKILL');
       } catch {

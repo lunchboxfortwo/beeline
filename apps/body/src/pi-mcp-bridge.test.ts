@@ -3,25 +3,26 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, it, vi } from 'vitest';
 import { piMcpBridgeSource } from './pi-mcp-bridge.js';
-import { ask } from './wait.js';
+import { answer, ask, runOwned, type OwnedCommand } from './wait.js';
 
 type Tool = { execute: (id: string, args: object) => Promise<unknown> };
-/** The generated extension with its imports supplied: spawn, readFile and the standalone ask. */
+/** The generated extension with its imports supplied: readFile and the standalone owners, spawning through `spawn`. */
 function loadBridge(source: string, spawn: unknown, readFile: unknown) {
   const body = source
     .replace(/^import .* from (?:'node:[^']+'|"data:[^"]+");\n/gm, '')
     .replace('export default function', 'return function');
-  return new Function('spawn', 'readFile', 'ask', body)(spawn, readFile, ask);
+  const owned = (command: OwnedCommand) => runOwned(command, { spawn: spawn as never });
+  return new Function('readFile', 'ask', 'answer', 'runOwned', body)(readFile, ask, answer, owned);
 }
 
 it('loads the Pi extension and permits prompts without contacting an unresponsive MCP child', async () => {
   const child = Object.assign(new EventEmitter(), {
     stdout: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
     stderr: Object.assign(new EventEmitter(), { setEncoding: vi.fn() }),
-    stdin: { write: vi.fn() },
+    stdin: { write: vi.fn(), on: vi.fn() },
     kill: vi.fn(),
   });
-  const spawn = vi.fn(() => child);
+  const spawn = vi.fn((..._args: unknown[]) => child);
   const tools: Tool[] = [];
   const on = vi.fn();
   const extension = loadBridge(
@@ -37,6 +38,7 @@ it('loads the Pi extension and permits prompts without contacting an unresponsiv
   // affects that tool call, never loading the extension or starting a prompt.
   const discovery = tools[0]!.execute('list', {});
   expect(spawn).toHaveBeenCalledTimes(1);
+  expect(spawn.mock.calls[0]?.[2]).toMatchObject({ detached: false });
   expect(child.stdin.write).toHaveBeenCalledTimes(2);
   const failed = expect(discovery).rejects.toThrow('exited before answering');
   child.emit('close', 1, null);
