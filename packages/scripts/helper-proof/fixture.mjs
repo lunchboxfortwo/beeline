@@ -52,7 +52,7 @@ const daemon = new DaemonService(database, live);
 const connectionPresence = new ConnectionPresence(database, live);
 await connectionPresence.start();
 export const releases = new ReleaseNotifier(database, { secret: 'fixture-release', live });
-export const helperVersionGate = new HelperVersionGate();
+const helperVersionGate = new HelperVersionGate();
 const backendOptions = {
   database,
   auth,

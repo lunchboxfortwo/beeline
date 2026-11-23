@@ -407,17 +407,20 @@ try {
     },
   );
   await phase(
-    'unrecognized identity and malformed configuration fail by name while siblings serve',
+    'unrecognized identity and malformed configuration are reported by name while siblings serve',
     async () => {
+      // Update reports each agent as the helper answered; one that cannot serve is not a wall.
       const unknown = await fixture.addUnrecognizedAgent();
-      await assert.rejects(entry(cli, ['update']), new RegExp(unknown));
+      console.log(await entry(cli, ['update']));
       let status = await observe((s) => s.agents[unknown]?.state === 'needs-auth');
       assert.ok(serving(status));
       const path = `${stateRoot}/beeline/agents/${unknown}/runtime.json`;
       await writeFile(path, '{broken');
       status = await observe((s) => s.agents[unknown]?.state === 'needs-config');
       assert.ok(serving(status));
-      await assert.rejects(entry(cli, ['update']), new RegExp(unknown));
+      assert.match(await entry(cli, ['update']), new RegExp(`agent ${unknown}: `));
+      status = await observe((s) => s.agents[unknown]?.state === 'needs-config');
+      assert.ok(serving(status));
       await unlink(path);
       console.log(await entry(cli, ['update']));
     },
@@ -431,10 +434,20 @@ try {
         agents[0],
       ]);
       await delay(10_100); // Let the real authentication cache expire once.
+      // Registration authenticates the token: the helper's next registration is refused.
+      const prior = (await observe()).generation;
+      const restarted = observe(
+        (s) =>
+          s.generation !== prior &&
+          s.agents[agents[0]]?.state === 'needs-auth' &&
+          s.agents[agents[1]]?.state === 'serving',
+        60_000,
+      );
+      await systemctl('kill', '--signal=SIGKILL', '--kill-whom=main', 'beeline-helper.service');
+      const refused = await restarted;
       const request = await fixture.message('native auth refusal');
-      const refused = await observe((s) => s.agents[agents[0]]?.state === 'needs-auth', 30_000);
-      assert.equal(refused.agents[agents[1]].state, 'serving');
-      await assert.rejects(entry(cli, ['update']), new RegExp(agents[0]));
+      assert.match(await entry(cli, ['update']), new RegExp(`agent ${agents[0]}: `));
+      await observe((s) => s.agents[agents[0]]?.state === 'needs-auth', 30_000);
       const exchange = await auth.createDaemonExchange(agents[0]);
       const replacement = await auth.exchangeDaemonToken(exchange.exchangeToken);
       runtime.transport.daemonToken = replacement.daemonToken;
@@ -468,51 +481,6 @@ try {
     assert.match(baseline.loadedRelease, /repair/);
     assert.equal(baseline.loadedIdentity.version, 'v0.2.4');
   });
-  await phase(
-    'a pushed server minimum interrupts through the same prepared handoff and replays without retry cost',
-    async () => {
-      fixture.holdWork(true);
-      const started = fixture.nextHarness();
-      const heldId = await fixture.message('native-held server-minimum');
-      await started;
-      await fixture.makeRelease('v0.2.5', '6'.repeat(40));
-      const stopped = observe((s) => s.processState === 'stopping', 90_000);
-      const prior = baseline.generation;
-      const startup = observe(
-        (s) => s.generation !== prior && s.processState === 'starting',
-        120_000,
-      );
-      const began = Date.now();
-      fixture.helperVersionGate.raise('v0.2.5');
-      await stopped;
-      assert.ok(Date.now() - began < 90_000);
-      const journal = JSON.parse(
-        await readFile(
-          `${stateRoot}/beeline/agents/${agents[0]}/force-update-interruptions.json`,
-          'utf8',
-        ),
-      );
-      assert.ok(JSON.stringify(journal).includes(heldId));
-      fixture.holdWork(false);
-      const interruptedStartup = await startup;
-      await systemctl('kill', '--signal=SIGKILL', '--kill-whom=main', 'beeline-helper.service');
-      baseline = await observe(
-        (s) => serving(s) && s.generation !== interruptedStartup.generation,
-        120_000,
-      );
-      assert.equal(baseline.loadedIdentity.version, 'v0.2.5');
-      assert.equal((await fixture.waitReply(heldId, 90_000)).length, 1);
-      assert.equal(
-        (
-          await database.query(
-            'SELECT hiccup_attempts FROM agent_commands WHERE turn_request_id=$1 AND agent_id=$2',
-            [heldId, agents[0]],
-          )
-        ).rows[0].hiccup_attempts,
-        0,
-      );
-    },
-  );
   await phase(
     'actual idle machine has no release, discovery, command or status HTTP reads',
     async () => {

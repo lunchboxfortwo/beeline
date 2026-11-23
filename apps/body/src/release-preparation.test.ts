@@ -1,12 +1,17 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it, vi } from 'vitest';
 import { prepareMachineRelease } from './recovery.js';
-import { prepareLatestRelease, requiredBundlePaths } from './self-update.js';
+import {
+  prepareLatestRelease,
+  readUpdateState,
+  requiredBundlePaths,
+  writeUpdateState,
+} from './self-update.js';
 import { tryLock } from './wait.js';
 
 const roots: string[] = [];
@@ -16,7 +21,7 @@ afterEach(async () => {
 
 /** An isolated install and one published bundle the owner and joiner both prepare. */
 async function published() {
-  const root = await mkdtemp(join(tmpdir(), 'beeline-preparation-join-'));
+  const root = await mkdtemp(join(tmpdir(), 'beeline-preparation-'));
   roots.push(root);
   const layout = {
     libDir: join(root, 'lib/beeline'),
@@ -98,4 +103,30 @@ it('still refuses other install work at once, naming its holder', async () => {
   } finally {
     await owner.release();
   }
+});
+
+it('keeps a forced repair of the published bytes instead of handing back to the release it replaced', async () => {
+  // Linux helper proof: after `update --force` repaired a damaged body, the repaired
+  // helper's next preparation selected the damaged directory and crash-looped on it.
+  const { layout, bytes, manifest } = await published();
+  const fetchImpl = async () => new Response(bytes);
+  const original = await prepareLatestRelease(layout, { manifest, fetchImpl, logger: () => {} });
+  const repair = await prepareLatestRelease(layout, {
+    manifest,
+    fetchImpl,
+    force: true,
+    logger: () => {},
+  });
+  await symlink(join(layout.releasesRoot, repair.releaseId), layout.libDir);
+  // Helper boot consumes the staged selection before it activates the repair.
+  await writeUpdateState(layout, {
+    ...(await readUpdateState(layout)),
+    stagedReleaseId: undefined,
+  });
+  await writeFile(
+    join(layout.releasesRoot, original.releaseId, 'lib/beeline/beeline-cli.mjs'),
+    "throw new Error('damaged installed body');\n",
+  );
+  const next = await prepareLatestRelease(layout, { manifest, fetchImpl, logger: () => {} });
+  expect(next.releaseId).toBe(repair.releaseId);
 });
