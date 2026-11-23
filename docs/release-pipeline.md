@@ -682,8 +682,8 @@ npm's trusted publisher for `usebeeline` accepts OIDC only from this workflow
 on GitHub Actions, so a local release attaches that tarball to its draft GitHub
 release and dispatches this workflow with `selection=npm-publish` (plus the
 channel, `release_version` and attribution). That run's only job, `npm_publish`,
-publishes the attached bytes; the local helper leg waits up to 12 minutes and
-fails unless the run succeeds.
+publishes the attached bytes; the local helper leg watches that run (bounded by
+the step's 15-minute timeout) and fails unless it succeeds.
 The rc CLI package publishes with npm tag `next`; promotion packs the final
 version and publishes it with npm's default latest tag. A successful
 `npm publish`, or an already existing version, completes that leg

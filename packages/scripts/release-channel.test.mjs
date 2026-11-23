@@ -183,7 +183,7 @@ if (${JSON.stringify(tool)} === 'gh') {
   if (args[0] === 'release' && args[1] === 'view') console.log(path.basename(process.env.HELPER_TARBALL) + '\\t' + fs.statSync(process.env.HELPER_TARBALL).size);
   if (args[0] === 'release' && args[1] === 'download') fs.writeFileSync(path.join(args[args.indexOf('--dir') + 1], args[args.indexOf('--pattern') + 1]), 'tarball');
   if (args[0] === 'workflow') console.log('https://github.com/fixture/repo/actions/runs/42');
-  if (args[0] === 'run') console.log(${JSON.stringify(conclusion)});
+  if (args[0] === 'run') process.exit(${JSON.stringify(conclusion)} === 'success' ? 0 : 1);
 }
 `, { mode: 0o755 });
   return { calls, read: () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse) };
@@ -219,12 +219,12 @@ test('a local release hands its exact tarball to the publish-only job and fails 
   assert.deepEqual(commands.find(c => c[1] === 'release' && c[2] === 'upload'), ['gh', 'release', 'upload', 'v0.1.184-rc.10', tarball, '--clobber']);
   assert.deepEqual(commands.find(c => c[1] === 'workflow'), ['gh', 'workflow', 'run', 'unified-release.yml', '-R', 'fixture/repo', '--ref', 'main',
     '-f', 'selection=npm-publish', '-f', 'channel=next', '-f', 'release_version=v0.1.184-rc.10', '-f', 'dispatched_by={"handle":"fixture"}']);
-  assert.deepEqual(commands.find(c => c[1] === 'run').slice(0, 4), ['gh', 'run', 'view', '42']);
+  assert.deepEqual(commands.find(c => c[1] === 'run'), ['gh', 'run', 'watch', '42', '-R', 'fixture/repo', '--exit-status']);
   assert.equal(commands.some(c => c[0] === 'npm'), false);
   tools = recordingTools(directory, 'failure');
   const failed = spawnSync('bash', ['-c', publish.run], { env: { ...env, CALLS: tools.calls }, encoding: 'utf8' });
   assert.notEqual(failed.status, 0);
-  assert.match(failed.stderr, /npm publish failed \(failure\): https:\/\/github\.com\/fixture\/repo\/actions\/runs\/42/);
+  assert.match(failed.stderr, /npm publish failed: https:\/\/github\.com\/fixture\/repo\/actions\/runs\/42/);
 
   const job = workflow.jobs.npm_publish;
   assert.equal(job.if, "inputs.selection == 'npm-publish'");

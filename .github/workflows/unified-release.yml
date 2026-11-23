@@ -682,15 +682,7 @@ jobs:
             run_url=$(grep -Eo 'https://github\.com/[^ ]+/actions/runs/[0-9]+' <<< "$dispatched" | tail -n 1 || true)
             [ -n "$run_url" ] || { echo "npm publish dispatch returned no run URL: $dispatched" >&2; exit 1; }
             echo "npm publish on GitHub: $run_url"
-            deadline=$((SECONDS + 12 * 60))
-            while :; do
-              conclusion=$(gh run view "${run_url##*/}" -R "$GITHUB_REPOSITORY" --json status,conclusion \
-                --jq 'select(.status == "completed") | .conclusion' || true)
-              [ -z "$conclusion" ] || break
-              [ "$SECONDS" -lt "$deadline" ] || { echo "npm publish did not finish within 12 minutes: $run_url" >&2; exit 1; }
-              sleep 10
-            done
-            [ "$conclusion" = success ] || { echo "npm publish failed ($conclusion): $run_url" >&2; exit 1; }
+            gh run watch "${run_url##*/}" -R "$GITHUB_REPOSITORY" --exit-status || { echo "npm publish failed: $run_url" >&2; exit 1; }
             exit 0
           fi
           npm install --global npm@^11.15.0
