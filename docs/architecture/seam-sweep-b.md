@@ -109,7 +109,7 @@ No names were shortened to reduce the ratchet. Current display defaults, resourc
 
 | File and guarded declarations | Why retained |
 | --- | --- |
-| [agent-corner-checkout.ts](../../apps/body/src/agent-corner-checkout.ts) — `function copyLegacy`, `let legacy` | Still copies unpublished legacy checkouts into per-agent writer copies while preserving recovery evidence (2). |
+| [agent-corner-checkout.ts](../../apps/body/src/agent-corner-checkout.ts) | Historical import path removed; current checkout behavior is owned by [Body delivery](../agent-body.md). |
 | [browser-share.ts](../../apps/body/src/browser-share.ts) — `let fallbackTimer`, `const scheduleFallback` | A quiet/static Chrome tab may never emit screencast frames, so its one-share timeout captures a frame and is cleared on close (2). |
 | [cli.ts](../../apps/body/src/cli.ts) — `function migrateLegacyAgentUnit` | Old per-agent native units launch the new bundle through this handoff before the machine helper takes ownership (1). |
 | [corner-emulator.ts](../apps/body/src/corner-emulator.ts) — `function removeLegacyAdbAlias` | Cleans old operator ADB aliases without losing active emulator metadata (1). |

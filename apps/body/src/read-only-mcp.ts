@@ -751,14 +751,14 @@ export function grantRunDepsFromEnv(): GrantRunDeps {
   };
 }
 
-/** The small-object pass-through: the server validates and streams the
- *  bytes to storage in one step and answers with the stored artifact url. */
 /** The refusal's error code only: never reflect a server body into the model-facing tool error. */
 async function serverErrorCode(response: Response): Promise<string> {
   const body = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
   return typeof body?.error === 'string' ? body.error : 'request_failed';
 }
 
+/** The small-object pass-through: the server validates and streams the
+ *  bytes to storage in one step and answers with the stored artifact url. */
 export async function daemonUploadArtifact(
   bytes: Buffer,
   mime: string,
