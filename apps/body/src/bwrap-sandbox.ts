@@ -192,7 +192,15 @@ export function sessionCredentialMaskPaths(
   config: { sandboxMaskPaths?: string[]; agentKind?: AgentKind },
   home: string = homedir(),
 ): MaskedPath[] {
-  const foreign = foreignLoginMaskPaths(config.agentKind, home);
+  // A symlinked cache is masked at the directory it resolves to; masking the
+  // link itself would only hide the link, not the login behind it.
+  const foreign = foreignLoginMaskPaths(config.agentKind, home).map((path) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return path;
+    }
+  });
   return credentialMaskPaths([...(config.sandboxMaskPaths ?? []), ...foreign], home, undefined, foreign);
 }
 

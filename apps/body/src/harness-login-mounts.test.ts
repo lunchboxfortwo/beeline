@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it } from 'vitest';
@@ -93,11 +93,19 @@ for (const mode of ['readonly', 'edit'] as const) {
     expect(JSON.stringify(env)).not.toContain('operator-refresh');
   });
 
-  it.each(['codex', 'cursor', undefined] as const)('%s session cannot see the Antigravity sign-in in ' + mode + ' mode', async (kind) => {
+  it.each([
+    ...(['codex', 'cursor', undefined] as const).map((kind) => ({ kind, linked: false })),
+    { kind: 'codex' as const, linked: true },
+  ])('$kind session cannot see the Antigravity sign-in (symlinked cache: $linked) in ' + mode + ' mode', async ({ kind, linked }) => {
     const root = await mkdtemp(`${testTmpDir()}/beeline-login-mounts-`); roots.push(root);
     const operatorHome = join(root, 'operator');
     const cache = join(operatorHome, '.gemini/antigravity-cli');
-    await mkdir(cache, { recursive: true });
+    if (linked) {
+      // The operator keeps the real cache elsewhere and links it into place.
+      await mkdir(join(root, 'elsewhere/agy'), { recursive: true });
+      await mkdir(dirname(cache), { recursive: true });
+      await symlink(join(root, 'elsewhere/agy'), cache);
+    } else await mkdir(cache, { recursive: true });
     await writeFile(join(cache, 'antigravity-oauth-token'), 'operator-agy-token');
     const privateRoot = join(root, 'private');
     // A home that served Antigravity before keeps a stale link until repaired.
@@ -107,7 +115,8 @@ for (const mode of ['readonly', 'edit'] as const) {
     const env = await prepareRoomAgentCredentials({ root: privateRoot, operatorHome, agentKind: kind });
     await sandboxed(mode, root, env, kind as AgentKind, operatorHome, `
       assert.equal(fs.existsSync(${JSON.stringify(privateLogin)}), false);
-      assert.deepEqual(fs.readdirSync(${JSON.stringify(cache)}), []);`, { masked: true });
+      assert.deepEqual(fs.readdirSync(${JSON.stringify(cache)}), []);
+      if (${linked}) assert.deepEqual(fs.readdirSync(${JSON.stringify(join(root, 'elsewhere/agy'))}), []);`, { masked: true });
     expect(await readFile(join(cache, 'antigravity-oauth-token'), 'utf8')).toBe('operator-agy-token');
   });
 }
