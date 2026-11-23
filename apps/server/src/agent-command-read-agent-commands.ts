@@ -53,7 +53,7 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
 
 /** A pending automatic review wake whose turn never started, for a head, PR or
  * brief revision that is no longer the thread's, for a head with the reviewer's
- * PASS, or for a head and revision given FAIL findings after it was queued. */
+ * PASS, or for a head and revision that already has FAIL findings. */
 export function staleReviewWakeSql(item: string): string {
   const corner = `COALESCE((${item}.review_context->>'cornerId')::uuid,${item}.room_id)`;
   const pr = `${cornerLifecycleSql(corner)}->'pr'`;
@@ -71,7 +71,6 @@ export function staleReviewWakeSql(item: string): string {
         AND approval.pull_request_number=(${item}.review_context->>'pullRequest')::int)
       OR EXISTS(SELECT 1 FROM agent_commands reviewed CROSS JOIN LATERAL ${reviewVerdictSql('reviewed', pattern)} verdict
         WHERE reviewed.room_id=${item}.room_id AND reviewed.agent_id=${item}.agent_id AND reviewed.id<>${item}.id
-          AND reviewed.state='complete' AND reviewed.completed_at>${item}.created_at
           AND ${greenReviewRequestSql('reviewed')}
           AND reviewed.review_context->>'headSha'=${item}.review_context->>'headSha'
           AND reviewed.review_context->'pullRequest'=${item}.review_context->'pullRequest'

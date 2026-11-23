@@ -14,7 +14,7 @@ describe('corner message attribution', () => {
   });
 
 
-  it('requests review after a new green event despite a historical verdict, keyed to the current brief', async () => {
+  it('requests review again on a verdicted head only under a newer brief revision', async () => {
     const head = 'f'.repeat(40);
     /** A check verdict on `head`, as the GitHub webhook writes it. */
     const verdict = async (kind: 'check-passed' | 'rerun') => {
@@ -44,30 +44,18 @@ describe('corner message attribution', () => {
     // A CI re-run on the same head and the same brief revision.
     await verdict('rerun');
     const repeated = (await commands(B, C)).length;
-    console.info(`Reproduction REVIEW-DUP-1: new green review requests=${repeated}`);
-    expect(repeated).toBe(1);
-    const [pending] = await commands(B, C);
-    expect(pending?.id).not.toBe(review!.id);
-    // A revised brief replaces the unstarted request made under revision 1.
+    console.info(`Reproduction REVIEW-DUP-1: review wakes for an already reviewed head=${repeated}; wrong=1 right=0`);
+    expect(repeated).toBe(0);
+    // A revised brief keys a new review to the same head.
     await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
       VALUES($1,2,'Brief','Brief with the waiver',$2,$3)`, [C, A, R]);
     await verdict('rerun');
-    const afterBrief = (await rootFixture.db.query<{ reason: string }>(
-      `SELECT reason FROM agent_commands WHERE room_id=$1 AND agent_id=$2
-         AND created_at>(SELECT created_at FROM corner_brief_revisions WHERE corner_id=$1 AND revision=2)`,
-      [C, B],
-    )).rows;
-    console.info(
-      `Reproduction review-redeliver: brief revision on a pending head review; replacement wakes keyed to revision 2=${afterBrief.length}`,
-    );
-    expect(afterBrief).toHaveLength(1);
-    expect((await commands(B,C)).some(item=>item.id===pending!.id)).toBe(false);
-    await verdict('rerun');
     const [current]=await commands(B,C);
     expect(current?.reason).toBe('corner_review_dispatch');
+    expect(current?.id).not.toBe(review!.id);
+    expect(current?.source.body).not.toMatch(/brief revision/i);
     expect((await rootFixture.db.query(`SELECT review_context->>'briefRevision' revision FROM agent_commands WHERE id=$1`,
       [current!.id])).rows[0]).toEqual({ revision: '2' });
-    expect(current?.source.body).not.toMatch(/brief revision/i);
   });
 
 

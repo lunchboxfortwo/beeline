@@ -21,7 +21,7 @@ describe('revision 4 simple corner review model', () => {
       AND reason='corner_review_dispatch'`,[C,B])).rowCount).toBe(1);
   });
 
-  it('C-2: a completed FAIL cannot veto a new green event on the same head', async () => {
+  it('C-2: a completed FAIL ends automatic review of the same head and brief revision', async () => {
     const head='5'.repeat(40);
     await rootFixture.phone.execute('updateRoom', {roomId:R,reviewerAgentId:B},H);
     await greenHead(105,head);
@@ -37,9 +37,7 @@ describe('revision 4 simple corner review model', () => {
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
     await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
     await greenHead(105,head);
-    const next=(await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
-    expect(next).toHaveLength(1);
-    expect(next[0]!.id).not.toBe(review!.id);
+    expect((await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch')).toEqual([]);
   });
   it('C-2: unrelated peer activity preserves Review and the green-head review dispatch', async () => {
     const peer='d'.repeat(64);
@@ -57,7 +55,7 @@ describe('revision 4 simple corner review model', () => {
       .toEqual([{state:'review'}]);
   });
 
-  it('C-2: a green handoff during same-head repair dispatches after the implementer finishes', async () => {
+  it('C-2: a green handoff during same-head repair queues no automatic review of the verdicted head', async () => {
     const head='7'.repeat(40);
     await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
     await greenHead(107,head);
@@ -74,12 +72,8 @@ describe('revision 4 simple corner review model', () => {
     expect(await commands(B,C)).toEqual([]);
     await result(repair!,'');
     for(let event=0;event<3;event++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    const next=(await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch');
-    expect(next).toHaveLength(1);
-    expect(next[0]!.id).not.toBe(first!.id);
-    expect(next[0]!.source.body).toContain(head);
-    for(let event=0;event<3;event++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    expect((await commands(B,C)).map(command=>command.id)).toEqual(next.map(command=>command.id));
+    // Another review of this head is an explicit request (RUBY-18).
+    expect(await commands(B,C)).toEqual([]);
   });
 
 });

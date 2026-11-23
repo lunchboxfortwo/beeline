@@ -413,7 +413,7 @@ describe('thread message attribution', () => {
 
   it.each(['FAIL: fix the demonstration.', '**FAIL**: A1 is unmet.', 'Verdict: FAIL: A1 is unmet.', 'PASS', '',
     'FAIL: the diff is empty; there is nothing to review.'])(
-    'Reproduction REVIEW-QUIET-1: pending reviews dedupe and retain historical %s', async verdict => {
+    'Reproduction REVIEW-QUIET-1: a verdicted head is not reviewed again and a later head carries %s', async verdict => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = '9'.repeat(40);
       await greenHead(71, head);
@@ -442,13 +442,8 @@ describe('thread message attribution', () => {
       await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
       await greenHead(71, head);
       for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
-      const pending = await commands(B, C);
-      if (!findings) expect(pending).toEqual([]);
-      else {
-        expect(pending).toHaveLength(1);
-        expect(pending[0]?.id).not.toBe(review!.id);
-        expect(pending[0]?.source.body).toContain(verdict);
-      }
+      // A verdict on this head and brief revision ends its automatic review.
+      expect(await commands(B, C)).toEqual([]);
       await greenHead(71, '8'.repeat(40));
       const [continuation] = await commands(B, C);
       if (findings) {
@@ -865,7 +860,7 @@ describe('thread message attribution', () => {
   });
 
 
-  it('Reproduction STALE-6: drops an unstarted review wake once its head gets FAIL findings', async () => {
+  it('Reproduction STALE-6: no review wake reaches the reviewer once its head has FAIL findings', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     const head = '7'.repeat(40);
     await greenHead(46, head);
@@ -877,10 +872,20 @@ describe('thread message attribution', () => {
       WHERE id=$1`, [other.id, queued!.id]);
     const answered = (await commands(B, C)).find(command => command.id === other.id)!;
     await claim(answered);
-    await result(answered, 'FAIL: attach the demonstration.');
+    // The findings reach the implementer while the review turn is still running.
+    await rootFixture.daemon.execute('message', { roomId: C, requestId: answered.turnRequestId,
+      to: { agent: 'implementer', place: C }, text: `FAIL on ${head}: attach the demonstration.` }, B);
+    expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [other.id])).rows[0]?.state).toBe('pending');
     const stale = (await commands(B, C)).filter(command => command.id === queued!.id);
     console.info(`Reproduction STALE-6: review wakes for a head with FAIL findings delivered=${stale.length}; wrong=1 right=0`);
     expect(stale).toEqual([]);
+    await result(answered, 'Findings sent to the implementer.');
+    // A new green run on the same head and brief revision queues no wake.
+    await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`, [C]);
+    await advanceCorner(rootFixture.db, C, { kind: 'checks-pending' });
+    await greenHead(46, head);
+    for (let cycle = 0; cycle < 3; cycle++) await reconcileConfiguredCornerReviewers(rootFixture.db, R);
+    expect(await commands(B, C)).toEqual([]);
   });
 
 
