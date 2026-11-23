@@ -48,18 +48,17 @@ describe('PillRow', () => {
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
     });
-    it('W5 folds a system pill to the ringed Beeline logo, its text only in the label', () => {
+    it('draws a lone agent message as its plain face → face row, with no pill above it', () => {
         let tree: any;
-        const system: PillItem = { id: 'call-ended', system: true, from: { kind: 'system', name: 'Beeline' }, time: '22:41',
-            summary: 'Voice call ended · 2:13', body: React.createElement('Text', { testID: 'call-body' }, 'Voice call ended · 2:13') };
-        act(() => { tree = create(<PillRow items={[system]} />); });
-        const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'system-pill');
-        expect(pill.props['aria-expanded']).toBe(false);
-        expect(pill.findAll((node: any) => node.type === 'Text')).toHaveLength(0);
-        expect(pill.props['aria-label']).toBe('Read Voice call ended · 2:13, 22:41');
-        const ring = pill.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face');
-        expect(ring.props.borderRadius).toBe('full');
-        expect(ring.find((node: any) => node.type === 'IdentityMark').props.seed).toBe(SYSTEM_IDENTITY_PUBKEY);
+        act(() => { tree = create(<PillRow items={[items[1]!]} />); });
+        expect(tree.root.findAll((node: any) => node.type === 'Button')).toHaveLength(0);
+        const entry = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-run-entry-a2a');
+        expect(entry.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
+        expect(entry.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
+        expect(text(entry)).toContain('· 10:00');
+        expect(entry.findByProps({ testID: 'a2a-body' }).props.children).toBe('@jimmy Keep it visible');
+        // The faces appear once: only in the row's heading.
+        expect(tree.root.findAll((node: any) => node.type === 'IdentityMark')).toHaveLength(2);
     });
 
     const ruby = { kind: 'agent', seed: 'ruby', name: 'Ruby' } as const;
@@ -167,7 +166,7 @@ describe('PillRow', () => {
     it('draws a stop as face, stop glyph, face, with no text', () => {
         let tree: any;
         const stop: PillItem = { id: 'stop', system: true, stop: true, from: owner, to: ruby, time: '09:42',
-            summary: 'Owner stopped Ruby · turn cancelled', body: React.createElement('Text', {}, 'Owner stopped Ruby · turn cancelled') };
+            body: React.createElement('Text', {}, 'Owner stopped Ruby · turn cancelled') };
         act(() => { tree = create(<PillRow items={[stop]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'stop-pill');
         expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['owner', 'ruby']);

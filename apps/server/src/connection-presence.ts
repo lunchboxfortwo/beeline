@@ -152,7 +152,7 @@ export async function releaseAgentConnection(
     return Number(current.rows[0]!.epoch);
   });
   if (released !== undefined) {
-    const rooms = await database.transaction(db => interruptAgentTurns(db, agentId, released + 1, true));
+    const rooms = await database.transaction(db => interruptAgentTurns(db, agentId, released + 1));
     for (const roomId of rooms) live.publish({ type: 'invalidate', roomId, reason: 'turn', agentId });
     await notifyAgentConnection(database,agentId,released);
     live.publish({ type: 'agent-connection', roomId: '', agentId, epoch: released });

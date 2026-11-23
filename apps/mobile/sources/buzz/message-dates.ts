@@ -1,4 +1,4 @@
-import { isPillMessage } from './transcript-pills';
+import { isPillMessage, isSystemLine } from './transcript-pills';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import { ledgerStamp } from './relative-time';
 
@@ -93,7 +93,8 @@ function hasTranscriptByline(message: ChatDisplayMessage): boolean {
     message.durableFact ||
     message.isAgentActivity ||
     message.pillRun ||
-    isPillMessage(message)
+    isPillMessage(message) ||
+    isSystemLine(message)
   );
 }
 

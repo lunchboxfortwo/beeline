@@ -140,21 +140,11 @@ END; $$;
 export const PERSON_STOP_REASON = 'person_stop';
 
 /** Use the recorded replacement epoch to avoid interrupting a newer execution. */
-export async function interruptAgentTurns(db: SqlDatabase, agentId: string, beforeEpoch: number, offline = false): Promise<string[]> {
+export async function interruptAgentTurns(db: SqlDatabase, agentId: string, beforeEpoch: number): Promise<string[]> {
   const turns = await db.query<{ room_id: string; request_id: string }>(`SELECT room_id,request_id FROM agent_turns
     WHERE agent_id=$1 AND status='working' AND (connection_epoch IS NULL OR connection_epoch<$2)`, [agentId,beforeEpoch]);
-  for (const turn of turns.rows) {
-    const ended = await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,$4,NULL)',
-      [agentId,turn.room_id,turn.request_id,beforeEpoch]);
-    if (offline && ended.rowCount) {
-      const agent = (await db.query<{ name: string }>('SELECT name FROM identities WHERE id=$1', [agentId])).rows[0]!;
-      await systemLine(db, {
-        id: createHash('sha256').update(`host-offline:${agentId}:${turn.request_id}:${beforeEpoch}`).digest('hex'),
-        roomId: turn.room_id, subject: { kind: 'agent', id: agentId, name: agent.name },
-        verb: systemMessage('agent-turn.host-offline'), requestId: turn.request_id, routeCommands: false,
-      });
-    }
-  }
+  for (const turn of turns.rows) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,$4,NULL)',
+    [agentId,turn.room_id,turn.request_id,beforeEpoch]);
   return [...new Set(turns.rows.map(turn=>turn.room_id))];
 }
 
