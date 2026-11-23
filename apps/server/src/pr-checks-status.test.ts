@@ -218,6 +218,8 @@ describe('PR-scoped check gate', () => {
 
 
   it.each(['workflow', 'suite'])('CHECK-HEAD-1: a completed job webhook cannot dispatch review with a queued %s', async registration => {
+    // Branch protection also requires `build`, which the queued registration has not reported.
+    rootFixture.requiredContexts = ['test', 'build'];
     await ownPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     if (registration === 'workflow') rootFixture.workflowStatus = 'queued';
@@ -231,6 +233,8 @@ describe('PR-scoped check gate', () => {
 
 
   it('keeps a formerly zero-check head pending when a workflow registers later', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     await ownPr();
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checksSummary}','{"total":0}') WHERE corner_id=$1`, [AUTHOR]);
     rootFixture.rollupContexts = { totalCount: 0, nodes: [] };
@@ -467,6 +471,8 @@ describe('PR-scoped check gate', () => {
 
 
   it('reports waiting while checks are still pending so the author does not invent a missed wake', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     await ownPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     await rootFixture.db.query(
@@ -534,6 +540,8 @@ describe('PR-scoped check gate', () => {
 
 
   it('Reproduction REVIEWERWAKE-2: never reports a live re-run as green just because the lifecycle was passing', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     await ownPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     rootFixture.rollupState = 'PENDING';
@@ -563,6 +571,8 @@ describe('PR-scoped check gate', () => {
 
 
   it('composes configured reviewer approval, no-reviewer landing, and a hold through the real helper', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     rootFixture.server = createServer(async (request, response) => {
       try {
         const chunks: Buffer[] = [];
@@ -676,12 +686,15 @@ describe('PR-scoped check gate', () => {
     // live verdicts even when restore state still says pending.
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [C,
       JSON.stringify({ checks: 'pending', pr: { number: 614, url: URL, headSha: SHA } })]);
+    // The queued registration has not reported the required `build` check yet.
+    rootFixture.requiredContexts = ['test', 'build'];
     rootFixture.workflowStatus = 'queued';
     expect(await callGate(6)).toMatchObject({ checks: 'pending', mergeAllowed: false,
       reason: expect.stringContaining('queued or running workflows or suites') });
     rootFixture.workflowStatus = 'completed'; rootFixture.suiteStatus = 'queued';
     expect(await callGate(7)).toMatchObject({ checks: 'pending', mergeAllowed: false });
     rootFixture.suiteStatus = 'completed';
+    rootFixture.requiredContexts = ['test'];
     expect(await callGate(8)).toMatchObject({ checks: 'passed', mergeAllowed: true, reason: 'all recorded checks passed' });
     console.info('Reproduction CHECK-HEAD-1: built helper read -> queued workflow/suite pending -> completed passed, stale restore text cleared');
     child.kill();
@@ -726,6 +739,8 @@ const scope2 = fixtureScope2();
 
 
   it('Reproduction ZC-REGISTRATION: does not wake review before delayed checks register', async () => {
+    // Branch protection makes `test` the CI gate.
+    rootFixture.requiredContexts = ['test'];
     rootFixture.rollupState = null;
     rootFixture.workflowCount = 2;
     rootFixture.mergeableState = 'clean';

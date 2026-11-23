@@ -1,5 +1,6 @@
 import type { CornerBlocker,CornerLifecycleView,CornerStateReason } from '@beeline/api-contract/phone';
 import type { CornerEvent } from './corner-lifecycle-values.js';
+import { cornerGateChecks } from './corner-ci-gate.js';
 
 export type CornerCheckSummary = NonNullable<CornerLifecycleView['checksSummary']> & {
   reportedHeadSha?: string;
@@ -140,6 +141,8 @@ export function transitionCorner(
     if (!effects.includes(key)) notifications.push({ kind, key });
   };
   const checks = f.lifecycle?.checks ?? f.lifecycle?.checksSummary?.status;
+  // Review and landing follow the head's CI gate; repair wakes follow the displayed checks.
+  const gateChecks = cornerGateChecks(f.lifecycle, headSha);
   const checksUnderway =
     checks === 'pending' ||
     f.lifecycle?.checksSummary?.checks.some((check) => check.status === 'pending') ||
@@ -169,7 +172,8 @@ export function transitionCorner(
     };
   if (event.kind === 'checks-pending' && !checksUnderway)
     return { state: current, wakes, notifications, suppression: 'checks are not pending' };
-  if (event.kind === 'checks' && (checks !== event.result || f.checkSourceId === 'stale'))
+  if (event.kind === 'checks' &&
+    ((event.result === 'passing' ? gateChecks : checks) !== event.result || f.checkSourceId === 'stale'))
     return { state: current, wakes, notifications, suppression: 'stale check event' };
   if (
     (event.kind === 'approval' && event.headSha !== headSha) ||
@@ -191,7 +195,7 @@ export function transitionCorner(
   const exhausted = (review?.emptyCount ?? 0) >= 1;
   if (
     headSha &&
-    checks === 'passing' &&
+    gateChecks === 'passing' &&
     !f.approved &&
     !exhausted &&
     !(f.reviewRequestActive ?? f.reviewerActive) &&
@@ -217,7 +221,7 @@ export function transitionCorner(
     wake('checks-failed', redKey);
   // Only a live GitHub read emits this event; a stored verdict never wakes.
   if (event.kind === 'merge-conflict' && f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
-  if (checks === 'passing' && headSha) {
+  if (gateChecks === 'passing' && headSha) {
     if (f.approved || f.reviewerRequired === false) {
       if (
         !f.mergeHeld &&
@@ -250,7 +254,7 @@ export function transitionCorner(
   else if (
     f.reviewerActive ||
     wakes.some((w) => w.kind === 'review') ||
-    (checks === 'passing' &&
+    (gateChecks === 'passing' &&
       Boolean(headSha) &&
       f.reviewerConfigured !== undefined &&
       f.reviewerRequired !== false &&

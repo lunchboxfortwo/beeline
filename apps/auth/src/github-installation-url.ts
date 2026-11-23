@@ -1,6 +1,6 @@
 import { ExternalServiceTimeoutError } from './external-fetch.js';
 import { importPKCS8, SignJWT } from 'jose';
-import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInstallationToken, GitHubDispatchableWorkflow, repositoryPath, isMissingGitHubResource, hasWorkflowDispatch, GitHubHttpError, ProductionReleaseBusyError, githubMergeability, jsonArray, responseRetryAfter, GitHubCheckRollup, checkRunAppId, suiteHasUnfinishedRuns, registrationStillOpen, requiredChecks } from './github.js';
+import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInstallationToken, GitHubDispatchableWorkflow, repositoryPath, isMissingGitHubResource, hasWorkflowDispatch, GitHubHttpError, ProductionReleaseBusyError, githubMergeability, jsonArray, responseRetryAfter, GitHubCheckRollup, checkRunAppId, suiteHasUnfinishedRuns, registrationStillOpen, requiredChecks, type RequiredCheck } from './github.js';
 
 
 
@@ -422,6 +422,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
     accessToken: string,
     fullName: string,
     headSha: string,
+    baseBranch?: string,
   ): Promise<GitHubCheckRollup> {
     const [owner, name] = fullName.split('/');
     if (!owner || !name || !/^[a-f0-9]{40,64}$/i.test(headSha)) {
@@ -453,9 +454,14 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
       Record<string, unknown> | undefined;
     if (object?.oid !== headSha) throw new Error('GitHub commit check rollup head mismatch');
     const rollup = object.statusCheckRollup as Record<string, unknown> | null | undefined;
+    // The base branch's protection names the CI gate; the caller decides with it.
+    const required = baseBranch === undefined
+      ? {}
+      : { required: await ctx.service.readRequiredChecks(accessToken, fullName, baseBranch) };
     if (!rollup) return {
       state: 'pending', total: 0, failing: [], checks: [],
       pendingRegistrations: await ctx.service.hasUnfinishedChecks(accessToken, fullName, headSha),
+      ...required, passedContexts: [],
     };
     const state =
       rollup.state === 'SUCCESS'
@@ -525,6 +531,8 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
       total,
       failing: checks.filter((check) => check.status === 'failed').map((check) => check.name),
       checks,
+      ...required,
+      passedContexts: reported,
     };
   }
 
@@ -577,22 +585,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
     }
     const missing = new Set<string>();
     for (const branch of bases) {
-      let body: Record<string, unknown>;
-      try {
-        body = await ctx.service.readRepositoryJson(
-          accessToken,
-          fullName,
-          `branches/${encodeURIComponent(branch)}/protection/required_status_checks`,
-        );
-      } catch (error) {
-        if (error instanceof GitHubHttpError && error.status === 404) continue;
-        // Private repositories on GitHub Free cannot configure branch protection.
-        if (error instanceof GitHubHttpError && error.status === 403 &&
-          (error.message.includes('Upgrade to GitHub Pro') ||
-            error.message.includes('make this repository public'))) continue;
-        throw error;
-      }
-      for (const required of requiredChecks(body)) {
+      for (const required of await ctx.service.readRequiredChecks(accessToken, fullName, branch)) {
         const satisfied = reported.some((check) =>
           check.name === required.name &&
           (required.appId === null || check.appId === required.appId));
@@ -600,6 +593,31 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
       }
     }
     return [...missing];
+  }
+
+
+  /** The base branch's required status checks. An unprotected branch has none. */
+  export async function gitHubAppClientReadRequiredChecks(ctx: { service: GitHubAppClient; config: Required<GitHubAppConfig> },
+    accessToken: string,
+    fullName: string,
+    branch: string,
+  ): Promise<RequiredCheck[]> {
+    let body: Record<string, unknown>;
+    try {
+      body = await ctx.service.readRepositoryJson(
+        accessToken,
+        fullName,
+        `branches/${encodeURIComponent(branch)}/protection/required_status_checks`,
+      );
+    } catch (error) {
+      if (error instanceof GitHubHttpError && error.status === 404) return [];
+      // Private repositories on GitHub Free cannot configure branch protection.
+      if (error instanceof GitHubHttpError && error.status === 403 &&
+        (error.message.includes('Upgrade to GitHub Pro') ||
+          error.message.includes('make this repository public'))) return [];
+      throw error;
+    }
+    return requiredChecks(body);
   }
 
 

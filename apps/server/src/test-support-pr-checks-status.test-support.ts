@@ -249,6 +249,7 @@ beforeEach(async () => {
                             name: 'test',
                             status: rollupState === 'PENDING' ? 'IN_PROGRESS' : 'COMPLETED',
                             conclusion: rollupState === 'SUCCESS' ? 'SUCCESS' : rollupState,
+                            checkSuite: { app: { databaseId: 15368 } },
                           },
                         ],
                       },

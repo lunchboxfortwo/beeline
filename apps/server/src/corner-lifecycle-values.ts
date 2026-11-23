@@ -1,6 +1,7 @@
 import type { PostCornerRemoteStateInput } from '@beeline/api-contract/daemon';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import type { AgentCommandInput,CommandRow } from './agent-command.js';
+import { cornerGateChecksSql, type CornerCiGate } from './corner-ci-gate.js';
 
 
 
@@ -16,7 +17,8 @@ ALTER TABLE corner_facts ADD COLUMN IF NOT EXISTS machine jsonb;
 
 
 // Compare check results, not refresh timestamps, attempts or run URLs.
-export const reviewChecksSql = `jsonb_build_object('status',lifecycle->>'checks','checks',
+// The status is the head's CI gate verdict (`cornerGateChecksSql`).
+export const reviewChecksSql = `jsonb_build_object('status',${cornerGateChecksSql('lifecycle')},'checks',
   (SELECT jsonb_agg(jsonb_build_object('name',item->>'name','status',item->>'status') ORDER BY item->>'name')
    FROM jsonb_array_elements(COALESCE(lifecycle->'checksSummary'->'checks','[]'::jsonb)) item))`;
 
@@ -71,7 +73,7 @@ export type CornerEvent =
 /** Observations admitted by the lifecycle owner; adapters never receive a SQL writer. */
 export type CornerGithubFact =
   | { kind: 'seeded'; lifecycleJson: string | null }
-  | { kind: 'github-observed'; patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>> }
+  | { kind: 'github-observed'; patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>> & { ciGate?: CornerCiGate } }
   | { kind: 'pr-opened'; pr: NonNullable<CornerLifecycleView['pr']> }
   | { kind: 'helper-observed'; remote: Pick<PostCornerRemoteStateInput, 'state' | 'checks' | 'pullRequest'> }
   | { kind: 'checks-unavailable'; headSha: string; fetchStartedAt: number }

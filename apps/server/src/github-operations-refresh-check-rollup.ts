@@ -9,6 +9,7 @@ import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js'
 import { archiveCornerState, lockCornerArchivalAuthority } from './corner-close.js';
 import { recordCornerGithubFact, advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle, type CornerEvent } from './corner-lifecycle.js';
 import { routeSystemCommand } from './agent-command.js';
+import { cornerCiGate, cornerGateChecks, type CornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
 
 
@@ -39,7 +40,10 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         const token = options?.snapshot ?? await ctx.app.installationToken(Number(target.installation_id), {
           repositoryIds: [Number(target.repository_id)],
         });
-        const rollup = options?.snapshot?.rollup ?? await ctx.app.readCommitCheckRollup(token.token, repository, checkHeadSha);
+        // The base branch's protection names the head's CI gate.
+        const rollup = options?.snapshot?.rollup ?? await ctx.app.readCommitCheckRollup(
+          token.token, repository, checkHeadSha, admitted.pr.targetBranch || undefined);
+        const ciGate = cornerCiGate(rollup, checkHeadSha);
         // A push can move GitHub's PR head before either its push or synchronize
         // webhook reaches us. The stored head alone cannot authorize a verdict.
         // A cancelled job (GitHub cancelled it before a runner picked it up:
@@ -138,6 +142,10 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             (current.checks === 'passing' || current.checks === 'failing'));
           const becamePassing = summary.status === 'passing' && (current.checks !== 'passing' || !sameReportedHead || newAttempt);
           const becameFailing = reportFailure;
+          // A gate that opens before the displayed checks settle wakes review and
+          // landing without a check note.
+          const gateOpened = ciGate?.checks === 'passing' && summary.status !== 'passing' &&
+            cornerGateChecks(current, checkHeadSha) !== 'passing';
           const suite = /check suite/i.test(providerCheck.name);
           const failureName = becameFailing || suite
             ? failedChecks.find(item => !/check suite/i.test(item.name))?.name
@@ -164,7 +172,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
           };
           const event: CornerEvent | null = becameFailing
             ? { kind: 'checks', result: 'failing', sourceMessageId: hash(`beeline:${target.corner_id}:${dedupe}`) }
-            : becamePassing
+            : becamePassing || gateOpened
               ? { kind: 'checks', result: 'passing' }
               : checksPending
               ? { kind: 'checks-pending' }
@@ -181,6 +189,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             const plan = planCheckRefresh(corner.lifecycle);
             const { branch: _branch, ...lifecycle } = {
               ...corner.lifecycle, checks: plan.summary.status, checksSummary: plan.storedSummary,
+              ...(ciGate ? { ciGate } : {}),
               ...(livePr && corner.lifecycle.pr ? { pr: { ...corner.lifecycle.pr, mergeability: livePr.mergeability } } : {}),
             };
             return { corner: { ...corner, lifecycle }, event: plan.event };
@@ -198,6 +207,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             if (!currentRow || !admits(currentRow.lifecycle)) return false;
             const plan = planCheckRefresh(currentRow.lifecycle);
             await ctx.updateLifecycle(target.corner_id, { checks: plan.summary.status, checksSummary: plan.storedSummary,
+              ...(ciGate ? { ciGate } : {}),
               ...(livePr && currentRow.lifecycle.pr ? { pr: { ...currentRow.lifecycle.pr, mergeability: livePr.mergeability } } : {}),
             }, db);
             if (plan.wantsNote) {
@@ -259,7 +269,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
 
   export async function gitHubOperationsUpdateLifecycle(ctx: GitHubOperations,
     cornerId: string,
-    patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>>,
+    patch: Partial<Pick<CornerLifecycleView, 'pr' | 'checks' | 'checksSummary'>> & { ciGate?: CornerCiGate },
     database: SqlDatabase = ctx.database,
   ) {
     await recordCornerGithubFact(database, cornerId, { kind: 'github-observed', patch });
