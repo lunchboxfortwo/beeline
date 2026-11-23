@@ -745,6 +745,39 @@ const scope11 = fixtureScope11();
   });
 
 
+  it('Reproduction REVISION-OFFLINE: a revision written while the implementer is offline wakes it when it reconnects', async () => {
+    const cornerId = await approved();
+    expect((await rootFixture.db.query(`SELECT 1 FROM live_outputs WHERE agent_id=$1 AND kind='presence'`, [A])).rowCount).toBe(0);
+    expect(await revise(cornerId)).toMatchObject({ revision: 2, wake: { queued: true, agentId: A } });
+    // Reconnect: the implementer's helper reads its queue and finds the revision.
+    const [wake] = (await commands(A, cornerId)).filter(command => command.reason === 'corner_brief_revision');
+    expect(wake).toBeDefined();
+    expect(wake!.source.body).toMatch(/revised the thread brief Revision 2/i);
+  });
+
+
+  it('Reproduction REVISION-SELF: the implementer revising from its parent chat wakes its thread session', async () => {
+    const cornerId = await approved();
+    const command = await commissioned(R, A);
+    const result = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: R, cornerId, requestId: command.turnRequestId, expectedRevision: 1,
+      brief: { ...brief(command.sourceMessageId), spec: 'Revised from the Room', change: 'Changed scope' } }, A);
+    console.info(`Reproduction REVISION-SELF: wrong=no wake; right=wake A in the thread; observed=${JSON.stringify(result.wake)}`);
+    expect(result).toMatchObject({ revision: 2, wake: { queued: true, agentId: A } });
+    expect(await reasons(cornerId, A)).toContain('corner_brief_revision');
+    expect(await reasons(cornerId, F)).toEqual([]);
+  });
+
+
+  it('the implementer revising from inside its own thread is not woken again', async () => {
+    const cornerId = await approved();
+    const command = await commissioned(cornerId, A);
+    const result = await rootFixture.daemon.execute('reviseCornerBrief', { roomId: cornerId, cornerId, requestId: command.turnRequestId, expectedRevision: 1,
+      brief: { ...brief(command.sourceMessageId), spec: 'Revised in the thread', change: 'Changed scope' } }, A);
+    expect(result).toMatchObject({ revision: 2, wake: { queued: false } });
+    expect(await reasons(cornerId, A)).not.toContain('corner_brief_revision');
+  });
+
+
   it('keeps the yes on the head: a brief edit does not cancel it, and the implementer still merges', async () => {
     const cornerId = await approved();
     await scope11.implementerOnline();

@@ -309,8 +309,8 @@ describe('IDLE-WORKING-1: a corner with nothing running is never Working', () =>
   it('rests idle when a wake queued nothing', async () => {
     const cornerId = await open('owner/widgets');
     await finishPending(cornerId);
-    // The revision came from the implementer itself, so there is no one else to wake.
-    const command = { agent_id: A } as CommandRow;
+    // The implementer revised from inside its own thread, so there is no one else to wake.
+    const command = { agent_id: A, room_id: cornerId } as CommandRow;
     const advanced = await advanceCorner(rootFixture.db, cornerId,
       { kind: 'brief-revised', revision: 9, sourceMessageId: 'revision', command });
     expect(advanced.wake).toMatchObject({ queued: false });

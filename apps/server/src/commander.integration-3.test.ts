@@ -266,7 +266,7 @@ it('Reproduction SELF-1: cross-place self-tags never start a ping-pong chain', a
 });
 
 
-it('Reproduction SELF-2: own brief revisions and external shell completion bookkeeping stay quiet', async () => {
+it('Reproduction SELF-2: own brief revisions from the Room wake the thread once; external shell completion bookkeeping stays quiet', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await daemon.execute('postBackgroundToolCompletion', { ...authority(turn), toolCallId: 'shell', title: 'Run tests', status: 'completed' }, WORKER);
   expect((await commands(opened.cornerId, WORKER)).filter(c => c.reason === 'corner_background_tool')).toEqual([]);
@@ -276,9 +276,10 @@ it('Reproduction SELF-2: own brief revisions and external shell completion bookk
   await db.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,'presence','presence','{"status":"online"}'::jsonb) ON CONFLICT(agent_id) WHERE kind='presence' DO UPDATE SET room_id=EXCLUDED.room_id,body=EXCLUDED.body,updated_at=now()`, [own.cornerId, RUBY]);
   await daemon.execute('reviseCornerBrief', { ...authority(order), cornerId: own.cornerId, expectedRevision: 1,
     brief: { spec: 'Build the clarified widget', change: 'Clarify work',approval:{sourceMessageId:order.sourceMessageId} } }, RUBY);
-  expect((await commands(own.cornerId,RUBY)).filter(c=>c.reason==='corner_brief_revision')).toEqual([]);
+  // Revised from the Room, the thread session has not seen it, so it is woken once there.
+  expect((await commands(own.cornerId,RUBY)).filter(c=>c.reason==='corner_brief_revision')).toHaveLength(1);
   expect((await db.query(`SELECT state FROM agent_commands WHERE room_id=$1 AND reason='corner_brief_revision'`,[own.cornerId])).rows)
-    .toEqual([]);
+    .toEqual([{ state: 'pending' }]);
 
 });
 
