@@ -1,5 +1,6 @@
 import { cornerRunStateSql, assembleTurnPrompt, cornerReviewerInstruction, describe, expect, it, vi, DaemonService, LiveHub, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, advanceCorner, H, A, B, W, R, C, db, phone, daemon, commands, claim, result, findings, greenHead, rootFixture, type AgentCommand } from './test-support-corner-review-dispatch.test-support.js';
 import { modelText } from './message-origin.js';
+import { recordCornerMergeApproval } from './corner-merge-approval.js';
 
 describe('thread message attribution', () => {
   it('REVIEW-SOURCE-1 reads only current brief citations during an assigned review', async () => {
@@ -470,7 +471,7 @@ describe('thread message attribution', () => {
 
 
   it.each(['pending', 'complete'] as const)(
-    'Reproduction REVIEW-PR-1: a replacement PR preserves each unanswered %s review', async state => {
+    'Reproduction REVIEW-PR-1: a replacement PR replaces an unstarted %s review', async state => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = '9'.repeat(40);
       await greenHead(73, head);
@@ -481,11 +482,11 @@ describe('thread message attribution', () => {
       }
       await greenHead(74, head);
       const reviews = await commands(B, C);
-      expect(reviews).toHaveLength(state === 'pending' ? 2 : 1);
+      expect(reviews).toHaveLength(1);
       expect(reviews.some(item => item.id !== old?.id)).toBe(true);
       const rows = await rootFixture.db.query<{ context: { pullRequest: number }; state: string }>(
         'SELECT review_context context,state FROM agent_commands WHERE id=$1', [old!.id]);
-      expect(rows.rows[0]?.state).toBe(state);
+      expect(rows.rows[0]?.state).toBe(state === 'pending' ? 'cancelled' : state);
     });
 
 
@@ -821,7 +822,23 @@ describe('thread message attribution', () => {
   });
 
 
-  it('Reproduction STALE-3: retains a review wake and its successor when the head moves', async () => {
+  it('Reproduction STALE-4: drops an undelivered review wake once its head is approved', async () => {
+    await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+    const head = '5'.repeat(40);
+    await greenHead(44, head);
+    const [queued] = await commands(B, C);
+    expect(queued?.reason).toBe('corner_review_dispatch');
+    // The reviewer's PASS on this head lands through another request first.
+    await recordCornerMergeApproval(rootFixture.db, { cornerId: C, approvedBy: B, pullRequestNumber: 44, headSha: head });
+    const delivered = await commands(B, C);
+    console.info(`Reproduction STALE-4: review wakes for an approved head delivered=${delivered.length}; wrong=1 right=0`);
+    expect(delivered).toEqual([]);
+    expect((await rootFixture.db.query(`SELECT state FROM agent_commands WHERE id=$1`, [queued!.id])).rows[0]?.state)
+      .toBe('cancelled');
+  });
+
+
+  it('Reproduction STALE-3: drops an undelivered review wake when the head moves', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     const headA = '3'.repeat(40), headB = '4'.repeat(40);
     const green = async (number: number, headSha: string) => {
@@ -844,8 +861,9 @@ describe('thread message attribution', () => {
     const queuedState = (
       await rootFixture.db.query<{ state: string }>(`SELECT state FROM agent_commands WHERE id=$1`, [queued!.id])
     ).rows[0]?.state;
-    expect(staleDelivered).toHaveLength(1);
-    expect(queuedState).toBe('pending');
+    console.info(`Reproduction STALE-3: stale-head review wakes delivered=${staleDelivered.length}; wrong=1 right=0`);
+    expect(staleDelivered).toHaveLength(0);
+    expect(queuedState).toBe('cancelled');
     // The current head gets its review wake, naming that head.
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     const current = (await commands(B, C)).filter((command) =>
@@ -853,8 +871,6 @@ describe('thread message attribution', () => {
     );
     expect(current).toHaveLength(1);
     expect(current[0]?.source.body).not.toContain(headA);
-    console.log(
-      'Demonstrated Reproduction STALE-3: review requests for both heads remain queued',
-    );
+
   });
 });
