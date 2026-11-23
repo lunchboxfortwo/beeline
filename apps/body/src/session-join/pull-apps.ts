@@ -143,7 +143,10 @@ async function watchAntigravity(dir: string): Promise<never> {
         onError: (error) => {
           stopped = true;
           dirty = false;
-          void Promise.resolve(draining).then(() => reject(error), () => reject(error));
+          void Promise.resolve(draining).then(
+            () => reject(error),
+            () => reject(error),
+          );
         },
       },
     );

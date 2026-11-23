@@ -12,6 +12,8 @@ afterEach(() => {
 it.each(['before startup', 'during status'])('delivers Pi mail pending %s without another event', when => {
   const dir = mkdtempSync(join(tmpdir(), 'pi-startup-'));
   folders.push(dir);
+  // Node's test driver must import the emitted TypeScript as ESM, as Pi's loader does.
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ type: 'module' }));
   const pending = join(dir, 'pending');
   if (when === 'before startup') writeFileSync(pending, 'startup mail');
   const hook = join(dir, 'hook.mjs');

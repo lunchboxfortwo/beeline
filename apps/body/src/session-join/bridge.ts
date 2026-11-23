@@ -369,7 +369,10 @@ async function serveTools(dir: string, path: string, sessionsChanged: () => void
         connection.end(JSON.stringify(answer) + '\n');
       })();
       requests.add(request);
-      void request.then(() => requests.delete(request), () => requests.delete(request));
+      void request.then(
+        () => requests.delete(request),
+        () => requests.delete(request),
+      );
     });
   });
   const listening = await listen(server, path);

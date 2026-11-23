@@ -68,7 +68,9 @@ async function bridge(dir: string) {
   boundary.watch.mockImplementation(() => { subscribed.resolve(); return () => stopped.resolve(); });
   const exit = new Error('bridge exit');
   vi.spyOn(process, 'exit').mockImplementation(() => { throw exit; });
-  const result = runBridge(dir, { node: process.execPath, bundle: 'fixture' }).catch(error => error);
+  const bundle = join(dir, 'fixture.mjs');
+  writeFileSync(bundle, '// synthetic bridge bundle identity\n');
+  const result = runBridge(dir, { node: process.execPath, bundle }).catch(error => error);
   await subscribed.promise;
   await notifyBridgeSessions(dir);
   return { result, stopped, exit };

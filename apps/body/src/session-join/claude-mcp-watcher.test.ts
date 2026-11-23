@@ -29,11 +29,11 @@ async function receiver(post = vi.fn(async (_target: unknown, _text: string) => 
   folders.push(dir);
   const joined: JoinedSession = {
     key: `claude-code:${dir}`, agent: 'claude-code', cwd: dir, name: 'fixture',
-    pid: process.pid, sessionId: 's1', server: 'https://synthetic.invalid',
+    pid: process.ppid, sessionId: 's1', server: 'https://synthetic.invalid',
     clientId: 'fixture', refreshToken: 'fixture', cursor: '0', deliveredWakes: [], joinedAt: '',
   };
   await updateState(dir, state => { state.sessions = [joined]; });
-  boundary.scan.mockReturnValue([{ pid: process.pid, sessionId: 's1', messagingSocketPath: '/synthetic' }]);
+  boundary.scan.mockReturnValue([{ pid: process.ppid, sessionId: 's1', messagingSocketPath: '/synthetic' }]);
   boundary.watch.mockReturnValue(vi.fn());
   const input = new PassThrough({ objectMode: true });
   inputs.push(input);
@@ -42,7 +42,7 @@ async function receiver(post = vi.fn(async (_target: unknown, _text: string) => 
   boundary.input.mockImplementation(() => { listening(); return input; });
   const running = runClaudeMcp(dir, { CLAUDE_CODE_MESSAGING_TOKEN: 'fixture-token' }, undefined, post);
   await ready;
-  expect(hasClaudeMcp(dir, process.pid)).toBe(true);
+  expect(hasClaudeMcp(dir, process.ppid)).toBe(true);
   const [, change, options] = boundary.watch.mock.calls[0]!;
   return { dir, joined, post, input, running, change, options };
 }
@@ -163,7 +163,7 @@ it.each(['watcher failure', 'normal shutdown'])('removes its receiver registrati
   if (ending === 'watcher failure') current.options.onError(new Error('watch channel failed'));
   else current.input.end();
   await setImmediate();
-  expect(hasClaudeMcp(current.dir, process.pid)).toBe(false);
+  expect(hasClaudeMcp(current.dir, process.ppid)).toBe(false);
   current.input.end();
   await current.running;
 });

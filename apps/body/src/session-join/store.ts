@@ -1,7 +1,17 @@
 // Local state for sessions that joined Beeline: one private file per machine user, a lock, and per-session inboxes
 // for apps that take messages through their own hooks or plugins instead of a push channel.
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  rmdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { withKernelLockWhenFree } from '../kernel-lock.js';
@@ -38,12 +48,13 @@ export interface JoinedSession {
   agentBin?: string;
   /** Current server delivery proof generation, independent of membership. */
   deliveryGeneration?: string;
-  deliveryMechanism?: 'local'|'events'|'webhook'|'on_demand'|'unfinished';
+  deliveryMechanism?: 'local' | 'events' | 'webhook' | 'on_demand' | 'unfinished';
   joinedAt: string;
 }
 
 /** Old joins retain their installed stream; new on-demand/unbound hosts never acquire a parallel stream. */
-export const hasLocalDelivery=(session:JoinedSession):boolean=>session.deliveryMechanism===undefined || session.deliveryMechanism==='local';
+export const hasLocalDelivery = (session: JoinedSession): boolean =>
+  session.deliveryMechanism === undefined || session.deliveryMechanism === 'local';
 
 /** A session an app's hook or plugin reported: alive while it reports, and its process lives. */
 export interface HookSession {
@@ -56,13 +67,18 @@ export interface HookSession {
   seenAt: number;
 }
 
-interface State { sessions: JoinedSession[] }
+interface State {
+  sessions: JoinedSession[];
+}
 
 /** A hook-only session that has not reported for this long is gone. */
 export const HOOK_TTL_MS = 6 * 3_600_000;
 
 export function stateDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(env.XDG_STATE_HOME || join(env.HOME || homedir(), '.local/state'), 'beeline-sessions');
+  return join(
+    env.XDG_STATE_HOME || join(env.HOME || homedir(), '.local/state'),
+    'beeline-sessions',
+  );
 }
 
 export function pidAlive(pid: number): boolean {
@@ -90,7 +106,9 @@ export function readState(dir = stateDir()): State {
   try {
     const value = JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')) as State;
     return Array.isArray(value.sessions) ? value : { sessions: [] };
-  } catch { return { sessions: [] }; }
+  } catch {
+    return { sessions: [] };
+  }
 }
 
 /** Callers hold the lock. */
@@ -209,9 +227,9 @@ function inboxPath(dir: string, key: string): string {
 
 /** Every new local or streamed message uses the same durable delivery queue. */
 export function queueInbox(dir: string, key: string, text: string): string {
-  adoptInboxText(dir,key);
+  adoptInboxText(dir, key);
   const deliveryId = `local:${randomUUID()}`;
-  queueInboxOnce(dir,key,deliveryId,text);
+  queueInboxOnce(dir, key, deliveryId, text);
   return deliveryStem(dir, key, deliveryId) + '.pending';
 }
 
@@ -220,15 +238,22 @@ export function queueInbox(dir: string, key: string, text: string): string {
  * and the usual delivery claim handles concurrent hooks. The .text suffix is
  * the input codec for those pre-stream files, never a second writer/consumer.
  */
-function adoptInboxText(dir:string,key:string):void {
-  const folder=ensureDir(join(dir,'deliveries',createHash('sha256').update(key).digest('hex').slice(0,24)));
-  try {renameSync(inboxPath(dir,key),join(folder,`${randomUUID()}.text.pending`));}
-  catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+function adoptInboxText(dir: string, key: string): void {
+  const folder = ensureDir(
+    join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0, 24)),
+  );
+  try {
+    renameSync(inboxPath(dir, key), join(folder, `${randomUUID()}.text.pending`));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
-let lastInboxOrder=0;
+let lastInboxOrder = 0;
 
 function deliveryStem(dir: string, key: string, deliveryId: string): string {
-  const folder = ensureDir(join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0,24)));
+  const folder = ensureDir(
+    join(dir, 'deliveries', createHash('sha256').update(key).digest('hex').slice(0, 24)),
+  );
   return join(folder, createHash('sha256').update(deliveryId).digest('hex'));
 }
 
@@ -236,41 +261,80 @@ function deliveryStem(dir: string, key: string, deliveryId: string): string {
  * delivery retains a content-free tombstone, so replay after a crash cannot
  * append the same text to an app inbox again. This is local delivery identity,
  * not a claim of exactly-once behavior by a third-party app. */
-export function queueInboxOnce(dir: string, key: string, deliveryId: string, text: string): boolean {
-  lastInboxOrder=Math.max(Date.now(),lastInboxOrder+0.001);
-  const queuedAt=lastInboxOrder;
+export function queueInboxOnce(
+  dir: string,
+  key: string,
+  deliveryId: string,
+  text: string,
+): boolean {
+  lastInboxOrder = Math.max(Date.now(), lastInboxOrder + 0.001);
+  const queuedAt = lastInboxOrder;
   if (!deliveryId || deliveryId.length > 256) throw new Error('Invalid inbox delivery identity');
   const stem = deliveryStem(dir, key, deliveryId);
-  if (existsDelivery(stem+'.pending') || existsDelivery(stem+'.done')) return false;
-  writePrivate(stem+'.pending', JSON.stringify({id:deliveryId,text,queuedAt}));
+  if (existsDelivery(stem + '.pending') || existsDelivery(stem + '.done')) return false;
+  writePrivate(stem + '.pending', JSON.stringify({ id: deliveryId, text, queuedAt }));
   return true;
 }
-function existsDelivery(path: string): boolean { try { statSync(path); return true; } catch { return false; } }
+function existsDelivery(path: string): boolean {
+  try {
+    statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function takeDeliveries(dir: string, key: string): string[] {
-  const folder=join(dir,'deliveries',createHash('sha256').update(key).digest('hex').slice(0,24));
-  let names: string[]; try { names=readdirSync(folder); } catch { return []; }
-  const pending=names.filter(name=>name.endsWith('.pending')).flatMap(name=>{
-    try { const contents=readFileSync(join(folder,name),'utf8');
-      const item=name.endsWith('.text.pending')?{text:contents,queuedAt:0}:JSON.parse(contents) as {text:string;queuedAt:number};
-      return typeof item.text==='string' ? [{name,...item}] : []; } catch { return []; }
-  }).sort((a,b)=>a.queuedAt-b.queuedAt || a.name.localeCompare(b.name));
-  const text: string[]=[];
+  const folder = join(
+    dir,
+    'deliveries',
+    createHash('sha256').update(key).digest('hex').slice(0, 24),
+  );
+  let names: string[];
+  try {
+    names = readdirSync(folder);
+  } catch {
+    return [];
+  }
+  const pending = names
+    .filter((name) => name.endsWith('.pending'))
+    .flatMap((name) => {
+      try {
+        const contents = readFileSync(join(folder, name), 'utf8');
+        const item = name.endsWith('.text.pending')
+          ? { text: contents, queuedAt: 0 }
+          : (JSON.parse(contents) as { text: string; queuedAt: number });
+        return typeof item.text === 'string' ? [{ name, ...item }] : [];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => a.queuedAt - b.queuedAt || a.name.localeCompare(b.name));
+  const text: string[] = [];
   for (const item of pending) {
-    const path=join(folder,item.name),done=path.replace(/\.pending$/,'.done');
-    try { renameSync(path,done); } catch { continue; }
-    text.push(item.text); writePrivate(done,'');
+    const path = join(folder, item.name),
+      done = path.replace(/\.pending$/, '.done');
+    try {
+      renameSync(path, done);
+    } catch {
+      continue;
+    }
+    text.push(item.text);
+    writePrivate(done, '');
   }
   return text;
 }
 
 /** Takes everything waiting for a joined session; it is gone once taken. */
 export function takeInbox(dir: string, key: string): string {
-  adoptInboxText(dir,key);
-  return takeDeliveries(dir,key).join('\n\n');
+  adoptInboxText(dir, key);
+  return takeDeliveries(dir, key).join('\n\n');
 }
 
 export function recordHookSession(dir: string, session: HookSession): void {
-  writePrivate(join(ensureDir(join(dir, 'hooks')), `${safe(session.agent)}-${safe(session.sessionId)}.json`), JSON.stringify(session));
+  writePrivate(
+    join(ensureDir(join(dir, 'hooks')), `${safe(session.agent)}-${safe(session.sessionId)}.json`),
+    JSON.stringify(session),
+  );
 }
 
 export function forgetHookSession(dir: string, agent: AgentId, sessionId: string): void {
@@ -278,16 +342,27 @@ export function forgetHookSession(dir: string, agent: AgentId, sessionId: string
 }
 
 /** Sessions apps reported through hooks that are still alive. */
-export function hookSessions(dir: string, now = Date.now(), alive: (pid: number) => boolean = pidAlive): HookSession[] {
+export function hookSessions(
+  dir: string,
+  now = Date.now(),
+  alive: (pid: number) => boolean = pidAlive,
+): HookSession[] {
   let names: string[];
-  try { names = readdirSync(join(dir, 'hooks')); } catch { return []; }
+  try {
+    names = readdirSync(join(dir, 'hooks'));
+  } catch {
+    return [];
+  }
   const found: HookSession[] = [];
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
     try {
       const session = JSON.parse(readFileSync(join(dir, 'hooks', name), 'utf8')) as HookSession;
-      if (now - session.seenAt <= HOOK_TTL_MS && (session.pid === undefined || alive(session.pid))) found.push(session);
-    } catch { /* half-written */ }
+      if (now - session.seenAt <= HOOK_TTL_MS && (session.pid === undefined || alive(session.pid)))
+        found.push(session);
+    } catch {
+      /* half-written */
+    }
   }
   return found;
 }

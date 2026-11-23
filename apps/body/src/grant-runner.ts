@@ -306,7 +306,7 @@ async function takeOperatorSecretsMarker(lockDir: string, owner: string): Promis
  * inside; every removal goes through `rmdir`, which succeeds only on an empty
  * directory. A marker held by a live older process, or one with no readable
  * owner, refuses at once naming its path; one whose owner pid is dead is
- * removed. Returns the release; call it in `finally`.
+ * removed. Releases both locks when the supplied work settles.
  */
 export async function withOperatorSecretStoreLock<T>(
   path: string,
