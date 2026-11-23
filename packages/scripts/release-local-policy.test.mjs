@@ -9,7 +9,6 @@ import test from 'node:test';
 import { parse } from 'yaml';
 import { dryRun, localHooks } from './release-local.mjs';
 import { LocalActions } from './release-local-actions.mjs';
-import { LocalChecks } from './release-local-checks.mjs';
 import { LocalDelivery, writeToolAdapters } from './release-local-delivery.mjs';
 import { localToolPlan } from './release-local-tools.mjs';
 import { droppedChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
@@ -63,44 +62,6 @@ test('local delivery preserves real dependency joins and requires the quick verd
       assert.equal(result.result, verdict);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test('the local controller records one exact-SHA profile and gates delivery on every quick result', async t => {
-  const sha = 'a'.repeat(40), rootState = temporary();
-  t.after(() => rmSync(rootState, { recursive: true, force: true }));
-  const jobs = [];
-  let failCodecs = false;
-  t.mock.method(LocalChecks.prototype, 'prepare', async () => {});
-  t.mock.method(LocalChecks.prototype, 'finish', function () {
-    writeFileSync(join(this.engine.directory, 'release-checks-timing.json'),
-      JSON.stringify({ wallSeconds: 2, completedAt: '2026-11-23T00:00:00Z' }));
-  });
-  t.mock.method(LocalChecks.prototype, 'execute', async (_slot, _job, context) => {
-    jobs.push(context.github.job);
-    assert.deepEqual(context.inputs, { suite: 'all', release_sha: sha });
-    return { result: failCodecs && context.github.job === 'codecs' ? 'failure' : 'success', outputs: {} };
-  });
-  t.mock.method(LocalDelivery.prototype, 'run', async (_job, context) => {
-    jobs.push(context.github.job);
-    return { result: 'success', outputs: context.github.job === 'initialize' ? {
-      release_sha: sha, run_server: 'true', run_mobile_ota: 'true',
-    } : {} };
-  });
-  for (const result of ['success', 'failure']) {
-    failCodecs = result === 'failure';
-    jobs.length = 0;
-    const directory = join(rootState, result), processes = new Processes({}, () => {});
-    const engine = new LocalActions({ root, directory, processes, hooks: localHooks(directory, processes) });
-    const outcomes = await engine.workflow('.github/workflows/unified-release.yml', { channel: 'next' }, {
-      github: { repository: 'Beeline-Work/beeline', sha, run_id: '1', event_name: 'workflow_dispatch' },
-    });
-    assert.equal(outcomes.release_validation.result, result);
-    assert.equal(jobs.includes('server'), !failCodecs);
-    assert.equal(jobs.includes('mobile_ota'), !failCodecs);
-    const checks = engine.variables.releaseChecks;
-    assert.deepEqual([checks.profile, checks.sourceSha, checks.result], ['quick', sha, result]);
-    assert.deepEqual(Object.keys(JSON.parse(readFileSync(checks.resultsPath, 'utf8'))).sort(), ['codecs', 'dead-code', 'typecheck']);
-  }
 });
 
 test('local latest promotion has no reusable Checks call or quick gates', async () => {

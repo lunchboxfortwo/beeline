@@ -215,7 +215,8 @@ test('helper promote dry run publishes and reads both exact channels through the
       assert.equal(result.version, expected.version);
     }
     const workflow = await yaml('.github/workflows/unified-release.yml');
-    const promote = workflow.jobs.helper.steps.find(step => step.with?.phase === 'promote');
+    const promote = workflow.jobs.helper.steps.find(step => step.uses === './.github/actions/daemon-leg' && step.with?.manifest_url);
+    assert.equal(promote.with.phase, "${{ needs.helper_linux.outputs.shipped == 'true' && 'prove' || 'promote' }}");
     assert.equal(promote.env.CLOUDFLARE_R2_TOKEN, '${{ secrets.CLOUDFLARE_R2_TOKEN }}');
     assert.equal(promote.env.CLOUDFLARE_ACCOUNT_ID, '${{ vars.CLOUDFLARE_ACCOUNT_ID }}');
     assert.equal(workflow.jobs.helper.permissions.pages, undefined);
