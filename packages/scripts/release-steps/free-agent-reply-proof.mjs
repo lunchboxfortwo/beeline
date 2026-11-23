@@ -26,7 +26,7 @@ const sentAt = Date.now();
 
 const outcome = await new Promise((resolve, reject) => {
   const socket = new WebSocket(`${origin.replace(/^http/, 'ws')}/v1/phone/live`, [`bearer.${accessToken}`]);
-  let sent = false, settled = false, dirty = false, owed = false;
+  let sent = false, settled = false, dirty = false;
   let accepted, requestId, reading;
   const finish = (error, value) => {
     if (settled) return; settled = true; socket.close();
@@ -48,8 +48,6 @@ const outcome = await new Promise((resolve, reject) => {
           if (!response.ok) throw new Error(`Proof Room read failed with HTTP ${response.status}`);
           const room = await response.json();
           for (const message of room.messages ?? []) judge(message);
-          owed = (room.pendingAgentCommands ?? []).some(command =>
-            command.agentPubkey === agentId && command.requestId === requestId);
         }
       } catch (error) { finish(error); } finally { reading = undefined; }
     })();
@@ -79,8 +77,7 @@ const outcome = await new Promise((resolve, reject) => {
     else if (frame.type === 'turn-delta' && frame.turn?.agentPubkey === agentId && frame.turn.requestId === requestId &&
         (frame.turn.status === 'failed' || frame.turn.status === 'cancelled'))
       void read().then(() => {
-        if (frame.turn.status === 'cancelled' && owed) return;
-        finish(new Error(`Free agent turn ${frame.turn.status} without a reply`));
+        if (frame.turn.status === 'failed') finish(new Error(`Free agent turn ${frame.turn.status} without a reply`));
       });
     else if (frame.type === 'invalidate') void read();
   });
