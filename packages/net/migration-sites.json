@@ -18,14 +18,6 @@
       "phase": "M4"
     },
     {
-      "id": "apps/body/src/agent-corner-checkout.ts::fetch",
-      "file": "apps/body/src/agent-corner-checkout.ts",
-      "kind": "fetch",
-      "count": 2,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/agent-runtime.ts::fetch",
       "file": "apps/body/src/agent-runtime.ts",
       "kind": "fetch",
@@ -53,14 +45,6 @@
       "id": "apps/body/src/browser-share-host.ts::import:node:net",
       "file": "apps/body/src/browser-share-host.ts",
       "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/browser-share-host.ts::fetch",
-      "file": "apps/body/src/browser-share-host.ts",
-      "kind": "fetch",
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
@@ -116,14 +100,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/connector-squire.ts::fetch",
-      "file": "apps/body/src/connector-squire.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/daemon-api-client.ts::fetch",
       "file": "apps/body/src/daemon-api-client.ts",
       "kind": "fetch",
@@ -151,7 +127,7 @@
       "id": "apps/body/src/free-agent-vm.ts::fetch",
       "file": "apps/body/src/free-agent-vm.ts",
       "kind": "fetch",
-      "count": 2,
+      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -276,18 +252,10 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/repository-cache-repair.ts::fetch",
-      "file": "apps/body/src/repository-cache-repair.ts",
-      "kind": "fetch",
-      "count": 3,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/resource-mcp-facade.ts::fetch",
       "file": "apps/body/src/resource-mcp-facade.ts",
       "kind": "fetch",
-      "count": 4,
+      "count": 3,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -360,14 +328,6 @@
       "file": "apps/body/src/squire-task-relay.ts",
       "kind": "import:node:http",
       "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/squire-task-relay.ts::fetch",
-      "file": "apps/body/src/squire-task-relay.ts",
-      "kind": "fetch",
-      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -1100,7 +1060,7 @@
       "id": "apps/body/src/wait.ts::import:node:net",
       "file": "apps/body/src/wait.ts",
       "kind": "import:node:net",
-      "count": 1,
+      "count": 2,
       "compatibility": "legacy-only",
       "phase": "M5",
       "reason": "Centralize existing helper socket requests and kernel locks in ask and tryLock."
