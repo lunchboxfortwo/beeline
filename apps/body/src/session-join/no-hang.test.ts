@@ -13,6 +13,7 @@ import { ensureBridge, notifyBridgeSessions, toolViaBridge } from './bridge.js';
 import { setMachineReadOutput } from './beeline-api.js';
 
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
+import { preparePrivateSocketDirectory } from '../local-socket.js';
 import { runSessionCommand } from './command.js';
 import { fill, HERMES_PLUGIN, OPENCODE_PLUGIN, PI_EXTENSION } from './templates.js';
 import { queueInbox, stateDir, updateState, type JoinedSession } from './store.js';
@@ -272,7 +273,9 @@ describe('fix 8: session tool calls through the bridge', () => {
           if (text.includes('\n')) onRequest(connection, text.trim());
         });
       });
-      server.listen(bridgeSocketPath(dir));
+      const path = bridgeSocketPath(dir);
+      await preparePrivateSocketDirectory(path);
+      server.listen(path);
       await once(server, 'listening');
       return server;
     };
