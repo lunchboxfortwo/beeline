@@ -505,7 +505,12 @@ async function writeCornerAdvance(
         }
         case 'revision': {
           if (event.kind !== 'brief-revised') break;
-          const agentId = corner.worker_agent_id !== event.command.agent_id ? corner.worker_agent_id : null;
+          // The implementer skips its own revision only when it revised from inside
+          // this thread. A revision it wrote from another place (its parent chat) is
+          // news to its thread session, so that session is woken with it. The queued
+          // command stays pending until the implementer's helper next connects.
+          const agentId = corner.worker_agent_id !== event.command.agent_id || event.command.room_id !== cornerId ? corner.worker_agent_id : null;
+          const selfInThread = Boolean(corner.worker_agent_id) && !agentId;
           const command = agentId
             ? await createAgentCommand(db, {
                 roomId: cornerId,
@@ -518,7 +523,9 @@ async function writeCornerAdvance(
             : undefined;
           result = {
             ok: true,
-            wake: { queued: Boolean(command), ...(command ? { agentId: command.agent_id } : { reason: 'No reachable implementer for the revision' }) },
+            wake: { queued: Boolean(command), ...(command ? { agentId: command.agent_id } : { reason: selfInThread
+              ? 'The implementer revised its own brief from this thread'
+              : 'The thread has no implementer to wake' }) },
           };
           break;
         }

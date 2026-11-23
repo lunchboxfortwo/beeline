@@ -120,7 +120,7 @@ describe('PillRow', () => {
         expect(edge.props).toMatchObject({ width: 22, height: 22, borderWidth: 1, borderColor: 'strongStroke' });
         expect(edge.find((node: any) => node.type === 'IdentityMark').props).toMatchObject({ seed: 'owner', size: 20 });
         expect(text(pill)).toEqual(['3 messages']);
-        expect(pill.props['aria-label']).toBe('Read 3 messages between Ruby, Claude and owner, 2 from Beeline, 10:02');
+        expect(pill.props['aria-label']).toBe('Read 3 messages between Ruby, Claude and owner, 1 from Beeline, 10:02');
         act(() => pill.props.onPress());
         expect(tree.root.findAll((node: any) => node.type === 'YStack' && node.props.testID?.startsWith?.('pill-run-entry-')).map((node: any) => node.props.testID))
             .toEqual(['pill-run-entry-x1', 'pill-run-entry-x2', 'pill-run-entry-x3']);
@@ -157,15 +157,68 @@ describe('PillRow', () => {
         ['only person stops', [
             { id: 's1', from: owner, to: ruby, time: '09:42', stop: true },
             { id: 's2', from: owner, to: claude, time: '09:43', stop: true },
-        ], [SYSTEM_IDENTITY_PUBKEY, 'owner', 'ruby']],
-    ] as const)('folds a system stack with %s to the ringed logo first and keeps the stopper', (_name, run, seeds) => {
+        ], ['owner', 'ruby', 'claude']],
+    ] as const)('folds a system stack with %s, stopper first, the ringed logo only if a heading has it', (_name, run, seeds) => {
         let tree: any;
         const stack: PillItem = { id: run[0]!.id, system: true, from: run[0]!.from, to: run[0]!.to, time: '09:43', body: null, run };
         act(() => { tree = create(<PillRow items={[stack]} />); });
         const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
-        expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+        expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face'))
+            .toHaveLength(seeds.includes(SYSTEM_IDENTITY_PUBKEY as never) ? 1 : 0);
         expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(seeds);
         expect(text(pill)).toEqual([`${run.length} messages`]);
+    });
+
+    const grunt = { kind: 'agent', seed: 'grunt', name: 'Grunt' } as const;
+    const nerd = { kind: 'agent', seed: 'nerd', name: 'Nerd' } as const;
+    // R1: an agent's message to Ruby, then a person stopping Grunt. Neither entry is Beeline's.
+    const personStop: PillItem = { id: 'r1', system: false, from: nerd, to: ruby, time: '23:48', body: null, run: [
+        { id: 'r1a', from: nerd, to: ruby, time: '23:47', body: null },
+        { id: 'r1b', system: true, stop: true, from: owner, to: grunt, time: '23:48', body: null },
+    ] };
+
+    it('folds an agent message and a person stop to the person first, with no Beeline ring', () => {
+        let tree: any;
+        act(() => { tree = create(<PillRow items={[personStop]} />); });
+        const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+        expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(0);
+        expect(pill.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['owner', 'nerd', 'ruby']);
+        expect(pill.props['aria-label']).toBe('Read 2 messages between Nerd, Ruby, Owner and Grunt, 23:48');
+    });
+
+    const beeline = { kind: 'system', name: 'Beeline' } as const;
+    const fixtures: PillItem[] = [
+        runItem,
+        personStop,
+        { id: 'mix', system: false, from: ruby, to: claude, time: '10:02', body: null, run: [
+            { id: 'x1', from: ruby, to: claude, time: '10:00', body: null },
+            { id: 'x2', system: true, from: beeline, to: ruby, time: '10:01', body: null },
+            { id: 'x3', system: true, stop: true, from: owner, to: claude, time: '10:02', body: null },
+        ] },
+        { id: 'n1', system: true, from: beeline, to: ruby, time: '09:42', body: null, run: [
+            { id: 'n1', system: true, from: beeline, to: ruby, time: '09:40', body: null },
+            { id: 's1', system: true, stop: true, from: owner, to: claude, time: '09:42', body: null },
+        ] },
+        { id: 's1', system: true, from: owner, to: ruby, time: '09:43', body: null, run: [
+            { id: 's1', system: true, stop: true, from: owner, to: ruby, time: '09:42', body: null },
+            { id: 's2', system: true, stop: true, from: owner, to: claude, time: '09:43', body: null },
+        ] },
+        { id: 'as', system: false, from: ruby, to: claude, time: '09:44', body: null, run: [
+            { id: 'as1', system: true, stop: true, from: ruby, to: claude, time: '09:43', body: null },
+            { id: 'as2', from: claude, to: jelly, time: '09:44', body: null },
+        ] },
+    ];
+
+    it.each(fixtures.map((item) => [item.id, item] as const))('folds run %s to faces its opened headings draw', (_id, item) => {
+        let tree: any;
+        act(() => { tree = create(<PillRow items={[item]} />); });
+        const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+        const folded = pill().findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed);
+        act(() => pill().props.onPress());
+        const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+        const opened = new Set(open.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed));
+        expect(folded.length).toBeGreaterThan(0);
+        for (const seed of folded) expect(opened).toContain(seed);
     });
 
     it('draws a stop as face, stop glyph, face, with no text', () => {

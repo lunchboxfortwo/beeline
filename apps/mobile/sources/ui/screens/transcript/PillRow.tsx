@@ -163,18 +163,24 @@ export function isNotice(entry: PillRunEntry): boolean {
     return Boolean(entry.system) && !(entry.stop && entry.from.kind === 'agent');
 }
 
+/** True when an entry's own heading draws the ringed Beeline face. */
+function beelineHeaded(entry: PillRunEntry): boolean {
+    return entry.from.kind === 'system' || entry.to?.kind === 'system';
+}
+
 /**
- * The faces a folded run shows, at most `RUN_FACES`. A run that holds a Beeline
- * notice leads with the ringed Beeline logo, then whoever stopped a turn, then
- * everyone else, so a person's stop stays visible while folded.
+ * The faces a folded run shows, at most `RUN_FACES`, and only faces its opened
+ * headings draw. Whoever stopped a turn leads, so a person's stop stays
+ * visible while folded; the ringed Beeline logo leads only when an opened
+ * entry is headed by it.
  */
 function foldedFaces(item: PillItem): PillFace[] {
     const run = item.run ?? [];
     const notice = (entry: PillRunEntry) => item.system || isNotice(entry);
     // Events lead with their rings (GitHub, then Beeline), so a folded merge or thread opening still shows.
     const github = run.some((entry) => entry.event?.source === 'github') ? [GITHUB_FACE] : [];
-    const beeline = run.some((entry) => entry.event?.source === 'beeline' || notice(entry)) ? [BEELINE_FACE] : [];
-    if (!github.length && !beeline.length) return runFaces(run).slice(0, RUN_FACES);
+    // The Beeline ring shows only when an opened heading draws it: a Beeline notice or a thread event, never a person's stop.
+    const beeline = run.some(beelineHeaded) ? [BEELINE_FACE] : [];
     const stoppers = run.filter((entry) => entry.stop && notice(entry)).map((entry) => entry.from);
     const seen = new Set<string>();
     const lead = [...github, ...beeline];
@@ -221,7 +227,8 @@ function pillLabel(item: PillItem, expanded: boolean): string {
             beeline ? plural(beeline, 'Beeline event') : ''].filter(Boolean);
         const spokenParts = parts.length > 2 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts.join(' and ');
         const between = names(runFaces(item.run).filter((face) => face.kind !== 'system' && face.kind !== 'github'));
-        const notices = item.run.filter(isNotice).length;
+        // Only messages Beeline itself sent count as from Beeline; thread events are counted above.
+        const notices = item.run.filter((entry) => !entry.event && entry.from.kind === 'system').length;
         return `${verb} ${spokenParts}${between ? ` between ${between}` : ''}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
     }
     if (item.run && item.system) {
@@ -230,7 +237,8 @@ function pillLabel(item: PillItem, expanded: boolean): string {
     }
     if (item.run) {
         const between = names(runFaces(item.run).filter((face) => face.kind !== 'system'));
-        const notices = item.run.filter(isNotice).length;
+        // Only messages Beeline itself sent count as from Beeline; a person's stop is the person's.
+        const notices = item.run.filter((entry) => entry.from.kind === 'system').length;
         return `${verb} ${item.run.length} messages between ${between}${notices ? `, ${notices} from Beeline` : ''}, ${item.time}`;
     }
     if (item.stop) return `${item.from.name} stopped ${item.to?.name ?? ''}`;

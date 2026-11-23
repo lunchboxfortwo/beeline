@@ -242,10 +242,15 @@ export async function stageMonolithAgentRuntime(input: {
   return { runtime, configPath };
 }
 
+/** A paired agent is its runtime record. A directory without one is residue
+ * (retirement keeps Squire-owned ancestors), never an agent to host or list. */
 async function runtimePaths(root: string): Promise<string[]> {
   const agents = resolve(root, 'beeline', 'agents');
   const entries = await readdir(agents, { withFileTypes: true }).catch(() => []);
-  return entries.filter((entry) => entry.isDirectory()).map((entry) => resolve(agents, entry.name, 'runtime.json'));
+  const paths = entries.filter((entry) => entry.isDirectory()).map((entry) => resolve(agents, entry.name, 'runtime.json'));
+  const present = await Promise.all(paths.map((path) =>
+    stat(path).then(() => true, (error: NodeJS.ErrnoException) => error.code !== 'ENOENT')));
+  return paths.filter((_, index) => present[index]);
 }
 
 export async function findAgentRuntimeConfigPaths(

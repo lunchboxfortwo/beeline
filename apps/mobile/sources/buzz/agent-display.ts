@@ -34,9 +34,8 @@ export type DisplayableAgent = Pick<Agent, 'pubkey' | 'displayName' | 'avatar' |
 };
 
 /**
- * Resolve authority-free presentation from the agent's one self-signed
- * declaration. A soul may shape personality and artwork, but never supplies
- * a competing name or @handle.
+ * Resolve presentation from the server-projected identity. A soul shapes
+ * personality without supplying a competing avatar, name or @handle.
  */
 export function resolveAgentDisplayIdentity(
   pubkey: string,
@@ -45,8 +44,9 @@ export function resolveAgentDisplayIdentity(
   const overlay = agent?.soulProfile;
   const name = resolveAgentName(agent?.displayName, pubkey);
   const overlayPersonality = overlay?.soul.trim();
-  // Once a human soul exists, its absent avatar explicitly selects the generated mark.
-  const avatarUrl = overlay ? overlay.avatar?.trim() : agent?.avatar?.trim();
+  // Profile uploads and generated portraits share identities.avatar on the server.
+  // A soul's legacy artwork must never override or suppress that persisted choice.
+  const avatarUrl = agent?.avatar?.trim();
   const face = agent?.face?.trim();
   return {
     name,
@@ -54,7 +54,7 @@ export function resolveAgentDisplayIdentity(
     // expose the previous two-argument declaration bundle.
     handle: agent?.handle?.trim() || agentHandle(name, pubkey),
     personality: overlayPersonality || 'Steady, practical, and ready to help.',
-    avatarSeed: overlay?.avatarSeed.trim() || pubkey || 'unknown-agent',
+    avatarSeed: pubkey || 'unknown-agent',
     ...(avatarUrl ? { avatarUrl } : {}),
     hasSoul: Boolean(overlay),
     ...(face ? { face } : {}),

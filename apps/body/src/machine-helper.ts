@@ -568,6 +568,14 @@ async function serveMachineHelper(
       setState(slot, 'stopped');
   };
 
+  /** A deleted agent's runtime record is gone; its slot leaves status with it. */
+  const forgetSlot = (slot: AgentSlot) => {
+    if (slots.get(slot.configPath) !== slot || slot.running) return;
+    slot.watcher?.close();
+    slots.delete(slot.configPath);
+    writeStatus();
+  };
+
   const startSlot = (configPath: string) => {
     const existing = slots.get(configPath);
     if (existing?.running) {
@@ -636,6 +644,10 @@ async function serveMachineHelper(
         void rescan().catch((error) =>
           console.error('[helper] desired-set reconciliation failed:', error),
         );
+      else if (slot.state === 'removed')
+        void stat(configPath).then(() => undefined, (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') forgetSlot(slot);
+        });
     });
   };
 
@@ -650,6 +662,7 @@ async function serveMachineHelper(
         continue;
       }
       slot.controller.abort();
+      forgetSlot(slot);
     }
     for (const configPath of wanted) startSlot(configPath);
   };

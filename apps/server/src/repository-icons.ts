@@ -7,8 +7,9 @@ export type IconRepository = { repository_id: string; installation_id: string; f
 export type IconRepositoryRead = (repository: IconRepository, path: string) => Promise<unknown>;
 
 /** Raised when the stored pick changes meaning; rows below it re-resolve once at the next backfill.
- * 2: the homepage site icon fills in for a repository with no committed icon file. */
-const RESOLVER_REVISION = 2;
+ * 2: the homepage site icon fills in for a repository with no committed icon file.
+ * 3: the largest icon in the picked directory, stored at 256 px and scaled down smoothly. */
+const RESOLVER_REVISION = 3;
 
 /** A repository at least one chat is linked to. Unlinked installed repositories are never read. */
 const LINKED = `r.active AND EXISTS (SELECT 1 FROM rooms chat WHERE chat.parent_id IS NULL

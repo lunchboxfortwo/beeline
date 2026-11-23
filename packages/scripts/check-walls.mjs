@@ -152,7 +152,7 @@ export function judgeWakeDestinations(root) {
   };
   visit(tree);
   for(const effect of Object.keys(WAKE_DESTINATIONS)) if(!found.has(effect)) errors.push(`${file}: missing fixed ${effect} destination`);
-  for(const [name,expected] of [['agentId','corner.worker_agent_id !== event.command.agent_id ? corner.worker_agent_id : null'],['reviewer','reachableReviewer(corner)']]) {
+  for(const [name,expected] of [['agentId','corner.worker_agent_id !== event.command.agent_id || event.command.room_id !== cornerId ? corner.worker_agent_id : null'],['reviewer','reachableReviewer(corner)']]) {
     const declaration=[];
     const find=node=>{if(ts.isVariableDeclaration(node) && node.name.getText(tree)===name && node.initializer) declaration.push(normalize(node.initializer.getText(tree)));ts.forEachChild(node,find);};
     find(tree);
