@@ -295,11 +295,10 @@ same Actions authority as the Mac helper dispatch.
 Local credentials come only from `~/.config/beeline-release.env` (or an explicit
 `--env-file` outside the checkout), owned by the operator with mode `600`.
 Use `KEY=value` records; JSON double-quoted values support embedded newlines.
-The file is parsed as data, never sourced. Do not commit or print it. Local
-publication uses `NPM_AUTOMATION_TOKEN` in a private job npmrc; hosted
-publication retains OIDC. Populate `GITHUB_TOKEN` from the existing gh login,
-`FLY_API_TOKEN` from the authorized Fly login, and `EXPO_TOKEN` from the existing
-squire secret file. Provision the remaining workflow authorities separately:
+The file is parsed as data, never sourced. Do not commit or print it. npm
+publication never uses a token (see the helper leg below). Populate
+`GITHUB_TOKEN` from the existing gh login, `FLY_API_TOKEN` from the authorized
+Fly login, and `EXPO_TOKEN` from the existing squire secret file. Provision the remaining workflow authorities separately:
 
 GitHub HTTPS git commands receive the configured token through ephemeral Git
 configuration in each job's environment, including inside its private HOME.
@@ -679,6 +678,12 @@ explicitly request the device proof, or make a deliberate store submission -
 never for a routine release.
 
 The helper leg smoke-tests the exact local npm tarball before publishing it.
+npm's trusted publisher for `usebeeline` accepts OIDC only from this workflow
+on GitHub Actions, so a local release attaches that tarball to its draft GitHub
+release and dispatches this workflow with `selection=npm-publish` (plus the
+channel, `release_version` and attribution). That run's only job, `npm_publish`,
+publishes the attached bytes; the local helper leg watches that run (bounded by
+the step's 15-minute timeout) and fails unless it succeeds.
 The rc CLI package publishes with npm tag `next`; promotion packs the final
 version and publishes it with npm's default latest tag. A successful
 `npm publish`, or an already existing version, completes that leg

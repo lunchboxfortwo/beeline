@@ -89,7 +89,7 @@ agent-home/
 # Exact-head CI build archive metadata
 .beeline-ci-build.json
 
-# Generated from README.md by packages/scripts/build-usebeeline-package.mjs
+# Copied byte-for-byte from the root README.md by the usebeeline prepack script
 packages/usebeeline/README.md
 
 # Local evidence and tool scratch never belong in the public tree.

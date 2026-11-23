@@ -170,29 +170,77 @@ test('latest reserves the final at the rc source and rejects a conflicting ident
   assert.throws(() => assign({ requestedVersion: next.version }), /final version/);
 });
 
+// A stub for npm and gh that records each call; gh answers the local hand-off.
+const recordingTools = (directory, conclusion = 'success') => {
+  const calls = join(directory, 'calls.jsonl');
+  writeFileSync(calls, '');
+  for (const tool of ['npm', 'gh']) writeFileSync(join(directory, tool), `#!${process.execPath}
+const fs = require('node:fs'), path = require('node:path');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.CALLS, JSON.stringify([${JSON.stringify(tool)}, ...args]) + '\\n');
+if (${JSON.stringify(tool)} === 'npm' && args[0] === 'view') process.exit(1);
+if (${JSON.stringify(tool)} === 'gh') {
+  if (args[0] === 'release' && args[1] === 'view') console.log(path.basename(process.env.HELPER_TARBALL) + '\\t' + fs.statSync(process.env.HELPER_TARBALL).size);
+  if (args[0] === 'release' && args[1] === 'download') fs.writeFileSync(path.join(args[args.indexOf('--dir') + 1], args[args.indexOf('--pattern') + 1]), 'tarball');
+  if (args[0] === 'workflow') console.log('https://github.com/fixture/repo/actions/runs/42');
+  if (args[0] === 'run') process.exit(${JSON.stringify(conclusion)} === 'success' ? 0 : 1);
+}
+`, { mode: 0o755 });
+  return { calls, read: () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse) };
+};
+
 test('the workflow publishes rc with next and final with the default npm tag, using OIDC', () => fixture(directory => {
   const publish = workflow.jobs.helper.steps.find(s => s.name === 'Publish the exact helper CLI package');
-  assert.equal(publish.if, "env.SKIP_HELPER_NPM != 'true'");
+  assert.equal(publish.if, undefined);
   assert.equal(workflow.jobs.helper.permissions['id-token'], 'write');
-  const calls = join(directory, 'npm-calls.jsonl');
-  writeFileSync(join(directory, 'npm'), `#!${process.execPath}
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-fs.appendFileSync(process.env.CALLS, JSON.stringify(args) + '\\n');
-if (args[0] === 'view') process.exit(1);
-`);
-  chmodSync(join(directory, 'npm'), 0o755);
   for (const channel of ['next', 'latest']) {
-    writeFileSync(calls, '');
+    const tools = recordingTools(directory);
     const version = channel === 'next' ? 'v0.1.184-rc.10' : 'v0.1.184';
     const tarball = join(directory, `usebeeline-${version.slice(1)}.tgz`);
-    execFileSync('bash', ['-c', publish.run], { env: { ...process.env,
-      PATH: `${directory}:${process.env.PATH}`, CALLS: calls, CHANNEL: channel, RELEASE_VERSION: version, HELPER_TARBALL: tarball } });
-    const commands = readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
-    assert.deepEqual(commands.find(c => c[0] === 'view'), ['view', `usebeeline@${version.slice(1)}`, 'version']);
-    assert.deepEqual(commands.find(c => c[0] === 'publish'),
-      ['publish', '--no-provenance', ...(channel === 'next' ? ['--tag', 'next'] : []), tarball]);
-    assert.equal(commands.some(c => c[0] === 'dist-tag'), false);
+    execFileSync('bash', ['-c', publish.run], { env: { ...process.env, BEELINE_LOCAL_RELEASE: '',
+      PATH: `${directory}:${process.env.PATH}`, CALLS: tools.calls, CHANNEL: channel, RELEASE_VERSION: version, HELPER_TARBALL: tarball } });
+    const commands = tools.read();
+    assert.deepEqual(commands.find(c => c[1] === 'view'), ['npm', 'view', `usebeeline@${version.slice(1)}`, 'version']);
+    assert.deepEqual(commands.find(c => c[1] === 'publish'),
+      ['npm', 'publish', '--no-provenance', ...(channel === 'next' ? ['--tag', 'next'] : []), tarball]);
+    assert.equal(commands.some(c => c[1] === 'dist-tag' || c[0] === 'gh'), false);
+  }
+}));
+
+test('a local release hands its exact tarball to the publish-only job and fails when that run fails', () => fixture(directory => {
+  const publish = workflow.jobs.helper.steps.find(s => s.name === 'Publish the exact helper CLI package');
+  const tarball = join(directory, 'usebeeline-0.1.184-rc.10.tgz');
+  writeFileSync(tarball, 'exact smoked bytes');
+  const env = { ...process.env, BEELINE_LOCAL_RELEASE: 'true', PATH: `${directory}:${process.env.PATH}`, GITHUB_REPOSITORY: 'fixture/repo',
+    CHANNEL: 'next', RELEASE_VERSION: 'v0.1.184-rc.10', HELPER_TARBALL: tarball, DISPATCHED_BY: '{"handle":"fixture"}' };
+  let tools = recordingTools(directory);
+  execFileSync('bash', ['-c', publish.run], { env: { ...env, CALLS: tools.calls } });
+  const commands = tools.read();
+  assert.deepEqual(commands.find(c => c[1] === 'release' && c[2] === 'upload'), ['gh', 'release', 'upload', 'v0.1.184-rc.10', tarball, '--clobber']);
+  assert.deepEqual(commands.find(c => c[1] === 'workflow'), ['gh', 'workflow', 'run', 'unified-release.yml', '-R', 'fixture/repo', '--ref', 'main',
+    '-f', 'selection=npm-publish', '-f', 'channel=next', '-f', 'release_version=v0.1.184-rc.10', '-f', 'dispatched_by={"handle":"fixture"}']);
+  assert.deepEqual(commands.find(c => c[1] === 'run'), ['gh', 'run', 'watch', '42', '-R', 'fixture/repo', '--exit-status']);
+  assert.equal(commands.some(c => c[0] === 'npm'), false);
+  tools = recordingTools(directory, 'failure');
+  const failed = spawnSync('bash', ['-c', publish.run], { env: { ...env, CALLS: tools.calls }, encoding: 'utf8' });
+  assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /npm publish failed: https:\/\/github\.com\/fixture\/repo\/actions\/runs\/42/);
+
+  const job = workflow.jobs.npm_publish;
+  assert.equal(job.if, "inputs.selection == 'npm-publish'");
+  assert.equal(workflow.jobs.initialize.if, "inputs.selection != 'npm-publish'");
+  assert.equal(job.permissions['id-token'], 'write');
+  const step = job.steps.find(s => s.name === "Publish the local release's exact helper CLI package");
+  for (const channel of ['next', 'latest']) {
+    tools = recordingTools(directory);
+    const version = channel === 'next' ? 'v0.1.184-rc.10' : 'v0.1.184';
+    execFileSync('bash', ['-c', step.run], { env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CALLS: tools.calls,
+      RUNNER_TEMP: directory, GITHUB_REPOSITORY: 'fixture/repo', CHANNEL: channel, RELEASE_VERSION: version } });
+    const published = tools.read();
+    assert.deepEqual(published.find(c => c[1] === 'release'), ['gh', 'release', 'download', version, '-R', 'fixture/repo',
+      '--pattern', `usebeeline-${version.slice(1)}.tgz`, '--dir', directory]);
+    assert.deepEqual(published.find(c => c[1] === 'publish'),
+      ['npm', 'publish', '--no-provenance', ...(channel === 'next' ? ['--tag', 'next'] : []), join(directory, `usebeeline-${version.slice(1)}.tgz`)]);
   }
 }));
 

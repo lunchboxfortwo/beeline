@@ -16,10 +16,19 @@ test('npm-delayed-visibility: the exact local tarball installs and starts; broke
       execFileSync('npm', ['pack', '--offline', '--pack-destination', directory], { cwd: directory, stdio: 'pipe' });
       return join(directory, 'usebeeline-0.0.1.tgz');
     };
+    const readme = join(directory, 'README.md'), options = { readme };
+    writeFileSync(readme, '# Beeline\n');
     const tarball = pack("console.log('beeline start [--all|--agent <public key>]')");
-    smokeHelperPackage(tarball, '0.0.1');
-    assert.throws(() => smokeHelperPackage(tarball, '0.0.2'), /Unexpected installed package/);
-    assert.throws(() => smokeHelperPackage(pack('process.exit(7)'), '0.0.1'), /Command failed/);
-    assert.throws(() => smokeHelperPackage(pack("console.log('broken')"), '0.0.1'), /Unexpected CLI help/);
+    smokeHelperPackage(tarball, '0.0.1', options);
+    assert.throws(() => smokeHelperPackage(tarball, '0.0.2', options), /Unexpected installed package/);
+    assert.throws(() => smokeHelperPackage(pack('process.exit(7)'), '0.0.1', options), /Command failed/);
+    assert.throws(() => smokeHelperPackage(pack("console.log('broken')"), '0.0.1', options), /Unexpected CLI help/);
+    const good = pack("console.log('beeline start [--all|--agent <public key>]')");
+    writeFileSync(readme, '# Beeline, edited\n');
+    assert.throws(() => smokeHelperPackage(good, '0.0.1', options), /differs from the repository README/);
+    rmSync(readme);
+    const missing = pack("console.log('beeline start [--all|--agent <public key>]')");
+    writeFileSync(readme, '# Beeline\n');
+    assert.throws(() => smokeHelperPackage(missing, '0.0.1', options), /README.md is missing/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
