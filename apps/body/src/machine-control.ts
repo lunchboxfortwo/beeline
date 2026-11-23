@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import type { HelperStatusFile } from './helper-status.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
 import { ask, tryLock } from './wait.js';
+import { waitForProcessExit } from './process-exit.js';
 
 export interface MachineRequest {
   operation: 'status' | 'converge' | 'stop' | 'update';
@@ -11,6 +12,7 @@ export interface MachineRequest {
   agentId?: string;
   sourceGeneration?: string;
   force?: boolean;
+  startup?: HelperStatusFile | { error: string };
 }
 
 /**
@@ -41,10 +43,16 @@ export type HeldAnswer = typeof HELD;
 /** One request, one answer: the live connection, not a PID or a snapshot on disk, proves the generation. */
 export class MachineControl {
   readonly #held = new Set<Socket>();
+  readonly #peers = new Set<Socket>();
   readonly #server = createServer((socket) => {
+    this.#peers.add(socket);
     socket.setEncoding('utf8');
     socket.on('error', () => undefined);
-    socket.once('close', () => this.#held.delete(socket));
+    socket.once('close', () => {
+      this.#held.delete(socket);
+      this.#peers.delete(socket);
+      if (!received) this.onIncompleteClose?.();
+    });
     let input = '';
     let received = false;
     socket.on('data', (chunk: string) => {
@@ -68,10 +76,11 @@ export class MachineControl {
         });
         if (answer === HELD) return;
         this.#held.delete(socket);
-        socket.end(`${JSON.stringify(answer)}\n`);
+        if (!socket.writableEnded) socket.end(`${JSON.stringify(answer)}\n`);
       })().catch((error) => {
         this.#held.delete(socket);
-        socket.end(`${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`);
+        this.onIncompleteClose?.();
+        if (!socket.writableEnded) socket.end(`${JSON.stringify({ error: error instanceof Error ? error.message : String(error) })}\n`);
       });
     });
   });
@@ -82,6 +91,7 @@ export class MachineControl {
       request: MachineRequest,
       hold: () => HeldAnswer,
     ) => Promise<MachineAnswer | HeldAnswer>,
+    readonly onIncompleteClose?: () => void,
   ) {}
 
   async start(): Promise<void> {
@@ -108,7 +118,11 @@ export class MachineControl {
 
   async stop(): Promise<void> {
     if (!this.#server.listening) return;
-    for (const socket of this.#held) socket.destroy();
+    await this.settleHeld({ error: 'helper stopped before answering the update' });
+    for (const peer of this.#peers) {
+      if (!peer.writableEnded) peer.end(`${JSON.stringify({ error: 'helper control stopped before answering' })}\n`);
+      peer.destroySoon();
+    }
     await new Promise<void>((done) => this.#server.close(() => done()));
     await rm(this.path, { force: true });
   }
@@ -193,4 +207,59 @@ function hostAdbQuery(query: string, connect: () => ReturnType<typeof createConn
     socket.once('error', reject);
     socket.once('close', () => reject(new Error('host adb server closed')));
   });
+}
+
+function helperStartupPath(stateRoot: string): string {
+  return privateSocketPath(JSON.stringify(['helper-startup', resolve(stateRoot)]));
+}
+
+export function reportHelperStartup(stateRoot: string, startup: HelperStatusFile | { error: string }): void {
+  const peer = createConnection(helperStartupPath(stateRoot));
+  peer.unref();
+  peer.on('error', () => undefined);
+  peer.on('data', () => undefined);
+  const answer = 'error' in startup ? startup : { pid: startup.pid, generation: startup.generation,
+    processState: startup.processState, updatedAt: startup.updatedAt, agents: {} };
+  peer.end(`${JSON.stringify({ operation: 'status', startup: answer })}\n`);
+}
+
+export async function startHelperWithAcknowledgment(stateRoot: string, start: () => Promise<number>): Promise<HelperStatusFile> {
+  let channel: MachineControl | undefined;
+  const controller = new AbortController();
+  return ask<HelperStatusFile>({ peer: 'launchd helper startup acknowledgment', send: async (ready, failed) => {
+    let status: HelperStatusFile | undefined;
+    let pid: number | undefined;
+    const complete = () => {
+      if (!status || pid === undefined) return;
+      if (status.pid !== pid) failed(new Error(`helper startup answered from pid ${status.pid}, expected ${pid}`));
+      else ready(status);
+    };
+    channel = new MachineControl(helperStartupPath(stateRoot), async request => {
+      const value = request.startup;
+      if (!value || typeof value !== 'object') throw new Error('helper startup answer missing');
+      if ('error' in value) {
+        const error = new Error(value.error);
+        failed(error);
+        throw error;
+      }
+      status = value;
+      complete();
+      return value;
+    }, () => failed(new Error('helper exited before its startup acknowledgment')));
+    await channel.start();
+    pid = await start();
+    if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('launchd start completed without a process');
+    void waitForProcessExit(pid, controller.signal).then(
+      () => { if (!controller.signal.aborted) failed(new Error(`helper pid ${pid} exited before its startup acknowledgment`)); },
+      error => { if (!controller.signal.aborted) failed(error); },
+    );
+    if (!status) {
+      const current = await askMachine(stateRoot, { operation: 'status' }, false).catch(error => {
+        if (helperAbsent(error)) return undefined;
+        throw error;
+      });
+      if (current?.processState === 'serving') status = current;
+    }
+    complete();
+  } }).finally(async () => { controller.abort(); await channel?.stop(); });
 }

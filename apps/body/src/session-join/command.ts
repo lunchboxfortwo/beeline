@@ -180,14 +180,8 @@ async function joinCommand(args: string[], env: NodeJS.ProcessEnv): Promise<void
   let available=true;
   if(previous){
     const finisher=await tryLock(finisherKey(previous.file));
-    const signedIn=previous.pending.signIn;
     if(finisher.held)await finisher.release();
-    else if(!signedIn.code&&!signedIn.tokens&&!signedIn.exchangeStarted&&previous.pending.startedAt+600_000<=Date.now()&&
-      finisher.holder.key===finisherKey(previous.file)&&finisher.holder.pid>0){
-      // The link expired and the server never ends its finisher's held wait, so a fresh link replaces it.
-      finisher.close();
-      try{process.kill(finisher.holder.pid,'SIGTERM');}catch{/* It already ended. */}
-    }else { finisher.close(); available=false; }
+    else { finisher.close(); available=false; }
   }
   const known=previous?.pending.signIn.tokens;
   const resume=previous&&(available!==true||Boolean(known)||

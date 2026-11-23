@@ -289,3 +289,7 @@ Old installations without rollback metadata select one recent predecessor once;
 later installs use the recorded previous version. Historical release symlinks
 are unlinked without following their targets. Regression coverage:
 `storage-bloat.regression.test.ts` and `self-update-layout.test.ts`.
+
+### Joined-session sign-in expiry residual
+
+The server does not yet end a held OAuth handoff when its row reaches `expires_at` without another committed change. The client uses the transport's own read failure, releases the finisher lock when that call ends, and preserves a ceremony while its finisher still owns it. Repeating join does not kill that finisher based on elapsed time. Server-owned expiry remains follow-up work; no server timer is added here.

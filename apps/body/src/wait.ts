@@ -30,16 +30,27 @@ export interface HttpChannel {
   report?: ((line: string) => void) | false;
 }
 
+export interface RequestChannel {
+  peer: string;
+  report?: ((line: string) => void) | false;
+  send: (answer: (value: unknown) => void, fail: (error: Error) => void) => Promise<void>;
+}
+
 /** The peer answered with `{ error }`: an explicit refusal, not a lost channel. */
 export class PeerRefusal extends Error {}
 
 export function ask<T = unknown>(channel: SocketChannel, request: unknown): Promise<T>;
 export function ask(channel: HttpChannel, request?: RequestInit): Promise<Response>;
+export function ask<T = unknown>(channel: RequestChannel): Promise<T>;
 export async function ask(
-  channel: SocketChannel | HttpChannel,
+  channel: SocketChannel | HttpChannel | RequestChannel,
   request?: unknown,
 ): Promise<unknown> {
   const report = channel.report === false ? undefined : (channel.report ?? say);
+  if ('send' in channel) {
+    report?.(`waiting for ${channel.peer}`);
+    return new Promise((resolve, reject) => { void channel.send(resolve, reject).catch(reject); });
+  }
   if ('url' in channel) {
     const init = request as RequestInit | undefined;
     const peer = channel.peer ?? new URL(channel.url).host;

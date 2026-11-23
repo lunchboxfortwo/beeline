@@ -452,18 +452,21 @@ describe('fix 13 and 15: join sign-in', () => {
     return log.mock.calls.flat().join('\n');
   };
 
-  it('prints a fresh link and ends the finisher of an expired one (an unapproved link never ended before)', async () => {
+  it('preserves an expired ceremony while its finisher still owns it', async () => {
     const { env, file, url } = setup(Date.now() - 11 * 60_000);
     const finisher = await holdLock(`beeline-session-sign-in:${resolve(file)}`);
+    expect(await join_(env)).toContain(url);
+    expect(existsSync(file)).toBe(true);
+    expect(finisher.exitCode).toBeNull();
+    expect(finisher.signalCode).toBeNull();
+  });
+
+  it('prints a fresh link after an expired ceremony has no finisher owner', async () => {
+    const { env, file, url } = setup(Date.now() - 11 * 60_000);
     const output = await join_(env);
     expect(output).toContain('https://synthetic.invalid/mcp/oauth/authorize?');
     expect(output).not.toContain(url);
     expect(existsSync(file)).toBe(false);
-    const [, signal] =
-      finisher.exitCode === null && finisher.signalCode === null
-        ? await once(finisher, 'exit')
-        : [finisher.exitCode, finisher.signalCode];
-    expect(signal).toBe('SIGTERM');
   });
 
   it('reprints a live link while its finisher holds it', async () => {

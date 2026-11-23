@@ -163,3 +163,40 @@ it('prepares after this helper\'s own pruning instead of failing on its install 
   expect(prepare).toHaveBeenCalledTimes(1);
   update.dispose();
 });
+
+it('gives overlapping already-current requests only terminal outcomes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beeline-overlapping-current-'));
+  const layout = { libDir: join(root, 'lib'), releasesRoot: join(root, 'releases'), binDir: join(root, 'bin') };
+  await mkdir(join(layout.releasesRoot, 'running/lib/beeline'), { recursive: true });
+  await writeFile(join(layout.releasesRoot, 'running/lib/beeline/bundle.json'), JSON.stringify({ version: 'v1.0.0' }));
+  const settled = vi.fn();
+  const update = new ReleaseTransaction({ layout, loadedRelease: 'running', env: {},
+    handoff: vi.fn(), changed: vi.fn(), failed: vi.fn(), settled });
+  try {
+    const outcomes = await Promise.allSettled([update.prepared('running'), update.prepared('running')]);
+    expect(outcomes.some(outcome => outcome.status === 'fulfilled' && outcome.value === 'current')).toBe(true);
+    for (const outcome of outcomes) {
+      if (outcome.status === 'fulfilled') expect(outcome.value).toBe('current');
+      else expect(String(outcome.reason)).toContain('attempt ended');
+    }
+    expect(settled).toHaveBeenCalledWith('current');
+  } finally { update.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('reports cancellation of a pending handoff exactly once', async () => {
+  let finish!: () => void;
+  let entered!: () => void;
+  const running = new Promise<void>(done => { entered = done; });
+  const handoff = new Promise<void>(done => { finish = done; });
+  const settled = vi.fn();
+  const update = new ReleaseTransaction({
+    layout: { libDir: '/isolated/lib', releasesRoot: '/isolated/releases', binDir: '/isolated/bin' },
+    loadedRelease: 'old', env: {}, changed: vi.fn(), failed: vi.fn(), settled,
+    handoff: async () => { entered(); await handoff; },
+  });
+  expect(await update.prepared('new')).toBe('pending');
+  await running;
+  update.dispose(); update.dispose();
+  expect(settled.mock.calls).toEqual([['cancelled']]);
+  finish(); await update.pending;
+});

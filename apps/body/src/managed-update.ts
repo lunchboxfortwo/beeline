@@ -45,6 +45,7 @@ export class ReleaseTransaction {
       handoff: (releaseId: string, signal: AbortSignal) => Promise<void>;
       changed: (desiredRelease?: string) => void;
       failed: (error: unknown, minimum?: string) => void;
+      settled?: (outcome: 'current' | 'cancelled') => void;
     },
   ) {}
   get desiredRelease(): string | undefined { return this.#prepared; }
@@ -56,7 +57,7 @@ export class ReleaseTransaction {
 
   private fail(signal: AbortSignal, error: unknown, releaseId = this.#prepared): void {
     if (this.#attempt?.controller.signal !== signal) return;
-    this.dispose();
+    this.finish();
     this.#prepared = undefined;
     this.#preparing = this.#handingOff = undefined;
     this.options.changed(undefined);
@@ -116,9 +117,11 @@ export class ReleaseTransaction {
       const targetLayout = { ...this.options.layout,
         libDir: resolve(this.options.layout.releasesRoot, releaseId) };
       const identity = await readInstalledBundleIdentity(targetLayout);
+      signal.throwIfAborted();
       const loaded = this.options.loadedRelease ? await readInstalledBundleIdentity({
         ...this.options.layout, libDir: resolve(this.options.layout.releasesRoot, this.options.loadedRelease),
       }) : undefined;
+      signal.throwIfAborted();
       if (identity?.version && loaded?.version && identity.version !== loaded.version &&
           versionAtLeast(loaded.version, identity.version) && !versionAtLeast(identity.version, loaded.version))
       {
@@ -128,26 +131,27 @@ export class ReleaseTransaction {
             await writeUpdateState(this.options.layout, { ...state, stagedReleaseId: undefined,
               lastCheckResult: 'current' });
         });
+        signal.throwIfAborted();
         this.#prepared = undefined;
         this.options.changed(undefined);
-        if (!this.#pendingCheck) this.dispose();
+        if (!this.#pendingCheck) this.finish('current');
         return 'current';
       }
       if (this.#minimum) {
         if (!identity?.version || !versionAtLeast(identity.version, this.#minimum))
           throw new Error(`published helper ${identity?.version ?? 'unknown'} is below required ${this.#minimum}`);
       }
-      if (signal.aborted) return 'pending';
+      signal.throwIfAborted();
       if (releaseId === this.options.loadedRelease) {
         this.#prepared = undefined;
-        if (!this.#pendingCheck) this.dispose();
+        if (!this.#pendingCheck) this.finish('current');
         this.options.changed(undefined);
         return 'current';
       }
       this.#prepared = releaseId;
       this.options.changed(releaseId);
       this.handoff();
-    } catch (error) { this.fail(signal, error, releaseId); }
+    } catch (error) { if (signal.aborted) throw error; this.fail(signal, error, releaseId); }
     return 'pending';
   }
 
@@ -160,7 +164,7 @@ export class ReleaseTransaction {
       await this.options.handoff(this.#prepared!, signal);
       if (!signal.aborted) {
         this.#completed = true;
-        this.dispose();
+        this.finish();
       }
     }).catch(error => this.fail(signal, error)).finally(() => {
       if (this.#handingOff !== operation) return;
@@ -170,11 +174,14 @@ export class ReleaseTransaction {
     this.#handingOff = operation;
   }
 
-  dispose(): void {
+  dispose(): void { this.finish('cancelled'); }
+
+  private finish(outcome?: 'current' | 'cancelled'): void {
     this.#pendingCheck = false;
     if (!this.#attempt) return;
-    this.#attempt.controller.abort();
+    this.#attempt.controller.abort(new Error('helper update attempt ended'));
     this.#attempt = undefined;
+    if (outcome) this.options.settled?.(outcome);
   }
 }
 

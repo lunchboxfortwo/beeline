@@ -74,3 +74,16 @@ it('answers a held update once its transaction fails or hands off', async () => 
     await live.close();
   }
 });
+
+it('answers a held update with an explicit refusal when the control owner stops', async () => {
+  let held!: () => void;
+  const holding = new Promise<void>(done => { held = done; });
+  const live = await helper(async (_request, hold) => { const answer = hold(); held(); return answer; });
+  const answer = askMachine(live.root, { operation: 'update', releaseId: 'next' }).catch(error => error);
+  try {
+    await holding;
+    await live.control.stop();
+    expect(await answer).toBeInstanceOf(PeerRefusal);
+    expect(String(await answer)).toContain('helper stopped before answering the update');
+  } finally { await live.close(); }
+});
