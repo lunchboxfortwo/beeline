@@ -34,6 +34,7 @@ const delivered = () => harness.deliver.mock.calls.map(([item]: [AgentCommand]) 
 vi.mock('../../body/src/place-session.js', () => ({ PlaceSession: class {
   alive = false;
   stale = false;
+  resources = { receiveCommand(_item: AgentCommand) {} };
   async start() {}
   current?: AgentCommand;
   async deliver(item: AgentCommand, batch: readonly AgentCommand[]) {

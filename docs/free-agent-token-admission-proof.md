@@ -53,25 +53,19 @@ npm run test -w @beeline/server -- src/free-agent-prompt-budget.test.ts src/free
 
 ## Instruction replay
 
-`packages/scripts/prove-free-agent-instructions.ts` runs the real `AcpClient` over stdio
-with an isolated deterministic harness, current-main Room/free-agent instructions,
-neutral retained context and SUB0ZERO's measured 16-turn / 78-call shape. It counts
+The former `packages/scripts/prove-free-agent-instructions.ts` ran the real `AcpClient` over stdio
+with an isolated deterministic harness, then-current Room/free-agent instructions,
+neutral retained context and SUB0ZERO's measured 16-turn / 78-call shape. It counted
 full before/after model-context strings using **tiktoken o200k_base**, not the
 DeepSeek native tokenizer. This table therefore measures a synthetic session of
 comparable size, not historical native input counts or actual task quality.
 
-Only exact repeated instruction blocks and their separating whitespace differ.
-The proof asserts that all task/tool-result history is identical after removing
-those copies, restores instructions after compaction, and preserves an attached
-image block at the ACP boundary. New session, failed/repaired session, changed
-instructions, each new compaction and unreadable journal behavior also have
-unit regressions. No history-compaction feature is introduced.
-
-Run (Python needs tiktoken; `TOKENIZER_PYTHONPATH` can select an isolated install):
-
-```sh
-node --import tsx packages/scripts/prove-free-agent-instructions.ts
-```
+Only exact repeated instruction blocks and their separating whitespace differed.
+The historical proof asserted identical task/tool-result history after removing
+those copies, instruction restoration after compaction, and preservation of an
+attached image block at the ACP boundary. That replay is no longer shipped;
+the table below records its historical results. The current delivery contract
+and regression coverage live in [Pi rule delivery](agent-body.md#updates-and-startup).
 
 | Turn | Call | Before input | After input | Saved |
 | ---: | ---: | ---: | ---: | ---: |

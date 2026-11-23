@@ -85,9 +85,9 @@ The original failed candidate result is retained alongside the baseline and
 passing result in the delivery attachments.
 
 Verified Claude ACP (`0.97.0`) now joins the existing verified Codex ACP
-(`2.3.0`, structured instructions) cache path. Pi checks its own compaction
-journal before assembly and conservatively re-sends context when the journal
-cannot be read. Native loads, new adapter processes, failed delivery and
+(`2.3.0`, structured instructions) cache path. Pi's former journal-based
+instruction re-delivery has been replaced; see [Pi rule delivery](agent-body.md#updates-and-startup).
+Native loads, new adapter processes, failed delivery and
 compaction restore context. Other adapter versions retain full delivery.
 `acp-codex-delivery.test.ts` checks new sessions, warm turns, native loads,
 failed resume, compaction and adapter restart; `codex-prompt-delivery.test.ts`

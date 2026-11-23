@@ -230,7 +230,7 @@ it('a missing optional human reply link still appends and answers the request', 
   expect((await db.query('SELECT reply_to_message_id FROM messages WHERE id=$1', [id])).rows[0]).toEqual({ reply_to_message_id: null });
 });
 
-it('uses one membership snapshot at the shared entry and one at the answer exit', async () => {
+it('uses one membership snapshot at entry, thread context, and answer exit', async () => {
   const reads: string[] = [];
   const observe = (database: SqlDatabase): SqlDatabase => new Proxy(database, {
     get(target, key) {
@@ -249,8 +249,10 @@ it('uses one membership snapshot at the shared entry and one at the answer exit'
   expect(reads).toHaveLength(1);
   const item = sent.commands[0]!;
   reads.length = 0;
-  await readAgentCommands(observed, A);
-  expect(reads).toHaveLength(0);
+  const delivered = await readAgentCommands(observed, A);
+  expect(delivered.commands).toMatchObject([{ id: item.id, threads: { corners: [] } }]);
+  expect(reads).toHaveLength(1);
+  reads.length = 0;
   await answerQueuedMessage(observed, A, { roomId: R1, requestId: item.turn_request_id, text: 'one exit' });
   expect(reads).toHaveLength(1);
   expect(await queue()).toEqual([]);

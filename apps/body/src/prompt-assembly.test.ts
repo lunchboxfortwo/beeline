@@ -77,11 +77,11 @@ const scope4 = fixtureScope4();
     for (const surface of ['room', 'dm'] as const) {
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand: 'claude-agent-acp',
         shell: { available: true }, writableHome: scope4.home }).systemPrompt;
-      expect(prompt).toContain(`You can write files only in your home, ${scope4.home} (~/)`);
-      expect(prompt).toContain('post_artifact posts files saved there');
+      expect(prompt).toContain(`post_artifact posts files saved in your home, ${scope4.home}.`);
+      expect(prompt).not.toContain('write/edit tools');
       const unwrapped = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand: 'claude-agent-acp',
         shell: { available: true } }).systemPrompt;
-      expect(unwrapped).not.toContain('You can write files only in your home');
+      expect(unwrapped).not.toContain('post_artifact posts files saved in your home');
     }
   });
 });

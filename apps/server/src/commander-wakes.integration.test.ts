@@ -221,12 +221,21 @@ it.each([false, true])('Reproduction report-step: delivers a finished PR step wh
   const opened = await open(), turn = await worker(opened.cornerId);
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'headSha',$2::text)) WHERE corner_id=$1`, [opened.cornerId, '9'.repeat(40)]);
   held = hold;
-  expect((await checks()).mergeAllowed).toBe(false);
+  const verdict = await checks();
+  expect(verdict.mergeAllowed).toBe(false);
   checks.mockClear();
-  await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: assigned PR step finished; awaiting review' }, WORKER);
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body)
-    .toBe('done: assigned PR step finished; awaiting review');
-  expect(checks).not.toHaveBeenCalled();
+  let release!: (value: typeof verdict) => void;
+  const pending = new Promise<typeof verdict>(resolve => { release = resolve; });
+  checks.mockImplementationOnce(() => pending);
+  try {
+    await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: assigned PR step finished; awaiting review' }, WORKER);
+    expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body)
+      .toBe('done: assigned PR step finished; awaiting review');
+  } finally {
+    // Completion may reconcile GitHub in the background; delivery cannot wait for it.
+    release(verdict);
+    await db.backgroundWork.drain();
+  }
 });
 it('R-GH-RETRY-REPORT: a GitHub outage cannot refuse or delay a finished-step report', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
@@ -234,12 +243,13 @@ it('R-GH-RETRY-REPORT: a GitHub outage cannot refuse or delay a finished-step re
   const fetchMock = vi.fn().mockImplementation(async () => new Response('upstream unavailable', { status: 502 }));
   vi.stubGlobal('fetch', fetchMock);
   checks.mockClear();
+  checks.mockRejectedValueOnce(new Error('upstream unavailable'));
   const text = 'done: implementation and verification finished';
   await daemon.execute('report', { ...authority(turn), status: 'done', text }, WORKER);
-  expect(checks).not.toHaveBeenCalled();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(captureServerError).not.toHaveBeenCalled();
   expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe(text);
+  await db.backgroundWork.drain();
 });
 
 it('delivers done immediately with live merge-ready checks', async () => {
@@ -247,15 +257,15 @@ it('delivers done immediately with live merge-ready checks', async () => {
   ready = true;
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'headSha',$2::text)) WHERE corner_id=$1`, [opened.cornerId, '9'.repeat(40)]);
   await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: ready to merge' }, WORKER);
-  expect(checks).not.toHaveBeenCalled();
   expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: ready to merge');
+  await db.backgroundWork.drain();
 });
 it('accepts done for a committed merged PR without requiring another GitHub read', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'mergeCommitSha',$2::text)) WHERE corner_id=$1`, [opened.cornerId, '8'.repeat(40)]);
   await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: PR merged' }, WORKER);
-  expect(checks).not.toHaveBeenCalled();
   expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: PR merged');
+  await db.backgroundWork.drain();
 });
 it('allows completed non-PR deliverables and agent DM orders', async () => {
   const opened = await open(false), turn = await worker(opened.cornerId);

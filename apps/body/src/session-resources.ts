@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
+import type { AgentCommand, DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import type { AgentModelConfigOption } from './model-types.js';
@@ -13,6 +13,7 @@ type Context = {
   repository: DaemonOperationMap['getRoomRepositoryState']['output'];
   restore: DaemonOperationMap['getCornerRestoreState']['output'];
   grants: DaemonOperationMap['listAgentGrants']['output'];
+  threads: DaemonOperationMap['listRoomCorners']['output'];
 };
 
 /** Exact tool names take precedence so unrelated descriptions do not inflate discovery. */
@@ -35,9 +36,11 @@ function toolsMatching(result: unknown, query: unknown): unknown {
   return { ...(result as object), tools };
 }
 
-/** Optional facts load beside the live session. No caller can wait for a refresh. */
 export class SessionResources {
   readonly context: Partial<Context> = {};
+  private threadsReceivedAt = 0;
+  private readonly receivedCommands = new WeakSet<AgentCommand>();
+  private commandThreads?: { value: Context['threads']; receivedAt: number };
   readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
   private readonly connections = new Map<string, Promise<string>>();
   private writes = Promise.resolve();
@@ -71,11 +74,24 @@ export class SessionResources {
           'repository',
           'restore',
           'modelCatalog',
+          'threads',
         ] as const)
           if (!this.context[key] && cached[key])
             Object.assign(this.context, { [key]: cached[key] });
       })
       .catch(() => {});
+  }
+
+  receiveCommand(item: AgentCommand): void {
+    this.receivedCommands.add(item);
+    if (item.threads) this.commandThreads = { value: item.threads, receivedAt: performance.now() };
+  }
+
+  threadsForDelivery(items: readonly AgentCommand[]): Context['threads'] | undefined {
+    for (const item of items) if (!this.receivedCommands.has(item)) this.receiveCommand(item);
+    return this.commandThreads && this.commandThreads.receivedAt > this.threadsReceivedAt
+      ? this.commandThreads.value
+      : this.context.threads;
   }
 
   refresh(): void {
@@ -88,6 +104,21 @@ export class SessionResources {
     this.load('grants', () => api.execute('listAgentGrants', { agentId, roomId: placeId }));
     if (parentRoomId)
       this.load('restore', () => api.execute('getCornerRestoreState', { cornerId: placeId }));
+    this.refreshThreads();
+  }
+
+  /** Open threads of this place's chat; also re-read after each turn, which may open one. */
+  refreshThreads(): Promise<void> {
+    const { api, placeId, parentRoomId } = this.options;
+    const read = ++this.threadReads;
+    return this.load(
+      'threads',
+      () => api.execute('listRoomCorners', { roomId: parentRoomId ?? placeId, activeOnly: true }),
+      () => {
+        this.threadsReceivedAt = performance.now();
+      },
+      () => read === this.threadReads,
+    );
   }
 
   refreshConfiguration(): void {
@@ -104,23 +135,27 @@ export class SessionResources {
   }
 
   private configurationReads = 0;
+  private threadReads = 0;
 
   private load<K extends keyof Context>(
     key: K,
     read: () => Promise<Context[K]>,
     loaded?: (value: Context[K]) => void,
-  ): void {
+    current: () => boolean = () => true,
+  ): Promise<void> {
     this.status[key] = 'loading';
-    void Promise.resolve()
+    return Promise.resolve()
       .then(read)
       .then((value) => {
-        this.context[key] = value;
-        this.status[key] = 'ready';
-        this.persist();
-        loaded?.(value);
+        if (current()) {
+          this.context[key] = value;
+          this.status[key] = 'ready';
+          this.persist();
+          loaded?.(value);
+        }
       })
       .catch((error) => {
-        this.status[key] = error instanceof Error ? error.message : String(error);
+        if (current()) this.status[key] = error instanceof Error ? error.message : String(error);
       });
   }
 

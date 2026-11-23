@@ -86,3 +86,42 @@ it('a configuration notification reads only configuration, preserving unrelated 
   expect(f.execute).toHaveBeenCalledWith('getAgentConfiguration',{agentId:'agent',roomId:'room'});
   expect(f.resources.context).toMatchObject({roster:{members:[]},repository:{resolution:'none'}});
 });
+
+
+it.each(['success', 'failure'] as const)('ignores a superseded thread read ending in %s', async outcome => {
+  const f = await fixture();
+  let resolveOlder!: (value: unknown) => void;
+  let rejectOlder!: (error: Error) => void;
+  const older = new Promise((resolve, reject) => { resolveOlder = resolve; rejectOlder = reject; });
+  const latest = { corners: [{ cornerId: 'new-thread', parentRoomId: 'room', name: 'Game fix',
+    createdBy: 'agent', archived: false, objective: 'Repair the start button' }] };
+  f.execute.mockImplementationOnce(() => older).mockResolvedValueOnce(latest);
+  const duringTurn = f.resources.refreshThreads();
+  const afterTurn = f.resources.refreshThreads();
+  await afterTurn;
+  expect(f.resources.read()).toMatchObject({ threads: latest, status: { threads: 'ready' } });
+  if (outcome === 'success') resolveOlder({ corners: [] });
+  else rejectOlder(new Error('old request failed'));
+  await duringTurn;
+  expect(f.resources.read()).toMatchObject({ threads: latest, status: { threads: 'ready' } });
+  await vi.waitFor(async () => expect(JSON.parse(await readFile(f.cachePath, 'utf8')).threads).toEqual(latest));
+});
+
+it('keeps a superseded thread result out while the newest read is pending or fails', async () => {
+  const f = await fixture();
+  let resolveOlder!: (value: unknown) => void;
+  let rejectLatest!: (error: Error) => void;
+  const older = new Promise(resolve => { resolveOlder = resolve; });
+  const latest = new Promise((_resolve, reject) => { rejectLatest = reject; });
+  f.execute.mockImplementationOnce(() => older).mockImplementationOnce(() => latest);
+  const duringTurn = f.resources.refreshThreads();
+  const afterTurn = f.resources.refreshThreads();
+  resolveOlder({ corners: [] });
+  await duringTurn;
+  expect(f.resources.context.threads).toBeUndefined();
+  expect(f.resources.status.threads).toBe('loading');
+  rejectLatest(new Error('new request failed'));
+  await afterTurn;
+  expect(f.resources.context.threads).toBeUndefined();
+  expect(f.resources.status.threads).toBe('new request failed');
+});

@@ -36,7 +36,6 @@ import type { SessionMode } from './config.js';
 import { harnessSupportsNativeSessionResume } from './harness-capabilities.js';
 import { McpLaunchFiles } from './mcp-launch-files.js';
 import { cgroupOomKillProbe,OomKillTracker,type OomKillDetector } from './oom-kill.js';
-import { PiSessionInstructions } from './pi-session-instructions.js';
 export { AcpRequestError,AcpResourceLimitError,AcpRuntimeExitedError,agentMessageChunkText,agentMessageRuns,agentStreamSnapshot,agentTurnSteps,finalAgentMessageText,flattenHarnessCause,isPiAcpHarness,isPureRetryNarration,killChildProcessGroup,meaningfulHarnessStderr,parseAvailableCommands,STDERR_TAIL_MAX_CHARS,type AcpAvailableCommand,type AcpPermissionAllowlist,type AcpPermissionDecision,type AcpPermissionHandler,type AcpPermissionOption,type AcpPermissionRequest,type AcpPromptBlock,type AcpStreamHandler,type AcpStreamSnapshot,type AcpTextChunkHandler,type AgentTurnStep,type McpServerWire,type PromptResult,type SessionUpdate,type SteerResult,type ToolCallEntry } from './acp-stderr-tail-max-chars.js';
 
 
@@ -159,8 +158,6 @@ export class AcpClient extends EventEmitter {
    stderrTail = '';
 
    agentEnv: Record<string, string>;
-
-   readonly piSessionInstructions = new PiSessionInstructions();
 
    harnessCommand: string;
 
