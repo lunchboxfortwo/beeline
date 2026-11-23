@@ -11,8 +11,8 @@ import { backfillSquireMachines } from './squire-machine.js';
 import { IDENTITY_HANDLE_SCHEMA } from './identity-handles.js';
 import { WORKSPACE_HANDLE_SCHEMA } from './workspace-handles.js';
 import { CHAT_SEQ_INDEX, CHAT_SEQ_SCHEMA, backfillChatSeq } from './chat-seq.js';
-import { OWNED_MODEL_CREDENTIAL_SCHEMA } from './owned-model-credential.js';
 import { OWNED_MODEL_ATTEMPT_SCHEMA } from './owned-model-attempt.js';
+import { RETIRED_OWNED_MODEL_CREDENTIAL_SCHEMA } from './owned-model-credential.js';
 import { SENTRY_WAKE_SOURCE_SCHEMA } from './sentry-wake-source.js';
 import { CONNECTOR_OFFER_EXPIRY_SCHEMA } from './connector-offer-expiry.js';
 import { PENDING_ATTACHMENT_SOURCE_SCHEMA } from './pending-attachment-source.js';
@@ -231,7 +231,7 @@ export async function migrate(
     `CREATE UNIQUE INDEX CONCURRENTLY free_agent_guide_warning
      ON free_agent_events(agent_id,(detail->>'warningId')) WHERE kind='guide_started'`,
   ));
-  await ddlScript('owned model credentials', OWNED_MODEL_CREDENTIAL_SCHEMA);
+  await ddlScript('retired model credential schema', RETIRED_OWNED_MODEL_CREDENTIAL_SCHEMA);
   await ddlScript('owned model attempts', OWNED_MODEL_ATTEMPT_SCHEMA);
   await ddlScript('starter onboarding schema', STARTER_ONBOARDING_SCHEMA);
   await runMigrationStep('checkin human history index', () => createIndexConcurrently(

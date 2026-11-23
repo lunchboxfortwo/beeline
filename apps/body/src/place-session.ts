@@ -46,7 +46,6 @@ import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
 import { agentArgsWithModelSelection } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { openRouterRoutingInput } from './openrouter-routing.js';
-import { OwnedModelFiles } from './owned-model-files.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import { itemPrompt, memberThreads, offlineBatchPrompt } from './place-prompt.js';
@@ -138,7 +137,6 @@ export class PlaceSession {
   private attachmentDir?: string;
   private privateHomeRoot?: string;
   private stopping = false;
-  private model?: OwnedModelFiles;
   readonly resources: SessionResources;
   private readonly running: RunningModelReporter;
   readonly contextPath: string;
@@ -351,45 +349,18 @@ export class PlaceSession {
   async writeContext(
     item: AgentCommand | undefined,
     queued: readonly AgentCommand[],
-    ownedModelDirectory?: string,
     invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
   ): Promise<void> {
-    await writeTurnContext(this.contextPath, item, queued, ownedModelDirectory, invocation);
+    await writeTurnContext(this.contextPath, item, queued, invocation);
     await writePrivateFileAtomically(
       `${this.contextPath}.resource-auth.json`,
       JSON.stringify({ ...this.options.api.connection(), turnContextPath: this.contextPath }),
     );
   }
 
-  /** A free agent's hosted model is reachable only with a credential bound to this item. */
-  private async hostedModel(item: AgentCommand): Promise<OwnedModelFiles | undefined> {
-    const env = this.options.config.agentEnv;
-    let files: OwnedModelFiles | undefined;
-    if (item.modelCredential || env?.BEELINE_FREE_AGENT_ID || env?.BEELINE_FREE_AGENT_MODEL_TOKEN) {
-      // OwnedModelFiles validates the required hosted credential before ACP starts.
-      const modelCredential = item.modelCredential!;
-      files = await OwnedModelFiles.create({
-        root: resolve(dirname(this.contextPath), 'state', `owned-model-${item.id}`),
-        credential: modelCredential,
-        binding: {
-          agentId: this.options.agent.publicKey,
-          itemId: item.id,
-          provider: 'beeline',
-          model: 'server-selected',
-          baseUrl: new URL('/v1/free-agents/model', this.options.api.baseUrl).href,
-        },
-      });
-    }
-    return files;
-  }
-
   /** Make sure a live session serves this place; reuse the running one. */
   async start(item?: AgentCommand): Promise<void> {
-    if (item) {
-      this.model = await this.hostedModel(item);
-      await this.writeContext(item, [], this.model?.paths().directory);
-      this.queuedSelection(item);
-    }
+    if (item) this.queuedSelection(item);
     if (!this.alive || this.stale) await this.startFresh();
     await this.prepareGitHubLaunchers();
   }
@@ -410,7 +381,7 @@ export class PlaceSession {
     try {
       await this.activate(sandbox);
     } catch (error) {
-      if (!sandbox || this.model) throw error;
+      if (!sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
       await this.stop();
       this.notes.push(
         `The OS sandbox could not start (${error instanceof Error ? error.message : String(error)}). ` +
@@ -503,7 +474,6 @@ export class PlaceSession {
       ...(tmpDir ? { tmpDir } : {}),
       additionalWritablePaths: [
         ...harnessLoginWritablePaths(config.agentKind, operatorHome),
-        ...(this.model ? [resolve(dirname(this.contextPath), 'state')] : []),
         ...(corner && config.workspaceRoot ? [config.workspaceRoot] : []),
         ...(attachScratchRoot ? [attachScratchRoot] : []),
       ],
@@ -584,8 +554,10 @@ export class PlaceSession {
         ),
       );
     const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, []);
-    if (this.model || agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
+    if (agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN) {
+      agentEnv.BEELINE_MODEL_ROOM_ID = placeId;
       await installOwnedModelProvider(agentEnv.PI_CODING_AGENT_DIR);
+    }
     await installPiMcpBridge({
       agentCommand: harnessLabel,
       piHome: agentEnv.PI_CODING_AGENT_DIR,
@@ -807,9 +779,7 @@ export class PlaceSession {
     const sessionId = this.sessionId!;
     this.current = item;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
-    const model = this.model ?? (await this.hostedModel(item));
-    this.model = undefined;
-    await this.writeContext(item, batch.slice(1), model?.paths().directory, invocation);
+    await this.writeContext(item, batch.slice(1), invocation);
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
@@ -901,7 +871,6 @@ export class PlaceSession {
       toolCalls: result.toolCalls,
       ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
       cleanup: async () => {
-        model?.revoke();
         return stream.retract();
       },
     };

@@ -4,7 +4,6 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
-import { OwnedModelCredentials } from '../owned-model-credential.js';
 import { type SystemPhrase } from '../system-line.js';
 
 
@@ -98,7 +97,6 @@ export class AccessDeniedError extends Error {
 }
 
 
-export type OwnedModelConfiguration = Readonly<{ credentials: OwnedModelCredentials; ready(): boolean }>;
 
 
 
@@ -290,7 +288,6 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   getAgentPresence: true,
   getRequestCompletion: true,
   getAgentCommands: true,
-  getModelCredential: true,
   startAgentTurn: true,
   postRoomMessage: true,
   reactToRoomMessage: true,

@@ -46,7 +46,7 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { promise, resolve };
 }
-async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
+async function fixture(saved?: import('./answer-store.js').StoredAnswer, hosted = false) {
   const root = await mkdtemp(join(tmpdir(), 'queue-runner-')); roots.push(root);
   const secretKeyHex = '01'.repeat(32);
   const identity = identityFromKey(secretKeyHex, 'Agent');
@@ -63,7 +63,7 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer) {
   } as unknown as DaemonApiClient;
   if (saved) await new AnswerStore(join(root,'answers')).save(saved);
   new AgentRunner(runtime, join(root, 'runtime.json'), {
-    workspaceRoot: root, agentBinary: 'fixture', mcpBinary: 'fixture', agentEnv: {},
+    workspaceRoot: root, agentBinary: 'fixture', mcpBinary: 'fixture', agentEnv: hosted ? { BEELINE_FREE_AGENT_MODEL_TOKEN: 'fixture' } : {},
   }, { daemonApi: api });
   const item = (id: string): AgentCommand => ({ id, agentId: agent.publicKey, roomId: 'room', returnRoomId: 'room',
     createdAt: 1, turnRequestId: id, action: 'input', reason: 'human_tag', rootCommandId: id,
@@ -545,10 +545,8 @@ it('retires a generated failure notice restored from an older helper outbox', as
 });
 
 it('ends a hosted item with the real startup failure and does not replay it on reconnect', async () => {
-  const f = await fixture();
-  const item = { ...f.item('first-hosted'), modelCredential: {
-    v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null,
-  } };
+  const f = await fixture(undefined, true);
+  const item = f.item('first-hosted');
   harness.start.mockRejectedValueOnce(new Error('ACP error -32000: Authentication required: Configure an API key or log in'));
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('startAgentTurn', {
@@ -565,10 +563,8 @@ it.each([false, true])('ends an unanswered hosted tag visibly after empty end_tu
   if (restored) vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
     itemId: 'beebee-empty-end-turn', roomId: 'room', requestId: 'beebee-empty-end-turn', text: '', harnessEnded: true,
   }]);
-  const f = await fixture();
-  const item = { ...f.item('beebee-empty-end-turn'), modelCredential: {
-    v: 1 as const, token: 'bfmc_v1.' + 'a'.repeat(32) + '.' + 'b'.repeat(64), expiresAt: null,
-  } };
+  const f = await fixture(undefined, true);
+  const item = f.item('beebee-empty-end-turn');
   // Beebee, 2026-11-18 05:08:46: Pi recorded a local model-intent error,
   // but pi-acp returned end_turn without any content updates.
   harness.deliver.mockResolvedValueOnce({ text: '', stopReason: 'end_turn', steps: [], toolCalls: [], cleanup: async () => {} });

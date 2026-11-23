@@ -2,7 +2,7 @@ import { OwnedModelAttempts } from './owned-model-attempt.js';
 import { settleAllowance } from './free-agent-accounting.js';
 import { groupBPostgresDatabase } from './test-fixtures/test-support-router-group-b-postgres.js';
 import { seedOwnedModelFixture, type OwnedModelFixture } from './test-fixtures/owned-model.js';
-import { readOwnedModelReceipt } from '@beeline/api-contract/helper-model-receipt';
+import { OwnedModelCredentials } from './owned-model-credential.js';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,11 +31,8 @@ describe('actual owned model endpoint and actual quota adapter', () => {
       const pg=await groupBPostgresDatabase(url);f=await seedOwnedModelFixture(pg.database,{installSchema:false,
         ...(/current Pi/.test(context.task.name) ? {model:'deepseek/deepseek-v4.1-flash'} : {})});closeDatabase=pg.close;
     }else{const local=await ownedModelFixture();f=local;closeDatabase=()=>local.db.close();} calls = []; reply = success;
-    await f.db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
-      VALUES($1,'synthetic-request',$2,'working')`,[MODEL_ROOM,MODEL_AGENT]);
     options = { database: f.db, config: { model: 'unselected/default', dailyTokenCap: 100_000, firstDayTokenCap: 100_000, lifetimeTokenCap: 0 },
       upstreamKey: 'SYNTHETIC_SERVER_PROVIDER_KEY',
-      ownedModel: { credentials: f.credentials, ready: () => true },
       fetchImpl: ((_url: string | URL | Request, init?: RequestInit) => {
         calls.push({ body: String(init?.body), headers: new Headers(init?.headers) }); return Promise.resolve(reply());
       }) as typeof fetch,
@@ -48,7 +45,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
   },60000);
   afterEach(async () => { vi.useRealTimers(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await closeDatabase(); },60000);
   const call = (body: Record<string, unknown> = input, id = ONE, token?: string) => fetch(origin + '/v1/free-agents/model/chat/completions', {
-    method: 'POST', headers: { authorization: `Bearer ${token ?? f.issued.token}`, 'x-beeline-model-request': id,
+    method: 'POST', headers: { authorization: `Bearer ${token ?? f.token}`, 'x-beeline-model-request': id, 'x-beeline-model-room': MODEL_ROOM,
       'content-type': 'application/json', 'x-beeline-command-generation': 'UNTRUSTED_CALLER_METADATA' }, body: JSON.stringify(body),
   });
   const counters = async () => ({
@@ -74,13 +71,13 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     });
     await locked.promise;
     const errors:unknown[]=[];
-    const lock=f.credentials.lockInvocation.bind(f.credentials);
-    vi.spyOn(f.credentials,'lockInvocation').mockImplementation(async(...args)=>{
-      try{await lock(...args);}catch(error){errors.push(error);throw error;}
+    const lock=OwnedModelCredentials.prototype.lockInvocation;
+    const lockSpy=vi.spyOn(OwnedModelCredentials.prototype,'lockInvocation').mockImplementation(async function(this: OwnedModelCredentials,...args){
+      try{await lock.call(this,...args);}catch(error){errors.push(error);throw error;}
     });
     const pending = fetch(origin + '/v1/free-agents/model/chat/completions', {
-      method: 'POST', headers: { authorization: 'Bearer bfm_native_provider_config',
-        'x-beeline-model-invocation': f.issued.token, 'x-beeline-model-request': ONE, 'content-type': 'application/json' },
+      method: 'POST', headers: { authorization: 'Bearer '+f.token,
+        'x-beeline-model-room': MODEL_ROOM, 'x-beeline-model-request': ONE, 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'deepseek/deepseek-v4.1-flash',
         messages: [{ role: 'system', content: 'You are Beebee.' }, { role: 'user', content: 'Hello Beebee' }],
         stream: true, max_tokens: 65_536, stream_options: { include_usage: true } }),
@@ -94,6 +91,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
       expect(calls).toHaveLength(0);
     }finally{release.resolve();await writer;}
     const response=await pending;
+    lockSpy.mockRestore();
     expect(errors).toEqual([]);
     if(change==='stop'){
       expect(response.status).toBe(403);await response.text();expect(calls).toHaveLength(0);
@@ -124,8 +122,8 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     });
     await locked.promise;
     const pending = fetch(origin + '/v1/free-agents/model/chat/completions', {
-      method: 'POST', headers: { authorization: 'Bearer bfm_native_provider_config',
-        'x-beeline-model-invocation': f.issued.token, 'x-beeline-model-request': ONE, 'content-type': 'application/json' },
+      method: 'POST', headers: { authorization: 'Bearer '+f.token,
+        'x-beeline-model-room': MODEL_ROOM, 'x-beeline-model-request': ONE, 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'deepseek/deepseek-v4.1-flash',
         messages: [{ role: 'system', content: 'You are Beebee.' }, { role: 'user', content: 'Hello Beebee' }],
         stream: true, max_tokens: 65_536, stream_options: { include_usage: true } }),
@@ -155,14 +153,20 @@ describe('actual owned model endpoint and actual quota adapter', () => {
   });
 
   it('sends N concurrent owner calls directly upstream while retaining the spend refusal', async () => {
-    const release=deferred<void>();
+    const release=deferred<void>(), allStarted=deferred<void>();
     options.config.dailyTokenCap=1_000_000;options.config.firstDayTokenCap=1_000_000;
     const count=40;
-    reply=async()=>{ await release.promise;return success(); };
+    reply=async()=>{
+      if (calls.length === count) allStarted.resolve();
+      await release.promise;
+      return success();
+    };
     const pending=Array.from({length:count},(_,index)=>call({messages:[{role:'user',content:`Distinct authorized call ${index}`}],max_tokens:256},
       `11111111-1111-4111-8111-${String(index).padStart(12,'0')}`).catch(()=>new Response('{}',{status:599})));
     try {
-      await vi.waitFor(()=>expect(calls).toHaveLength(count),{timeout:5000});
+      await Promise.race([allStarted.promise, Promise.race(pending).then(response => {
+        throw new Error(`Model request returned HTTP ${response.status} before all requests reached the provider`);
+      })]);
       expect(calls).toHaveLength(count);
     } finally { release.resolve();await Promise.allSettled(pending); }
     const results=await Promise.all(pending);
@@ -176,27 +180,40 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     const response=await call();expect(response.status).toBe(200);await response.text();
     const recorded=await call();expect(recorded.status).toBe(409);
     const body=await recorded.json();expect(body.receipt.state).toBe('succeeded');
-    expect(readOwnedModelReceipt(body.error.signedReceipt,f.issued.token,ONE)).toMatchObject({state:'succeeded'});
     expect(calls).toHaveLength(1);
-    const removedRead=await fetch(origin+'/v1/free-agents/model/requests/'+ONE,{headers:{authorization:'Bearer '+f.issued.token}});
+    const removedRead=await fetch(origin+'/v1/free-agents/model/requests/'+ONE,{headers:{authorization:'Bearer '+f.token}});
     expect(removedRead.status).toBe(404);await removedRead.text();
   });
 
-  it('reads the invocation header supplied by the existing native Pi transport',async()=>{
-    const response=await fetch(origin+'/v1/free-agents/model/chat/completions',{
-      method:'POST',headers:{authorization:'Bearer bfm_native_provider_config',
-        'x-beeline-model-invocation':f.issued.token,'x-beeline-model-request':ONE,'content-type':'application/json'},
-      body:JSON.stringify(input),
-    });
-    expect(response.status).toBe(200);await response.text();
+  it('uses one bearer for successive turns in the Room while recording each attempt separately', async () => {
+    const first = await call();
+    expect(first.status).toBe(200);
+    await first.text();
+    await f.db.query("UPDATE agent_commands SET state='complete' WHERE id=$1", [f.actor.binding.commandId]);
+    const idle = await call(input, TWO);
+    expect(idle.status).toBe(401);
+    await idle.text();
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.headers.has('x-beeline-model-invocation')).toBe(false);
-    expect(calls[0]!.headers.get('authorization')).toBe('Bearer SYNTHETIC_SERVER_PROVIDER_KEY');
+
+    await f.db.query(`INSERT INTO agent_commands(id,room_id,agent_id,turn_request_id,action,reason,root_command_id,root_source_message_id,
+      agent_depth,state) VALUES('second-command',$1,$2,'second-request','input','human_tag','second-command','second-source',0,'pending')`, [MODEL_ROOM, MODEL_AGENT]);
+    await f.db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status,started_at)
+      VALUES($1,'second-request',$2,'working',now())`, [MODEL_ROOM, MODEL_AGENT]);
+    const second = await call(input, TWO);
+    expect(second.status).toBe(200);
+    await second.text();
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.headers.has('x-beeline-model-room')).toBe(false);
+    expect(calls[1]!.headers.get('authorization')).toBe('Bearer SYNTHETIC_SERVER_PROVIDER_KEY');
+    expect((await f.db.query('SELECT command_id,state FROM owned_model_attempts ORDER BY created_at')).rows).toEqual([
+      { command_id: f.actor.binding.commandId, state: 'succeeded' },
+      { command_id: 'second-command', state: 'succeeded' },
+    ]);
   });
 
   it('reconciles a lost provider reply inside the existing leaf from its recorded receipt',async()=>{
     reply=async()=>{
-      const binding=f.credentials.actor(f.actor);
+      const binding=f.actor.binding;
       await new OwnedModelAttempts(f.db,f.credentials).settleUsage(f.actor,ONE,{tokens:13,usd:0.00002},'succeeded',async(tx,reservation)=>{
         await settleAllowance(tx,binding.ownerId,binding.agentId,reservation.day,
           13-reservation.reserved,-reservation.credit,0.00002-reservation.reservedUsd,{modelRequestId:ONE});
@@ -205,13 +222,12 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     };
     const response=await call();expect(response.status).toBe(409);
     const body=await response.json();expect(body.receipt.state).toBe('succeeded');
-    expect(readOwnedModelReceipt(body.error.signedReceipt,f.issued.token,ONE)).toMatchObject({state:'succeeded'});
     expect(calls).toHaveLength(1);
     expect(Number((await counters()).usage[0]?.tokens)).toBe(13);
   });
-  it('rejects the retired agent-wide model token without selecting a different Room’s command',async()=>{
+  it('rejects an invalid model token',async()=>{
     const response=await call(input,ONE,'bfm_retired');expect(response.status).toBe(401);
-    expect(await response.json()).toMatchObject({error:{code:'owned_model_required'}});expect(calls).toHaveLength(0);
+    expect(await response.json()).toMatchObject({error:{code:'owned_model_authority'}});expect(calls).toHaveLength(0);
   });
 
   it('pins actual command model, strips private identity headers, settles real quota once and replays outcome only', async () => {
@@ -220,7 +236,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect(JSON.parse(calls[0]!.body)).toEqual({ ...input, model: MODEL, usage: { include: true } });
     expect([...calls[0]!.headers.keys()].sort()).toEqual(['authorization', 'content-type', 'http-referer', 'x-title']);
     expect(calls[0]!.headers.get('authorization')).toBe('Bearer SYNTHETIC_SERVER_PROVIDER_KEY');
-    expect(calls[0]!.body).not.toContain(f.issued.token); expect(freeAgentModelTakesImages).not.toHaveBeenCalled();
+    expect(calls[0]!.body).not.toContain(f.token); expect(freeAgentModelTakesImages).not.toHaveBeenCalled();
     expect((await counters()).usage.map(row => Number(row.tokens))).toEqual([13]);
     expect(Number((await counters()).budget[0]?.usd)).toBeCloseTo(0.00002);
     expect((await f.db.query(`SELECT kind FROM free_agent_events WHERE kind='model_usage'`)).rowCount).toBe(1);
@@ -228,7 +244,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect(await replay.json()).toMatchObject({ receipt: { requestId: ONE, state: 'succeeded', evidence: { kind: 'usage', tokens: 13 } } });
     expect(calls).toHaveLength(1); expect(await counters()).toEqual(before);
     const stored = JSON.stringify((await f.db.query('SELECT * FROM owned_model_attempts')).rows);
-    for (const secret of ['SYNTHETIC_PRIVATE_HISTORY', 'SYNTHETIC_PRIVATE_ANSWER', 'SYNTHETIC_SERVER_PROVIDER_KEY', f.issued.token]) expect(stored).not.toContain(secret);
+    for (const secret of ['SYNTHETIC_PRIVATE_HISTORY', 'SYNTHETIC_PRIVATE_ANSWER', 'SYNTHETIC_SERVER_PROVIDER_KEY', f.token]) expect(stored).not.toContain(secret);
   });
 
   it('delivers an owned stream beyond the former window without spending preparation time', async () => {
@@ -309,7 +325,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
       vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
       const result = await call(); expect(await result.json()).toMatchObject({ receipt: { state: drop ? 'unknown' : 'refused' } }); expect(requests).toBe(1);
       expect(forwarded[0]?.url).toBe('/v1/chat/completions'); expect(forwarded[0]?.headers.authorization).toBe('Bearer SYNTHETIC_SERVER_PROVIDER_KEY');
-      expect(forwarded[0]?.headers['x-beeline-model-request']).toBeUndefined(); expect(forwarded[0]?.body).not.toContain(f.issued.token);
+      expect(forwarded[0]?.headers['x-beeline-model-request']).toBeUndefined(); expect(forwarded[0]?.body).not.toContain(f.token);
       expect(Number((await counters()).usage[0]?.tokens)).toBeGreaterThanOrEqual(0);
       await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); vi.useRealTimers(); expect(requests).toBe(1);
       const replay = await call(input, TWO); expect(replay.status).toBe(401);await replay.text();expect(requests).toBe(1);
@@ -356,12 +372,11 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     const response=await call({...input,stream:true}),reader=response.body!.getReader();
     try{
       const first=await reader.read();const before=new TextDecoder().decode(first.value);await entered.promise;
-      expect(before).not.toContain('forged');expect(before).not.toContain('bfmr_');expect(before).not.toContain('[DONE]');
+      expect(before).not.toContain('forged');expect(before).not.toContain(ONE);expect(before).not.toContain('[DONE]');
       release.resolve();let tail='';for(;;){const next=await reader.read();if(next.done)break;tail+=new TextDecoder().decode(next.value);}
       const frames=tail.split('\n').filter(line=>line.startsWith('data: {')).map(line=>JSON.parse(line.slice(6)));
-      const receipt=frames.find(frame=>frame.id)?.id;
-      expect(readOwnedModelReceipt(receipt,f.issued.token,ONE)).toMatchObject({requestId:ONE,state:'succeeded',evidence:{kind:'usage',tokens:13}});
-      expect(readOwnedModelReceipt(receipt,f.issued.token,TWO)).toBeNull();expect(tail).toContain('[DONE]');
+      expect(frames.find(frame=>frame.id)?.id).toBe(ONE);
+      expect(tail).toContain('[DONE]');
     }finally{release.resolve();reader.releaseLock();}
   });
 
@@ -375,7 +390,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     let observed='';await call({...input,stream:true}).then(async response=>{const reader=response.body!.getReader();
       try{for(;;){const next=await reader.read();if(next.done)break;observed+=new TextDecoder().decode(next.value);}}finally{reader.releaseLock();}
     }).catch(()=>{});
-    expect(observed).not.toContain('bfmr_');expect(observed).not.toContain('[DONE]');expect(observed).not.toContain('forged');
+    expect(observed).not.toContain(ONE);expect(observed).not.toContain('[DONE]');expect(observed).not.toContain('forged');
     expect((await f.db.query('SELECT state,evidence FROM owned_model_attempts')).rows).toEqual([{state:'unknown',evidence:null}]);
     expect(calls).toHaveLength(1);
   });
@@ -384,7 +399,7 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     const content='large provider output '.repeat(30_000);
     reply=()=>new Response('data: '+JSON.stringify({id:'untrusted-provider',choices:[{index:0,delta:{content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:3,cost:0.00002}})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
     const response=await call({...input,stream:true}),text=await response.text();
-    expect(response.status).toBe(200);expect(text).toContain(content);expect(text).not.toContain('untrusted-provider');expect(text).toContain('bfmr_v1.');expect(text).toContain('[DONE]');
+    expect(response.status).toBe(200);expect(text).toContain(content);expect(text).not.toContain('untrusted-provider');expect(text).toContain(ONE);expect(text).toContain('[DONE]');
     expect((await f.db.query('SELECT state FROM owned_model_attempts')).rows).toEqual([{state:'succeeded'}]);expect(calls).toHaveLength(1);
   });
   it('allows image input by default without extra model metadata admission', async () => {
@@ -413,10 +428,10 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     report.mockRestore();
   });
 
-  it('stops on the first chunk after authorization is revoked, without a timer', async () => {
+  it('stops on the first chunk after agent retirement', async () => {
     reply = () => new Response(new ReadableStream<Uint8Array>({
       async pull(controller) {
-        await f.db.query('UPDATE owned_model_credentials SET revoked_at=clock_timestamp()');
+        await f.db.query('UPDATE free_agents SET removed_at=clock_timestamp()');
         controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"EXPIRED_PRIVATE_CHUNK"}}]}\n\n'));
         controller.close();
       },
@@ -428,13 +443,10 @@ describe('actual owned model endpoint and actual quota adapter', () => {
     expect((await f.db.query('SELECT state FROM owned_model_attempts WHERE model_request_id=$1', [ONE])).rows[0]).toEqual({ state: 'unknown' });
   });
 
-  it('refuses default-off and every malformed owned namespace before legacy lookup or model metadata work', async () => {
+  it('refuses malformed tokens before database or model metadata work', async () => {
     const queries: string[] = [], base = options.database;
     options.database = { query: (sql, values) => { queries.push(sql); return base.query(sql, values); }, transaction: work => base.transaction(work) };
-    options.ownedModel = { credentials: f.credentials, ready: () => false };
-    const disabled = await call(); expect(disabled.status).toBe(401); await disabled.text(); expect(queries).toEqual([]);
-    options.ownedModel = { credentials: f.credentials, ready: () => true };
-    for (const token of ['bfmc_v1.invalid', f.issued.token.replace('bfmc_v1.', 'bfmc_v2.'), 'bfmc_bfm_legacy']) {
+    for (const token of ['bfmc_v1.invalid', f.token + '.extra', 'bfm_short']) {
       const invalid = await call(input, ONE, token); expect(invalid.status).toBe(401); await invalid.text();
     }
     expect(queries).toEqual([]); expect(calls).toHaveLength(0); expect(freeAgentModelTakesImages).not.toHaveBeenCalled();

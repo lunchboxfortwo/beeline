@@ -15,7 +15,6 @@ import type { ObjectStorage } from './object-storage.js';
 import { DatabaseBackgroundWork } from './database-background-work.js';
 
 export class PgliteDatabase implements SqlDatabase {
-  ownedModelCredentials?: SqlDatabase['ownedModelCredentials'];
   readonly backgroundWork = new DatabaseBackgroundWork();
   #client: PGliteInterface | undefined;
   // The vector extension is loaded unconditionally: institutional_memory_items
@@ -67,7 +66,6 @@ export class PgliteDatabase implements SqlDatabase {
   }
   private executor(transaction: Transaction): SqlDatabase {
     return {
-      ownedModelCredentials: this.ownedModelCredentials,
       query: async <Row extends QueryResultRow = QueryResultRow>(
         sql: string,
         values: unknown[] = [],

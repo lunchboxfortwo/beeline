@@ -3272,7 +3272,8 @@
       },
       "owned_model_credentials": {
         "module": "Owned model credentials (apps/server/src/owned-model-credential.ts)",
-        "reason": "Immutable credential bindings survive claim replay and revoke stale provider authority without retaining the bearer token.",
+        "reason": "Retains historical model credential bindings from preceding serving images.",
+        "drop": "docs/free-agents.md#model-access-and-allowances",
         "columns": {
           "id": "Opaque durable credential identity selects the immutable binding without exposing its bearer.",
           "key_version": "Pins credential MAC reconstruction to the signing key version used at issuance.",
@@ -3311,7 +3312,7 @@
         "module": "Owned model attempts (apps/server/src/owned-model-attempt.ts)",
         "reason": "Durable request identity, reservation and outcome evidence prevent duplicate provider dispatch after uncertain or lost replies.",
         "columns": {
-          "credential_id": "Links the attempt to the exact immutable authority that admitted it.",
+          "credential_id": "Partitions request identity by agent for current attempts and retains the historic credential ID for earlier ones.",
           "model_request_id": "Retains the helper request identity across transport loss and receipt replay.",
           "command_id": "Preserves the original command for cross-generation UNKNOWN admission fences.",
           "generation_id": "Pins the attempt to its admitted claim even after command lifecycle changes.",

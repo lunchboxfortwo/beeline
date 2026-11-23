@@ -311,7 +311,6 @@ export class AgentRunner {
           text: '',
         });
       } else {
-        // Required item credentials and provider configuration precede ACP startup.
         await place.session.start(item);
         place.turnStarted = item;
         await this.options.daemonApi.execute('startAgentTurn', {
@@ -368,7 +367,7 @@ export class AgentRunner {
             this.latest.some((listed) => listed.id === next.id) && !this.answered.has(next.id),
         )
       ) {
-        if (!this.stopped && !item.modelCredential) this.reportOwnerBlocker(item, error);
+        if (!this.stopped && !this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) this.reportOwnerBlocker(item, error);
         if (started && !this.stopped) {
           const pending = batch.filter((next) =>
             this.latest.some((listed) => listed.id === next.id),
@@ -386,7 +385,7 @@ export class AgentRunner {
             });
         } else if (
           !this.stopped &&
-          (item.modelCredential || this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN)
+          this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
         ) {
           await this.options.daemonApi.execute('startAgentTurn', {
             roomId: item.roomId,
@@ -540,8 +539,7 @@ export class AgentRunner {
         );
         const hosted =
           answer.harnessEnded &&
-          (pending.some((item) => item.modelCredential) ||
-            this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID ||
+          (this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID ||
             this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
         if (hosted)
           for (const item of pending)

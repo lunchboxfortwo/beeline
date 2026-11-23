@@ -331,15 +331,17 @@ async function createReservedFreeAgent(database:SqlDatabase,config:FreeAgentConf
       FREE_AGENT_HARNESS,
     ],
   );
+  const modelToken = opaque('bfm');
   await database.query(
-    `INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model,starter_role)
-     VALUES($1,$2,$3,$4,$5)`,
+    `INSERT INTO free_agents(agent_id,owner_id,sealed_keys,model,starter_role,model_token_hash)
+     VALUES($1,$2,$3,$4,$5,$6)`,
     [
       agent.publicKey,
       input.creatorId,
-      sealSecrets(config.sealSecret, { agent: agent.secretKey, body: body.secretKey }),
+      sealSecrets(config.sealSecret, { agent: agent.secretKey, body: body.secretKey, modelToken }),
       config.model,
       input.team ? name.toLowerCase() : null,
+      tokenHash(modelToken),
     ],
   );
   await createInvitedWorkspaceMembership(database, [input.workspaceId, agent.publicKey, input.creatorId]);
@@ -687,7 +689,7 @@ export class FreeAgentService {
   /**
    * First boot of a Machine: hand it everything it needs to stage its helper.
    * Valid until the agent first connects; each call mints a fresh daemon
-   * exchange and model token, so a crashed first boot can simply retry.
+   * exchange and returns the agent’s provisioned model token.
    */
   async bootstrap(token: string): Promise<FreeAgentBootstrapGrant | undefined> {
     return this.database.transaction(async (database) => {
@@ -716,12 +718,15 @@ export class FreeAgentService {
         )
       ).rows[0];
       if (!row) return undefined;
-      const keys = openSecrets<{ agent: string; body: string }>(this.config.sealSecret, row.sealed_keys);
-      const modelToken = opaque('bfm');
-      await database.query(
-        `UPDATE free_agents SET model_token_hash=$2,updated_at=now() WHERE agent_id=$1`,
-        [row.agent_id, tokenHash(modelToken)],
-      );
+      const keys = openSecrets<{ agent: string; body: string; modelToken?: string }>(this.config.sealSecret, row.sealed_keys);
+      const modelToken = keys.modelToken ?? opaque('bfm');
+      // Older agents only stored a hash. Adopt a recoverable token at their
+      // next bootstrap, when the replacement Machine has no prior token.
+      if (!keys.modelToken)
+        await database.query(
+          'UPDATE free_agents SET sealed_keys=$2,model_token_hash=$3 WHERE agent_id=$1',
+          [row.agent_id, sealSecrets(this.config.sealSecret, { ...keys, modelToken }), tokenHash(modelToken)],
+        );
       const exchange = await this.createDaemonExchange(row.agent_id, database);
       await recordFreeAgentEvent(database, row.agent_id, 'bootstrapped');
       return {

@@ -1,10 +1,9 @@
-import { OwnedModelUnknownGeneration } from './owned-model-errors.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SqlDatabase } from './database.js';
 import { OwnedModelAttempts, OwnedModelIdentityConflict, OwnedModelUnknownPayload, canonicalOwnedModelPayload,
   type OwnedModelDispatchPermit, type OwnedModelReservation } from './owned-model-attempt.js';
 import { OwnedModelCredentials } from './owned-model-credential.js';
-import { MODEL, MODEL_CLAIM, MODEL_KEY, MODEL_ROOM, MODEL_SOURCE, ownedModelFixture } from './test-fixtures/owned-model.js';
+import { MODEL, MODEL_ROOM, ownedModelFixture } from './test-fixtures/owned-model.js';
 
 const ONE = '11111111-1111-4111-8111-111111111111', TWO = '22222222-2222-4222-8222-222222222222';
 const ALLOWANCE: OwnedModelReservation = { day: '2026-11-02', reserved: 16, maxOutput: 8, reservedUsd: 0.01, credit: 0 };
@@ -42,13 +41,13 @@ describe('owned model durable UNKNOWN and exact one-use handoff primitive', () =
     await expect(attempts.handoff(admitted.permit!, start)).rejects.toBeInstanceOf(OwnedModelUnknownPayload);
     const stored = JSON.stringify((await fixture.db.query('SELECT * FROM owned_model_attempts')).rows);
     expect(stored).not.toContain('synthetic private model message'); expect(stored).not.toContain('synthetic provider result');
-    expect(stored).not.toContain(fixture.issued.token);
+    expect(stored).not.toContain(fixture.token);
   });
 
   it('replays the same request after process-owner replacement with zero new reservation or dispatch permit', async () => {
     const reserve = hook(), first = await attempts.reserve(fixture.actor, ONE, semantic, reserve);
-    const credentials = new OwnedModelCredentials({ currentVersion: 'test-v1', key: () => MODEL_KEY }, () => MODEL);
-    const actor = await credentials.authenticate(fixture.db, fixture.issued.token);
+    const credentials = new OwnedModelCredentials(MODEL);
+    const actor = await credentials.authenticate(fixture.db, fixture.token, MODEL_ROOM);
     const restarted = new OwnedModelAttempts(fixture.db, credentials);
     const replay = await restarted.reserve(actor, ONE, { messages: semantic.messages, model: MODEL }, reserve);
     expect(replay).toEqual({ receipt: first.receipt }); expect(reserve).toHaveBeenCalledOnce();

@@ -223,7 +223,6 @@ const daemonOperations = {
   forgetSquireSignIn: true,
   getAgentAvatar: true,
   getAgentCommands: true,
-  getModelCredential: true,
   startAgentTurn: true,
   getAgentConfiguration: true,
   getAgentPresence: true,

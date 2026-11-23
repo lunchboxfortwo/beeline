@@ -1,6 +1,4 @@
-/** Selected model responses carry their settlement receipt in the SDK's
- * response ID. Provider IDs and DONE can never supply that evidence. The
- * original stream remains available to the caller's billing parser. */
+/** Forward content before settlement and release the terminal frame after it. */
 export class OwnedModelStream {
   private buffer = '';
   private data: string[] = [];
@@ -48,9 +46,9 @@ export class OwnedModelStream {
 
   complete(): boolean { return this.done && !this.buffer.trim() && !this.data.length; }
 
-  terminal(receipt: string): string {
+  terminal(id: string): string {
     if (!this.complete()) throw new Error('Owned model stream is incomplete');
-    return `data: ${JSON.stringify({ id: receipt, object: 'chat.completion.chunk',
+    return `data: ${JSON.stringify({ id, object: 'chat.completion.chunk',
       choices: [{ index: 0, delta: {}, finish_reason: this.finishReason ?? 'stop' }] })}\n\ndata: [DONE]\n\n`;
   }
 }

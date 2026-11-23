@@ -130,15 +130,6 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
 }
 
 /** Compatibility read for older installed helpers; never issues or negotiates authority. */
-export async function getModelCredentialOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
-        const request = input as Input<'getModelCredential'>;
-        return await ctx.database.transaction(async db => {
-          const command = await authorizeCommandOutput(db, request.roomId, authenticatedAgentId, request.requestId);
-          return { modelCredential: (await db.ownedModelCredentials?.forCommands(db, [command.id]))?.get(command.id) } as Output<Name>;
-        });
-}
-
-/** Status only: the helper handed this item to the agent session. */
 export async function startAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
         const request = input as Input<'startAgentTurn'>;
         if (request.available === false) {
