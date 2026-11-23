@@ -586,6 +586,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
           if (frame.type === 'ended') {
             failure = `member stream ended: ${frame.reason}`;
             failedStartup(failure);
+            if (frame.reason === 'expired') return;
             break;
           }
           // The old owner drains before the candidate can commit or deliver.

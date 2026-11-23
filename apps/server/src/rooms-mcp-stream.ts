@@ -151,8 +151,9 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
     await connectorDeliveryChanged(db,member);
   });
   let stopped = false, running = false, dirty = true, initial = true, position = input.cursor, mentionCursor = input.mentionCursor;
+  const credentialEnded = new Error('member stream credential ended');
   const shutdown = () => close();
-  const close = (reason?: 'unavailable') => {
+  const close = (reason?: 'expired' | 'unavailable') => {
     if (stopped) return; stopped=true; release();
     input.signal?.removeEventListener('abort',shutdown);
     void database.transaction(async db=>{
@@ -176,7 +177,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         // Setup can create a route after this authenticated stream opened.
         // Bind it before handing its probe to the host, without reconnecting.
         if (!initial) await database.transaction(async db=>{
-          if (!await currentCredential(db,principal)) throw new Error('member stream credential ended');
+          if (!await currentCredential(db,principal)) throw credentialEnded;
           const bound=await db.query(`UPDATE rooms_mcp_delivery SET stream_id=$2,credential_hash=$3
             WHERE member_id=$1 AND mechanism='local' AND stream_id IS NULL`,[member,streamId,principal.hash]);
           if (bound.rowCount) await connectorDeliveryChanged(db,member);
@@ -185,9 +186,8 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
           // Queue reads retire obsolete idle episodes through the terminal owner.
           // Keep the snapshot consistent while allowing that committed cleanup.
           await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-          const credentialValid = await currentCredential(db,principal);
+          if (!await currentCredential(db,principal)) throw credentialEnded;
           if(!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount)throw new Error('Delivery owner changed');
-          if (!credentialValid) throw new Error('member stream credential ended');
           const head = (await db.query<{epoch:string; sequence:string}>('SELECT epoch,sequence::text FROM live_streams WHERE id=$1',[stream])).rows[0];
           if (!head) throw new Error('member stream source missing');
           const to = {epoch:head.epoch,through:Number(head.sequence)};
@@ -227,8 +227,10 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         if (!prepared || stopped) continue;
         await database.transaction(async db=>{
           await db.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
-          if (!(await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount || !await lockRoomAccess(db,prepared.rooms,[member]) || !await currentCredential(db,principal,true) ||
-              digest(await scopes(db,member,prepared.rooms))!==prepared.authority)
+          const owner = (await db.query("SELECT 1 WHERE beeline_mcp_delivery_owner($1,'local')",[member])).rowCount;
+          const roomAccess = owner && await lockRoomAccess(db,prepared.rooms,[member]);
+          if (!await currentCredential(db,principal,true)) throw credentialEnded;
+          if (!roomAccess || digest(await scopes(db,member,prepared.rooms))!==prepared.authority)
             throw new Error('member stream authority changed');
           if (!stopped) for (const frame of prepared.encoded) {
             response.write(frame);
@@ -236,7 +238,7 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
         });
         position=prepared.to; mentionCursor=prepared.after; initial=false;
       }
-    } catch (error) { console.error('[mcp-member-stream] drain failed', error); close('unavailable'); } finally { running=false; }
+    } catch (error) { console.error('[mcp-member-stream] drain failed', error); close(error === credentialEnded ? 'expired' : 'unavailable'); } finally { running=false; }
   };
   await drain();
 }
