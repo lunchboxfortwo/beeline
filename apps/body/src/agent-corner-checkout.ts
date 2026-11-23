@@ -169,15 +169,15 @@ export async function materializeAgentCornerCheckout(input: {
       ]);
       let startRef = input.startRef;
       if (input.targetBranch) {
-        const fetch = (branch: string) =>
+        const fetchBranch = (branch: string) =>
           fetchRepositoryCache({
             gitDir: staging,
             label,
             args: ['origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
             env: input.env,
           });
-        await fetch(input.targetBranch);
-        const published = await fetch(input.branch).then(
+        await fetchBranch(input.targetBranch);
+        const published = await fetchBranch(input.branch).then(
           () => true,
           (error) => {
             if (

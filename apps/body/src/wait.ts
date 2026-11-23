@@ -56,6 +56,7 @@ export function ask(channel: HttpChannel, request?: RequestInit): Promise<Respon
 export async function ask(
   channel: SocketChannel | HttpChannel,
   request?: unknown,
+  net = { createConnection },
 ): Promise<unknown> {
   const report = waitCommandReporter(channel);
   if ('url' in channel) {
@@ -66,7 +67,7 @@ export async function ask(
   }
   report?.(`waiting for ${channel.peer}`);
   return new Promise((resolve, reject) => {
-    const socket: Socket = createConnection(channel.socket);
+    const socket: Socket = net.createConnection(channel.socket);
     let input = '';
     let settled = false;
     const settle = (error?: Error, answer?: unknown) => {
@@ -390,15 +391,20 @@ export async function runOwnedFile(
   return result;
 }
 
+/** `runOwned` and `ask` as a standalone module for generated scripts and harness extensions. */
 export function ownedCommandModule(): string {
   const source = `import { spawn } from 'node:child_process';
+import { createConnection } from 'node:net';
 const waitSay = line => process.stderr.write('[beeline] ' + line + '\\n');
 const __name = fn => fn;
 let waitMachineReadOutput = false, waitOwnerHooks = false;
 const waitOwnedChildren = new Set(), waitGroupLeaders = new WeakSet(), waitLinkedWorkers = new WeakSet();
 ${waitCommandReporter.toString()}
 ${waitKillGroup.toString()}
+const PeerRefusal = ${PeerRefusal.toString()};
 const own = ${runOwned.toString()};
-export const runOwned = command => own(command, { spawn });`;
+const waitAsk = ${ask.toString()};
+export const runOwned = command => own(command, { spawn });
+export const ask = (channel, request) => waitAsk(channel, request, { createConnection });`;
   return `data:text/javascript,${encodeURIComponent(source)}`;
 }

@@ -209,7 +209,7 @@ export async function fetchRepositoryCache(input: {
     checked.set(gitDir, check);
   }
   await check;
-  const fetch = (extra: readonly string[] = []) =>
+  const gitFetch = (extra: readonly string[] = []) =>
     git(gitDir, ['fetch', ...extra, ...args], input.env ? { env: input.env } : {});
   const damaged = (error: unknown): never => {
     if (!isRepositoryCacheCorruption(error)) throw error;
@@ -222,20 +222,20 @@ export async function fetchRepositoryCache(input: {
   const marker = resolve(gitDir, REPAIR_PENDING_FILE);
   let repaired = existsSync(marker);
   try {
-    await fetch();
+    await gitFetch();
   } catch (error) {
     if (!isRepositoryCacheCorruption(error)) throw error;
     const repair = await repairRepositoryCache(gitDir, diagnosticText(error));
     console.warn(
       `[thin-core] repo cache ${label} damaged; removed ${repair.removedObjects.length} empty or corrupt objects and ${repair.removedRefs.length} refs, retrying fetch`,
     );
-    await fetch().catch(damaged);
+    await gitFetch().catch(damaged);
     repaired = true;
   }
   if (!repaired) return;
   if (!(await fetchedHistoryIsComplete(gitDir, args))) {
     console.warn(`[thin-core] repo cache ${label} still lacks fetched history; refetching it`);
-    await fetch(['--refetch']).catch(damaged);
+    await gitFetch(['--refetch']).catch(damaged);
     if (!(await fetchedHistoryIsComplete(gitDir, args)))
       damaged(new Error(`${label}: fetched refs still have missing objects after refetch`));
   }

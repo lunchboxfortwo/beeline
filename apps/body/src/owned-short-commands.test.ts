@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -66,22 +68,27 @@ describe('short local commands run as owned children', () => {
   });
 });
 
+const bundledWait = async () =>
+  (
+    await build({
+      stdin: { contents: "export { ownedCommandModule } from './wait.ts';", resolveDir: __dirname },
+      bundle: true,
+      write: false,
+      platform: 'node',
+      format: 'esm',
+      target: 'node20',
+    })
+  ).outputFiles[0]!.text;
+
 it('runs the standalone child owner emitted by a bundled helper', async () => {
-  const bundled = await build({
-    stdin: { contents: "export { ownedCommandModule } from './wait.ts';", resolveDir: __dirname },
-    bundle: true,
-    write: false,
-    platform: 'node',
-    format: 'esm',
-    target: 'node20',
-  });
+  const bundled = await bundledWait();
   const result = await runOwned({
     step: 'bundled standalone owner',
     file: process.execPath,
     args: [
       '--input-type=module',
       '-e',
-      bundled.outputFiles[0]!.text +
+      bundled +
         `
       const { runOwned: runStandalone } = await import(ownedCommandModule());
       const result = await runStandalone({step:'fixture',file:process.execPath,args:['-e',"console.log('owned'); console.error('progress');"],machineRead:true});
@@ -95,4 +102,39 @@ it('runs the standalone child owner emitted by a bundled helper', async () => {
     stdout: 'owned\n',
     stderr: 'progress\n',
   });
+});
+
+it('asks an HTTP peer and a socket peer through the standalone module of a bundled helper', async () => {
+  const http = createHttpServer((request, response) => response.end(`answered ${request.method}`));
+  const socketPath = join(scratch(), 'peer.sock');
+  const refusing = createNetServer((peer) => peer.end('{"error":"not here"}\n'));
+  await new Promise<void>((done) => http.listen(0, '127.0.0.1', done));
+  await new Promise<void>((done) => refusing.listen(socketPath, done));
+  try {
+    const { port } = http.address() as AddressInfo;
+    const result = await runOwned({
+      step: 'bundled standalone ask',
+      file: process.execPath,
+      args: [
+        '--input-type=module',
+        '-e',
+        (await bundledWait()) +
+          `
+      const { ask: askStandalone } = await import(ownedCommandModule());
+      const response = await askStandalone({ url: 'http://127.0.0.1:${port}/probe', machineRead: true }, { method: 'POST' });
+      const refusal = await askStandalone({ socket: ${JSON.stringify(socketPath)}, peer: 'fixture peer', machineRead: true }, {}).catch(error => error);
+      console.log(JSON.stringify({ status: response.status, text: await response.text(), refusal: refusal.constructor.name + ': ' + refusal.message }));`,
+      ],
+      machineRead: true,
+    });
+    expect(result.stderr).toBe('');
+    expect(JSON.parse(result.stdout)).toEqual({
+      status: 200,
+      text: 'answered POST',
+      refusal: 'PeerRefusal: fixture peer: not here',
+    });
+  } finally {
+    http.close();
+    refusing.close();
+  }
 });

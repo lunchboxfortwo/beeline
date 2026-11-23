@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { TurnStoppedError } from './turn-stop.js';
+import { ask } from './wait.js';
 
 export const RESOURCE_FACADE_FLAG = '--resource-mcp-facade';
 export function resourceFacadeArgs(): string[] {
@@ -58,13 +59,14 @@ type SquireApprovalLink = {
   readonly linkKind: 'approval' | 'passkey' | 'vouch';
 };
 
-export type SquireApprovalRelay = SquireApprovalDetails & SquireApprovalLink & {
-  readonly tool: string;
-  readonly title: string;
-  readonly detail: string;
-  /** Squire's expires_at, as Unix milliseconds. */
-  readonly expiresAt?: number;
-};
+export type SquireApprovalRelay = SquireApprovalDetails &
+  SquireApprovalLink & {
+    readonly tool: string;
+    readonly title: string;
+    readonly detail: string;
+    /** Squire's expires_at, as Unix milliseconds. */
+    readonly expiresAt?: number;
+  };
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -244,11 +246,7 @@ export function drivenUrlIn(
 }
 
 function credentialLabel(args: Record<string, unknown>): string | undefined {
-  return (
-    stringArg(args, 'name') ??
-    stringArg(args, 'label') ??
-    stringArg(args, 'service')
-  );
+  return stringArg(args, 'name') ?? stringArg(args, 'label') ?? stringArg(args, 'service');
 }
 
 /** Human copy derived only from non-secret, explicitly safe Squire arguments. */
@@ -336,26 +334,83 @@ export function squireApprovalFromMcp(
   const expiresAt = approvalExpiryIn(response.result);
   const copy = squireApprovalCopy(tool, args);
   const reference = stringArg(args, 'reference');
-  const credential = stringArg(args, 'service') ?? stringArg(args, 'label') ?? stringArg(args, 'name');
+  const credential =
+    stringArg(args, 'service') ?? stringArg(args, 'label') ?? stringArg(args, 'name');
   let site = credential;
-  try { site = new URL(stringArg(args, 'url') ?? '').hostname || site; } catch { /* A saved login need not supply a URL. */ }
-  const purchaseAmount = copy.detail.split(' · ').slice(stringArg(args, 'merchant') ? 2 : 1).join(' · ');
-  const keyTool = ['fetch_credential', 'edit_credential', 'delete_credential', 'edit_payment_card'].includes(tool);
-  const facts = tool === 'inject_card'
-    ? [{ label: 'From', value: stringArg(args, 'merchant') ?? 'Checkout' },
-       ...(purchaseAmount ? [{ label: 'Amount', value: purchaseAmount }] : [{ label: 'Can', value: 'Authorize this purchase' }])]
-    : tool === 'operate_login' || tool === 'operate_fill_credential'
-      ? [{ label: 'Site', value: site ?? 'Saved login' }, { label: 'Can', value: 'Fill the saved password' }]
-      : keyTool ? [{ label: tool === 'edit_payment_card' ? 'Card' : 'Key', value: credential ?? (tool === 'edit_payment_card' ? 'Saved card' : 'Saved credential') },
-         { label: 'Can', value: tool === 'fetch_credential' ? 'Read the key value' : tool === 'delete_credential' ? 'Delete the saved key' : tool === 'edit_payment_card' ? 'Edit the saved card' : 'Edit the saved key' }]
-        : [{ label: 'Site', value: site ?? 'Current browser session' }, { label: 'Can', value: link.linkKind === 'passkey' ? 'Use your passkey' : link.linkKind === 'vouch' ? 'Confirm your identity' : `Continue ${tool.replace(/_/g, ' ')}` }];
-  const action = tool === 'operate_login' || tool === 'operate_fill_credential'
-    ? `sign in to ${site ?? 'a site'}` : squireApprovalAction(tool, copy.detail, link.linkKind);
-  return { tool, ...copy, action: stringArg(args, 'action') ?? action,
-    ...(stringArg(args, 'purpose') ? { purpose: stringArg(args, 'purpose') } : {}), facts,
+  try {
+    site = new URL(stringArg(args, 'url') ?? '').hostname || site;
+  } catch {
+    /* A saved login need not supply a URL. */
+  }
+  const purchaseAmount = copy.detail
+    .split(' · ')
+    .slice(stringArg(args, 'merchant') ? 2 : 1)
+    .join(' · ');
+  const keyTool = [
+    'fetch_credential',
+    'edit_credential',
+    'delete_credential',
+    'edit_payment_card',
+  ].includes(tool);
+  const facts =
+    tool === 'inject_card'
+      ? [
+          { label: 'From', value: stringArg(args, 'merchant') ?? 'Checkout' },
+          ...(purchaseAmount
+            ? [{ label: 'Amount', value: purchaseAmount }]
+            : [{ label: 'Can', value: 'Authorize this purchase' }]),
+        ]
+      : tool === 'operate_login' || tool === 'operate_fill_credential'
+        ? [
+            { label: 'Site', value: site ?? 'Saved login' },
+            { label: 'Can', value: 'Fill the saved password' },
+          ]
+        : keyTool
+          ? [
+              {
+                label: tool === 'edit_payment_card' ? 'Card' : 'Key',
+                value:
+                  credential ?? (tool === 'edit_payment_card' ? 'Saved card' : 'Saved credential'),
+              },
+              {
+                label: 'Can',
+                value:
+                  tool === 'fetch_credential'
+                    ? 'Read the key value'
+                    : tool === 'delete_credential'
+                      ? 'Delete the saved key'
+                      : tool === 'edit_payment_card'
+                        ? 'Edit the saved card'
+                        : 'Edit the saved key',
+              },
+            ]
+          : [
+              { label: 'Site', value: site ?? 'Current browser session' },
+              {
+                label: 'Can',
+                value:
+                  link.linkKind === 'passkey'
+                    ? 'Use your passkey'
+                    : link.linkKind === 'vouch'
+                      ? 'Confirm your identity'
+                      : `Continue ${tool.replace(/_/g, ' ')}`,
+              },
+            ];
+  const action =
+    tool === 'operate_login' || tool === 'operate_fill_credential'
+      ? `sign in to ${site ?? 'a site'}`
+      : squireApprovalAction(tool, copy.detail, link.linkKind);
+  return {
+    tool,
+    ...copy,
+    action: stringArg(args, 'action') ?? action,
+    ...(stringArg(args, 'purpose') ? { purpose: stringArg(args, 'purpose') } : {}),
+    facts,
     ...(stringArg(args, 'reason') ? { reason: stringArg(args, 'reason') } : {}),
-    ...(reference ? { reference } : {}), ...link,
-    ...(expiresAt !== undefined ? { expiresAt } : {}) };
+    ...(reference ? { reference } : {}),
+    ...link,
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+  };
 }
 
 /** Read Squire's structured expiry, including JSON inside MCP text blocks. */
@@ -363,10 +418,16 @@ function approvalExpiryIn(value: unknown, depth = 0): number | undefined {
   if (depth > 6) return undefined;
   if (typeof value === 'string') {
     if (value.length > 20_000 || !/^[{[]/.test(value.trim())) return undefined;
-    try { return approvalExpiryIn(JSON.parse(value), depth + 1); } catch { return undefined; }
+    try {
+      return approvalExpiryIn(JSON.parse(value), depth + 1);
+    } catch {
+      return undefined;
+    }
   }
   if (Array.isArray(value))
-    return value.map((entry) => approvalExpiryIn(entry, depth + 1)).find((expiry) => expiry !== undefined);
+    return value
+      .map((entry) => approvalExpiryIn(entry, depth + 1))
+      .find((expiry) => expiry !== undefined);
   const item = record(value);
   if (!item) return undefined;
   const raw = item.expires_at ?? item.expiresAt;
@@ -374,7 +435,8 @@ function approvalExpiryIn(value: unknown, depth = 0): number | undefined {
     const parsed = Date.parse(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
-  return Object.values(item).map((entry) => approvalExpiryIn(entry, depth + 1))
+  return Object.values(item)
+    .map((entry) => approvalExpiryIn(entry, depth + 1))
     .find((expiry) => expiry !== undefined);
 }
 
@@ -570,10 +632,16 @@ export async function authorizeResourceMessage(
       signal,
     },
   );
-  const result = await response.json() as { allowed?: boolean; error?: string };
-  if (response.status === 403 && [
-    'command output authority rejected', 'command turn cancelled', 'command already completed',
-  ].includes(result.error ?? '')) throw new TurnStoppedError(result.error);
+  const result = (await response.json()) as { allowed?: boolean; error?: string };
+  if (
+    response.status === 403 &&
+    [
+      'command output authority rejected',
+      'command turn cancelled',
+      'command already completed',
+    ].includes(result.error ?? '')
+  )
+    throw new TurnStoppedError(result.error);
   return response.ok && result.allowed === true;
 }
 
@@ -608,7 +676,8 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
     const request = squireRequests.get(key);
     squireRequests.delete(key);
     const approval = squireApprovalFromMcp(request?.message, message);
-    if (request?.message.method === 'tools/list') Object.assign(message, squireApprovalSchemas(message));
+    if (request?.message.method === 'tools/list')
+      Object.assign(message, squireApprovalSchemas(message));
     if (approval) {
       await postSquireApproval(approval, authFile, request?.drivenUrl).catch(() => {});
       if (request?.drivenUrl && activeSquireBrowserUrl === request.drivenUrl)
@@ -685,9 +754,19 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
         let upstream = message;
         if (target === 'squire') {
           upstream = squireApprovalCall(message);
-          if (message.method === 'tools/list' && message.id !== undefined) squireRequests.set(JSON.stringify(message.id), { message });
+          if (message.method === 'tools/list' && message.id !== undefined)
+            squireRequests.set(JSON.stringify(message.id), { message });
         }
-        if (!(await authorizeResourceMessage(message, target, authFile, spendsGrant, undefined, transport.signal)))
+        if (
+          !(await authorizeResourceMessage(
+            message,
+            target,
+            authFile,
+            spendsGrant,
+            undefined,
+            transport.signal,
+          ))
+        )
           throw new Error('resource approval required');
         if (target === 'squire' && message.method === 'tools/call') {
           const call = record(message.params);
@@ -711,17 +790,21 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
           started.stdin!.write(`${JSON.stringify(upstream)}\n`);
           return;
         }
-        const response = await fetch(launch.url!, {
-          method: 'POST',
-          headers: {
-            ...launch.headers,
-            'content-type': 'application/json',
-            accept: 'application/json, text/event-stream',
-            ...(session ? { 'mcp-session-id': session } : {}),
+        // The MCP client reads this process's stdout: the wait stays silent.
+        const response = await ask(
+          { url: launch.url!, machineRead: true },
+          {
+            method: 'POST',
+            headers: {
+              ...launch.headers,
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              ...(session ? { 'mcp-session-id': session } : {}),
+            },
+            body: JSON.stringify(upstream),
+            signal: transport.signal,
           },
-          body: JSON.stringify(upstream),
-          signal: transport.signal,
-        });
+        );
         if (!response.ok) throw new Error('resource transport refused the call');
         session = response.headers.get('mcp-session-id') ?? session;
         if (response.status === 202 || response.status === 204) return;
@@ -746,7 +829,9 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
                 const result = JSON.parse(data) as { id?: unknown };
                 if (messageIdKey(result.id) !== expectedId) continue;
                 await observeSquireResponse(result as Record<string, unknown>);
-                process.stdout.write(`${await boundToolResponse(result as Record<string, unknown>)}\n`);
+                process.stdout.write(
+                  `${await boundToolResponse(result as Record<string, unknown>)}\n`,
+                );
                 return;
               }
             }

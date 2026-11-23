@@ -16,6 +16,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { AGENT_SIGN_IN_ATTEMPT_TTL_MS } from '@beeline/api-contract/daemon';
+import { ask } from './wait.js';
 
 export const CLAUDE_OAUTH = {
   clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
@@ -84,7 +85,11 @@ export function claudeProxyLogin(body: unknown, now: number): Record<string, unk
     throw new ClaudeSignInShapeError('missing access_token');
   if (typeof value.refresh_token !== 'string' || !value.refresh_token)
     throw new ClaudeSignInShapeError('missing refresh_token');
-  if (typeof value.expires_in !== 'number' || !Number.isFinite(value.expires_in) || value.expires_in <= 0)
+  if (
+    typeof value.expires_in !== 'number' ||
+    !Number.isFinite(value.expires_in) ||
+    value.expires_in <= 0
+  )
     throw new ClaudeSignInShapeError('missing expires_in');
   if (value.scope !== undefined && typeof value.scope !== 'string')
     throw new ClaudeSignInShapeError('scope is not a string');
@@ -150,18 +155,28 @@ export class ClaudeSignIn {
       throw new Error(CLAUDE_SIGN_IN_WRONG_ATTEMPT_MESSAGE);
     attempt.completing = true;
     try {
-      const request = { grant_type: 'authorization_code', code, redirect_uri: CLAUDE_OAUTH.redirectUri,
-        client_id: CLAUDE_OAUTH.clientId, code_verifier: attempt.verifier, state: attempt.state };
+      const request = {
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: CLAUDE_OAUTH.redirectUri,
+        client_id: CLAUDE_OAUTH.clientId,
+        code_verifier: attempt.verifier,
+        state: attempt.state,
+      };
       let response: Response;
       try {
-        response = await this.#fetch(CLAUDE_OAUTH.tokenUrl, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(request),
-          signal: undefined,
-        });
+        response = await ask(
+          { url: CLAUDE_OAUTH.tokenUrl, peer: "Claude's sign-in service", fetch: this.#fetch },
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(request),
+          },
+        );
       } catch {
-        throw new Error("Could not reach Claude's sign-in service from the agent's machine. Try again.");
+        throw new Error(
+          "Could not reach Claude's sign-in service from the agent's machine. Try again.",
+        );
       }
       if (response.status === 400 || response.status === 401)
         throw new Error(CLAUDE_SIGN_IN_REJECTED_MESSAGE);

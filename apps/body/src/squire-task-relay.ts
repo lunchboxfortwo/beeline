@@ -15,6 +15,7 @@ import { sharedSquireMcpClient, type SquireMcpConnection } from './squire-mcp-cl
 import { SquireShareRenewals, type SquireShareLease } from './squire-share-renewals.js';
 import { squireApprovalFromMcp } from './resource-mcp-facade.js';
 import { squireSignedOutUrl } from './squire-sign-in.js';
+import { ask } from './wait.js';
 import {
   forgetSquireSessions,
   registerSquireSession,
@@ -699,9 +700,13 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
   let subscribed = false;
   const subscribe = async () => {
     try {
-      const response = await fetch(new URL('/notifications', url), {
-        headers: { authorization: `Bearer ${token}` }, signal: notifications.signal,
-      });
+      const response = await ask(
+        { url: new URL('/notifications', url), machineRead: true },
+        {
+          headers: { authorization: `Bearer ${token}` },
+          signal: notifications.signal,
+        },
+      );
       if (!response.ok || !response.body) return;
       let buffer = '';
       const decoder = new TextDecoder();
@@ -733,10 +738,21 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
         const inventory = input.method === 'initialize' || input.method === 'tools/list';
         const context = inventory ? undefined : JSON.parse(await readFile(contextFile, 'utf8')) as TurnKey;
         const operationId = randomUUID();
-        const send = (read:boolean) => fetch(new URL('/mcp',url),{
-          method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},
-          body:JSON.stringify({...context,operationId,method:read ? 'beeline/read_operation' : input.method,params:input.params ?? {}}),
-        });
+        // The MCP client reads this process's stdout: the wait stays silent.
+        const send = (read: boolean) =>
+          ask(
+            { url: new URL('/mcp', url), machineRead: true },
+            {
+              method: 'POST',
+              headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+              body: JSON.stringify({
+                ...context,
+                operationId,
+                method: read ? 'beeline/read_operation' : input.method,
+                params: input.params ?? {},
+              }),
+            },
+          );
         let response:Response;
         try { response=await send(false); }
         catch { response=await send(true); }
