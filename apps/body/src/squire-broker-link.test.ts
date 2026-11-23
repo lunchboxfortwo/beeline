@@ -205,7 +205,18 @@ describe('helper connection across Squire broker restarts', () => {
         expect(helper.diagnostics.some((line) => /ENOENT|ECONNREFUSED/.test(line))).toBe(true),
       );
       helper.diagnostics.length = 0;
+      // While the broker is away a call is answered at once as never sent; it
+      // never waits for the broker and never reaches it.
+      await expect(helper.call('operate_start')).rejects.toMatchObject({
+        outcome: { accepted: false, completed: false },
+      });
       await broker.start();
+      // The socket's publication reconnects the link; its inventory read marks it ready.
+      await vi.waitFor(() =>
+        expect(broker.methods.filter((method) => method === 'tools/list')).toHaveLength(
+          restart + 1,
+        ),
+      );
       const session = body(await helper.call('operate_start'));
       expect(
         body(await helper.call('operate_observe', { session_id: session.session_id })).title,
@@ -216,7 +227,7 @@ describe('helper connection across Squire broker restarts', () => {
     expect(broker.methods.filter((method) => method === 'tools/list')).toHaveLength(2);
   });
 
-  it('reads an interrupted action outcome once without replaying it, then permits a fresh session', async () => {
+  it('reports an action interrupted by a broker outage as possibly completed, never replays it, then permits a fresh session', async () => {
     const broker = await brokerFixture();
     const helper = await helperFixture(broker.path);
     const session = body(await helper.call('operate_start'));
@@ -229,12 +240,17 @@ describe('helper connection across Squire broker restarts', () => {
     await vi.waitFor(() =>
       expect(helper.diagnostics.some((line) => /ENOENT|ECONNREFUSED/.test(line))).toBe(true),
     );
-    await broker.start();
+    // Its receipt cannot be read while the broker is away, and nothing waits for
+    // it: the ambiguity is reported at once, and the action is never replayed.
     expect(await interrupted).toMatchObject({
-      outcome: { cause: 'result-unknown', completed: false },
+      outcome: { cause: 'connection-lost', accepted: null, completed: false },
     });
+    await broker.start();
+    await vi.waitFor(() =>
+      expect(broker.methods.filter((method) => method === 'tools/list')).toHaveLength(1),
+    );
     expect(broker.methods.filter((method) => method === 'operate_click')).toHaveLength(1);
-    expect(broker.methods.filter((method) => method === 'beeline_read_operation')).toHaveLength(1);
+    expect(broker.methods.filter((method) => method === 'beeline_read_operation')).toHaveLength(0);
     const fresh = body(await helper.call('operate_start'));
     expect(body(await helper.call('operate_observe', { session_id: fresh.session_id })).title).toBe(
       'Local browser fixture',

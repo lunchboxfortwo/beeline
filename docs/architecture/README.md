@@ -43,9 +43,13 @@ or its channel's explicit failure, never for a condition. The rule's
 timer exceptions; `apps/body/src/wait.ts` documents the primitive contracts.
 Only the exact before/after manifest `HELPER_WAIT_OWNER_LANDING` in
 `packages/scripts/architecture-invariants.mjs` permits the approved owner
-expansion; any other widening still fails. The sites outside those owners
-today are a strict one-way ratchet: CI rejects a raised `total`, so it only
-falls as areas move to the owner.
+expansion; any other widening still fails. No site outside those owners
+remains: `total` is 0, and CI rejects any raised `total`. Zero sites is not
+"nothing can wait": a silent connected peer, a live lock holder, an owned child
+that never exits, and the machine link's unsent work until its next registration
+still wait without a bound of their own. Each wait ends on its owner's answer
+or terminal event; unsent machine work survives a plain disconnect but ends
+on registration refusal, unregistration, channel retirement or a forced update.
 `packages/scripts/helper-waits.test.mjs` plants waits and timers and verifies the
 real check rejects them.
 

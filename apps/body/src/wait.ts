@@ -484,11 +484,13 @@ function waitLatched(source: object, event: string): boolean {
     readableEnded?: unknown;
     closed?: unknown;
     connected?: unknown;
+    readyState?: unknown;
   };
   if (event === 'exit')
     return 'signalCode' in state && (state.exitCode !== null || state.signalCode !== null);
   if (event === 'end') return state.readableEnded === true;
-  if (event === 'close') return state.closed === true;
+  // A WebSocket has no `closed` flag; readyState 3 is CLOSED.
+  if (event === 'close') return state.closed === true || state.readyState === 3;
   if (event === 'disconnect') return state.connected === false;
   return false;
 }

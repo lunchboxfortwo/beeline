@@ -300,14 +300,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/squire-broker-link.ts::import:node:net",
-      "file": "apps/body/src/squire-broker-link.ts",
-      "kind": "import:node:net",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/squire-task-relay.ts::import:node:http",
       "file": "apps/body/src/squire-task-relay.ts",
       "kind": "import:node:http",

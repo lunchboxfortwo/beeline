@@ -32,14 +32,16 @@
  * An established connection loss admits an immediate replacement. If the
  * broker is still restarting, publication of its Unix socket admits the next
  * attempt, without a retry timer. Initialization and one tool inventory read
- * reconcile each replacement; pending tool calls retain an unknown outcome
- * and are never replayed. No path launches a broker.
+ * reconcile each replacement. Requests may wait during a connect attempt or
+ * initialization replay; with no socket and no attempt, they fail as not-sent.
+ * Failed attempts also end queued requests as not-sent; sent requests lose
+ * their outcome on disconnect and are never replayed. No path launches a broker.
  */
 import { randomUUID } from 'node:crypto';
-import { watch, type FSWatcher } from 'node:fs';
-import { createConnection, type Socket } from 'node:net';
+import type { Socket } from 'node:net';
 import { basename, dirname } from 'node:path';
 import { SQUIRE_BROKER_UNAVAILABLE, TRUSTY_SQUIRE_BROKER_UNIT_NAME } from './squire-host.js';
+import { answer, connect as connectStream, onEnd, watchChanges } from './wait.js';
 
 type JsonRpcFrame = { id?: string | number; method?: string; error?: unknown };
 
@@ -63,7 +65,7 @@ export type SquireBrokerLinkOptions = {
   readonly input?: NodeJS.ReadableStream;
   readonly output?: NodeJS.WritableStream;
   readonly logError?: (message: string) => void;
-  /** Injectable for tests; defaults to a real Unix socket connection. */
+  /** Injectable for tests: opens the (not yet connected) socket; defaults to a real Unix socket. */
   readonly connect?: (path: string) => Socket;
   /** Injectable for tests; defaults to real process signals. */
   readonly onShutdownSignal?: (handler: () => void) => void;
@@ -79,7 +81,7 @@ export async function runSquireBrokerLink(
     input = process.stdin,
     output = process.stdout,
     logError = (message: string) => process.stderr.write(`${message}\n`),
-    connect = (path: string) => createConnection(path),
+    connect,
     onShutdownSignal = (handler: () => void) => {
       process.once('SIGHUP', handler);
       process.once('SIGTERM', handler);
@@ -88,7 +90,9 @@ export async function runSquireBrokerLink(
   } = options;
 
   let socket: Socket | undefined;
-  let watcher: FSWatcher | undefined;
+  // The one connect attempt in flight; a late peer from an abandoned one is destroyed.
+  let attempt: AbortController | undefined;
+  let stopWatching: (() => void) | undefined;
   let socketChanged = false;
   let inBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let outBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
@@ -104,7 +108,8 @@ export async function runSquireBrokerLink(
   const queued: string[] = [];
 
   let resolveDone!: (ok: boolean) => void;
-  const done = new Promise<boolean>((resolve) => {
+  // The link's whole life: it ends on input EOF, a shutdown signal, or giving up.
+  const done = answer<boolean>('Trusty Squire broker link', [], ({ resolve }) => {
     resolveDone = resolve;
   });
 
@@ -135,10 +140,20 @@ export async function runSquireBrokerLink(
   function stop(ok: boolean): void {
     if (stopped) return;
     stopped = true;
-    watcher?.close();
+    stopWatching?.();
+    attempt?.abort();
     socket?.destroy();
     resolveDone(ok);
   }
+
+  /** Requests that arrived during a connect attempt that failed were never sent. */
+  const failQueued = (reconnect: 'in-progress' | 'failed') => {
+    for (const line of queued.splice(0)) {
+      const frame = JSON.parse(line) as JsonRpcFrame;
+      if (frame.id !== undefined && frame.method)
+        output.write(failResponse(frame.id, 'not-sent', reconnect));
+    }
+  };
 
   const giveUp = () => {
     if (gaveUp) return;
@@ -158,28 +173,24 @@ export async function runSquireBrokerLink(
     stop(false);
   };
 
+  /** A connected peer: greet it, then replay initialization or flush what waited. */
   const attach = (peer: Socket) => {
-    if (stopped) {
-      peer.destroy();
-      return;
-    }
     socket = peer;
-    let connected = false;
     outBuffer = Buffer.alloc(0);
-    peer.once('connect', () => {
-      if (socket !== peer || stopped) return;
-      connected = true;
-      peer.write(`${agentId}\n`);
-      if (connectedOnce && initializeLine) {
-        replayId = `beeline-squire-relay-${randomUUID()}`;
-        const frame = JSON.parse(initializeLine) as Record<string, unknown>;
-        peer.write(`${JSON.stringify({ ...frame, id: replayId })}\n`);
-      } else {
-        ready = true;
-        flush();
-      }
-      connectedOnce = true;
+    peer.on('error', (error) => {
+      if (!stopped)
+        logError(`squire relay: ${error instanceof Error ? error.message : String(error)}`);
     });
+    peer.write(`${agentId}\n`);
+    if (connectedOnce && initializeLine) {
+      replayId = `beeline-squire-relay-${randomUUID()}`;
+      const frame = JSON.parse(initializeLine) as Record<string, unknown>;
+      peer.write(`${JSON.stringify({ ...frame, id: replayId })}\n`);
+    } else {
+      ready = true;
+      flush();
+    }
+    connectedOnce = true;
     peer.on('data', (chunk: Buffer) => {
       if (socket !== peer || stopped) return;
       outBuffer = frameLines(chunk, outBuffer, (line) => {
@@ -216,34 +227,52 @@ export async function runSquireBrokerLink(
         output.write(`${line}\n`);
       });
     });
-    peer.on('error', (error) => {
-      if (!stopped)
-        logError(`squire relay: ${error instanceof Error ? error.message : String(error)}`);
-    });
-    peer.once('close', () => {
+    onEnd(peer, ['close'], () => {
       if (socket !== peer || stopped) return;
       socket = undefined;
       ready = false;
       replayId = undefined;
       inventoryId = undefined;
-      const replace = connectedOnce;
-      for (const id of pending.values())
-        output.write(failResponse(id, 'unknown', replace ? 'in-progress' : 'failed'));
+      for (const id of pending.values()) output.write(failResponse(id, 'unknown', 'in-progress'));
       pending.clear();
-      if (!replace) giveUp();
-      else if (connected || socketChanged) doConnect();
-      // A refused successor waits for the host broker to publish its socket.
+      // An established connection's loss admits one immediate replacement.
+      doConnect();
     });
   };
 
   const doConnect = () => {
-    if (stopped) return;
+    if (stopped || attempt || socket) return;
     socketChanged = false;
-    try {
-      attach(connect(socketPath));
-    } catch {
-      if (!connectedOnce) giveUp();
-    }
+    const controller = new AbortController();
+    attempt = controller;
+    connectStream(
+      socketPath,
+      { peer: 'Trusty Squire broker', signal: controller.signal },
+      connect ? { createConnection: () => connect(socketPath) } : undefined,
+    ).then(
+      (peer) => {
+        if (attempt !== controller || stopped) {
+          peer.destroy();
+          return;
+        }
+        attempt = undefined;
+        attach(peer);
+      },
+      (error: unknown) => {
+        if (attempt !== controller) return;
+        attempt = undefined;
+        if (stopped) return;
+        logError(`squire relay: ${error instanceof Error ? error.message : String(error)}`);
+        if (!connectedOnce) {
+          giveUp();
+          return;
+        }
+        // The broker is restarting: nothing waits for it. What arrived during
+        // this attempt was never sent; the socket's next publication reconnects.
+        failQueued('in-progress');
+        if (socketChanged) doConnect();
+      },
+    );
   };
 
   input.on('data', (chunk: Buffer) => {
@@ -259,25 +288,35 @@ export async function runSquireBrokerLink(
       }
       if (frame.method === 'initialize') initializeLine = line;
       if (frame.method === 'notifications/initialized') initializedLine = line;
+      // With no broker socket and no attempt in flight, a request is answered
+      // at once as never sent: it never waits for the broker to come back.
+      if (connectedOnce && !socket && !attempt) {
+        if (frame.id !== undefined && frame.method)
+          output.write(failResponse(frame.id, 'not-sent', 'in-progress'));
+        return;
+      }
       queued.push(line);
       if (ready) flush();
     });
   });
 
   const close = () => stop(!gaveUp);
-  input.once('end', close);
-  input.once('close', close);
+  onEnd(input, ['end', 'close'], close);
   onShutdownSignal(close);
 
   // Watch the directory, not the socket inode that a restart unlinks. Start
   // before connecting so publication during a failing attempt is not lost.
+  // The publication only starts a reconnect; no request waits for it.
   try {
-    watcher = watch(dirname(socketPath), (event, filename) => {
-      if (event !== 'rename' || filename !== basename(socketPath) || stopped) return;
-      socketChanged = true;
-      if (connectedOnce && !socket) doConnect();
-    });
-    watcher.on('error', giveUp);
+    stopWatching = watchChanges(
+      dirname(socketPath),
+      (filename) => {
+        if ((filename !== null && filename !== basename(socketPath)) || stopped) return;
+        socketChanged = true;
+        if (connectedOnce && !socket) doConnect();
+      },
+      { onError: giveUp },
+    );
     doConnect();
   } catch {
     giveUp();
