@@ -429,6 +429,8 @@ export class PlaceSession {
           root: config.agentHomeRoot,
           failClosed: true,
           agentKind: config.agentKind,
+          sharedSkills: config.sharedSkills,
+          isReviewer: configuration?.isReviewer === true,
           onDiagnostic: (message) => this.notes.push(message),
           operatorHome: config.operatorHome,
           agentEnv: config.agentEnv,

@@ -57,7 +57,7 @@ import { basename,dirname,resolve } from 'node:path';
 import { AGENT_BEHAVIORS,agentBehavior,API_KEY_STORES,SHARED_CREDENTIALS,type AgentKind } from './agent-command.js';
 import { cliProxyHarnessEnv, type CliProxyEndpoint } from './cliproxy.js';
 import { assertRealContainedDirectory,isMissingPathError,roomAgentHomeEnv,roomSessionTmpDir,writeIsolatedHarnessFile } from './agent-home-plan-managed-skills.js';
-import { localGooseConfig,provisionAgentSkillsAndMcp,provisionPiCustomModelConfig,readJsonObject } from './agent-home-provision-agent-skills-and-mcp.js';
+import { localGooseConfig,provisionAgentSkills,provisionAgentSkillsAndMcp,provisionPiCustomModelConfig,readJsonObject } from './agent-home-provision-agent-skills-and-mcp.js';
 import { BEELINE_ONBOARDING_SKILL_NAME,BEELINE_REVIEW_SKILL_NAME,BEELINE_SPEC_SKILL_NAME,BEELINE_TRIAGE_SKILL_NAME,runningBeelineReleaseId,SITUATIONAL_SKILL_NAMES } from './beeline-skill.js';
 import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
 import { type OpenRouterRoutingHomeInput } from './openrouter-routing.js';
@@ -434,13 +434,26 @@ async function provisionRoomAgentCredentials(
     }
   }
   if (agentBehavior(input.agentKind).hostedModelConfig === 'model-file') await provisionPiCustomModelConfig(root, operatorHome, true, undefined, input.cliProxy, input.agentEnv);
+  // A harness discovers its skills tree when its process starts, so the
+  // skills the rules name exist before the first turn, not only after an
+  // optional prepare. Best effort and unqueued: a hung prepare cannot hold the
+  // session, and any rebuild that wins a race also carries the Beeline skills.
+  await provisionAgentSkills(
+    root,
+    operatorHome,
+    input.skillReleaseId ?? runningBeelineReleaseId(),
+    input.sharedSkills ?? [],
+    agentSkillDir(input.agentKind),
+    input.isReviewer ?? false,
+    (error) => console.warn(`[body] shared skills skipped under ${root}:`, error),
+  ).catch((error) => console.warn(`[body] skills not provisioned under ${root}:`, error));
 
   const env = tmpLinkReady
     ? roomAgentHomeEnv(root)
     : { ...roomAgentHomeEnv(root), TMPDIR: resolve(root, 'tmp') };
   return { ...env, ...await cliProxyHarnessEnv({ kind: input.agentKind, root, operatorHome, proxy: input.cliProxy, env: { ...input.agentEnv, ...env } }) };
 }
-/** Optional skills and MCP setup, separate from the private credential home. */
+/** Optional MCP setup and a skills refresh, after the private home the session starts with. */
 export async function prepareRoomAgentHome(input: RoomAgentHomeInput): Promise<Record<string, string>> {
   const env = await prepareRoomAgentCredentials(input);
   if (!env.HOME) return env;

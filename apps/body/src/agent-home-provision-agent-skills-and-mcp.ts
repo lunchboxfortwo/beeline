@@ -71,6 +71,37 @@ import { extractTomlSections,tomlChildTableNames } from './toml-section.js';
 
 
 /**
+ * Rebuild the selected harness's skills tree: the release-owned Beeline skills
+ * plus this agent's shares. With `onShareError`, a share that cannot be
+ * resolved or validated costs only the shares; the release-owned skills are
+ * still written. Without it, that failure throws as before.
+ */
+export async function provisionAgentSkills(
+  root: string,
+  operatorHome: string,
+  skillReleaseId: string,
+  sharedSkills: string[],
+  skillDir: AgentSkillDir,
+  isReviewer: boolean,
+  onShareError?: (error: unknown) => void,
+): Promise<void> {
+  const target = resolve(root, skillDir, 'skills');
+  const managedSkills = [
+    { name: DRAW_AVATAR_SKILL_NAME, content: drawAvatarSkillMarkdown(skillReleaseId) },
+    ...beelineManagedSkills(skillReleaseId, { isReviewer }),
+  ];
+  try {
+    const shared = await resolveSharedSkillSources(operatorHome, sharedSkills);
+    await provisionManagedSkillsDir(target, managedSkills, shared, sharedSkills.length === 0);
+  } catch (error) {
+    if (!onShareError) throw error;
+    onShareError(error);
+    await provisionManagedSkillsDir(target, managedSkills, [], true);
+  }
+}
+
+
+/**
  * Provision each harness home's Beeline-managed skills directory and copy the
  * operator's MCP declarations into the home. Best-effort end to end: a missing
  * source is the common case (not every host has every harness), and any
@@ -97,17 +128,7 @@ export async function provisionAgentSkillsAndMcp(
   cliProxy?: RoomAgentHomeInput['cliProxy'],
   agentEnv: Record<string, string> = {},
 ): Promise<void> {
-  const managedSkills = [
-    { name: DRAW_AVATAR_SKILL_NAME, content: drawAvatarSkillMarkdown(skillReleaseId) },
-    ...beelineManagedSkills(skillReleaseId, { isReviewer }),
-  ];
-  const shared = await resolveSharedSkillSources(operatorHome, sharedSkills);
-  await provisionManagedSkillsDir(
-    resolve(root, skillDir, 'skills'),
-    managedSkills,
-    shared,
-    sharedSkills.length === 0,
-  );
+  await provisionAgentSkills(root, operatorHome, skillReleaseId, sharedSkills, skillDir, isReviewer);
 
   for (const config of HARNESS_MCP_CONFIGS) {
     try {
