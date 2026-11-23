@@ -288,7 +288,14 @@ try {
       const replies = await fixture.waitReply(id, 60_000);
       assert.equal(replies.length, 1);
       console.log('[native-command]', JSON.stringify({ request: id, replies }));
-      const scopes = await systemctl('list-units', '--type=scope', '--all', '--plain', '--no-legend', 'beeline-acp-*');
+      const scopes = await systemctl(
+        'list-units',
+        '--type=scope',
+        '--all',
+        '--plain',
+        '--no-legend',
+        'beeline-acp-*',
+      );
       assert.match(scopes, /beeline-acp-.*active/);
       console.log('[native-acp-scopes]', scopes);
     },
@@ -534,7 +541,14 @@ try {
   );
   await phase('explicit native stop stays off', async () => {
     await systemctl('stop', 'beeline-helper.service');
-    const scopes = await systemctl('list-units', '--type=scope', '--state=active', '--plain', '--no-legend', 'beeline-acp-*');
+    const scopes = await systemctl(
+      'list-units',
+      '--type=scope',
+      '--state=active',
+      '--plain',
+      '--no-legend',
+      'beeline-acp-*',
+    );
     assert.equal(scopes.trim(), '', 'native stop must end every ACP scope');
     console.log('[native-acp-scopes] no active scopes after native stop');
     await delay(6500);

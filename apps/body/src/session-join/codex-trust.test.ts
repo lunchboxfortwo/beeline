@@ -69,12 +69,15 @@ it('does not grant trust, or wait, when the app-server exits before answering', 
   await expect(trustCodexHook(context(codex.root), codex.bin, codex.root)).resolves.toBe(false);
 });
 
-it.each(['initialize', 'hooks/list'])('ends its app-server when stdout closes during %s', async method => {
-  const codex = await fakeCodex(`{ initialize: {}, ${JSON.stringify(method)}: 'eof' }`);
-  await expect(trustCodexHook(context(codex.root), codex.bin, codex.root)).resolves.toBe(false);
-  const pid = await codex.pid();
-  await vi.waitFor(() => expect(alive(pid)).toBe(false));
-});
+it.each(['initialize', 'hooks/list'])(
+  'ends its app-server when stdout closes during %s',
+  async (method) => {
+    const codex = await fakeCodex(`{ initialize: {}, ${JSON.stringify(method)}: 'eof' }`);
+    await expect(trustCodexHook(context(codex.root), codex.bin, codex.root)).resolves.toBe(false);
+    const pid = await codex.pid();
+    await vi.waitFor(() => expect(alive(pid)).toBe(false));
+  },
+);
 
 it('does not grant trust when codex is missing', async () => {
   const root = await mkdtemp(join(tmpdir(), 'codex-trust-'));
