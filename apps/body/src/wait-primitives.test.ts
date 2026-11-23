@@ -185,6 +185,29 @@ it('connect fails with the transport error and can be abandoned', async () => {
   );
 });
 
+it.runIf(process.platform !== 'win32')(
+  'a synchronously failed socket preserves errno and its readiness probe exits cleanly',
+  () => {
+    // An overlong Unix address fails before createConnection returns, while
+    // Node delivers error on the next tick. The public probe must return false
+    // without an unhandled error killing its process.
+    const script = `import { connect } from ${JSON.stringify(resolve(__dirname, 'wait.ts'))};
+      import { squireBrokerSocketReady } from ${JSON.stringify(resolve(__dirname, 'squire-host.ts'))};
+      const path = 'x'.repeat(200);
+      try { await connect(path, { peer: 'invalid address' }); process.exitCode = 2; }
+      catch (error) { if (error.code !== 'EINVAL') throw error; }
+      console.log(await squireBrokerSocketReady(path));`;
+    const result = spawnSync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '-e', script],
+      { encoding: 'utf8' },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('false');
+    expect(result.stderr).not.toContain('Unhandled');
+  },
+);
+
 it('watchChanges pushes changes until stopped and hands its error to the caller', async () => {
   const dir = await scratch();
   const names: Array<string | null> = [];

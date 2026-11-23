@@ -6,13 +6,8 @@ import { createServer, isIPv4, isIPv6, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
-import type {
-  ConnectorAssignment,
-  ConnectorStep,
-} from '@beeline/api-contract/daemon';
-import {
-  NON_CONSUMING,
-} from './resource-mcp-facade.js';
+import type { ConnectorAssignment, ConnectorStep } from '@beeline/api-contract/daemon';
+import { NON_CONSUMING } from './resource-mcp-facade.js';
 import { privateSocketPath, preparePrivateSocketDirectory } from './local-socket.js';
 import { ask, listen, type Listening } from './wait.js';
 
@@ -438,12 +433,7 @@ export async function installRegistryMcp(input: {
       await assertNotOwnMachine(authorizationServer, remoteIsOwnMachine, resolveHost);
       let metadataResponse: Response | undefined;
       for (const metadataUrl of authorizationServerMetadataUrls(authorizationServer)) {
-        const candidate = await guardedFetch(
-          metadataUrl,
-          { signal: undefined },
-          guard,
-          transport,
-        );
+        const candidate = await guardedFetch(metadataUrl, { signal: undefined }, guard, transport);
         if (candidate.ok) {
           metadataResponse = candidate;
           break;
@@ -578,8 +568,12 @@ async function refresh(state: ConnectedState, transport: typeof fetch): Promise<
 }
 
 /** Helper-owned provider maintenance may use a connected Registry credential; it never enters a turn. */
-export async function registryMcpProviderToken(connectorId: string, expectedName: string,
-  home = homedir(), transport: typeof fetch = fetch): Promise<string> {
+export async function registryMcpProviderToken(
+  connectorId: string,
+  expectedName: string,
+  home = homedir(),
+  transport: typeof fetch = fetch,
+): Promise<string> {
   const path = registryMcpStatePath(connectorId, home);
   const stored = readState(path);
   if (stored?.status !== 'connected' || stored.serverName !== expectedName)
@@ -818,7 +812,10 @@ export async function brokerRequest(socketPath: string, request: BrokerRequest):
   );
   const parsed = JSON.parse(output) as { messages?: unknown; error?: unknown };
   if (typeof parsed.error === 'string') throw new Error(parsed.error);
-  if (!Array.isArray(parsed.messages) || !parsed.messages.every((entry) => typeof entry === 'string'))
+  if (
+    !Array.isArray(parsed.messages) ||
+    !parsed.messages.every((entry) => typeof entry === 'string')
+  )
     throw new Error('Registry MCP broker returned an invalid response');
   return parsed.messages;
 }
@@ -858,7 +855,9 @@ export function runRegistryMcpBroker(env: NodeJS.ProcessEnv = process.env): void
           connectionId,
           ...(turn ? { turn } : {}),
         }))
-          process.stdout.write(`${await boundToolResponse(JSON.parse(message) as Record<string, unknown>)}\n`);
+          process.stdout.write(
+            `${await boundToolResponse(JSON.parse(message) as Record<string, unknown>)}\n`,
+          );
       } catch (error) {
         if (request.id !== undefined) {
           process.stdout.write(

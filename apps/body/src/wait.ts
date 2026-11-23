@@ -23,8 +23,8 @@ export function setMachineReadOutput(machineRead: boolean): void {
 }
 
 /**
- * The one switch for wait lines. Every wait prints one stderr line naming the
- * peer it waits on, so a human-facing command is never silent. Only a caller
+ * The switch for `ask` and `runOwned` wait lines. Each prints one stderr line
+ * naming its peer or step, so a human-facing command is never silent. Only a caller
  * whose stdout/stderr is read by a machine (session tool JSON, hook output,
  * the MCP stdio tool process and what it calls) sets `machineRead: true`, and
  * then no line is written.
@@ -452,7 +452,7 @@ export async function runOwnedFile(
 
 /**
  * An event that ends an `answer`. `[source, event]` fails it: with the event's
- * Error argument, or a named error (`mapError` builds your own). `[source,
+ * Error argument, or a named error (an outcome callback builds your own). `[source,
  * event, 'answer']` settles it with the event's first argument. An
  * AbortSignal fails it with its reason.
  */
@@ -636,7 +636,18 @@ export async function connect(
   net: SocketOpener = { createConnection },
 ): Promise<Socket> {
   const socket = net.createConnection(typeof address === 'string' ? { path: address } : address);
+  // A synchronous connect failure can latch `closed` before Node emits its
+  // queued error. Keep that error handled until close even if answer settles
+  // from the latched state and removes its own listeners first.
+  const ignoreError = () => undefined;
+  socket.on('error', ignoreError);
+  const removeGuard = () => {
+    socket.removeListener('error', ignoreError);
+    socket.removeListener('close', removeGuard);
+  };
+  socket.on('close', removeGuard);
   try {
+    if (socket.errored) throw socket.errored;
     await answer(options.peer, [
       [socket, 'connect', 'answer'],
       [socket, 'error'],
@@ -647,6 +658,7 @@ export async function connect(
     socket.destroy();
     throw error;
   }
+  removeGuard();
   return socket;
 }
 
