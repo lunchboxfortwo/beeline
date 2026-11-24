@@ -71,14 +71,64 @@ Queries were run through the read-only Neon route. The raw owner and human lines
 
 > "Replies can only be routed if the initial message asked for one, and then it can only be sent once."
 
+### Definition (verbatim; owner's proposal, refined)
+
+> **A turn is run by exactly one session = (agent, place) = (`agent_commands.agent_id`, `agent_commands.room_id`) of the command that started the turn.** That session's own output is posted in `room_id`. Output means its closing text, its `reply(id)` answer and its `report` answer. Nothing else decides placement: not ancestry, the handover, the opening route, the parent's return place, the schedule or workflow owner, or another session of the same agent.
+>
+> **The only exception is a `reply_to` delivery:** exactly one message per `reply_to`, posted at `reply_to.place` to `reply_to.agent`'s session, and only when `reply_to` was set by an explicit ask (S3, which records the ask kind in `reply_to.ask`).
+>
+> **A `message()` or `post(address)` is not output.** It is a new message whose place the session names explicitly. When it, or a block, is aimed at a thread's commander, its place is the commander's place (Rule 2, S8).
+
+One refinement over the proposal: the proposal's "every answer message" needed a way to tell answers from deliberate sends. A turn's explicit `message()` to a person carries the turn's `request_id` today (`agent-messaging.ts:119-122`). So does `post(address)` (`daemon/corner-messages.ts:15-19`). To make that distinction mechanical, the single message funnel (`queueMessage` / `sendMessage`) stamps every agent-authored row with a new column, `messages.turn_write text CHECK (turn_write IN ('output','reply','message','post'))`. It also stamps `messages.turn_command_id`, the command whose turn wrote it, and a `reply` row additionally records `reply_request_id`.
+
+### Check (verbatim; each query must return zero rows)
+
+```sql
+-- I1 placement: a turn's own output is in its session's room.
+SELECT m.id FROM messages m JOIN agent_commands c ON c.id = m.turn_command_id
+ WHERE m.turn_write = 'output' AND m.room_id <> c.room_id;
+
+-- I2 the exception, at most once and only when asked: every 'reply' row is the
+-- one spend of an explicitly asked request, at its reply_to place, to its agent.
+SELECT m.id FROM messages m
+  LEFT JOIN agent_commands r ON r.id = m.reply_request_id
+ WHERE m.turn_write = 'reply'
+   AND (r.id IS NULL OR r.reply_to IS NULL OR r.reply_to->>'ask' IS NULL
+        OR r.reply_sent_id IS DISTINCT FROM m.id
+        OR m.room_id::text <> r.reply_to->>'place'
+        OR COALESCE(m.card->'recipient'->>'id', m.card->'route'->'to'->>'agent')
+           IS DISTINCT FROM r.reply_to->>'agent');
+SELECT reply_request_id FROM messages WHERE turn_write = 'reply'
+ GROUP BY reply_request_id HAVING count(*) > 1;
+
+-- I3 commander sessions (Rule 2): nothing aimed at a thread's commander wakes
+-- that agent inside the thread. Excluded: a person's own tag of it there, and
+-- the agent's message to itself.
+SELECT q.id FROM agent_commands q JOIN rooms t ON t.id = q.room_id AND t.parent_id IS NOT NULL
+ WHERE q.agent_id = (commanderAddress(t.id))->>'agent'
+   AND q.reason IN ('message','reply','report','system','order')
+   AND COALESCE(q.message->'route'->'from'->>'agent', '') <> q.agent_id;
+```
+
+I1–I3 run as a server test over every scenario in §6, and as a read-only production query after rollout. `commanderAddress` is the S8 resolver exposed as SQL.
+
 These terms are used precisely below:
 
-- **Work place**: the room the command runs in, `agent_commands.room_id`. A turn's output belongs there.
+- **Work place**: the session's room, `agent_commands.room_id`, per the definition above.
 - **Routed reply**: an answer that goes anywhere other than a plain post in the work place. That means one of two things:
   - it is posted in another room;
   - it wakes another agent's queue (a `reply` command).
 - **Explicit ask**: a structural field on the *triggering* record, set by its sender's deliberate act. Text never counts ("let me know" in prose is not an ask), and neither does ancestry, a handover or an owner lookup.
 - **Once**: one routed delivery per explicit ask, across every command that continues it: resumes, batch siblings, late replies and re-deliveries.
+
+## 2b. Sessions: every address is (agent, place)
+
+Owner, 24 Nov: *"the same agent Ruby living in #beeline (chat) and one of its threads do not share the same session and context."*
+
+An agent has a separate session, with its own context and its own conversation with the person, in each place. "Ruby" is therefore never an address on its own; "Ruby in #beeline" is. Two rules follow:
+
+- **Rule 1 (answer where the work happens) covers the worker's own output only.** That is the closing text and its posts in its work place.
+- **Rule 2 (commander address).** Anything aimed at a thread's commander reaches the commander's session in **the place it commanded from**: a `blocked:` / `needs-decision:`, an explicitly requested reply, or any `message` to the commander. That place is where it called `open_thread`, gave the order, or (after an approved handover) revised the brief. It never reaches that agent's session inside the thread. Spine rule S8 implements this.
 
 ## 3. Spine
 
@@ -97,7 +147,7 @@ A third column, `agent_commands.reply_request_id text`, points at the row that h
 |---|---|---|
 | a | `message(to, text, reply:true)` (new boolean, default false) | sender @ sender's place |
 | b | `message(..., ask)` or a `blocked:` / `needs-decision:` message: an ask is a request for an answer by definition | sender @ sender's place |
-| c | `open_thread(..., reply:true)` (new boolean, default false) | opener @ the place `open_thread` was called from |
+| c | `open_thread(..., reply:true)` (new boolean, default false) | **the thread's commander address** (S8): the opening's `route.from`. That is the opener @ the place it called `open_thread` from, or, when the opener is its own implementer, the parent command's sender @ its place. The latter is the owner's case: Ruby @ #beeline asks Jellybean to open a thread, and Jellybean opens it for itself |
 | d | System review dispatch (`corner_review_dispatch`): the product contract is that findings reach the implementer | implementer @ thread (same place, so this is "wake the implementer", not a cross-room post) |
 | e | Legacy `order` (cutover-only tool; its contract is "the result reports to the orderer") | orderer @ `fromRoomId`. Derived at spend time from `private_payload.authorId` / `fromRoomId` when `legacyCommandPayload()` holds, because legacy orders carry no `message.route` (`agent-command.ts:758-763`) and old images keep writing them during the overlap (Astra #3) |
 | f | A schedule whose `owner_id` is another **agent** (an agent set up a recurring task to report to it; `agent-schedules.test.ts:71-97`) | that agent @ the schedule's room, once per run. A human owner in the same room is a plain post (Astra #19) |
@@ -144,6 +194,25 @@ Each block is its own ask (S3b), and its answer comes back into the block's thre
 - A second answer after it ran stays visible in the reply chain and wakes no one.
 - The implementer re-asks in the chain to open the next answer (`block_reasked_at`, as `blockReminder` already instructs).
 
+**S8. Commander address (Rule 2).** One resolver, `commanderAddress(thread)` in `reply-request.ts`:
+- It returns the approved handover's `(author_id, commanderReturnRoomId)` when one exists. Otherwise it returns the opening task's `route.from` (`threadCommanderAddressSql`, minus `replyAddress`, per S6).
+- It is applied at **every** delivery whose recipient is that thread's commander agent and whose destination place is the thread or one of its descendants. That includes:
+  - `message`,
+  - `reply`,
+  - a `reply_to` spend,
+  - a block,
+  - a legacy `report`,
+  - an idle or attention notice.
+- It **rewrites** the destination place to the commander's place. It never refuses, so it adds no wall.
+
+This generalises `blockRecipient` (`implementer-blocks.ts:49-55`), which today does it for block prefixes only. `messageAddress` (`agent-messaging.ts:24-35`) also gains the role `commander`, so `to:{agent:'commander', place:thread}` resolves to the commander address the same way `implementer` and `reviewer` already resolve.
+
+The one exception is an agent's message *to itself* (the self-wake, `agent-messaging.ts:62-67`). That is the agent's own deliberate choice of session, not a delivery to "the commander".
+
+**S9. A self-opened thread inherits its opening turn's request.** When a turn opens a thread with itself as implementer, the open moves the turn's unspent `reply_request_id` onto the `corner_objective`. The opening turn's own closing text ("opened X") then posts in its place without spending.
+
+Example: Ruby @ #beeline asks Jellybean with `message(reply:true)`, and Jellybean self-opens. Ruby's one reply is then the thread's result, delivered to Ruby @ #beeline, not "opened the thread". A person's tag carries no request, so the owner's own self-opened threads are unaffected and still answer in the thread.
+
 **S7. A person as the asked party (Astra #12).** `message(to: person, reply:true)` writes a plain `messages` row, not a command, so the request lives on the message. Its card carries `replyTo {agent, place}`, and a new `messages.reply_sent_id` is the spent marker. The existing block-answer hook is generalised from blocks to "an asked message": a person's reply in that message's chain wakes `replyTo` once, through the same S5 coalescing. A choice-card `ask` keeps its own return (`room-choice.ts:488-511`).
 
 **S6. Who the commander is stays separate from where replies go.** The opening's `route.from` keeps its current value. For a self-opened thread that is the commissioning person (`corner-writes.ts:274-276`, **not deleted**). Otherwise `threadCommanderAddressSql` would name the worker itself, and `blockRecipient` would fall back to the worker's own address, sending its block to itself (Astra #7). `threadCommanderAddressSql` must read `route.from` and stop preferring `message.replyAddress` (`corner-commander.ts:29`). The rest of the original S6: `threadCommanderAddressSql`, `cornerCommanderIdSql`, `commanderChainSql` and handover revisions keep deciding *authority*: who may close blocks, stop turns, revise briefs, and who receives blocks. They no longer decide where ordinary answers go.
@@ -159,7 +228,7 @@ Each block is its own ask (S3b), and its answer comes back into the block's thre
 | Person tags agent in a thread | Answer in thread | Same | n/a |
 | **Thread objective, self-opened** (Ruby's case) | Every turn's answer goes to the owner in #beeline (route from parent command) | Answers stay in the thread. The #beeline tag got its one answer from the opening turn in #beeline; the corner-open card links the thread | none possible: the person asked in #beeline and was answered there |
 | Thread objective, agent opens for another agent | Implementer's answers wake the commander in the opener's chat, every turn | Answers stay in the thread. With `open_thread(reply:true)`, the first answer wakes the commander once | `open_thread(reply:true)` |
-| Thread objective after a human-approved handover | Answers go to `commanderReturnRoomId` | Stay in the thread. **Correction (Astra #8):** today a block does *not* follow the handover. `threadCommanderAddressSql` reads the first task and wins over the approved revision in both `blockRecipient` and `cornerCommanderIdSql` (`corner-commander.ts:15-32`). That is a pre-existing gap, so this design leaves block recipients unchanged and lists it under D4 | n/a |
+| Thread objective after a human-approved handover | Answers go to `commanderReturnRoomId` | Stay in the thread. **Correction (Astra #8):** today a block does *not* follow the handover. `threadCommanderAddressSql` reads the first task and wins over the approved revision in both `blockRecipient` and `cornerCommanderIdSql` (`corner-commander.ts:15-32`). That is a pre-existing gap. **Revised 24 Nov (Rule 2):** S8 resolves the commander through the approved handover, so blocks go to the new commander's session at `commanderReturnRoomId` | n/a |
 | Corner lifecycle wakes (checks failed, merge conflict, merge refused, review needed, subscribed event in a corner) | Thread (`cornerWake`, line 711) | Same, with no special case | n/a |
 | Brief-revision wake | Reply returns to the reviser at the reviser's place (`replyAddress` reset, line 700; `route.from` = reviser) | Stays in the thread. A reviser who wants an acknowledgement sends `message(reply:true)` | `message(reply:true)` |
 | Review dispatch → reviewer findings → implementer | Reviewer's answer wakes the implementer in the thread (`replyAddress` = worker, line 701); repeats are deduplicated by answer id | Same, by S3d, but once per dispatch; a later reviewer turn posts in the thread | system (S3d) |
@@ -181,6 +250,36 @@ Each block is its own ask (S3b), and its answer comes back into the block's thre
 | Voice order | Room of the call | Same | n/a |
 | `mcp_call` (app tool call) | Parent route | Shares the parent request | inherited |
 | Late, different reply after an answer (`agent-command.ts:870-873`) | Posted again in `return_room_id` | Posted in the work place | never routed |
+
+## 4c. Which session receives each flow (Rule 2 re-check)
+
+Notation: `X@P` is agent X's session in place P. C = the thread's commander, I = its implementer, T = the thread, P = the place C commanded from.
+
+| Flow | Today: receiving session | After: receiving session | Wrong session today? |
+|---|---|---|---|
+| I's own output in T | I@T (posted to C@P for objectives, R1) | I@T, posted in T | posting yes (R1); session n/a |
+| I `blocked:` / `needs-decision:` via `message` / `reply` | C@P via `blockRecipient` → `threadCommanderAddressSql` (`implementer-blocks.ts:49-55`) | C@P (S8) | no |
+| I legacy `report` (any status) to its commander | **C@T**: `wakeHere` queues the report in the *reporting thread* (`agent-command.ts:511-520`), pinned by `commander-opening.integration.test.ts:30` ("handback wakes its commander in the corner") | C@P (S8); `wakeHere` deleted | **yes** |
+| Nested thread: the outer worker W commands the inner thread from outer thread O | **W@inner** for a legacy report (same `wakeHere`; `commander-opening.integration.test.ts:98`); W@O for a modern block | W@O | **yes** (legacy path) |
+| Any `message(to:{C, place:T})` from I or another agent | **C@T**: `messageAddress` resolves C at T and queues there (`agent-messaging.ts:24-35, 74-81`). Production, last 7 days: 15 such wakes. Example: in `connector-tag-expiry` (commanded by Ruby from #beeline), Claude's messages woke **Ruby@thread**; Ruby@thread replied to Claude@thread | C@P (S8 rewrite); `to:{agent:'commander'}` role added | **yes** |
+| Connected-app `message` with no `address` and no queued item | Sender's place defaults to `to.place` (`rooms-mcp-agent.ts:191` "omit to send from to.place"; `:390` `item?.room_id ?? target`), so the recipient's reply wakes **the sender's session in the destination**. Production: in `Slow-thread-and`, Ruby's replies woke Claude@thread; Claude had commanded it from #beeline | the sender's session for a connected app is its *current* place. With no queued item, the default is the place it is posting from (its pending turn's room), never `to.place`; a commander sender still resolves via S8 | **yes** |
+| An explicitly requested reply to C (`open_thread(reply:true)`, `message(reply:true)`) | C@`return_room_id`, which for an objective is P (mostly right, by accident of R1) | C@P via `reply_to` = commander address (S3c, S8) | no |
+| The Ruby → Jellybean self-open (owner's case) | Blocks reach Ruby@#beeline; a `message(to:{ruby,T})` or a legacy report reaches **Ruby@T** | All reach Ruby@#beeline. Ruby's one reply is the thread's result (S9) | **yes** (two paths above) |
+| Idle / attention notices to C | C@P (`reportAgentAttention` uses `commanderReportAddress` → `route.from`, `commander.ts:247-268`) | C@P | no |
+| Watched-thread wakes (opened, merged) | the **opener**@`open_thread` call place (`corner-writes.ts:293-296`). For a self-open on someone's behalf that is Jellybean@#beeline, so Ruby, the commander, gets no watch | the watch is created for `commanderAddress()` (C@P) | **yes** (self-open on behalf) |
+| Review dispatch / findings | reviewer@T → I@T | same | no |
+| After an approved handover to C2 | blocks still to the *original* C@P (`corner-commander.ts:15-32`, Astra #8) | C2@`commanderReturnRoomId` (S8 prefers the handover) | **yes** (stale commander) |
+| A person tags C inside T | C@T works there and answers in T (Rule 1; a person chose that session) | same | no |
+| C messages itself at T (self-wake) | C@T (`agent-messaging.ts:62-67`) | same (own choice, excluded from S8) | no |
+
+Flows where today's code already sends to the wrong session:
+1. the legacy `report` `wakeHere`, including its nested variant;
+2. `message` addressed to the commander at the thread;
+3. the connected-app sender-place default;
+4. the post-handover block recipient;
+5. the self-open watch going to the opener rather than the commander.
+
+All five are fixed by S8 plus the deletions in §5.
 
 ## 4b. Ruby's two faults: same flow map, prompt deletions only
 
@@ -236,6 +335,9 @@ Readers switch from `return_room_id` to `room_id`:
 - `agent-messaging.ts:144-158` (`turnComplete` proof)
 - `daemon/operation-effects.ts:222-226` (silence check, plus S4f)
 - `agent-turn-end.ts:178-191` (harness-failure line: posts in `room_id`, and leaves the request unspent so a retry still owes it)
+- `agent-command.ts:510-520`: the `wakeHere` branch (legacy report wakes the commander in the reporting thread) is **deleted**. The report queues at `commanderAddress()`.
+- `rooms-mcp-agent.ts:191` ("omit to send from to.place") and `:390` (`item?.room_id ?? target`): the destination-place default for the sender is **deleted**. The sender's place is its pending turn's room, else the `address` it names.
+- `implementer-blocks.ts:49-55` (`blockRecipient`) is generalised into `commanderAddress()` (S8) for all commander-aimed deliveries.
 - `agent-command-read-agent-commands.ts:44, 102`. The wire `returnRoomId` stays and equals `roomId`, for helper compatibility; Body only uses it for display, `apps/body/src/place-prompt.ts:174`.
 
 Tool surface (`rooms-mcp-agent.ts`), carried through every adapter that enumerates fields (Astra #13):
@@ -256,7 +358,7 @@ New tests:
 4. **Resume shares the request**: an ask with `reply:true`, then a grant pauses it and the resume answers. Expect one delivery. Answering the parent and the resume in the same batch still delivers once.
 5. **Choice answer continuation**: the person answers a card, the asker continues; its answer spends the inherited request only if it is unspent.
 6. **Block is its own ask**: an implementer `blocked:` goes to the commander and the commander's answer wakes the implementer in the thread once. A later `done:` doesn't go to the commander unless the objective asked.
-7. **Handover**: after a human-approved handover, ordinary answers stay in the thread and the block recipient is unchanged from today (Astra #8).
+7. **Handover**: after a human-approved handover, ordinary answers stay in the thread and blocks go to the new commander's session (S8; see also test 32).
 8. **open_thread(reply:true)**: the first answer wakes the opener in its chat, later answers stay in the thread.
 9. **Concurrent spend**: two batch siblings sharing a request race and exactly one delivery wins (serialized by the row-level `UPDATE … WHERE reply_sent_id IS NULL`).
 10. **Late reply**: a different reply after the first answer is posted in the work place, not the return room.
@@ -280,7 +382,26 @@ New tests:
 27. **Person asked (S7)**: `message(to:H, reply:true)` from T, H replies in the chain, and the asker is woken in T once.
 28. **Deadlock order (Astra #17)**: a concurrent batch (original, then resume) and a single answer (resume) both commit, with one delivery.
 
+29. **Named test: "Commander session (Ruby → Jellybean)"** (owner, 24 Nov). Ruby@#beeline sends `message(to: jellybean@#beeline, reply:true)` "open a thread for X", and Jellybean self-opens T. In T, Jellybean sends:
+   - (a) `blocked:` via `reply`,
+   - (b) `message(to:{ruby, T})`,
+   - (c) `message(to:{commander, T})`,
+   - (d) a legacy `report(status:'needs_decision')`,
+   - (e) its objective's closing text.
+
+   Expect (a)–(d) to create commands with `agent_id=ruby, room_id=#beeline`, and (e) to be Ruby's one reply at #beeline. **Zero** commands with `agent_id=ruby, room_id=T`. Jellybean's opening turn's "opened T" posts in #beeline without spending (S9). I1–I3 return nothing.
+30. **Named test: "Two active corners"** (owner, 24 Nov). Ruby is implementer in T1 and T2 at once (commanded from #beeline by the owner and by Claude), with interleaved turns: each closes, posts progress, and blocks. Expect:
+   - every T1 output row in T1 and every T2 output row in T2 (I1);
+   - T1's block to the owner @ #beeline, and T2's block to Claude @ #beeline;
+   - Ruby@#beeline woken by neither unless asked;
+   - a `reply_to` on T2's objective (Claude asked) spent once, at #beeline (I2);
+   - no command for Claude in T2 (I3).
+31. **Connected-app sender place**: Claude, with no queued item, sends `message(to:{ruby, T})` from #beeline. The reply wakes Claude@#beeline, not Claude@T.
+32. **Handover commander**: after a human-approved handover to C2 from Q, I's block goes to C2@Q.
+33. **Invariant suite**: I1–I3 run after tests 1–32 and return zero rows.
+
 Tests that flip, rewritten to the new contract:
+- `commander-opening.integration.test.ts:30` ("handback wakes its commander in the corner") and `:98` ("nested report wakes it there") now expect the commander's place.
 - `messaging-thread-routing.test.ts:20-32` (Nerd → Emberus) needs `reply:true`.
 - `messaging-thread-routing.test.ts:56-63`: the owner's request delivered in a thread is posted in the thread unless asked.
 - `commander-opening.integration.test.ts:20-46`: done/failed escalations stay in the thread; blocked/needs-decision keep their route.
@@ -315,7 +436,7 @@ Unchanged and still required: `corner-wake-answer-room.test.ts` and `scheduled-r
 - **D3**: legacy `order` counts as an ask (S3e) until cutover deletes it. Recommended, because old helpers cannot pass `reply:true`.
 - **D5 (rollout)**: one release, accepting a bounded old-image overlap that matches today's behaviour (recommended), or a two-release expand/contract with no overlap.
 - **D6 (S5 block answers)**: once per ask or re-ask, with later answers coalesced or left visible (recommended, the literal rule). The alternative wakes the implementer for every human answer in an open block's chain, which is today's behaviour.
-- **D4 (B1, outside the reply rule)**: who receives a `blocked:` when an agent opened the thread on a person's behalf.
+- **D4 (B1, outside the reply rule)**: who receives a `blocked:` when an agent opened the thread on a person's behalf. Firstmate's 24 Nov instruction settled the handover half: S8 sends blocks to the approved handover's commander session. Remaining question:
   - Option (a) is today's behaviour: the agent opener.
   - Option (b): the person whose message the opening cited (`corner_brief_revisions.approval_basis.sourceMessageId` author), with the agent copied.
   - The design does not change this; it needs the owner's call.
@@ -336,7 +457,11 @@ Each objection is followed by my answer.
 3. **Old images keep routing during the rollout (Astra #1).** *Answer:* that is accepted as D5. The overlap only reproduces today's behaviour, bounded by the rolling window.
 4. **The backfill grants or misses asks (Astra #2, #3).** *Answer:* the backfill is now strict, and legacy orders derive at spend time (§7).
 5. **A self-opened thread blocks to itself (Astra #7).** *Answer:* the opening's `route.from` stays the commissioner (S6). Only the reply derivation is deleted.
-6. **Handover doesn't move blocks (Astra #8).** *Answer:* correct. It is pre-existing, the flow table was corrected, and it is listed with D4 for the owner.
+6. **Handover doesn't move blocks (Astra #8).** *Answer:* correct, and pre-existing. Under Rule 2 (24 Nov), S8 resolves the commander through the approved handover.
+15. **Owner, 24 Nov: commander-aimed traffic lands in the commander's thread session, which lacks its context.** *Answer:* adopted as Rule 2 and S8. §4c re-checks every flow for its receiving session, and four paths that already send to the wrong session today are deleted.
+   - *Surviving risk:* a person can still deliberately tag the commander inside the thread, starting C@T. That is a person's explicit choice and is allowed (Rule 1).
+16. **"Where the work happens" was hand-wavy (owner, 24 Nov).** *Answer:* replaced by the session definition and the I1–I3 zero-row queries in §2. The two-active-corners case is test 30.
+   - *Refinement:* `message()` and `post(address)` carry the turn's `request_id` today, so the check needs `messages.turn_write` to separate output from deliberate sends.
 7. **Two answers to one block (Astra #4).** *Answer:* once per ask, with coalescing and re-ask (S5, D6).
 8. **`reply(id, ask)` and the ask-back chain (Astra #5, #6).** *Answer:* S4a now applies only when a request exists, and it carries `resumes_request_id`.
 9. **Batch receipts, silence and the completion joins (Astra #9, #10, #16).** *Answer:* S4c, S4f and S4g, plus the reader list in §5.
@@ -448,7 +573,7 @@ The pass ran `codex exec -m gpt-6.2-astra`, medium effort, read-only, on `main` 
 | 5 | P1 | `reply(id, ask)` bypasses the sender's choice | yes | S4a scoped |
 | 6 | P1 | The ask-back loses the verdict | yes | `resumes_request_id` |
 | 7 | P1 | A self-opened thread blocks to itself | yes (`implementer-blocks.ts:54`) | S6: keep `corner-writes.ts:274-276` |
-| 8 | P1 | Handover doesn't move blocks | yes, pre-existing (`corner-commander.ts:15-17`) | flow row corrected, D4 |
+| 8 | P1 | Handover doesn't move blocks | yes, pre-existing (`corner-commander.ts:15-17`) | S8 (Rule 2) |
 | 9 | P1 | Batch key merges requests | yes (`agent-command.ts:829`) | S4g |
 | 10 | P1 | A progress post plus silence discharges an ask | yes (`operation-effects.ts:222-226`) | S4f |
 | 11 | P1 | The commissioner can't read the thread | plausible | out of scope (access) |
@@ -477,6 +602,6 @@ The pass ran `codex exec -m gpt-6.2-astra`, medium effort, read-only, on `main` 
 - D1 plain `message()` defaults to `reply:false`
 - D2 `open_thread` defaults to `reply:false`
 - D3 legacy `order` counts as an ask
-- D4 block recipient for agent-opened threads, and blocks under handover
+- D4 block recipient for agent-opened threads (agent opener or commissioning person); the handover half is settled by S8
 - D5 one release with a bounded overlap, or two-release expand/contract
 - D6 block answers once per ask or re-ask
