@@ -30,7 +30,7 @@ describe.skipIf(!url)('Persisted schedule clock admission', () => {
         CREATE TABLE agent_schedules(id uuid PRIMARY KEY,room_id uuid,agent_id text,creator_id text,
           owner_id text,workflow_slug text,human_command_message_id text,requester_command_id text,cadence jsonb,message text,
           max_runs int,run_count int DEFAULT 0,next_run_at timestamptz,updated_at timestamptz DEFAULT now(),
-          paused_at timestamptz,failed_due_at timestamptz,failed_revision timestamptz);`);
+          paused_at timestamptz,lock_retry_revision timestamptz,failed_due_at timestamptz,failed_revision timestamptz);`);
       // Use the assembled production schema regardless of how its SQL is split across files.
       const index = SCHEMA.match(/CREATE INDEX IF NOT EXISTS agent_schedules_due_idx[^;]+;/)?.[0];
       expect(index).toBeTruthy(); await pool.query(index!);
