@@ -19,7 +19,7 @@ const facts: CornerMachineFacts = { archived: false, turnRunning: false };
 const green: CornerMachineFacts = {
   ...facts,
   headSha: head,
-  implementerAvailable: true,
+  implementerId: 'worker',
   reviewerConfigured: true,
   lifecycle: { lifecycle: 'in-review', checks: 'passing', pr },
 };
@@ -46,10 +46,10 @@ describe('corner transition table', () => {
     ['reviewer has an actual review request', { ...green, reviewerActive: true, reviewRequestActive: true }, observe, 'review', undefined],
     ['review requests changes', { ...green, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'working', 'review-findings'],
     ['review ends without a verdict', { ...green, reviewRequests: 1, reviewEnded: { id: 'review' } }, observe, 'idle', undefined],
-    ['findings without an implementer cannot hand back', { ...green, implementerAvailable: false, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'idle', undefined],
+    ['findings without an implementer cannot hand back', { ...green, implementerId: undefined, reviewRequests: 1, reviewEnded: { id: 'review', findings: 'FAIL: missing test' } }, observe, 'idle', undefined],
     ['no reviewer needs no approval', { ...green, reviewerConfigured: false, reviewerRequired: false }, observe, 'idle', undefined],
     ['green without reviewer lands', { ...green, reviewerConfigured: false, reviewerRequired: false }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
-    ['an open implementer block does not gate landing', { ...green, approved: true, turnRunning:true, implementerBlocked:true, blocker:{reason:'question',itemId:'block'} }, {kind:'approval',headSha:head,by:'reviewer'}, 'waiting', 'land'],
+    ['an open implementer block does not gate landing', { ...green, approved: true, turnRunning:true, blocker:{reason:'question',itemId:'block'} }, {kind:'approval',headSha:head,by:'reviewer'}, 'working', 'land'],
     ['green event continues landing', { ...green, approved: true }, { kind: 'checks', result: 'passing' }, 'idle', 'land'],
     ['reconcile never initiates landing', { ...green, approved: true }, observe, 'idle', undefined],
     ['approval lands while reviewer is active', { ...green, approved: true, reviewerActive: true }, { kind: 'approval', headSha: head, by: 'reviewer' }, 'review', 'land'],
@@ -79,7 +79,7 @@ describe('corner transition table', () => {
     ).toEqual([]);
   });
   it.each(['question', 'approve', 'connect'] as const)(
-    'an explicit %s wait returns after the worker ends, including during review and CI',
+    'an explicit %s wait yields to work, CI and review, and returns when they end',
     (reason) => {
       const result = run({
         ...green,
@@ -95,19 +95,48 @@ describe('corner transition table', () => {
         lifecycle: { ...green.lifecycle!, checks: 'pending' },
         blocker: { reason, itemId: 'ask' },
       }, observe, result.state);
-      expect(ended.state.state).toBe('waiting');
-      expect(ended.notifications.map((n) => n.kind)).toEqual(['waiting']);
+      expect(ended.state.state).toBe('review');
+      expect(ended.notifications).toEqual([]);
+      const settled = run({ ...green, reviewRequests: 1, reviewEnded: { id: 'review' }, blocker: { reason, itemId: 'ask' } }, observe, ended.state);
+      expect(settled.state.state).toBe('waiting');
+      expect(settled.notifications.map((n) => n.kind)).toEqual(['waiting']);
       expect(run({ ...facts, turnRunning: true }, observe, result.state).state.state).toBe(
         'working',
       );
     },
   );
+  it('screenshot: a stale block with an open PR and the reviewer running is review, named for the reviewer', () => {
+    const result = run({ ...green, reviewerActive: true, reviewRequestActive: true, reviewerId: 'speedy',
+      blocker: { reason: 'question', itemId: 'stale-block' } });
+    expect(result.state).toMatchObject({ state: 'review', agent: 'speedy' });
+    expect(result.notifications).toEqual([]);
+    expect(run({ ...green, reviewerActive: true, reviewerId: 'speedy', turnRunning: true,
+      blocker: { reason: 'question', itemId: 'stale-block' } }).state).toMatchObject({ state: 'working', agent: 'worker' });
+  });
+  it('counts wakes planned in the same step, so they never read idle or spend the idle notice', () => {
+    const resting = { ...green, idleEligible: true, idleSince: '9', reviewerId: 'speedy' };
+    const review = run(resting);
+    expect(review.wakes.map((w) => w.kind)).toEqual(['review']);
+    expect(review.state).toMatchObject({ state: 'review', agent: 'speedy' });
+    const red = run({ ...resting, lifecycle: { ...green.lifecycle!, checks: 'failing' }, checkSourceId: 'red' },
+      { kind: 'checks', result: 'failing', sourceMessageId: 'red' });
+    expect(red.state).toMatchObject({ state: 'working', agent: 'worker' });
+    for (const planned of [review, red]) expect(planned.notifications).toEqual([]);
+  });
+  it('a green head whose reviewer is its implementer hands back, then rests idle once', () => {
+    const self = { ...green, reviewerConfigured: false, idleEligible: true, idleSince: '3' };
+    expect(run(self).wakes.map((w) => w.kind)).toEqual(['review-gap']);
+    expect(run(self).state.state).toBe('working');
+    const after = run(self, observe, { state: 'working', headSha: head, pullRequest: 7, effects: [`review-gap:${head}`] });
+    expect(after.state.state).toBe('idle');
+    expect(after.notifications).toEqual([{ kind: 'idle', key: 'idle:3' }]);
+  });
   it('does not let a merge hold stop implementing', () => {
     expect(
       run({
         ...facts,
         turnRunning: true,
-        blocker: { reason: 'approve', blocker: { kind: 'merge-hold' } },
+        blocker: { reason: 'approve', itemId: 'hold' },
       }).state.state,
     ).toBe('working');
   });

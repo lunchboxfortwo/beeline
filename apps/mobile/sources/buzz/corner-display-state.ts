@@ -1,8 +1,4 @@
-import type {
-  CornerLifecycleView,
-  CornerState,
-  CornerStateReason,
-} from '@beeline/api-contract/phone';
+import { threadState, type CornerLifecycleView, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 
 export type CornerDisplayItem = {
   readonly state: CornerState;
@@ -46,6 +42,6 @@ export function cornerHeaderItem(
 ): CornerDisplayItem | undefined {
   if (row) return row;
   if (archived)
-    return { state: 'archived', lifecycle: { lifecycle: 'unknown', checks: 'unknown' } };
+    return { ...threadState({ ended: true }), lifecycle: { lifecycle: 'unknown', checks: 'unknown' } };
   return undefined;
 }

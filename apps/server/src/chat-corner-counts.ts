@@ -8,7 +8,7 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { createHash } from 'node:crypto';
-import type { DerivedCornerState } from '@beeline/api-contract/phone';
+import { threadState,type DerivedCornerState } from '@beeline/api-contract/phone';
 import { cornerOwedLookupSql } from './corner-owed.js';
 import { followsCornerSql } from './corner-follow.js';
 import { visibleChatMessageSql } from './read-cursor.js';
@@ -40,13 +40,11 @@ export type CornerStateRow = {
 
 /** The thread's state is its stored machine; a waiting thread names the blocker this viewer reads. */
 export function cornerRowState(row: CornerStateRow): DerivedCornerState {
-  const machine = row.machine ?? { state: 'idle' as const };
-  if (machine.state === 'idle' && machine.reason === 'backlog')
-    return { state: 'idle', reason: 'backlog' };
+  const machine = row.machine ?? threadState({});
   if (machine.state !== 'waiting' || !row.waiting_item_id || !row.waiting_reason)
-    return { state: machine.state };
+    return { state: machine.state, ...(machine.state === 'idle' && machine.reason ? { reason: machine.reason } : {}) };
   return {
-    state: 'waiting',
+    state: machine.state,
     reason: row.waiting_reason,
     itemId:
       row.waiting_kind === 'report'
@@ -91,8 +89,7 @@ export function cornerFactsSql(viewerExpr: string): {
       blocker.item_id waiting_item_id,blocker.reason waiting_reason,
       blocker.kind waiting_kind,blocker.person_name waiting_person_name,
       blocker.person_id waiting_person_id,
-      (SELECT identity.name FROM agent_turns running JOIN identities identity ON identity.id=running.agent_id
-        WHERE running.room_id=c.id AND running.status='working' ORDER BY running.started_at DESC LIMIT 1) working_agent_name,
+      (SELECT identity.name FROM identities identity WHERE identity.id=f.machine->>'agent') working_agent_name,
       turn.status latest_turn_status,turn.created_at latest_turn_created_at,
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,
@@ -147,13 +144,13 @@ export function cornerWorkSql(): string {
               AND ${workingTurnFreshSql('live')})`;
   return `LEFT JOIN rooms parent ON parent.id=c.parent_id
     LEFT JOIN LATERAL (WITH activity_rows AS (
-        SELECT ${reviewerTurn} AS review,NOT (t.agent_id=${implementer} OR ${reviewerTurn}) AS peer
+        SELECT ${reviewerTurn} AS review,NOT (t.agent_id=${implementer} OR ${reviewerTurn}) AS peer,t.agent_id
         FROM agent_turns t WHERE t.room_id=c.id AND t.status='working' AND ${workingTurnFreshSql('t')}
           AND NOT EXISTS(SELECT 1 FROM agent_commands notice WHERE notice.room_id=t.room_id
             AND notice.agent_id=t.agent_id AND notice.turn_request_id=t.request_id
             AND notice.reason='report' AND notice.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}')
         UNION ALL
-        SELECT ${reviewerCommand},false
+        SELECT ${reviewerCommand},false,command.agent_id
         FROM agent_commands command
         WHERE command.room_id=c.id AND ${deliverableCommandSql('command')} AND ${currentCornerCommandTargetSql('command')}
           AND (command.agent_id=${implementer} OR ${reviewerCommand})
@@ -161,7 +158,8 @@ export function cornerWorkSql(): string {
       )
       SELECT COALESCE(bool_or(NOT review AND NOT peer),false) worker_active,
         COALESCE(bool_or(review),false) reviewer_active,
-        COALESCE(bool_or(peer),false) peer_active
+        COALESCE(bool_or(peer),false) peer_active,
+        (array_agg(agent_id) FILTER (WHERE review))[1] reviewer_agent_id,(array_agg(agent_id) FILTER (WHERE peer))[1] peer_agent_id
       FROM activity_rows
     ) activity ON true`;
 }

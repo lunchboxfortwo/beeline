@@ -40,12 +40,11 @@ export function cornerWaitingSql(corner: string): string {
 export async function loadCornerWaiting(db: SqlDatabase, cornerId: string) {
   return (
     await db.query<{
-      persistent_block: boolean;
       item_id: string;
       reason: 'question' | 'approve' | 'connect';
       kind: 'message' | 'report' | null;
     }>(
-      `SELECT waiting.*,EXISTS(SELECT 1 FROM messages block WHERE block.id=waiting.item_id AND block.block_corner_id IS NOT NULL AND block.ask_closed_reason IS NULL) persistent_block FROM rooms waiting_corner CROSS JOIN LATERAL (${cornerWaitingSql('waiting_corner')}) waiting
+      `SELECT waiting.* FROM rooms waiting_corner CROSS JOIN LATERAL (${cornerWaitingSql('waiting_corner')}) waiting
      WHERE waiting_corner.id=$1 ORDER BY waiting.created_at,waiting.item_id LIMIT 1`,
       [cornerId],
     )

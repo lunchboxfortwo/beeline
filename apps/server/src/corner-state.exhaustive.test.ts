@@ -73,17 +73,17 @@ function blockerFacts(kind: BlockerKind): Pick<CornerMachineFacts, 'blocker'> {
   if (kind === 'none') return {};
   if (kind === 'agent') {
     return {
-      blocker: { reason: 'question', blocker: { kind: 'report', personId: 'commander' } },
+      blocker: { reason: 'question' },
     };
   }
   if (kind === 'merge-hold') {
     return {
-      blocker: { reason: 'approve', blocker: { kind: 'merge-hold', personId: 'human' } },
+      blocker: { reason: 'approve', itemId: 'hold' },
     };
   }
   const reason = kind === 'human-approve' ? 'approve' : kind === 'human-connect' ? 'connect' : 'question';
   return {
-    blocker: { reason, blocker: { kind: 'message', personId: 'human' } },
+    blocker: { reason, itemId: 'ask' },
   };
 }
 
@@ -130,6 +130,7 @@ function scan(
                         locked,
                         turnRunning,
                         reviewerActive,
+                        reviewerRequired: false,
                         lifecycle: lifecycleFor(shape, prPresent, closure),
                         ...blockerFacts(blocker),
                       };
@@ -140,7 +141,6 @@ function scan(
                       let expected: CornerState;
                       if (closed) expected = 'archived';
                       else if (turnRunning) expected = 'working';
-                      else if (anyBlocker && (blocker !== 'merge-hold' || !turnRunning && !reviewerActive && !pending)) expected = 'waiting';
                       else if (reviewerActive || pending) expected = 'review';
                       else if (anyBlocker) expected = 'waiting';
                       else expected = 'idle';

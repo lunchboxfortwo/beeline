@@ -1,11 +1,11 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectCornerMachineSource, checkCornerMachine } from './corner-machine-boundary.mjs';
+import { inspectCornerMachineSource, inspectThreadStateSource, checkCornerMachine } from './corner-machine-boundary.mjs';
 
 it('freezes the real corner tree to one state/wake owner', () => {
   assert.deepEqual(checkCornerMachine(process.cwd()), []);
@@ -56,6 +56,47 @@ it('fails the architecture build gate for a planted cache write outside the owne
     const packageResult = run();
     assert.equal(packageResult.status, 1);
     assert.match(packageResult.stderr, /packages\/planted\/src\/cache-write\.ts:1: corner machine boundary/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const OWNER = 'packages/api-contract/src/thread-state.ts';
+it('freezes thread state and its activity label to one owner, including a pasted copy of the rule', () => {
+  const owner = readFileSync(new URL('../api-contract/src/thread-state.ts', import.meta.url), 'utf8');
+  assert.deepEqual(inspectThreadStateSource(OWNER, owner), []);
+  for (const [file, source] of [
+    ['apps/server/src/planted-state.ts', "const row = { state: 'waiting' };"],
+    ['apps/server/src/planted-state.ts', "const row = { state: ('review' as const) };"],
+    ['apps/mobile/sources/planted-label.ts', 'const word = `${name} is working`;'],
+    ['apps/mobile/sources/planted-label.tsx', "const word = name + ' is reviewing';"],
+    ['packages/api-contract/src/planted-copy.ts', owner],
+  ]) assert.ok(inspectThreadStateSource(file, source).length, `${file}: ${source.slice(0, 60)}`);
+  // Reading a state is not computing one.
+  assert.deepEqual(inspectThreadStateSource('apps/server/src/read.ts', "if (row.state === 'waiting') count++;"), []);
+});
+
+it('fails the architecture build gate for a planted second thread-state rule', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'thread-state-boundary-'));
+  try {
+    for (const dir of ['apps/server/src', 'apps/mobile/sources', 'docs/architecture']) mkdirSync(path.join(root, dir), { recursive: true });
+    writeFileSync(path.join(root, 'docs/architecture/invariants.json'), JSON.stringify({ rules: [] }));
+    writeFileSync(path.join(root, 'docs/architecture/machine-connection-sinks.json'), '{}');
+    const run = () => spawnSync(process.execPath, [
+      fileURLToPath(new URL('./check-architecture.mjs', import.meta.url)), '--root', root,
+    ], { encoding: 'utf8' });
+    assert.equal(run().status, 0, 'the isolated tree passes before the planted copy');
+    const owner = readFileSync(new URL('../api-contract/src/thread-state.ts', import.meta.url), 'utf8');
+    for (const [file, source] of [
+      ['apps/server/src/planted-machine.ts', owner],
+      ['apps/mobile/sources/planted-row.tsx', 'export const word = (name: string) => `${name} is working`;'],
+    ]) {
+      writeFileSync(path.join(root, file), source);
+      const result = run();
+      assert.equal(result.status, 1, file);
+      assert.match(result.stderr, new RegExp(`${file.replace(/[.]/g, '\\.')}:\\d+: thread state boundary`));
+      rmSync(path.join(root, file));
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

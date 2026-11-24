@@ -1,4 +1,4 @@
-import type { CornerBlocker,CornerLifecycleView,CornerStateReason } from '@beeline/api-contract/phone';
+import { threadState,type CornerLifecycleView,type CornerStateReason,type ThreadState } from '@beeline/api-contract/phone';
 import type { CornerEvent } from './corner-lifecycle-values.js';
 import { cornerGateChecks } from './corner-ci-gate.js';
 
@@ -36,11 +36,7 @@ export type CornerMachine = {
   outcome?: 'landed' | 'closed';
   /** A person or agent parked the thread in Backlog (update_work); it rests idle with reason backlog. */
   backlog?: true;
-} & (
-  | { state: 'working' | 'waiting' | 'archived' }
-  | { state: 'idle'; reason?: 'backlog' }
-  | { state: 'review'; phase: 'checks' | 'reviewer' }
-);
+} & ThreadState;
 
 export type MachineWake = {
   kind:
@@ -63,17 +59,16 @@ export type CornerMachineFacts = {
   locked?: boolean;
   /** Running worker receipts; reviewer work has its own input. */
   turnRunning: boolean;
-  /** A durable implementer block stays visible until explicitly closed. */
-  implementerBlocked?: boolean;
   reviewerActive?: boolean;
-  /** Another agent's running turn; it shows working only where the thread would otherwise be idle. */
+  /** Another agent's running turn. */
   peerActive?: boolean;
+  /** The agents the state names: the implementer, and the reviewer and peer of their activity. */
+  implementerId?: string;
+  reviewerId?: string;
+  peerId?: string;
   lifecycle?: CornerLifecycleView;
-  /**
-   * The selected blocker. Merge holds are selected only when no other blocker
-   * is open, so a `merge-hold` blocker means the hold is all that remains.
-   */
-  blocker?: { reason: CornerStateReason; itemId?: string; blocker?: CornerBlocker };
+  /** The selected blocker; a merge hold is selected only when no other blocker is open. */
+  blocker?: { reason: CornerStateReason; itemId?: string };
   headSha?: string;
   approved?: boolean;
   reviewerRequired?: boolean;
@@ -83,7 +78,6 @@ export type CornerMachineFacts = {
   reviewerConfigured?: boolean;
   /** Actual implementer admission; peer work still owns the Working badge. */
   implementerActive?: boolean;
-  implementerAvailable?: boolean;
   /** An actual request for this head; reviewer activity also includes event notices. */
   reviewRequestActive?: boolean;
   reviewRequests?: number;
@@ -164,7 +158,7 @@ export function transitionCorner(
     return {
       state: {
         ...base,
-        state: 'archived',
+        ...threadState({ ended: true }),
         outcome: event.kind === 'merged' || merged || current.outcome === 'landed' ? 'landed' : 'closed',
       },
       wakes,
@@ -189,8 +183,7 @@ export function transitionCorner(
       'merge-refused',
       `refused:${event.headSha}:${event.reason}:${event.confirmedUnmerged ? f.checkSourceId : ''}`,
     );
-  // Explicit blocks remain visible until closure; native waits yield to running work.
-  // Red and green facts retain their existing admission through the wait.
+  // Wakes read facts, never the state; red and green facts keep their admission through a wait.
   const review = f.reviewEnded;
   if (
     headSha &&
@@ -203,7 +196,7 @@ export function transitionCorner(
   if (
     review?.findings &&
     !review.delivered &&
-    f.implementerAvailable &&
+    f.implementerId &&
     headSha &&
     !f.approved &&
     !f.turnRunning &&
@@ -239,35 +232,14 @@ export function transitionCorner(
       else if (!f.blocker) wake('review-gap');
     }
   }
-  let state: CornerMachine;
-  if (
-    f.blocker &&
-    (!f.turnRunning || f.implementerBlocked) &&
-    (f.blocker.blocker?.kind !== 'merge-hold' ||
-      (!f.turnRunning && !f.reviewerActive && !checksUnderway && !wakes.some((w) => w.kind === 'review')))
-  ) {
-    state = { ...base, state: 'waiting' };
-    notify('waiting', `waiting:${f.blocker.itemId ?? f.blocker.reason}`);
-  } else if (f.turnRunning || wakes.some((w) => !['review', 'review-gap', 'land'].includes(w.kind)))
-    state = { ...base, state: 'working' };
-  else if (
-    f.reviewerActive ||
-    wakes.some((w) => w.kind === 'review') ||
-    (reviewReady &&
-      Boolean(headSha) &&
-      f.reviewerConfigured !== undefined &&
-      f.reviewerRequired !== false &&
-      !f.reviewEnded &&
-      !f.approved)
-  )
-    state = { ...base, state: 'review', phase: 'reviewer' };
-  else if (checksUnderway) state = { ...base, state: 'review', phase: 'checks' };
-  else if (backlog) state = { ...base, state: 'idle', reason: 'backlog' };
-  else if (f.peerActive) state = { ...base, state: 'working' };
-  else {
-    state = { ...base, state: 'idle' };
-    if (f.idleEligible && f.idleSince) notify('idle', `idle:${f.idleSince}`);
-  }
+  const state: CornerMachine = { ...base, ...threadState({
+    implementerRunning: f.turnRunning || wakes.some((w) => !['review', 'land'].includes(w.kind)),
+    reviewerActive: f.reviewerActive || wakes.some((w) => w.kind === 'review'),
+    checksRunning: checksUnderway, decisionOpen: Boolean(f.blocker), backlog, peerRunning: f.peerActive,
+    implementer: f.implementerId, reviewer: f.reviewerId, peer: f.peerId,
+  }) };
+  if (state.state === 'waiting') notify('waiting', `waiting:${f.blocker!.itemId ?? f.blocker!.reason}`);
+  if (state.state === 'idle' && !state.reason && f.idleEligible && f.idleSince) notify('idle', `idle:${f.idleSince}`);
   return { state, wakes, notifications };
 }
 

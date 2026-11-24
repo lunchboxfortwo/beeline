@@ -16,7 +16,8 @@ it('CORNER-REFERENCE: exhausts independent activity, ending, CI and blocker fact
           failing: [], checks: ci === 'pending-job' ? [{ name: 'check', status: 'pending' as const }] : [],
           updatedAt: 1, ...(ci === 'empty-fetched' ? { fetchStartedAt: 1 } : {}) } : undefined;
     const facts: CornerMachineFacts = {
-      archived, locked, turnRunning, reviewerActive,
+      // No reviewer is configured; review dispatch and gaps have their own tables.
+      archived, locked, turnRunning, reviewerActive, reviewerRequired: false,
       lifecycle: { lifecycle: ending === 'done' ? 'done' : 'working',
         ...(ending === 'abandoned' ? { outcome: 'abandoned' } : {}),
         checks: ci === 'pending' ? 'pending' : ci === 'failing' ? 'failing' : ci === 'passing' ? 'passing' : 'unknown',
@@ -30,7 +31,6 @@ it('CORNER-REFERENCE: exhausts independent activity, ending, CI and blocker fact
     };
     const expected = archived || (!locked && ['done','abandoned','merged'].includes(ending)) ? 'archived'
       : turnRunning ? 'working'
-      : blocked ? 'waiting'
       : reviewerActive || ['pending', 'unreported', 'pending-job'].includes(ci) ? 'review'
       : blocked ? 'waiting' : 'idle';
     expect(transitionCorner({ state: 'idle' }, { facts, event: { kind: 'reconcile' } }).state.state, JSON.stringify(facts)).toBe(expected);

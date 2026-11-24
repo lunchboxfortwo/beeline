@@ -1,7 +1,7 @@
 import { useRecordedWorkItem } from '@/buzz/work-board-store';
 import React, { useCallback, useMemo } from 'react';
 import { router } from 'expo-router';
-import { cornerShortTitle, roomTitle, type CornerState, type RoomView } from '@beeline/api-contract/phone';
+import { cornerShortTitle, roomTitle, threadState as threadStateOf, type CornerState, type RoomView } from '@beeline/api-contract/phone';
 import { navigateToRoom } from '@/buzz/corner-navigation';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { Modal } from '@/modal';
@@ -54,7 +54,7 @@ export function useChatThreadHeader({
       chatTag: parentName ? (roomTitle(parentName) ?? null) : null,
       repositoryHomepageIcon: roomSurface?.room.homepageIcon,
       title: cornerShortTitle(parentName, title, decodedId),
-      ...(threadState ? { state: threadState } : isArchived ? { state: 'archived' as const } : {}),
+      ...(threadState ? { state: threadState } : isArchived ? threadStateOf({ ended: true }) : {}),
       ...(threadReason ? { reason: threadReason } : {}),
       workItem:recordedWorkItem??roomSurface?.workItem,
       people:roomSurface?.members.map(member=>member.identity),

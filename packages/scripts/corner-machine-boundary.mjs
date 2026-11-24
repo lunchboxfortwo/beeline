@@ -72,9 +72,29 @@ export function inspectCornerMachineSource(file, text) {
   visit(source);
   return errors;
 }
+const THREAD_STATE_OWNER = 'packages/api-contract/src/thread-state.ts';
+const THREAD_STATES = new Set(['working', 'review', 'waiting', 'idle', 'archived']);
+/** One thread-state rule and one activity label: no other product file writes a state or the words. */
+export function inspectThreadStateSource(file, text) {
+  if (file === THREAD_STATE_OWNER || !/^(?:apps\/server\/src|apps\/mobile\/sources|packages\/api-contract\/src)\//.test(file)) return [];
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const errors = [];
+  const deny = (node, reason) => errors.push(`${file}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}: thread state boundary: ${reason}; use threadState or threadActivityLabel from ${THREAD_STATE_OWNER}`);
+  const bare = (node) => ts.isAsExpression(node) || ts.isSatisfiesExpression(node) || ts.isParenthesizedExpression(node) ? bare(node.expression) : node;
+  function visit(node) {
+    if (ts.isPropertyAssignment(node) && node.name.getText(source) === 'state' && ts.isStringLiteralLike(bare(node.initializer)) && THREAD_STATES.has(bare(node.initializer).text))
+      deny(node, 'thread state computed outside its owner');
+    if ((ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) && /\bis (?:working|reviewing)\b/.test(node.text))
+      deny(node, 'thread activity label written outside its owner');
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return errors;
+}
 export function checkCornerMachine(root) {
   return sourceFiles(root)
-    .flatMap((file) =>
-      inspectCornerMachineSource(file, readFileSync(path.join(root, file), 'utf8')),
-    );
+    .flatMap((file) => {
+      const text = readFileSync(path.join(root, file), 'utf8');
+      return [...inspectCornerMachineSource(file, text), ...inspectThreadStateSource(file, text)];
+    });
 }
