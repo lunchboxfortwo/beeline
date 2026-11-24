@@ -59,7 +59,12 @@ it('queues the first message before a machine exists and completes it after boot
   const item = queued.commands[0]!;
   expect((await fixture.db.query('SELECT fly_machine_id FROM free_agents')).rows).toEqual([{ fly_machine_id: null }]);
   expect(item).not.toHaveProperty('modelCredential');
-  const create = vi.fn(async () => Response.json({ id: 'first-machine' }));
+  const create = vi.fn(async () => {
+    expect(await phone.liveRoomCommands(MODEL_ROOM, MODEL_OWNER)).toEqual([
+      expect.objectContaining({ requestId: item.turnRequestId, runtimePhase: { phase: 'starting', operationId: expect.any(String) } }),
+    ]);
+    return Response.json({ id: 'first-machine' });
+  });
   const provider = new FlyMachines('synthetic', 'first-boot', async (url, init) =>
     init?.method === 'POST' ? create() : Response.json(new URL(String(url)).pathname.endsWith('/machines') ? [] : { id: 'first-machine', state: 'started', config: { image } }));
   await new FreeAgentService(fixture.db, config(), provider, async () => ({ exchangeToken: 'synthetic' })).reconcile(MODEL_AGENT);
@@ -67,7 +72,9 @@ it('queues the first message before a machine exists and completes it after boot
   await daemon.execute('startAgentTurn', { roomId: MODEL_ROOM, requestId: item.turnRequestId }, MODEL_AGENT);
   await daemon.execute('postRoomMessage', { roomId: MODEL_ROOM, requestId: item.turnRequestId, text: 'First message answered.' }, MODEL_AGENT);
   expect((await fixture.db.query('SELECT state FROM agent_commands WHERE source_message_id=$1', [sent.messageId])).rows).toEqual([{ state: 'complete' }]);
-  expect((await phone.readRoom(MODEL_ROOM, MODEL_OWNER))?.messages.some(message => message.text === 'First message answered.')).toBe(true);
+  const room = await phone.readRoom(MODEL_ROOM, MODEL_OWNER);
+  expect(room?.messages.some(message => message.text === 'First message answered.')).toBe(true);
+  expect(room?.pendingAgentCommands).toEqual([]);
 });
 
 it('uses the provisioned model credential through runtime catch-up', async () => {
@@ -177,12 +184,40 @@ it('hands a peer work committed during suspension and resumes the completed snap
   await off();await peer.reconcile(MODEL_AGENT);
 });
 
-it('provider failure preserves pending work and never replays the unknown mutation',async()=>{
-  const runtime=lab();runtime.hooks.failUpdate=true;await send('saved');
-  await expect(runtime.service().reconcile(MODEL_AGENT,true)).rejects.toThrow('HTTP 500');
+it('free-thinking-1 shows startup before the VM responds and clears it on wake failure', async () => {
+  const runtime = lab();
+  const receipt = await send('saved');
+  const notifications: { table: string; roomId: string; agentId?: string }[] = [];
+  const unsubscribe = await fixture.db.client.listen('beeline_live_v1', raw => notifications.push(JSON.parse(raw)));
+  const startupLine = async () => {
+    const commands = await phone.liveRoomCommands(MODEL_ROOM, MODEL_OWNER);
+    const room = await phone.readRoom(MODEL_ROOM, MODEL_OWNER);
+    expect(commands).toEqual(room!.pendingAgentCommands);
+    expect(commands?.[0]?.requestId).toBe(receipt.pendingAgentCommands![0]!.requestId);
+    return selectComposerAckPresentation({
+      isCorner: false, now: Date.now(), viewerPubkey: MODEL_OWNER, viewerCanSend: true, pendingAgentCommands: commands ?? [],
+      conversationIdentities: new Map([[MODEL_AGENT, { pubkey: MODEL_AGENT, kind: 'agent', name: 'Beebee' }]]),
+    });
+  };
+  runtime.hooks.update = async () => {
+    const progress = await startupLine();
+    expect(notifications.filter(event => event.table === 'agent_commands')).toEqual([
+      expect.objectContaining({ roomId: MODEL_ROOM }),
+    ]);
+    expect(notifications.find(event => event.table === 'agent_commands')).not.toHaveProperty('agentId');
+    expect(progress?.stop).toEqual({ agentPubkey: MODEL_AGENT, requestId: receipt.pendingAgentCommands![0]!.requestId });
+    expect(progress?.turnKey).toBe(`${MODEL_AGENT}:${receipt.pendingAgentCommands![0]!.requestId}`);
+    expect(progress?.label).toBe(`Beebee ${progress!.verb!.gerund.toLowerCase()}…`);
+    expect(progress?.startedAt).toBeUndefined();
+  };
+  runtime.hooks.failUpdate = true;
+  await expect(runtime.service().reconcile(MODEL_AGENT, true)).rejects.toThrow('HTTP 500');
   expect(runtime.calls).toEqual(['POST /m1']);
+  expect(await startupLine()).toBeNull();
+  expect(notifications.filter(event => event.table === 'agent_commands')).toHaveLength(2);
+  await unsubscribe();
   expect((await fixture.db.query(`SELECT 1 FROM agent_commands WHERE state='pending'`)).rowCount).toBe(1);
-  expect((await fixture.db.query(`SELECT runtime_owner FROM free_agents`)).rows).toEqual([{runtime_owner:null}]);
+  expect((await fixture.db.query(`SELECT runtime_owner FROM free_agents`)).rows).toEqual([{ runtime_owner: null }]);
 });
 
 it('full read and send receipt show the accepted pending command without a synthetic working turn',async()=>{
@@ -256,12 +291,15 @@ it('replaces a busy snapshot immediately and retains its queued work',async()=>{
 it('records a hosted startup failure visibly and terminates the item without an offline notice', async () => {
   const daemon = new DaemonService(fixture.db, live);
   await send('first message');
+  await lab('suspended', image).service().reconcile(MODEL_AGENT);
+  expect((await phone.liveRoomCommands(MODEL_ROOM, MODEL_OWNER))?.[0]?.runtimePhase?.phase).toBe('starting');
   const item = (await daemon.execute('getAgentCommands', {}, MODEL_AGENT)).commands[0]!;
   const reason = 'ACP error -32000: Authentication required: Configure an API key or log in';
   await daemon.execute('startAgentTurn', { roomId: MODEL_ROOM, requestId: item.id, available: false, failureReason: reason }, MODEL_AGENT);
   expect((await daemon.execute('getAgentCommands', {}, MODEL_AGENT)).commands).toEqual([]);
   const room = (await phone.readRoom(MODEL_ROOM, MODEL_OWNER))!;
   expect(room.latestAgentTurns.find(turn => turn.requestId === item.id)).toMatchObject({ status: 'failed' });
+  expect(room.pendingAgentCommands).toEqual([]);
   expect(room.messages.some(message => message.systemEvent?.consequence === reason)).toBe(true);
   expect((await fixture.db.query('SELECT failure_reason FROM agent_turns WHERE request_id=$1', [item.id])).rows).toEqual([{ failure_reason: reason }]);
   expect(room.messages.some(message => message.text?.includes('connect again'))).toBe(false);

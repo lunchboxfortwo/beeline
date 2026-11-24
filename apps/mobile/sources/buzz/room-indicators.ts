@@ -129,7 +129,8 @@ export type ComposerWorkingAgent = {
   name: string;
   avatar?: string;
   face?: string;
-  startedAt: number;
+  startedAt?: number;
+  turnKey?: string;
   stop?: { agentPubkey: string; requestId: string };
 };
 
@@ -220,8 +221,25 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
-  if (input.activeTurns && input.activeTurns.length > 1) {
-    const agents = input.activeTurns.map((turn): ComposerWorkingAgent => {
+  type Receipt = { agentPubkey: string; requestId?: string; startedAt?: number };
+  const receipts = new Map<string, Receipt>();
+  const keyOf = (receipt: Receipt) => `${receipt.agentPubkey}:${receipt.requestId ?? ''}`;
+  for (const turn of input.activeTurns ?? []) {
+    receipts.set(keyOf(turn), { ...turn, startedAt: turn.startedAt ?? turn.createdAt });
+  }
+  if (input.activeTurnPubkey && !input.activeTurns?.length) {
+    const turn = { agentPubkey: input.activeTurnPubkey, requestId: input.activeTurnRequestId,
+      startedAt: input.activeTurnStartedAt };
+    receipts.set(keyOf(turn), turn);
+  }
+  for (const command of input.pendingAgentCommands ?? []) {
+    if (command.runtimePhase?.phase === 'starting' && !receipts.has(keyOf(command))) {
+      receipts.set(keyOf(command), command);
+    }
+  }
+  const turns = [...receipts.values()];
+  if (turns.length > 1) {
+    const agents = turns.map((turn): ComposerWorkingAgent => {
       const identity = input.conversationIdentities?.get(turn.agentPubkey);
       const detail = agentFromConversationIdentity(identity) ?? input.agentsByPubkey?.get(turn.agentPubkey);
       const display = resolveAgentDisplayIdentity(turn.agentPubkey, detail);
@@ -230,30 +248,27 @@ export function selectComposerAckPresentation(
         name: display.name,
         avatar: display.avatarUrl,
         face: display.face,
-        startedAt: turn.startedAt ?? turn.createdAt,
-        ...(viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend)
+        startedAt: turn.startedAt,
+        turnKey: keyOf(turn),
+        ...(turn.requestId && viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend)
           ? { stop: { agentPubkey: turn.agentPubkey, requestId: turn.requestId } } : {}),
       };
     });
+    const starts = turns.flatMap(turn => turn.startedAt == null ? [] : [turn.startedAt]);
     return {
       agents,
       label: `${agents.length === 2 ? agents.map(agent => agent.name).join(', ') : `${agents.length} agents`} brewing…`,
-      startedAt: Math.min(...agents.map(agent => agent.startedAt)),
+      ...(starts.length ? { startedAt: Math.min(...starts) } : {}),
     };
   }
-  const pending = !input.activeTurnPubkey
-    ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
-    : undefined;
-  if (pending) {
-    const agent = agentFromConversationIdentity(input.conversationIdentities?.get(pending.agentPubkey)) ??
-      input.agentsByPubkey?.get(pending.agentPubkey);
-    const subject = resolveAgentDisplayIdentity(pending.agentPubkey,agent).name;
-    return { label: `${subject} · starting…`,
-      ...(viewerMayStopTurn(input.viewerPubkey,input.viewerCanSend)
-        ? { stop: { agentPubkey:pending.agentPubkey,requestId:pending.requestId } } : {}),
-    };
-  }
-  const state = selectComposerAckState(input);
+  const turn = turns[0];
+  const progress = turn ? {
+    ...input,
+    activeTurnPubkey: turn.agentPubkey,
+    activeTurnRequestId: turn.requestId,
+    activeTurnStartedAt: turn.startedAt,
+  } : input;
+  const state = selectComposerAckState(progress);
   if (!state) return null;
   if (state.kind === 'sent') {
     return { label: `Sent to ${state.handles.map((handle) => `@${handle}`).join(', ')}`, live: false };
@@ -266,13 +281,13 @@ export function selectComposerAckPresentation(
     const subject = display.name;
     const agents: ComposerWorkingAgent[] = [{
       pubkey: state.agentPubkey, name: display.name, avatar: display.avatarUrl, face: display.face,
-      startedAt: input.activeTurnStartedAt ?? 0,
+      startedAt: progress.activeTurnStartedAt ?? 0,
     }];
     // A real receipt carries its own identity: one verb per turn (seeded by
     // the turn key, never re-picked per tick) and the receipt's server time
     // for the elapsed counter. The local "sending…" bridge has neither.
-    if (input.activeTurnRequestId) {
-      const turnKey = `${state.agentPubkey}:${input.activeTurnRequestId}`;
+    if (progress.activeTurnRequestId) {
+      const turnKey = `${state.agentPubkey}:${progress.activeTurnRequestId}`;
       const verb = pickTurnVerb(turnKey);
       // A stop needs the turn's own coordinates, and only a real receipt has
       // them. The local "sending…" bridge is not a turn yet: there is nothing
@@ -285,15 +300,15 @@ export function selectComposerAckPresentation(
         turnKey,
         verb,
         ...(input.receivedSteer?.agentPubkey === state.agentPubkey &&
-        input.receivedSteer.turnRequestId === input.activeTurnRequestId
+        input.receivedSteer.turnRequestId === progress.activeTurnRequestId
           ? { received: true }
           : {}),
-        ...(input.activeTurnStartedAt != null ? { startedAt: input.activeTurnStartedAt } : {}),
+        ...(progress.activeTurnStartedAt != null ? { startedAt: progress.activeTurnStartedAt } : {}),
         ...(stoppable
           ? {
               stop: {
-                agentPubkey: input.activeTurnAgentPubkey ?? state.agentPubkey,
-                requestId: input.activeTurnRequestId,
+                agentPubkey: progress.activeTurnAgentPubkey ?? state.agentPubkey,
+                requestId: progress.activeTurnRequestId,
               },
             }
           : {}),

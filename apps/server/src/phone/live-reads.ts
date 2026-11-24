@@ -462,9 +462,9 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
   export async function phoneLiveRoomCommands(ctx: PhoneContext, roomId: string, viewerId: string) {
     if (!(await phoneCanReadRooms(ctx, [roomId], viewerId)).has(roomId)) return null;
     const rows = await ctx.database.query<{
-      agent_id: string; turn_request_id: string; created_at: Date;
+      agent_id: string; turn_request_id: string; created_at: Date; startup_operation_id: string | null;
     }>(`SELECT DISTINCT ON(command.agent_id)
-        command.agent_id,command.turn_request_id,command.created_at
+        command.agent_id,command.turn_request_id,command.created_at,command.startup_operation_id
       FROM agent_commands command
       JOIN messages source ON source.id=command.source_message_id AND source.room_id=command.room_id
       JOIN identities author ON author.id=source.author_id AND author.kind='human'
