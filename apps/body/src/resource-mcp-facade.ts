@@ -509,6 +509,15 @@ export function squireLoginWallFromMcp(
   return squireLoginWallIn(response.result);
 }
 
+function resourceRequestHeaders(auth: { daemonToken: string; helperVersion?: string }, context: Record<string, unknown>) {
+  return {
+    authorization: `Bearer ${auth.daemonToken}`,
+    'content-type': 'application/json',
+    ...(typeof context.itemId === 'string' && context.itemId ? { 'x-beeline-command-id': context.itemId } : {}),
+    'x-beeline-helper-version': auth.helperVersion ?? 'v0.0.0',
+  };
+}
+
 // Sandboxed resource processes have no machine registration. These closed
 // permission/approval adapters retain server command authority on old HTTP wire.
 async function postSquireApproval(
@@ -535,11 +544,7 @@ async function postSquireApproval(
     return;
   await fetchImpl(new URL('/v1/daemon/operations/postSquireApproval', auth.baseUrl), {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${auth.daemonToken}`,
-      'content-type': 'application/json',
-      'x-beeline-helper-version': auth.helperVersion ?? 'v0.0.0',
-    },
+    headers: resourceRequestHeaders(auth, context),
     body: JSON.stringify({ ...context, ...approval, ...(signInUrl ? { signInUrl } : {}) }),
     signal: undefined,
   });
@@ -568,11 +573,7 @@ async function postSquireLoginWall(
     return;
   await fetchImpl(new URL('/v1/daemon/operations/postSquireLoginWall', auth.baseUrl), {
     method: 'POST',
-    headers: {
-      authorization: `Bearer ${auth.daemonToken}`,
-      'content-type': 'application/json',
-      'x-beeline-helper-version': auth.helperVersion ?? 'v0.0.0',
-    },
+    headers: resourceRequestHeaders(auth, context),
     body: JSON.stringify({ ...context, wall: wall.wall, message: wall.message }),
     signal: undefined,
   });
@@ -618,11 +619,7 @@ export async function authorizeResourceMessage(
     new URL('/v1/daemon/operations/authorizeResourceCall', auth.baseUrl),
     {
       method: 'POST',
-      headers: {
-        authorization: `Bearer ${auth.daemonToken}`,
-        'content-type': 'application/json',
-        'x-beeline-helper-version': auth.helperVersion ?? 'v0.0.0',
-      },
+      headers: resourceRequestHeaders(auth, context),
       body: JSON.stringify({
         ...context,
         target,

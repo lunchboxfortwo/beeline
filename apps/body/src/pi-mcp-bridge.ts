@@ -232,6 +232,7 @@ async function authorizeSquire(signal) {
   const response = await ask({ url: new URL('/v1/daemon/operations/authorizeSquireCall', env.BEELINE_DAEMON_BASE_URL) }, {
     method: 'POST',
     headers: { authorization: 'Bearer ' + env.BEELINE_DAEMON_TOKEN, 'content-type': 'application/json',
+      ...(typeof context.itemId === 'string' && context.itemId ? { 'x-beeline-command-id': context.itemId } : {}),
       'x-beeline-helper-version': env.BEELINE_HELPER_VERSION || 'v0.0.0' },
     body: JSON.stringify({ roomId: context.roomId, requestId: context.requestId }),
     signal,

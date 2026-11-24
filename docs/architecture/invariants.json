@@ -3242,6 +3242,15 @@
           "digest": "Rejects conflicting content that attempts to reuse an already accepted source revision."
         }
       },
+      "helper_read_windows": {
+        "module": "Helper conversation reads (apps/server/src/helper-requests.ts)",
+        "reason": "Every server replica needs the same count to enforce one read allowance per authenticated helper.",
+        "columns": {
+          "agent_id": "Groups HTTP and socket reads under the same helper identity across reconnects.",
+          "expires_at": "Sets the deadline for renewing the allowance and calculating the retry delay.",
+          "reads": "Counts reads in the current window, capped one past the allowance to distinguish a refusal."
+        }
+      },
       "helper_overlay_demand": {
         "module": "Helper overlays (apps/server/src/helper-overlay.ts)",
         "reason": "A durable aggregate viewing revision gates fresh helper baselines across application sockets and server processes.",
