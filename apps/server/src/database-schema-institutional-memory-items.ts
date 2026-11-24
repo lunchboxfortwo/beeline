@@ -601,6 +601,7 @@ WITH resolved AS (
 )
 UPDATE agent_schedules schedule SET workflow_slug=resolved.slug
 FROM resolved WHERE schedule.id=resolved.id AND resolved.slug IS NOT NULL;
+ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS lock_retry_revision timestamptz;
 -- During rollout, older images may still park a failed occurrence here.
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS failed_due_at timestamptz;
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS failed_revision timestamptz;
