@@ -1,6 +1,7 @@
 import * as Sentry from '@sentry/node';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AGENT, ROOM, monolithFixture } from '../test-fixtures/test-support-monolith.js';
+import { createAgentCommand } from '../agent-command.js';
+import { AGENT, HUMAN, ROOM, monolithFixture } from '../test-fixtures/test-support-monolith.js';
 
 vi.mock('@sentry/node', () => ({ captureException: vi.fn() }));
 
@@ -21,7 +22,6 @@ describe('daemon request errors', () => {
     ['handoff', {}, 409, 'workflow handoff requires an active command'],
     ['archiveWorkflow', {}, 409, 'workflow archive requires an active command'],
     ['assignWorkflowRole', {}, 409, 'workflow role assignment requires an active command'],
-    ['postRoomMessage', { roomId: ROOM }, 400, 'reply text is required'],
     ['reply', { roomId: ROOM }, 400, 'reply text is required'],
     ['postAgentThought', { roomId: ROOM }, 400, 'turnId is required'],
     ['postAgentModelCatalog', {}, 400, 'model options are required'],
@@ -31,6 +31,39 @@ describe('daemon request errors', () => {
     expect(response.status).toBe(status);
     expect(await response.json()).toEqual({ error: message });
     expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it('refuses a missing text field without completing the command that already posted a reply', async () => {
+    const sourceId = 'd'.repeat(64);
+    await fixture.database.query(
+      'INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)',
+      [sourceId, ROOM, HUMAN, 'Please publish a reply'],
+    );
+    const command = await createAgentCommand(fixture.database, {
+      roomId: ROOM, agentId: AGENT, sourceMessageId: sourceId, reason: 'human_tag',
+    });
+    const request = { roomId: ROOM, requestId: command!.turn_request_id };
+    const post = (operation: string, fields = {}) => fixture.request(
+      '/v1/daemon/operations/' + operation, 'POST', { ...request, ...fields }, fixture.daemonToken,
+    );
+    expect((await post('startAgentTurn')).status).toBe(200);
+    const posted = await post('postCornerMessage', { cornerId: ROOM, text: 'The public reply.' });
+    expect(posted.status).toBe(200);
+    const { id: replyId } = await posted.json();
+    const readCommand = async () => (await fixture.database.query(
+      'SELECT * FROM agent_commands WHERE id=$1', [command!.id],
+    )).rows[0];
+    const pending = await readCommand();
+    expect(pending).toMatchObject({ state: 'pending', posted_reply_id: replyId, result_message_id: null });
+
+    const refused = await post('postRoomMessage');
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: 'reply text is required' });
+    expect(await readCommand()).toEqual(pending);
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+
+    expect((await post('postRoomMessage', { text: '' })).status).toBe(200);
+    expect(await readCommand()).toMatchObject({ state: 'complete', result_message_id: replyId });
   });
 
   it('rejects malformed bootstrap JSON', async () => {
