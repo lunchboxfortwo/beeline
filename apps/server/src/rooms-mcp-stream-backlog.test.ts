@@ -16,7 +16,7 @@ class Reply extends EventEmitter {
 
 describe('MCP member stream pending backlog', () => {
   const scope = fixtureScope1();
-  it.each([false, true])('delivers a new tag past old replies and an obsolete idle wake (oversized=%s)', async oversized => {
+  it.each([false, true])('delivers a new request past old replies and an obsolete idle wake (oversized=%s)', async oversized => {
     const { client, member, token, grant } = await scope.connected();
     const setup = await client.callTool({ name: 'setup_delivery', arguments: {
       mechanism: 'local', host: 'Claude', surface: 'CLI', conversation: 'synthetic-session', installed: true,
@@ -31,9 +31,8 @@ describe('MCP member stream pending backlog', () => {
     const idle = await createAgentCommand(scope.db, { roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'system',
       privatePayload: { kind: 'report', authorId: SYSTEM_IDENTITY_ID, fromRoomId: ROOM, text: 'Obsolete idle episode',
         automatic: true, idleSince: '1795054571.286801' } });
-    const handle = (await scope.db.query<{ handle: string }>('SELECT beeline_room_handle($1,$2) handle', [member, ROOM])).rows[0]!.handle;
-    const tag = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} Please investigate` }, USER);
-    const command = (await scope.db.query<{ id: string }>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2', [member, tag.messageId])).rows[0]!;
+    const command = (await createAgentCommand(scope.db, { roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'message',
+      privatePayload: { kind: 'message', authorId: USER, fromRoomId: ROOM, text: 'Please investigate' } }))!;
     // This proof is about backlog size on a live stream: the work counts as
     // queued while connected. A reconnect retiring work queued before the
     // connector was last seen offline is covered by connector-reconnect.test.ts.

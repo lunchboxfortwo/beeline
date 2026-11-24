@@ -270,10 +270,12 @@ export class RoomsMcp {
     return row ? { owner: { name: row.name, handle: row.handle }, delivery, ...(setup ? { setup } : {}) } : {delivery};
   }
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
+    // The stream delivers the full tag. The catch-up tool returns a bounded preview.
     const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; institutionalContext: string | null; truncated: boolean; attachments: import('@beeline/api-contract/daemon').DaemonAttachment[] }>(
       `WITH readable AS (${READABLE})
        SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
-         m.created_at,left(m.text,16000) text,length(m.text)>16000 truncated,m.attachments,
+         m.created_at,CASE WHEN $4::boolean THEN m.text ELSE left(m.text,16000) END text,
+         NOT $4::boolean AND length(m.text)>16000 truncated,m.attachments,
          (SELECT ${queuedContextSql('command')} FROM agent_commands command WHERE command.agent_id=$1
            AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1) "institutionalContext"
        FROM rooms_mcp_mentions mention
@@ -285,7 +287,7 @@ export class RoomsMcp {
          AND NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=mention.member_id
            AND command.source_message_id=mention.message_id AND ${connectorHostAcceptedSql('command')})
          AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=mention.room_id AND active.archived_at IS NULL)
-       ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1])).rows;
+       ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1, stream])).rows;
     const page = rows.slice(0, limit);
     return {
       mentions: page.map(({ seq, institutionalContext, ...row }) => ({ ...mentionRouting(member, row.room_id, row.id, row.author_handle), ...row, ...(institutionalContext ? {institutionalContext} : {}), deliveryCursor: seq })),

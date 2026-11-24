@@ -759,8 +759,8 @@ function briefDraft(value: unknown): Args | undefined {
 
 /** The queue envelope is identical for subscription and helper agents. */
 export async function pendingMcpWakes(db: SqlDatabase, member: string) {
-  const {rows} = await readAgentQueueRows(db,member);
-  const wakes = await Promise.all(rows.filter(item=>item.reason!=='mcp_call').map(async item=>{
+  const {rows} = await readAgentQueueRows(db,member,{mcpWakes:true});
+  const wakes = await Promise.all(rows.map(async item=>{
     const route=item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item);
     return {id:item.id,address:item.room_id,reason:item.reason,
       ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
