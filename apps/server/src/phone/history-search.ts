@@ -1,4 +1,4 @@
-import { messageColumns } from '../message-columns.js';
+import { phoneMessageColumns } from '../message-columns.js';
 import type { MessageSearchView, RoomHistoryOutline, RoomHistoryView } from '@beeline/api-contract/phone';
 import { messageSearchTerms } from '@beeline/api-contract/phone';
 import { visibleMessageSql } from '../read-cursor.js';
@@ -134,7 +134,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
             AND ${visibleMessageSql('m')}
           ORDER BY m.created_at DESC,m.id DESC LIMIT 15)
        ), page AS (
-       SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
+       SELECT ${phoneMessageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
          i.avatar author_avatar,i.face_id author_face,
          ${reactionIdentitiesSql('m')} reaction_identities,
          ${replyPreviewSql('m')} reply_preview,
@@ -168,7 +168,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
               AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
               AND workspace_member.removed_at IS NULL))
       ), page AS (
-      SELECT ${messageColumns('m')},
+      SELECT ${phoneMessageColumns('m')},
          i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
          i.avatar author_avatar,i.face_id author_face,
          ${reactionIdentitiesSql('m')} reaction_identities,
@@ -213,7 +213,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
       ), cursor AS (
         SELECT created_at,id FROM messages WHERE room_id=$1 AND id=$3
       ), page AS (
-        SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
+        SELECT ${phoneMessageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
           i.avatar author_avatar,i.face_id author_face,
           ${reactionIdentitiesSql('m')} reaction_identities,
          ${replyPreviewSql('m')} reply_preview,

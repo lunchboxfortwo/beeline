@@ -1,7 +1,10 @@
 import type { SystemEvent, SystemTranscript } from '@beeline/api-contract/phone';
 import { SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import { githubProviderKey } from './providers/index.js';
 import { HIDDEN_WAKE_CARD_TYPES } from './room-choice.js';
+
+const githubCardPrefix = `${githubProviderKey}-`;
 
 export function systemTranscript(
   authorId: string,
@@ -10,7 +13,7 @@ export function systemTranscript(
   event?: SystemEvent | null,
   durableFact?: string | null,
 ): SystemTranscript {
-  const origin = event?.subject.kind === 'github' || cardType?.startsWith('github-') ? 'github'
+  const origin = event?.subject.kind === githubProviderKey || cardType?.startsWith(githubCardPrefix) ? githubProviderKey
     : authorId === SCHEDULE_SCHEDULER_ID ? 'scheduler' : 'system';
   const hidden = HIDDEN_WAKE_CARD_TYPES.some(type => type === cardType) ||
     event?.kind === 'schedule-ran' || event?.kind === 'computer-session-activity' ||
@@ -32,7 +35,7 @@ export function projectSystemTranscript(row: {
   if (row.system_transcript) return row.system_transcript;
   if (row.system_event || row.presentation === 'system' || row.durable_fact ||
       row.author_id === SYSTEM_IDENTITY_ID || row.author_id === SCHEDULE_SCHEDULER_ID ||
-      row.card_type?.startsWith('github-') || row.card_type === 'daemon-fact') {
+      row.card_type?.startsWith(githubCardPrefix) || row.card_type === 'daemon-fact') {
     return systemTranscript(row.author_id, row.presentation, row.card_type, row.system_event, row.durable_fact);
   }
   return undefined;

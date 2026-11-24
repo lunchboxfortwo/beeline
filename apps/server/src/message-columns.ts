@@ -9,7 +9,12 @@ const columns = [
 ] as const;
 
 export function messageColumns(alias: string): string {
-  return `${columns.map(column => `${alias}.${column}`).join(',')},
+  return columns.map(column => `${alias}.${column}`).join(',');
+}
+
+/** Resolve the pinned gate for old expiry rows when projecting them to the phone. */
+export function phoneMessageColumns(alias: string): string {
+  return `${messageColumns(alias)},
     CASE WHEN ${alias}.card_type='workflow-handoff' AND ${alias}.card->>'outcome'='expired'
       THEN COALESCE(${alias}.card->>'expiredStepKind', (
         SELECT version.markdown::jsonb->'handoffs'->(${alias}.card->>'fromState')->>'kind'

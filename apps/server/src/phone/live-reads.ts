@@ -1,4 +1,4 @@
-import { messageColumns } from '../message-columns.js';
+import { phoneMessageColumns } from '../message-columns.js';
 import { projectSystemTranscript } from '../system-transcript.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { workingTurnFreshSql } from '../agent-turn-end.js';
@@ -151,7 +151,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
              AND workspace_member.removed_at IS NULL
            WHERE room.id=$1
          )
-         SELECT ${messageColumns('message')},author.kind author_kind,author.name author_name,
+         SELECT ${phoneMessageColumns('message')},author.kind author_kind,author.name author_name,
            beeline_room_handle(author.id,message.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
            ${reactionIdentitiesSql('message')} reaction_identities,
            ${replyPreviewSql('message')} reply_preview,
@@ -168,7 +168,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
          JOIN messages message ON message.room_id=room.id AND message.id=$2
          JOIN identities author ON author.id=message.author_id
          LEFT JOIN LATERAL (
-           SELECT ${messageColumns('candidate')} FROM messages candidate
+           SELECT ${phoneMessageColumns('candidate')} FROM messages candidate
            WHERE message.deleted_at IS NOT NULL AND candidate.room_id=room.id
              AND ${visibleChatMessageSql('candidate')}
            ORDER BY candidate.created_at DESC,candidate.id DESC LIMIT 1
