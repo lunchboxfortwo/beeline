@@ -131,6 +131,7 @@ jobs:
       run_desktop: ${{ steps.plan.outputs.run_desktop }}
       run_website: ${{ steps.plan.outputs.run_website }}
       native_android: ${{ steps.plan.outputs.native_android }}
+      native_ios: ${{ steps.plan.outputs.native_ios }}
       native_app_version: ${{ steps.native_version.outputs.version }}
       release_marker: ${{ steps.store_shipped.outputs.release_marker }}
       android_shipped: ${{ steps.store_shipped.outputs.android_shipped }}
