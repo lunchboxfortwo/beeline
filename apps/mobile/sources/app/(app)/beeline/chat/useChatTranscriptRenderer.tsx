@@ -18,15 +18,14 @@ import { messageJumpHref } from '@/buzz/corner-navigation';
 import { canBeginReply, replyPreviewTarget, type MessageReplyDisplayTarget } from '@/buzz/message-reply';
 import { archiveActionPresentation, liveCardPresentation, messageFailureGroups, messageRosterPresentation, useRoomMessageRenderItem } from '@/buzz/room-message-cell';
 import type { RoomMessagePresentation, RoomMessageRenderContext } from '@/buzz/room-message-cell';
-import { GitHubEventCard, NotificationLifecycleCard, DaemonFactCard, GrantRequestCard, SquireApprovalCard, ConnectorOfferCard, AppSignInCard, ChoiceCard, WalletCards, agentCommandTranscriptMessage, OrdinaryLedgerMessage, TargetBranchProposalCard, WritePermissionCard, SwipeToReply } from './RoomMessageVariants';
+import { GitHubEventCard, DaemonFactCard, GrantRequestCard, SquireApprovalCard, ConnectorOfferCard, AppSignInCard, ChoiceCard, WalletCards, agentCommandTranscriptMessage, OrdinaryLedgerMessage, TargetBranchProposalCard, WritePermissionCard, SwipeToReply } from './RoomMessageVariants';
 import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/transport/monolith-operation';
-import { CornerOpenedMarkers } from '@/components/buzz/CornerOpenedMarker';
-import { LedgerEntryFrame, LedgerRoomUpdate, LedgerSystemLine } from '@/components/buzz/Ledger';
+import { LedgerEntryFrame, LedgerRoomUpdate } from '@/components/buzz/Ledger';
 import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
 import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
-import { canDecideGrantRequest, GrantRequestPill } from '@/components/buzz/GrantRequestCard';
-import { isPillMessage } from '@/buzz/transcript-pills';
+import { TranscriptCard } from '@/components/buzz/TranscriptCard';
+import { isHiddenSystemLine, isPillMessage } from '@/buzz/transcript-pills';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 type Props = [
@@ -218,102 +217,8 @@ export function useChatTranscriptRenderer([
           agentFace: rowAgentFace,
           agentHandle: rowAgentHandle,
         }, agentByPubkey);
-      // System lines and agent-to-agent messages are avatar-only pills; a
-      // folded run shares one wrapping row.
-      const pillRun = item.pillRun ??
-        (isPillMessage(item) ? [item] : null);
-      if (pillRun) {
-        return (
-          <TranscriptPills
-            run={pillRun}
-            resolve={resolvePillIdentity}
-            onOpenIdentity={handleOpenSystemIdentity}
-            onOpenUrl={handleOpenGitHubEvent}
-            onOpenBrief={openCurrentBrief}
-            onOpenCorner={openCorner}
-            cornerId={isCorner ? decodedId : undefined}
-          />
-        );
-      }
-      // An agent's order or report is ordinary transcript: the recipient leads
-      // the text as an @mention and the row keeps its own author's byline.
-      item = agentCommandTranscriptMessage(item, roomParticipants);
-      if (item.vaultSave) {
-        return <VaultSaveCard card={item.vaultSave} cardId={item.id} roomId={decodedId}
-          stamp={ledgerStamp(item.timestamp)}
-          viewerId={cacheViewerPubkey} agentName={agentFor(item.vaultSave.agentId)?.displayName ?? 'Agent'} />;
-      }
-      if (item.roomUpdate) {
-        return (
-          <LedgerRoomUpdate
-            id={item.id}
-            line={item.text}
-            stamp={ledgerStamp(item.timestamp)}
-            digest={item.roomUpdate.digest}
-          />
-        );
-      }
-
-      if (item.writePermission) {
-        return (
-          <WritePermissionCard
-            message={item}
-            roomName={roomName}
-            agent={agentFor(item.writePermission.agentPubkey)}
-            viewerIsAgent={rowViewer}
-            viewerPubkey={cacheViewerPubkey}
-            viewerCanManage={rowManage}
-            actionId={rowPermission}
-            targetBranch={rowBranch}
-            onDecision={rowActions.handleWritePermission}
-            onOpenCorner={openCorner}
-          />
-        );
-      }
-
-      if (item.grantRequest) {
-        const card = (
-          <GrantRequestCard
-            message={item}
-            agent={agentFor(item.grantRequest.agent.pubkey)}
-            viewerIsAgent={rowViewer}
-            viewerPubkey={cacheViewerPubkey}
-            viewerCanManageWorkspace={rowManage}
-            actionId={rowGrant}
-            onDecision={handleGrantDecision}
-            onOpenSource={(roomId, messageId) =>
-              router.navigate(messageJumpHref(roomId, messageId, `squire-grant:${item.id}`))
-            }
-          />
-        );
-        return canDecideGrantRequest(item.grantRequest, cacheViewerPubkey, rowViewer, rowManage)
-          ? card
-          : <GrantRequestPill message={item} resolve={resolvePillIdentity} card={card} />;
-      }
-      if (item.squireApproval) {
-        return (
-          <SquireApprovalCard
-            message={item}
-            agent={agentFor(item.squireApproval.agent.pubkey)}
-            viewerPubkey={cacheViewerPubkey}
-            onOpenSource={(roomId, messageId) =>
-              router.navigate(messageJumpHref(roomId, messageId, `squire-approval:${item.id}`))
-            }
-          />
-        );
-      }
-      if (item.computerSession) {
-        return (
-          <ComputerSessionCard session={item.computerSession} messageId={item.id} roomId={decodedId} isDesktop={desktopExperience}
-          agentHandle={item.authorIdentity?.kind === 'agent' ? item.authorIdentity.handle : undefined} />
-        );
-      }
-      // The active call lives below the Room header; ended calls use LedgerSystemLine.
-      if (item.voiceCall && !item.voiceCall.endedAt) return null;
-      if (item.onboarding) return <RepositoryOnboardingCard card={item.onboarding} viewerId={cacheViewerPubkey} author={item.authorIdentity} />;
-      if (item.choice && (item.choice.mode === 'poll' || item.choice.runId)) {
-        return (
-          <ChoiceCard
+      const renderChoice = (item: ChatDisplayMessage) => item.choice && (item.choice.mode === 'poll' || item.choice.runId)
+        ? <ChoiceCard
             message={item}
             agent={agentFor(item.choice.agent.pubkey)}
             viewerIsAgent={rowViewer}
@@ -321,158 +226,262 @@ export function useChatTranscriptRenderer([
             actionId={rowChoice}
             onAnswer={handleChoiceAnswer}
           />
-        );
-      }
+        : undefined;
 
-      if (item.appSignIn) {
-        const card = item.appSignIn;
-        const agentName = resolveAgentDisplayIdentity(
-          card.agentId,
-          agentFor(card.agentId),
-        ).name;
-        return (
-          <AppSignInCard
-            message={item}
-            agentName={agentName}
-            canConnect={!rowViewer && cacheViewerPubkey === card.ownerId}
-            busy={rowAppSignIn === card.appId}
-            onConnect={() => {
-              if (rowAppSignIn || rowViewer || cacheViewerPubkey !== card.ownerId) return;
-              setAppSignInActionId(card.appId);
-              void monolithPhoneOperation('beginAppSignIn', { appId: card.appId })
-                .then((result) =>
-                  openAppSignIn(result.authorizationUrl, {
-                    workspaceId: activeCommunityId ?? '',
-                    viewerId: cacheViewerPubkey,
-                    roomId: decodedId,
-                    appId: card.appId,
-                  }),
-                )
-                .catch((error) =>
-                  Modal.alert('Could not connect app', phoneOperationFailureReason(error)),
-                )
-                .finally(() => setAppSignInActionId(null));
-            }}
-          />
-        );
-      }
-      if (item.agentSignIn) {
-        const card = item.agentSignIn;
-        const agentName = resolveAgentDisplayIdentity(
-          card.agentId,
-          agentFor(card.agentId),
-        ).name;
-        return (
-          <LedgerEntryFrame hasByline>
-            <AgentSignInCard
-              card={card}
-              agentName={agentName}
-              isOwner={!rowViewer && cacheViewerPubkey === card.ownerId}
-              onSubmit={async (code) => {
-                try {
-                  await monolithPhoneOperation('completeAgentSignIn', {
-                    roomId: decodedId,
-                    messageId: item.id,
-                    code,
-                  });
-                } catch (error) {
-                  throw new Error(phoneOperationFailureReason(error));
-                }
-              }}
-              testID={`agent-sign-in-${item.id}`}
+      const renderSystemBody = (item: ChatDisplayMessage) => {
+        if (item.deleted) return undefined;
+        if (item.vaultSave) {
+          return <VaultSaveCard card={item.vaultSave} cardId={item.id} roomId={decodedId}
+            stamp={ledgerStamp(item.timestamp)}
+            viewerId={cacheViewerPubkey} agentName={agentFor(item.vaultSave.agentId)?.displayName ?? 'Agent'} />;
+        }
+        if (item.roomUpdate) {
+          return (
+            <LedgerRoomUpdate
+              id={item.id}
+              line={item.text}
+              stamp={ledgerStamp(item.timestamp)}
+              digest={item.roomUpdate.digest}
             />
-          </LedgerEntryFrame>
-        );
-      }
-      if (item.connectorOffer) {
-        return (
-          <ConnectorOfferCard
-            message={item}
-            agent={agentFor(item.connectorOffer.agent.pubkey)}
-            viewerIsAgent={rowViewer}
-            viewerPubkey={cacheViewerPubkey}
-            viewerCanManage={rowManage}
-            actionId={rowConnector}
-            onAccept={handleAcceptConnectorOffer}
-            onDecline={async offerId => {
-              if (rowConnector) return;
-              setConnectorOfferActionId(offerId);
-              try { await monolithPhoneOperation('decideApprovalCard', { roomId: decodedId, messageId: item.id, decision: 'deny' }); }
-              catch (error) { Modal.alert('Could not decline', phoneOperationFailureReason(error)); }
-              finally { setConnectorOfferActionId(null); }
-            }}
-            onContinue={(offerId, connectorType, pairedConnectorId) =>
-              void continueConnectorOffer(offerId, connectorType, pairedConnectorId, item.connectorOffer!.intent === 'reconnect')
-            }
-            onOpenWorkbench={openWorkbench}
-            onOpenReplacement={messageId => handleOpenMessageSource(decodedId, messageId)}
-          />
-        );
-      }
+          );
+        }
 
-      if (item.notificationLifecycleRun) {
-        return (
-          <NotificationLifecycleCard
-            message={item}
-            cornerId={isCorner ? decodedId : undefined}
-            onOpenCorner={openCorner}
-            onOpenUrl={handleOpenGitHubEvent}
-          />
-        );
-      }
-
-      if (item.walletTx || item.walletInsufficient || item.walletDelegation) {
-        return <WalletCards message={item} stamp={ledgerStamp(item.timestamp)} />;
-      }
-
-      if (item.targetBranchProposal) {
-        const notice =
-          rowTargetBranchNotice !== undefined
-            ? rowTargetBranchNotice
-            : targetBranchNotice?.proposalId === item.targetBranchProposal.proposalId
-              ? targetBranchNotice.text
-              : null;
-        return (
-          <TargetBranchProposalCard
-            message={item}
-            roomName={roomName}
-            agent={agentFor(item.targetBranchProposal.agentPubkey)}
-            currentTargetBranch={rowBranch}
-            canManageWorkspace={rowManage}
-            viewerIsAgent={rowViewer}
-            actionId={rowBranchAction}
-            notice={notice}
-            onConfirm={rowActions.handleConfirmTargetBranch}
-            viewerPubkey={cacheViewerPubkey}
-            onDeny={async () => {
-              if (rowBranchAction) return;
-              setTargetBranchActionId(item.targetBranchProposal!.proposalId);
-              try { await monolithPhoneOperation('decideApprovalCard', { roomId: decodedId, messageId: item.id, decision: 'deny' }); }
-              catch (error) { Modal.alert('Could not decline', phoneOperationFailureReason(error)); }
-              finally { setTargetBranchActionId(null); }
-            }}
-          />
-        );
-      }
-      if (item.corner) {
-        return null;
-      }
-
-      if (item.githubEvent) {
-        return <GitHubEventCard message={item} onOpenCorner={openCorner} onOpenUrl={handleOpenGitHubEvent} />;
-      }
-
-      if (item.daemonFact) {
-        return (
-          <YStack>
-            <DaemonFactCard
+        if (item.writePermission) {
+          return (
+            <WritePermissionCard
               message={item}
+              roomName={roomName}
+              agent={agentFor(item.writePermission.agentPubkey)}
+              viewerIsAgent={rowViewer}
+              viewerPubkey={cacheViewerPubkey}
+              viewerCanManage={rowManage}
+              actionId={rowPermission}
+              targetBranch={rowBranch}
+              onDecision={rowActions.handleWritePermission}
               onOpenCorner={openCorner}
-              onOpenUrl={handleOpenGitHubEvent}
             />
-          </YStack>
-        );
-      }
+          );
+        }
+
+        if (item.grantRequest) {
+          return (
+            <GrantRequestCard
+              message={item}
+              agent={agentFor(item.grantRequest.agent.pubkey)}
+              viewerIsAgent={rowViewer}
+              viewerPubkey={cacheViewerPubkey}
+              viewerCanManageWorkspace={rowManage}
+              actionId={rowGrant}
+              onDecision={handleGrantDecision}
+              onOpenSource={(roomId, messageId) =>
+                router.navigate(messageJumpHref(roomId, messageId, `squire-grant:${item.id}`))
+              }
+            />
+          );
+        }
+        if (item.squireApproval) {
+          return (
+            <SquireApprovalCard
+              message={item}
+              agent={agentFor(item.squireApproval.agent.pubkey)}
+              viewerPubkey={cacheViewerPubkey}
+              onOpenSource={(roomId, messageId) =>
+                router.navigate(messageJumpHref(roomId, messageId, `squire-approval:${item.id}`))
+              }
+            />
+          );
+        }
+        if (item.computerSession) {
+          return (
+            <ComputerSessionCard session={item.computerSession} messageId={item.id} roomId={decodedId} isDesktop={desktopExperience}
+            agentHandle={item.authorIdentity?.kind === 'agent' ? item.authorIdentity.handle : undefined} />
+          );
+        }
+        if (item.onboarding) return <RepositoryOnboardingCard card={item.onboarding} viewerId={cacheViewerPubkey} author={item.authorIdentity} />;
+        const choice = renderChoice(item);
+        if (choice) return choice;
+
+        if (item.appSignIn) {
+          const card = item.appSignIn;
+          const agentName = resolveAgentDisplayIdentity(
+            card.agentId,
+            agentFor(card.agentId),
+          ).name;
+          return (
+            <AppSignInCard
+              message={item}
+              agentName={agentName}
+              canConnect={!rowViewer && cacheViewerPubkey === card.ownerId}
+              busy={rowAppSignIn === card.appId}
+              onConnect={() => {
+                if (rowAppSignIn || rowViewer || cacheViewerPubkey !== card.ownerId) return;
+                setAppSignInActionId(card.appId);
+                void monolithPhoneOperation('beginAppSignIn', { appId: card.appId })
+                  .then((result) =>
+                    openAppSignIn(result.authorizationUrl, {
+                      workspaceId: activeCommunityId ?? '',
+                      viewerId: cacheViewerPubkey,
+                      roomId: decodedId,
+                      appId: card.appId,
+                    }),
+                  )
+                  .catch((error) =>
+                    Modal.alert('Could not connect app', phoneOperationFailureReason(error)),
+                  )
+                  .finally(() => setAppSignInActionId(null));
+              }}
+            />
+          );
+        }
+        if (item.agentSignIn) {
+          const card = item.agentSignIn;
+          const agentName = resolveAgentDisplayIdentity(
+            card.agentId,
+            agentFor(card.agentId),
+          ).name;
+          return (
+            <LedgerEntryFrame hasByline>
+              <AgentSignInCard
+                card={card}
+                agentName={agentName}
+                isOwner={!rowViewer && cacheViewerPubkey === card.ownerId}
+                onSubmit={async (code) => {
+                  try {
+                    await monolithPhoneOperation('completeAgentSignIn', {
+                      roomId: decodedId,
+                      messageId: item.id,
+                      code,
+                    });
+                  } catch (error) {
+                    throw new Error(phoneOperationFailureReason(error));
+                  }
+                }}
+                testID={`agent-sign-in-${item.id}`}
+              />
+            </LedgerEntryFrame>
+          );
+        }
+        if (item.connectorOffer) {
+          return (
+            <ConnectorOfferCard
+              message={item}
+              agent={agentFor(item.connectorOffer.agent.pubkey)}
+              viewerIsAgent={rowViewer}
+              viewerPubkey={cacheViewerPubkey}
+              viewerCanManage={rowManage}
+              actionId={rowConnector}
+              onAccept={handleAcceptConnectorOffer}
+              onDecline={async offerId => {
+                if (rowConnector) return;
+                setConnectorOfferActionId(offerId);
+                try { await monolithPhoneOperation('decideApprovalCard', { roomId: decodedId, messageId: item.id, decision: 'deny' }); }
+                catch (error) { Modal.alert('Could not decline', phoneOperationFailureReason(error)); }
+                finally { setConnectorOfferActionId(null); }
+              }}
+              onContinue={(offerId, connectorType, pairedConnectorId) =>
+                void continueConnectorOffer(offerId, connectorType, pairedConnectorId, item.connectorOffer!.intent === 'reconnect')
+              }
+              onOpenWorkbench={openWorkbench}
+              onOpenReplacement={messageId => handleOpenMessageSource(decodedId, messageId)}
+            />
+          );
+        }
+
+        if (item.walletTx || item.walletInsufficient || item.walletDelegation) {
+          return <WalletCards message={item} stamp={ledgerStamp(item.timestamp)} />;
+        }
+
+        if (item.targetBranchProposal) {
+          const notice =
+            rowTargetBranchNotice !== undefined
+              ? rowTargetBranchNotice
+              : targetBranchNotice?.proposalId === item.targetBranchProposal.proposalId
+                ? targetBranchNotice.text
+                : null;
+          return (
+            <TargetBranchProposalCard
+              message={item}
+              roomName={roomName}
+              agent={agentFor(item.targetBranchProposal.agentPubkey)}
+              currentTargetBranch={rowBranch}
+              canManageWorkspace={rowManage}
+              viewerIsAgent={rowViewer}
+              actionId={rowBranchAction}
+              notice={notice}
+              onConfirm={rowActions.handleConfirmTargetBranch}
+              viewerPubkey={cacheViewerPubkey}
+              onDeny={async () => {
+                if (rowBranchAction) return;
+                setTargetBranchActionId(item.targetBranchProposal!.proposalId);
+                try { await monolithPhoneOperation('decideApprovalCard', { roomId: decodedId, messageId: item.id, decision: 'deny' }); }
+                catch (error) { Modal.alert('Could not decline', phoneOperationFailureReason(error)); }
+                finally { setTargetBranchActionId(null); }
+              }}
+            />
+          );
+        }
+        if (item.githubEvent) {
+          return <GitHubEventCard message={item} onOpenCorner={openCorner} onOpenUrl={handleOpenGitHubEvent} />;
+        }
+
+        if (item.daemonFact) {
+          return (
+            <YStack>
+              <DaemonFactCard
+                message={item}
+                onOpenCorner={openCorner}
+                onOpenUrl={handleOpenGitHubEvent}
+              />
+            </YStack>
+          );
+        }
+
+        if (item.awayWarning) {
+          return <TranscriptCard tier="record" testID="away-warning-card" wrapTitle
+            title="Routines will pause in 1 day" body={item.text} stamp={ledgerStamp(item.timestamp)} />;
+        }
+
+        if (item.durableFact && !item.isSystemNotice && !item.systemEvent) {
+          return (
+            <LedgerRoomUpdate
+              id={item.id}
+              line={durableFactLine(item)}
+              stamp={ledgerStamp(item.timestamp)}
+              tone={item.durableFact.kind === 'failure' ? 'brass' : 'quiet'}
+            />
+          );
+        }
+
+        return undefined;
+      };
+
+      const renderPills = (run: readonly ChatDisplayMessage[]) => (
+        <TranscriptPills
+          run={run}
+          resolve={resolvePillIdentity}
+          renderBody={renderSystemBody}
+          onOpenIdentity={handleOpenSystemIdentity}
+          onOpenUrl={handleOpenGitHubEvent}
+          onOpenBrief={openCurrentBrief}
+          onOpenCorner={openCorner}
+          cornerId={isCorner ? decodedId : undefined}
+        />
+      );
+      const withMarkers = (body: React.ReactNode) => item.cornerMarkers?.length ? (
+        <YStack>
+          {body}
+          {renderPills(item.cornerMarkers)}
+        </YStack>
+      ) : body;
+
+      if (item.corner || isHiddenSystemLine(item)) return null;
+      const run = item.pillRun ?? (isPillMessage(item) ? [item] : null);
+      if (run) return withMarkers(renderPills(run));
+
+      // Member orders and reports keep their own byline.
+      item = agentCommandTranscriptMessage(item, roomParticipants);
+      const memberChoice = renderChoice(item);
+      if (memberChoice) return withMarkers(memberChoice);
 
       // ── Archived notice ──────────────────────────────────────────
       if (item.isArchivedNotice) {
@@ -480,32 +489,6 @@ export function useChatTranscriptRenderer([
           <YStack paddingVertical="2" marginBottom="4" alignSelf="center" maxWidth="90%">
             <T v="code" color="secondary" textAlign="center">□ THREAD ARCHIVED · READ-ONLY</T>
           </YStack>
-        );
-      }
-
-      // ── System line: one renderer for every server-phrased notification ──
-      if (item.isSystemNotice) {
-        return (
-          <LedgerSystemLine
-            id={item.id}
-            text={item.text}
-            {...(item.systemEvent ? { event: item.systemEvent } : {})}
-            stamp={ledgerStamp(item.timestamp)}
-            onOpenIdentity={handleOpenSystemIdentity}
-            onOpenUrl={handleOpenGitHubEvent}
-            onOpenBrief={openCurrentBrief}
-          />
-        );
-      }
-
-      if (item.durableFact) {
-        return (
-          <LedgerRoomUpdate
-            id={item.id}
-            line={durableFactLine(item)}
-            stamp={ledgerStamp(item.timestamp)}
-            tone={item.durableFact.kind === 'failure' ? 'brass' : 'quiet'}
-          />
         );
       }
 
@@ -570,14 +553,7 @@ export function useChatTranscriptRenderer([
         />
       );
       ownsReplyGesture = item.presentation !== 'card' || item.choice?.mode === 'question';
-      return item.cornerMarkers?.length ? (
-        <YStack>
-          {ledgerMessage}
-          <CornerOpenedMarkers message={item} onOpenCorner={openCorner} onOpenUrl={handleOpenGitHubEvent} />
-        </YStack>
-      ) : (
-        ledgerMessage
-      );
+      return withMarkers(ledgerMessage);
       };
       const content = renderContent();
       if (!content || ownsReplyGesture || rowDesktopLayout || isReadOnlyDirectMessage ||

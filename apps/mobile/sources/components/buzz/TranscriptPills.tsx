@@ -2,8 +2,8 @@ import React, { useMemo } from 'react';
 import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
-import { isGitHubEventRun, stopNotice } from '@/buzz/transcript-pills';
-import { countedLifecycleItemIds, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
+import { isGitHubEventRun, isSystemLine, stopNotice } from '@/buzz/transcript-pills';
+import { countedLifecycleItemIds, lifecycleItem, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
 import { BEELINE_FACE, GITHUB_FACE, isNotice, PillRow, type PillEvent, type PillFace, type PillItem, type PillRunEntry } from '@/ui/screens/transcript/PillRow';
 import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
@@ -13,6 +13,7 @@ import { NotificationLifecycleCard } from './PrLifecycleCard';
 export type PillIdentityResolver = (id: string, name: string, kind?: 'agent' | 'human') => PillFace;
 
 type PillHandlers = {
+  renderBody?: (message: ChatDisplayMessage) => React.ReactNode;
   onOpenIdentity?: (id: string) => void;
   onOpenUrl?: (url: string) => void;
   onOpenBrief?: () => void;
@@ -24,30 +25,26 @@ type PillHandlers = {
 function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, handlers: PillHandlers): PillItem {
   const time = ledgerStamp(message.timestamp);
   const stop = stopNotice(message);
-  if (stop) {
+  if (message.notificationLifecycleRun || isSystemLine(message)) {
+    const request = message.grantRequest;
+    const from = stop ? resolve(stop.stopper.id, stop.stopper.name, stop.stopper.kind)
+      : request ? resolve(request.agent.pubkey, request.agent.name, 'agent')
+      : message.systemTranscript?.origin === 'github' || message.systemEvent?.subject?.kind === 'github'
+        ? GITHUB_FACE : BEELINE_FACE;
+    const to = stop ? resolve(stop.stopped.id, stop.stopped.name, 'agent')
+      : request ? resolve(request.owner.pubkey, request.owner.name, 'human') : undefined;
     return {
       id: message.id,
       system: true,
-      // A stop is the stopper's face, the stop glyph and the stopped agent's face; the line itself opens on tap.
-      stop: true,
-      from: resolve(stop.stopper.id, stop.stopper.name, stop.stopper.kind),
-      to: resolve(stop.stopped.id, stop.stopped.name, 'agent'),
+      stop: Boolean(stop),
+      from,
+      to,
       time,
       body: (
-        <LedgerSystemLine
-          id={message.id}
-          text={message.text}
-          {...(message.systemEvent ? { event: message.systemEvent } : {})}
-          stamp={time}
-          bare
-          onOpenIdentity={handlers.onOpenIdentity}
-          onOpenUrl={handlers.onOpenUrl}
-          onOpenBrief={handlers.onOpenBrief}
-        />
+        <OpenedSystemBody message={message} time={time} handlers={handlers} />
       ),
     };
   }
-  // `isPillMessage` admits only an agent-authored message to another agent here.
   const author = message.authorIdentity?.pubkey ?? message.pubkey ?? '';
   const authorName = message.authorIdentity?.name ?? '';
   const recipient = message.agentCommand?.recipient;
@@ -68,6 +65,29 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
       <TypedView view={MonoMarkdown} v="body" color="secondary" markdown={text} testID={`pill-message-${message.id}`} />
     ),
   };
+}
+
+function OpenedSystemBody({ message, time, handlers }: {
+  message: ChatDisplayMessage;
+  time: string;
+  handlers: PillHandlers;
+}) {
+  if (!message.deleted && message.notificationLifecycleRun) {
+    return <NotificationLifecycleCard message={message} cornerId={handlers.cornerId}
+      onOpenCorner={handlers.onOpenCorner ?? (() => {})} onOpenUrl={handlers.onOpenUrl ?? (() => {})} />;
+  }
+  return handlers.renderBody?.(message) ?? (
+    <LedgerSystemLine
+      id={message.id}
+      text={message.text}
+      event={message.systemEvent}
+      stamp={time}
+      bare
+      onOpenIdentity={handlers.onOpenIdentity}
+      onOpenUrl={handlers.onOpenUrl}
+      onOpenBrief={handlers.onOpenBrief}
+    />
+  );
 }
 
 type LifecycleItem = NotificationLifecycleRun['items'][number];
@@ -142,9 +162,14 @@ export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdent
   // A repeated webhook line for one PR event counts once across the whole run.
   const counted = countedLifecycleItemIds(run.flatMap((message) =>
     isGitHubEventRun(message) ? message.notificationLifecycleRun!.items : []));
-  const entries: PillRunEntry[] = run.flatMap((message) => isGitHubEventRun(message)
-    ? eventEntries(message, counted, handlers)
-    : [pillItem(message, resolve, handlers)]);
+  const entries: PillRunEntry[] = run.flatMap(message => {
+    if (isGitHubEventRun(message)) return eventEntries(message, counted, handlers);
+    if (!message.deleted && message.daemonFact?.sourceMessageId) {
+      const marker = lifecycleItem(message);
+      if (marker?.cornerId) return [eventEntry(marker, ledgerStamp(message.timestamp), true, handlers)];
+    }
+    return [pillItem(message, resolve, handlers)];
+  });
   if (entries.length < 2) {
     return entries.map((entry) => ({ ...entry, system: Boolean(entry.system), body: entry.body ?? null }));
   }
@@ -156,6 +181,7 @@ export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdent
 export function TranscriptPills({
   run,
   resolve,
+  renderBody,
   onOpenIdentity,
   onOpenUrl,
   onOpenBrief,
@@ -166,17 +192,13 @@ export function TranscriptPills({
   resolve: PillIdentityResolver;
 } & PillHandlers) {
   const items = useMemo(
-    () => pillItems(run, resolve, { onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId }),
-    [run, resolve, onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId],
+    () => pillItems(run, resolve, { renderBody, onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId }),
+    [run, resolve, renderBody, onOpenIdentity, onOpenUrl, onOpenBrief, onOpenCorner, cornerId],
   );
   return (
     // The ledger's bylined entry rhythm: 24 at a speaker change on both sides of the pills.
     <LedgerEntryFrame hasByline testID={`chat-message-${run[0]?.id ?? ''}`}>
-      {/* Payment and wallet runs keep their own rows. */}
-      {run.length === 1 && run[0]?.notificationLifecycleRun && !isGitHubEventRun(run[0]) ? (
-        <NotificationLifecycleCard message={run[0]} cornerId={cornerId}
-          onOpenCorner={onOpenCorner ?? (() => {})} onOpenUrl={onOpenUrl ?? (() => {})} />
-      ) : <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />}
+      <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />
     </LedgerEntryFrame>
   );
 }

@@ -1,5 +1,4 @@
 import { INSTITUTIONAL_HISTORY_MAX_AGE_DAYS, INSTITUTIONAL_MEMORY_KEYWORD_PATTERN, INSTITUTIONAL_MEMORY_KEYWORDS_MAX, INSTITUTIONAL_MEMORY_STOPWORDS, INSTITUTIONAL_RETIRED_STANDING_KEY } from '@beeline/api-contract/daemon';
-import { SCHEDULE_RAN_VERB } from '@beeline/api-contract/scheduled-prompts';
 import { PER_ITEM_EVENT_KINDS, uniqueAgentHandle } from '@beeline/api-contract/phone';
 import { perItemMembershipSubscriptionCleanupSql } from './membership-join.js';
 import { TERMINAL_PUSH_CLAIMS_SQL } from './push-claim-cleanup.js';
@@ -269,22 +268,6 @@ export async function backfillInstitutionalMemoryRollout(database: SqlDatabase):
       `backfillInstitutionalMemoryRollout: advanced ${advanced.rowCount}, enrolled ${enrolled.rowCount} Workspace rollout(s)`,
     );
   return changed;
-}
-
-
-/**
- * Scheduled-prompt lines predate the `kind` beside their verb. They are the one
- * shape a live subscriber can already be waiting on, so they are stamped; older
- * join/corner/check lines get nothing, because no subscriber can want an event
- * that already happened. Idempotent through the `IS NULL` guard.
- */
-export async function backfillSystemEventKinds(database: SqlDatabase): Promise<void> {
-  await boundedMigrationUpdate(database, 'system event kinds',
-    `UPDATE messages SET system_event = system_event || jsonb_build_object('kind','schedule-ran')
-     WHERE id IN (SELECT id FROM messages WHERE system_event->>'verb'=$1
-       AND system_event->>'kind' IS NULL ORDER BY id LIMIT $2)`,
-    [SCHEDULE_RAN_VERB],
-  );
 }
 
 

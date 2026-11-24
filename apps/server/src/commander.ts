@@ -2,7 +2,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
 import { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
-import { queueMessage,type CommandRow,type PrivateCommandPayload,type QueuedDelivery } from './agent-command.js';
+import { queueMessage,type CommandRow,type PrivateCommandPayload } from './agent-command.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { cornerCommanderBriefSql,cornerCommanderIdSql,threadCommanderAddressSql,threadTaskSql } from './corner-commander.js';
 import { recordedMessageRoute,reportRecipient } from './message-route.js';
@@ -213,13 +213,9 @@ export function commanderChainSql(corner: string, asker: string, askedAt: string
 type ReportOptions = { orderIssuer?: boolean; automatic?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string; afterCommit?: AfterCommit };
 
 type ReportReceipt = { id: string; createdAt: number; delivered?: boolean; receipt?: string };
-/** A worker reports in its model's words; a machine report is System-authored. */
-export function reportToCommander(db: SqlDatabase, roomId: string, agentId: string, text: AgentVoice,
-  command?: CommandRow, reportId?: string, options?: ReportOptions): Promise<ReportReceipt>;
-export function reportToCommander(db: SqlDatabase, roomId: string, agentId: SystemAuthorId, text: Composed<'system'>,
-  command?: CommandRow, reportId?: string, options?: ReportOptions): Promise<ReportReceipt>;
+/** A worker reports in its model's words. */
 export async function reportToCommander(
-  db: SqlDatabase, roomId: string, agentId: string, text: AgentVoice | Composed<'system'>, command?: CommandRow,
+  db: SqlDatabase, roomId: string, agentId: string, text: AgentVoice, command?: CommandRow,
   reportId = randomBytes(32).toString('hex'), options: ReportOptions = {},
 ): Promise<ReportReceipt> {
   const resolved = command ? undefined : await commanderReportAddress(db, roomId);
@@ -236,7 +232,7 @@ export async function reportToCommander(
     sourceRoomId: roomId, sourceItem: source, parent,
     attachments: options.attachments, ask: options.ask,
     automatic: options.automatic, idleSince: options.idleSince,
-  } as QueuedDelivery);
+  });
 }
 
 /** Lifecycle notices select an agent audience; they do not create a human request.

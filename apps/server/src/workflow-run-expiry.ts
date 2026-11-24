@@ -2,7 +2,7 @@ import type { SqlDatabase } from './database.js';
 import { openRun } from './workflow-runs.js';
 import { closeRun } from './workflow-runs-cancel-run-timers.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { systemMessage } from '@beeline/api-contract/system-message-catalog';
+import { workflowExpiryLine } from './workflow-expiry-line.js';
 
 // Pinned metadata also covers runs created before timeout enforcement existed.
 const deadlines = `SELECT start.room_id,start.id run_id,
@@ -39,10 +39,7 @@ export async function expireWorkflowRuns(db: SqlDatabase, now: Date): Promise<st
     if (scope.ended || !seconds || new Date(scope.head.createdAt).getTime()+seconds*1000>now.getTime()) return;
     if (await closeRun(tx, scope, {
       status: 'failed', outcome: 'expired', reason: 'Step exceeded timeoutSeconds',
-      line: { authorId: SYSTEM_IDENTITY_ID,
-        subject: { kind: 'system', name: systemMessage('workflow-runs.the-workflow') },
-        verb: systemMessage('workflow-runs.applied'), object: systemMessage('workflow-runs.timeout'),
-        consequence: scope.stateName },
+      line: { authorId: SYSTEM_IDENTITY_ID, ...workflowExpiryLine(scope.run.workflowSlug, scope.state?.kind) },
     })) changed.push(candidate.room_id);
   });
   return [...new Set(changed)];

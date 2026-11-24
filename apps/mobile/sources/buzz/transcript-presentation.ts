@@ -1,4 +1,5 @@
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
+import { isHiddenSystemLine } from '@/buzz/transcript-pills';
 
 /**
  * Whether a projected transcript record owns a visible FlatList row.
@@ -11,7 +12,7 @@ import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
  * bounded history window.
  */
 export function rendersTranscriptRow(message: ChatDisplayMessage): boolean {
-  if (message.corner) return false;
+  if (message.corner || isHiddenSystemLine(message)) return false;
   return !(
     message.writePermission?.status === 'allowed' &&
     message.writePermission.subchannelId !== undefined

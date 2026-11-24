@@ -46,7 +46,7 @@ import { retireDatedCardWorkflows } from './migrations/dated-card-workflows.js';
 import { deleteArchivedCornerWakeSources } from './migrations/archived-corner-wakes.js';
 import { retireBotDirectMessages } from './migrations/one-system-thread.js';
 import { FREE_AGENTS_SCHEMA, FREE_AGENT_CONNECT_GUIDE } from './free-agents.js';
-import { backfillComputerObservations } from './system-line.js';
+import { backfillComputerObservations, backfillSystemEventKinds } from './migrations/system-lines.js';
 import { SUBSCRIPTION_WEBHOOKS_SCHEMA } from './subscription-webhooks.js';
 import { AGENT_SUBSCRIPTIONS_SCHEMA, migrateMembershipSubscriptions } from './agent-subscriptions.js';
 import { PROVIDER_WEBHOOKS_SCHEMA } from './provider-webhooks.js';
@@ -81,7 +81,7 @@ import { backfillCornerFollows, cornerFollowsSchemaSql } from './corner-follow.j
 import { alreadyNoOp, alreadySatisfied, triggerAlreadyCurrent, runMigrationStep, splitMigrationStatements } from './migration-steps.js';
 import { SqlDatabase, SCHEMA, MESSAGE_CURSOR_MS_SQL } from './database.js';
 import { MEMBERSHIP_ROLE_SCHEMA, retireOrphanRoomMemberships } from './membership-join.js';
-import { createIndexConcurrently, backfillMessageSearchDocuments, backfillSquireApprovalExpiry, compactWebhookDeliveries, compactPushClaims, backfillCornerOwed, backfillSystemEventKinds, backfillPerItemEventSubscriptions, backfillInstitutionalMemoryRollout, retireStandingPreferences, backfillConnectorMachineId } from './database-backfill-squire-approval-expiry.js';
+import { createIndexConcurrently, backfillMessageSearchDocuments, backfillSquireApprovalExpiry, compactWebhookDeliveries, compactPushClaims, backfillCornerOwed, backfillPerItemEventSubscriptions, backfillInstitutionalMemoryRollout, retireStandingPreferences, backfillConnectorMachineId } from './database-backfill-squire-approval-expiry.js';
 
 
 

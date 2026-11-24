@@ -16,13 +16,13 @@ describe('transcript pills', () => {
   const say = (id: string, from = 'alan', to = 'jimmy') => row(id, {
     pubkey: from, agentCommand: { kind: 'message', recipient: { id: to, name: to, kind: 'agent' }, text: id } });
 
-  it('draws agent orders as pills and keeps system lines and Beeline-account rows out of pills', () => {
-    expect(isPillMessage(system('s'))).toBe(false);
+  it('pills agent orders, plain notices and Beeline-account rows', () => {
+    expect(isPillMessage(system('s'))).toBe(true);
     expect(isSystemLine(system('s'))).toBe(true);
-    expect(isPillMessage(row('b', { pubkey: SYSTEM_IDENTITY_PUBKEY }))).toBe(false);
+    expect(isPillMessage(row('b', { pubkey: SYSTEM_IDENTITY_PUBKEY }))).toBe(true);
     expect(isSystemLine(row('b', { pubkey: SYSTEM_IDENTITY_PUBKEY }))).toBe(true);
-    // A Beeline-authored order is a system line, not a Beeline → agent pill.
-    expect(isPillMessage(say('beeline-order', SYSTEM_IDENTITY_PUBKEY))).toBe(false);
+    // A Beeline-authored order takes the system notice path.
+    expect(isPillMessage(say('beeline-order', SYSTEM_IDENTITY_PUBKEY))).toBe(true);
     expect(isPillMessage(row('o', {
       pubkey: 'alan', agentCommand: { kind: 'order', recipient: { id: 'jimmy', name: 'Jimmy', kind: 'agent' }, text: 'Go' },
     }))).toBe(true);
@@ -30,14 +30,14 @@ describe('transcript pills', () => {
     expect(isSystemLine(row('m', { pubkey: 'dan' }))).toBe(false);
   });
 
-  it('never folds a system line into a pill run: it ends the run and stays its own row', () => {
+  it('keeps a plain system notice in its own pill between agent runs', () => {
     const offline = row('host', { isSystemNotice: true, text: '@grunt joined',
       systemEvent: { subject: { kind: 'agent', id: 'grunt', name: 'Grunt' }, verb: 'joined' } });
     const rows = foldPillRuns([say('m1'), say('m2'), offline, say('m3')]);
     expect(rows.map(message => message.id)).toEqual(['m1', 'host', 'm3']);
     expect(rows[0]!.pillRun?.map(message => message.id)).toEqual(['m1', 'm2']);
     expect(rows[1]!.pillRun).toBeUndefined();
-    expect(isPillMessage(rows[1]!)).toBe(false);
+    expect(isPillMessage(rows[1]!)).toBe(true);
     // A lone agent message stays a single row with no folded run.
     expect(rows[2]!.pillRun).toBeUndefined();
   });
@@ -54,8 +54,8 @@ describe('transcript pills', () => {
     expect(rows[2]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['after1', 'after2']);
   });
 
-  it('keeps cards and attachments out of pills', () => {
-    expect(isPillMessage(row('c', { ...say('c'), githubEvent: {} as never }))).toBe(false);
+  it('pills provider cards while ordinary attachments and archive banners keep their own rows', () => {
+    expect(isPillMessage(row('c', { ...say('c'), githubEvent: {} as never }))).toBe(true);
     expect(isPillMessage(row('a', { ...say('a'), attachments: [{} as never] }))).toBe(false);
     expect(isPillMessage(row('x', { ...say('x'), isArchivedNotice: true }))).toBe(false);
   });
@@ -63,7 +63,7 @@ describe('transcript pills', () => {
   it('draws a folded PR or thread lifecycle run as a system pill', () => {
     const run = { items: [], subline: '' } as never;
     expect(isPillMessage(row('l', { githubEvent: {} as never, notificationLifecycleRun: run }))).toBe(true);
-    expect(isPillMessage(row('d', { deleted: true, notificationLifecycleRun: run }))).toBe(false);
+    expect(isPillMessage(row('d', { deleted: true, notificationLifecycleRun: run }))).toBe(true);
   });
 
   it('keeps a plain tag of another agent a message, and draws message() to an agent as a pill', () => {

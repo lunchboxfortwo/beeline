@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { QueryProfiler } from './query-profile.js';
 import { DatabaseBackgroundWork } from './database-background-work.js';
 import { migrate, migrateData } from './database-migrate.js';
-import { backfillSquireApprovalExpiry, keywordsFromBody, retireStandingPreferences, MESSAGE_SEARCH_BACKFILL_BATCH, backfillMessageSearchDocuments, backfillConnectorMachineId, compactWebhookDeliveries, compactPushClaims, backfillInstitutionalMemoryRollout, backfillSystemEventKinds, backfillPerItemEventSubscriptions, backfillCornerOwed, measureDatabase, measureDatabaseBreakdown } from './database-backfill-squire-approval-expiry.js';
+import { backfillSquireApprovalExpiry, keywordsFromBody, retireStandingPreferences, MESSAGE_SEARCH_BACKFILL_BATCH, backfillMessageSearchDocuments, backfillConnectorMachineId, compactWebhookDeliveries, compactPushClaims, backfillInstitutionalMemoryRollout, backfillPerItemEventSubscriptions, backfillCornerOwed, measureDatabase, measureDatabaseBreakdown } from './database-backfill-squire-approval-expiry.js';
 
 
 
@@ -625,8 +625,9 @@ export { backfillConnectorMachineId } from './database-backfill-squire-approval-
 export { compactWebhookDeliveries } from './database-backfill-squire-approval-expiry.js';
 export { compactPushClaims } from './database-backfill-squire-approval-expiry.js';
 export { backfillInstitutionalMemoryRollout } from './database-backfill-squire-approval-expiry.js';
-export { backfillSystemEventKinds } from './database-backfill-squire-approval-expiry.js';
 export { backfillPerItemEventSubscriptions } from './database-backfill-squire-approval-expiry.js';
 export { backfillCornerOwed } from './database-backfill-squire-approval-expiry.js';
 export { measureDatabase } from './database-backfill-squire-approval-expiry.js';
 export { measureDatabaseBreakdown } from './database-backfill-squire-approval-expiry.js';
+
+export { backfillSystemEventKinds } from './migrations/system-lines.js';

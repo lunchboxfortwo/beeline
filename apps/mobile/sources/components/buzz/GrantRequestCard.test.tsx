@@ -13,7 +13,8 @@ vi.mock('@/ui/screens/transcript/cards/RequestMedia', () => ({ RequestMedia: () 
 vi.mock('./Ledger', () => ({ LedgerEntryFrame: ({ children }: { children: React.ReactNode }) => children }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
-import { canDecideGrantRequest, GrantRequestCard, GrantRequestPill } from './GrantRequestCard';
+import { canDecideGrantRequest, GrantRequestCard } from './GrantRequestCard';
+import { TranscriptPills } from './TranscriptPills';
 
 const OWNER = 'a'.repeat(64);
 const AGENT = { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Alan', handle: 'alan' } as const;
@@ -93,9 +94,9 @@ describe('grant request card', () => {
         expect(canDecideGrantRequest(request, other, false, true)).toBe(false);
         let tree: any;
         act(() => {
-            tree = create(<GrantRequestPill message={message}
-                resolve={(id, name, kind) => ({ kind, seed: id, name })}
-                card={<GrantRequestCard message={message} viewerIsAgent={false} viewerPubkey={other}
+            tree = create(<TranscriptPills run={[message]}
+                resolve={(id, name, kind) => ({ kind: kind ?? 'human', seed: id, name })}
+                renderBody={row => <GrantRequestCard message={row} viewerIsAgent={false} viewerPubkey={other}
                     actionId={null} onDecision={() => undefined} />} />);
         });
         const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'system-pill');

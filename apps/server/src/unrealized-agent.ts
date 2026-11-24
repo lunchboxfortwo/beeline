@@ -1,6 +1,6 @@
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { SqlDatabase } from './database.js';
-import { ensureSystemIdentity } from './system-line.js';
+import { ensureSystemIdentity, systemLine } from './system-line.js';
 import { revokeDaemonCredentials } from './daemon-credential-lifetime.js';
 
 /** The caller owns the transaction. A failed connect may discard setup, never work. */
@@ -19,13 +19,16 @@ export async function deleteUnrealizedAgent(database: SqlDatabase, agentId: stri
   await database.query(`DELETE FROM push_outbox WHERE message_id IN (SELECT id FROM messages WHERE author_id=$1)`, [agentId]);
   await database.query(`DELETE FROM push_message_context WHERE message_id IN (SELECT id FROM messages WHERE author_id=$1)`, [agentId]);
   await database.query(`DELETE FROM push_turn_context WHERE author_id=$1`, [agentId]);
-  const notices = await database.query(`SELECT 1 FROM messages WHERE author_id=$1 LIMIT 1`, [agentId]);
-  if (notices.rowCount) {
-    // A generated join can already be the source of somebody else's command.
-    // Keep its ID and those commands, but hide the unrealized arrival.
+  const notices = await database.query<{ id: string; deleted_at: Date }>(
+    `SELECT id,COALESCE(deleted_at,now()) deleted_at FROM messages
+     WHERE author_id=$1 AND presentation='system' AND card_type='member-joined'`, [agentId],
+  );
+  if (notices.rows.length) {
+    // Keep the join ids because other commands may already cite them.
     await ensureSystemIdentity(database);
-    await database.query(`UPDATE messages SET author_id=$2,deleted_at=COALESCE(deleted_at,now())
-      WHERE author_id=$1 AND presentation='system' AND card_type='member-joined'`, [agentId,SYSTEM_IDENTITY_ID]);
+    await systemLine(database, { operation: 'update', rows: notices.rows.map(row => ({
+      id: row.id, authorId: SYSTEM_IDENTITY_ID, deletedAt: row.deleted_at,
+    })) });
   }
   await database.query(`DELETE FROM agent_pairing_codes WHERE claimed_by=$1`, [agentId]);
   // Native cascades remove only this identity's setup rows and reservations.

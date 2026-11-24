@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { YStack } from 'tamagui';
-import { NotificationLifecycleCard } from '@/components/buzz/PrLifecycleCard';
 import { formatChoiceClock, workflowGateOptionLabel } from '@beeline/api-contract/phone';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
@@ -559,7 +558,6 @@ export const TargetBranchProposalCard = React.memo(function TargetBranchProposal
   );
 });
 export { GitHubEventCard, DaemonFactCard } from '@/components/buzz/LifecycleCard';
-export { NotificationLifecycleCard };
 export { GrantRequestCard, type GrantDecision, type GrantRequestCardProps } from '@/components/buzz/GrantRequestCard';
 export type { OrdinaryLedgerMessageProps } from './RoomMessageVariants-attachment-card';
 export { ConnectorReceiptCard, SwipeToReply } from './RoomMessageVariants-attachment-card';

@@ -2,12 +2,12 @@ import { formatSystemLine, repositorySystemLine } from '@beeline/api-contract/ph
 import type { RoomViewMessage, SystemEvent, SystemSubject } from '@beeline/api-contract/phone';
 
 /**
- * System lines on the phone: one grammar, one renderer, one row per message.
+ * The committed fields shared by system notice bodies and lifecycle folds.
  *
  * The server phrases every system notification (`apps/server/src/system-line.ts`)
  * as `<subject> <verb>[ <object>][ · <consequence>]` and stores the structured
  * event beside the text. The phone renders the event (names in brass, the
- * object linked by its URL). Passive lifecycle events can share a disclosure row; their message ids and posted facts remain intact.
+ * object linked by its URL). Pills can group lifecycle events while retaining their message ids.
  * A row from before the grammar has no event and renders its text verbatim.
  */
 export type SystemLineMessage = {
@@ -15,6 +15,7 @@ export type SystemLineMessage = {
   text: string;
   timestamp: number;
   orderAtMs?: number;
+  cornerMarkers?: readonly unknown[];
   foldedReadBoundaries?: { id: string; orderAtMs: number }[];
   isSystemNotice?: boolean;
   /** A deleted message's line; it holds that message's place, so it never folds. */

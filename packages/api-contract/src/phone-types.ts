@@ -225,7 +225,13 @@ export type RoomViewActivity = {
 };
 
 
+export type SystemTranscript = {
+  readonly origin: 'system' | 'github' | 'scheduler';
+  readonly visibility: 'notice' | 'card' | 'hidden';
+};
+
 export type RoomViewMessage = {
+  readonly systemTranscript?: SystemTranscript;
   readonly awayWarning?: boolean;
   readonly sourceClient?: { readonly id: string; readonly name: string };
   readonly voiceCall?: import('./voice.js').VoiceCall;

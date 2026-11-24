@@ -1,4 +1,5 @@
 import { messageColumns } from '../message-columns.js';
+import { projectSystemTranscript } from '../system-transcript.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { workingTurnFreshSql } from '../agent-turn-end.js';
 import { readHelperOverlayFrame } from '@beeline/api-contract/helper-overlay';
@@ -37,7 +38,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
     committed: { type: 'message'; row: CommittedMessageLiveRow },
     viewerId?: string,
   ): Promise<RoomLiveDelta | null> {
-    if (committed.row.room_id !== roomId) return null;
+    if (committed.row.room_id !== roomId || projectSystemTranscript(committed.row)?.visibility === 'hidden') return null;
     if (committed.row.card_type === 'repository-onboarding' && (!viewerId ||
       readRepositoryOnboardingCard(committed.row.card)?.requesterId !== viewerId)) return null;
     const message = (await phoneDecorateCornerOpenCards(ctx, roomId, [

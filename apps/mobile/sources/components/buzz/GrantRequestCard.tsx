@@ -1,15 +1,13 @@
 import { approvalSentence } from '@beeline/api-contract/phone';
-import React, { useMemo } from 'react';
+import React from 'react';
 import { YStack } from 'tamagui';
 import { T } from '@/ui/grammar';
-import { PillRow, type PillFace, type PillItem } from '@/ui/screens/transcript/PillRow';
 import { RequestMedia } from '@/ui/screens/transcript/cards/RequestMedia';
 import { AGENT_GRANT_VERBS, grantPresentation } from '@beeline/api-contract/agent-grants';
 import type { AgentPresentation, ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { AgentApprovalCard, approvalAudience, approvalDecisionNote } from './AgentApprovalCard';
 import { type TranscriptCardAction } from './TranscriptCard';
-import { LedgerEntryFrame } from './Ledger';
 
 export type GrantDecision = 'always' | 'once' | 'deny';
 
@@ -151,29 +149,3 @@ export const GrantRequestCard = React.memo(function GrantRequestCard({
     </YStack>
   );
 });
-
-/**
- * A permission request seen by someone who cannot answer it: a collapsed
- * system pill (asking agent → the person who decides) whose card opens
- * read-only. Only the request's target sees the card with its controls.
- */
-export function GrantRequestPill({ message, resolve, card }: {
-  message: ChatDisplayMessage;
-  resolve: (id: string, name: string, kind: 'agent' | 'human') => PillFace;
-  card: React.ReactNode;
-}) {
-  const request = message.grantRequest!;
-  const items = useMemo<PillItem[]>(() => [{
-    id: message.id,
-    system: true,
-    from: resolve(request.agent.pubkey, request.agent.name, 'agent'),
-    to: resolve(request.owner.pubkey, request.owner.name, 'human'),
-    time: ledgerStamp(message.timestamp),
-    body: card,
-  }], [message.id, message.timestamp, request.agent.pubkey, request.agent.name, request.owner.pubkey, request.owner.name, resolve, card]);
-  return (
-    <LedgerEntryFrame hasByline testID={`chat-message-${message.id}`}>
-      <PillRow items={items} testID={`grant-request-pill-${message.id}`} />
-    </LedgerEntryFrame>
-  );
-}

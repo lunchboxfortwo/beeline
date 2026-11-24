@@ -191,6 +191,7 @@ export function createRoomMessageProjector(): RoomMessageProjector {
 export type ChatDisplayMessage = {
   /** Retain the validated row kind even when a card's optional payload is rejected. */
   presentation?: RoomViewMessage['presentation'];
+  systemTranscript?: RoomViewMessage['systemTranscript'];
   id: string;
   text: string;
   isUser: boolean;
@@ -366,6 +367,7 @@ export function displayRoomMessage(
   return {
     id: message.id,
     presentation: message.presentation,
+    ...(message.systemTranscript ? { systemTranscript: message.systemTranscript } : {}),
     relayId: message.id,
     text: message.text,
     timestamp: message.createdAt,

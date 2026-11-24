@@ -16,6 +16,8 @@ import {
   type SystemSubject,
 } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
+import type { SystemTranscript } from '@beeline/api-contract/phone';
+import { systemTranscript } from './system-transcript.js';
 import {
   SYSTEM_IDENTITY_HANDLE,
   SYSTEM_IDENTITY_ID,
@@ -32,9 +34,8 @@ import {
  * [ <object>][ · <consequence>]`. The stored text is what an old phone shows
  * verbatim; the structured `messages.system_event` beside it is what a current
  * phone renders (names as tappable mentions, the object linked by its URL,
- * same-verb runs folded). The daemon never phrases a line: it posts events and
- * the server calls this. `system-line.contract.test.ts` fails the build on any
- * `presentation='system'` insert or any text restatement outside this file.
+ * lifecycle runs folded). The daemon posts events and the server phrases them
+ * here. The architecture check enforces this file's write ownership.
  *
  * A line is the default container. A card (`presentation: 'card'`) is only for
  * something a tap must settle — a grant request, a connector offer, a permission
@@ -382,12 +383,99 @@ async function resolveCascade(
   return { causeId, rootCauseId, depth };
 }
 
-/** Insert one system line (or card) in a Room. */
+type SystemRow = {
+  id: string;
+  roomId: string;
+  authorId: string;
+  text: string;
+  presentation: NonNullable<SystemLineInput['presentation']>;
+  event?: SystemEvent;
+  cardType?: string;
+  card?: Record<string, unknown>;
+  requestId?: string;
+  durableFact?: SystemLineInput['durableFact'];
+  cascade?: Cascade;
+  notBefore?: Date | null;
+  replyToMessageId?: string;
+};
+
+type SystemRowUpdate = {
+  id: string;
+  text?: string;
+  event?: SystemEvent;
+  eventKind?: SystemEventKind;
+  deletedAt?: Date;
+  card?: Record<string, unknown>;
+  presentation?: SystemLineInput['presentation'];
+  createdAt?: Date;
+  authorId?: string;
+  clearCard?: boolean;
+  transcript?: SystemTranscript;
+  durableFact?: SystemLineInput['durableFact'];
+};
+
+type SystemLineOperation =
+  | { operation: 'insert'; rows: readonly SystemRow[] }
+  | { operation: 'update'; rows: readonly SystemRowUpdate[] };
+
+async function persistSystemRows(database: SqlDatabase, input: SystemLineOperation): Promise<Set<string>> {
+  if (!input.rows.length) return new Set();
+  if (input.operation === 'update') {
+    const result = await database.query<{ id: string }>(
+      `UPDATE messages message SET
+        text=COALESCE(line.text,message.text),
+        system_event=CASE WHEN line."eventKind" IS NOT NULL
+          THEN message.system_event || jsonb_build_object('kind',line."eventKind")
+          ELSE COALESCE(line.event,message.system_event) END,
+        deleted_at=COALESCE(message.deleted_at,line."deletedAt"),
+        card=CASE WHEN line."clearCard" THEN NULL ELSE COALESCE(line.card,message.card) END,
+        card_type=CASE WHEN line."clearCard" THEN NULL ELSE message.card_type END,
+        author_id=COALESCE(line."authorId",message.author_id),
+        presentation=COALESCE(line.presentation,message.presentation),
+        created_at=COALESCE(line."createdAt",message.created_at),
+        system_transcript=COALESCE(line.transcript,message.system_transcript),
+        durable_fact=COALESCE(line."durableFact",message.durable_fact)
+       FROM jsonb_to_recordset($1::jsonb) AS line(id text,text text,event jsonb,card jsonb,
+         "eventKind" text,"deletedAt" timestamptz,"clearCard" boolean,"authorId" text,
+         presentation text,"createdAt" timestamptz,transcript jsonb,"durableFact" text)
+       WHERE message.id=line.id RETURNING message.id`,
+      [JSON.stringify(input.rows)],
+    );
+    return new Set(result.rows.map(row => row.id));
+  }
+
+  const rows = input.rows.map(row => ({
+    ...row,
+    causeId: row.cascade?.causeId,
+    rootCauseId: row.cascade?.rootCauseId,
+    depth: row.cascade?.depth,
+    transcript: systemTranscript(row.authorId, row.presentation, row.cardType, row.event, row.durableFact),
+  }));
+  const result = await database.query<{ id: string }>(
+    `INSERT INTO messages(id,room_id,author_id,text,presentation,request_id,durable_fact,
+       card_type,card,system_event,system_transcript,event_cause_id,event_root_cause_id,event_depth,
+       created_at,reply_to_message_id)
+     SELECT id,"roomId","authorId",text,presentation,"requestId","durableFact",
+       "cardType",card,event,transcript,"causeId","rootCauseId",depth,
+       GREATEST(now(),COALESCE("notBefore",now())),"replyToMessageId"
+     FROM jsonb_to_recordset($1::jsonb) AS line(id text,"roomId" uuid,"authorId" text,text text,
+       presentation text,"requestId" text,"durableFact" text,"cardType" text,card jsonb,event jsonb,
+       transcript jsonb,"causeId" text,"rootCauseId" text,depth integer,"notBefore" timestamptz,"replyToMessageId" text)
+     ON CONFLICT DO NOTHING RETURNING id`,
+    [JSON.stringify(rows)],
+  );
+  return new Set(result.rows.map(row => row.id));
+}
+
+/** Write system-origin records, including batches and in-place transitions. */
+export function systemLine(database: SqlDatabase, input: SystemLineInput): Promise<SystemLineResult>;
+export function systemLine(database: SqlDatabase, input: SystemLineOperation): Promise<Set<string>>;
 export async function systemLine(
   database: SqlDatabase,
-  input: SystemLineInput,
-): Promise<SystemLineResult> {
-    database = new CornerAccessDatabase(database);
+  input: SystemLineInput | SystemLineOperation,
+): Promise<SystemLineResult | Set<string>> {
+  if ('operation' in input) return persistSystemRows(database, input);
+  database = new CornerAccessDatabase(database);
   const authorId = input.authorId ?? input.subject.id;
   if (!authorId) throw new Error('system line needs an author identity');
   // Workflow cards name their own author without a self-address.
@@ -410,34 +498,16 @@ export async function systemLine(
     notBefore: Date | null,
     watches: { watcher_room_id: string; agent_id: string; incoming_command: CommandRow | null }[],
   ) => {
-    const result = await db.query(
-      `INSERT INTO messages(
-         id,room_id,author_id,text,presentation,request_id,durable_fact,
-         card_type,card,system_event,event_cause_id,event_root_cause_id,event_depth,created_at,reply_to_message_id
-       ) VALUES(
-         $1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,
-         GREATEST(now(), COALESCE($14::timestamptz, now())),$15
-       )
-       ON CONFLICT DO NOTHING`,
-      [
-        id,
-        input.roomId,
-        authorId,
-        text,
-        input.presentation ?? 'system',
-        input.requestId ?? null,
-        input.durableFact ?? null,
-        input.cardType ?? null,
-        input.card ? JSON.stringify({ ...input.card, ask: approvalAsk(input.cardType, input.card) }) : null,
-        JSON.stringify(event),
-        cascade?.causeId ?? null,
-        cascade?.rootCauseId ?? null,
-        cascade?.depth ?? null,
-        notBefore,
-        input.replyToMessageId ?? null,
-      ],
-    );
-    if (result.rowCount) {
+    const inserted = (await persistSystemRows(db, { operation: 'insert', rows: [{
+      id, roomId: input.roomId, authorId, text, event,
+      presentation: input.presentation ?? 'system',
+      requestId: input.requestId,
+      durableFact: input.durableFact,
+      cardType: input.cardType,
+      card: input.card ? { ...input.card, ask: approvalAsk(input.cardType, input.card) } : undefined,
+      cascade, notBefore, replyToMessageId: input.replyToMessageId,
+    }] })).has(id);
+    if (inserted) {
       // Preserve message-before-subscription lock order. One capture chooses each
       // subscription's mode, so a prompt edit cannot dispatch twice on two cuts.
       if (input.kind && isSubscribableEventKind(input.kind)) {
@@ -494,7 +564,7 @@ export async function systemLine(
         }
       }
     }
-    return { id, text, event, inserted: Boolean(result.rowCount) };
+    return { id, text, event, inserted };
   };
   return database.transaction(async (tx) => {
     const watches =
@@ -547,23 +617,11 @@ export async function systemLineInRooms(
   const { text, event } = composeSystemLine(
     await canonicalPhrase(database, input, undefined, undefined, undefined, workspaceId),
   );
-  await database.query(
-    `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event,created_at)
-     SELECT line.id,line.room_id,$3,$4,'system',$5,$6::jsonb,$7::jsonb,now()
-     FROM unnest($1::text[],$2::uuid[]) line(id,room_id)
-     ON CONFLICT DO NOTHING`,
-    [
-      roomIds.map(() => randomBytes(32).toString('hex')),
-      roomIds,
-      authorId,
-      text,
-      input.cardType ?? null,
-      input.card
-        ? JSON.stringify({ ...input.card, ask: approvalAsk(input.cardType, input.card) })
-        : null,
-      JSON.stringify(event),
-    ],
-  );
+  const card = input.card ? { ...input.card, ask: approvalAsk(input.cardType, input.card) } : undefined;
+  await systemLine(database, { operation: 'insert', rows: roomIds.map((roomId): SystemRow => ({
+    id: randomBytes(32).toString('hex'), roomId, authorId, text, event,
+    presentation: 'system', cardType: input.cardType, card,
+  })) });
 }
 
 /** One committed batch of per-offer answers, with the same grammar and resume
@@ -578,23 +636,23 @@ export async function connectorOfferDecisionLines(database: SqlDatabase,
     `SELECT identity.id,kind,name,beeline_room_handle(identity.id,place.room_id) handle,place.room_id
      FROM identities identity CROSS JOIN unnest($2::uuid[]) place(room_id) WHERE identity.id=ANY($1::text[])`,
     [ids,[...new Set(inputs.map(input => input.roomId))]])).rows;
-  const lines = inputs.map(input => {
-    const identities = new Map(labels.filter(row => row.room_id===input.roomId).map(row => [row.id,row]));
+  const lines = new Map<string, SystemRow & { wakes: string[]; commandId?: string; event: SystemEvent }>();
+  for (const input of inputs) {
     const id = input.id ?? randomBytes(32).toString('hex');
-    const composed = composeSystemLine(labeledPhrase(input,identities));
-    return { id,roomId:input.roomId,authorId:input.authorId ?? input.subject.id,
-      text:composed.text,event:composed.event,card:input.card
-        ? {...input.card,ask:approvalAsk(input.cardType,input.card)} : null,cardType:input.cardType ?? null,
-      wakes:[...new Set(input.wakes ?? [])],commandId:input.commandId ?? null,requestId:input.requestId ?? null };
-  });
-  const inserted = (await database.query<{id:string}>(`INSERT INTO messages(id,room_id,author_id,text,presentation,
-    request_id,card_type,card,system_event,event_root_cause_id,event_depth)
-    SELECT id,"roomId","authorId",text,'system',"requestId","cardType",card,event,id,0
-    FROM jsonb_to_recordset($1::jsonb) AS line(id text,"roomId" uuid,"authorId" text,text text,
-      "requestId" text,"cardType" text,card jsonb,event jsonb,wakes jsonb)
-    ON CONFLICT DO NOTHING RETURNING id`,[JSON.stringify(lines)])).rows;
-  const winners = new Set(inserted.map(row => row.id));
-  for (const line of lines) {
+    if (lines.has(id)) continue;
+    const authorId = input.authorId ?? input.subject.id;
+    if (!authorId) throw new Error('system line needs an author identity');
+    const identities = new Map(labels.filter(row => row.room_id === input.roomId).map(row => [row.id, row]));
+    lines.set(id, {
+      id, roomId: input.roomId, authorId, ...composeSystemLine(labeledPhrase(input, identities)),
+      presentation: 'system', cardType: input.cardType,
+      card: input.card ? { ...input.card, ask: approvalAsk(input.cardType, input.card) } : undefined,
+      cascade: { causeId: null, rootCauseId: id, depth: 0 },
+      wakes: [...new Set(input.wakes ?? [])], commandId: input.commandId, requestId: input.requestId,
+    });
+  }
+  const winners = await systemLine(database, { operation: 'insert', rows: [...lines.values()] });
+  for (const line of lines.values()) {
     if (!winners.has(line.id) || !line.wakes.length) continue;
     await routeSystemCommand(database,{
       roomId:line.roomId,sourceMessageId:line.id,kind:line.event.kind,targets:line.wakes,
@@ -648,87 +706,85 @@ export async function wakeLateCornerWatcher(
  * grant card that gained another ask). The row keeps its id, so a push claimed
  * on it never fires twice.
  */
+type SystemLineChanges = Pick<SystemRowUpdate, 'presentation' | 'createdAt' | 'durableFact'>;
+
 export async function restateSystemLine(
   database: SqlDatabase,
   messageId: string,
   phrase: SystemPhrase,
   card?: Record<string, unknown>,
+  changes: SystemLineChanges = {},
 ): Promise<{ text: string; event: SystemEvent; updated: boolean }> {
-  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase,undefined,undefined,messageId));
-  const result = await database.query(
-    `UPDATE messages SET text=$2,system_event=$3::jsonb,card=COALESCE($4::jsonb,card) WHERE id=$1`,
-    [messageId, text, JSON.stringify(event), card ? JSON.stringify(card) : null],
-  );
-  return { text, event, updated: Boolean(result.rowCount) };
+  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase, undefined, undefined, messageId));
+  const updated = await systemLine(database, { operation: 'update', rows: [{
+    id: messageId, text, event, card, ...changes,
+    ...(changes.presentation ? { transcript: systemTranscript(phrase.subject.id ?? SYSTEM_IDENTITY_ID, changes.presentation, undefined, event) } : {}),
+  }] });
+  return { text, event, updated: updated.has(messageId) };
 }
 
 /** Restate committed facts as one batch, without query loops under their rows. */
-export async function restateSystemLines(database: SqlDatabase, lines: readonly {
+export async function restateSystemLines(database: SqlDatabase, lines: readonly ({
   id: string; phrase: SystemPhrase; card?: Record<string, unknown>;
-  presentation?: 'system' | 'card' | 'activity'; createdAt?: Date;
-}[]): Promise<void> {
+} & SystemLineChanges)[]): Promise<void> {
   if (!lines.length) return;
-  const ids = [...new Set(lines.flatMap(({phrase}) => [phrase.subject.id,
+  const ids = [...new Set(lines.flatMap(({ phrase }) => [phrase.subject.id,
     typeof phrase.object === 'string' ? undefined : phrase.object?.id, phrase.attribution?.actor.id]
     .filter((id): id is string => Boolean(id))))];
-  const labels = ids.length ? (await database.query<IdentityLabelRow & {message_id:string}>(
+  const labels = ids.length ? (await database.query<IdentityLabelRow & { message_id: string }>(
     `SELECT identity.id,kind,name,beeline_room_handle(identity.id,message.room_id) handle,message.id message_id
      FROM messages message CROSS JOIN identities identity
-     WHERE identity.id=ANY($1::text[]) AND message.id=ANY($2::text[])`,[ids,lines.map(line => line.id)])).rows : [];
-  const rows = lines.map(line => ({id:line.id,...composeSystemLine(labeledPhrase(line.phrase,
-    new Map(labels.filter(row => row.message_id===line.id).map(row => [row.id,row])))),
-    card:line.card,presentation:line.presentation,created_at:line.createdAt}));
-  await database.query(`UPDATE messages message SET text=line.text,system_event=line.event,
-    card=COALESCE(line.card,message.card),presentation=COALESCE(line.presentation,message.presentation),
-    created_at=COALESCE(line.created_at,message.created_at)
-    FROM jsonb_to_recordset($1::jsonb) line(id text,text text,event jsonb,card jsonb,presentation text,created_at timestamptz)
-    WHERE message.id=line.id`, [JSON.stringify(rows)]);
+     WHERE identity.id=ANY($1::text[]) AND message.id=ANY($2::text[])`, [ids, lines.map(line => line.id)])).rows : [];
+  const rows = lines.map(({ phrase, ...line }) => {
+    const identities = new Map(labels.filter(row => row.message_id === line.id).map(row => [row.id, row]));
+    const composed = composeSystemLine(labeledPhrase(phrase, identities));
+    return {
+      ...line, ...composed,
+      ...(line.presentation ? { transcript: systemTranscript(phrase.subject.id ?? SYSTEM_IDENTITY_ID, line.presentation, undefined, composed.event) } : {}),
+    };
+  });
+  await systemLine(database, { operation: 'update', rows });
 }
 
-/** Replace an actionable card with its one catalog completion line, retaining its id. */
+/** Replace an actionable card with its completion line, retaining its id. */
 export async function settleSystemCard(
   database: SqlDatabase,
   messageId: string,
   phrase: SystemPhrase & { readonly authorId: string },
 ): Promise<{ id: string; text: string; event: SystemEvent }> {
-  const { text, event } = await restateSystemLine(database, messageId, phrase);
-  await database.query(
-    `UPDATE messages SET author_id=$2,presentation='system',card_type=NULL,card=NULL WHERE id=$1`,
-    [messageId, phrase.authorId],
-  );
+  const { text, event } = composeSystemLine(await canonicalPhrase(database, phrase, undefined, undefined, messageId));
+  await systemLine(database, { operation: 'update', rows: [{
+    id: messageId, text, event, authorId: phrase.authorId, presentation: 'system', clearCard: true,
+    transcript: systemTranscript(phrase.authorId, 'system', undefined, event),
+  }] });
   return { id: messageId, text, event };
 }
 
-/**
- * The line a deleted message becomes, in its own place: `@deleter deleted a
- * message`, with `· sent by @author` when someone else wrote it. Only the
- * structured event is stored on the deleted row; its text stays empty so no
- * reader of message text can mistake the line for the author's words.
- */
-export async function deletedMessageEvent(
+/** Give a deleted member row a tombstone in place, leaving its erased text empty. */
+export async function tombstoneSystemLine(
   database: SqlDatabase,
+  messageId: string,
   deleterId: string,
   authorId: string,
-  roomId?: string,
-): Promise<SystemEvent> {
+  roomId: string,
+): Promise<void> {
   const rows = await database.query<IdentityLabelRow>(
     `SELECT id,kind,name,beeline_room_handle(id,$2) handle FROM identities WHERE id=ANY($1::text[])`,
-    [[...new Set([deleterId, authorId])],roomId ?? null],
+    [[...new Set([deleterId, authorId])], roomId],
   );
-  const identities = new Map(rows.rows.map((row) => [row.id, row]));
+  const identities = new Map(rows.rows.map(row => [row.id, row]));
   const deleter = identities.get(deleterId);
   const author = identities.get(authorId);
   if (!deleter || !author) throw new Error('deleted message identities are missing');
-  return composeSystemLine(
-    await canonicalPhrase(database, {
-      subject: identitySubject(deleter),
-      verb: systemMessage("system-line.deleted"),
-      object: systemMessage("system-line.a-message"),
-      ...(authorId === deleterId
-        ? {}
-        : { attribution: { verb: 'sent by', actor: identitySubject(author) } }),
-    },undefined,roomId),
-  ).event;
+  const { event } = composeSystemLine(await canonicalPhrase(database, {
+    subject: identitySubject(deleter),
+    verb: systemMessage("system-line.deleted"),
+    object: systemMessage("system-line.a-message"),
+    ...(authorId === deleterId ? {} : { attribution: { verb: 'sent by', actor: identitySubject(author) } }),
+  }, undefined, roomId));
+  await systemLine(database, { operation: 'update', rows: [{
+    id: messageId, event, transcript: { origin: 'system', visibility: 'notice' },
+  }] });
 }
 
 /** The subject shape for a Room identity row. */
@@ -742,17 +798,6 @@ export function identitySubject(row: {
 
 export const GITHUB_SUBJECT: SystemSubject = { kind: githubProviderKey, name: systemMessage("system-line.github") };
 
-/** Retire historical human-facing browser observations without losing agent context. */
-export async function backfillComputerObservations(database: SqlDatabase): Promise<void> {
-  // Old viewer lines remain agent context, but never return in phone history.
-  await database.query(`UPDATE messages SET presentation='activity',durable_fact=NULL,
-      text=replace(text,'A person','Shared browser'),
-      system_event=jsonb_set(system_event,'{subject,name}',
-        to_jsonb(replace(system_event->'subject'->>'name','A person','Shared browser')))
-    WHERE system_event->>'kind'='computer-session-activity'`);
-
-}
-
 /** A plain operator notice in the recipient's existing System thread. */
 export async function sendSystemDirectMessage(database: SqlDatabase, workspaceId: string, recipientId: string,
   text: string, id: string): Promise<boolean> {
@@ -760,7 +805,8 @@ export async function sendSystemDirectMessage(database: SqlDatabase, workspaceId
     AND room_id IS NULL AND removed_at IS NULL`, [workspaceId, recipientId]);
   if (!member.rowCount) throw new Error('System DM recipient has no active Workspace');
   const roomId = await ensureSystemDirectMessageRoom(database, workspaceId, recipientId);
-  const inserted = await database.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,$4)
-    ON CONFLICT(id) DO NOTHING`, [id, roomId, SYSTEM_IDENTITY_ID, text]);
-  return Boolean(inserted.rowCount);
+  const inserted = await systemLine(database, { operation: 'insert', rows: [{
+    id, roomId, authorId: SYSTEM_IDENTITY_ID, text, presentation: 'system',
+  }] });
+  return inserted.has(id);
 }

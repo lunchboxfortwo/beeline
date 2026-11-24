@@ -61,8 +61,8 @@ export async function postWalletNotice(
       next.amountText=Object.values(next.transfers).join(systemMessage('wallet-notices.detail-separator'));
     if (next.operation==='approval' && next.status==='confirmed')
       next.reason=systemMessage('wallet-notices.approval-confirmed-requires-new-action');
-    await restateSystemLine(tx,id,walletNoticePhrase(next),next);
-    if (next.status==='failed') await tx.query("UPDATE messages SET durable_fact='failure' WHERE id=$1",[id]);
+    await restateSystemLine(tx,id,walletNoticePhrase(next),next,
+      next.status === 'failed' ? { durableFact: 'failure' } : undefined);
   });
 }
 

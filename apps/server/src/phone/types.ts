@@ -84,6 +84,8 @@ export interface MessageRow {
   card_type: string | null;
   card: Record<string, unknown> | null;
   system_event: SystemEvent | null;
+  system_transcript?: RoomViewMessage['systemTranscript'] | null;
+  expired_workflow_step_kind?: string | null;
   created_at: Date;
   version?: number;
   author_kind: 'human' | 'agent';

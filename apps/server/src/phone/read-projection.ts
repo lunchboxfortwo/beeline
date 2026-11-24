@@ -11,6 +11,8 @@ import { readVaultSaveCard } from '@beeline/api-contract/phone';
 import { MemberRow, RoomHeaderRow, AttachmentFacts, MessageRow, RoomScheduleRow } from './types.js';
 import { unix } from './values.js';
 import { visibleMessageSql } from '../read-cursor.js';
+import { projectSystemTranscript } from '../system-transcript.js';
+import { workflowExpiryLine } from '../workflow-expiry-line.js';
 
 
 /** A held presence belongs to a live helper connection and does not age out. */
@@ -197,6 +199,13 @@ export function projectedMessage(
     const event = { ...row.system_event, verb: systemMessage('phone-service.opened-a-corner') };
     row = { ...row, system_event: event, text: formatSystemLine(event) };
   }
+  if (!row.deleted_at && row.card_type === 'workflow-handoff' && row.card?.outcome === 'expired' &&
+      typeof row.card.workflowSlug === 'string') {
+    const event = workflowExpiryLine(row.card.workflowSlug,
+      typeof row.card.expiredStepKind === 'string' ? row.card.expiredStepKind : row.expired_workflow_step_kind);
+    row = { ...row, text: formatSystemLine(event), system_event: event };
+  }
+  const systemTranscript = projectSystemTranscript(row);
   const author = identity(
     {
       id: row.author_id,
@@ -214,7 +223,7 @@ export function projectedMessage(
   const replyPreview = projectedReplyPreview(row.reply_preview, publicOrigin);
   const base: RoomViewMessage = {
     id: row.id,
-    // A deleted message stays in its place as a system line (`deletedMessageEvent`).
+    // A deleted message stays in its place as a system line (`tombstoneSystemLine`).
     text: row.deleted_at
       ? row.system_event
         ? formatSystemLine(row.system_event)
@@ -226,6 +235,7 @@ export function projectedMessage(
     author,
     ...(!row.deleted_at && row.source_client ? { sourceClient: row.source_client } : {}),
     presentation: row.deleted_at ? 'system' : row.presentation,
+    ...(systemTranscript ? { systemTranscript } : {}),
     ...(row.deleted_at ? { deleted: true } : {}),
     ...(row.bookmarked ? { bookmarked: true } : {}),
     ...(row.feedback_reported ? { feedbackReported: true } : {}),
@@ -296,7 +306,7 @@ export function projectedMessage(
     ...(row.durable_fact ? { durableFact: row.durable_fact } : {}),
     ...(row.system_event ? { systemEvent: row.system_event } : {}),
   };
-  if (!row.card_type || !row.card) return base;
+  if (row.deleted_at || !row.card_type || !row.card) return base;
   switch (row.card_type) {
     case 'away-warning': return { ...base, awayWarning: true };
     case 'vault-save': {

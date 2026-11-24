@@ -51,14 +51,13 @@ export const CORNER_LIFECYCLE_CARD_TYPE = 'corner-workflow-handoff';
  * its own footer. Only `wakeChoice`'s explicit `wakes` targets the asking
  * agent, so this line stays visible to humans without waking anyone new.
  */
+export const HIDDEN_WAKE_CARD_TYPES = [
+  'grant-decision', 'connector-offer-decision', 'squire-approval-decision', CORNER_LIFECYCLE_CARD_TYPE,
+] as const;
+
 export function hiddenWakeCardSql(alias?: string): string {
   const column = alias ? `${alias}.card_type` : 'card_type';
-  return (
-    `${column} IS DISTINCT FROM 'grant-decision' ` +
-    `AND ${column} IS DISTINCT FROM 'connector-offer-decision' ` +
-    `AND ${column} IS DISTINCT FROM 'squire-approval-decision' ` +
-    `AND ${column} IS DISTINCT FROM '${CORNER_LIFECYCLE_CARD_TYPE}'`
-  );
+  return HIDDEN_WAKE_CARD_TYPES.map(type => `${column} IS DISTINCT FROM '${type}'`).join(' AND ');
 }
 
 type IdentityRow = {

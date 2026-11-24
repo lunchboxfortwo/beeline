@@ -8,7 +8,7 @@ import { tombstoneInstitutionalMemoryForMessage } from '../institutional-memory-
 import { messageColumns } from '../message-columns.js';
 import { unreadMessageSql,visibleChatMessageSql } from '../read-cursor.js';
 import { observeOnboardingMessage } from '../signin-funnel.js';
-import { deletedMessageEvent } from '../system-line.js';
+import { tombstoneSystemLine } from '../system-line.js';
 import { phoneRequireWorkspaceMember } from './access.js';
 import type { PhoneContext } from './context.js';
 import { phoneLiveStarPrompt,phoneReadLiveDelta } from './live-reads.js';
@@ -246,13 +246,7 @@ import { personText } from '../message-origin.js';
       if (!row) throw new CommandRefusalError('message is not available for deletion', 404);
       // The deleted row keeps its place and time and reads as a system line
       // naming who deleted it; nothing new is posted to the Room.
-      await database.query(
-        `UPDATE messages message SET system_event=$2::jsonb WHERE message.id=$1`,
-        [
-          input.messageId,
-          JSON.stringify(await deletedMessageEvent(database, row.deleted_by, row.author_id,input.roomId)),
-        ],
-      );
+      await tombstoneSystemLine(database, input.messageId, row.deleted_by, row.author_id, input.roomId);
       await tombstoneInstitutionalMemoryForMessage(database, input.messageId);
 
     });

@@ -429,6 +429,7 @@ CREATE INDEX IF NOT EXISTS needs_you_marks_message_idx ON needs_you_marks(messag
 CREATE INDEX IF NOT EXISTS needs_you_marks_workspace_idx ON needs_you_marks(workspace_id);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS agent_hop_count integer NOT NULL DEFAULT 0;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS system_event jsonb;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS system_transcript jsonb;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by text REFERENCES identities(id);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS reactions jsonb NOT NULL DEFAULT '{}'::jsonb;
