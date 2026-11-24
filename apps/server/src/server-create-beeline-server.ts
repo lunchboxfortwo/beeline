@@ -1,3 +1,4 @@
+import { helperRequestAgent } from './helper-requests.js';
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { bearer, type TokenAuth } from "./auth.js";
 import { PHONE_READ_OPERATIONS } from "@beeline/api-contract/phone";
@@ -62,6 +63,7 @@ export async function daemonIdentity(
 ): Promise<string | null> {
   const value = bearer(request.headers.authorization);
   const agentId = value ? await options.auth.authenticateDaemon(value) : null;
+  if (agentId) helperRequestAgent.set(request, agentId);
   // Sentry counts the person who owns the agent, not each of their agents.
   noteSentryAgent(options.database, agentId);
   return agentId;

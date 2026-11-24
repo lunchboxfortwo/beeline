@@ -1,3 +1,4 @@
+import { commandLogField, helperLogPath, helperRequestAgent, helperRequestCommand } from './helper-requests.js';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { finishLiveClose } from './shutdown.js';
 import { type Server, createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -594,7 +595,15 @@ export function createBeelineServer(options: ServerOptions): Server {
         ).catch(() => undefined);
       });
     }
-    console.log('[req]', method, url.pathname);
+    const helper = url.pathname.startsWith('/v1/daemon/');
+    const logPath = helper ? helperLogPath(url.pathname) : url.pathname;
+    const attribution = () => [
+      `agent=${helperRequestAgent.get(request) ?? 'unknown'}`,
+      ...commandLogField(request.headers['x-beeline-command-id'] ?? helperRequestCommand.get(request)),
+    ];
+    if (helper) response.once('close', () => console.log('[req]', method, logPath, ...attribution(),
+      response.writableFinished ? `status=${response.statusCode}` : 'aborted'));
+    else console.log('[req]', method, url.pathname);
     if (url.pathname !== '/v1/site/download-tap' && isWebAppCorsPath(url.pathname) && applyWebAppCors(request, response, options)) return;
     if (url.pathname === '/v1/vault-save/submit' || url.pathname === '/v1/vault-save/answer') {
       void vaultSaveHttp(request, response, options, vaultSaveRelay);
@@ -618,9 +627,9 @@ export function createBeelineServer(options: ServerOptions): Server {
       console.error(
         '[req-error]',
         method,
-        url.pathname,
+        logPath,
         `status=${status}`,
-        error instanceof Error ? error.stack || error.message : String(error),
+        ...(helper ? attribution() : [error instanceof Error ? error.stack || error.message : String(error)]),
       );
       json(response, status, error instanceof PhoneOperationError || error instanceof WallRefusal ? error.payload : { error: message });
     });

@@ -1,3 +1,4 @@
+import { commandLogField, helperReadRetryAfter } from './helper-requests.js';
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { helperUsageCodecs } from '@beeline/net/helper-codecs';
 import { randomUUID } from 'node:crypto';
@@ -321,6 +322,16 @@ export class DaemonAgentSession {
     try {
       if(item.type === 'request-result') { reply(await results.read(this.agentId,requestId,this.#closedSignal.signal));return; }
       if(item.type === 'request-ack') { await results.acknowledge(this.agentId,requestId);return; }
+      if (DAEMON_OPERATION_NAMES.has(item.operation as keyof DaemonOperationMap)) {
+        const operation = String(item.operation);
+        const input = item.input as { commandId?: unknown } | undefined;
+        console.log('[req]', 'LIVE', operation, `agent=${this.agentId}`, ...commandLogField(item.commandId ?? input?.commandId));
+        const retryAfter = await helperReadRetryAfter(this.deps.database, this.agentId, operation);
+        if (retryAfter) {
+          reply({ error: 'helper_read_rate_limited', status: 429, retryAfter });
+          return;
+        }
+      }
       const execute = async () => {
         try {
           const operation = item.operation as keyof DaemonOperationMap;

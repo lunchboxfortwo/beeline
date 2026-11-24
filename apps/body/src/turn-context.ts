@@ -10,7 +10,7 @@ export async function writeTurnContext(
         'id' | 'roomId' | 'turnRequestId' | 'rootCommandId' | 'reason' | 'operatorAgent'
       >
     | undefined,
-  queued: readonly Pick<AgentCommand, 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [],
+  queued: readonly Pick<AgentCommand, 'id' | 'turnRequestId' | 'rootCommandId' | 'reason'>[] = [],
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
 ): Promise<void> {
   await writePrivateFileAtomically(
@@ -25,6 +25,7 @@ export async function writeTurnContext(
             itemId: item.id,
             ...(item.operatorAgent ? { operatorAgent: true } : {}),
             commands: queued.map((command) => ({
+              itemId: command.id,
               requestId: command.turnRequestId,
               commandReason: command.reason,
               taskId: command.rootCommandId,
