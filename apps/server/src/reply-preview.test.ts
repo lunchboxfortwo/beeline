@@ -69,3 +69,31 @@ it('a deleted or other-room original sends no preview', async () => {
   }
   expect(view?.messages.find((message) => !message.reply && message.replyPreview)).toBeUndefined();
 });
+
+it('an activity, card or schedule-run original that the transcript hides sends no preview', async () => {
+  const database = await seed();
+  const at = (minute: number) => new Date(Date.UTC(2026, 10, 20, 13, minute));
+  const hidden = [
+    ['7'.repeat(64), "'activity'", 'NULL', 'NULL'],
+    ['8'.repeat(64), "'card'", "'grant-decision'", 'NULL'],
+    ['9'.repeat(64), "'system'", 'NULL', `'{"kind":"schedule-ran"}'::jsonb`],
+  ] as const;
+  const replies: string[] = [];
+  for (const [index, [id, presentation, cardType, systemEvent]] of hidden.entries()) {
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,system_event,created_at)
+      VALUES($1,$2,$3,'Hidden original',${presentation},${cardType},${systemEvent},$4)`, [id, ROOM, AGENT, at(index)]);
+    const reply = `d${index}`.padStart(64, 'e');
+    replies.push(reply);
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id,created_at)
+      VALUES($1,$2,$3,'About the hidden one',$4,$4,$5)`, [reply, ROOM, OWNER, id, at(10 + index)]);
+  }
+  const phone = new PhoneService(database, 'https://example.invalid');
+  for (const read of [() => phone.readRoom(ROOM, OWNER), () => phone.readHistory(ROOM, OWNER)]) {
+    const messages = (await read())?.messages ?? [];
+    for (const reply of replies) {
+      const message = messages.find((candidate) => candidate.id === reply);
+      expect(message).toBeDefined();
+      expect(message?.replyPreview).toBeUndefined();
+    }
+  }
+});
