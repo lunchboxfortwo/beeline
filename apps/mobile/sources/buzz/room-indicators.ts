@@ -129,7 +129,8 @@ export type ComposerWorkingAgent = {
   name: string;
   avatar?: string;
   face?: string;
-  startedAt: number;
+  startedAt?: number;
+  turnKey?: string;
   stop?: { agentPubkey: string; requestId: string };
 };
 
@@ -220,8 +221,25 @@ export function selectComposerAckState(input: ComposerAckInput): ComposerAckStat
 export function selectComposerAckPresentation(
   input: ComposerAckPresentationInput,
 ): ComposerAckPresentation | null {
-  if (input.activeTurns && input.activeTurns.length > 1) {
-    const agents = input.activeTurns.map((turn): ComposerWorkingAgent => {
+  type Receipt = { agentPubkey: string; requestId?: string; startedAt?: number };
+  const receipts = new Map<string, Receipt>();
+  const keyOf = (receipt: Receipt) => `${receipt.agentPubkey}:${receipt.requestId ?? ''}`;
+  for (const turn of input.activeTurns ?? []) {
+    receipts.set(keyOf(turn), { ...turn, startedAt: turn.startedAt ?? turn.createdAt });
+  }
+  if (input.activeTurnPubkey && !input.activeTurns?.length) {
+    const turn = { agentPubkey: input.activeTurnPubkey, requestId: input.activeTurnRequestId,
+      startedAt: input.activeTurnStartedAt };
+    receipts.set(keyOf(turn), turn);
+  }
+  for (const command of input.pendingAgentCommands ?? []) {
+    if (command.runtimePhase?.phase === 'starting' && !receipts.has(keyOf(command))) {
+      receipts.set(keyOf(command), command);
+    }
+  }
+  const turns = [...receipts.values()];
+  if (turns.length > 1) {
+    const agents = turns.map((turn): ComposerWorkingAgent => {
       const identity = input.conversationIdentities?.get(turn.agentPubkey);
       const detail = agentFromConversationIdentity(identity) ?? input.agentsByPubkey?.get(turn.agentPubkey);
       const display = resolveAgentDisplayIdentity(turn.agentPubkey, detail);
@@ -230,27 +248,25 @@ export function selectComposerAckPresentation(
         name: display.name,
         avatar: display.avatarUrl,
         face: display.face,
-        startedAt: turn.startedAt ?? turn.createdAt,
-        ...(viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend)
+        startedAt: turn.startedAt,
+        turnKey: keyOf(turn),
+        ...(turn.requestId && viewerMayStopTurn(input.viewerPubkey, input.viewerCanSend)
           ? { stop: { agentPubkey: turn.agentPubkey, requestId: turn.requestId } } : {}),
       };
     });
+    const starts = turns.flatMap(turn => turn.startedAt == null ? [] : [turn.startedAt]);
     return {
       agents,
       label: `${agents.length === 2 ? agents.map(agent => agent.name).join(', ') : `${agents.length} agents`} brewing…`,
-      startedAt: Math.min(...agents.map(agent => agent.startedAt)),
+      ...(starts.length ? { startedAt: Math.min(...starts) } : {}),
     };
   }
-  const pending = !input.activeTurnPubkey
-    ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
-    : undefined;
-  // The server has begun this command's wake. Use its turn key through
-  // session startup so the same label and Stop target survive helper pickup.
-  const progress = pending ? {
+  const turn = turns[0];
+  const progress = turn ? {
     ...input,
-    activeTurnPubkey: pending.agentPubkey,
-    activeTurnRequestId: pending.requestId,
-    activeTurnAgentPubkey: pending.agentPubkey,
+    activeTurnPubkey: turn.agentPubkey,
+    activeTurnRequestId: turn.requestId,
+    activeTurnStartedAt: turn.startedAt,
   } : input;
   const state = selectComposerAckState(progress);
   if (!state) return null;
