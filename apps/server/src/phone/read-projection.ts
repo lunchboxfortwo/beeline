@@ -10,6 +10,7 @@ import { mediaIdFromUrl } from '../media-ttl.js';
 import { readVaultSaveCard } from '@beeline/api-contract/phone';
 import { MemberRow, RoomHeaderRow, AttachmentFacts, MessageRow, RoomScheduleRow } from './types.js';
 import { unix } from './values.js';
+import { possiblyVisibleMessageSql } from '../read-cursor.js';
 
 
 /** A held presence belongs to a live helper connection and does not age out. */
@@ -421,12 +422,8 @@ function projectedReplyPreview(
  * The replied-to message's author and text for one message row, so a quote
  * shows even when the original is outside the page. One primary-key lookup
  * per reply. Only a same-Room original that is not deleted, not activity
- * without a durable fact, and not a card is read; anything else stays NULL.
- *
- * Skipping cards keeps this narrower than `visibleMessageSql`: every row that
- * predicate hides is a card, except a schedule-run line, which is also
- * skipped here. Inlining the full predicate made every page read slower to
- * plan, so quotes of cards keep the old fallback.
+ * without a durable fact, and passes `possiblyVisibleMessageSql` is read;
+ * anything else stays NULL.
  */
 export function replyPreviewSql(messageAlias: string): string {
   return `(SELECT jsonb_build_object(
@@ -446,8 +443,7 @@ export function replyPreviewSql(messageAlias: string): string {
       AND original.room_id=${messageAlias}.room_id
       AND original.deleted_at IS NULL
       AND (original.presentation<>'activity' OR original.durable_fact IS NOT NULL)
-      AND original.card_type IS NULL
-      AND original.system_event->>'kind' IS DISTINCT FROM 'schedule-ran')`;
+      AND ${possiblyVisibleMessageSql('original')})`;
 }
 
 

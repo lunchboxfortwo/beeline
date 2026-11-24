@@ -2,6 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { ROOM_VIEW_MESSAGE_LIMIT } from '@beeline/api-contract/phone';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
+import { possiblyVisibleMessageSql, visibleMessageSql } from './read-cursor.js';
 
 // Reproduction R1: a reply on the newest page quotes a message that is older
 // than the page. The read carries the original's author and first line.
@@ -70,7 +71,7 @@ it('a deleted or other-room original sends no preview', async () => {
   expect(view?.messages.find((message) => !message.reply && message.replyPreview)).toBeUndefined();
 });
 
-it('an activity, card or schedule-run original that the transcript hides sends no preview', async () => {
+it('an activity, wake card or schedule-run original that the transcript hides sends no preview', async () => {
   const database = await seed();
   const at = (minute: number) => new Date(Date.UTC(2026, 10, 20, 13, minute));
   const hidden = [
@@ -96,4 +97,52 @@ it('an activity, card or schedule-run original that the transcript hides sends n
       expect(message?.replyPreview).toBeUndefined();
     }
   }
+});
+
+it('a visible card outside the newest page is quoted with its first line', async () => {
+  const database = await seed();
+  const CARD = 'a1'.padStart(64, 'f'), CARD_REPLY = 'a2'.padStart(64, 'f');
+  await database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)
+    VALUES($1,$2,$3,'Pick a deploy window','card','choice','{}'::jsonb,$4)`,
+    [CARD, ROOM, AGENT, new Date(Date.UTC(2026, 10, 20, 11, 0))]);
+  await database.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id,created_at)
+    VALUES($1,$2,$3,'Tuesday works',$4,$4,$5)`, [CARD_REPLY, ROOM, OWNER, CARD, new Date(Date.UTC(2026, 10, 20, 14, 0))]);
+  const phone = new PhoneService(database, 'https://example.invalid');
+  for (const read of [() => phone.readRoom(ROOM, OWNER), () => phone.readHistory(ROOM, OWNER)]) {
+    const messages = (await read())?.messages ?? [];
+    expect(messages.some((message) => message.id === CARD)).toBe(false);
+    expect(messages.find((message) => message.id === CARD_REPLY)?.replyPreview?.text).toBe('Pick a deploy window');
+  }
+});
+
+it('the preview check hides every row the transcript hides', async () => {
+  const database = await seed();
+  const THREAD = '44444444-4444-4444-8444-444444444444';
+  await database.query("INSERT INTO rooms(id,workspace_id,name,created_by,parent_id) VALUES($1,$2,'Thread',$3,$4)",
+    [THREAD, WORKSPACE, OWNER, ROOM]);
+  const at = new Date(Date.UTC(2026, 10, 20, 10, 0));
+  const rows: Array<[string, string, string, string | null, string | null, string | null]> = [
+    ['b1', ROOM, 'card', 'grant-decision', null, null],
+    ['b2', ROOM, 'card', 'connector-offer-decision', null, null],
+    ['b3', ROOM, 'card', 'corner-workflow-handoff', null, null],
+    ['b4', THREAD, 'card', 'github-corner-note', null, '{"verb":"merged"}'],
+    ['b5', ROOM, 'system', null, null, '{"kind":"schedule-ran"}'],
+    ['b6', ROOM, 'card', 'daemon-fact', `{"type":"corner-open","cornerId":"${THREAD}"}`, null],
+    ['b7', OTHER_ROOM, 'card', 'daemon-fact', `{"type":"corner-open","cornerId":"${THREAD}","sourceMessageId":"x"}`, null],
+    ['b8', ROOM, 'card', 'daemon-fact', `{"type":"corner-complete","cornerId":"${THREAD}"}`, null],
+    ['b9', ROOM, 'card', 'choice', '{}', null],
+  ];
+  for (const [id, room, presentation, cardType, card, systemEvent] of rows) {
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event,created_at)
+      VALUES($1,$2,$3,'Sample',$4,$5,$6::jsonb,$7::jsonb,$8)`,
+      [id.padStart(64, 'f'), room, AGENT, presentation, cardType, card, systemEvent, at]);
+  }
+  const ids = rows.map(([id]) => id.padStart(64, 'f'));
+  const hidden = await database.query<{ id: string }>(
+    `SELECT id FROM messages original WHERE id=ANY($1::text[]) AND NOT (${visibleMessageSql('original')})`, [ids]);
+  expect(hidden.rows).toHaveLength(7);
+  const leaked = await database.query<{ id: string }>(
+    `SELECT id FROM messages original WHERE id=ANY($1::text[]) AND NOT (${visibleMessageSql('original')})
+      AND ${possiblyVisibleMessageSql('original')}`, [ids]);
+  expect(leaked.rows).toEqual([]);
 });
