@@ -95,6 +95,7 @@ export interface PhoneTokens {
 }
 
 export class GoogleSignInError extends Error {}
+export class GitHubSignInError extends Error {}
 
 export class TokenAuth {
   readonly #daemonAuthCache = new Map<string, { agentId: string | null; ownerId?: string | null; expiresAt: number }>();

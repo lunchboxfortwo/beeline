@@ -690,6 +690,15 @@ describe('mounted monolith auth', () => {
     expect((await mountedRequest(`/auth/github/callback?state=${state}&error=access_denied&installation_id=77`)).status).toBe(400);
   });
 
+  it('returns 401 for an invalid GitHub sign-in ticket', async () => {
+    const response = await fetch(`${origin}/v1/auth/github/exchange`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ oidcToken: 'not-a-ticket' }),
+    });
+    expect(response.status).toBe(401);
+  });
+
   it('turns an in-process GitHub ticket into a phone session with subject and login', async () => {
     const response = await fetch(`${origin}/v1/auth/github/exchange`, {
       method: 'POST',

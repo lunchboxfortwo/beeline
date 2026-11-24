@@ -165,7 +165,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     let reviewerWake = reviewerWakeFromFacts({
       configuredReviewerId,
       reviewerHandle: corner.reviewer_handle,
-      checks: rollup.required?.length ? gateChecks : checks,
+      checks: rollup.required ? gateChecks : checks,
       reviewWoken: corner.review_woken,
     });
     const mergeDecision = cornerMergeability({

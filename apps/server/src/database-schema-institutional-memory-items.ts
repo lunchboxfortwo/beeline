@@ -601,7 +601,7 @@ WITH resolved AS (
 )
 UPDATE agent_schedules schedule SET workflow_slug=resolved.slug
 FROM resolved WHERE schedule.id=resolved.id AND resolved.slug IS NOT NULL;
--- A failed occurrence remains parked until an actual schedule revision or due changes.
+-- During rollout, older images may still park a failed occurrence here.
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS failed_due_at timestamptz;
 ALTER TABLE agent_schedules ADD COLUMN IF NOT EXISTS failed_revision timestamptz;
 CREATE INDEX IF NOT EXISTS agent_schedules_admitted_due_idx ON agent_schedules(next_run_at,id)

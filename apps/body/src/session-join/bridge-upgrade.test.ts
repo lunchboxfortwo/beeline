@@ -178,6 +178,7 @@ it.each(['short', 'long'])(
     );
     const old = spawn(process.execPath, [oldBundle, 'session', 'bridge'], { env, stdio: 'ignore' });
     children.push(old);
+    const oldExited = once(old, 'exit');
     await changedFile(stateDir, () => {
       try {
         return Number(readFileSync(join(stateDir, 'bridge.pid'))) === old.pid;
@@ -239,7 +240,7 @@ it.each(['short', 'long'])(
     );
     try {
       await refreshJoinedSessionBridge(bundle, env);
-      expect(old.exitCode !== null || old.signalCode !== null).toBe(true);
+      expect(await oldExited).toEqual([null, 'SIGTERM']);
       await delivered;
       expect(messages[0]).toContain('missed while old bridge lived');
       expect(messages[1]).toContain('committed after reconnect');
