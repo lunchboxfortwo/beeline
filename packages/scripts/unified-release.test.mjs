@@ -275,3 +275,12 @@ for (const [delivery, outcome] of [
     else { assert.notEqual(code, 0); assert.match(output, /Free agent turn failed: .*Model request did not complete/); }
   } finally { for (const client of live.clients) client.terminate(); live.close(); server.close(); }
 });
+
+// release_result restores the plan from needs.initialize.outputs; a flag missing
+// there fails every release after all of its legs already shipped.
+test('initialize exports every plan flag release finalization reads', () => {
+  const outputs = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8')).jobs.initialize.outputs;
+  const flags = ['has_previous', 'has_runtime_pin', 'no_op', 'runtime_pin_changed', 'native_android', 'native_ios',
+    ...RELEASE_COMPONENTS.map(component => `run_${component.replace('-', '_')}`)];
+  for (const flag of flags) assert.ok(outputs[flag], `initialize output ${flag}`);
+});
