@@ -299,6 +299,29 @@ it('publishes closing output locally after a mid-turn post', async () => {
   expect(await queue()).toEqual([]);
 });
 
+it('requires a reply text field before completing a pending command with a public reply', async () => {
+  const item = await ask(R1, 'Publish a reply');
+  const request = { roomId: R1, requestId: item.turn_request_id };
+  await daemon.execute('startAgentTurn', request, A);
+  const posted = await daemon.execute('postCornerMessage', {
+    ...request, cornerId: R1, text: 'The public reply.',
+  }, A);
+  const readCommand = async () => (await db.query(
+    'SELECT * FROM agent_commands WHERE id=$1', [item.id],
+  )).rows[0];
+  const pending = await readCommand();
+  expect(pending).toMatchObject({ state: 'pending', posted_reply_id: posted.id, result_message_id: null });
+
+  // @ts-expect-error An older or malformed client can omit the required wire field.
+  await expect(daemon.execute('postRoomMessage', request, A)).rejects.toMatchObject({
+    status: 400, message: 'reply text is required',
+  });
+  expect(await readCommand()).toEqual(pending);
+
+  await answer(R1, item.turn_request_id, '');
+  expect(await readCommand()).toMatchObject({ state: 'complete', result_message_id: posted.id });
+});
+
 it('publishes the closing text as the answer when no reply tool posted', async () => {
   const item = await ask(R1, 'Use the closing answer');
   const settled = await answer(R1,item.turn_request_id,'This closing text is the answer.');
