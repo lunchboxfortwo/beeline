@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { prepareWorkspace } from './workspace-checkout.js';
@@ -12,6 +12,7 @@ import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
@@ -35,6 +36,7 @@ const commit = async (source: string, version: string) => {
 async function fixture(
   scripts: Record<string, string>,
   restore: { brief?: { spec: string } } = {},
+  packageManager: 'npm' | 'pnpm' = 'npm',
 ) {
   const root = await mkdtemp(`${testTmpDir()}/beeline-prepare-`);
   roots.push(root);
@@ -48,6 +50,7 @@ async function fixture(
       name: 'fixture',
       private: true,
       dependencies: { dep: 'file:dep' },
+      ...(packageManager === 'pnpm' ? { packageManager: 'pnpm@10.34.5' } : {}),
       scripts,
     }),
   );
@@ -60,11 +63,25 @@ async function fixture(
     ].join('\n'),
   );
   await writeFile(join(source, '.gitignore'), 'node_modules/\ndist/\n');
-  await exec(
-    'npm',
-    ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
-    { cwd: source },
-  );
+  if (packageManager === 'pnpm') {
+    await writeFile(join(source, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n");
+    const bin = join(root, 'bin');
+    await mkdir(bin);
+    const npm = (await exec('which', ['npm'])).stdout.trim();
+    await writeFile(join(bin, 'npm'), [
+      '#!/bin/sh',
+      `[ "$1" = "exec" ] || exec '${npm}' "$@"`,
+      '[ "$*" = "exec --yes --package=pnpm@10.34.5 -- pnpm install --frozen-lockfile" ] || exit 1',
+      'mkdir -p node_modules && cp -r dep node_modules/dep',
+    ].join('\n'), { mode: 0o755 });
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+  } else {
+    await exec(
+      'npm',
+      ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
+      { cwd: source },
+    );
+  }
   await commit(source, 'v1');
   const repository = { resolution: 'repository', remote: `file://${source}`, targetBranch: 'main' };
   const api = {
@@ -128,6 +145,14 @@ it.each([
 it('prepare reports a failed build step instead of a ready checkout', async () => {
   const f = await fixture({ build: 'node -e "process.exit(3)"' });
   await expect(f.prepare('room')).rejects.toThrow(/is not ready: npm run build failed/);
+});
+
+it('installs a pnpm checkout from its lockfile before building', async () => {
+  const f = await fixture({ build: 'test -f node_modules/dep/package.json && node build.mjs' }, {}, 'pnpm');
+  const result = await f.prepare('room');
+  expect(result).toContain('Checkout ready at ');
+  const path = result.slice('Checkout ready at '.length).split(' on ')[0]!;
+  expect(await readFile(join(path, 'dist', 'built.txt'), 'utf8')).toBe('v1\n');
 });
 
 it('prepare says the checkout is not ready when no OS sandbox can run its scripts', async () => {
