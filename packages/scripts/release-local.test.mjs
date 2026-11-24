@@ -13,12 +13,12 @@ import { condition, evaluate, readCommandFile, render } from './release-local-ex
 import { loadEnvironment, Processes } from './release-local-process.mjs';
 import { mergeBeelineBundles } from './merge-beeline-bundles.mjs';
 import { validateBundleDirectory } from './pages-site.mjs';
-import { initializeRelease, planOutputs, restoreReleasePlan } from './unified-release.mjs';
+import { initializeRelease } from './unified-release.mjs';
 import { run as bookkeeping } from './release-bookkeeping.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { assignReleaseVersion, latestPublished, recoverTaggedReleases } from './release-record.mjs';
 import { CheckQueue, checkPlan, checkWorkspace, LocalChecks } from './release-local-checks.mjs';
-import { acquireReleaseLock, localAttribution, pinnedRuntimes, prepareReleaseSource, readOtaVersions, releaseArguments, storeReleaseNeeded } from './release.mjs';
+import { acquireReleaseLock, localAttribution, prepareReleaseSource, readOtaVersions, releaseArguments } from './release.mjs';
 
 const repository = resolve(import.meta.dirname, '../..');
 const temporary = () => mkdtempSync(join(tmpdir(), 'beeline-local-test-'));
@@ -38,15 +38,6 @@ test('execution is explicit and requires immutable identity and complete attribu
   const provenance = Object.fromEntries(['agentId', 'handle', 'place', 'humanCommandMessageId', 'auditMessageId'].map(k => [k, k]));
   assert.deepEqual(attribution(JSON.stringify(provenance)), provenance);
 });
-test('a store release is needed only when a pinned runtime is not the newest live store runtime', () => {
-  const config = 'ios: {\n runtimeVersion: runtimeVersionOverride || "41",\n},\nandroid: {\n runtimeVersion: runtimeVersionOverride || "53",\n}';
-  const pins = pinnedRuntimes(config);
-  assert.deepEqual(pins, { android: '53', ios: '41' });
-  const live = (android, ios) => ({ android: { status: 'readable', latestRuntimeVersion: android }, ios: { status: 'readable', latestRuntimeVersion: ios } });
-  assert.equal(storeReleaseNeeded(pins, live('53', '41')), false);
-  assert.equal(storeReleaseNeeded(pins, live('49', '41')), true);
-  assert.equal(storeReleaseNeeded(pins, { ...live('53', '41'), ios: { status: 'unavailable' } }), true);
-});
 test('release lock clears only a dead owner', async () => {
   const directory = temporary(), lock = join(directory, 'release.lock');
   try {
@@ -60,7 +51,7 @@ test('release lock clears only a dead owner', async () => {
     assert.throws(() => readFileSync(join(lock, 'owner')), /ENOENT/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('release source refreshes main and pins the published next even after main advances', async () => {
+test('next release source refreshes main without changing the operator checkout', async () => {
   const directory = temporary();
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
   try {
@@ -81,17 +72,6 @@ test('release source refreshes main and pins the published next even after main 
     for (const ref of ['HEAD', 'main', 'origin/main']) assert.equal(git(prepared.source, 'rev-parse', ref), current);
     assert.equal(readFileSync(join(prepared.source, 'source'), 'utf8'), 'current main');
     assert.equal(git(operator, 'rev-parse', 'HEAD'), old);
-    git(upstream, 'tag', 'v0.1.2-rc.1');
-    const advanced = commit('advanced main');
-    const promotionState = join(directory, 'promotion');
-    mkdirSync(promotionState);
-    const promotion = prepareReleaseSource(operator, promotionState, execFileSync, source => ({
-      sourceSha: git(source, 'rev-parse', 'refs/tags/v0.1.2-rc.1'), version: 'v0.1.2',
-    }));
-    assert.equal(promotion.sha, current);
-    assert.equal(promotion.version, 'v0.1.2');
-    assert.equal(git(promotion.source, 'rev-parse', 'HEAD'), current);
-    assert.equal(git(promotion.source, 'rev-parse', 'origin/main'), advanced);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('OTA branch inventory paginates so orphaned high rc numbers are reserved', async () => {
@@ -805,30 +785,6 @@ test('cancellation prevents later publication and still permits always cleanup',
     assert.throws(() => readFileSync(join(directory, 'finalized')));
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('local latest plan restores a carried desktop set without changing helper/OTA selection', async () => {
-  const directory = temporary();
-  try {
-    const delivered = release => {
-      release.state = 'delivered';
-      for (const component of Object.values(release.components)) component.state = 'checked';
-      return release;
-    };
-    const previous = delivered(initializeRelease({ version: 'v1.2.2', sourceSha: oldSha }));
-    const next = delivered(initializeRelease({ version: 'v1.2.3-rc.1', sourceSha: sha, previous, channel: 'next', selectedComponents: ['server', 'helper', 'mobile-ota'] }));
-    const latest = initializeRelease({ version: 'v1.2.3', sourceSha: sha, previous, next, channel: 'latest', selectedComponents: ['helper', 'mobile-ota', 'desktop', 'website'] });
-    const outputs = readCommandFile(planOutputs(latest, previous));
-    mkdirSync(join(directory, 'previous'));
-    writeFileSync(join(directory, 'previous/release.json'), JSON.stringify(previous));
-    const policy = localHooks(directory, new Processes({}, () => {}));
-    await policy.afterStep({ step: { name: 'Produce the inspectable release plan' }, context: { runner: { temp: directory } }, result: { outputs } });
-    assert.equal(outputs.run_desktop, 'false');
-    const restored = restoreReleasePlan({ version: latest.version, sourceSha: sha, plan: outputs, previous, next, startedAt: latest.startedAt });
-    assert.equal(restored.components.desktop.state, 'carried');
-    assert.equal(restored.components.desktop.desktopVersion, previous.components.desktop.desktopVersion);
-    assert.equal(restored.components.helper.selected, true);
-    assert.equal(restored.components['mobile-ota'].selected, true);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
 test('local transport upgrades shallow fetches without changing the hosted workflow or provisioning shared tools', async () => {
   const policy = localHooks(tmpdir(), new Processes({}, () => {}));
   const step = { run: 'git fetch --no-tags --depth=1 origin "$CI_BASE_SHA"' };
@@ -956,8 +912,8 @@ test('default CLI plan never requires secrets or starts release commands', () =>
   assert.match(output, /no release commands executed/);
   assert.match(output, /static assets to Cloudflare Pages/);
   assert.match(output, /ARM and Intel helpers built natively on GitHub-hosted macos-15 and macos-15-intel/);
-  assert.match(output, /macOS and Linux signed updater set built from the promoted commit; published Windows installers carried unchanged/);
+  assert.match(output, /macOS and Linux signed updater set staged on next; published Windows installers carried unchanged/);
   const carried = execFileSync(process.execPath, ['packages/scripts/release-local.mjs', '--plan', '--desktop-mode', 'carry', '--mac-helpers', 'carry'], { cwd: repository, encoding: 'utf8' });
   assert.match(carried, /Apple-silicon and Intel Mac helpers carried unchanged/);
-  assert.match(carried, /published signed updater set carried unchanged/);
+  assert.match(carried, /installer proof plan requests the published desktop set/);
 });

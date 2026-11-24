@@ -50,7 +50,7 @@ export function updaterBuildConfig({ version, publicKey, endpoint }) {
 
 export function createDesktopUpdateManifest({ directory, version, releaseTag, repository, publishedAt, omit = [] }) {
   const normalized = normalizeDesktopVersion(version);
-  if (!/^v\d+\.\d+\.\d+$/.test(releaseTag ?? '')) fail('release tag must be vX.Y.Z');
+  if (!/^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/.test(releaseTag ?? '')) fail('invalid desktop release tag');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? '')) fail('invalid repository');
   const platforms = {};
   for (const [platform, file] of Object.entries(SIGNED_ASSETS)) {

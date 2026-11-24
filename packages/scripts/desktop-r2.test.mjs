@@ -49,7 +49,7 @@ test('production build CLI preserves endpoint priority from the desktop workflow
   const script = workflow.jobs.build.steps.find(step => step.name === 'Prepare the signed production updater configuration').run;
   const endpoints = [...script.matchAll(/--endpoint '([^']+)'/g)].map(match => match[1]);
   assert.deepEqual(endpoints, [`${origin}/latest/Beeline-latest.json`,
-    'https://github.com/Beeline-Work/beeline/releases/latest/download/Beeline-latest.json']);
+    'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-latest.json']);
   execFileSync(process.execPath, [join(root, 'packages/scripts/desktop-update.mjs'), 'config', '--version', '1.2.3',
     ...endpoints.flatMap(endpoint => ['--endpoint', endpoint]), '--output', output], {
     env: { ...process.env, TAURI_UPDATER_PUBLIC_KEY: 'fixture-public-key' },
@@ -103,14 +103,13 @@ test('R2 upload failure stops immediately without retrying or advancing latest',
   }
 });
 
-test('unified publication invokes R2 for built and carried sets, and local recovery retains that step', async () => {
+test('next stages desktop artifacts through the same R2 step on both runners', async () => {
   const workflow = parse(await readFile(join(root, '.github/workflows/unified-release.yml'), 'utf8'));
   const step = Object.values(workflow.jobs).flatMap(job => job.steps || [])
-    .find(step => step.name === 'Publish the one GitHub release record with its release.json and stable desktop downloads');
+    .find(step => step.name === 'Publish the next record and staged artifacts');
   assert.equal(step.env.CLOUDFLARE_R2_TOKEN, '${{ secrets.CLOUDFLARE_R2_TOKEN }}');
   assert.equal(step.env.CLOUDFLARE_ACCOUNT_ID, '${{ vars.CLOUDFLARE_ACCOUNT_ID }}');
-  assert.ok(step.run.indexOf('gh release download') < step.run.indexOf('node packages/scripts/desktop-r2.mjs'));
-  assert.ok(step.run.indexOf('node packages/scripts/desktop-r2.mjs') < step.run.indexOf('ghr_publish "$RELEASE_VERSION"'));
+  assert.ok(step.run.indexOf('node packages/scripts/desktop-r2.mjs') < step.run.indexOf('gh release edit "$RELEASE_VERSION"'));
   const handled = await localHooks(tmpdir(), {}).step({ step, context: { github: { job: 'bookkeeping' } } });
   assert.equal(handled, undefined);
 });

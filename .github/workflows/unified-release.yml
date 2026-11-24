@@ -20,7 +20,7 @@ on:
         type: string
         required: false
       release_version:
-        description: Recovery only - existing vX.Y.Z-rc.N or final vX.Y.Z identity
+        description: Recovery only - existing vX.Y.Z-rc.N identity
         type: string
         required: false
       selection:
@@ -29,7 +29,7 @@ on:
         default: auto
         required: true
       store_track:
-        description: Explicit store build only - next requires beta (Android); latest allows production
+        description: Explicit Android beta store build only; promotion requires none
         type: choice
         default: none
         options:
@@ -69,8 +69,50 @@ concurrency:
   group: ${{ inputs.selection == 'npm-publish' && 'usebeeline-npm-publish' || 'unified-production-release' }}
   cancel-in-progress: false
 jobs:
+  promote:
+    if: inputs.channel == 'latest'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+    concurrency:
+      group: usebeeline-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Read the published next identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCHED_BY: ${{ inputs.dispatched_by }}
+          REQUESTED_SHA: ${{ inputs.release_sha }}
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+          STORE_TRACK: ${{ inputs.store_track }}
+          SELECTION: ${{ inputs.selection }}
+          RUN_RELEASE_PROOF: ${{ inputs.run_release_proof }}
+          MOBILE_STORE_MINIMUM: ${{ inputs.mobile_store_minimum }}
+          PUBLISH_LISTING: ${{ inputs.publish_listing }}
+        run: node packages/scripts/release-promote.mjs prepare "$RUNNER_TEMP/promotion"
+      - uses: ./.github/actions/eas-cli
+      - name: Install npm with OIDC dist-tag support
+        run: npm install --global npm@^11.21.0
+      - name: Move production to the published candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
+          CLOUDFLARE_PAGES_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node packages/scripts/release-promote.mjs promote "$RUNNER_TEMP/promotion"
   initialize:
-    if: inputs.selection != 'npm-publish'
+    if: inputs.channel != 'latest' && inputs.selection != 'npm-publish'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -157,14 +199,9 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
-          release_sha=''
-          if [ "$CHANNEL" = next ]; then
-            release_sha=$(git rev-parse --verify "${REQUESTED_SHA:-$GITHUB_SHA}^{commit}")
-          elif [ -n "$REQUESTED_SHA" ]; then
-            release_sha=$(git rev-parse --verify "$REQUESTED_SHA^{commit}")
-          fi
+          release_sha=$(git rev-parse --verify "${REQUESTED_SHA:-$GITHUB_SHA}^{commit}")
           node packages/scripts/release-record.mjs identity --sha "$release_sha" --requested "$REQUESTED_VERSION" \
-            --channel "$CHANNEL" --next "$RUNNER_TEMP/next-release.json" \
+            --channel "$CHANNEL" \
             --previous "$RUNNER_TEMP/previous/release.json" > "$RUNNER_TEMP/identity.txt"
           release_sha=$(sed -n 's/^release_sha=//p' "$RUNNER_TEMP/identity.txt")
           git merge-base --is-ancestor "$release_sha" origin/main || {
@@ -215,7 +252,6 @@ jobs:
             --state "$RUNNER_TEMP/unified-release.json" --summary "$RUNNER_TEMP/release-plan.json"
             --outputs "$GITHUB_OUTPUT")
           if [ -f "$previous" ]; then args+=(--previous "$previous"); fi
-          if [ "$CHANNEL" = latest ]; then args+=(--next "$RUNNER_TEMP/next-release.json"); fi
           node packages/scripts/unified-release.mjs "${args[@]}"
           tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/release-plan.json"
       - name: Mint a Play token to read this release's store builds
@@ -698,7 +734,7 @@ jobs:
   npm_publish:
     # Publish-only path (selection=npm-publish) that a local release's helper
     # leg dispatches: npm's trusted publisher for usebeeline is this workflow.
-    if: inputs.selection == 'npm-publish'
+    if: inputs.channel != 'latest' && inputs.selection == 'npm-publish'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -898,7 +934,7 @@ jobs:
       completed_at: ${{ steps.complete.outputs.completed_at }}
     permissions:
       actions: read
-      contents: read
+      contents: write
     concurrency:
       group: usebeeline-pages
       cancel-in-progress: false
@@ -919,17 +955,33 @@ jobs:
           bash packages/scripts/npm-ci-timed.sh
           npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
       - uses: ./.github/actions/eas-cli
+      - run: mkdir -p "$RUNNER_TEMP/website-staging"
       - uses: ./.github/actions/pages-leg
         with:
+          deployment_json: ${{ runner.temp }}/website-staging/pages-deployment.json
+          branch: ${{ format('next-{0}', needs.initialize.outputs.release_version) }}
           cloudflare_api_token: ${{ secrets.CLOUDFLARE_PAGES_TOKEN }}
           cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       - uses: ./.github/actions/web-app-leg
         with:
+          deployment_json: ${{ runner.temp }}/website-staging/web-deployment.json
           sentry_auth_token: ${{ secrets.SENTRY_AUTH_TOKEN }}
           expo_token: ${{ secrets.EXPO_TOKEN }}
           release_sha: ${{ needs.initialize.outputs.release_sha }}
           release_version: ${{ needs.initialize.outputs.release_version }}
-      - name: Record live website completion after both origins passed
+      - name: Record the immutable website references on the candidate release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
+          RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          . packages/scripts/gh-release-retry.sh
+          website="$RUNNER_TEMP/website-staging"
+          node packages/scripts/release-promote.mjs stage "$website/website-staging.json" \
+            "$website/web-deployment.json" "$website/pages-deployment.json" "$RELEASE_VERSION" "$RELEASE_SHA"
+          ghr_upload_verified "$RELEASE_VERSION" "$website/website-staging.json"
+      - name: Record candidate website completion
         id: complete
         run: echo "completed_at=$(date +%s)" >> "$GITHUB_OUTPUT"
   mobile_native_android:
@@ -1285,7 +1337,7 @@ jobs:
       - release_proof
       - delivery_result
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: write
@@ -1306,11 +1358,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node packages/scripts/release-record.mjs previous --channel "${{ needs.initialize.outputs.channel }}" --output "$RUNNER_TEMP/previous/release.json"
-      - name: Read the next release being promoted
-        if: needs.initialize.outputs.channel == 'latest'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node packages/scripts/release-record.mjs previous --channel next --rc-only true --output "$RUNNER_TEMP/next-release.json"
       - name: Record each component job's result and classify the attempt
         id: result
         env:
@@ -1327,7 +1374,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/release" "$RUNNER_TEMP/previous"
           state="$RUNNER_TEMP/release/release.json"
           restore=(restore-job-state --state "$state" --previous "$RUNNER_TEMP/previous/release.json")
-          if [ '${{ needs.initialize.outputs.channel }}' = latest ]; then restore+=(--next "$RUNNER_TEMP/next-release.json"); fi
           if ! node packages/scripts/unified-release.mjs "${restore[@]}"; then
             exit 0 # Classified metadata failure; the final reporting step fails the job.
           fi
@@ -1386,27 +1432,6 @@ jobs:
           pattern: beeline-desktop-release-${{ needs.initialize.outputs.release_version }}-${{ needs.initialize.outputs.release_sha }}-*
           path: ${{ runner.temp }}/desktop-release
           merge-multiple: true
-      - name: Preserve the previous updater manifest for publication rollback
-        if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'latest'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_DESKTOP: ${{ needs.initialize.outputs.run_desktop }}
-        run: |
-          state="$RUNNER_TEMP/release/release.json"
-          # The last known-good desktop manifest is the one carried by the
-          # release this one supersedes — unless desktop is carried forward,
-          # in which case only the release that last BUILT desktop
-          # (components.desktop.version) is guaranteed to have it.
-          if [ "$RUN_DESKTOP" = true ]; then
-            previous_version=$(node -e 'process.stdout.write(require(process.argv[1]).supersedes?.version ?? "")' "$state")
-          else
-            previous_version=$(node -e 'process.stdout.write(require(process.argv[1]).components.desktop.version)' "$state")
-          fi
-          if [ -n "$previous_version" ]; then
-            mkdir -p "$RUNNER_TEMP/desktop-rollback"
-            gh release download "$previous_version" --pattern 'Beeline-latest.json' --dir "$RUNNER_TEMP/desktop-rollback"
-          fi
       - name: Build the signed desktop update manifest
         if: steps.result.outputs.outcome == 'success' && needs.initialize.outputs.run_desktop == 'true'
         env:
@@ -1435,111 +1460,22 @@ jobs:
           node packages/scripts/unified-release.mjs finalize "${args[@]}"
           node packages/scripts/release-delivery.mjs record "$state"
           node -e 'const fs=require("node:fs");const p=process.argv[1];const r=JSON.parse(fs.readFileSync(p,"utf8"));r.runId=Number(process.env.GITHUB_RUN_ID);fs.writeFileSync(p,JSON.stringify(r,null,2)+"\n")' "$state"
-      - name: Publish the one GitHub release record with its release.json and stable desktop downloads
-        if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'latest'
+      - name: Publish the next record and staged artifacts
+        if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'next'
         env:
           CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
-          RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
-          RUN_DESKTOP: ${{ needs.initialize.outputs.run_desktop }}
-          RELEASE_PROOF_UNPROVEN: ${{ needs.initialize.outputs.run_mobile_ota == 'true' && inputs.run_release_proof != true }}
         run: |
           set -euo pipefail
-          # Every release-mutating gh call below goes through bounded-retry,
-          # asset-verified wrappers (run 35268976983: a transient GitHub-side
-          # HTTP 500 on `gh release upload` failed an otherwise finished
-          # release).
           . packages/scripts/gh-release-retry.sh
-          state="$RUNNER_TEMP/release/release.json"
-          mkdir -p "$RUNNER_TEMP/desktop-release"
-          # A carried desktop re-attaches the installers of the release that
-          # built them; every release therefore holds the current installers.
-          if [ "$RUN_DESKTOP" != true ]; then
-            previous_version=$(node -e 'process.stdout.write(require(process.argv[1]).components.desktop.version)' "$state")
-            gh release download "$previous_version" --pattern 'Beeline-*' --dir "$RUNNER_TEMP/desktop-release"
-            if [ ! -f "$RUNNER_TEMP/desktop-rollback/Beeline-latest.json" ] && [ -f "$RUNNER_TEMP/desktop-release/Beeline-latest.json" ]; then
-              mkdir -p "$RUNNER_TEMP/desktop-rollback"
-              cp "$RUNNER_TEMP/desktop-release/Beeline-latest.json" "$RUNNER_TEMP/desktop-rollback/Beeline-latest.json"
-            fi
-          fi
-          previous_sha=$(node -e 'process.stdout.write(require(process.argv[1]).supersedes?.sourceSha ?? "")' "$state")
-          notes="$RUNNER_TEMP/release-notes.md"
-          git log --pretty='- %s (%h)' "${previous_sha:+${previous_sha}..}${RELEASE_SHA}" > "$notes"
-          [ -s "$notes" ] || echo '- No component changes required.' > "$notes"
-          if [ "$RELEASE_PROOF_UNPROVEN" = true ]; then
-            echo '- Promoted without a device proof: proof is opt-in and was not requested for this release (release recorded UNPROVEN).' >> "$notes"
-          fi
-          if [ "$RUN_DESKTOP" = true ]; then
-            manifest="$RUNNER_TEMP/desktop-manifest/Beeline-latest.json"
-          else
-            manifest="$RUNNER_TEMP/desktop-rollback/Beeline-latest.json"
-          fi
-          test -f "$manifest" || { echo 'desktop updater manifest is missing' >&2; exit 1; }
-          mapfile -t assets < <(find "$RUNNER_TEMP/desktop-release" -maxdepth 1 -type f -name 'Beeline-*' ! -name 'Beeline-latest.json' | sort)
-          # Publish the installers before either updater manifest can name them.
-          # Local recovery executes this same step with its carried signed set.
-          node packages/scripts/desktop-r2.mjs \
-            --directory "$RUNNER_TEMP/desktop-release" \
-            --manifest "$manifest" --tag "$RELEASE_VERSION" \
-            --output "$RUNNER_TEMP/desktop-release/Beeline-latest.json"
-          manifest="$RUNNER_TEMP/desktop-release/Beeline-latest.json"
-          previous="$RUNNER_TEMP/desktop-rollback/Beeline-latest.json"
-          # initialize reserved this identity as a draft; create it only if
-          # that draft is gone.
-          if ! gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
-            ghr_create "$RELEASE_VERSION" --target "$RELEASE_SHA" --title "$RELEASE_VERSION" --notes 'Release in progress.' --draft
-          fi
-          [ ! -f "$previous" ] || ghr_upload_verified "$RELEASE_VERSION" "$previous"
-          [ "${#assets[@]}" -eq 0 ] || ghr_upload_verified "$RELEASE_VERSION" "${assets[@]}"
-          # A local release keeps its quick-check results beside its record.
-          checks="$RUNNER_TEMP/release/release-checks.json"
-          [ ! -f "$checks" ] || ghr_upload_verified "$RELEASE_VERSION" "$checks"
-          # Per-job check evidence is useful, not required: a failed upload is logged.
-          for evidence in records.json release-checks-timing.json; do
-            [ ! -f "$RUNNER_TEMP/release/$evidence" ] || ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/$evidence" || echo "::warning::$evidence was not uploaded"
-          done
-          # The memory the next release and every rollback read. Written
-          # before publication, so a published release always carries it.
-          ghr_upload_verified "$RELEASE_VERSION" "$state"
-          rollback_manifest() {
-            if [ -f "$previous" ]; then
-              ghr_upload_verified "$RELEASE_VERSION" "$previous#Beeline-latest.json" || true
-            else
-              ghr_delete_asset "$RELEASE_VERSION" 'Beeline-latest.json' || true
-            fi
-          }
-          manifest_committed=false
-          rollback_on_exit() {
-            status=$?
-            if [ "$manifest_committed" != true ]; then rollback_manifest; fi
-            return "$status"
-          }
-          trap rollback_on_exit EXIT
-          # The manifest is the commit point: every URL and signature it names
-          # is already present before clients can discover this version.
-          ghr_upload_verified "$RELEASE_VERSION" "$manifest"
-          ghr_publish "$RELEASE_VERSION" "$notes"
-          manifest_url='https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-latest.json'
-          verified=false
-          for _ in {1..12}; do
-            if node packages/scripts/desktop-update.mjs verify --url "$manifest_url" --expected "$manifest"; then
-              verified=true
-              break
-            fi
-            sleep 5
-          done
-          [ "$verified" = true ] || { echo 'desktop updater manifest did not converge' >&2; exit 1; }
-          manifest_committed=true
-          trap - EXIT
-      - name: Publish the next record without changing GitHub latest or desktop downloads
-        if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'next'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
-        run: |
-          . packages/scripts/gh-release-retry.sh
+          manifest="$RUNNER_TEMP/desktop-manifest/Beeline-latest.json"
+          desktop="$RUNNER_TEMP/desktop-release"
+          node packages/scripts/desktop-r2.mjs --directory "$desktop" --manifest "$manifest" \
+            --tag "$RELEASE_VERSION" --output "$desktop/Beeline-latest.json"
+          mapfile -t assets < <(find "$desktop" -maxdepth 1 -type f -name 'Beeline-*' | sort)
+          ghr_upload_verified "$RELEASE_VERSION" "${assets[@]}"
           checks="$RUNNER_TEMP/release/release-checks.json"
           [ ! -f "$checks" ] || ghr_upload_verified "$RELEASE_VERSION" "$checks"
           # Per-job check evidence is useful, not required: a failed upload is logged.
@@ -1547,7 +1483,7 @@ jobs:
             [ ! -f "$RUNNER_TEMP/release/$evidence" ] || ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/$evidence" || echo "::warning::$evidence was not uploaded"
           done
           ghr_upload_verified "$RELEASE_VERSION" "$RUNNER_TEMP/release/release.json"
-          gh release edit "$RELEASE_VERSION" --draft=false --prerelease --latest=false --notes 'Next dogfood release; production OTA, desktop and website await owner-commanded latest promotion.'
+          gh release edit "$RELEASE_VERSION" --draft=false --prerelease --latest=false --notes 'Next dogfood release with staged desktop and website artifacts. Production promotion is owner-commanded.'
       - name: Remove drafts this release supersedes
         if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true'
         continue-on-error: true

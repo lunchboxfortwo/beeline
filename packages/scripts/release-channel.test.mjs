@@ -101,8 +101,8 @@ const workflow = parse(readFileSync('.github/workflows/unified-release.yml', 'ut
 test('channel defaults to next; native consent and latest selection stay separate', () => {
   assert.equal(releaseChannel(), 'next');
   assert.throws(() => releaseChannel('beta'), /invalid release channel/);
-  assert.deepEqual(channelComponents(['helper', 'mobile-ota', 'desktop', 'website']), ['server', 'helper', 'mobile-ota']);
-  assert.deepEqual(channelComponents(['mobile-native'], { storeTrack: 'beta' }), ['server', 'helper', 'mobile-ota', 'mobile-native']);
+  assert.deepEqual(channelComponents(['helper', 'mobile-ota', 'desktop', 'website']), ['server', 'helper', 'mobile-ota', 'desktop', 'website']);
+  assert.deepEqual(channelComponents(['mobile-native'], { storeTrack: 'beta' }), ['server', 'helper', 'mobile-ota', 'desktop', 'website', 'mobile-native']);
   assert.throws(() => channelComponents(['mobile-native']), /explicit store_track=beta/);
   assert.throws(() => channelComponents([], { storeTrack: 'production' }), /store_track=beta/);
   assert.deepEqual(channelComponents([], { channel: 'latest' }), ['helper', 'mobile-ota', 'desktop', 'website']);
@@ -244,8 +244,8 @@ test('a local release hands its exact tarball to the publish-only job and fails 
   assert.match(failed.stderr, /npm publish failed: https:\/\/github\.com\/fixture\/repo\/actions\/runs\/42/);
 
   const job = workflow.jobs.npm_publish;
-  assert.equal(job.if, "inputs.selection == 'npm-publish'");
-  assert.equal(workflow.jobs.initialize.if, "inputs.selection != 'npm-publish'");
+  assert.equal(job.if, "inputs.channel != 'latest' && inputs.selection == 'npm-publish'");
+  assert.equal(workflow.jobs.initialize.if, "inputs.channel != 'latest' && inputs.selection != 'npm-publish'");
   assert.equal(job.permissions['id-token'], 'write');
   const step = job.steps.find(s => s.name === "Publish the local release's exact helper CLI package");
   for (const channel of ['next', 'latest']) {
@@ -285,7 +285,7 @@ for (const channel of ['next', 'latest']) test(`offline workflow plan: ${channel
   const output = execFileSync(process.execPath, args, { encoding: 'utf8' });
   const plan = JSON.parse(output.trim().split('\n').at(-1));
   console.log(`${channel} component plan: ${JSON.stringify(plan)}`);
-  assert.deepEqual(plan.selected, channel === 'next' ? ['server', 'helper', 'mobile-ota'] : ['helper', 'mobile-ota', 'desktop', 'website']);
+  assert.deepEqual(plan.selected, channel === 'next' ? ['server', 'helper', 'mobile-ota', 'desktop', 'website'] : ['helper', 'mobile-ota', 'desktop', 'website']);
   const state = JSON.parse(readFileSync(join(directory, 'state.json')));
   assert.deepEqual(state.plan.nativePlatforms, channel === 'next' ? ['android'] : ['android', 'ios']);
   const outputs = Object.fromEntries(readFileSync(join(directory, 'outputs.txt'), 'utf8').trim().split('\n').map(line => {

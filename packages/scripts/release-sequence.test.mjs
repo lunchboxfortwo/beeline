@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { releaseArguments, releaseSequence, removeReleaseDirectory, removeStaleReleaseImages, staleReleaseImages } from './release.mjs';
+import { dispatchPromotion, releaseArguments, releaseSequence, removeReleaseDirectory, removeStaleReleaseImages, staleReleaseImages } from './release.mjs';
 
 const sha = 'a'.repeat(40);
 const spec = { source: '/source', sha, directory: '/state', dispatchedBy: { humanCommandMessageId: 'owner-message-42' } };
@@ -12,24 +12,25 @@ test('routine delivery runs next once and does not promote or authorize stores',
   assert.equal(calls[0]['release-sha'], sha);
   assert.equal(calls[0]['store-track'], 'none');
 });
-test('promotion can restart from the published next identity after a failed latest', async () => {
+test('promotion dispatches only the metadata workflow and waits for its verdict', () => {
   const calls = [];
-  const promotion = { ...spec, version: 'v1.2.3', store: true };
-  await assert.rejects(releaseSequence(promotion, async () => { throw new Error('latest delivery failed'); }), /latest delivery failed/);
-  await releaseSequence(promotion, async args => { calls.push(args); });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].channel, 'latest');
-  assert.equal(calls[0]['release-sha'], sha);
-  assert.equal(calls[0]['release-version'], 'v1.2.3');
-  assert.equal(calls[0]['store-track'], 'production');
-  assert.deepEqual(JSON.parse(calls[0]['dispatched-by']), spec.dispatchedBy);
+  dispatchPromotion(spec.dispatchedBy, {}, (command, args) => {
+    calls.push([command, ...args]);
+    return 'https://github.com/lunchboxfortwo/beeline/actions/runs/42';
+  });
+  assert.deepEqual(calls, [
+    ['gh', 'workflow', 'run', 'unified-release.yml', '-R', 'lunchboxfortwo/beeline', '--ref', 'main',
+      '-f', 'channel=latest', '-f', `dispatched_by=${JSON.stringify(spec.dispatchedBy)}`],
+    ['gh', 'run', 'watch', '42', '-R', 'lunchboxfortwo/beeline', '--exit-status'],
+  ]);
 });
-test('promotion and store authorization are explicit and a Checks exception needs the owner message', async () => {
+test('promotion accepts owner attribution and rejects build and test options', async () => {
   assert.deepEqual(releaseArguments(['--skip-full-checks', 'owner-message-42']), { skipFullChecks: 'owner-message-42' });
-  assert.deepEqual(releaseArguments(['--promote', '--dispatched-by', JSON.stringify(spec.dispatchedBy), '--store-track', 'production']),
-    { promote: true, dispatchedBy: spec.dispatchedBy, store: true });
+  assert.deepEqual(releaseArguments(['--promote', '--dispatched-by', JSON.stringify(spec.dispatchedBy)]),
+    { promote: true, dispatchedBy: spec.dispatchedBy });
   for (const argv of [['--skip-full-checks'], ['--skip-full-checks', ' '], ['--skip-full-checks', '--no-store'],
-    ['--promote'], ['--store-track', 'production'], ['--promote', '--dispatched-by', '{}', '--store-track', 'production', '--no-store']])
+    ['--promote'], ['--store-track', 'production'], ['--promote', '--dispatched-by', '{}', '--store-track', 'production'],
+    ['--promote', '--dispatched-by', '{}', '--desktop-mode', 'carry']])
     assert.throws(() => releaseArguments(argv), /Usage/);
   const calls = [];
   await releaseSequence({ ...spec, skipFullChecks: 'owner-message-42' }, async args => { calls.push(args); });

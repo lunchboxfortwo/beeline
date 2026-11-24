@@ -14,6 +14,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const RELEASE_RECORD_ASSET = 'release.json';
+export const PROMOTION_RECORD_ASSET = 'promotion.json';
 export const LEGACY_OTA_BRANCH = 'production';
 const COMPONENTS = ['server', 'helper', 'mobile-ota', 'mobile-native', 'desktop', 'website'];
 const VERSION = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?$/;
@@ -106,7 +107,7 @@ export function assignReleaseVersion({ releases, previous, sha, requestedVersion
   }
   const floor = VERSION.exec(previous?.version ?? 'v0.0.0');
   if (!floor) fail(`invalid previous release version: ${previous?.version}`);
-  let patch = Number(floor[3]) + (floor[4] ? 0 : 1);
+  let patch = Number(floor[3]) + (floor[4] && previous?.channel !== 'latest' ? 0 : 1);
   let base = `v${floor[1]}.${floor[2]}.${patch}`;
   if (previous?.sourceSha === sha && previous.channel === 'next' && previous.version.startsWith(`${base}-rc.`))
     return { version: previous.version, reason: 'already-published' };
@@ -198,7 +199,7 @@ function listReleases(repository) {
   return recoverLocalReleases(repository, JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`])).flat());
 }
 
-function listIdentityReleases(repository) {
+export function listIdentityReleases(repository) {
   return recoverLocalReleases(repository, listReleasePage(endpoint => JSON.parse(gh(['api', `repos/${repository}/${endpoint}`]))));
 }
 
@@ -231,7 +232,7 @@ function recoverLocalReleases(repository, releases) {
   return recovered;
 }
 
-function downloadAsset(repository, release, name) {
+export function downloadAsset(repository, release, name) {
   const asset = release.assets?.find((candidate) => candidate.name === name);
   if (!asset) return null;
   return gh(['api', '-H', 'Accept: application/octet-stream', `repos/${repository}/releases/assets/${asset.id}`], { binary: true });
@@ -242,10 +243,12 @@ function commitOfTag(repository, tag) {
 }
 
 /** The newest published release's record, or a migration record for it. */
-export function readPublishedRecord(repository, releases = listReleases(repository), channel = 'latest') {
+export function readPublishedRecord(repository, releases = listReleases(repository), channel = 'latest', { candidate = false } = {}) {
   const release = latestPublished(releases, channel);
   if (!release) return null;
-  const bytes = downloadAsset(repository, release, RELEASE_RECORD_ASSET);
+  const promotion = !candidate && !release.prerelease && VERSION.exec(release.tag_name)?.[4]
+    ? downloadAsset(repository, release, PROMOTION_RECORD_ASSET) : null;
+  const bytes = promotion || downloadAsset(repository, release, RELEASE_RECORD_ASSET);
   if (bytes) {
     const record = JSON.parse(bytes.toString('utf8'));
     if (record.version !== release.tag_name) fail(`${release.tag_name} carries a release.json for ${record.version}`);
@@ -308,7 +311,7 @@ function main(argv) {
   }
   if (command === 'previous') {
     const releases = args['rc-only'] === 'true' ? listReleases(repository).filter(release => VERSION.exec(release.tag_name ?? '')?.[4]) : undefined;
-    const record = readPublishedRecord(repository, releases, args.channel ?? 'latest');
+    const record = readPublishedRecord(repository, releases, args.channel ?? 'latest', { candidate: args['rc-only'] === 'true' });
     if (!record) fail('no published release exists');
     write(args.output, record);
     process.stdout.write(`version=${record.version}\n`);

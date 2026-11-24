@@ -1,29 +1,19 @@
 # Helper downloads
 
-`worker.mjs` serves `usebeeline.app/dl/*` from public R2 objects at
-`https://downloads.usebeeline.app/dl/...`. Latest uses the `dl/` prefix in
-`beeline-downloads`; next uses `dl/next/`. The rolling GitHub Releases
-`helper-update-channel` and `helper-update-channel-next` retain secondary copies.
-Archive names, checksums and recovery bootstrap paths stay unchanged. `/install` and
-`/install.sh` stay on the static website and already fetch these `/dl` paths.
-Desktop installers and application updates use the same R2 bucket under
-versioned and `latest/` prefixes.
+`worker.mjs` streams helper and desktop downloads from public R2 objects.
+`/dl/next/*` serves the candidate helper channel. `/dl/*` and
+`downloads.usebeeline.app/latest/*` resolve `latest-release.json` in
+`beeline-downloads` to the same immutable rc, with the legacy R2 paths used
+until the first pointer is present. Helper filenames and desktop updater URLs
+stay stable. The website also uses the desktop routes in its installer links.
 
-GET and HEAD stream bytes without buffering archives or forwarding caller
-credentials. Range requests remain range requests. Clients see no redirect.
-Mutable channel responses and upstream failures are not cached; a cache-busting
-query makes the next verification read the freshly published bytes. Publication
-uses `CLOUDFLARE_R2_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` through the shared desktop
-R2 client. Downloads need no credentials or additional release gate.
-
-The helper action validates, uploads and verifies the public channel directly.
-Pages receives only the static marketing site and associations. Next helper
-publication does not deploy the website. Latest publication runs the website
-leg when selected, independently of helper publication.
+GET and HEAD preserve ranges without forwarding caller credentials. The
+Worker bypasses caches for channel pointers and streams payloads directly.
+The release pipeline writes the pointer after staging all referenced artifacts.
 
 ## Rollout
 
-Activate the route before the first release using this workflow. Merging the
+Activate both routes before the first promotion using this workflow. Merging the
 code does not configure Cloudflare. Do not dispatch a release for this setup.
 
 1. Run `node --test packages/scripts/helper-downloads.test.mjs` and
@@ -50,13 +40,14 @@ code does not configure Cloudflare. Do not dispatch a release for this setup.
 5. Deploy the reviewed route with
    `npx wrangler deploy --config apps/infra/helper-downloads/wrangler.jsonc`.
    The existing proxied apex DNS record remains unchanged. Verify both
-   canonical manifests, sidecars, bootstrap, GET/HEAD and the squire read-only
-   check again. Check `/install`, `/install.sh`, `/` and app associations still
+   canonical helper manifests, sidecars, bootstrap, GET/HEAD and the squire
+   read-only check again. Verify that the desktop updater manifest under
+   `downloads.usebeeline.app/latest/` serves the current version and carries
+   `X-Beeline-Release-Pointer: 1`. Check `/install`, `/install.sh`, `/` and app associations still
    resolve through the existing static site.
 
-Removing only this Worker's `/dl/*` route restores the old Pages download
-snapshot. It does not undo a helper channel publication; check the snapshot's
-identity before considering it a rollback. Keep both public rolling releases.
+To roll back the download channels, restore the preceding pointer to its
+immutable candidate. Keep both public rolling releases for helper recovery.
 An interrupted upload fails checksum validation and a release rerun repairs
 it; installed helpers remain on their verified release.
 

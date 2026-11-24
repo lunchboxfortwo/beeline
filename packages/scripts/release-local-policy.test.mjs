@@ -64,31 +64,22 @@ test('local delivery preserves real dependency joins and requires the quick verd
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('local latest promotion has no reusable Checks call or quick gates', async () => {
-  const workflow = localWorkflow(read('unified-release.yml'), { channel: 'latest' });
-  assert.equal(workflow.jobs.release_checks, undefined);
-  assert.ok(Object.values(workflow.jobs).every(job => ![job.needs ?? []].flat().includes('release_checks')));
-  assert.deepEqual(workflow.jobs.release_validation.needs, ['initialize']);
-  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest' });
-  assert.match(plan.checks.reusedFrom, /successful same-SHA next/);
+test('the latest path reaches only the promotion job', async () => {
+  const workflow = read('unified-release.yml');
+  assert.deepEqual(Object.keys(localWorkflow(workflow, { channel: 'latest' }).jobs), ['promote']);
   const directory = temporary(), started = [];
   try {
     const engine = new LocalActions({ root, directory, processes: new Processes({}, () => {}) });
-    engine.hooks.workflow = ({ workflow, inputs }) => ({ workflow: localWorkflow(workflow, inputs),
+    engine.hooks.workflow = () => ({
       job: async (_job, context) => {
         started.push(context.github.job);
-        return { result: 'success', outputs: context.github.job === 'initialize' ? {
-          channel: 'latest', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true',
-          run_mobile_native: 'true', native_android: 'true', native_ios: 'true',
-        } : {} };
-      } });
-    const results = await engine.workflow('.github/workflows/unified-release.yml', { channel: 'latest', store_track: 'production' }, {
+        return { result: 'success', outputs: {} };
+      },
+    });
+    await engine.workflow('.github/workflows/unified-release.yml', { channel: 'latest' }, {
       github: { repository: 'Beeline-Work/beeline', sha: 'a'.repeat(40), run_id: '1' },
     });
-    assert.equal(results.release_validation.result, 'success');
-    assert.ok(!started.some(id => ['release_checks', 'typecheck', 'dead-code', 'codecs'].includes(id)));
-    assert.ok(started.includes('helper') && started.includes('release_result'));
-    assert.ok(started.includes('mobile_native_android') && started.includes('mobile_native_ios'));
+    assert.deepEqual(started, ['promote']);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -106,7 +97,7 @@ test('only iOS uses the remote queue while both carried Mac helpers and Android 
   assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['mobile_native_ios']);
   assert.equal(placements.filter(([id, slot]) => id === 'helper_macos' && slot < 4).length, 2);
   assert.ok(placements.some(([id, slot]) => id === 'mobile_native_android' && slot < 4));
-  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'latest', macHelpers: 'carry' });
+  const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'next', macHelpers: 'carry' });
   assert.equal(plan.jobs.find(job => job.id === 'mobile_native_ios').placement, 'remote Mac, separate queue');
   assert.equal(plan.jobs.find(job => job.id === 'helper_macos').placement, 'bounded local queue');
   assert.match(plan.jobs.find(job => job.id === 'helper_macos').policy, /Apple-silicon and Intel Mac helpers carried unchanged/);

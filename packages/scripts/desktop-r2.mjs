@@ -10,7 +10,7 @@ const INSTALLER = /^Beeline-.*\.(?:dmg|app\.tar\.gz|AppImage|deb|rpm|msi|exe)(?:
 // Keep the signed bytes and desktop version when carrying a previous build.
 // Only the download locations move to this release's immutable R2 prefix.
 export function r2Manifest(manifest, tag) {
-  if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error('R2 desktop tag must be vX.Y.Z');
+  if (!/^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/.test(tag)) throw new Error('invalid R2 desktop tag');
   return {
     ...manifest,
     platforms: Object.fromEntries(Object.entries(manifest.platforms).map(([platform, entry]) => {
@@ -37,7 +37,7 @@ export async function publishDesktopR2({ directory, manifestPath, tag, output,
   await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`);
   // Finish the immutable set first, then advance latest. The latest manifest
   // is last so an updater never observes a reference to an unfinished upload.
-  for (const prefix of [tag, 'latest']) {
+  for (const prefix of tag.includes('-rc.') ? [tag] : [tag, 'latest']) {
     for (const file of files) await put(prefix, file, join(directory, file));
     await put(prefix, 'Beeline-latest.json', output);
   }

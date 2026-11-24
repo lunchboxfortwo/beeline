@@ -13,10 +13,12 @@ function fail(message) {
 export async function verifyWebDeployment({
   origin = WEB_APP_ORIGIN,
   expectedReleasePath,
+  preview = false,
   attempts = 20,
   fetchImpl = fetch,
 }) {
-  if (new URL(origin).origin !== origin || origin !== WEB_APP_ORIGIN) {
+  const expectedOrigin = preview ? /^https:\/\/[a-z0-9-]+--[a-z0-9-]+\.expo\.app$/.test(origin) : origin === WEB_APP_ORIGIN;
+  if (!expectedOrigin) {
     fail(`web verification origin must be ${WEB_APP_ORIGIN}`);
   }
   const expected = JSON.parse(await readFile(expectedReleasePath, 'utf8'));
@@ -46,12 +48,15 @@ export async function verifyWebDeployment({
 }
 
 async function main() {
-  const option = (name) => process.argv[process.argv.indexOf(name) + 1];
+  const option = name => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : undefined;
+  const deploymentPath = option('--deployment');
+  const deployment = deploymentPath && JSON.parse(await readFile(deploymentPath, 'utf8'));
   await verifyWebDeployment({
+    ...(deployment && { origin: new URL(deployment.url).origin, preview: true }),
     expectedReleasePath: option('--expected-release'),
     attempts: Number(option('--attempts') || 20),
   });
-  console.log(`web deployment verified at ${WEB_APP_ORIGIN}`);
+  console.log(`web deployment verified at ${deployment?.url || WEB_APP_ORIGIN}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

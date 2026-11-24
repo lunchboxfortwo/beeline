@@ -61,15 +61,13 @@ export function attribution(text) {
 
 export function missingReleaseCredentials(args, secrets, plan = {}) {
   const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8'];
-  if (plan.run_website === 'true') required.push('CLOUDFLARE_PAGES_TOKEN');
-  if (plan.run_helper === 'true' || (plan.channel === 'latest' && plan.no_op !== 'true'))
+  if (plan.run_website === 'true') required.push('CLOUDFLARE_PAGES_TOKEN', 'CLOUDFLARE_ACCOUNT_ID');
+  if (plan.run_helper === 'true' || plan.run_desktop === 'true')
     required.push('CLOUDFLARE_R2_TOKEN', 'CLOUDFLARE_ACCOUNT_ID');
-  if (plan.run_desktop === 'true' && args.desktopMode === 'build')
-    required.push('TAURI_UPDATER_PUBLIC_KEY', 'TAURI_UPDATER_PRIVATE_KEY');
   if (plan.run_server === 'true') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL',
     'SERVER_CANARY_ROOM_ID', 'SERVER_CANARY_REVIEW_SECRET', 'BEELINE_FREE_AGENT_MODEL_KEY');
   if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
-  const missing = required.filter(name => !secrets[name]);
+  const missing = [...new Set(required)].filter(name => !secrets[name]);
   if (!secrets.GITHUB_TOKEN && !secrets.GH_TOKEN) missing.push('GITHUB_TOKEN or GH_TOKEN');
   if (args.proof && !secrets.BEELINE_REVIEW_SECRET) missing.push('BEELINE_REVIEW_SECRET');
   return missing;
@@ -250,8 +248,8 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         return { workflow: localWorkflow(workflow, { ...inputs, skipFullChecks }), parallel: true, job: async (...args) => {
           if (args[1].github.job === 'release_validation') {
             const checks = engine.variables.releaseChecks;
-            if (inputs.channel !== 'latest' && (checks?.sourceSha !== inherited.github.sha ||
-              !(checks.result === 'success' || (checks.result === 'skipped' && skipFullChecks))))
+            if (checks?.sourceSha !== inherited.github.sha ||
+              !(checks.result === 'success' || (checks.result === 'skipped' && skipFullChecks)))
               throw new Error('Quick checks do not authorize this release SHA');
             return engine.job(...args);
           }
@@ -353,32 +351,19 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
           if (platform.startsWith('darwin-')) carryHelperPlatform(platform, bundle);
       }
       if (step.id === 'plan' && context.github?.job === 'initialize' && context.inputs?.dispatched_by) {
-        const missing = missingReleaseCredentials({ proof: context.inputs.run_release_proof, desktopMode: engine.variables.desktopMode }, context.secrets, result.outputs);
+        const missing = missingReleaseCredentials({ proof: context.inputs.run_release_proof }, context.secrets, result.outputs);
         if (missing.length) throw new Error(`Missing local release credentials: ${missing.join(', ')}`);
         const publish = result.outputs.run_helper === 'true' && engine.read(WORKFLOW).jobs.npm_publish;
         if (result.outputs.run_helper === 'true' && publish?.permissions?.['id-token'] !== 'write')
           throw new Error('The helper requires the npm trusted-publishing job');
-      }
-      if (step.name === 'Produce the inspectable release plan' && result.outputs.run_desktop === 'true' && engine?.variables?.desktopMode !== 'build') {
-        const previous = JSON.parse(readFileSync(join(context.runner.temp, 'previous/release.json'), 'utf8'));
-        const desktop = previous.components.desktop;
-        if (!desktop?.desktopVersion) throw new Error('No published desktop updater set to carry');
-        // One updater manifest has one version for all OSes. Carry its whole
-        // signed installer set so Windows never receives a false newer version.
-        result.outputs.run_desktop = 'false';
-        result.outputs.desktop_version = desktop.desktopVersion;
-        processes.log(`Desktop updater set carried unchanged, including Windows: ${desktop.version} (${desktop.desktopVersion})`);
       }
       if (step.name === 'Finalize the release record') {
         const path = join(context.runner.temp, 'release/release.json');
         const record = JSON.parse(readFileSync(path, 'utf8'));
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
-        const next = join(context.runner.temp, 'next-release.json');
-        const checks = context.inputs.channel === 'latest'
-          ? { ...(JSON.parse(readFileSync(next, 'utf8')).checks ?? {}), sourceSha: record.sourceSha, reusedFrom: 'next' }
-          : { ...engine.variables.releaseChecks };
-        if (context.inputs.channel === 'next' && checks.resultsPath && existsSync(checks.resultsPath)) {
+        const checks = { ...engine.variables.releaseChecks };
+        if (checks.resultsPath && existsSync(checks.resultsPath)) {
           copyFileSync(checks.resultsPath, join(dirname(path), 'release-checks.json'));
           const releaseUrl = `https://github.com/${context.github.repository}/releases/download/${record.version}`;
           // Per-job attempts and timing let CI history work from release assets alone.
@@ -417,11 +402,10 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
             if (Object.keys(profile).length) live.profile = profile;
           }
         }
-        record.delivery.localExceptions = { staticWebsite: 'not released',
+        record.delivery.localExceptions = { staticWebsite: 'staged on Cloudflare Pages',
           helperArm64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15' : 'carried unchanged',
           helperX64: engine.variables.macHelperMode === 'build' ? 'built and install-verified on GitHub-hosted macos-15-intel' : 'carried unchanged',
-          desktop: engine.variables.desktopMode !== 'build' ? 'published signed updater set carried unchanged, including Windows'
-            : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on a GitHub-hosted macOS runner, squire and Windows VM'
+          desktop: WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on a GitHub-hosted macOS runner, squire and Windows VM'
               : 'native signed updater builds on a GitHub-hosted macOS runner and squire; Windows installers carried unchanged and omitted from the updater manifest' };
         record.delivery.localExceptions.checks = checks;
         const helperJob = join(directory, 'jobs/helper-local');
@@ -431,7 +415,6 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         const previousPath = join(context.runner.temp, 'previous/release.json');
         if (existsSync(previousPath)) {
           const previous = JSON.parse(readFileSync(previousPath, 'utf8'));
-          record.components.website.staticSourceSha = previous.components.website.staticSourceSha || previous.components.website.sourceSha;
           // The release record also counts releases that carried the whole
           // helper without republishing its channel manifest.
           if (helperManifest) for (const [platform, bundle] of Object.entries(record.components.helper.platforms)) {
@@ -440,7 +423,7 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
               record.components.helper.platforms[platform] = carryHelperPlatform(platform, prior);
           }
         }
-        if (record.delivery.live?.components?.website?.state === 'success') record.delivery.live.components.website.scope = 'web-app';
+        if (record.delivery.live?.components?.website?.state === 'success') record.delivery.live.components.website.scope = 'preview';
         privateWrite(path, `${JSON.stringify(record, null, 2)}\n`);
       }
     },
@@ -552,6 +535,13 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const root = repository;
   if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|mac-helpers|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
+  if (args.channel === 'latest') {
+    if (args.mode === 'plan') {
+      console.log('Latest moves the published next candidate through the unified workflow promote job.');
+      return;
+    }
+    throw new Error('Use release.mjs --promote for latest. Run release checks independently of promotion.');
+  }
   if (process.platform !== 'linux') throw new Error('Run the release controller on Linux squire');
   const sha = args['release-sha'] || execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const directory = resolve(args['state-dir'] || join(tmpdir(), `beeline-release-${Date.now()}`));
@@ -570,8 +560,8 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   if (args.mode === 'plan') {
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
-    console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
-    console.log(`Mac helper mode: ${variables.macHelperMode}; ARM and Intel helpers build on GitHub-hosted macos-15 and macos-15-intel runners. Desktop mode: ${variables.desktopMode}; builds use a GitHub-hosted macOS runner (mac-desktop.yml), squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
+    console.log('Website staging publishes static assets to Cloudflare Pages and the web app to EAS previews.');
+    console.log(`Mac helper mode: ${variables.macHelperMode}; ARM and Intel helpers build on GitHub-hosted macos-15 and macos-15-intel runners. Desktop mode: ${variables.desktopMode}; builds use a GitHub-hosted macOS runner (mac-desktop.yml), squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}.`);
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
@@ -581,7 +571,8 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     await releaseChecks(engine, context);
     return;
   }
-  console.log(`Local desktop policy: ${variables.desktopMode}; installer publication remains in the latest release finalization.`);
+  if (variables.desktopMode !== 'build') throw new Error('A promotable next release requires staging its signed desktop artifacts');
+  console.log('Desktop artifacts are built and staged on next.');
   attribution(args['dispatched-by']);
   if (!args['release-sha']) throw new Error('--execute requires an explicit immutable --release-sha');
   const identityPath = join(directory, 'local-execution.json');

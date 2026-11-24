@@ -18,10 +18,16 @@ step4)
 node -e 'require("node:fs").writeFileSync("apps/mobile/dist/beeline-web-release.json", JSON.stringify({version:process.env.RELEASE_VERSION,sourceSha:process.env.RELEASE_SHA})+"\n")'
 ;;
 step5)
-"$EAS_CLI_PATH" deploy --prod --export-dir dist --non-interactive
+if [ -n "${WEB_DEPLOYMENT_JSON:-}" ]; then
+  "$EAS_CLI_PATH" deploy --environment production --export-dir dist --json --non-interactive > "$WEB_DEPLOYMENT_JSON"
+else
+  "$EAS_CLI_PATH" deploy --prod --export-dir dist --non-interactive
+fi
 ;;
 step6)
-node packages/scripts/verify-web-deployment.mjs --expected-release apps/mobile/dist/beeline-web-release.json --attempts 20
+args=()
+if [ -n "${WEB_DEPLOYMENT_JSON:-}" ]; then args+=(--deployment "$WEB_DEPLOYMENT_JSON"); fi
+node packages/scripts/verify-web-deployment.mjs --expected-release apps/mobile/dist/beeline-web-release.json --attempts 20 "${args[@]}"
 ;;
 *) echo "Unknown web-app-leg step: $1" >&2; exit 2 ;;
 esac

@@ -11,7 +11,7 @@ export function channelComponents(selected, { channel = 'next', storeTrack = 'no
     if (storeTrack === 'production') throw new Error('next native builds require store_track=beta');
     if (selected.includes('mobile-native') && storeTrack !== 'beta')
       throw new Error('next native builds require explicit store_track=beta');
-    return ['server', 'helper', 'mobile-ota', ...(selected.includes('mobile-native') ? ['mobile-native'] : [])];
+    return ['server', 'helper', 'mobile-ota', 'desktop', 'website', ...(selected.includes('mobile-native') ? ['mobile-native'] : [])];
   }
   if (storeTrack === 'beta') throw new Error('latest cannot publish to the Play beta track');
   return ['helper', 'mobile-ota', ...(storeTrack === 'production' ? ['mobile-native'] : []), 'desktop', 'website'];

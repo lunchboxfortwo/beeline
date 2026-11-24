@@ -14,8 +14,8 @@ job `publish-usebeeline`. After the GitHub commit is mirrored, use GitLab's
 to `vX.Y.Z-rc.N` (or `X.Y.Z-rc.N`). Alternatively push a `usebeeline-vX.Y.Z-rc.N`
 tag to the mirror with a matching `RELEASE_VERSION` CI/CD variable configured.
 Ordinary branch pushes and merge requests do not run this job. RC versions
-publish to `next`; stable `X.Y.Z` versions publish to `latest` and require the
-explicit owner promotion command. Do not run it alongside another npm publisher.
+publish to `next`. Owner-authorized promotion moves the existing rc package to npm
+`latest` through the unified workflow. Do not run the mirror alongside another npm publisher.
 
 In `usebeeline`'s npm package settings, add a **GitLab CI/CD** trusted publisher:
 namespace `lunchboxfortwo`, project `beeline` (project path
@@ -37,23 +37,29 @@ npm run release
 npm run release -- --promote --dispatched-by '<owner command attribution JSON>'
 ```
 
-The default command pins current `origin/main` in a private checkout. Promotion
-pins the SHA and final version from the successfully delivered `next` record,
-even if main has advanced. If promotion fails, repeat the authorized promotion
-against that published next. Each command takes the existing per-user lock.
-On next, a draft for the same SHA keeps its release version. Delivery legs
-check their current channel and artifact identity before reusing shipped work.
+The default command pins current `origin/main` in a private checkout. The next
+command defaults attribution to the invoking user and the local
+`squire-release-<UTC timestamp>` command and audit IDs. A draft for the same SHA
+keeps its candidate version. Delivery legs check their current channel and
+artifact identity before reusing shipped work.
 
-Next publishes the OTA beta. Add `--store-track production` to an authorized
-promotion to submit native binaries when a pinned runtime differs from its
-store or the store cannot be read. The next command defaults attribution to
-the invoking user and the local `squire-release-<UTC timestamp>` command and
-audit IDs. Promotion requires explicit attribution.
+Promotion dispatches the unified workflow's `promote` job and waits for its
+result. It requires explicit owner attribution and keeps the published candidate's
+SHA and rc version even if main has moved. It reads the published references,
+moves the production endpoints and reports elapsed time. It runs without
+checking out candidate source, building, running Checks, exporting bundles, or
+accessing signing credentials. An interrupted promotion can be retried against
+the same published candidate. The command takes the existing per-user lock.
 
-The command prints redacted job outcomes and timings before cleaning up the
-private checkout and logs. It keeps the current and newest previous release's
-labelled Docker images, then prunes unused dangling images. Cleanup is best
-effort.
+Before the first promotion, deploy the [download pointer Worker](../apps/infra/helper-downloads/README.md#rollout)
+and enable **Allow npm dist-tag** on the existing `usebeeline` trusted publisher for
+`unified-release.yml`. The job uses the existing OIDC trust and npm 11.21+.
+Candidates published before artifact staging need a new `next` delivery.
+The promotion job refuses incomplete candidates before moving any endpoints.
+
+The next command prints redacted job outcomes and timings before cleaning up
+its private checkout and logs. It keeps the current and newest previous
+release's labelled Docker images, then prunes unused dangling images.
 
 ## Release checks on squire
 
@@ -134,27 +140,19 @@ CI base image mirrors use `ghcr.io/lunchboxfortwo`. The existing `Refresh CI
 base image mirrors` workflow copies the pinned upstream manifests there with
 their digests preserved; consumers and the mirror script must stay in sync.
 
-The static website publishes by Cloudflare Pages Direct Upload to the existing
-`usebeeline` project, which already serves `usebeeline.app` and has no Git
-integration. Both hosted and local releases run the same `pages-leg` composite:
-assemble `apps/site` without download archives, then deploy that directory to
-the project's production branch (`main`) with the exact release commit.
-This uses Cloudflare credentials rather than GitHub Pages artifacts or OIDC.
-The previous local static-site bypass is removed. No DNS or domain attachment
-change is required, and GitHub Pages must not be enabled for this site.
+The website stages both origins on `next`. The shared `pages-leg` composite
+assembles the static marketing site without downloads and uses Wrangler to
+upload a preview to the existing Cloudflare Pages project. It saves the
+uploaded asset manifest and Pages deployment ID on the candidate release.
+The EAS web leg exports once, uploads private source maps when configured,
+and verifies the immutable preview URL. The same release asset saves its EAS deployment ID and the Expo project
+identity read from that candidate configuration.
+Promotion submits the recorded asset manifest to the Pages production branch
+and assigns the existing EAS deployment to the production alias.
 
-Hosted delivery requires the `CLOUDFLARE_PAGES_TOKEN` Actions secret (Cloudflare
-Pages Edit authority) and the `CLOUDFLARE_ACCOUNT_ID` repository variable.
-Local latest promotion requires the same names in its private release
-environment. The vaulted `pages-deploy-2027` credential owns Pages delivery;
-the separate R2 token owns downloads. The Pages command uses the
-[Cloudflare Direct Upload flow](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
-Next releases carry the website unchanged; only an owner-authorized latest
-promotion publishes it. Merging website changes alone does not publish them.
-
-The selected EAS web app leg
-still exports, uploads private source maps when configured, deploys and verifies its canonical
-origin. Both Mac helpers build on GitHub-hosted runners: the controller
+The website uses the existing `CLOUDFLARE_PAGES_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` on both paths. Cloudflare Pages and EAS remain the
+production origins. Both Mac helpers build on GitHub-hosted runners. The controller
 dispatches `.github/workflows/mac-helpers.yml` once per release leg (ref `main`,
 building the release SHA), waits for it and downloads its two
 `daemon-darwin-*` artifacts into the leg's private state for the existing
@@ -185,8 +183,7 @@ rebuild; newly built archives reset the count. The same limit applies when a
 release carries the entire helper component.
 
 The desktop updater manifest has one version for all platforms. A normal
-`npm run release -- --no-store` builds the complete installer set from the
-promoted commit using `.github/workflows/desktop.yml`: universal macOS (Apple
+`npm run release` stages the signed installer set from the next commit using `.github/workflows/desktop.yml`: universal macOS (Apple
 silicon and Intel) on a GitHub-hosted runner, Linux x86_64 on Squire, and Windows
 x86_64 in Chad's existing `win10` VM through SSH and QEMU Guest Agent.
 For macOS the controller dispatches `.github/workflows/mac-desktop.yml` (ref
@@ -217,9 +214,8 @@ builds fit on the laptop. Windows file transfer uses Chad's existing
 Python libvirt bindings and guest agent, with private transport files and no new
 network listener.
 The existing workflow assigns the next desktop version, stages stable names,
-and publishes the complete set and manifest during latest finalization.
-`npm run release -- --no-store --desktop-mode carry` instead carries the
-complete published signed installer set and its version unchanged.
+and stages the set and manifest during next finalization. Latest switches the
+download pointer to that staged set.
 
 While `WINDOWS_DESKTOP` in `packages/scripts/release-local-desktop.mjs` is
 `skip` (since 19 Nov 2026: Chad's Windows VM is in use elsewhere), the local
@@ -291,19 +287,15 @@ missing history fails closed locally. Keep tags current with a normal full
 | `BEELINE_HELPER_SENTRY_DSN`, `BEELINE_MOBILE_SENTRY_DSN` | Public build configuration, corresponding to repository variables |
 
 Desktop downloads are served from `https://downloads.usebeeline.app/latest`.
-Latest publication copies every installer, signature and `Beeline-latest.json`
-to the `beeline-downloads` R2 bucket under both `v<version>/` and `latest/`;
-GitHub releases retain a second copy. The updater checks R2 first and GitHub
-second, and manifest payload URLs use the versioned R2 prefix. Local recovery
-uses the same publication step for either freshly built installers or a carried
-set, preserving the staged desktop version and signatures.
+Next uploads installers, signatures and the updater manifest to the immutable
+rc prefix in R2 and the rc GitHub release. The updater checks R2 first and
+GitHub second, and manifest payload URLs use the immutable R2 prefix.
 
-Helper channels use the same R2 client and bucket: every channel file is
-uploaded under `dl/` (latest) or `dl/next/` (next), with the manifest last.
-The `/dl/*` Worker reads those public objects through
-`https://downloads.usebeeline.app`; GitHub rolling releases retain secondary
-copies. The existing helper update proof still runs against `usebeeline.app/dl`
-immediately after publication, without additional gates or retries.
+Next publishes helper bytes under `dl/next/` and `dl/releases/<rc>/`, with
+the manifest last. Latest writes one small R2 pointer for the stable helper
+and desktop download routes. The Worker resolves the stable paths to their
+staged rc prefixes. GitHub rolling helper releases retain the next backup
+and the pre-rollout latest backup.
 
 Provide `CLOUDFLARE_R2_TOKEN` (a Cloudflare API bearer token with R2 object
 write authority) and `CLOUDFLARE_ACCOUNT_ID` in the private local release env
@@ -369,9 +361,8 @@ npm run release
 ```
 
 `release-local.mjs` retains plan, dry-run and checks-only commands; delivery
-uses `release.mjs`. Its internal latest leg retains the successful-next source
-rules. Hosted dispatches retain server-issued attribution and their existing
-optional proof and store controls.
+uses `release.mjs`. Latest delivery uses only the hosted promotion job. The
+next path retains its optional device proof and Android beta store controls.
 
 `--dry-run --leg release` prints the complete dependency, placement and omission
 plan without executing commands.
@@ -405,9 +396,8 @@ PRs and checks the source-reader scan against the newest usable map. There
 are no push-to-main jobs, including server-image prebuilds or main-failure
 reporting. The prebuild workflow remains available by manual dispatch.
 
-On Actions, before any delivery leg, `release_checks` calls the reusable Checks workflow
-with `suite=all` and the immutable release SHA. Every checkout uses that SHA,
-including latest promotion at an older rc commit. No PR subset is applied:
+On Actions, before next delivery, `release_checks` calls the reusable Checks workflow
+with `suite=all` and the immutable release SHA. Every next delivery checkout uses that SHA. The full Checks workflow runs:
 all eight server shards, all eight integration batches, the existing
 `identity-live.e2e.test.ts`, PostgreSQL seams and every other Checks suite run
 through their existing owners. No e2e suite or second invocation is added.
@@ -448,61 +438,34 @@ npm run lint:workflows
 
 ## Next and latest
 
-The workflow has one channel selector: `channel=next` (default) or
-`channel=latest`. Routine and authorized recurring releases use `next`.
-`next` and `latest` are the only release channel names. Next versions are
-release candidates, for example `0.1.184-rc.3`; latest promotion publishes
-`0.1.184` from that candidate's commit. GitHub tags and release records retain
-the `v` prefix (`v0.1.184-rc.3` / `v0.1.184`); npm versions omit it.
-`packages/scripts/release-record.mjs` increments the rc counter within the next unreleased
-final version. Draft attempts reserve counters; rerunning the same attempt
-reuses its identity. A reserved final draft is also skipped for new source,
-since its npm version may already be published. After final publication, next
-starts the following patch at `rc.1`. Numeric prerelease identifiers put `rc.10` after `rc.9` and every rc
-before its final version.
-Only an explicit workspace owner command promotes the current successful
-`next` release to `latest`; merges never publish either channel. Both modes use the
-existing workflow and concurrency group. The scheduled 2 a.m. run is still
-called the nightly release and targets `next`. No release, store build,
-promotion, or schedule change runs merely by installing this implementation.
+The workflow has two channels. Routine and recurring releases publish
+`next`. An explicit owner command promotes the current successful `next`
+candidate to `latest`. Both modes use the unified workflow's concurrency group.
+Published versions retain the candidate identifier, for example
+`v0.1.184-rc.3` on GitHub and `0.1.184-rc.3` on npm.
+Draft attempts reserve rc counters. Once a candidate is promoted, the next
+release starts the following patch at `rc.1`.
 
 | Component | Next | Latest promotion |
 | --- | --- | --- |
-| Server | Deploy the shared production server; preserve compatibility with the previous app | Carry the already deployed server |
-| Phone OTA | Publish an immutable `release-<version>` branch and point `next` at it | Rebuild at the rc commit with the final version; publish a final branch and point `production` at it |
-| Android native | Only explicit `store_track=beta`; same app id/signing, build-time `next-ci` profile with `next` OTA channel | Only explicit `store_track=production`; production OTA channel |
-| iOS native | No build | Only explicit `store_track=production` |
-| Helpers | Build/stamp rc bundles, publish `/dl/next/manifest.json`; leave latest untouched | Rebuild/stamp final bundles at the rc commit; publish `/dl/manifest.json` |
-| Desktop and website | Carry latest | Build from the promoted `next` commit |
+| Server | Deploy the shared server with compatibility for the previous app | Keep the already deployed server |
+| Phone OTA | Publish the candidate groups on a release branch and point `next` at it | Republish those exact groups on a production release branch and move `production` to it |
+| Store binaries | Explicit `store_track=beta` can build Android | Store submissions are independent of promotion |
+| Helpers | Publish verified rc bundles and point `/dl/next` at them | Move the stable download pointer to that rc |
+| Desktop | Stage signed downloads in R2 and on the rc release | Move the stable download pointer to that rc |
+| Website | Stage the Pages manifest and EAS Hosting preview | Publish the recorded asset manifest and move the EAS production alias |
+| npm and GitHub | Publish the npm package with `--tag next` and mark the GitHub release a prerelease | Move npm's `latest` dist-tag, then mark the same GitHub release latest |
 
-A `next` GitHub release is a prerelease (`--latest=false`). Promotion creates
-its own final GitHub release at the rc's SHA and marks that release latest;
-the rc remains a prerelease. npm publishes the rc with `--tag next` and the
-final with the default latest tag through the existing tokenless OIDC path.
-Promotion never republishes an npm version or moves a dist-tag; no npm token
-is needed. Versioned outputs are rebuilt/stamped from the promoted commit,
-including helper archives, npm, phone OTA, desktop and website.
-A promotion refuses a different `release_sha` or a `release_version` other
-than the rc's final version. Promotion requires the dotted rc format; plain
-versions from the old next scheme cannot be promoted.
+The promotion accepts an optional `release_sha` or `release_version` only when
+it matches the published candidate. It keeps `release.json` as the next record
+and writes `promotion.json` with the production OTA rollback reference before
+advancing GitHub latest. Already-promoted candidates are a no-op.
 
-A `next` release prepares OTA bundles for both platforms. Only Android beta
-binaries subscribe to `next`; iOS and production Android binaries remain on
-`production` until latest promotion publishes the final bundles. Both builds
-use the same native fingerprint and runtime policy. The optional existing
-device proof still uses its separate `beta` channel and never moves production
-before it succeeds. It adds no wait unless explicitly requested.
-Android OTA targeting includes published Play beta runtimes alongside
-production runtimes, including when the beta runtime is newer than production.
-Production OTA rollback reads latest, while server rollback reads the newest
-published release because the server is shared.
-
-Store publishing remains explicit (`store_track=none` by default). The `next` channel
-rejects production store submissions and native recovery without `beta`;
-latest rejects the beta track. Runtime-pin changes alone never add a native
-build. Play listing uploads remain locked unless explicitly commanded by the
-owner. iOS production submits the verified build to App Review with automatic
-release after approval, through the existing store submission path.
+Both platforms receive candidate OTA groups. Only Android beta binaries
+subscribe to `next`. iOS and production Android binaries subscribe to
+`production`. The optional device proof uses its separate `beta` channel and
+belongs to next delivery. Production OTA rollback reads the latest production
+record. Server rollback follows the newest published server rollout.
 
 The Android job injects `next-ci` (`extends: production-ci`, `channel:
 next`) into its temporary EAS build workspace immediately before building.
@@ -565,7 +528,7 @@ and build number. There is no hand-maintained binary/runtime list.
 
 ## Routine release
 
-Desktop installer builds run during latest promotion or explicit tester dispatch, while PRs retain the light desktop icon checks. Intel Mac helper storage, launchd and Room acceptance run in the release’s `helper_macos` leg before its archive can be promoted; the pairing acceptance uses an installation of that exact candidate archive.
+Desktop installer builds run during next delivery or explicit tester dispatch, while PRs retain the light desktop icon checks. Intel Mac helper storage, launchd and Room acceptance run in the release’s `helper_macos` leg before its archive can be promoted; the pairing acceptance uses an installation of that exact candidate archive.
 
 Firstmate calls the first-party `dispatch_release` agent tool with `{}`, without
 creating a release worker or requesting a command grant. This path creates no
@@ -627,7 +590,7 @@ the workflow token. The mint is the installation lookup plus one
 repository-scoped access token. The four start calls stay on that token.
 
 A `next` release pins current `main`, includes every merge at that
-HEAD, selects the server, helper and OTA components, uses `store_track=none`,
+HEAD, selects the server, helper, OTA, desktop and website components, uses `store_track=none`,
 and publishes `next` OTA without a device proof (recorded UNPROVEN unless
 `run_release_proof=true`), publishes one release record, runs component checks,
 and reports the result in the workflow summary. The channel selects next or latest promotion. Other operator-selected inputs are
@@ -642,8 +605,8 @@ release and dispatches this workflow with `selection=npm-publish` (plus the
 channel, `release_version` and attribution). That run's only job, `npm_publish`,
 publishes the attached bytes; the local helper leg watches that run (bounded by
 the step's 15-minute timeout) and fails unless it succeeds.
-The rc CLI package publishes with npm tag `next`; promotion packs the final
-version and publishes it with npm's default latest tag. A successful
+The rc CLI package publishes with npm tag `next`. Promotion moves npm's
+`latest` tag to that published version. A successful
 `npm publish`, or an already existing version, completes that leg
 without waiting for npm's registry listing. A publish failure still fails the
 release. The final job records the helper version and publishes the GitHub
@@ -667,14 +630,11 @@ memory* below) and writes `release-plan.json`. Its explicit path map is
 `COMPONENT_PATH_RULES` in `packages/scripts/unified-release.mjs`. The plan selects
 `server`, `helper`, `mobile-ota`, `mobile-native`, `desktop`, and `website`
 independently before applying the channel policy. Every new next identity
-builds helper and OTA to carry its rc version; latest builds helper, OTA,
-desktop and website to carry its final version, while carrying the deployed
-server. `selection=all` is a recovery-only, deliberate full-release
+prepares helper, OTA, desktop and website artifacts at its candidate SHA. `selection=all` is a recovery-only, deliberate full-release
 override. An explicit compatible store track selects `mobile-native`. Automatic selection with
 `store_track=none` never builds native binaries, even when native inputs changed.
-`next` native builds require explicit `store_track=beta`; latest native builds
-require explicit `store_track=production`. iOS store uploads require an explicit store track and only
-`production` submits for App Review. Android listing text/images remain locked unless the
+`next` native builds require explicit `store_track=beta`. Production store
+submissions follow the [mobile store runbook](../apps/mobile/docs/store-submission.md). Android listing text/images remain locked unless the
 owner explicitly commands a listing publish. The pre-commit gate stops on any
 listing change; a passing build edit commits without `changesNotSentForReview`.
 
@@ -688,8 +648,7 @@ The per-platform native runtime pins no longer gate an OTA release. When
 `apps/mobile/native-fingerprint.json` changes a runtime pin and `store_track`
 is `none`, the plan ships the OTA to the runtimes live in the stores and prints
 a notice; the new runtime gets OTAs once a store release puts it live. With an
-explicit beta track, next builds Android. A production promotion builds and
-submits both Android and iOS, even if only one platform's runtime changed. The `allow_pin_restore` input is accepted and ignored.
+explicit beta track, next builds Android. The `allow_pin_restore` input is accepted and ignored.
 
 On hosted releases, iOS store binaries build locally on the self-hosted
 `macbook-pro-7` Mac runner. On squire, iOS uses the authorized
@@ -852,8 +811,7 @@ selected outputs fail closed. Helper fleet uptake is recorded once as
 post-release observability; installed-helper convergence never gates delivery.
 
 A repeat routine next dispatch at an already-delivered rc HEAD succeeds as a
-no-op. After that rc is promoted to final, next at the same HEAD starts the
-following patch's first rc. Repeating a latest promotion is also a no-op. It
+no-op. After that rc is promoted, next at the same HEAD starts the following patch's first rc. Repeating a latest promotion is also a no-op. It
 does not rebuild components, replace the release record, upload release assets,
 or send a duplicate client notification.
 
@@ -1022,14 +980,11 @@ stage-timing files.
 ## Phone OTA by channel pointer
 
 Each `next` release publishes to its own EAS branch, for example
-`release-v0.1.184-rc.3`, one update per runtime live in the stores, and points
-`next` at it. Latest promotion exports fresh bundles from that same commit
-with the final version and publishes `release-v0.1.184`, then points
-`production` at it. The next pointer keeps serving the rc. Runtime targets
-come from the existing live-store policy for the selected channel.
-Every live runtime must be on the branch before its channel moves. A rerun
-publishes only the runtimes its own release branch lacks and skips a channel
-that already points at it; a branch never mixes two source commits.
+`release-v0.1.184-rc.3`, with groups for its recorded runtime targets. Latest
+promotion uses `eas update:republish --group` to place those existing groups
+on `release-promoted-v0.1.184-rc.3`, then points `production` at that branch.
+A retry skips each matching group already on the destination. The `next`
+channel continues to serve the original groups.
 
 `Mobile OTA rollback recovery` points `production` back: to the branch before
 the newest published release if that release is live, or to the newest
@@ -1056,8 +1011,8 @@ concurrency group and has a `dry_run` mode.
   drafts are excluded. Edit-track status does not distinguish review approval,
   so a completed release can receive an OTA before store review finishes.
   Both platforms target their newest three distinct published runtimes.
-  Next includes the live Play beta audience in that three-runtime window;
-  latest uses production and its publication history. Store observations and
+  Next includes the live Play beta audience in that three-runtime window.
+  Latest reuses the runtimes recorded by next. Store observations and
   upload records carry publication history forward between releases. Play
   resolves unrecorded binaries from its generated APK manifest, while ASC
   distributed build identities join recorded upload metadata. An unknown
