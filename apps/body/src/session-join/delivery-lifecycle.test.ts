@@ -174,9 +174,9 @@ it.each([0, 1])(
   },
 );
 
-it.each(['claude-mcp', 'claude-mcp/receiver.json'])(
-  'hands pending mail back on removal of %s',
-  async (path) => {
+it.each(['receiver.json', null])(
+  'hands pending mail back on a receiver removal notification with name %s',
+  async (name) => {
     const { dir, joined } = await fixture('claude-code');
     mkdirSync(join(dir, 'claude-mcp'));
     const registration = join(dir, 'claude-mcp', 'receiver.json');
@@ -189,7 +189,11 @@ it.each(['claude-mcp', 'claude-mcp/receiver.json'])(
     const running = await bridge(dir);
     expect(boundary.post).not.toHaveBeenCalled();
     rmSync(registration);
-    boundary.watch.mock.calls[0]![1](path);
+    const registrationWatch = boundary.watch.mock.calls.find(
+      ([path]) => path === join(dir, 'claude-mcp'),
+    );
+    expect(registrationWatch).toBeDefined();
+    registrationWatch![1](name);
     await posted.promise;
     expect(boundary.post.mock.calls[0]![1]).toBe('handback message');
     process.emit('SIGTERM');
