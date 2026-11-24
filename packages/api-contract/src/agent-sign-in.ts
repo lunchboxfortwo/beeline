@@ -44,7 +44,6 @@ export const AGENT_CONNECT_HARNESSES = [
   'opencode',
   'antigravity',
 ] as const;
-export type AgentConnectHarness = (typeof AGENT_CONNECT_HARNESSES)[number];
 
 /** API-key providers an agent can be connected with (`beeline connect`). */
 export const AGENT_SIGN_IN_KEY_PROVIDERS = [
