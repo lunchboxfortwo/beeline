@@ -488,8 +488,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
     if (post && input.authorId !== SYSTEM_IDENTITY_ID && chat.direct_participants?.includes(SYSTEM_IDENTITY_ID))
       throw wall('credentials', 'this is a read-only system thread; only @system may post here (access denied)');
     if (chat.archived || (delivery || origin) && chat.source_archived || 'stopped' in input && input.stopped)
-      throw wall('stop', chat.archived || (delivery || origin) && chat.source_archived
-        ? {message:'address is archived',status:409} : 'command turn cancelled');
+      refuseStoppedMessage(Boolean(chat.archived || (delivery || origin) && chat.source_archived));
     if (delivery) {
       const target = audience.find(member => member.id === input.recipientId);
       if (target?.kind === 'agent') {
@@ -774,6 +773,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   return saved;
 }
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+function refuseStoppedMessage(archived: boolean): never {
+  throw wall('stop', archived ? {message:'address is archived',status:409} : 'command turn cancelled');
+}
 /** Every message adapter shares the queue owner's existing membership refusal. */
 export function refuseMessageMembership(message='address requires current membership'):never {
   throw wall('membership',message);
@@ -841,7 +843,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     }
     const payload = item?.private_payload;
     const messageText = repairAgentPost(item?.reason === 'voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
-    if (item?.state === 'cancelled') throw wall('stop','command turn cancelled');
+    if (item?.state === 'cancelled') refuseStoppedMessage(false);
     if (item && !input.report) {
       const receipt = {id:item.result_message_id ?? item.posted_reply_id ?? item.id,createdAt:Math.floor(Date.now()/1000),delivered:true};
       if (!input.explicitReply) {
@@ -851,7 +853,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           if (item.state === 'complete') return receipt;
           if (!item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
             if (input.harnessEnded) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)',[agentId,item.room_id,item.turn_request_id]);
-            return {...receipt,delivered:false,answered:false};
+            return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
           }
           await endAgentTurn(db,item,'complete',null,item.public_reply_id ?? undefined);
           completedNow = true;
@@ -875,7 +877,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           id:input.messageId ?? hash(`late-reply:${item.id}:${messageText}`),agentIds:[]});
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
       }
-      if (!messageText) return {...receipt,delivered:false,answered:false};
+      if (!messageText) return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
       await refuseDoneWithBlocks(db,agentId,input.roomId,messageText);
       const to = await reportRecipient(db,item);
       if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[to.place])).rowCount) {

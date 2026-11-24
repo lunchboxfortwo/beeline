@@ -57,6 +57,13 @@
           "repositoryWork": false,
           "spec": "Maintain the inventory count as shipments arrive."
         }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
       }
     ],
     "connect": {
