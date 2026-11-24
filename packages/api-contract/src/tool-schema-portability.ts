@@ -29,8 +29,8 @@ export function regexPortabilityProblem(pattern: string): string | undefined {
       continue;
     }
     if (char === '[') {
+      // ECMA-262 reads `[]` as an empty class, so a `]` right after `[` closes it.
       inClass = true;
-      if (pattern[i + 1] === ']') i++;
       continue;
     }
     if (char === '(' && pattern[i + 1] === '?') {

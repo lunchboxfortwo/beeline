@@ -12,7 +12,7 @@ function everyAdvertisedTool(): ToolDefinition[] {
 
 describe('advertised tool schemas compile in RE2 harnesses', () => {
   it('flags the syntax RE2 rejects', () => {
-    for (const bad of ['^(?![\\s\\S]*\\u0000)\\S', '(?=a)', '(?<=a)b', '(?<!a)b', '(?<n>a)', '(a)\\1', '(?<n>a)\\k<n>', '\\u0041'])
+    for (const bad of ['^(?![\\s\\S]*\\u0000)\\S', '(?=a)', '(?<=a)b', '(?<!a)b', '(?<n>a)', '(a)\\1', '(?<n>a)\\k<n>', '\\u0041', '[](?=a)'])
       expect(regexPortabilityProblem(bad), bad).toBeDefined();
     for (const good of ['\\S', '^[0-9a-f]{64}$', '^[a-z0-9][a-z0-9_./-]{1,31}$', '\\\\u', '[(?=]', '(?:a|b)'])
       expect(regexPortabilityProblem(good), good).toBeUndefined();
