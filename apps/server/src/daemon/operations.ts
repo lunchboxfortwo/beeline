@@ -95,7 +95,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return loadWorkspaceSkillOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);
       case 'saveSkill':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('skill save requires an active command');
+          throw new CommandRefusalError('skill save requires an active command', 409);
         }
         return (await saveSkill(
           ctx.database,
@@ -106,7 +106,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'deleteSkill':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('skill delete requires an active command');
+          throw new CommandRefusalError('skill delete requires an active command', 409);
         }
         return (await deleteSkill(
           ctx.database,
@@ -115,7 +115,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'saveWorkflow':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('workflow save requires an active command');
+          throw new CommandRefusalError('workflow save requires an active command', 409);
         }
         return (await saveWorkflow(
           ctx.database,
@@ -125,7 +125,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'startWorkflow':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('workflow start requires an active command');
+          throw new CommandRefusalError('workflow start requires an active command', 409);
         }
         return (await startWorkflow(
           ctx.database,
@@ -139,11 +139,11 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       }
       case 'cancelWorkflowRun':
         if (!ctx.commandTransaction || !ctx.authorizedCommand)
-          throw new Error('workflow cancellation requires an active command');
+          throw new CommandRefusalError('workflow cancellation requires an active command', 409);
         return (await cancelWorkflowRun(ctx.database, ctx.authorizedCommand, input as Input<'cancelWorkflowRun'>)) as Output<Name>;
       case 'handoff':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('workflow handoff requires an active command');
+          throw new CommandRefusalError('workflow handoff requires an active command', 409);
         }
         return (await handoff(
           ctx.database,
@@ -154,7 +154,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'archiveWorkflow':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('workflow archive requires an active command');
+          throw new CommandRefusalError('workflow archive requires an active command', 409);
         }
         return (await archiveWorkflow(
           ctx.database,
@@ -163,7 +163,7 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         )) as Output<Name>;
       case 'assignWorkflowRole':
         if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('workflow role assignment requires an active command');
+          throw new CommandRefusalError('workflow role assignment requires an active command', 409);
         }
         return (await assignWorkflowRole(
           ctx.database,

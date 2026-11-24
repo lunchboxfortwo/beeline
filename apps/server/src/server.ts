@@ -1,3 +1,4 @@
+import { CommandRefusalError } from './command-refusal.js';
 import { commandLogField, helperLogPath, helperRequestAgent, helperRequestCommand } from './helper-requests.js';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { finishLiveClose } from './shutdown.js';
@@ -306,7 +307,12 @@ export async function body(request: IncomingMessage, allowEmptyVoiceBody = false
   const text = raw.toString('utf8');
   // Android expo/fetch can encode a bodyless voice action as a NUL byte.
   if (allowEmptyVoiceBody && /^[\s\u0000]*$/u.test(text)) return {};
-  const parsed = JSON.parse(text) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new CommandRefusalError('invalid JSON request body', 400);
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
     throw new Error('JSON object required');
   return parsed as Record<string, unknown>;

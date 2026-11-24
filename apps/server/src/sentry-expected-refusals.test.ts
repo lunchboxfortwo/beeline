@@ -26,3 +26,7 @@ it('Reproduction SENTRY-REFUSALS: shared capture excludes typed refusals and ret
     expect(Sentry.captureException).toHaveBeenLastCalledWith(error, expect.anything());
   }
 });
+
+it.each(['57P01', '57P02', 'ECONNREFUSED', '53300'])('keeps database outage %s retryable', code => {
+  expect(requestErrorStatus(Object.assign(new Error('database connection failed'), { code }))).toBe(503);
+});

@@ -271,7 +271,7 @@ describe('the gate stays shut (AC-8)', () => {
       await post('phone', 'sendRoomMessage', { roomId: cornerId, messageId: randomBytes(32).toString('hex'), text: '@hoots release the hold' });
       const direct = (await post('daemon', 'getAgentCommands', { roomId: cornerId })).commands.at(-1);
       await startQueuedCommand(rootFixture.daemon, { roomId:cornerId, commandId:direct.id }, A);
-      await post('daemon', 'setCornerHold', { cornerId, roomId: cornerId, requestId: direct.turnRequestId, releaseHoldId: holdId }, 503);
+      await post('daemon', 'setCornerHold', { cornerId, roomId: cornerId, requestId: direct.turnRequestId, releaseHoldId: holdId }, 500);
       expect((await post('daemon', 'getPrChecksStatus', { cornerId })).held).toBe(true);
       await post('phone', 'setCornerHold', { cornerId, releaseHoldId: holdId });
       const released = await post('daemon', 'getPrChecksStatus', { cornerId });

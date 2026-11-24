@@ -136,8 +136,8 @@ export async function handoff(
         input.outcome,
       );
       if (!answer)
-        throw new Error(
-          `${stateName} is a gate; a person answers it on its card in the Room, and it cannot be handed off`,
+        throw new CommandRefusalError(
+          `${stateName} is a gate; a person answers it on its card in the Room, and it cannot be handed off`, 409,
         );
       await settleWorkflowGate(db, {
         choiceId: answer.choiceId,

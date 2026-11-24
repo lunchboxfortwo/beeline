@@ -231,7 +231,7 @@ it('SENTRY-7807034373: schedule HTTP refusals stay visible without Sentry events
         for (const operation of ['createAgentSchedule','updateAgentSchedule']) {
           for (const title of ['', 'one two three four five', 'x'.repeat(81), 7, null]) {
             const result = await call(operation,{...input,scheduleId:created.body.scheduleId,title});
-            assert.equal(result.status,503);
+            assert.equal(result.status,400);
             assert.deepEqual(result.body,{error:typeof title === 'string'
               ? 'title must be one to four words, at most 80 characters' : 'title must be one to four words'});
             assert.deepEqual((await db.query('SELECT * FROM agent_schedules')).rows,before);
@@ -240,7 +240,7 @@ it('SENTRY-7807034373: schedule HTTP refusals stay visible without Sentry events
         await flushServerErrors();
         // An unexpected fault with identical wording must still be reported.
         daemon.execute = async () => { throw new Error('title must be one to four words'); };
-        assert.equal((await call('createAgentSchedule',input)).status,503);
+        assert.equal((await call('createAgentSchedule',input)).status,500);
         await flushServerErrors();
       } finally {
         await new Promise(r => server.close(r));
@@ -311,7 +311,7 @@ it('unexpected database errors still alert with retired validation wording', asy
         await db.query(\`CREATE FUNCTION fail_checkin_activity() RETURNS trigger LANGUAGE plpgsql AS $$
           BEGIN RAISE EXCEPTION 'A check-in must be one plain Room message'; END $$;
           CREATE TRIGGER checkin_fault BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION fail_checkin_activity();\`);
-        assert.equal((await call('postAgentActivity',activity)).status,503);
+        assert.equal((await call('postAgentActivity',activity)).status,500);
         await flushServerErrors();
       } finally { await new Promise(r=>server.close(r)); await db.close(); }
       process.exit(0);`;
@@ -425,11 +425,11 @@ it('ATTACH-CAP-1: queued attachments pass the retired cap and unexpected errors 
         // Unknown item and ownership checks still refuse without queueing.
         assert.equal((await call({...input,requestId:'unknown-item'})).status,403);
         await db.query('UPDATE objects SET owner_id=$2 WHERE id=$1',[media,human]);
-        assert.equal((await call()).status,503);
+        assert.equal((await call()).status,500);
         assert.deepEqual(await queue(),[]);
         // The exact same wording on an unexpected failure must still alert.
         daemon.execute = async () => { throw new Error('queued attachments exceed the size cap'); };
-        assert.equal((await call()).status,503);
+        assert.equal((await call()).status,500);
         await flushServerErrors();
       } finally {
         await new Promise(r => server.close(r));
@@ -570,7 +570,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
             });
             const before = await snapshot();
             const mismatch = await call({...input,runId,role:'reviewer',targetAgentId:agent},'assignWorkflowRole');
-            assert.deepEqual(mismatch,{status:503,body:{error:'unknown workflow role: reviewer'}});
+            assert.deepEqual(mismatch,{status:400,body:{error:'unknown workflow role: reviewer'}});
             assert.deepEqual(await snapshot(),before);
           }
           if (name === 'workspace-walk') await reserveServiceReviewWorkspaces(db,agent,runId);
@@ -604,7 +604,7 @@ it('WORKFLOW-ROLE-REFUSAL / BEELINE-SENTRY-REFUSALS / APP-REFUSAL-5: real agent 
         assert.equal((await db.query('SELECT name FROM rooms WHERE id=$1',[archived])).rows[0].name,'Closed');
         // The exact same wording on an unexpected failure must still alert.
         daemon.execute = async () => { throw new Error('queued attachments exceed the size cap'); };
-        assert.equal((await call()).status,503);
+        assert.equal((await call()).status,500);
         await flushServerErrors();
       } finally {
         await new Promise(r => server.close(r));

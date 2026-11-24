@@ -345,7 +345,7 @@ export class DaemonAgentSession {
           return { result };
         } catch (error) {
           return { error: error instanceof Error ? error.message : String(error),
-            status: this.deps.operationErrorStatus?.(error) ?? 503 };
+            status: this.deps.operationErrorStatus?.(error) ?? 500 };
         }
       };
       // Queue/message IDs own conversational replay. The optional-tool RPC ledger
@@ -358,7 +358,8 @@ export class DaemonAgentSession {
       // Otherwise a finished harness stays working while publication waits forever.
       // Keep the durable request identity: no failed operation is resubmitted here.
       console.error('[live] machine request failed',error);
-      reply({error:error instanceof Error ? error.message : 'machine_request_failed',status:503});
+      reply({error:error instanceof Error ? error.message : 'machine_request_failed',
+        status: this.deps.operationErrorStatus?.(error) ?? 500});
     }
   }
 
@@ -459,7 +460,7 @@ export class DaemonAgentSession {
       if (!this.#closed && this.transport.isOpen()) this.transport.send({
         type: 'commands',
         error: error instanceof Error ? error.message : 'daemon_operation_refused',
-        status: this.deps.operationErrorStatus?.(error) ?? 503,
+        status: this.deps.operationErrorStatus?.(error) ?? 500,
       });
     } finally {
       this.#queuePushing = false;

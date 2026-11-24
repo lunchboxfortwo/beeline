@@ -85,6 +85,6 @@ it('captures unexpected server request failures without changing their response'
   const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/phone/rooms/00000000-0000-0000-0000-000000000000`, {
     headers: { authorization: 'Bearer isolated-sentry-proof-token' },
   });
-  expect(response.status).toBe(503);
+  expect(response.status).toBe(500);
   expect(capture).toHaveBeenCalledWith(expect.any(Error));
 });

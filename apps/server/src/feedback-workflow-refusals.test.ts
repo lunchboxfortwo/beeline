@@ -79,7 +79,7 @@ it('Reproduction R1/R2: distinct feedback and workflow lookup produce no Sentry 
     ] as const) {
       const result = await post(operation, input);
       console.log('R2 full-ID HTTP evidence', JSON.stringify({ operation, ...result }));
-      expect(result).toEqual({ status: 503,
+      expect(result).toEqual({ status: 400,
         body: { error: 'workflow run is unavailable in this chat' } });
       await Sentry.flush(2000);
       expect(events()).toHaveLength(0);
@@ -97,7 +97,7 @@ it('Reproduction R1/R2: distinct feedback and workflow lookup produce no Sentry 
     await Sentry.flush(2000);
     expect(events()).toHaveLength(0);
     vi.spyOn(daemon, 'execute').mockRejectedValueOnce(new Error('Unexpected refusal proof fault'));
-    expect((await post('getWorkflowRun', { roomId: room, runId: 'deadbeef' })).status).toBe(503);
+    expect((await post('getWorkflowRun', { roomId: room, runId: 'deadbeef' })).status).toBe(500);
     await Sentry.flush(2000);
     expect(events()).toHaveLength(1);
     expect(events()[0].exception.values[0].value).toBe('Unexpected refusal proof fault');

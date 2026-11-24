@@ -179,10 +179,10 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
   });
 
   it('a failed Room request leaves another request and the socket usable', async () => {
-    const read = vi.spyOn(phone, 'readRoom').mockRejectedValueOnce(new Error('Room read unavailable'));
+    const read = vi.spyOn(phone, 'readRoom').mockRejectedValueOnce(new Error('unexpected Room read failure'));
     const socket = await open();
     const failed = await request(socket, 'readRoom', { roomId: ROOM });
-    expect(failed).toMatchObject({ ok: false, error: { code: 'unavailable', retryable: true } });
+    expect(failed).toMatchObject({ ok: false, error: { code: 'internal_error', retryable: true } });
     expect(socket.readyState).toBe(WebSocket.OPEN);
     const healthy = await request(socket, 'readWorkspaces', {});
     expect(healthy).toMatchObject({ ok: true });

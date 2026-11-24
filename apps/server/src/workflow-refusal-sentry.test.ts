@@ -56,7 +56,7 @@ it('Reproduction SERVER-4K: workflow unavailable and already-ended refusals stay
     const expectRefusal = async (operation: string, input: unknown, message: string) => {
       vi.mocked(captureException).mockClear();
       const result = await post(operation, input);
-      expect(result).toEqual({ status: 503, body: { error: message } });
+      expect(result).toEqual({ status: 400, body: { error: message } });
       expect(captureException).not.toHaveBeenCalled();
     };
 
@@ -81,7 +81,7 @@ it('Reproduction SERVER-4K: workflow unavailable and already-ended refusals stay
     const fault = new Error('Unexpected workflow fault');
     vi.mocked(captureException).mockClear();
     vi.spyOn(daemon, 'execute').mockRejectedValueOnce(fault);
-    expect((await post('startWorkflow', { ...turn, name: 'feedback-sweep', roleBindings: { worker: agent } })).status).toBe(503);
+    expect((await post('startWorkflow', { ...turn, name: 'feedback-sweep', roleBindings: { worker: agent } })).status).toBe(500);
     expect(captureException).toHaveBeenCalledTimes(1);
     expect(captureException).toHaveBeenCalledWith(fault, expect.anything());
   } finally {

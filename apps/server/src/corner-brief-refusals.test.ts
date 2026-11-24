@@ -90,7 +90,7 @@ it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of 
     await Sentry.flush(2000);
     expect(events()).toHaveLength(0);
     await db.query('DROP TABLE corner_brief_revisions CASCADE');
-    expect((await revise()).status).toBe(503);
+    expect((await revise()).status).toBe(500);
     await Sentry.flush(2000);
     expect(events()).toHaveLength(1);
     expect(events()[0].exception.values[0].value).toContain('corner_brief_revisions');

@@ -1,3 +1,4 @@
+import { CommandRefusalError } from '../command-refusal.js';
 import { renderAgentAvatar } from '../agent-avatar.js';
 import { randomUUID } from 'node:crypto';
 import type { DaemonContext } from './context.js';
@@ -61,6 +62,9 @@ import { daemonWriteResult } from './corner-messages.js';
   }
 
   export async function daemonModelCatalog(ctx: DaemonContext, input: Input<'postAgentModelCatalog'>, agentId: string) {
+    if (!Array.isArray(input.options) || !input.options.length ||
+        input.options.some(axis => !axis || !Array.isArray(axis.options)))
+      throw new CommandRefusalError('model options are required', 400);
     return ctx.database.transaction(async (database) => {
     await database.query(
       `UPDATE agents SET model_catalog=$2::jsonb,selected_model=COALESCE($3,selected_model),

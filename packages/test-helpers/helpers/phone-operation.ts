@@ -44,7 +44,7 @@ export const phoneFetch: typeof fetch = async (input, init) => {
           : code === 'not_found' || code === 'unknown_phone_operation' ? 404
           : code === 'conflict' ? 409 : code === 'query_too_broad' ? 422
           : code === 'too_many_requests' || code === 'voice-daily-limit' ? 429
-          : frame.error.retryable ? 503 : 400;
+          : code === 'internal_error' ? 500 : frame.error.retryable ? 503 : 400;
         resolve(Response.json({ error: frame.error.message, ...(code === 'voice-daily-limit' ? { code } : {}) }, { status }));
       }
     });

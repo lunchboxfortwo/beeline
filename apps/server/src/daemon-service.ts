@@ -1,4 +1,5 @@
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { CommandRefusalError } from './command-refusal.js';
 import { type CommandRow } from './agent-command.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { daemonAccess,daemonIdentity,daemonReviewSourceAccess,daemonRoomMembers } from './daemon/access.js';
@@ -104,7 +105,14 @@ export class DaemonService {
 
   /** Collects network work that must wait for the command transaction to commit. */
    afterCommit: AfterCommit | undefined;
-  async execute<Name extends keyof DaemonOperationMap>(...args: CommandArguments<typeof daemonExecute<Name>>): ReturnType<typeof daemonExecute<Name>> { return daemonExecute<Name>(this, ...args); }
+  async execute<Name extends keyof DaemonOperationMap>(...args: CommandArguments<typeof daemonExecute<Name>>): ReturnType<typeof daemonExecute<Name>> {
+    const [name, input] = args;
+    if ((name === 'postRoomMessage' || name === 'reply') &&
+        (!input || typeof input !== 'object' || !('text' in input) || typeof input.text !== 'string')) {
+      throw new CommandRefusalError('reply text is required', 400);
+    }
+    return daemonExecute<Name>(this, ...args);
+  }
   async reconcileZeroCheckWorkerCompletion(...args: CommandArguments<typeof daemonReconcileZeroCheckWorkerCompletion>): ReturnType<typeof daemonReconcileZeroCheckWorkerCompletion> { return daemonReconcileZeroCheckWorkerCompletion(this, ...args); }
   async connectorAssignments(...args: CommandArguments<typeof daemonConnectorAssignments>): ReturnType<typeof daemonConnectorAssignments> { return daemonConnectorAssignments(this, ...args); }
   async connectorInstall(...args: CommandArguments<typeof daemonConnectorInstall>): ReturnType<typeof daemonConnectorInstall> { return daemonConnectorInstall(this, ...args); }
