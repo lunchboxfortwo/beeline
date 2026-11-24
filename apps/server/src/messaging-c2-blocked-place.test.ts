@@ -28,7 +28,7 @@ describe('C2: implementer blocks default to the opening commander', () => {
       await settle();
       const wake = await systemWake(reason, worker);
       await settle();
-      const answer = await daemon.execute('reply', { id: wake.id, text: 'blocked: need a decision', ask }, worker);
+      const answer = await daemon.execute('reply', { roomId:THREAD, id: wake.id, text: 'blocked: need a decision', ask }, worker);
       expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)]), `opening=${opening}`)
         .toEqual(reason === 'corner_review_dispatch' ? [[B, THREAD, { agent: C, place: THREAD }, true]] : [[A,PLACES[place],{agent:worker,place:THREAD},true]]);
       if (reason !== 'corner_review_dispatch') expect((await db.query('SELECT room_id,author_id FROM messages WHERE id=$1', [answer.id])).rows)
@@ -39,7 +39,7 @@ describe('C2: implementer blocks default to the opening commander', () => {
   it.each(places)('commander in the %s; a blocked reply to the task itself returns there', async place => {
     const task = await firstTask(PLACES[place], false);
     await settle();
-    await daemon.execute('reply', { id: task.id, text: 'blocked: need a decision', ask }, B);
+    await daemon.execute('reply', { roomId:THREAD, id: task.id, text: 'blocked: need a decision', ask }, B);
     expect((await inbox()).map(row => [row.agent_id, row.room_id, Boolean(row.ask)])).toEqual([[A, PLACES[place], true]]);
   });
 

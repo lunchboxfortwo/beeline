@@ -13,7 +13,7 @@ it('S3: thread and chat tuples select exactly the recorded target and place; rep
   const delivered=(await readAgentCommands(db,B)).commands[0]!;
   expect(delivered.from).toEqual({agent:A,place:CHAT});
   expect(delivered.source.body).toBe('Build widget');
-  await replyToMessage(db,B,{id:task.id,text:'Done'});
+  await replyToMessage(db,B,{roomId:THREAD,id:task.id,text:'Done'});
   // Production incident: the legacy report woke Ruby in the thread, despite a Milo return place.
   expect(await queued()).toEqual([[A,CHAT]]);
   await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:C,place:OTHER}},text:'Conversation'});
@@ -23,7 +23,7 @@ it('S3: thread and chat tuples select exactly the recorded target and place; rep
 it('S3: a closed recorded destination ends the turn without rerouting to its parent',async()=>{
   const task=await sendMessage(db,{route:{from:{agent:A,place:THREAD},to:{agent:B,place:CHAT}},text:'Work'});
   await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[THREAD]);
-  await replyToMessage(db,B,{id:task.id,text:'Done'});
+  await replyToMessage(db,B,{roomId:CHAT,id:task.id,text:'Done'});
   expect(await queued()).toEqual([]);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows[0]).toEqual({state:'cancelled'});
 });
@@ -31,14 +31,14 @@ it('S3: a closed recorded destination ends the turn without rerouting to its par
 it('S3: replying to a recorded sender can return to its private chat without joining the worker there',async()=>{
   await db.query('DELETE FROM memberships WHERE room_id=$1 AND identity_id=$2',[OTHER,B]);
   const sent=await sendMessage(db,{route:{from:{agent:A,place:OTHER},to:{agent:B,place:THREAD}},text:'Build widget'});
-  await replyToMessage(db,B,{id:sent.id,text:'Finished'});
+  await replyToMessage(db,B,{roomId:THREAD,id:sent.id,text:'Finished'});
   expect(await queued()).toEqual([[A,OTHER]]);
 });
 
 it('S3: native message and reply operations deliver the same immutable tuple envelope',async()=>{
   const sent=await daemon.execute('message',{roomId:CHAT,to:{agent:'implementer',place:THREAD},text:'Build widget'},A);
   expect(await queued()).toEqual([[B,THREAD]]);
-  await daemon.execute('reply',{id:sent.id,text:'Done'},B);
+  await daemon.execute('reply',{roomId:THREAD,id:sent.id,text:'Done'},B);
   expect(await queued()).toEqual([[A,CHAT]]);
 });
 it('S3: an MCP message keeps its explicit sending place when another place has pending work',async()=>{
@@ -56,7 +56,7 @@ it('S3: an MCP task tool binds to the received thread message and preserves that
   expect((await db.query('SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[THREAD])).rows)
     .toEqual([{implementer_agent_id:A}]);
   expect(await queued()).toEqual([[A,THREAD]]);
-  await mcp.call(A,'reply',{id:sent.id,text:'Done'});
+  await mcp.call(A,'reply',{commandId:sent.id,id:sent.id,text:'Done'});
   expect(await queued()).toEqual([[B,CHAT]]);
 });
 

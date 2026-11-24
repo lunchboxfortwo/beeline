@@ -14,7 +14,7 @@ export function cornerCommanderBriefSql(cornerId: string, at?: string): string {
 /** The current commander for authority checks that previously used the creator. */
 export function cornerCommanderIdSql(corner: string): string {
   return `COALESCE((${threadCommanderAddressSql(`${corner}.id`)})->>'agent',
-    (SELECT author_id FROM (${cornerCommanderBriefSql(`${corner}.id`)}) commander),${corner}.created_by)`;
+    ${corner}.created_by)`;
 }
 
 /** The opening, else the first task delivered to the thread's implementer, records
@@ -23,11 +23,14 @@ export function threadTaskSql(cornerId:string):string {
   return `SELECT task.* FROM agent_commands task LEFT JOIN corner_facts fact ON fact.corner_id=task.room_id
     WHERE task.room_id=${cornerId} AND (task.reason='corner_objective'
       OR task.reason IN ('human_tag','message') AND task.agent_id=fact.implementer_agent_id)
-    ORDER BY task.inbox_sequence LIMIT 1`;
+    ORDER BY (task.reason='corner_objective') DESC,task.inbox_sequence LIMIT 1`;
 }
 export function threadCommanderAddressSql(cornerId:string):string {
-  return `(SELECT COALESCE(task.message->'replyAddress',task.message->'route'->'from',task.private_payload->'route'->'from',
+  return `COALESCE((SELECT jsonb_build_object('agent',handover.author_id,'place',
+    COALESCE(handover.approval_basis->>'commanderReturnRoomId',handover.source_room_id::text))
+    FROM (${cornerCommanderBriefSql(cornerId)}) handover),
+    (SELECT COALESCE(task.message->'route'->'from',task.private_payload->'route'->'from',
     jsonb_build_object('agent',COALESCE(task.private_payload->>'authorId',task.message->>'authorId'),
       'place',COALESCE(task.private_payload->>'fromRoomId',task.room_id::text)))
-    FROM (${threadTaskSql(cornerId)}) task)`;
+    FROM (${threadTaskSql(cornerId)}) task))`;
 }

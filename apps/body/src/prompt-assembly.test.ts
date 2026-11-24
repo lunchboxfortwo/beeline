@@ -450,9 +450,8 @@ describe('prompt assembly guards', () => {
 
   it('keeps thread help requests with the commander', () => {
     for (const contract of [promptRules.CORNER_AUTHOR_CONTRACT, promptRules.CORNER_RUNTIME_AUTHOR_CONTRACT]) {
-      expect(contract).toContain('Work in this thread;');
-      expect(contract).toContain('deliver task outcomes with reply(id)');
-      expect(contract).toContain('deliver task outcomes with reply(id).');
+      expect(contract).toContain('Everything you write stays in this thread.');
+      expect(contract).not.toContain('deliver task outcomes with reply(id)');
     }
   });
 
@@ -461,7 +460,7 @@ describe('prompt assembly guards', () => {
     const author = assembleSessionPrompt(SESSION_VARIANTS['code-corner-reviewed']!).systemPrompt;
     expect(author).not.toMatch(/^Commit and push/m);
     expect(author).toContain('Only when the brief calls for repository changes');
-    expect(author).toContain('Non-repo work: post_artifact and reply.');
+    expect(author).toContain('Non-repo work: post_artifact.');
     expect(author).not.toContain('Only repository assignments commit');
     expect(promptRules.CORNER_DELIVERY_NUDGE).toContain('Only when you write code in this thread and the brief calls for repository changes');
   });
@@ -507,7 +506,7 @@ describe('prompt assembly guards', () => {
   it('gives agents one rule for messaging each other', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text, name).toContain('Message other agents only when you need something from them, or when you are replying to something they need.');
+      expect(text.includes('Message other agents only when'), name).toBe(!context.surface.includes('corner'));
       expect(text, name).not.toContain('If human, tag them');
       expect(text, name).not.toContain('Message only your commander');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
@@ -657,15 +656,15 @@ describe('prompt assembly guards', () => {
   it('gives both thread lanes sibling steer context without chat question instructions', () => {
     for (const surface of ['code-corner', 'repo-less-corner'] as const) {
       const session = assembleSessionPrompt({ surface, agentName: 'Bee' }).systemPrompt;
-      expect(session).toContain('Send message(to:{agent,place},text)');
-      expect(session).toContain('Message other agents only when you need something from them');
+      expect(session).not.toContain('Send message(to:{agent,place},text)');
+      expect(session).not.toContain('Message other agents only when you need something from them');
       const turn = assembleTurnPrompt({
         surface,
         corners: [{ cornerId: 'sibling-id', parentRoomId: 'room-id', createdBy: 'agent-id', archived: false, objective: 'Other work' }],
         task: { body: 'Steer the sibling' },
       }).text;
-      expect(turn).toContain('sibling-id');
-      expect(turn).toContain('read or message across member chats');
+      expect(turn).not.toContain('sibling-id');
+      expect(turn).not.toContain('read or message across member chats');
       expect(turn).not.toContain('ask_corner');
     }
   });
@@ -675,10 +674,10 @@ describe('prompt assembly guards', () => {
     const context = { surface, agentName: 'Bee', agentCommand: 'codex-acp' };
     const entries = sessionSections(context);
     const coordination = entries.filter(({ text }) => text.includes('Message other agents only when'));
-    expect(coordination.map(({ section }) => section.id)).toEqual(['talking']);
+    expect(coordination.map(({ section }) => section.id)).toEqual(surface.includes('corner') ? [] : ['talking']);
     const session = assembleSessionPrompt(context);
     const turn = assembleTurnPrompt({ surface, sessionPrefix: session.turnPrefix, task: { body: 'Continue' } });
-    expect(turn.text).toContain('Message other agents only when you need something from them, or when you are replying to something they need.');
+    expect(turn.text.includes('Message other agents only when')).toBe(!surface.includes('corner'));
     expect(turn.text).not.toContain('to the person who started the chain');
   });
 });

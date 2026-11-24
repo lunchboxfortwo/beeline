@@ -46,14 +46,14 @@ describe('C4: external agents route like native agents', () => {
       const sent = await tools.ok(client, 'message', { address: place, to: { agent: role, place: THREAD }, text: 'Build widget' });
       expect((await pending(worker)).map(row => row.room_id)).toEqual([THREAD]);
       await settle();
-      await scope.daemon.execute('reply', { id: sent.id, text: 'Done' }, worker);
-      await scope.daemon.execute('reply', { id: sent.id, text: 'blocked: need a choice', ask }, worker);
+      await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Done' }, worker);
+      await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'blocked: need a choice', ask }, worker);
       // A block after a System wake still reaches the implementer’s commander.
-      if (role === 'implementer') await scope.daemon.execute('reply', { id: (await wake(worker)).id, text: 'blocked: build access', ask }, worker);
+      if (role === 'implementer') await scope.daemon.execute('reply', { roomId:THREAD, id: (await wake(worker)).id, text: 'blocked: build access', ask }, worker);
       const wakes = (await tools.ok(client, 'list_mentions', {})).wakes as { address: string; from: unknown }[];
       expect(wakes.map(item => [item.address, item.from])).toEqual(
-        Array(role === 'implementer' ? 3 : 2).fill([place, { agent: worker, place: THREAD }]));
-      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true, true] : [false, true]);
+        Array(role === 'implementer' ? 2 : 0).fill([place, { agent: worker, place: THREAD }]));
+      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true] : []);
     });
 
   it.each(Object.entries(places))('an external thread implementer replies over MCP to a native commander in the %s, including after a System wake', async (_place, place) => {
@@ -90,7 +90,7 @@ describe('C4: external agents route like native agents', () => {
     await session('reply', { id: (await wake(member)).id, text: 'blocked: build access' });
     const asked = await session('message', { address: THREAD, to: { agent: 'reviewer', place: THREAD }, text: 'Please review', ask });
     expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM,ROOM]);
-    await scope.daemon.execute('reply', { id: asked.id, text: 'Approved' }, REVIEWER);
+    await scope.daemon.execute('reply', { roomId:THREAD, id: asked.id, text: 'Approved' }, REVIEWER);
     expect((await session('list_mentions', {})).wakes.map((item: { address: string; from: unknown }) => [item.address, item.from]))
       .toEqual([[THREAD, { agent: REVIEWER, place: THREAD }]]);
   });
@@ -105,7 +105,7 @@ describe('C4: external agents route like native agents', () => {
     expect(value.result.isError, value.result.content[0]!.text).toBeFalsy();
     const sent = JSON.parse(value.result.content[0]!.text).data;
     expect(await pending(AGENT)).toEqual([{ id: sent.id, room_id: THREAD, from: { agent: member, place: THREAD }, ask: null }]);
-    await scope.daemon.execute('reply', { id: sent.id, text: 'Reviewed' }, AGENT);
+    await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Reviewed' }, AGENT);
     expect((await pending(member)).map(row => [row.room_id, row.from]))
       .toEqual([[THREAD, { agent: AGENT, place: THREAD }]]);
   });

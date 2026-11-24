@@ -177,7 +177,7 @@ function itemPromptContext(item: AgentCommand, options: {
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),
-    agentMessageText({ from: author, place, id: item.id, replyNeeded: replyNeeded(item.reason, item.ask),
+    agentMessageText({ from: author, place, id: item.id, replyNeeded: item.parentRoomId ? undefined : replyNeeded(item.reason, item.ask),
       text: body.trim() || '(shared attachments)', attachments: attachmentMarkerLines(source.attachments) }),
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
       : source.replyToMessageId ? [`In reply to message ${source.replyToMessageId}`] : []),
@@ -205,7 +205,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(items[0]?.offlineSeconds !== undefined
       ? [`> You were offline for ${hours} h. These arrived while you were away and may be outdated.`] : []),
-    'Answer each asker in one combined reply. Follow the newest instructions when earlier discussion has moved on.',
+    (items[0]?.parentRoomId ? '' : 'Answer each asker in one combined reply. ') + 'Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),

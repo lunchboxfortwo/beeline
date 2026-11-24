@@ -12,7 +12,7 @@ test('audit covers every situation in all three runtimes, without replay-control
     .flatMap(runtime => situations.map(situation => `${runtime}/${situation}.txt`)).sort());
   for (const prompt of prompts) {
     assert.doesNotMatch(prompt.text, /Prompt case replay:|You are the agent described below|Return calls:\[\]/);
-    assert.ok(prompt.text.includes('Message other agents only when you need something from them, or when you are replying to something they need.'), prompt.name);
+    assert.equal(prompt.text.includes('Message other agents only when you need something from them, or when you are replying to something they need.'), !/^native\/(fresh-thread-first-turn|check-system-event)/.test(prompt.name), prompt.name);
     assert.doesNotMatch(prompt.text, /Message only|final reply is posted|This reply is information|background context|Reply with reply/, prompt.name);
     if (prompt.name.startsWith('mcp/')) assert.ok(prompt.text.startsWith(INSTRUCTIONS));
     if (prompt.name.endsWith('informational-reply.txt') || prompt.name.endsWith('commander-worker-report.txt')) {
@@ -25,7 +25,7 @@ test('audit covers every situation in all three runtimes, without replay-control
     }
   }
   const native = prompts.find(prompt => prompt.name === 'native/check-system-event.txt').text;
-  assert.match(native, /^From: System in #widget\nid: e{64}\nReply needed: false\ntext: All widget checks passed\./m);
+  assert.match(native, /^From: System in #widget\nid: e{64}\ntext: All widget checks passed\./m);
   for (const runtime of ['native', 'mcp', 'session-joined'])
     assert.match(prompts.find(prompt => prompt.name === `${runtime}/reply-with-ask.txt`).text, /Reply\(id: e{64}, text: \.\.\.\) with your reply/);
   const joined = prompts.find(prompt => prompt.name === 'session-joined/reply-with-ask.txt').text;

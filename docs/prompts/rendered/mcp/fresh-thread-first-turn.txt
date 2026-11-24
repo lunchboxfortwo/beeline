@@ -47,7 +47,7 @@ Agent tools:
   "author_handle": "owner",
   "author_name": "Owner",
   "text": "Please add a dark mode toggle to the settings screen.",
-  "institutionalContext": "This human-opened thread still has its generated name, \"corner-7f3a\". If the newest human message states the work, call revise_thread(action:install_brief, address:thisCornerAddress) once before you reply with a name of at most three words joined by hyphens (no whitespace) and a short objective, plus a brief grounded in that message with brief.approval.sourceMessageId set to the human message id. A bare mention does not state the work; leave the name until a message does.\n\nMembers (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.",
+  "institutionalContext": "This human-opened thread still has its generated name, \"corner-7f3a\". If the newest human message states the work, call revise_thread(action:install_brief, address:thisCornerAddress) once before you reply with a name of at most three words joined by hyphens (no whitespace) and a short objective, plus a brief grounded in that message with brief.approval.sourceMessageId set to the human message id. A bare mention does not state the work; leave the name until a message does.\n\nMembers (exact tag spellings):\n- @owner — Owner (person)\nYou are @jellybean, a member here; you are not listed above.",
   "attachments": [],
   "created_at": "2026-11-17T00:00:00.000Z",
   "deliveryCursor": "1",

@@ -172,7 +172,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     "description": "Create one unit of work in a member chat; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the chat's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle with revise_thread(action:metadata). A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
     "inputSchema": {
       "type": "object",
-      "required": ["room", "brief", "implementer"],
+      "required": ["brief", "implementer"],
       "properties": {
         "room": {
           "type": "string",

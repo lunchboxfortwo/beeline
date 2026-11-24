@@ -24,18 +24,18 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     const db = rootFixture.db;
     // Implementer replies to its task, then a failing head wakes it for repair.
     const task = (await pendingFor(thread, A)).find(row => row.reason === 'corner_objective')!;
-    await rootFixture.daemon.execute('reply', { id: task.id, text: 'Opened the pull request' }, A);
+    await rootFixture.daemon.execute('reply', { roomId:thread, id: task.id, text: 'Opened the pull request' }, A);
     await db.query('UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1', [thread,
       JSON.stringify({ lifecycle: 'in-review', checks: 'unknown', pr: { number: 7, headSha: SHA, url: 'https://github.com/owner/widgets/pull/7' } })]);
     await pushToCorner(thread, SHA);
     rootFixture.githubApp.readCommitCheckRollup.mockResolvedValueOnce({ state: 'failed', total: 1, failing: ['typecheck'], checks: [{ name: 'typecheck', status: 'failed' }] });
     await fixtureScope18().checkRun(thread, 'typecheck', 'failure');
     for (const wake of await pendingFor(thread, A))
-      await rootFixture.daemon.execute('reply', { id: wake.id, text: 'blocked: need build access', ask: { question: 'Grant access?', options: ['Yes', 'No'] } }, A);
+      await rootFixture.daemon.execute('reply', { roomId:thread, id: wake.id, text: 'blocked: need build access', ask: { question: 'Grant access?', options: ['Yes', 'No'] } }, A);
     // System wake answers stay in the thread without asking the commander.
-    const asked = (await pendingFor(R, F)).filter(row => row.reason === 'reply' && row.ask);
-    expect(asked).toEqual([]);
-    for (const row of asked) await rootFixture.daemon.execute('reply', { id: row.id, text: 'Access granted' }, F);
+    const asked = (await pendingFor(R, F)).filter(row => row.ask);
+    expect(asked.length).toBe(opener==='another agent'?1:0);
+    for (const row of asked) await rootFixture.daemon.execute('reply', { roomId:R, id: row.id, text: 'Access granted' }, F);
     expect((await pendingFor(thread, A)).map(row => row.reason)).toEqual(asked.map(() => 'reply'));
     await settle();
     // A green head requests review; the reviewer's findings and reply stay in the thread.
@@ -43,14 +43,14 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     const review = (await pendingFor(thread, B)).find(row => row.reason === 'corner_review_dispatch')!;
     expect(review).toBeDefined();
     await rootFixture.daemon.execute('message', { roomId: thread, to: { agent: 'implementer', place: thread }, text: 'FAIL: add the missing test' }, B);
-    await rootFixture.daemon.execute('reply', { id: review.id, text: 'Findings sent to the implementer' }, B);
+    await rootFixture.daemon.execute('reply', { roomId:thread, id: review.id, text: 'Findings sent to the implementer' }, B);
     await settle();
     // Merge gate wakes: a provider refusal and a live conflict.
     await advanceCorner(db, thread, { kind: 'merge-refused', headSha: SHA, reason: 'Provider refused the merge' });
     await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr,mergeability}','"dirty"') WHERE corner_id=$1`, [thread]);
     const note = await db.query<{ id: string }>('SELECT id FROM messages WHERE room_id=$1 ORDER BY created_at DESC LIMIT 1', [thread]);
     await queueCornerMergeConflict(db, thread, note.rows[0]!.id);
-    for (const wake of await pendingFor(thread, A)) await rootFixture.daemon.execute('reply', { id: wake.id, text: 'Resolving' }, A);
+    for (const wake of await pendingFor(thread, A)) await rootFixture.daemon.execute('reply', { roomId:thread, id: wake.id, text: 'Resolving' }, A);
     await settle();
     // Every event above reached a thread worker, so the empty result is not vacuous.
     const inThread = (await db.query<{ reason: string }>(`SELECT DISTINCT reason FROM agent_commands

@@ -383,17 +383,20 @@ export class RoomsMcpAgentTools {
       const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
         : String(args.address ?? args.room ?? '');
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(
-        `SELECT * FROM agent_commands WHERE agent_id=$1 AND (state='pending' OR id=$2) AND reason<>'mcp_call'
-         AND ($2::text IS NULL OR id=$2) AND ($4 OR room_id::text=$3) ORDER BY (room_id::text=$3) DESC,inbox_sequence,id LIMIT 1`,
-        [member,typeof args.commandId === 'string' ? args.commandId : null,target,name==='reply'])).rows[0];
+        `SELECT * FROM agent_commands WHERE agent_id=$1 AND reason<>'mcp_call'
+           AND (state='pending' OR id=$2 OR ($4 AND id=$5))
+           AND ($2::text IS NULL OR id=$2)
+           AND ($2 IS NOT NULL OR room_id::text=$3 OR $4)
+         ORDER BY ($4 AND id=$5) DESC,(state='pending') DESC,inbox_sequence,id LIMIT 1`,
+        [member,args.commandId ?? null,target,name==='reply',name==='reply' ? args.id : null])).rows[0];
       if (item?.state === 'pending' && typeof args.commandId === 'string')
         await beginAgentInvocation(this.db, member, item.room_id, item.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
       const context = {roomId:item?.room_id ?? target,requestId:item?.turn_request_id};
-      if (name === 'post' && item?.state==='pending' && (item.return_room_id ?? item.room_id) === target)
+      if (name === 'post' && item?.state==='pending' && item.room_id === target && (item.return_room_id ?? target) === target)
         return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
       return this.exec(member,name === 'post' ? 'postCornerMessage' : name,
         name === 'message' ? {...context,to:args.to,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
-        : name === 'reply' ? {id:args.id,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
+        : name === 'reply' ? {...context,id:args.id,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
         : {...context,cornerId:target,text:args.text,replyTo:args.replyTo});
     }
     return this.callTool(member,name,args);

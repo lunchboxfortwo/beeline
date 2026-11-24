@@ -1,4 +1,4 @@
-import { blockRecipient, refuseDoneWithBlocks } from './implementer-blocks.js';
+import { refuseDoneWithBlocks } from './implementer-blocks.js';
 import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
 import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
@@ -48,8 +48,7 @@ export async function sendMessage(db: SqlDatabase, input: {
   return db.transaction(async tx => {
     await refuseDoneWithBlocks(tx,input.route.from.agent,input.route.from.place,input.text);
     const reportStatus = /^(blocked|needs-decision):/i.exec(input.text.trim())?.[1]?.toLowerCase();
-    const destination = await blockRecipient(tx,input.route.from,input.route.to,input.text);
-    const to = input.replyTo ? destination : await messageAddress(tx,destination,input.route.from.agent);
+    const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
     // A recorded reply can cross a private call site the worker never joined.
     // Its recipient still belongs there; the responder belongs at its own origin.
     const route = { from: input.route.from, to };
@@ -126,7 +125,7 @@ export async function sendMessage(db: SqlDatabase, input: {
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
-  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; roomId?:string; queuedRequestIds?:readonly string[];
+  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; roomId:string; requestId?:string; queuedRequestIds?:readonly string[];
 },onAnswered?:(roomId:string)=>void) {
   const reportAsk = reportMessageAsk(input);
   input = { ...input, ask: input.ask ?? reportAsk };
@@ -135,11 +134,16 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;
   if (invocation?.state === 'cancelled') refuseMessageMembership('command turn cancelled');
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
-    WHERE agent_id=$1 AND (id=$2 OR source_message_id=$2)
-    ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id])).rows[0];
-  if (!item) refuseMessageMembership();
+    WHERE agent_id=$1 AND room_id=$3 AND (id=$2 OR source_message_id=$2)
+    ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id,input.roomId])).rows[0];
+  if (!item) {
+    if (!input.roomId) refuseMessageMembership();
+    const post = await queueMessage(db,{kind:'post',roomId:input.roomId,authorId:agentId,text:modelText(input.text),
+      id:input.messageId,agentIds:[],requestId:input.requestId,commandRoomId:input.roomId});
+    return {id:post.id,createdAt:post.createdAt,receipt:'Task outside this session. Text posted in this place.'};
+  }
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
-    messageAsk:input.ask,messageId:input.messageId,explicitReply:true,replyFromPlace:input.roomId});
+    messageAsk:input.ask,messageId:input.messageId,explicitReply:true});
   if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);
   const owed = [...new Set(input.queuedRequestIds ?? [])];
   const completed = !input.ask && saved.delivered && input.roomId === item.room_id && owed.includes(item.turn_request_id) && owed.length

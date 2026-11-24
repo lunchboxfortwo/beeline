@@ -16,8 +16,8 @@ it('S6: queued legacy order, report and corner_land items retain ids, text, orig
   expect(delivered.map(item=>item.id)).toEqual([task!.id,land!.id]);
   expect(delivered.find(item=>item.id===land!.id)!.source.body).toContain('The server merges');
   expect(delivered.find(item=>item.id===land!.id)!.source.body).not.toMatch(/merge_corner|merge_thread/);
-  await replyToMessage(db,B,{id:task!.id,text:'Finished queued work'});
-  await replyToMessage(db,A,{id:report!.id,text:'Continue'});
+  await replyToMessage(db,B,{roomId:THREAD,id:task!.id,text:'Finished queued work'});
+  await replyToMessage(db,A,{roomId:CHAT,id:report!.id,text:'Continue'});
   await answerQueuedMessage(db,B,{roomId:THREAD,requestId:land!.id,text:'',harnessEnded:true});
   expect((await db.query("SELECT state FROM agent_commands WHERE id=ANY($1::text[])",[[task!.id,report!.id,land!.id]])).rows)
     .toEqual([{state:'complete'},{state:'complete'},{state:'complete'}]);

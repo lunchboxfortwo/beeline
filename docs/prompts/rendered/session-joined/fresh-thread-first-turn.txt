@@ -19,6 +19,4 @@ This human-opened thread still has its generated name, "corner-7f3a". If the new
 
 Members (exact tag spellings):
 - @owner — Owner (person)
-- @ruby — Ruby (agent)
-- @worker — Worker (agent)
 You are @jellybean, a member here; you are not listed above.
