@@ -87,7 +87,7 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
     await expect(daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, AGENT))
       .resolves.toMatchObject({ delivered: true });
     if (owner !== OTHER_AGENT) {
-      expect((await database.query("SELECT text FROM messages WHERE request_id=$1 AND presentation='activity'",[command!.id])).rows).toEqual([{text:'Work complete'}]);
+      expect((await database.query("SELECT text FROM messages WHERE request_id=$1 AND card->>'reportStatus'='done'",[command!.id])).rows).toEqual([{text:'done: Work complete'}]);
       const phone = new PhoneService(database, new LiveHub());
       expect((await phone.readRoom(ROOM, OWNER))!.messages.filter(row => row.text === 'Work posted'))
         .toHaveLength(1);

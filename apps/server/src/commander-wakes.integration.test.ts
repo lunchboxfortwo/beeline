@@ -95,30 +95,30 @@ it.each([
   const delegate = (await commands(opened.cornerId, peer))[0]!;
   await claim(delegate);
   await daemon.execute('report', { ...authority(delegate), status, text: `${status.replace('_', '-')}: input recovery result` }, peer);
-  const report = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
+  const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
   expect(report).toBeDefined();
   // A delegate reports to the opening commander, whose next order answers it.
   await daemon.execute('order', { ...authority(order), address: opened.cornerId, agent: 'delegate', text: 'Use the recovered input' }, RUBY);
   if (path === 'cached claim') await claim(report);
-  expect((await commands(opened.cornerId, RUBY)).some(command => command.id === report.id)).toBe(true);
+  expect((await commands(DM, RUBY)).some(command => command.id === report.id)).toBe(true);
 });
 it.each(['delivery', 'cached claim'])('a subsequent order retains the unanswered report at %s', async path => {
   const opened = await open(false), turn = await worker(opened.cornerId);
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: publish job is running' }, WORKER);
-  const report = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
+  const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
   expect(report).toBeDefined();
   // Replay fb_0fd0fc28da34b3f6dd4e0107: the commander answers the
   // blocker with an order before the queued blocker is claimed.
   await answer(opened.cornerId);
   if (path === 'cached claim') await claim(report);
-  expect((await commands(opened.cornerId, RUBY)).some(command => command.id === report.id)).toBe(true);
+  expect((await commands(DM, RUBY)).some(command => command.id === report.id)).toBe(true);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
     .toEqual([{ state: 'pending' }]);
 });
 it('STALE-ANSWERED-REPORT: preserves a report already being handled', async () => {
   const opened = await open(false), turn = await worker(opened.cornerId);
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: publish job is running' }, WORKER);
-  const report = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
+  const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
   await claim(report);
   await answer(opened.cornerId);
   await claim(report);
@@ -128,7 +128,7 @@ it('STALE-ANSWERED-REPORT: preserves a report already being handled', async () =
   await claim(report);
   // A disconnected helper cannot remove the durable item.
   const restarted = PgliteDatabase.fromSnapshot(await db.snapshot());
-  try { expect((await readAgentCommands(restarted, RUBY, opened.cornerId)).commands.map(c => c.id)).toContain(report.id); }
+  try { expect((await readAgentCommands(restarted, RUBY, DM)).commands.map(c => c.id)).toContain(report.id); }
   finally { await restarted.close(); }
   await claim(report);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [report.id])).rows)
@@ -160,7 +160,7 @@ it.each([
 it('delivers a finished report before optional PR checks are ready', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: PR opened, tests running' }, WORKER);
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: PR opened, tests running');
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: PR opened, tests running');
   expect(checks).not.toHaveBeenCalled();
 });
 
@@ -184,9 +184,9 @@ it.each([true, false])('report delivery does not read GitHub (optional PR exists
   try {
     const send = () => daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: widget delivered' }, WORKER);
     await send();
-    expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: widget delivered');
+    expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: widget delivered');
     await send();
-    expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
+    expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
     expect(app.openPullRequestsForBranch).not.toHaveBeenCalled();
     expect(app.readPullRequest).not.toHaveBeenCalled();
   } finally { Object.assign(daemon, { github: undefined }); }
@@ -210,7 +210,7 @@ it('Reproduction report-schema: stores and delivers a complete multi-paragraph r
   const opened = await open(), turn = await worker(opened.cornerId);
   const text = 'blocked: ' + 'Synthetic paragraph for report delivery.\n\n'.repeat(150) + 'End of report.\n\n';
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text }, WORKER);
-  const report = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
+  const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
   expect(report.source.body).toBe(text.trim());
   expect((await db.query<{ text: string }>(
     `SELECT private_payload->>'text' text FROM agent_commands WHERE id=$1`, [report.id],
@@ -229,7 +229,7 @@ it.each([false, true])('Reproduction report-step: delivers a finished PR step wh
   checks.mockImplementationOnce(() => pending);
   try {
     await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: assigned PR step finished; awaiting review' }, WORKER);
-    expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body)
+    expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body)
       .toBe('done: assigned PR step finished; awaiting review');
   } finally {
     // Completion may reconcile GitHub in the background; delivery cannot wait for it.
@@ -248,7 +248,7 @@ it('R-GH-RETRY-REPORT: a GitHub outage cannot refuse or delay a finished-step re
   await daemon.execute('report', { ...authority(turn), status: 'done', text }, WORKER);
   expect(fetchMock).not.toHaveBeenCalled();
   expect(captureServerError).not.toHaveBeenCalled();
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe(text);
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe(text);
   await db.backgroundWork.drain();
 });
 
@@ -257,14 +257,14 @@ it('delivers done immediately with live merge-ready checks', async () => {
   ready = true;
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'headSha',$2::text)) WHERE corner_id=$1`, [opened.cornerId, '9'.repeat(40)]);
   await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: ready to merge' }, WORKER);
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: ready to merge');
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: ready to merge');
   await db.backgroundWork.drain();
 });
 it('accepts done for a committed merged PR without requiring another GitHub read', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'mergeCommitSha',$2::text)) WHERE corner_id=$1`, [opened.cornerId, '8'.repeat(40)]);
   await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: PR merged' }, WORKER);
-  expect((await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: PR merged');
+  expect((await commands(DM, RUBY)).find(c => c.reason === 'report')?.source.body).toBe('done: PR merged');
   await db.backgroundWork.drain();
 });
 it('allows completed non-PR deliverables and agent DM orders', async () => {
@@ -282,7 +282,7 @@ it('allows completed non-PR deliverables and agent DM orders', async () => {
   const reports = [...await commands(opened.cornerId, RUBY), ...await commands(DM, RUBY)].filter(c => c.reason === 'report');
   expect(reports).toHaveLength(2);
   expect(reports.map(c => [c.roomId, c.source.body])).toEqual(expect.arrayContaining([
-    [opened.cornerId, 'done: non-PR artifact delivered'], [DM, 'done: research delivered']]));
+    [DM, 'done: non-PR artifact delivered'], [DM, 'done: research delivered']]));
   expect(JSON.stringify(reports)).toContain('research delivered');
   expect(JSON.stringify(reports)).toContain('artifact delivered');
 });
@@ -312,18 +312,18 @@ it('delivers a human message and lifecycle fact as separate commands', async () 
   expect(pending).toHaveLength(2);
   expect(pending.map(command => command.source.body)).toEqual(expect.arrayContaining(['Watched corner one: merged', 'Change the endpoint']));
 });
-it('Reproduction QUIET-CHAT-THREAD: a thread report wakes its commander in the thread, where the reply posts', async () => {
+it('Reproduction QUIET-CHAT-THREAD: a thread report wakes its commander in the issuing DM, where closing output posts', async () => {
   const opened = await open(false), turn = await worker(opened.cornerId);
   await daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: widget delivered' }, WORKER);
-  expect((await commands(DM, RUBY)).some(c => c.reason === 'report')).toBe(false);
-  const report = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
+  expect((await commands(opened.cornerId, RUBY)).some(c => c.reason === 'report')).toBe(false);
+  const report = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
   expect(report.source.body).toBe('done: widget delivered');
   await claim(report);
   await daemon.execute('postRoomMessage', { ...authority(report), text: 'Reviewed the widget; it passes.' }, RUBY);
   expect((await db.query(`SELECT room_id FROM messages WHERE author_id=$1 AND text='Reviewed the widget; it passes.'`, [RUBY])).rows)
     .toEqual([{ room_id: DM }]);
 });
-it('an explicit reply leaves closing prose in turn activity', async () => {
+it('a public post and closing prose both stay in the active DM', async () => {
   // Replay of the Nov 12 21:39/21:40 pair: one report wake, an explicit post to
   // the chat, then closing prose re-delivered to the person as a second post.
   const workerDM = randomUUID();
@@ -339,14 +339,13 @@ it('an explicit reply leaves closing prose in turn activity', async () => {
   await daemon.execute('postCornerMessage', { ...authority(wakes[0]!), cornerId: DM, text: 'The endpoint research is in.' }, RUBY);
   await daemon.execute('postRoomMessage', { ...authority(wakes[0]!), text: 'The endpoint research is in; nothing else is needed.' }, RUBY);
   expect((await db.query(`SELECT text FROM messages WHERE room_id=$1 AND author_id=$2 AND presentation='message'`, [DM, RUBY])).rows)
-    .toEqual([{ text: 'The endpoint research is in.' }]);
-  await vi.waitFor(async()=>expect((await db.query(`SELECT text FROM messages WHERE presentation='activity' AND author_id=$1`,[RUBY])).rows).toContainEqual({text:'The endpoint research is in; nothing else is needed.'}));
+    .toEqual([{text:'The endpoint research is in.'},{text:'The endpoint research is in; nothing else is needed.'}]);
 });
 it('Reproduction QUIET-CHAT-ESCALATE: a thread-woken commander escalates a decision to the DM where the person gave the order', async () => {
   // Captain -> Ruby in the DM -> Ruby opens a thread in the target Room for Worker.
   const opened = await open(false), turn = await worker(opened.cornerId);
   await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: which endpoint should the widget use?' }, WORKER);
-  const wake = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
+  const wake = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
   expect(wake.parentCommandId).toBe(order.id);
   await claim(wake);
   await daemon.execute('report', { ...authority(wake), status: 'needs_decision',

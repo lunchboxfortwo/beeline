@@ -6,7 +6,7 @@ it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: 'Work started.' }, RUBY);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: files ready' }, WORKER);
-  const wake = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
+  const wake = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
   await claim(wake);
   const objectId = randomUUID();
   await rootFixture.db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
@@ -28,7 +28,7 @@ it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction
   // The frozen return address is the DM. An explicit reply spends the public answer; closing is activity.
   const visible = [...(await rootFixture.phone.readRoom(DM, HUMAN))!.messages, ...(await rootFixture.phone.readRoom(opened.cornerId, HUMAN))!.messages]
     .filter(m => m.author.pubkey === RUBY && m.presentation === 'message' && m.text !== 'Work started.');
-  expect(visible).toHaveLength(1);
+  expect(visible).toHaveLength(mode.startsWith('post-') ? 2 : 1);
   expect(visible.flatMap(message => (message.attachments ?? []).map(attachment => attachment.name))).toEqual(['proof.png']);
   expect(visible[0]!.text).not.toContain('must remain silent');
   expect((await rootFixture.db.query('SELECT 1 FROM agent_pending_attachments WHERE request_id=$1', [wake.turnRequestId])).rowCount).toBe(0);
@@ -47,13 +47,8 @@ it.each([false, true])('same-place closing keeps a new attachment on the visible
   } }, RUBY);
   const final = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text }, RUBY);
   const messages = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message');
-  expect(messages.map(m => m.id)).toEqual([posted.id]);
-  const message = messages[0]!;
-  expect(final.id).toBe(posted.id);
-  await rootFixture.db.backgroundWork.drain();
-  expect((await rootFixture.db.query(`SELECT presentation FROM messages WHERE request_id=$1 AND presentation='activity'`, [rootFixture.order.id])).rows).toEqual([{ presentation: 'activity' }]);
-  expect(message.presentation).toBe('message');
-  await vi.waitFor(async()=>expect((await rootFixture.phone.readRoom(DM,HUMAN))!.messages.find(item=>item.id===message.id)?.attachments).toHaveLength(1));
+  expect(messages.map(m => m.id)).toEqual([posted.id,final.id]);
+  expect(messages[1]?.attachments?.map(file=>file.name)).toEqual(['proof.txt']);
 });
 
 
@@ -62,14 +57,11 @@ it.each([
   ['Open https://example.com/a-b. The checks passed.', 'Open https://example.com/a/b.', true],
   ['The balance is -5. The checks passed.', 'The balance is -5.', false],
   ['Open https://example.com/a-b. The checks passed.', 'Open https://example.com/a-b.', false],
-])('same-place summaries retain literal corrections in activity: %s -> %s', async (post, final) => {
+])('same-place summaries retain literal corrections in closing output: %s -> %s', async (post, final) => {
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: post }, RUBY);
   const result = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: final }, RUBY);
   const messages = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message');
-  expect(messages.map(m => m.id)).toEqual([posted.id]);
-  expect(result.id).toBe(posted.id);
-  await rootFixture.db.backgroundWork.drain();
-  expect((await rootFixture.db.query(`SELECT activity FROM messages WHERE request_id=$1 AND presentation='activity'`, [rootFixture.order.id])).rows[0]?.activity).toContainEqual({ kind: 'note', title: 'Turn summary', text: final });
+  expect(messages.map(m => [m.id,m.text])).toEqual([[posted.id,post],[result.id,final]]);
 });
 
 
@@ -80,11 +72,11 @@ it.each([
   ['Run `send(a-b)`.', 'Run `send(a/b)`.'],
   ['Run `READY`.', 'Run `ready`.'],
   ['Run `a  b`.', 'Run `a b`.'],
-])('same-place summaries retain corrected paths, identifiers and code in activity: %s -> %s', async (post, final) => {
+])('same-place summaries retain corrected paths, identifiers and code in closing output: %s -> %s', async (post, final) => {
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: post }, RUBY);
   const result = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: final }, RUBY);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message').map(m => m.id))
-    .toEqual([posted.id]);
+    .toEqual([posted.id,result.id]);
 });
 
 
@@ -94,11 +86,11 @@ it.each([
   ['Deploy the release only after checks pass.', 'Deploy the release', true],
   ['Deploy the release. Only after checks pass.', 'Deploy the release.', true],
   ['Do not deploy the release. The checks passed.', 'Do not deploy the release.', false],
-])('same-place summaries retain polarity and qualifying context in activity: %s -> %s', async (post, final) => {
+])('same-place summaries retain polarity and qualifying context in closing output: %s -> %s', async (post, final) => {
   const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: post }, RUBY);
   const result = await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: final }, RUBY);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.author.pubkey === RUBY && m.presentation === 'message').map(m => m.id))
-    .toEqual([posted.id]);
+    .toEqual([posted.id,result.id]);
 });
 
 
@@ -183,7 +175,7 @@ it.each(['room', 'corner'] as const)('a legacy silent marker cannot suppress the
   expect((await rootFixture.db.query('SELECT state,result_message_id FROM agent_commands WHERE id=$1', [turn.id])).rows[0]).toMatchObject({ state: 'complete', result_message_id: expect.any(String) });
 });
 
-it.each(['room', 'corner'] as const)('Reproduction R1: post then a differently worded summary leaves one visible %s message', async scope => {
+it.each(['room', 'corner'] as const)('Reproduction R1: post then a differently worded summary keeps both messages in the %s', async scope => {
   let turn: AgentCommand;
   if (scope === 'corner') turn = await worker((await open()).cornerId);
   else {
@@ -195,12 +187,8 @@ it.each(['room', 'corner'] as const)('Reproduction R1: post then a differently w
   const summary = 'Finished checking it; the widget can be used now.';
   const final = await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: summary }, turn.agentId);
   const messages = (await rootFixture.phone.readRoom(turn.roomId, HUMAN))!.messages.filter(message => message.author.pubkey === turn.agentId && message.presentation === 'message');
-  expect(messages.map(message => message.id)).toEqual([posted.id]);
-  if (scope === 'room') expect(final.id).toBe(posted.id);
-  await rootFixture.db.backgroundWork.drain();
-  if (scope === 'room') expect((await rootFixture.db.query(`SELECT presentation,activity FROM messages WHERE request_id=$1 AND presentation='activity'`, [turn.id])).rows[0])
-    .toMatchObject({ presentation: 'activity', activity: [{ kind: 'note', title: 'Turn summary', text: summary }] });
-  else expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [turn.id])).rows).toEqual([{ state: 'complete' }]);
+  expect(messages.map(message => [message.id,message.text])).toEqual([[posted.id,'The widget is ready.'],[final.id,summary]]);
+  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows).toEqual([{state:'complete'}]);
 });
 
 
@@ -237,7 +225,7 @@ it('WAKE-STORM: a later delegate report publishes its reply without re-answering
   const turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: coordination finished'}, RUBY);
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: reviewer requires authentication'}, WORKER);
-  const returned = (await commands(opened.cornerId,RUBY)).find(c=>c.reason==='report')!;
+  const returned = (await commands(DM, RUBY)).find(c=>c.reason==='report')!;
   await claim(returned);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(returned),text:'The reviewer still needs to sign in.'}, RUBY);
   // The reply to a corner report publishes in that corner; the chat keeps only the earlier result.
@@ -492,7 +480,7 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=private_payload-'fromRoomId' WHERE id=$1`, [turn.id]);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: need a decision' }, WORKER);
-  const returned = (await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'report');
+  const returned = (await commands(DM, RUBY)).filter(c => c.reason === 'report');
   expect(returned).toHaveLength(1);
   expect(returned[0]!.source.body).toBe('blocked: need a decision');
   await claim(returned[0]!);
@@ -502,7 +490,7 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
 it('Reproduction RETURN-ADDRESS: a report whose parent expired retains the recorded human source route', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: decision needed' }, WORKER);
-  const returned = (await commands(opened.cornerId, RUBY)).find(c => c.reason === 'report')!;
+  const returned = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
   await claim(returned);
   // Production feedback fb_135f018e: the report parent was gone, but its
   // root_source_message_id still named the human's original Room order.

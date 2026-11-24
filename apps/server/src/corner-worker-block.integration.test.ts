@@ -80,7 +80,7 @@ it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report st
   const turn = await input();
   const report = await daemon.execute('report', { ...turn, status, text: 'The router-login secrets are missing.' }, WORKER);
   expect(await blockReminder(db,WORKER,C)).toContain(report.id);
-  expect((await readAgentCommands(db,COMMANDER,C)).commands.some(c=>c.id===report.id)).toBe(true);
+  expect((await readAgentCommands(db,COMMANDER,ROOM)).commands.some(c=>c.id===report.id)).toBe(true);
   expect(await state()).toBe('waiting'); // The report ended its turn; the block is all that remains.
   expect((await db.query("SELECT id FROM messages WHERE card_type='agent-command'")).rows).toEqual([]);
   const next = await input(); // New work keeps the block open and shows Working.

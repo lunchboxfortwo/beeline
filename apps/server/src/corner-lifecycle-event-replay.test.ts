@@ -122,9 +122,8 @@ describe('corner lifecycle recorded event sequences', () => {
       expect(await machine(cornerId)).toMatchObject({ state: 'working' });
       await terminalResult(repair!, 'Awaiting the owner host approval to capture phone screenshots.');
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
-      // The reviewer has the implementer's reply queued: review outranks the owner's open ask.
-      expect(await machine(cornerId)).toMatchObject({ state: 'review', agent: B });
-      expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner host approval to capture phone screenshots.'}]);
+      expect(await machine(cornerId)).toMatchObject({state:'waiting'});
+      expect(await commands(B,cornerId)).toEqual([]);
       changes.length = 0;
       await rootFixture.phone.execute('decideAgentGrant', { grantId: ask.grantId, decision: 'always' }, H);
       expect(changes).toContain(cornerId);
@@ -138,7 +137,7 @@ describe('corner lifecycle recorded event sequences', () => {
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
       expect((await commands(A, cornerId)).filter(command => command.action === 'input' && command.reason === 'resume').map(command => command.id))
         .toEqual(resumes.map(command => command.id));
-      expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner host approval to capture phone screenshots.'}]);
+      expect(await commands(B,cornerId)).toEqual([]);
     } finally { await unlisten(); }
   });
 });

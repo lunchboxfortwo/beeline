@@ -1,7 +1,7 @@
 import { closeAgentAsk } from './agent-open-asks.js';
 import { createHash } from 'node:crypto';
 import { threadWorkState } from '@beeline/api-contract/phone';
-import { HUMAN, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
+import { HUMAN, DM, ROOM, RUBY, WORKER, authority, claim, commands, expect, it, open, rootFixture, worker } from './test-support-commander.integration.test-support.js';
 import { cornerBlockerSql, cornerFactsSql, cornerRowState, chatCornerCounts } from './chat-corner-counts.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import { refreshCornerAttention } from './corner-attention.js';
@@ -63,7 +63,7 @@ it.each(['blocked', 'needs_decision'] as const)('REPORT-WAITING-DERIVED: real %s
 
 it('REPORT-WAITING-DERIVED: commander orders and old answered markers cannot clear a worker block', async () => {
   const { cornerId, report } = await blocked();
-  const delivery = (await commands(cornerId, RUBY)).find(item => item.id === report.id)!;
+  const delivery = (await commands(DM, RUBY)).find(item => item.id === report.id)!;
   await claim(delivery);
   await rootFixture.daemon.execute('order', { ...authority(delivery), address: cornerId, text: 'Use option one.' }, RUBY);
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{waitingAnswered}','true') WHERE id=$1`, [report.id]);
@@ -74,19 +74,19 @@ it('REPORT-WAITING-DERIVED: commander orders and old answered markers cannot cle
   expect((await blocker(cornerId)).item_id).toBeNull();
 });
 
-it('REPORT-WAITING-DERIVED: blocked final reply opens an explicit report wait', async () => {
+it('REPORT-WAITING-DERIVED: closing prose by itself leaves no report wait', async () => {
   const { cornerId } = await open(), turn = await worker(cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'blocked: progress note' }, WORKER);
   const waiting = await rootFixture.db.query(`SELECT waiting.* FROM rooms c
     CROSS JOIN LATERAL (${cornerWaitingReportSql('c')}) waiting WHERE c.id=$1`, [cornerId]);
-  expect(waiting.rows).toHaveLength(1);
+  expect(waiting.rows).toHaveLength(0);
 });
 
 it('R1: holds rank behind a real private report, and retain their actual message target', async () => {
   const { cornerId, report } = await blocked();
   const hold = await rootFixture.phone.execute('setCornerHold', { cornerId }, HUMAN);
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id, kind: 'report' });
-  const delivery = (await commands(cornerId, RUBY)).find(item => item.id === report.id)!;
+  const delivery = (await commands(DM, RUBY)).find(item => item.id === report.id)!;
   await claim(delivery);
   await rootFixture.daemon.execute('order', { ...authority(delivery), address: cornerId, text: 'Finish.' }, RUBY);
   const next = await worker(cornerId);

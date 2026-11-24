@@ -36,7 +36,7 @@ describe('corner message attribution', () => {
     await verdict('check-passed');
     const [review] = await commands(B, C);
     await claim(review!);
-    await result(review!, 'FAIL: the waiver is not in the brief.');
+    await rootFixture.daemon.execute('reply',{roomId:C,id:review!.id,text:'FAIL: the waiver is not in the brief.'},B);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     const repairs=await commands(A,C);
     expect(repairs.map(item=>item.reason)).toEqual(['reply']);
@@ -185,7 +185,7 @@ describe('corner message attribution', () => {
       await result(worker!, text);
       await push.runOnce();
       expect(send.mock.calls.map(([, message]) => message.text)).toEqual(
-        [`Hoots: ${text}`],
+        tagged ? [`Hoots: ${text}`] : [],
       );
     } finally {
       await rootFixture.db.query(

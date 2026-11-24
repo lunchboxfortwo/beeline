@@ -848,7 +848,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       const receipt = {id:item.result_message_id ?? item.posted_reply_id ?? item.id,createdAt:Math.floor(Date.now()/1000),delivered:true};
       if (!input.explicitReply) {
         const files = input.outputFiles ?? item.answer_attachments ?? [];
-        if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && isBackgroundCommand(item.reason)) return receipt;
+        if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && (payload?.automatic || isBackgroundCommand(item.reason))) return receipt;
         if (!messageText && !files.length && !input.sharedReplyId) {
           if (item.state === 'complete') return receipt;
           if (!item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
@@ -866,6 +866,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,
         });
+        if (existing && item.state === 'complete') return {id:existing,createdAt:receipt.createdAt,delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
         await endAgentTurn(db,item,'complete',null,saved.id);
         completedNow = true;
@@ -905,8 +906,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       await endAgentTurn(db,item,'cancelled','return_address_archived');
       return {id:item.id,createdAt:Math.floor(Date.now()/1000)};
     }
-    if (!messageText) return {id:item?.id ?? hash(`${agentId}:${input.roomId}`),createdAt:Math.floor(Date.now()/1000),answered:false};
-    const text = modelText(input.report ? `${status}: ${messageText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '')}` : messageText);
+    const reportBody = input.report ? messageText.replace(/^(?:done|blocked|failed|needs[-_]decision):\s*/, '').trim() : messageText;
+    if (!reportBody) return {id:item?.id ?? hash(`${agentId}:${input.roomId}`),createdAt:Math.floor(Date.now()/1000),answered:false};
+    const text = modelText(input.report ? `${status}: ${reportBody}` : reportBody);
     if (input.report) await refuseDoneWithBlocks(db,agentId,input.roomId,text);
     const answerId = input.messageId ?? hash(`answer:${item?.id ?? `${agentId}:${input.roomId}:${input.requestId ?? ''}`}`);
     const sourceItem = item ?? { id: answerId, room_id: input.roomId, agent_id: agentId,

@@ -1,7 +1,7 @@
 import { it, expect, vi } from 'vitest';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 import { GitHubOperations } from './github-operations.js';
-import { open, worker, authority, commands, claim, rootFixture, RUBY, WORKER, HUMAN } from './test-support-commander.integration.test-support.js';
+import { open, worker, authority, commands, claim, rootFixture, DM, RUBY, WORKER, HUMAN } from './test-support-commander.integration.test-support.js';
 
 it.each(['blocked', 'failed', 'done', 'done-unregistered'] as const)('Reproduction R1: GitHub 404 does not block posts, %s reports or orders', async scenario => {
   const status = scenario === 'done-unregistered' ? 'done' : scenario;
@@ -31,7 +31,7 @@ it.each(['blocked', 'failed', 'done', 'done-unregistered'] as const)('Reproducti
       await rootFixture.db.query(`UPDATE corner_brief_revisions SET approval_basis=approval_basis || '{"repositoryWork":true}'::jsonb WHERE corner_id=$1`, [opened.cornerId]);
     }
     await execute('report', { ...authority(turn), status, text: `${status}: GitHub is unavailable` }, WORKER);
-    const report = (await commands(opened.cornerId, RUBY)).find(command => command.reason === 'report')!;
+    const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
     expect(report.source.body).toBe(`${status}: GitHub is unavailable`);
     await claim(report);
     await execute('order', { ...authority(report), address: opened.cornerId, text: 'Continue with local proof' }, RUBY);

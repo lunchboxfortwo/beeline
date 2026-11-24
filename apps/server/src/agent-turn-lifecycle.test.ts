@@ -149,8 +149,7 @@ it('stores and delivers a complete child-process failure beyond the manual repor
   expect((await db.query('SELECT failure_reason FROM agent_turns WHERE request_id=$1',[c.turn_request_id])).rows)
     .toEqual([{failure_reason:null}]);
   await daemon.execute('postRoomMessage',{roomId:R,requestId:c.turn_request_id,text:'Candy stopped while answering this: '+reason},A);
-  const reports=(await db.query<{text:string}>(`SELECT private_payload->>'text' text FROM agent_commands
-    WHERE agent_id=$1 AND reason='report'`,[commander])).rows;
+  const reports=(await db.query<{text:string}>(`SELECT text FROM messages WHERE author_id=$1 AND room_id=$2 AND request_id=$3`,[A,R,c.turn_request_id])).rows;
   expect(reports).toHaveLength(1);
   expect(reports[0]!.text).toContain(reason);
 });

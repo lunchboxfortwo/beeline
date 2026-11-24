@@ -63,7 +63,7 @@ describe('revision 4 simple corner review model', () => {
     await greenHead(107,head);
     const [first]=await commands(B,C);
     await claim(first!);
-    await result(first!,'FAIL: attach the required evidence.');
+    await rootFixture.daemon.execute('reply',{roomId:first!.roomId,id:first!.id,text:'FAIL: attach the required evidence.'},first!.agentId);
     await reconcileConfiguredCornerReviewers(rootFixture.db,R);
     const [repair]=(await commands(A,C)).filter(command=>command.reason==='reply');
     expect(repair).toBeDefined();
@@ -118,7 +118,7 @@ it.each(['decline','silent'])('Reproduction REVIEW-EMPTY: a %s review ends until
   const [review]=await commands(B,C);
   await claim(review!);
   if(ending==='decline') {
-    await result(review!,'I already reviewed this item.');
+    await rootFixture.daemon.execute('reply',{roomId:C,id:review!.id,text:'I already reviewed this item.'},B);
     const [reply]=(await commands(A,C)).filter(command=>command.reason==='reply');
     await claim(reply!);
     await result(reply!,'');
