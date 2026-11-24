@@ -162,7 +162,6 @@ export function watchTailscaleSignIn(
         file: 'tailscale',
         args: ['debug', 'watch-ipn', '--initial'],
         captureOutput: false,
-        machineRead: true,
         signal: watching.signal,
         onSpawn: (child) => {
           child.stdout?.on('data', changed);

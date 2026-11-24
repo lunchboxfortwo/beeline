@@ -43,11 +43,7 @@ export async function observeHelper(
       if (controller.signal.aborted) throw controller.signal.reason;
       if (watchError) throw watchError;
       dirty = false;
-      const status = await askMachine(
-        stateRoot,
-        { operation: 'status' },
-        { machineRead: true },
-      ).catch((error) => {
+      const status = await askMachine(stateRoot, { operation: 'status' }).catch((error) => {
         // A helper the proof is killing resets the connection; re-read on its next status write.
         if (helperAbsent(error) || error?.code === 'ECONNRESET') return undefined;
         throw error;

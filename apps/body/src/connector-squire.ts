@@ -197,7 +197,6 @@ export const defaultStreamedRunner: StreamedShellRunner = (command, args, env, o
       args,
       env: env ?? squireConnectProcessEnv(),
       captureOutput: false,
-      machineRead: true,
       onSpawn: (spawned) => {
         child = spawned;
         spawned.stdout?.on('data', (chunk: Buffer | string) => {
@@ -638,7 +637,7 @@ export async function installSquire(options: InstallSquireOptions): Promise<Inst
 export async function awaitPublicPage(url: string): Promise<boolean> {
   try {
     const response = await ask(
-      { url, peer: 'Squire sign-in page' },
+      { url },
       { method: 'GET', redirect: 'manual' },
     );
     await response.body?.cancel().catch(() => undefined);

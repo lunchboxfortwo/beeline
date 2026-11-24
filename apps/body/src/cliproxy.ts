@@ -160,7 +160,6 @@ export class CliProxy {
       cwd: dir,
       env: { HOME: dir, PATH: process.env.PATH ?? '' },
       captureOutput: false,
-      machineRead: true,
       onSpawn: (spawned) => {
         child = spawned;
         spawned.stdout?.on('data', read);
@@ -213,7 +212,7 @@ export class CliProxy {
   async #management(path: string, init: RequestInit = {}): Promise<unknown> {
     await this.start();
     const response = await ask(
-      { url: `${this.endpoint!.url}/v0/management/${path}`, peer: 'CLIProxyAPI management' },
+      { url: `${this.endpoint!.url}/v0/management/${path}` },
       {
         ...init,
         headers: {

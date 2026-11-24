@@ -697,7 +697,7 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
   const subscribe = async () => {
     try {
       const response = await ask(
-        { url: new URL('/notifications', url), machineRead: true },
+        { url: new URL('/notifications', url) },
         {
           headers: { authorization: `Bearer ${token}` },
           signal: notifications.signal,
@@ -737,7 +737,7 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
         // The MCP client reads this process's stdout: the wait stays silent.
         const send = (read: boolean) =>
           ask(
-            { url: new URL('/mcp', url), machineRead: true },
+            { url: new URL('/mcp', url) },
             {
               method: 'POST',
               headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

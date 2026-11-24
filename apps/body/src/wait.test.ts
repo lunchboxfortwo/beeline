@@ -15,7 +15,7 @@ import {
   machineControlPath,
 } from './machine-control.js';
 import { downloadBytes } from './update-download.js';
-import { ask, PeerRefusal, runOwned, setMachineReadOutput, tryLock } from './wait.js';
+import { PeerRefusal, runOwned, tryLock } from './wait.js';
 
 const alive = (pid: number) => {
   try {
@@ -166,7 +166,6 @@ it("reports download bytes and fails on the transport's explicit close", async (
         })
       ).byteLength,
     ).toBe(4);
-    expect(lines[0]).toContain(`waiting for 127.0.0.1:${port}`);
     expect(lines.some((line) => line.includes('4 bytes'))).toBe(true);
     await expect(
       downloadBytes(`http://127.0.0.1:${port}/cut`, fetch, { report: () => undefined }),
@@ -345,34 +344,13 @@ it('follows an acknowledged legacy helper whose lock record has no generation', 
   expect(settled).toBe(true);
 });
 
-it('names the peer of every wait on stderr unless the output is machine-read', async () => {
-  const server = httpServer((_req, res) => res.end('ok'));
-  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
-  const port = (server.address() as { port: number }).port;
-  const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-  try {
-    await (await ask({ url: `http://127.0.0.1:${port}/human` })).text();
-    await (await ask({ url: `http://127.0.0.1:${port}/tool`, machineRead: true })).text();
-    const lines = writes.mock.calls.map(([chunk]) => String(chunk));
-    expect(lines).toContain(`[beeline] waiting for 127.0.0.1:${port} (GET /human)\n`);
-    expect(lines.some((line) => line.includes('/tool'))).toBe(false);
-  } finally {
-    writes.mockRestore();
-    await new Promise<void>((done) => server.close(() => done()));
-  }
-});
-
-it('announces an owned step before spawning and streams both outputs while retaining its result', async () => {
+it('streams both child outputs while retaining its result', async () => {
   const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   try {
     const result = await runOwned({
       step: 'registry lookup',
       file: process.execPath,
       args: ['-e', "console.log('registry result'); console.error('registry progress');"],
-      onSpawn: () =>
-        expect(writes.mock.calls.map(([chunk]) => String(chunk))).toEqual([
-          '[beeline] waiting for registry lookup\n',
-        ]),
     });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe('registry result\n');
@@ -385,12 +363,12 @@ it('announces an owned step before spawning and streams both outputs while retai
   }
 });
 
-it('keeps owned step and output quiet under the shared machine-output switch', async () => {
+it('captures child output without echoing it in machine-read mode', async () => {
   const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-  setMachineReadOutput(true);
   try {
     const result = await runOwned({
       step: 'machine lookup',
+      machineRead: true,
       file: process.execPath,
       args: ['-e', "console.log('result'); console.error('progress');"],
     });
@@ -399,7 +377,6 @@ it('keeps owned step and output quiet under the shared machine-output switch', a
     expect(result.stderr).toBe('progress\n');
     expect(writes).not.toHaveBeenCalled();
   } finally {
-    setMachineReadOutput(false);
     writes.mockRestore();
   }
 });
@@ -420,7 +397,6 @@ it.each(['stdout', 'stderr'] as const)(
       for (;;) fs.writeSync(${stream === 'stdout' ? 1 : 2}, chunk);`,
         ],
         maxBuffer: limit,
-        machineRead: true,
         onSpawn: (child) => {
           pid = child.pid!;
         },

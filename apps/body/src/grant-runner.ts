@@ -698,7 +698,6 @@ export class GrantCommandRunner {
       env,
       input: stdin ?? '',
       captureOutput: false,
-      machineRead: true,
       onSpawn: (spawned) => {
         child = spawned;
         this.children.set(spawned, input.roomId as string);

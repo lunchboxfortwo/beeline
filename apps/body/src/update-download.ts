@@ -10,7 +10,7 @@ export async function downloadBytes(
   const report = options.report ?? progress;
   let step = `network DNS/connect/headers ${url}`;
   try {
-    const response = await ask({ url, fetch: fetchImpl, report });
+    const response = await ask({ url, fetch: fetchImpl });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (!response.body) throw new Error('missing response body');
     step = `network body ${url} (0 bytes)`;

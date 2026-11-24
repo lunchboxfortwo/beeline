@@ -57,7 +57,6 @@ export class BrowserShareHost {
               await ask(
                 {
                   url: new URL('/v1/daemon/operations/endComputerSession', request.serverBaseUrl),
-                  peer: 'Beeline server',
                 },
                 {
                   method: 'POST',
@@ -95,7 +94,7 @@ export async function startHostedBrowserShare(
   request: ShareRequest,
 ): Promise<void> {
   const output = await ask<string>(
-    { socket: socketPath, peer: 'browser share host', framing: 'eof', machineRead: true },
+    { socket: socketPath, peer: 'browser share host', framing: 'eof' },
     JSON.stringify(request),
   );
   const result = JSON.parse(output) as { ok?: boolean; error?: string };

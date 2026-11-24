@@ -76,7 +76,7 @@ export async function postToClaude(socket: ClaudeSocket, text: string): Promise<
     { type: 'user', message: { role: 'user', content: text } },
   ];
   await ask<void>(
-    { socket: socket.path, peer: 'Claude Code session', framing: 'flush', machineRead: true },
+    { socket: socket.path, peer: 'Claude Code session', framing: 'flush' },
     frames.map((frame) => `${JSON.stringify(frame)}\n`).join(''),
   );
 }

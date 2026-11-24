@@ -533,7 +533,7 @@ export async function pruneStoppedAgentStorage(
       const read = async () => {
         const url = new URL('/v1/daemon/operations/getDaemonBootstrap', runtime.transport!.baseUrl);
         const response = await ask(
-          { url, peer: `${url.host} for stopped agent ${agentId.slice(0, 12)}` },
+          { url },
           {
             method: 'POST',
             headers: {

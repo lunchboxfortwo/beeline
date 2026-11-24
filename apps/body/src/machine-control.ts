@@ -217,7 +217,6 @@ function hostAdbQuery(query: string, connect?: () => Socket): Promise<string> {
     {
       socket: { host: '127.0.0.1', port: 5037 },
       peer: 'host adb server',
-      machineRead: true,
       framing: {
         read: (bytes) => {
           if (bytes.length < 8) return undefined;

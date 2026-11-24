@@ -9,8 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { ensureBridge, notifyBridgeSessions, toolViaBridge } from './bridge.js';
-import { setMachineReadOutput } from './beeline-api.js';
+import { ensureBridge, toolViaBridge } from './bridge.js';
 
 import { bridgeOwnerKey, bridgeSocketPath } from './bridge-socket.js';
 import { preparePrivateSocketDirectory } from '../local-socket.js';
@@ -302,28 +301,6 @@ describe('fix 8: session tool calls through the bridge', () => {
       }
     });
 
-    it('uses the HTTP machine-output switch for bridge tools and hook notifications', async () => {
-      const dir = scratch();
-      const server = await serve(dir, (connection) =>
-        connection.end('{"ok":true,"data":{"id":"m"}}\n'),
-      );
-      const writes = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-      try {
-        setMachineReadOutput(false);
-        expect(await toolViaBridge(dir, 'k', 'read', {})).toEqual({ ok: true, data: { id: 'm' } });
-        expect(writes).toHaveBeenCalledWith('[beeline] waiting for Beeline bridge\n');
-        writes.mockClear();
-        setMachineReadOutput(true);
-        expect(await toolViaBridge(dir, 'k', 'tool', {})).toEqual({ ok: true, data: { id: 'm' } });
-        await notifyBridgeSessions(dir);
-        expect(writes).not.toHaveBeenCalled();
-      } finally {
-        setMachineReadOutput(false);
-        writes.mockRestore();
-        server.close();
-      }
-    });
-
     it('settles as unknown when the bridge closes after taking the call, and as unsent with no bridge', async () => {
       const dir = scratch();
       expect(await toolViaBridge(dir, 'k', 'post', {})).toBeUndefined();
@@ -495,7 +472,7 @@ describe('fix 13 and 15: join sign-in', () => {
     expect(finisher.exitCode).toBeNull();
   });
 
-  it('names the host and step on stderr before registering, leaving stdout to the link', async () => {
+  it('prints the authorization link with the registered client ID', async () => {
     const home = scratch();
     const noop = join(home, 'noop.mjs');
     writeFileSync(noop, '');
@@ -506,16 +483,11 @@ describe('fix 13 and 15: join sign-in', () => {
       BEELINE_SESSION_BUNDLE: noop,
       PATH: process.env.PATH,
     };
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       Response.json({ client_id: 'registered' }, { status: 201 }),
     );
     const output = await join_(env);
-    expect(stderr.mock.calls.map(([line]) => String(line))).toContain(
-      '[beeline] waiting for synthetic.invalid to register this session (POST /mcp/oauth/register)\n',
-    );
     expect(output).toContain('client_id=registered');
-    expect(output).not.toContain('[beeline]');
   });
 });
 

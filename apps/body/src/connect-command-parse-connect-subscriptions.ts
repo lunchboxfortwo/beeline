@@ -320,7 +320,7 @@ export async function runConnectWizard(
       verifyProviderKey({
         ...input,
         fetchImpl,
-        ...(step ? { report: step.say, signal: step.signal } : {}),
+        ...(step ? { signal: step.signal } : {}),
       }),
   );
   const baseUrl = (process.env.BEELINE_AUTH_URL ?? 'https://server.usebeeline.app').replace(

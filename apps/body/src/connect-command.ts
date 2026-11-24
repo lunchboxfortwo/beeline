@@ -509,7 +509,7 @@ export async function collectConnectWizard(
   ) => Promise<void> = (input, step) =>
     verifyProviderKey({
       ...(input as { provider: ConnectKeyProvider; apiKey: string }),
-      ...(step ? { report: step.say, signal: step.signal } : {}),
+      ...(step ? { signal: step.signal } : {}),
     }),
   seams: ConnectWizardSeams = {},
 ): Promise<ConnectWizardResult> {
@@ -728,9 +728,7 @@ export interface DeviceGrantResponse {
 }
 
 /**
- * One wizard POST through `ask`: it names the host and path it waits on (in
- * the covering spinner when there is one, else on stderr) and aborts when the
- * person cancels.
+ * One wizard POST through `ask` that aborts when the person cancels.
  */
 export async function jsonRequest<T>(
   url: string,
@@ -739,7 +737,7 @@ export async function jsonRequest<T>(
   step?: SpinnerStep,
 ): Promise<T> {
   const response = await ask(
-    { url, fetch: fetchImpl, ...(step ? { report: step.say } : {}) },
+    { url, fetch: fetchImpl },
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -775,7 +773,7 @@ export async function installCurrentRelease(
   }
   const manifestUrl = resolveManifestUrl(process.env);
   const response = await ask(
-    { url: manifestUrl, fetch: fetchImpl, ...(step ? { report: step.say } : {}) },
+    { url: manifestUrl, fetch: fetchImpl },
     step ? { signal: step.signal } : undefined,
   );
   if (!response.ok)

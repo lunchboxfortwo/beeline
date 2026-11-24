@@ -71,7 +71,6 @@ export async function trustCodexHook(
     cwd,
     stdin: 'pipe',
     captureOutput: false,
-    machineRead: true,
     signal: done.signal,
     // Its stderr is not read: drain it so it cannot fill the pipe.
     onSpawn: (spawned) => {

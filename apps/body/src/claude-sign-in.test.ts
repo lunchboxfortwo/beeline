@@ -1,7 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { CLAUDE_OAUTH, CLAUDE_SIGN_IN_REJECTED_MESSAGE, ClaudeSignIn } from './claude-sign-in.js';
-
-afterEach(() => vi.restoreAllMocks());
 
 function attempt(fetch: typeof globalThis.fetch) {
   const signIn = new ClaudeSignIn({ fetch, now: () => 1_000 });
@@ -9,8 +7,7 @@ function attempt(fetch: typeof globalThis.fetch) {
   return { signIn, pasted: `pasted-code#${state}` };
 }
 
-it("exchanges the pasted code once with Claude's sign-in service, naming it while it waits", async () => {
-  const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+it("exchanges the pasted code once with Claude's sign-in service", async () => {
   const fetch = vi.fn(async () =>
     Response.json({
       access_token: 'access',
@@ -29,13 +26,9 @@ it("exchanges the pasted code once with Claude's sign-in service, naming it whil
     CLAUDE_OAUTH.tokenUrl,
     expect.objectContaining({ method: 'POST' }),
   ]);
-  expect(stderr).toHaveBeenCalledWith(
-    "[beeline] waiting for Claude's sign-in service (POST /v1/oauth/token)\n",
-  );
 });
 
 it('keeps the attempt after a rejected code and names an unreachable service', async () => {
-  vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(new Response('{}', { status: 400 }))

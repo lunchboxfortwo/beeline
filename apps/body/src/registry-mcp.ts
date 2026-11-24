@@ -807,7 +807,7 @@ export class RegistryMcpHostBroker {
 
 export async function brokerRequest(socketPath: string, request: BrokerRequest): Promise<string[]> {
   const output = await ask<string>(
-    { socket: socketPath, peer: 'Registry MCP broker', framing: 'eof', machineRead: true },
+    { socket: socketPath, peer: 'Registry MCP broker', framing: 'eof' },
     JSON.stringify(request),
   );
   const parsed = JSON.parse(output) as { messages?: unknown; error?: unknown };

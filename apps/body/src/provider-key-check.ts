@@ -63,8 +63,6 @@ export async function verifyProviderKey(input: {
   provider: ConnectKeyProvider;
   apiKey: string;
   fetchImpl?: typeof fetch;
-  /** Where the one "waiting for <host>" line goes; stderr by default. */
-  report?: (line: string) => void;
   /** The caller left (SIGINT or cancel): abort the request. */
   signal?: AbortSignal;
 }): Promise<void> {
@@ -75,9 +73,7 @@ export async function verifyProviderKey(input: {
     response = await ask(
       {
         url,
-        peer: `${new URL(url).host} to verify the ${label} key`,
         ...(input.fetchImpl ? { fetch: input.fetchImpl } : {}),
-        ...(input.report ? { report: input.report } : {}),
       },
       { headers, ...(input.signal ? { signal: input.signal } : {}) },
     );

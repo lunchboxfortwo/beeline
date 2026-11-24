@@ -166,7 +166,7 @@ export class ClaudeSignIn {
       let response: Response;
       try {
         response = await ask(
-          { url: CLAUDE_OAUTH.tokenUrl, peer: "Claude's sign-in service", fetch: this.#fetch },
+          { url: CLAUDE_OAUTH.tokenUrl, fetch: this.#fetch },
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },

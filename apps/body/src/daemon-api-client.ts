@@ -445,7 +445,6 @@ export class DaemonApiClient {
       throw new Error('HTTP daemon operation requires bootstrap or a registered old server');
     this.inFlight += 1;
     try {
-      // `corner-read-token` names the host and step on stderr before it waits.
       const response = await ask(
         {
           url: endpoint(this.baseUrl, `/v1/daemon/operations/${String(name)}`),

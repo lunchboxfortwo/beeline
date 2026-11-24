@@ -179,7 +179,6 @@ export async function setupDelivery(
       conversation,
       installed: true,
     },
-    'set up delivery',
   )) as { delivery: { generation?: string; mechanism?: JoinedSession['deliveryMechanism'] } };
   joined.deliveryGeneration = delivery.generation;
   joined.deliveryMechanism = delivery.mechanism ?? mechanism;
