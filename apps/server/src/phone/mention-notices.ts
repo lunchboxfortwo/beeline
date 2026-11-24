@@ -77,9 +77,9 @@ import { phoneProjectPendingAgentCommands } from './message-enrichment.js';
     const commands = await database.query<{
       agent_id: string;
       turn_request_id: string;
-      created_at: Date;
+      created_at: Date; startup_operation_id: string | null;
     }>(
-      `SELECT command.agent_id,command.turn_request_id,command.created_at
+      `SELECT command.agent_id,command.turn_request_id,command.created_at,command.startup_operation_id
        FROM agent_commands command
        WHERE command.room_id=$1 AND command.source_message_id=$2
          AND command.state='pending' AND command.action='input'

@@ -117,6 +117,7 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS inbox_sequence bigint GENERA
 CREATE INDEX IF NOT EXISTS agent_commands_delayed_wakes ON agent_commands(wake_after) WHERE state='pending' AND wake_after IS NOT NULL;
 CREATE INDEX IF NOT EXISTS agent_commands_coalesced_into ON agent_commands(cancellation_reason) WHERE cancellation_reason IS NOT NULL;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS created_offline boolean;
+ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS startup_operation_id text;
 ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_action_check;
 ALTER TABLE agent_commands ADD CONSTRAINT agent_commands_action_check CHECK(action IN ('input','resume','stop','restart'));
 CREATE INDEX IF NOT EXISTS agent_commands_parent_order ON agent_commands(parent_command_id)

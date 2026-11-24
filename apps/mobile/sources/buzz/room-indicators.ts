@@ -244,16 +244,15 @@ export function selectComposerAckPresentation(
   const pending = !input.activeTurnPubkey
     ? input.pendingAgentCommands?.find(command => command.runtimePhase?.phase === 'starting')
     : undefined;
-  if (pending) {
-    const agent = agentFromConversationIdentity(input.conversationIdentities?.get(pending.agentPubkey)) ??
-      input.agentsByPubkey?.get(pending.agentPubkey);
-    const subject = resolveAgentDisplayIdentity(pending.agentPubkey,agent).name;
-    return { label: `${subject} · starting…`,
-      ...(viewerMayStopTurn(input.viewerPubkey,input.viewerCanSend)
-        ? { stop: { agentPubkey:pending.agentPubkey,requestId:pending.requestId } } : {}),
-    };
-  }
-  const state = selectComposerAckState(input);
+  // The server has begun this command's wake. Use its turn key through
+  // session startup so the same label and Stop target survive helper pickup.
+  const progress = pending ? {
+    ...input,
+    activeTurnPubkey: pending.agentPubkey,
+    activeTurnRequestId: pending.requestId,
+    activeTurnAgentPubkey: pending.agentPubkey,
+  } : input;
+  const state = selectComposerAckState(progress);
   if (!state) return null;
   if (state.kind === 'sent') {
     return { label: `Sent to ${state.handles.map((handle) => `@${handle}`).join(', ')}`, live: false };
@@ -266,13 +265,13 @@ export function selectComposerAckPresentation(
     const subject = display.name;
     const agents: ComposerWorkingAgent[] = [{
       pubkey: state.agentPubkey, name: display.name, avatar: display.avatarUrl, face: display.face,
-      startedAt: input.activeTurnStartedAt ?? 0,
+      startedAt: progress.activeTurnStartedAt ?? 0,
     }];
     // A real receipt carries its own identity: one verb per turn (seeded by
     // the turn key, never re-picked per tick) and the receipt's server time
     // for the elapsed counter. The local "sending…" bridge has neither.
-    if (input.activeTurnRequestId) {
-      const turnKey = `${state.agentPubkey}:${input.activeTurnRequestId}`;
+    if (progress.activeTurnRequestId) {
+      const turnKey = `${state.agentPubkey}:${progress.activeTurnRequestId}`;
       const verb = pickTurnVerb(turnKey);
       // A stop needs the turn's own coordinates, and only a real receipt has
       // them. The local "sending…" bridge is not a turn yet: there is nothing
@@ -285,15 +284,15 @@ export function selectComposerAckPresentation(
         turnKey,
         verb,
         ...(input.receivedSteer?.agentPubkey === state.agentPubkey &&
-        input.receivedSteer.turnRequestId === input.activeTurnRequestId
+        input.receivedSteer.turnRequestId === progress.activeTurnRequestId
           ? { received: true }
           : {}),
-        ...(input.activeTurnStartedAt != null ? { startedAt: input.activeTurnStartedAt } : {}),
+        ...(progress.activeTurnStartedAt != null ? { startedAt: progress.activeTurnStartedAt } : {}),
         ...(stoppable
           ? {
               stop: {
-                agentPubkey: input.activeTurnAgentPubkey ?? state.agentPubkey,
-                requestId: input.activeTurnRequestId,
+                agentPubkey: progress.activeTurnAgentPubkey ?? state.agentPubkey,
+                requestId: progress.activeTurnRequestId,
               },
             }
           : {}),

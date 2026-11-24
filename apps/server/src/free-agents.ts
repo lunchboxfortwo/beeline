@@ -558,6 +558,7 @@ export class FreeAgentService {
     let initial: RuntimeFacts | undefined;
     let completedEffect = false;
     let mutationStarted = false;
+    let unconfirmedStarts = 0;
     let machineId: string | null = null;
     const owns = async () => Boolean((await this.database.query(`SELECT 1 FROM free_agents
       WHERE agent_id=$1 AND runtime_operation_id=$2 AND removed_at IS NULL`, [agentId,operationId])).rowCount);
@@ -579,6 +580,16 @@ export class FreeAgentService {
       }
       const work = initial.pending || initial.connector;
       if (!work && !initial.connection_id && !refreshImage && (!prepare || machineId)) return;
+      if (initial.pending) {
+        const marked = await this.database.query(`UPDATE agent_commands command SET startup_operation_id=$2
+          WHERE command.agent_id=$1 AND command.state='pending' AND command.action='input'
+            AND command.reason IN ('human_tag','direct_message')
+            AND NOT EXISTS(SELECT 1 FROM agent_turns turn WHERE turn.room_id=command.room_id
+              AND turn.agent_id=command.agent_id AND turn.request_id=command.turn_request_id)
+            AND EXISTS(SELECT 1 FROM free_agents f WHERE f.agent_id=$1 AND f.runtime_operation_id=$2)`,
+          [agentId,operationId]);
+        unconfirmedStarts = marked.rowCount;
+      }
       let machine = machineId ? await this.machines.read(machineId) : undefined;
       machine ??= await this.machines.find(agentId);
       if (!machine) {
@@ -594,6 +605,7 @@ export class FreeAgentService {
         await this.machines.waitFor(created.id,work ? 'started' : 'stopped',60,created.instance_id);
         completedEffect = true;
         await recordFreeAgentEvent(this.database,agentId,'provisioned',{machineId,operationId});
+        unconfirmedStarts = 0;
         return;
       }
       if (machine.id !== machineId) await adopt(machine.id);
@@ -627,8 +639,10 @@ export class FreeAgentService {
           await this.machines.waitFor(machine.id,'started',60,machine.instance_id);
           completedEffect = true;
           await recordFreeAgentEvent(this.database,agentId,'start_requested',{machineId:machine.id,operationId,machineVersion:machine.instance_id});
+          unconfirmedStarts = 0;
         }
       } else if (machine.state === 'started') {
+        unconfirmedStarts = 0;
         // Image replacement does not make an idle connection busy. Re-read work
         // committed during provider observation/replacement before taking its snapshot.
         const current = (await this.database.query<RuntimeFacts>(runtimeFactsSql,[agentId])).rows[0];
@@ -657,6 +671,10 @@ export class FreeAgentService {
         // Signals arriving before this row-locked handoff are retained by a
         // committed notification; signals arriving after it can acquire ownership.
         const final = (await db.query<RuntimeFacts>(`${runtimeFactsSql} FOR UPDATE OF f`,[agentId])).rows[0];
+        if (unconfirmedStarts) {
+          await db.query(`UPDATE agent_commands SET startup_operation_id=NULL
+            WHERE agent_id=$1 AND state='pending' AND startup_operation_id=$2`, [agentId,operationId]);
+        }
         const released = await db.query(`UPDATE free_agents SET runtime_owner=NULL
           WHERE agent_id=$1 AND runtime_operation_id=$2 RETURNING agent_id`,[agentId,operationId]);
         if (released.rowCount && (completedEffect || JSON.stringify(initial) !== JSON.stringify(final)))
