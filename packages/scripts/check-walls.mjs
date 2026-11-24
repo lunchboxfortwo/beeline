@@ -44,6 +44,7 @@ export const MERGE_FILES = [
   'apps/server/src/corner-lifecycle-review-state.ts',
   'apps/server/src/github-operations-read-pr-checks-status.ts',
   'apps/server/src/corner-machine.ts',
+  'packages/api-contract/src/thread-state.ts',
   'packages/api-contract/src/daemon-operations-daemon-operation-map.ts',
 ];
 
