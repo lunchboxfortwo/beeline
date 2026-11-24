@@ -58,14 +58,24 @@ it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state
     recordHookSession(dir, { agent: 'codex', sessionId: id, cwd: join(home, id), seenAt: Date.now() });
   }
   await updateState(dir, state => { state.sessions = [session('first')]; });
+  const transientDir = join(dir, 'transient.lock');
   const source = resolve('src/session-join/bridge.ts');
   const bundle = join(home, 'usebeeline.mjs');
   const script = `import { tsImport } from ${JSON.stringify(createRequire(import.meta.url).resolve('tsx/esm/api'))};
-    import { appendFileSync } from 'node:fs';
+    import fs, { appendFileSync } from 'node:fs';
     const { runBridge } = await tsImport(${JSON.stringify(source)}, import.meta.url);
+    // Model another process releasing its lock between a recursive watcher's
+    // directory discovery and scan. Never interfere with the real state lock.
+    const transientDir = ${JSON.stringify(transientDir)};
+    const readdirSync = fs.readdirSync;
+    fs.readdirSync = (path, ...args) => {
+      if (path === transientDir) fs.rmdirSync(path);
+      return readdirSync(path, ...args);
+    };
     globalThis.fetch = async (url, init) => {
       if (init.method === 'POST') return Response.json({ result: { capabilities: { memberStreamV1: true } } });
       const id = init.headers.authorization.slice('Bearer '.length);
+      if (id === 'first') fs.mkdirSync(transientDir);
       const body = new ReadableStream({ start(controller) {
         controller.enqueue(new TextEncoder().encode(JSON.stringify({ v: 1, type: 'delivery',
           deliveryId: 'mention:' + id, mentions: [{ id, room_id: 'chat', text: 'tag-' + id }],
@@ -85,24 +95,30 @@ it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state
   let errors = '';
   child.stderr!.on('data', chunk => { errors += chunk; });
   children.push(child);
-  await Promise.race([received(output, 'tag-first'), once(child, 'exit').then(() => {
-    throw new Error(`bridge exited before delivering the first tag: ${errors}`);
-  })]);
+  const ended = once(child, 'close');
+  const receive = (marker: string) => Promise.race([
+    received(output, marker),
+    ended.then(() => {
+      const log = join(dir, 'bridge.log');
+      const details = existsSync(log) ? readFileSync(log, 'utf8') : '';
+      throw new Error(`bridge exited before ${marker}\n${errors}${details}`);
+    }),
+  ]);
+  await receive('tag-first');
   expect(statSync(socket).mode & 0o777).toBe(0o600);
   if (dirname(socket) !== dir) expect(statSync(dirname(socket)).mode & 0o777).toBe(0o700);
   await updateState(dir, state => { state.sessions.push(session('second')); });
   await ensureBridge(dir, { node: process.execPath, bundle }, env);
-  await received(output, 'tag-second');
+  await receive('tag-second');
   await updateState(dir, state => { state.sessions.push(session('third')); });
   await ensureBridge(dir, { node: process.execPath, bundle }, env);
-  await received(output, 'tag-third');
+  await receive('tag-third');
   expect(Number(readFileSync(join(dir, 'bridge.pid'), 'utf8'))).toBe(child.pid);
   await updateState(dir, state => { state.sessions = state.sessions.filter(s => s.sessionId !== 'second'); });
   await notifyBridgeSessions(dir);
-  await received(output, 'closed-second');
+  await receive('closed-second');
   const text = readFileSync(output, 'utf8');
   for (const id of ['first', 'second', 'third']) expect(text.split('tag-' + id)).toHaveLength(2);
-  const ended = once(child, 'exit');
   await updateState(dir, state => { state.sessions = []; });
   // The bridge can observe the empty state on an already queued file event.
   // Drive that ordering explicitly, then send the final control notification.

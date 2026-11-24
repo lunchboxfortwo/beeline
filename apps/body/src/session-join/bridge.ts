@@ -6,6 +6,7 @@ import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import {
   chmodSync,
   closeSync,
+  mkdirSync,
   openSync,
   readFileSync,
   renameSync,
@@ -508,22 +509,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
   const sources = machineSources(dir);
   type Stream = { fingerprint: string; controller: AbortController; recovered: boolean };
   const streams = new Map<string, Stream>();
-  // A change without a name is any change. A failed watcher would leave this
-  // bridge deaf, so it stops and the next session start launches a new one.
-  const stopWatching = watchChanges(
-    dir,
-    (path) => {
-      // A new subdirectory can be reported by its own name only.
-      if (path === null || /^(?:hooks|inbox|deliveries|claude-mcp)(?:\/|$)/.test(path)) changed();
-    },
-    {
-      recursive: true,
-      onError: (error) => {
-        log(dir, `local watcher failed: ${error.message}`);
-        stop();
-      },
-    },
-  );
+  const stopWatching: (() => void)[] = [];
   const stop = () => {
     if (!activated) process.exit(0);
     stopping = true;
@@ -619,6 +605,21 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     void job.finally(() => jobs.delete(job));
   };
   try {
+    // Watch only delivery inputs. Node's recursive watcher scans every
+    // directory it discovers and can fail if a transient state.lock vanishes.
+    for (const name of ['hooks', 'inbox', 'deliveries', 'claude-mcp']) {
+      const path = join(dir, name);
+      mkdirSync(path, { recursive: true, mode: 0o700 });
+      stopWatching.push(
+        watchChanges(path, changed, {
+          recursive: name === 'deliveries',
+          onError: (error) => {
+            log(dir, `local watcher failed: ${error.message}`);
+            stop();
+          },
+        }),
+      );
+    }
     if (staged) {
       if (!expected.size) throw new Error('No joined sessions to activate');
       for (const joined of readState(dir).sessions.filter(hasLocalDelivery)) start(joined);
@@ -672,7 +673,7 @@ export async function runBridge(dir: string, runner: Runner): Promise<void> {
     await owner?.release();
     throw error;
   } finally {
-    stopWatching();
+    for (const close of stopWatching) close();
     for (const stream of streams.values()) {
       stream.controller.abort();
     }
