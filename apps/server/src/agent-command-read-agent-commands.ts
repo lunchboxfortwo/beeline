@@ -1,5 +1,6 @@
 import { connectorHostAcceptedSql } from './rooms-mcp-delivery.js';
 import { legacyMessageBody } from './messaging-cutover.js';
+import { publicMentionCommandSql } from './owed-mentions.js';
 import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { isResumeKind } from '@beeline/api-contract/phone';
@@ -14,15 +15,14 @@ import { savedScheduleCommand } from './scheduled-command-authority.js';
 
 
 /** One durable queue read, shared by helper push and connected-app delivery. */
-export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: { roomId?: string; mcpWakes?: true } = {}) {
+export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: { roomId?: string; pairedWithMentions?: boolean } = {}) {
   // Idle notices describe one episode, unlike accepted human work. Retire an
   // obsolete episode through the terminal owner before delivering the queue.
   // An automatic review wake not yet started is obsolete once its head is no
   // longer the thread head or that head is approved.
   // Public tags and DMs with a mention record are delivered by message ID.
   // The queued command still owns the request and resolves its reply route.
-  const wakeSource = options.mcpWakes ? `AND item.reason<>'mcp_call'
-    AND NOT (item.reason IN ('human_tag','agent_tag','direct_message') AND item.private_payload IS NULL
+  const wakeSource = options.pairedWithMentions ? `AND NOT (${publicMentionCommandSql('item')}
       AND EXISTS(SELECT 1 FROM rooms_mcp_mentions mention
         WHERE mention.member_id=item.agent_id AND mention.room_id=item.room_id
           AND mention.message_id=item.source_message_id))` : '';

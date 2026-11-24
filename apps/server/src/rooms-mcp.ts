@@ -11,7 +11,7 @@ import type { DaemonService } from './daemon-service.js';
 import type { SqlDatabase } from './database.js';
 import type { LiveHub } from './live.js';
 import type { ObjectService } from './object-service.js';
-import { OWED_MENTION_OPEN_SQL,mentionRouting } from './owed-mentions.js';
+import { OWED_MENTION_OPEN_SQL,mentionRouting,publicMentionCommandSql } from './owed-mentions.js';
 import type { PhoneService } from './phone-service.js';
 import { visibleChatMessageSql } from './read-cursor.js';
 import { MCP_AGENT_EXCLUSIONS,MCP_AGENT_TOOLS,MCP_OPERATOR_TOOLS,MCP_RETIRED_TOOLS,McpContent,RoomsMcpAgentTools,mcpRefusal,pendingMcpWakes } from './rooms-mcp-agent.js';
@@ -274,14 +274,20 @@ export class RoomsMcp {
     const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; institutionalContext: string | null; truncated: boolean; attachments: import('@beeline/api-contract/daemon').DaemonAttachment[] }>(
       `WITH readable AS (${READABLE})
        SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
-         m.created_at,CASE WHEN $4::boolean THEN m.text ELSE left(m.text,16000) END text,
+         m.created_at,CASE WHEN $4::boolean THEN COALESCE(queued.body,m.text) ELSE left(m.text,16000) END text,
          NOT $4::boolean AND length(m.text)>16000 truncated,m.attachments,
-         (SELECT ${queuedContextSql('command')} FROM agent_commands command WHERE command.agent_id=$1
-           AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1) "institutionalContext"
+         queued."institutionalContext"
        FROM rooms_mcp_mentions mention
        JOIN readable r ON r.id=mention.room_id
        JOIN messages m ON m.id=mention.message_id AND m.deleted_at IS NULL
        LEFT JOIN identities i ON i.id=m.author_id
+       LEFT JOIN LATERAL (
+         SELECT command.message->>'body' body,${queuedContextSql('command')} "institutionalContext"
+         FROM agent_commands command
+         WHERE command.agent_id=mention.member_id AND command.room_id=mention.room_id
+           AND command.source_message_id=mention.message_id AND ${publicMentionCommandSql('command')}
+         ORDER BY (command.state='pending') DESC,command.created_at DESC,command.id DESC LIMIT 1
+       ) queued ON true
        WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND mention.seq>$2::bigint
          AND ${OWED_MENTION_OPEN_SQL}
          AND NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=mention.member_id
@@ -293,7 +299,7 @@ export class RoomsMcp {
       mentions: page.map(({ seq, institutionalContext, ...row }) => ({ ...mentionRouting(member, row.room_id, row.id, row.author_handle), ...row, ...(institutionalContext ? {institutionalContext} : {}), deliveryCursor: seq })),
       nextCursor: page.at(-1)?.seq ?? cursor,
       more: rows.length > limit,
-      wakes: [...await pendingMcpWakes(db, member), ...(stream ? await localDeliveryProbe(db,member) : [])],
+      wakes: [...await pendingMcpWakes(db, member, { pairedWithMentions: true }), ...(stream ? await localDeliveryProbe(db,member) : [])],
     };
   }
   private async call(principal: McpPrincipal, name: string, args: Record<string, unknown>): Promise<unknown> {

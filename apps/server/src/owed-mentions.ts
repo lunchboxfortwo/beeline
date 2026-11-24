@@ -15,6 +15,10 @@ export function mentionRouting(memberId: string, roomId: string, messageId: stri
     idempotencyKey: `mention:${memberId}:${messageId}` };
 }
 
+export function publicMentionCommandSql(command: string): string {
+  return `${command}.reason IN ('human_tag','agent_tag','direct_message') AND ${command}.private_payload IS NULL`;
+}
+
 /** Retain cleared rows: a retry must keep the server key even after its answer committed. */
 export async function mentionReplyKey(db: SqlDatabase, member: string, room: string, message?: string): Promise<string | undefined> {
   if (!message) return undefined;

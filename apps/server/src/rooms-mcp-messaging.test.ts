@@ -1,14 +1,16 @@
 import { sendMessage } from './agent-messaging.js';
 import { readAgentCommands } from './agent-command-read-agent-commands.js';
+import { applySkillRevision } from './institutional-skills.js';
 import { mkdtemp,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { vi } from 'vitest';
 import { memberStream } from '../../body/src/session-join/beeline-api.js';
 import { acceptMemberDelivery } from '../../body/src/session-join/bridge.js';
 import { takeInbox,updateState,type JoinedSession } from '../../body/src/session-join/store.js';
 import { memberStreamFrame } from '../../body/src/session-join/stream-frame.js';
 import { itemPrompt } from '../../body/src/place-prompt.js';
-import { AGENT,PRIVATE,PUBLIC_CORNER,ROOM,USER,describe,expect,fixtureScope1,fixtureScope3,it } from './test-support-rooms-mcp.test-support.js';
+import { AGENT,PRIVATE,PUBLIC_CORNER,ROOM,USER,WORKSPACE,describe,expect,fixtureScope1,fixtureScope3,it } from './test-support-rooms-mcp.test-support.js';
 
 describe('connected agent message protocol',()=>{
   const scope=fixtureScope1(true), tools=fixtureScope3(scope);
@@ -19,8 +21,18 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
-  it('renders one person tag with its image and replies by message id in a joined Claude session', async () => {
+  it('renders one person tag with its context and attachment and replies by message id in a joined Claude session', async () => {
+    vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { client, member, token, grant } = await scope.connected();
+    const seed = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Save the image review procedure.' }, USER);
+    const procedure = 'Measure the distance from each edge before giving feedback.';
+    await applySkillRevision(scope.db, {
+      workspaceId: WORKSPACE, sourceRoomId: ROOM, slug: 'image-review', kind: 'procedure',
+      description: 'Review an annotated screenshot.', markdown: procedure, sourceMessageIds: [seed.messageId],
+    });
+    const brief = 'Review the keyboard alignment on the mobile layout.';
+    await scope.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,spec,objective,author_id,source_room_id)
+      VALUES($1,1,$2,'Review the layout',$3,$4)`, [PUBLIC_CORNER, brief, USER, ROOM]);
     await tools.ok(client, 'setup_delivery', {
       mechanism: 'local', host: 'Claude', surface: 'CLI', conversation: 'image-proof', installed: true,
     });
@@ -33,7 +45,7 @@ describe('connected agent message protocol',()=>{
     const runner = { node: '/proof/node', bundle: '/proof/beeline.mjs' };
     const stream = memberStream(joined, token, AbortSignal.timeout(10_000));
     const instruction = 'Check the keyboard alignment in the attached image.';
-    const text = `@${await handle(member)} ${'Context. '.repeat(2_000)}${instruction}`;
+    const text = `@${await handle(member)} follow image-review. ${'Context. '.repeat(2_000)}${instruction}`;
     let messageId: string | undefined;
     let rendered = 0;
     let tagCheckpoint = false;
@@ -50,7 +62,7 @@ describe('connected agent message protocol',()=>{
         }
         if (!messageId) {
           takeInbox(dir, joined.key);
-          const source = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text, attachments: [image] }, USER);
+          const source = await scope.phone.execute('sendRoomMessage', { roomId: PUBLIC_CORNER, text, attachments: [image] }, USER);
           messageId = source.messageId;
         }
       }
@@ -59,14 +71,16 @@ describe('connected agent message protocol',()=>{
       const inbox = takeInbox(dir, joined.key);
       expect(inbox).toContain(`id: ${messageId}\n`);
       expect(inbox).toContain(instruction);
+      expect(inbox).toContain(procedure);
+      expect(inbox).toContain(brief);
       expect(inbox).toContain(image.name);
       expect(inbox).toContain(image.url);
       expect(inbox).toContain(image.mimeType);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-    const direct=await tools.ok(client,'read',{address:ROOM,facet:'message',messageId});
-    const page=await tools.ok(client,'read_messages',{room:ROOM});
+    const direct=await tools.ok(client,'read',{address:PUBLIC_CORNER,facet:'message',messageId});
+    const page=await tools.ok(client,'read_messages',{room:PUBLIC_CORNER});
     const delivery=await tools.ok(client,'list_mentions',{});
     const command=(await readAgentCommands(scope.db,member)).commands.find(item=>item.sourceMessageId===messageId)!;
     expect(direct.attachments).toEqual([image]);
@@ -79,7 +93,7 @@ describe('connected agent message protocol',()=>{
     expect(delivery.wakes).toEqual([]);
     const reply = await tools.ok(client, 'reply', { id: messageId, text: 'I checked the image.' });
     expect((await scope.db.query('SELECT room_id,card FROM messages WHERE id=$1', [reply.id])).rows)
-      .toMatchObject([{ room_id: ROOM, card: { route: { to: { agent: USER, place: ROOM } } } }]);
+      .toMatchObject([{ room_id: PUBLIC_CORNER, card: { route: { to: { agent: USER, place: PUBLIC_CORNER } } } }]);
   });
   it('names to and its {agent, place} shape when to is a string',async()=>{
     const {client}=await scope.connected();
