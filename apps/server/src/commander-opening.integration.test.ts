@@ -41,7 +41,7 @@ it.each((['Room', 'DM'] as const).flatMap(surface => (['blocked', 'needs_decisio
   const result = await rootFixture.daemon.execute('reply', { ...authority(inspection), id:inspection.id,
     text: `${status.replace('_','-')}: inspected` }, WORKER);
   expect((await rootFixture.db.query("SELECT room_id,card->'route'->'to' recipient FROM messages WHERE id=$1",[result.id])).rows)
-    .toEqual([{room_id:opened.cornerId,recipient:{agent:HUMAN,place:opened.cornerId}}]);
+    .toEqual([{room_id:opened.cornerId,recipient:status === 'done' ? null : {agent:HUMAN,place:opened.cornerId}}]);
 });
 
 it('later human orders get ordinary replies here while escalations still go to the opening commander', async () => {
@@ -156,7 +156,7 @@ it('a worker self-opening a nested fix retains its own issuer', async () => {
     name:'Fix',objective:'Resolve the triaged issue',implementer:'worker',brief:{spec:'Resolve the issue',repositoryWork:false}},WORKER);
   const objective=(await commands(child.cornerId,WORKER)).find(command=>command.reason==='corner_objective')!;
   await claim(objective);
-  const result=await rootFixture.daemon.execute('reply',{...authority(objective),id:objective.id,text:'done: fixed'},WORKER);
+  const result=await rootFixture.daemon.execute('reply',{...authority(objective),id:objective.id,text:'blocked: the fix needs a decision'},WORKER);
   expect((await commands(DM,RUBY)).find(command=>command.id===result.id)?.from).toEqual({agent:WORKER,place:child.cornerId});
 });
 
@@ -169,7 +169,7 @@ it('prints three self-opened thread turns locally and reports to the person who 
       sourceMessageId:null,reason:'corner_check'}))!.id;
     await rootFixture.daemon.execute('postRoomMessage',{roomId:child.cornerId,requestId:id,text:`Count result ${i}`},RUBY);
   }
-  const result=await rootFixture.daemon.execute('reply',{roomId:child.cornerId,id:objective.id,text:'done: counted'},RUBY);
+  const result=await rootFixture.daemon.execute('reply',{roomId:child.cornerId,id:objective.id,text:'blocked: counted; where should it go?'},RUBY);
   expect((await rootFixture.db.query("SELECT room_id FROM messages WHERE author_id=$1 AND text LIKE 'Count result %'",[RUBY])).rows)
     .toEqual(Array(3).fill({room_id:child.cornerId}));
   expect((await rootFixture.db.query("SELECT card->'route'->'to' recipient FROM messages WHERE id=$1",[result.id])).rows)
@@ -189,7 +189,9 @@ it.each(['blocked','done','question','legacy'])('an agent-issued order survives 
   const result=kind==='legacy' ? await rootFixture.daemon.execute('report',{...context,status:'done',text:'Checked'},WORKER)
     : await rootFixture.daemon.execute('reply',{...context,id:objective.id,text:kind==='question'?'needs-decision: Which stockroom?':`${kind}: checked`,
       ...(kind==='question'?{ask:{question:'Which stockroom?',options:['East','West']}}:{})},WORKER);
-  expect((await commands(DM,RUBY)).find(command=>command.id===result.id)?.from).toEqual({agent:WORKER,place:child.cornerId});
+  // A done report stays in its thread; every other report returns to the issuer.
+  if (kind==='done') expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1',[result.id])).rows).toEqual([{room_id:child.cornerId}]);
+  expect((await commands(DM,RUBY)).find(command=>command.id===result.id)?.from).toEqual(kind==='done' ? undefined : {agent:WORKER,place:child.cornerId});
   expect((await rootFixture.db.query('SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2',[child.cornerId,RUBY])).rows).toEqual([]);
   const local=await rootFixture.daemon.execute('postRoomMessage',{...context,text:'Inventory notes',harnessEnded:true},WORKER);
   expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1',[local.id])).rows).toEqual([{room_id:child.cornerId}]);

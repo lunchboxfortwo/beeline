@@ -146,14 +146,14 @@ describe('sensitivity boundaries and replacement slots', () => {
     },
   );
 
-  it('waits for final agent prose and uses tags, replies and choice metadata only once per turn', async () => {
+  it('waits for the turn to end and pushes its newest message addressed to me once', async () => {
     await db.query(`UPDATE identities SET push_level='attention' WHERE id=$1`, [person]);
     const turn = 'd'.repeat(64);
     await db.query(
       `INSERT INTO agent_turns(room_id,request_id,agent_id,status) VALUES($1,$2,$3,'working')`,
       [corner, turn, agent],
     );
-    await post('@owner partial output', agent, corner, turn);
+    const tag = await post('@owner partial output', agent, corner, turn);
     expect(await loop.runOnce()).toBe(0);
     const choice = await post('Please choose', agent, corner, turn);
     await db.query(
@@ -168,13 +168,23 @@ describe('sensitivity boundaries and replacement slots', () => {
     expect(await loop.runOnce()).toBe(1);
     expect(send).toHaveBeenLastCalledWith(
       expect.any(String),
-      expect.objectContaining({
-        messageId: final,
-        text: 'Bee: The final result',
-        collapseId: final,
-      }),
+      expect.objectContaining({ messageId: tag, text: 'Bee: @owner partial output', collapseId: tag }),
     );
+    expect(send.mock.calls.map(([, message]) => message.messageId)).not.toContain(final);
     expect(await loop.runOnce()).toBe(0);
+  });
+
+  it('QUIET-4: Attention pushes the message addressed to me, never a same-turn status post', async () => {
+    await db.query(`UPDATE identities SET push_level='attention' WHERE id=$1`, [person]);
+    const turn = 'e'.repeat(64);
+    await db.query(
+      `INSERT INTO agent_turns(room_id,request_id,agent_id,status) VALUES($1,$2,$3,'complete')`,
+      [room, turn, agent],
+    );
+    const tag = await post('@owner the answer is 42', agent, room, turn);
+    await post('Status: PR #143 merged', agent, room, turn);
+    await loop.runOnce();
+    expect(send.mock.calls.map(([, message]) => message.messageId)).toEqual([tag]);
   });
 
   it('collapses room activity while keeping human messages and attention separate', async () => {

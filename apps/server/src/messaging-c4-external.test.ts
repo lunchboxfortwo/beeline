@@ -48,12 +48,12 @@ describe('C4: external agents route like native agents', () => {
       await settle();
       await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Done' }, worker);
       await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'blocked: need a choice', ask }, worker);
-      // A block after a System wake still reaches the implementer’s commander.
+      // A later block on the same order, and one after a System wake, still reach the implementer’s commander.
       if (role === 'implementer') await scope.daemon.execute('reply', { roomId:THREAD, id: (await wake(worker)).id, text: 'blocked: build access', ask }, worker);
       const wakes = (await tools.ok(client, 'list_mentions', {})).wakes as { address: string; from: unknown }[];
       expect(wakes.map(item => [item.address, item.from])).toEqual(
-        Array(role === 'implementer' ? 2 : 0).fill([place, { agent: worker, place: THREAD }]));
-      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true] : []);
+        Array(role === 'implementer' ? 3 : 0).fill([place, { agent: worker, place: THREAD }]));
+      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true, true] : []);
     });
 
   it.each(Object.entries(places))('an external thread implementer replies over MCP to a native commander in the %s, including after a System wake', async (_place, place) => {

@@ -23,8 +23,8 @@ it('interleaves two thread sessions without mixing their output or report recipi
   await output(OTHER,second.id,'3 widgets');
   const wrong = await report(OTHER,first.id,'Working note');
   expect(wrong.receipt).toContain('posted');
-  const one = await report(THREAD,first.id,'done: counted twelve');
-  const two = await report(OTHER,second.id,'done: counted three');
+  const one = await report(THREAD,first.id,'blocked: twelve need a recount');
+  const two = await report(OTHER,second.id,'blocked: three need a recount');
   expect((await db.query("SELECT room_id,text FROM messages WHERE author_id=$1 AND card IS NULL ORDER BY text",[B])).rows)
     .toEqual([{room_id:THREAD,text:'12 widgets'},{room_id:OTHER,text:'3 widgets'},{room_id:OTHER,text:'Working note'}]);
   expect((await db.query("SELECT room_id,card->'route'->'to' recipient FROM messages WHERE id=$1",[one.id])).rows)
@@ -55,7 +55,7 @@ it.each([true,false])('keeps file-only output home with report first=%s', async 
   expect((await db.query('SELECT room_id,attachments FROM messages WHERE id=$1',[local.id])).rows)
     .toEqual([{room_id:THREAD,attachments:[file]}]);
   expect((await db.query('SELECT room_id,attachments FROM messages WHERE text=$1',['done: counted'])).rows)
-    .toEqual([{room_id:CHAT,attachments:[]}]);
+    .toEqual([{room_id:THREAD,attachments:[]}]);
   expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[late.id])).rows).toEqual([{room_id:THREAD}]);
 });
 
@@ -86,4 +86,36 @@ it('returns a reviewer continuation to the implementer in the reviewed thread', 
   const result=await daemon.execute('reply',{roomId:THREAD,id:resumed!.id,text:'done: review complete'},C);
   expect((await db.query("SELECT parent_command_id,message->'route' route FROM agent_commands WHERE id=$1",[result.id])).rows)
     .toEqual([{parent_command_id:resumed!.id,route:{from:{agent:C,place:THREAD},to:{agent:B,place:THREAD}}}]);
+});
+
+it('QUIET-1: routes every blocked or question report to the commander, also after an earlier routed report', async () => {
+  const work=await task(H,THREAD);
+  await report(THREAD,work.id,'blocked: the token is missing');
+  await report(THREAD,work.id,'needs-decision: which API should I call?');
+  expect((await db.query(`SELECT room_id,card->>'reportStatus' status,card->'route'->'to' recipient FROM messages
+    WHERE author_id=$1 ORDER BY created_at,id`,[B])).rows).toEqual([
+    {room_id:CHAT,status:'blocked',recipient:{agent:H,place:CHAT}},
+    {room_id:CHAT,status:'needs-decision',recipient:{agent:H,place:CHAT}},
+  ]);
+});
+
+it.each([H,A])('QUIET-2: a done report stays in its thread and wakes no commander (%#)', async commander => {
+  const work=await task(commander,THREAD);
+  const done=await report(THREAD,work.id,'done: counted twelve');
+  expect((await db.query('SELECT room_id,card FROM messages WHERE id=$1',[done.id])).rows).toEqual([{room_id:THREAD,card:null}]);
+  expect((await db.query('SELECT room_id FROM messages WHERE author_id=$1',[B])).rows).toEqual([{room_id:THREAD}]);
+  expect((await db.query('SELECT id FROM agent_commands WHERE agent_id=$1',[commander])).rows).toEqual([]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[work.id])).rows).toEqual([{state:'complete'}]);
+  const later=await report(THREAD,work.id,'blocked: CI needs a secret');
+  expect((await db.query(`SELECT room_id,card->>'reportStatus' status FROM messages WHERE id=$1`,[later.id])).rows)
+    .toEqual([{room_id:CHAT,status:'blocked'}]);
+});
+
+it.each([false,true])('QUIET-3: a watched-thread event wake publishes none of its final output (explicit post=%s)', async explicit => {
+  const item=await queueMessage(db,{roomId:CHAT,agentId:B,sourceMessageId:null,reason:'watched_corner',
+    privatePayload:{kind:'lifecycle',text:'Watched thread Widget: merged',authorId:SYSTEM_IDENTITY_ID,fromRoomId:THREAD}});
+  const posted=explicit ? await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:item!.id,text:'Release is next'},B) : undefined;
+  await output(CHAT,item!.id,'PR #143 merged. No reply was needed, so I sent none.');
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1',[B])).rows).toEqual(posted ? [{id:posted.id}] : []);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[item!.id])).rows).toEqual([{state:'complete'}]);
 });

@@ -850,6 +850,12 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       if (!input.explicitReply) {
         const files = input.outputFiles ?? item.answer_attachments ?? [];
         if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && (payload?.automatic || isBackgroundCommand(item.reason))) return receipt;
+        // A watched-thread event or an automatic notice is already visible where it happened.
+        if (input.harnessEnded && (item.reason === 'watched_corner' || payload?.automatic)) {
+          if (item.state !== 'complete') await endAgentTurn(db,item,'complete');
+          completedNow = true;
+          return receipt;
+        }
         if (!messageText && !files.length && !input.sharedReplyId) {
           if (item.state === 'complete') return receipt;
           if (!item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
@@ -873,12 +879,16 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         completedNow = true;
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
       }
-      if (item.routed) {
+      const question = Boolean(input.messageAsk) || /^(blocked|needs-decision):/i.test(messageText);
+      const local = async () => {
         if (item.public_reply_text === messageText) return receipt;
         const saved = await queueMessage(db,{kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),
           id:input.messageId ?? hash(`late-reply:${item.id}:${messageText}`),agentIds:[]});
+        if (item.state !== 'complete') await endAgentTurn(db,item,'complete',null,saved.id);
+        completedNow = true;
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
-      }
+      };
+      if (item.routed && !question) return local();
       if (!messageText) return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
       await refuseDoneWithBlocks(db,agentId,input.roomId,messageText);
       const to = await reportRecipient(db,item);
@@ -886,8 +896,13 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         await endAgentTurn(db,item,'cancelled','return_address_archived');
         return {id:item.id,createdAt:receipt.createdAt};
       }
+      // Completion shows as the thread merging or closing; only a review handback leaves with done.
+      if (!question && /^done:/i.test(messageText) && (await db.query(`SELECT 1 FROM rooms room
+        LEFT JOIN corner_facts fact ON fact.corner_id=room.id
+        WHERE room.id=$1 AND room.parent_id IS NOT NULL AND fact.implementer_agent_id IS DISTINCT FROM $2`,[item.room_id,to.agent])).rowCount)
+        return local();
       const from = {agent:agentId,place:item.room_id};
-      const id = hash(`answer:${item.id}:${to.place}:${to.agent}${input.messageAsk ? ':ask' : ''}`);
+      const id = hash(`answer:${item.id}:${to.place}:${to.agent}${input.messageAsk ? ':ask' : ''}:${messageText}`);
       const saved = to.agent === SYSTEM_IDENTITY_ID ? await queueMessage(db,{
         kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],card:{route:{from,to}},
         id,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,

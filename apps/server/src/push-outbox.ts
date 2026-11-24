@@ -40,7 +40,6 @@ INSERT INTO push_turn_context(room_id,author_id,request_id,turn_ids,expires_at)
   GROUP BY context.room_id,context.author_id,context.request_id
   ON CONFLICT(room_id,author_id,request_id) DO NOTHING;
 CREATE OR REPLACE FUNCTION enqueue_message_push(m messages) RETURNS void LANGUAGE plpgsql AS $$
-DECLARE collected_turn_ids text[];
 BEGIN
   IF m.created_at<now()-interval '1 hour' OR m.presentation='activity'
     OR m.deleted_at IS NOT NULL OR btrim(m.text)=''
@@ -64,12 +63,9 @@ BEGIN
       ON CONFLICT(message_id) DO UPDATE SET room_id=EXCLUDED.room_id,author_id=EXCLUDED.author_id,
         request_id=EXCLUDED.request_id,turn_ids=EXCLUDED.turn_ids,burst_ids=EXCLUDED.burst_ids
       RETURNING turn_ids
-  ), siblings AS (
-    UPDATE push_message_context stored SET turn_ids=context.turn_ids FROM context
+  ) UPDATE push_message_context stored SET turn_ids=context.turn_ids FROM context
       WHERE stored.room_id=m.room_id AND stored.author_id=m.author_id
-        AND stored.request_id=m.request_id AND stored.message_id<>m.id
-      RETURNING stored.message_id
-  ) SELECT turn_ids INTO collected_turn_ids FROM context;
+        AND stored.request_id=m.request_id AND stored.message_id<>m.id;
   INSERT INTO push_outbox(message_id,device_token,expires_at)
     SELECT m.id,device.token,m.created_at+interval '1 hour'
     FROM room_access member
@@ -83,7 +79,7 @@ BEGIN
       -- Prose stays queued for an Attention/Off -> Full preference change.
       -- Other kinds need direct attention under every possible push level.
       AND ((m.presentation='message' AND m.card_type IS NULL)
-        OR ${pushDirectAttentionSql('collected_turn_ids')})
+        OR ${pushDirectAttentionSql()})
     ON CONFLICT(message_id,device_token) DO NOTHING;
 END $$;
 CREATE OR REPLACE FUNCTION message_push_outbox_trigger() RETURNS trigger LANGUAGE plpgsql AS $$

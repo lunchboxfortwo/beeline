@@ -330,23 +330,11 @@ export class PushDeliveryLoop {
 
           )
           AND NOT ${earlierTurnPushSql('m', 'd.token')}
-          -- A completed turn's decision/tag metadata qualifies its final prose,
-          -- rather than winning the turn's one push before that prose.
-          AND NOT (m.presentation IN ('system','card') AND m.request_id IS NOT NULL
-            AND EXISTS (SELECT 1 FROM agent_turns t WHERE t.room_id=m.room_id
-              AND t.request_id=m.request_id AND t.agent_id=m.author_id AND t.status='complete')
-            AND EXISTS (SELECT 1 FROM ${messagePointsSql('COALESCE(turn.turn_ids,context.turn_ids)', 'final')} WHERE final.room_id=m.room_id
-              AND final.author_id=m.author_id AND final.request_id=m.request_id
-              AND final.presentation='message' AND final.deleted_at IS NULL))
-          -- Durable chat from agents waits for completion and selects final prose.
+          -- Durable chat from agents waits for completion.
           AND (m.presentation<>'message' OR m.request_id IS NULL
             OR NOT EXISTS (SELECT 1 FROM identities a WHERE a.id=m.author_id AND a.kind='agent')
-            OR (NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.room_id=m.room_id
-                AND t.request_id=m.request_id AND t.agent_id=m.author_id AND t.status='working')
-              AND NOT EXISTS (SELECT 1 FROM ${messagePointsSql('COALESCE(turn.turn_ids,context.turn_ids)', 'newer')} WHERE newer.room_id=m.room_id
-                AND newer.author_id=m.author_id AND newer.request_id=m.request_id
-                AND newer.presentation='message' AND newer.card_type IS NULL AND newer.deleted_at IS NULL
-                AND (newer.created_at,newer.id)>(m.created_at,m.id))))
+            OR NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.room_id=m.room_id
+                AND t.request_id=m.request_id AND t.agent_id=m.author_id AND t.status='working'))
       ), candidates AS (
         SELECT m.id message_id,room.workspace_id::text workspace_id,
           COALESCE(room.parent_id,room.id)::text room_id,
@@ -402,7 +390,7 @@ export class PushDeliveryLoop {
           AND workspace_member.removed_at IS NULL
         JOIN identities author ON author.id=m.author_id
         JOIN identities recipient ON recipient.id=m.push_identity_id AND recipient.kind='human'
-        CROSS JOIN LATERAL (SELECT ${pushDirectAttentionSql('m.turn_ids')} direct) attention
+        CROSS JOIN LATERAL (SELECT ${pushDirectAttentionSql()} direct) attention
 
         WHERE (
             room.direct_participants IS NULL
@@ -415,6 +403,15 @@ export class PushDeliveryLoop {
             attention.direct
             OR (recipient.push_level='full' AND m.presentation='message' AND m.card_type IS NULL)
           )
+          -- An agent turn's one push is its newest message that is for this person.
+          AND NOT EXISTS (SELECT 1 FROM ${messagePointsSql('m.turn_ids', 'newer')} WHERE m.request_id IS NOT NULL
+            AND author.kind='agent' AND newer.room_id=m.room_id
+            AND newer.author_id=m.author_id AND newer.request_id=m.request_id
+            AND newer.deleted_at IS NULL AND btrim(newer.text)<>'' AND newer.presentation IS DISTINCT FROM 'activity'
+            AND COALESCE(newer.card_type,'') NOT IN ('agent-yolo','grant-auto','turn-failed','workspace-member-joined','agent-command')
+            AND (newer.created_at,newer.id)>(m.created_at,m.id)
+            AND (${pushDirectAttentionSql('newer')}
+              OR (recipient.push_level='full' AND newer.presentation='message' AND newer.card_type IS NULL)))
         UNION ALL
         SELECT notification.id message_id,notification.workspace_id::text workspace_id,
           notification.room_id::text room_id,

@@ -76,9 +76,9 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
       .toEqual([{room_id:opened.cornerId}]);
   }
   if (mode === 'in-flight') {
-    await daemon.execute('reply', { ...authority(initial), id:initial.id, text: 'done: Original order result' }, WORKER);
-    expect((await commands(returnRoom,BOSS)).filter(c => c.reason === 'reply')).toEqual([
-      expect.objectContaining({source:expect.objectContaining({body:'done: Original order result'})})]);
+    await daemon.execute('reply', { ...authority(initial), id:initial.id, text: 'blocked: Original order result' }, WORKER);
+    expect((await commands(returnRoom,BOSS)).filter(c => c.source.body === 'blocked: Original order result')).toEqual([
+      expect.objectContaining({source:expect.objectContaining({body:'blocked: Original order result'})})]);
   }
   const wake = await createAgentCommand(db, { roomId: opened.cornerId, agentId: WORKER, sourceMessageId: null, reason: 'corner_check' });
   const turn = (await commands(opened.cornerId, WORKER)).find(c => c.id === wake!.id)!;
