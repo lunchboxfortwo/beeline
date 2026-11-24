@@ -8,7 +8,8 @@ import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { deliveredMessage } from '../corner-brief.js';
 
-
+// Membership is checked separately. System messages appear in the transcript.
+const readableMessage = "(message.presentation IN ('message','activity','system') OR message.card_type='agent-command')";
 
   export async function daemonRoomMessage(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<{ messageId: string; body: string; attachments: DaemonAttachment[]; nextOffset?: number }> {
     if (input.attachmentId !== undefined) return ctx.roomAttachment(input, agentId);
@@ -63,7 +64,7 @@ import { deliveredMessage } from '../corner-brief.js';
          WHERE message.id=$2 AND message.deleted_at IS NULL
            AND COALESCE(source.parent_id,source.id)=COALESCE(output.parent_id,output.id)
            AND (NOT $4::boolean OR message.room_id=output.id)
-           AND (presentation IN ('message','activity') OR card_type='agent-command')`,
+           AND ${readableMessage}`,
         [input.roomId, input.messageId, offset, borrowedSource],
       )
     ).rows[0];
@@ -116,7 +117,7 @@ import { deliveredMessage } from '../corner-brief.js';
              FROM messages message
              JOIN authorized_rooms authorized ON authorized.id=message.room_id
              WHERE message.id=$5 AND message.deleted_at IS NULL
-               AND (message.presentation IN ('message','activity') OR message.card_type='agent-command')`,
+               AND ${readableMessage}`,
             [input.roomId, authority.requester_identity_id, authority.workspace_id, agentId,
               input.messageId, offset],
           )
@@ -132,7 +133,7 @@ import { deliveredMessage } from '../corner-brief.js';
          JOIN rooms source ON source.id=message.room_id
          JOIN rooms output ON output.id=$1
          WHERE starts_with(message.id,$5) AND message.deleted_at IS NULL
-           AND (message.presentation IN ('message','activity') OR message.card_type='agent-command')
+           AND ${readableMessage}
            AND (COALESCE(source.parent_id,source.id)=COALESCE(output.parent_id,output.id)
              OR message.room_id IN (SELECT id FROM authorized_rooms))
          ORDER BY message.id LIMIT 21`,
@@ -148,7 +149,7 @@ import { deliveredMessage } from '../corner-brief.js';
       const elsewhere = await ctx.database.query(
         `SELECT 1 FROM messages message
          WHERE message.id=$1 AND message.deleted_at IS NULL
-           AND (message.presentation IN ('message','activity') OR message.card_type='agent-command')`,
+           AND ${readableMessage}`,
         [input.messageId],
       );
       if (elsewhere.rowCount) throw new Error('message access denied from this chat');

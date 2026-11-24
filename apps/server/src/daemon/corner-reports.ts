@@ -48,7 +48,7 @@ import { id,Input,Output } from './values.js';
         [input.roomId, agentId],
       );
       if (!member.rowCount) throw new Error('daemon chat access denied');
-      if (input.cornerId === input.roomId) throw new Error('a thread cannot watch itself');
+      if (input.cornerId === input.roomId) throw new CommandRefusalError('a thread cannot watch itself', 400);
       await daemonReach(ctx, input.cornerId, agentId, db);
       const corner = await db.query<Output<'watchCorner'>['snapshot'] & { archived: boolean; landed: boolean }>(
         `SELECT c.id,c.name,${cornerRunStateSql('c.id')} "workflowState",

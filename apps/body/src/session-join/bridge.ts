@@ -411,7 +411,9 @@ export function toolViaBridge(
 /** State is durable storage; its writer tells the serving bridge to read it. */
 export async function notifyBridgeSessions(dir: string): Promise<void> {
   const answer = await bridgeRequest(dir, { type: 'sessions-changed' });
-  if (!answer?.ok) throw new Error(answer?.error ?? 'Beeline tool result is awaiting confirmation');
+  // Leaving the last local session can close the bridge before it answers.
+  if (!answer?.ok && readState(dir).sessions.some(hasLocalDelivery))
+    throw new Error(answer?.error ?? 'Beeline tool result is awaiting confirmation');
 }
 
 const BRIDGE_PEER = 'Beeline bridge';

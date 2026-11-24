@@ -17,7 +17,7 @@ ALTER TABLE corner_facts ADD COLUMN IF NOT EXISTS machine jsonb;
 
 
 // Compare check results, not refresh timestamps, attempts or run URLs.
-// Review uses the required checks when configured and the whole rollup otherwise.
+// Review uses the head's gate when known and the whole rollup otherwise.
 export const reviewChecksSql = `jsonb_build_object('status',${cornerReviewChecksSql('lifecycle')},'checks',
   (SELECT jsonb_agg(jsonb_build_object('name',item->>'name','status',item->>'status') ORDER BY item->>'name')
    FROM jsonb_array_elements(COALESCE(lifecycle->'checksSummary'->'checks','[]'::jsonb)) item))`;

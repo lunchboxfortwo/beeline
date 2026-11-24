@@ -5,6 +5,7 @@ import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon'
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { isResumeKind } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { CommandRow,checkFailureLogBody,createAgentCommand,reportedHeadBody } from './agent-command.js';
 import { advanceCorner } from './corner-lifecycle.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
@@ -12,7 +13,21 @@ import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
 import { savedScheduleCommand } from './scheduled-command-authority.js';
 
+type ReviewRollup = Pick<CornerLifecycleView, 'checks' | 'checksSummary'>;
 
+export function queuedWakeBody(item: CommandRow & { review_rollup?: ReviewRollup | null }, body: string): string {
+  const rollup = item.review_rollup;
+  if (!rollup) return legacyMessageBody(item, body);
+  const kind = item.message?.systemEvent?.kind;
+  if (kind === 'check-passed' || kind === 'check-failed') {
+    // Replace the check announcement while retaining the prior reviewer note.
+    const newline = body.indexOf('\n');
+    body = newline < 0 ? '' : body.slice(newline + 1);
+  }
+  const checks = rollup.checksSummary?.checks ?? [];
+  return [body, `Checks: ${rollup.checksSummary?.status ?? rollup.checks}`,
+    ...checks.map(check => `- ${check.name}: ${check.status}`)].filter(Boolean).join('\n');
+}
 
 /** One durable queue read, shared by helper push and connected-app delivery. */
 export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: { roomId?: string; pairedWithMentions?: boolean } = {}) {
@@ -28,22 +43,37 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: 
           AND mention.message_id=item.source_message_id))` : '';
   return db.query<CommandRow & { parent_room_id: string | null; room_name: string | null;
     return_room_name: string | null; offline_seconds: number | null; operator_agent:boolean;
-    selected_model: string | null; selected_effort: string | null; fast_mode: boolean | null }>(
+    selected_model: string | null; selected_effort: string | null; fast_mode: boolean | null;
+    review_rollup: ReviewRollup | null }>(
     `WITH queued AS MATERIALIZED (
        SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
      ), obsolete AS MATERIALIZED (
-       SELECT item.id,'complete' outcome,NULL reason FROM queued item WHERE item.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}'
+       SELECT item.id,'complete' outcome,NULL reason,NULL result_id
+       FROM queued item WHERE item.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}'
          AND item.private_payload->>'automatic'='true' AND item.private_payload->>'idleSince' IS NOT NULL
          AND NOT ${currentIdleReportSql('item')}
        UNION ALL
-       SELECT item.id,'cancelled','stale_review_head' FROM queued item
+       SELECT item.id,'cancelled','stale_review_head',NULL FROM queued item
        WHERE ${staleReviewWakeSql('item')}
+       UNION ALL
+       SELECT item.id,'complete',NULL,report.id FROM queued item
+       JOIN LATERAL (
+         SELECT message.id FROM messages message
+         WHERE item.reason='schedule' AND message.room_id=item.room_id AND message.author_id=item.agent_id
+           AND message.deleted_at IS NULL
+           AND (message.id=item.result_message_id OR
+             (message.request_id=item.turn_request_id AND
+               (message.card ? 'reportStatus' OR message.card->>'kind'='reply')))
+         ORDER BY message.created_at DESC,message.id DESC LIMIT 1
+       ) report ON true
      ), retired AS MATERIALIZED (
        SELECT obsolete.id FROM obsolete LEFT JOIN LATERAL
-         beeline_finish_agent_command(obsolete.id,obsolete.outcome,obsolete.reason,NULL) ended ON true
+         beeline_finish_agent_command(obsolete.id,obsolete.outcome,obsolete.reason,obsolete.result_id) ended ON true
      ) SELECT item.*,room.parent_id parent_room_id,room.name room_name,return_room.name return_room_name,
        agent.owner_id='${OPERATOR_OWNER_ID}' operator_agent,
        agent.selected_model,agent.selected_effort,agent.fast_mode,
+       CASE WHEN review.corner_id IS NOT NULL THEN jsonb_build_object(
+         'checks',review.lifecycle->'checks','checksSummary',review.lifecycle->'checksSummary') END review_rollup,
        CASE WHEN item.created_at<=connection.connected_at THEN
          EXTRACT(EPOCH FROM connection.connected_at-connection.offline_since)::double precision END offline_seconds
      FROM queued item
@@ -51,6 +81,9 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: 
      LEFT JOIN rooms return_room ON return_room.id=COALESCE(item.return_room_id,item.room_id)
      LEFT JOIN agent_connections connection ON connection.agent_id=item.agent_id
      LEFT JOIN agents agent ON agent.agent_id=item.agent_id
+     LEFT JOIN corner_github_cache review ON item.reason='corner_review_dispatch' AND review.corner_id=item.room_id
+       AND review.lifecycle->'pr'->>'headSha'=item.review_context->>'headSha'
+       AND review.lifecycle->'pr'->'number'=item.review_context->'pullRequest'
      WHERE NOT EXISTS(SELECT 1 FROM retired WHERE retired.id=item.id)
        AND NOT ${connectorHostAcceptedSql('item')}
        ${wakeSource}
@@ -122,7 +155,7 @@ export async function readAgentCommands(
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),
         ...(source.systemEvent?.scheduleId ? {scheduleId:source.systemEvent.scheduleId} : {}),
-        source: { ...source, createdAt, body: legacyMessageBody(item,source.body) + checkFailureLogBody(source.systemEvent ?? null) + reportedHeadBody(source.systemEvent ?? null) },
+        source: { ...source, createdAt, body: queuedWakeBody(item, source.body) + (item.review_rollup ? '' : checkFailureLogBody(source.systemEvent ?? null)) + reportedHeadBody(source.systemEvent ?? null) },
       };
     }),
   };

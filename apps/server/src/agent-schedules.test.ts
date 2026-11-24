@@ -314,95 +314,50 @@ describe('manager schedule phone operations', () => {
 });
 
 describe('agent schedule background posting', () => {
-  it('Reproduction SCHEDULE-ISOLATION: parks a poisoned occurrence until a real edit without duplicate posts', async () => {
-    const database = await fixture();
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const failedId = '44444444-4444-4444-8444-444444444444';
-    const healthyId = '55555555-5555-4555-8555-555555555555';
-    const now = new Date('2026-09-01T12:00:30Z');
-    try {
-      for (const [id, minutes, due] of [
-        [failedId, 0, '2026-09-01T12:00:00Z'],
-        [healthyId, 5, '2026-09-01T12:00:01Z'],
-      ] as const) {
-        await database.query(
-          `INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at)
-           VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
-          [id, WORKSPACE, ROOM, AGENT, OWNER,
-            JSON.stringify({ kind: 'interval', everyMinutes: minutes }), id, new Date(due)],
-        );
-      }
-      const loop = new AgentScheduleLoop(database);
-      await expect(loop.runOnce(now)).resolves.toBe(1);
-      const daemon = new DaemonService(database, new LiveHub());
-      const inbox = await daemon.execute('getRoomInbox', { roomId: ROOM, limit: 50 }, AGENT);
-      expect(inbox.items.map((item) => item.body)).toContain(healthyId);
-      expect((await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands).toHaveLength(1);
-      expect(errors).toHaveBeenCalledWith(
-        expect.stringContaining(failedId), expect.any(Error),
-      );
-      expect((await database.query(`SELECT text FROM messages`)).rows).toEqual([{ text: healthyId }]);
-      expect((await database.query(`SELECT schedule_id FROM agent_schedule_occurrences`)).rows)
-        .toEqual([{ schedule_id: healthyId }]);
-      expect((await database.query(`SELECT next_run_at,run_count FROM agent_schedules WHERE id=$1`, [failedId])).rows)
-        .toEqual([{ next_run_at: new Date('2026-09-01T12:00:00Z'), run_count: 0 }]);
-      expect((await database.query(`SELECT count(*)::int count FROM agent_commands`)).rows).toEqual([{ count: 1 }]);
-      await expect(loop.runOnce(new Date(now.getTime() + 1_000))).resolves.toBe(0);
-      // With the healthy calendar cancelled, the parked occurrence supplies no
-      // deadline even though its original due remains in the past.
-      await database.query('DELETE FROM agent_schedules WHERE id=$1', [healthyId]);
-      await expect(loop.nextDelayMs()).resolves.toBeUndefined();
-      await database.query(`UPDATE agent_schedules SET cadence=$2::jsonb,updated_at=updated_at+interval '1 second' WHERE id=$1`,
-        [failedId, JSON.stringify({ kind: 'interval', everyMinutes: 5 })]);
-      await expect(loop.runOnce(new Date(now.getTime() + 60_000))).resolves.toBe(1);
-      expect((await database.query(`SELECT text FROM messages ORDER BY text`)).rows)
-        .toEqual([{ text: failedId }, { text: healthyId }]);
-      expect((await database.query(`SELECT count(*)::int count FROM agent_commands`)).rows).toEqual([{ count: 2 }]);
-      console.log('Demonstrated SCHEDULE-ISOLATION: later prompt reached the agent inbox and command queue; failed occurrence parked with its original due; a separate edit admitted one occurrence');
-    } finally {
-      errors.mockRestore();
-      await database.close();
-    }
-  });
-
-  it.each(['edit', 'delete', 'parking failure'] as const)(
-    'continues after a failure while preserving a concurrent %s', async (race) => {
+  it.each(['lock timeout', 'legacy parked occurrence'] as const)(
+    'advances the failed occurrence after %s and posts on the next normal tick', async (failure) => {
       const database = await fixture();
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
       const failedId = '44444444-4444-4444-8444-444444444444';
       const healthyId = '55555555-5555-4555-8555-555555555555';
+      const due = new Date('2026-09-01T12:00:00Z');
       const now = new Date('2026-09-01T12:00:30Z');
-      let querySpy: ReturnType<typeof vi.spyOn> | undefined;
+      const next = new Date('2026-09-01T12:05:00Z');
       try {
-        for (const [id, minutes] of [[failedId, 0], [healthyId, 5]] as const) {
-          await database.query(
-            `INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at)
-             VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
-            [id, WORKSPACE, ROOM, AGENT, OWNER,
-              JSON.stringify({ kind: 'interval', everyMinutes: minutes }), id, now],
-          );
+        await database.query(
+          `INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,cadence,message,next_run_at,max_runs)
+           VALUES($1::uuid,$3,$4,$5,$6,'{"kind":"interval","everyMinutes":5}',($1::uuid)::text,$7,2),
+                 ($2::uuid,$3,$4,$5,$6,'{"kind":"interval","everyMinutes":10}',($2::uuid)::text,$7,NULL)`,
+          [failedId, healthyId, WORKSPACE, ROOM, AGENT, OWNER, due],
+        );
+        if (failure === 'lock timeout') {
+          await database.query(`CREATE FUNCTION schedule_test_timeout() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+              IF NEW.text = '${failedId}' THEN RAISE EXCEPTION 'fixture lock timeout' USING ERRCODE='55P03'; END IF;
+              RETURN NEW;
+            END $$;
+            CREATE TRIGGER schedule_test_timeout BEFORE INSERT ON messages
+              FOR EACH ROW EXECUTE FUNCTION schedule_test_timeout()`);
+        } else {
+          await database.query('UPDATE agent_schedules SET failed_due_at=next_run_at,failed_revision=updated_at WHERE id=$1', [failedId]);
         }
-        const query = database.query.bind(database);
-        querySpy = vi.spyOn(database, 'query').mockImplementation(async (sql, values) => {
-          if (sql.includes('UPDATE agent_schedules SET failed_due_at=next_run_at,failed_revision=updated_at')) {
-            if (race === 'parking failure') throw new Error('parking unavailable');
-            if (race === 'delete') await query(`DELETE FROM agent_schedules WHERE id=$1`, [failedId]);
-            else await query(
-              `UPDATE agent_schedules SET message='edited',updated_at=updated_at + interval '1 second' WHERE id=$1`,
-              [failedId],
-            );
-          }
-          return query(sql, values);
-        });
-        const run = new AgentScheduleLoop(database).runOnce(now);
-        if (race === 'parking failure') await expect(run).rejects.toThrow('parking unavailable');
-        else await expect(run).resolves.toBe(1);
-        expect((await query(`SELECT text FROM messages`)).rows).toEqual([{ text: healthyId }]);
-        const failed = (await query(`SELECT message,next_run_at FROM agent_schedules WHERE id=$1`, [failedId])).rows;
-        expect(failed).toEqual(race === 'delete' ? [] : [{ message: race === 'edit' ? 'edited' : failedId, next_run_at: now }]);
-        if (race !== 'delete') expect((await query('SELECT failed_revision FROM agent_schedules WHERE id=$1', [failedId])).rows).toEqual([{ failed_revision: null }]);
+        const loop = new AgentScheduleLoop(database);
+        await expect(loop.runOnce(now)).resolves.toBe(1);
+        if (failure === 'lock timeout') {
+          expect(errors).toHaveBeenCalledWith(expect.stringContaining(failedId), expect.objectContaining({ code: '55P03' }));
+          await database.query('DROP TRIGGER schedule_test_timeout ON messages');
+        }
+        expect((await database.query('SELECT text FROM messages')).rows).toEqual([{ text: healthyId }]);
+        expect((await database.query('SELECT schedule_id FROM agent_schedule_occurrences')).rows)
+          .toEqual([{ schedule_id: healthyId }]);
+        expect((await database.query('SELECT next_run_at,run_count FROM agent_schedules WHERE id=$1', [failedId])).rows)
+          .toEqual([{ next_run_at: next, run_count: 1 }]);
+        await expect(loop.runOnce(now)).resolves.toBe(0);
+        await expect(loop.runOnce(next)).resolves.toBe(1);
+        expect((await database.query('SELECT text FROM messages ORDER BY text')).rows)
+          .toEqual([{ text: failedId }, { text: healthyId }]);
+        expect((await database.query('SELECT 1 FROM agent_schedules WHERE id=$1', [failedId])).rowCount).toBe(0);
       } finally {
-        querySpy?.mockRestore();
         errors.mockRestore();
         await database.close();
       }

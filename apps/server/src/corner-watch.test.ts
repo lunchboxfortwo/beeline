@@ -70,6 +70,14 @@ const emit = (kind: CornerWatchKind = 'merged') =>
   });
 const wakes = async () => (await readAgentCommands(db, W, A)).commands;
 
+it('refuses a self-watch as a bad request', async () => {
+  await expect(watch(['merged'], A, A)).rejects.toMatchObject({
+    status: 400,
+    message: 'a thread cannot watch itself',
+  });
+  expect((await db.query('SELECT 1 FROM corner_watches')).rowCount).toBe(0);
+});
+
 it('Reproduction O-2: a watcher receives a named sibling merge in A', async () => {
 
   await watch();
@@ -89,7 +97,7 @@ it('Reproduction O-2: a watcher receives a named sibling merge in A', async () =
   expect(commands[0]!.source.body).toContain(`Watched thread B (${B}): merged`);
 });
 
-it.each(['non-member', 'self', 'room', 'invalid kind', 'closed kind'])(
+it.each(['non-member', 'room', 'invalid kind', 'closed kind'])(
   'refuses %s and writes nothing',
   async (reason) => {
     if (reason === 'non-sibling')
@@ -98,15 +106,13 @@ it.each(['non-member', 'self', 'room', 'invalid kind', 'closed kind'])(
       watch(
         reason === 'invalid kind' ? ['joined' as CornerWatchKind] : reason === 'closed kind' ? ['closed' as CornerWatchKind] : ['merged'],
         A,
-        reason === 'self' ? A : reason === 'room' ? P : B,
+        reason === 'room' ? P : B,
         reason === 'non-member' ? H : W,
       ),
     ).rejects.toThrow(
       reason === 'non-member'
         ? 'access denied'
-        : reason === 'self'
-          ? 'cannot watch itself'
-          : ['invalid kind', 'closed kind'].includes(reason)
+        : ['invalid kind', 'closed kind'].includes(reason)
             ? 'watch kinds'
             : 'access denied',
     );

@@ -92,11 +92,10 @@ type DueSchedule = {
   due_revision: string;
   agent_name: string;
   updated_at: string;
+  previously_failed: boolean;
 };
 
-const unfailedSchedule = `(schedule.failed_due_at IS DISTINCT FROM schedule.next_run_at
-  OR schedule.failed_revision IS DISTINCT FROM schedule.updated_at)`;
-type ScheduleAttempt = { id: string; next_run_at: Date; due_revision: string; updated_at: string };
+type ScheduleAttempt = Pick<DueSchedule, 'id' | 'cadence' | 'max_runs' | 'run_count' | 'next_run_at' | 'due_revision' | 'updated_at'>;
 
 export class AgentScheduleLoop {
   constructor(
@@ -112,7 +111,7 @@ export class AgentScheduleLoop {
          FROM agent_schedules schedule
          JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
          WHERE schedule.paused_at IS NULL AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
-           AND ${unfailedSchedule} AND (
+           AND (
            EXISTS(SELECT 1 FROM identities creator WHERE creator.id=schedule.creator_id
              AND (creator.kind='human' OR creator.id=schedule.agent_id))
            AND EXISTS(SELECT 1 FROM identities agent WHERE agent.id=schedule.agent_id AND agent.kind='agent')
@@ -135,9 +134,8 @@ export class AgentScheduleLoop {
     // reserved for deterministic fixture runs.
     now ??= (await this.database.query<{ now_at: Date }>('SELECT clock_timestamp() now_at')).rows[0]!.now_at;
     for (const roomId of await expireWorkflowRuns(this.database, now)) this.onPosted?.(roomId);
-    const due = await this.database.query<DueSchedule>(
-      `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,schedule.requester_command_id,
-        schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,
+    const due = await this.database.query<ScheduleAttempt>(
+      `SELECT schedule.id,schedule.cadence,schedule.max_runs,schedule.run_count,schedule.next_run_at,
         schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision
        FROM agent_schedules schedule
        JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
@@ -148,13 +146,13 @@ export class AgentScheduleLoop {
          AND creator_membership.identity_id=schedule.creator_id AND creator_membership.removed_at IS NULL
        JOIN memberships agent_membership ON agent_membership.room_id=schedule.room_id
          AND agent_membership.identity_id=schedule.agent_id AND agent_membership.removed_at IS NULL
-       WHERE schedule.paused_at IS NULL AND schedule.next_run_at <= $1 AND ${unfailedSchedule}
+       WHERE schedule.paused_at IS NULL AND schedule.next_run_at <= $1
          AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
        ORDER BY schedule.next_run_at,schedule.id`,
       [now],
     );
     let posted = 0;
-    let parkFailure: unknown;
+    let advanceFailure: unknown;
     for (const candidate of due.rows) {
       let roomId: string | undefined;
       let attempt: ScheduleAttempt = candidate;
@@ -164,7 +162,8 @@ export class AgentScheduleLoop {
             await database.query<DueSchedule>(
               `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,schedule.requester_command_id,
                 schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,
-                agent.name agent_name,schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision
+                agent.name agent_name,schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision,
+                COALESCE(schedule.failed_due_at=schedule.next_run_at AND schedule.failed_revision=schedule.updated_at,false) previously_failed
                FROM agent_schedules schedule
                JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
                JOIN identities creator ON creator.id=schedule.creator_id
@@ -176,7 +175,7 @@ export class AgentScheduleLoop {
                JOIN memberships agent_membership ON agent_membership.room_id=schedule.room_id
                  AND agent_membership.identity_id=schedule.agent_id
                  AND agent_membership.removed_at IS NULL
-               WHERE schedule.paused_at IS NULL AND schedule.id=$1 AND schedule.next_run_at <= $2 AND ${unfailedSchedule}
+               WHERE schedule.paused_at IS NULL AND schedule.id=$1 AND schedule.next_run_at <= $2
                  AND (schedule.max_runs IS NULL OR schedule.run_count<schedule.max_runs)
                FOR UPDATE OF schedule SKIP LOCKED`,
               [candidate.id, now],
@@ -184,122 +183,138 @@ export class AgentScheduleLoop {
           ).rows[0];
           if (!current) return undefined;
           attempt = current;
-          const messageId = randomBytes(32).toString('hex');
-          const claim = await database.query(
-            `INSERT INTO agent_schedule_occurrences(schedule_id,scheduled_for,message_id)
-             VALUES($1,$2,$3) ON CONFLICT(schedule_id,scheduled_for) DO NOTHING RETURNING schedule_id`,
-            [current.id, current.due_revision, messageId],
-          );
-          if (!claim.rowCount) return undefined;
-          const live = current.workflow_slug
-            ? await liveWorkflowRun(database, current.room_id, current.workflow_slug)
-            : undefined;
-          if (live) {
-            await this.advance(database, current, now, false);
-            return current.room_id;
+          // Consume a failure recorded by a serving image from before the upgrade.
+          if (current.previously_failed) {
+            await this.advance(database, current, now, true);
+            return undefined;
           }
-          // A schedule created by the target agent itself must not be authored by
-          // that agent: its own-authored rows never reach the agent's inbox and the
-          // transcript would show the agent talking to itself. A human creator
-          // keeps authoring its schedule posts exactly as before.
-          const selfCreated = current.creator_id === current.agent_id;
-          if (selfCreated) {
-            await database.query(
-              `INSERT INTO identities(id,kind,name,handle,hidden_from_roster)
-               VALUES($1,'human',$2,$3,true)
-               ON CONFLICT(id) DO UPDATE SET handle=EXCLUDED.handle`,
-              [SCHEDULE_SCHEDULER_ID, SCHEDULE_SCHEDULER_NAME, SCHEDULE_SCHEDULER_HANDLE],
-            );
+          // Keep the schedule lock when delivery fails, so another scheduler
+          // cannot replay the failed occurrence before its calendar advances.
+          await database.query('SAVEPOINT schedule_delivery');
+          let started: boolean | undefined;
+          let delivered = true;
+          try {
+            started = await this.postOccurrence(database, current);
+          } catch (error) {
+            await database.query('ROLLBACK TO SAVEPOINT schedule_delivery');
+            console.error(`schedule ${current.id} failed`, error);
+            started = true;
+            delivered = false;
           }
-          if (selfCreated) {
-            await systemLine(database, {
-              id: messageId,
-              roomId: current.room_id,
-              subject: { kind: 'system', id: SCHEDULE_SCHEDULER_ID, name: SCHEDULE_SCHEDULER_NAME },
-              verb: SCHEDULE_RAN_VERB,
-              kind: 'schedule-ran',
-              scheduleId: current.id,
-              object: { text: current.agent_name, id: current.agent_id },
-              consequence: current.message,
-              wakes: [current.agent_id],
-              routeCommands: false,
-            });
-          } else {
-            // The agent is woken by the command created just below, never by a
-            // tag: a scheduled prompt is the creator's words, and those words
-            // need not name anybody.
-            // Only a person or the target agent itself creates a due schedule (the
-            // selection above); here the creator is the person who wrote the prompt.
-            await insertMemberMessage(database, {
-              id: messageId, roomId: current.room_id, authorId: current.creator_id, text: personText(current.message),
-            });
-          }
-          await database.query(
-            `UPDATE messages SET card=COALESCE(card,'{}'::jsonb) || jsonb_build_object('trigger',jsonb_build_object('scheduleId',$2::text,'period',$3::text)) || $4::jsonb WHERE id=$1`,
-            [
-              messageId,
-              current.id,
-              current.next_run_at.toISOString(),
-              // The person a run started from this tick reports to.
-              JSON.stringify(current.owner_id ? { ownerId: current.owner_id } : {}),
-            ],
-          );
-          await createAgentCommand(database, {
-            roomId: current.room_id,
-            agentId: current.agent_id,
-            sourceMessageId: messageId,
-            reason: 'schedule',
-            scheduledHumanCommandMessageId: current.human_command_message_id ?? undefined,
-            parent: await savedScheduleCommand(database, current.requester_command_id, current.room_id, current.agent_id),
-            retainDepth: true,
-            inheritPrivatePayload: false,
-          });
-          await this.advance(database, current, now, true);
-          return current.room_id;
+          await database.query('RELEASE SAVEPOINT schedule_delivery');
+          if (started === undefined) return undefined;
+          await this.advance(database, current, now, started);
+          return delivered ? current.room_id : undefined;
         });
       } catch (error) {
-        // The occurrence and dispatch rolled back together. Failure is not a
-        // new calendar obligation, and must not rewrite the authorized due time.
-        console.error(`schedule ${candidate.id} failed; occurrence parked`, error);
-        try { await this.park(attempt); }
-        catch (failure) { parkFailure = failure; }
+        // The occurrence and dispatch rolled back together. Consume the
+        // failed tick on the normal calendar without replaying its work.
+        console.error(`schedule ${candidate.id} failed`, error);
+        try { await this.advance(this.database, attempt, now, true); }
+        catch (failure) { advanceFailure = failure; }
         continue;
       }
       if (!roomId) continue;
       posted += 1;
       this.onPosted?.(roomId);
     }
-    if (parkFailure) throw parkFailure;
+    if (advanceFailure) throw advanceFailure;
     return posted;
   }
 
-  private async park(attempt: ScheduleAttempt): Promise<void> {
-    // A concurrent edit/delete/advance wins. Keep exact database revision text
-    // rather than truncating its microseconds through a JavaScript Date.
-    await this.database.query(
-      `UPDATE agent_schedules SET failed_due_at=next_run_at,failed_revision=updated_at
-       WHERE id=$1 AND next_run_at=$2 AND updated_at=$3::timestamptz`,
-      [attempt.id, attempt.due_revision, attempt.updated_at],
+  /** True when a run started, false when its workflow is already running. */
+  private async postOccurrence(database: SqlDatabase, current: DueSchedule): Promise<boolean | undefined> {
+    const messageId = randomBytes(32).toString('hex');
+    const claim = await database.query(
+      `INSERT INTO agent_schedule_occurrences(schedule_id,scheduled_for,message_id)
+       VALUES($1,$2,$3) ON CONFLICT(schedule_id,scheduled_for) DO NOTHING RETURNING schedule_id`,
+      [current.id, current.due_revision, messageId],
     );
+    if (!claim.rowCount) return undefined;
+    const live = current.workflow_slug
+      ? await liveWorkflowRun(database, current.room_id, current.workflow_slug)
+      : undefined;
+    if (live) return false;
+    // A schedule created by the target agent itself must not be authored by
+    // that agent: its own-authored rows never reach the agent's inbox and the
+    // transcript would show the agent talking to itself. A human creator
+    // keeps authoring its schedule posts exactly as before.
+    const selfCreated = current.creator_id === current.agent_id;
+    if (selfCreated) {
+      await database.query(
+        `INSERT INTO identities(id,kind,name,handle,hidden_from_roster)
+         VALUES($1,'human',$2,$3,true)
+         ON CONFLICT(id) DO UPDATE SET handle=EXCLUDED.handle`,
+        [SCHEDULE_SCHEDULER_ID, SCHEDULE_SCHEDULER_NAME, SCHEDULE_SCHEDULER_HANDLE],
+      );
+    }
+    if (selfCreated) {
+      await systemLine(database, {
+        id: messageId,
+        roomId: current.room_id,
+        subject: { kind: 'system', id: SCHEDULE_SCHEDULER_ID, name: SCHEDULE_SCHEDULER_NAME },
+        verb: SCHEDULE_RAN_VERB,
+        kind: 'schedule-ran',
+        scheduleId: current.id,
+        object: { text: current.agent_name, id: current.agent_id },
+        consequence: current.message,
+        wakes: [current.agent_id],
+        routeCommands: false,
+      });
+    } else {
+      // The agent is woken by the command created just below, never by a
+      // tag: a scheduled prompt is the creator's words, and those words
+      // need not name anybody.
+      // Only a person or the target agent itself creates a due schedule (the
+      // selection above); here the creator is the person who wrote the prompt.
+      await insertMemberMessage(database, {
+        id: messageId, roomId: current.room_id, authorId: current.creator_id, text: personText(current.message),
+      });
+    }
+    await database.query(
+      `UPDATE messages SET card=COALESCE(card,'{}'::jsonb) || jsonb_build_object('trigger',jsonb_build_object('scheduleId',$2::text,'period',$3::text)) || $4::jsonb WHERE id=$1`,
+      [
+        messageId,
+        current.id,
+        current.next_run_at.toISOString(),
+        // The person a run started from this tick reports to.
+        JSON.stringify(current.owner_id ? { ownerId: current.owner_id } : {}),
+      ],
+    );
+    await createAgentCommand(database, {
+      roomId: current.room_id,
+      agentId: current.agent_id,
+      sourceMessageId: messageId,
+      reason: 'schedule',
+      scheduledHumanCommandMessageId: current.human_command_message_id ?? undefined,
+      parent: await savedScheduleCommand(database, current.requester_command_id, current.room_id, current.agent_id),
+      retainDepth: true,
+      inheritPrivatePayload: false,
+    });
+    return true;
   }
 
   private async advance(
     database: SqlDatabase,
-    current: DueSchedule,
+    current: ScheduleAttempt,
     now: Date,
     started: boolean,
   ): Promise<void> {
     const increment = started ? 1 : 0;
     const finished =
       started && current.max_runs !== null && current.run_count + increment >= current.max_runs;
+    // After a rollback, a concurrent edit/deletion or another server wins.
+    const revision = [current.id, current.due_revision, current.updated_at];
+    const unchanged = 'id=$1 AND next_run_at=$2::timestamptz AND updated_at=$3::timestamptz';
     if (finished) {
-      await database.query(`DELETE FROM agent_schedules WHERE id=$1`, [current.id]);
+      await database.query(`DELETE FROM agent_schedules WHERE ${unchanged}`, revision);
       return;
     }
     const next = nextScheduleOccurrence(current.cadence, now, current.next_run_at);
     await database.query(
-      `UPDATE agent_schedules SET next_run_at=$2,run_count=run_count+$3,updated_at=now() WHERE id=$1`,
-      [current.id, next, increment],
+      `UPDATE agent_schedules SET next_run_at=$4,run_count=run_count+$5,updated_at=now(),
+         failed_due_at=NULL,failed_revision=NULL WHERE ${unchanged}`,
+      [...revision, next, increment],
     );
   }
 

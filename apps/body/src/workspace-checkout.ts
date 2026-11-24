@@ -183,8 +183,8 @@ export async function materializeRoomCheckout(input: {
  * Install the checkout's packages and run its build step in the same OS
  * sandbox as the agent's own commands. A repository's `corner:prepare` is its
  * whole step and reads the thread brief from `BEELINE_BRIEF`; otherwise
- * `npm ci` and `npm run build` when defined. Returns why the checkout is not
- * ready, or undefined once it is.
+ * prepare installs from the lockfile and runs the build when defined. Returns
+ * why the checkout is not ready, or undefined once it is.
  */
 async function readyCheckout(input: {
   path: string;
@@ -196,13 +196,22 @@ async function readyCheckout(input: {
   const { path, config } = input;
   const manifest = await readFile(resolve(path, 'package.json'), 'utf8').catch(() => undefined);
   if (manifest === undefined) return undefined;
-  const scripts = (JSON.parse(manifest) as { scripts?: Record<string, unknown> }).scripts ?? {};
-  const steps = scripts['corner:prepare']
-    ? [['run', 'corner:prepare']]
-    : [
-        ...(existsSync(resolve(path, 'package-lock.json')) ? [['ci']] : []),
-        ...(scripts.build ? [['run', 'build']] : []),
-      ];
+  const { scripts = {}, packageManager } = JSON.parse(manifest) as {
+    scripts?: Record<string, unknown>;
+    packageManager?: string;
+  };
+  const steps: [string, ...string[]][] = [];
+  if (scripts['corner:prepare']) steps.push(['npm', 'run', 'corner:prepare']);
+  else {
+    if (existsSync(resolve(path, 'package-lock.json'))) steps.push(['npm', 'ci']);
+    else if (existsSync(resolve(path, 'pnpm-lock.yaml'))) {
+      const pinnedPnpm = /^pnpm@\d+\.\d+\.\d+(?:-[\w.-]+)?(?=\+|$)/.exec(packageManager ?? '')?.[0];
+      steps.push(pinnedPnpm
+        ? ['npm', 'exec', '--yes', `--package=${pinnedPnpm}`, '--', 'pnpm', 'install', '--frozen-lockfile']
+        : ['pnpm', 'install', '--frozen-lockfile']);
+    }
+    if (scripts.build) steps.push(['npm', 'run', 'build']);
+  }
   if (!steps.length) return undefined;
   if (!config.bwrapPath)
     return 'packages were not installed and the build step did not run: this host has no OS sandbox to run the repository scripts in.';
@@ -230,7 +239,7 @@ async function readyCheckout(input: {
   // The sandbox keeps /tmp private and /var/tmp read-only; tests write here.
   const tmp = await mkdtemp('/var/tmp/beeline-prepare-');
   try {
-    for (const args of steps) {
+    for (const [executable, ...args] of steps) {
       const command = wrapAgentCommand({
         bwrapPath: config.bwrapPath,
         spec: {
@@ -242,7 +251,7 @@ async function readyCheckout(input: {
             ...siblingAgentMaskPaths(runtimeDirectory(input.supervisorRoot, input.agentId)),
           ],
         },
-        command: 'npm',
+        command: executable,
         args,
       });
       await runOwnedFile(command.command, command.args, {
@@ -260,7 +269,7 @@ async function readyCheckout(input: {
       }).catch((error: { stderr?: string; stdout?: string; message?: string }) => {
         const output = (error.stderr || error.stdout || error.message || '').trim().slice(-1500);
         throw new Error(
-          `Checkout at ${path} is not ready: npm ${args.join(' ')} failed:\n${output}`,
+          `Checkout at ${path} is not ready: ${[executable, ...args].join(' ')} failed:\n${output}`,
         );
       });
     }

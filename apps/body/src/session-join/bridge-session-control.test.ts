@@ -49,7 +49,7 @@ it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state
     key: `codex:${join(home, id)}`, agent: 'codex', cwd: join(home, id), name: id,
     server: 'https://synthetic.invalid', clientId: id, refreshToken: 'synthetic',
     accessToken: id, accessExpiresAt: Date.now() + 3_600_000,
-    cursor: '0', deliveredWakes: [], joinedAt: '', sessionId: id, agentBin: cli, deliveryGeneration:'bound-control',deliveryMechanism:'local',
+    cursor: '0', deliveredWakes: [], joinedAt: '', sessionId: id, agentBin: cli, deliveryGeneration:'bound-control',
     deliveryMechanism: 'local',
   });
   // Seed host records before startup: only the explicit socket notification
@@ -104,6 +104,12 @@ it.each(['short', 'long', 'unicode'])('opens successive joins through a %s state
   for (const id of ['first', 'second', 'third']) expect(text.split('tag-' + id)).toHaveLength(2);
   const ended = once(child, 'exit');
   await updateState(dir, state => { state.sessions = []; });
+  // The bridge can observe the empty state on an already queued file event.
+  // Drive that ordering explicitly, then send the final control notification.
+  if (length === 'unicode') {
+    recordHookSession(dir, { agent: 'codex', sessionId: 'third', cwd: join(home, 'third'), seenAt: Date.now() });
+    await ended;
+  }
   await notifyBridgeSessions(dir);
   expect((await ended)[0]).toBe(0);
 });

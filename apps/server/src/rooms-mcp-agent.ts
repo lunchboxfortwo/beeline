@@ -1,6 +1,5 @@
 import { beginAgentInvocation } from './agent-invocation.js';
 import { queuedContextText } from './agent-command-context.js';
-import { legacyMessageBody } from './messaging-cutover.js';
 import { recordedMessageRoute } from './message-route.js';
 import { REPORT_DIGEST_PROPERTIES,ASK_TOOL_TEXT,MESSAGE_ADDRESS_SCHEMA,MESSAGE_ASK_SCHEMA,OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX,REPOSITORY_SUBSCRIPTION_EVENTS,WallRefusal } from '@beeline/api-contract/daemon';
@@ -9,7 +8,7 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
-import { readAgentQueueRows } from './agent-command-read-agent-commands.js';
+import { queuedWakeBody, readAgentQueueRows } from './agent-command-read-agent-commands.js';
 import { createMcpAgentCommand,dismissAgentCommandWakes,selectMcpMessage } from './agent-command.js';
 import { endAgentTurn } from './agent-turn-end.js';
 import { ExpectedRefusalError } from './command-refusal.js';
@@ -764,7 +763,7 @@ export async function pendingMcpWakes(db: SqlDatabase, member: string, options: 
     const route=item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item);
     return {id:item.id,address:item.room_id,reason:item.reason,
       ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
-      text:legacyMessageBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
+      text:queuedWakeBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
       ...(item.message?.institutionalContext || item.message?.conversationContext || item.message?.openAsksChanged ? {institutionalContext:queuedContextText(item.message)} : {}),
       attachments:item.message?.attachments ?? item.private_payload?.attachments ?? [],
       ...(item.private_payload?.messageAsk ? {ask:item.private_payload.messageAsk} : {})};

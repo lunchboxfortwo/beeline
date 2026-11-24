@@ -455,6 +455,22 @@ it.each([false,true])('keeps the morning-card schedule owed after an empty harne
   expect(await queue()).toEqual([]);
 });
 
+it('settles only the scheduled run that already has a report in its thread', async () => {
+  const runs = await Promise.all([1, 2, 3].map(() => createAgentCommand(db, {
+    roomId: R1, agentId: A, sourceMessageId: null, reason: 'schedule',
+  })));
+  const [reported, anotherPlace, progress] = runs.map(run => run!);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,request_id,card) VALUES
+    ('schedule-report',$1,$3,'Report for this run',$4,'{"reportStatus":"done"}'),
+    ('schedule-other-place',$2,$3,'Report in another place',$5,'{"reportStatus":"done"}'),
+    ('schedule-progress',$1,$3,'Progress in this place',$6,NULL)`,
+    [R1, R2, A, reported!.turn_request_id, anotherPlace!.turn_request_id, progress!.turn_request_id]);
+  expect((await queue()).map(item => item.id)).toEqual([anotherPlace!.id, progress!.id]);
+  expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=$1', [reported!.id])).rows)
+    .toEqual([{ state: 'complete', result_message_id: 'schedule-report' }]);
+  expect((await queue()).map(item => item.id)).toEqual([anotherPlace!.id, progress!.id]);
+});
+
 it('no_reply_needed explicitly finishes a schedule but not an owed human answer', async () => {
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,system_event) VALUES('silent-schedule',$1,$2,'ads ran','system',$3::jsonb)
     ON CONFLICT(id) DO NOTHING`, [R1, H, JSON.stringify({ kind:'schedule-ran',scheduleId:'ads',consequence:'ads ran' })]);

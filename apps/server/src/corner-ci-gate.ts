@@ -45,13 +45,16 @@ export function cornerGateChecks(
   purpose: 'merge' | 'review' = 'merge',
 ): CornerLifecycleView['checks'] | undefined {
   const gate = storedCornerCiGate(lifecycle, headSha);
-  if (gate && purpose === 'merge') return gate.checks ?? 'passing';
-  return (gate?.required ? gate.checks : undefined) ?? lifecycle?.checks ?? lifecycle?.checksSummary?.status;
+  if (gate && (purpose === 'merge' || gate.checks === null)) return gate.checks ?? 'passing';
+  return (gate?.required ? gate.checks : undefined) ?? (purpose === 'review'
+    ? lifecycle?.checksSummary?.status ?? lifecycle?.checks
+    : lifecycle?.checks ?? lifecycle?.checksSummary?.status);
 }
 
-/** Review follows the required gate or falls back to the displayed rollup. */
+/** Review follows the head's gate once branch protection has been read. */
 export function cornerReviewChecksSql(lifecycle: string): string {
   return `COALESCE(CASE WHEN ${lifecycle}->'ciGate'->>'headSha'=${lifecycle}->'pr'->>'headSha'
-    AND ${lifecycle}->'ciGate'->>'required'='true'
-    THEN ${lifecycle}->'ciGate'->>'checks' END,${lifecycle}->>'checks',${lifecycle}->'checksSummary'->>'status')`;
+    THEN CASE WHEN ${lifecycle}->'ciGate'->'checks'='null'::jsonb THEN 'passing'
+      WHEN ${lifecycle}->'ciGate'->>'required'='true' THEN ${lifecycle}->'ciGate'->>'checks' END
+    END,${lifecycle}->'checksSummary'->>'status',${lifecycle}->>'checks')`;
 }
