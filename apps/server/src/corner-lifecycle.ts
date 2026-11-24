@@ -2,7 +2,7 @@ import { cornerFeatureBranchSql } from './corner-branch.js';
 import { cornerRunOutcomeSql } from './corner-run.js';
 import { withdrawPullRequestMergeApprovals } from './corner-merge-approval.js';
 import { cornerOwnerSql } from './corner-worker.js';
-import { CornerLifecycleView } from '@beeline/api-contract/phone';
+import { CornerLifecycleView, threadState } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
@@ -385,10 +385,11 @@ async function readCornerAdvance(
       headSha: head,
       turnRunning: row?.worker_active === true || active?.worker === true,
       implementerActive: active?.worker === true,
-      implementerBlocked: waiting?.persistent_block,
-      implementerAvailable: Boolean(corner.worker_agent_id),
+      implementerId: corner.worker_agent_id ?? undefined,
       reviewerActive: row?.reviewer_active === true || review.pending,
+      reviewerId: row?.reviewer_agent_id ?? reachableReviewer(corner),
       peerActive: row?.peer_active === true,
+      peerId: row?.peer_agent_id ?? undefined,
       // Activity owns the displayed state. Only a request sent with passing
       // checks suppresses the first green-head review dispatch.
       reviewRequestActive: review.pending,
@@ -400,9 +401,7 @@ async function readCornerAdvance(
       lostEffects: receipts.filter(receipt => !active?.retained?.includes(receipt.id)).flatMap(receipt => [receipt.key, receipt.marker]),
       reviewerConfigured: independentReviewerConfigured(corner),
       ...(review.ended ? {reviewEnded:review.ended} : {}),
-      ...(waiting ? {blocker:{reason:waiting.reason,itemId:waiting.item_id,
-        ...(waiting.kind ? {blocker:{kind:waiting.kind}} : {})}}
-        : row?.waiting_kind==='merge-hold' ? {blocker:{reason:row.waiting_reason!,itemId:row.waiting_item_id!,blocker:{kind:'merge-hold' as const}}} : {}),
+      ...(waiting ?? row?.waiting_item_id ? {blocker:{reason:waiting?.reason ?? row!.waiting_reason!,itemId:waiting?.item_id ?? row!.waiting_item_id!}} : {}),
       checkSourceId:
         sourceHead && sourceHead !== head
           ? 'stale'
@@ -455,7 +454,7 @@ async function writeCornerAdvance(
   event: CornerEvent,
   { corner, head, row, checkSource, facts }: CornerAdvanceRead,
 ): Promise<CornerAdvance> {
-    const prior = corner.machine ?? { state: 'idle' };
+    const prior: CornerMachine = corner.machine ?? threadState({});
     const plan = transitionCorner(prior, { facts, event });
     if (plan.suppression) return { state: prior.state, accepted: false };
     const archived = plan.state.state === 'archived' && !corner.archived &&
@@ -664,7 +663,7 @@ async function writeCornerAdvance(
       effects.push(notice.key);
     }
     const state = status === plan.state ? { ...plan.state, effects }
-      : { ...plan.state, state: status.state, ...('phase' in status ? { phase: status.phase } : {}),
+      : { ...plan.state, agent: undefined, reason: undefined, state: status.state, ...('agent' in status ? { agent: status.agent } : {}),
         ...('reason' in status ? { reason: status.reason } : {}), effects } as CornerMachine;
     // Any write here changes the row version, so an event that read before this
     // commit reads again. Only a write-free event leaves the version alone.

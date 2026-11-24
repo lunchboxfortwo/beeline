@@ -7,7 +7,7 @@ import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import type { View } from 'react-native';
 import { ListItem, XStack, YStack, useThemeName } from 'tamagui';
 import { ArrowLeft, Users, CornerDownRight, GitPullRequest, MoreHorizontal } from 'lucide-react-native';
-import { threadWorkMark, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
+import { threadActivityLabel, threadWorkMark, type CornerState, type CornerStateReason } from '@beeline/api-contract/phone';
 import { Btn, Glyph, HEIGHT, SafeTop, T, typeStyle, useTextSize } from '@/ui/grammar';
 
 /**
@@ -96,7 +96,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                     <ThreadName title={h.title} v={headerMark(h)?.state === 'needs-you' ? "metaStrong" : "meta"} testID="thread-bar-name" trail={<HeaderMark h={h} />} />
                                 </ListItem>
                             ) : null}
-                            {h.workingAgentName ? <T v="meta" color="needsYou" testID="thread-header-working">{`${h.workingAgentName} is working`}</T> : null}
+                            {threadActivityLabel(h) ? <T v="meta" color="needsYou" testID="thread-header-working">{threadActivityLabel(h)}</T> : null}
                         </YStack>
                     </XStack>
                     {openActions ? (

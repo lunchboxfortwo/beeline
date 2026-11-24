@@ -694,7 +694,7 @@ const fixture = monolithFixture();
       expect((await fixture.database.query<{ worker_agent_id: string; workflow_state: string }>(
         `SELECT ${cornerImplementerSql('fact', 'corner')} worker_agent_id,${cornerRunStateSql('fact.corner_id')} workflow_state FROM corner_facts fact
          JOIN rooms corner ON corner.id=fact.corner_id WHERE fact.corner_id=$1`, [cornerId],
-      )).rows[0]).toEqual({ worker_agent_id: worker, workflow_state: state === 'waiting' ? 'waiting' : 'working' });
+      )).rows[0]).toEqual({ worker_agent_id: worker, workflow_state: 'working' }); // The queued revision outranks an open question.
     },
   );
 

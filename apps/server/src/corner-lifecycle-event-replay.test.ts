@@ -4,7 +4,7 @@ import {
 } from './test-support-corner-lifecycle.test-support.js';
 
 const machine = async (cornerId: string) => (
-  await rootFixture.db.query<{ machine: { state: string; phase?: string; reason?: string } }>(
+  await rootFixture.db.query<{ machine: { state: string; agent?: string; reason?: string } }>(
     'SELECT machine FROM corner_facts WHERE corner_id=$1', [cornerId],
   )
 ).rows[0]!.machine;
@@ -18,7 +18,7 @@ describe('corner lifecycle recorded event sequences', () => {
         pr: { number: 7, url: 'https://github.com/owner/widgets/pull/7', headSha: SHA } }),
     ]);
     await pushToCorner(cornerId, SHA);
-    expect(await machine(cornerId)).toMatchObject({ state: 'review', phase: 'checks' });
+    expect(await machine(cornerId)).toMatchObject({ state: 'review' });
     const failing = [1, 2, 5, 8].map(n => `SERVER SUITE SHARD ${n}`);
     const rollup = { state: 'failed', total: 5, failing,
       checks: [...failing.map(name => ({ name, status: 'failed' })),
@@ -49,7 +49,7 @@ describe('corner lifecycle recorded event sequences', () => {
     'terminal %s reviewer report hands missing phone proof back to the implementer', async status => {
       const cornerId = await inReview();
       const [review] = await commands(B, cornerId);
-      expect(await machine(cornerId)).toMatchObject({ state: 'review', phase: 'reviewer' });
+      expect(await machine(cornerId)).toMatchObject({ state: 'review', agent: B });
       await claim(review!);
       await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId,to:{agent:'implementer',place:cornerId}, text: 'FAIL: required native phone screenshots are missing. Capture the approved screens.' }, B);
       await terminalResult(review!, '');
@@ -122,7 +122,8 @@ describe('corner lifecycle recorded event sequences', () => {
       expect(await machine(cornerId)).toMatchObject({ state: 'working' });
       await terminalResult(repair!, 'Awaiting the owner host approval to capture phone screenshots.');
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
-      expect(await machine(cornerId)).toMatchObject({ state: 'waiting' });
+      // The reviewer has the implementer's reply queued: review outranks the owner's open ask.
+      expect(await machine(cornerId)).toMatchObject({ state: 'review', agent: B });
       expect((await commands(B, cornerId)).map(command=>({reason:command.reason,body:command.source.body}))).toEqual([{reason:'reply',body:'Awaiting the owner host approval to capture phone screenshots.'}]);
       changes.length = 0;
       await rootFixture.phone.execute('decideAgentGrant', { grantId: ask.grantId, decision: 'always' }, H);

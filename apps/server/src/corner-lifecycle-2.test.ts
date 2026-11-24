@@ -276,7 +276,8 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
       `SELECT state FROM agent_commands WHERE id=$1`,
       [review[0]!.id],
     )).rows[0]?.state).toBe('pending');
-    expect(await currentState(cornerId)).toBe('waiting');
+    // The #beeline screenshot: the queued reviewer outranks the stale block.
+    expect(await currentState(cornerId)).toBe('review');
   });
 
 

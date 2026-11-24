@@ -67,8 +67,9 @@ it('stores orders privately and gives blocks a closeable message', async () => {
     .toMatchObject({ private: true, source: { authorId: RUBY, body: 'Use endpoint v2' } });
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-command'`,[opened.cornerId])).rowCount).toBe(0);
   await advanceCorner(rootFixture.db, opened.cornerId, { kind: 'reconcile' });
+  // The commander's order is queued for the implementer: work outranks the still-open block.
   expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId: opened.cornerId }, WORKER))
-    .toMatchObject({ state: 'waiting' });
+    .toMatchObject({ state: 'working' });
   expect((await rootFixture.db.query(`SELECT private_payload->>'reportStatus' status FROM agent_commands WHERE id=$1`, [report.id])).rows)
     .toEqual([{ status: 'blocked' }]);
   expect((await rootFixture.db.query(`SELECT count(*)::int n FROM messages WHERE room_id=ANY($1::uuid[])`,[[ROOM,DM]])).rows[0]!.n).toBe(before+1);

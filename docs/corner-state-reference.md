@@ -1,24 +1,27 @@
 # Corner state reference
 
-`apps/server/src/corner-machine.ts` owns the state type and pure `transitionCorner`.
+`threadState` in `packages/api-contract/src/thread-state.ts` is the only thread-state rule, and
+`threadActivityLabel` there the only "<name> is working/reviewing" words.
+`apps/server/src/corner-machine.ts` owns the pure `transitionCorner`, which reads it.
 `apps/server/src/corner-lifecycle.ts` owns the `advanceCorner` runtime.
 Close and confirmed merge execute command/workflow/hold cleanup in that runtime module.
 Every corner command enters that runtime; the generic
 queue retains membership, provenance, deduplication and turn authority.
 
 The machine persists one state on `corner_facts.machine`. Every new corner starts
-Idle; an opening order, if present, supplies its first event:
+Idle; an opening order, if present, supplies its first event. In order, first match wins:
 
-- **Working:** an implementing command or receipt is active.
-- **Review:** checks are underway (`checks`), or the configured reviewer owns the
-  current head (`reviewer`). The corner override wins over the parent Room reviewer.
-- **Waiting:** an explicit blocker, user action or question needs an answer. These
-  waits remain visible during CI. A running worker takes precedence; the wait
-  returns when the turn ends if its blocker is still open. A merge hold vetoes
-  landing while work continues; it becomes Waiting when it is all that remains.
-- **Idle:** no implementing, review or waiting work remains.
 - **Archived:** terminal after authorized closure or a confirmed merge. A locked
   standing corner remains active after a merge.
+- **Working:** the implementer's turn or command is active, or a wake for it is planned.
+- **Review:** the reviewer is active (turn, command, request, or a planned review wake),
+  or checks are underway. The corner override wins over the parent Room reviewer.
+- **Waiting:** an explicit blocker, user action, question or merge hold needs an answer.
+  Work and review outrank it; it returns when they end if the blocker is still open.
+- **Idle:** nothing else remains; Backlog idle when parked, else another agent's
+  running turn shows Working.
+
+The stored machine names the agent its state is about; rows read that name.
 
 Red checks wake the implementer with the recorded failing jobs. Green checks wake
 the independent configured reviewer inside the corner. Review uses the required
@@ -44,9 +47,9 @@ turns or the GitHub display cache. Waiting has no separately stored reason;
 read projections attach the current blocker's reason and identity. Existing hidden lifecycle
 cards remain inert history during the expand release; no new cards are written.
 
-Coverage: `corner-machine.test.ts`, `corner-lifecycle-event-replay.test.ts`, `corner-state.test.ts`,
+Coverage: `thread-state.test.ts` (the frozen case table), `corner-machine.test.ts`, `corner-lifecycle-event-replay.test.ts`, `corner-state.test.ts`,
 `corner-state.exhaustive.test.ts`, `corner-state-reference.test.ts`,
 `corner-review-dispatch.test.ts` and `corner-attention.integration.test.ts`.
 `node --test packages/scripts/corner-machine-boundary.test.mjs` plants violations of the
-state-write and wake boundary; TYPECHECK runs the same guard through architecture
+state-write and wake boundary and a second thread-state rule or label; TYPECHECK runs the same guard through architecture
 checks. The boundary has one owner and no per-call exemption list.

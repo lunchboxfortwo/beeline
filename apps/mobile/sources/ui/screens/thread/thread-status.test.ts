@@ -51,6 +51,9 @@ describe('thread status (header B)', () => {
   });
 });
 
-it('uses the running session name even after a reply changes the thread workflow', () => {
-  expect(threadListLabel({ state: 'waiting', workingAgentName: 'Ruby' }, undefined).word).toBe('Ruby is working');
+it('names the agent the state names: working, reviewing, and never over a wait', () => {
+  expect(threadListLabel({ state: 'working', workingAgentName: 'Ruby' }, undefined).word).toBe('Ruby is working');
+  // The #beeline screenshot: the reviewer running on a thread with a stale block reads as review.
+  expect(threadListLabel({ state: 'review', workingAgentName: 'Speedy' }, undefined).word).toBe('Speedy is reviewing');
+  expect(threadListLabel({ state: 'waiting', workingAgentName: 'Speedy' }, undefined).word).toBe('waiting on a reply');
 });

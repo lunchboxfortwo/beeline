@@ -51,8 +51,10 @@ mutation('a new live stage fails', 'apps/server/src/github-operations-read-pr-ch
   "('checking' as const)", "('awaiting-consent' as const)");
 mutation('a new wire stage fails', 'packages/api-contract/src/daemon-operations-daemon-operation-map.ts',
   "stage: 'building'", "stage: 'awaiting-consent' | 'building'");
-mutation('a new machine state fails', 'apps/server/src/corner-machine.ts',
-  "state: 'working' | 'waiting' | 'archived'", "state: 'awaiting-consent' | 'working' | 'waiting' | 'archived'");
+mutation('a new machine state fails', 'packages/api-contract/src/thread-state.ts',
+  "state: 'archived' | 'waiting'", "state: 'awaiting-consent' | 'archived' | 'waiting'");
+mutation('a new thread-state result fails', 'packages/api-contract/src/thread-state.ts',
+  "return { state: 'waiting' };", "return { state: 'awaiting-consent' };");
 mutation('a new lifecycle fallback state fails', 'apps/server/src/corner-lifecycle.ts',
   "state: machine?.state ?? 'idle'", "state: machine?.state ?? 'awaiting-consent'");
 mutation('implementer derivation cannot gain an admission gate', 'apps/server/src/corner-worker.ts',
