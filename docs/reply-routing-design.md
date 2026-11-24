@@ -123,7 +123,7 @@ Everything you write stays in this thread. reply(id) reports to your commander: 
 | `message` | "Send text to one identity at one place … Use read to find addresses. …" | **removed** |
 | `read` | "Discover with facet addresses; …", with `facet` enum including `addresses`, `threads` | those two facets and the phrase are removed. The default place is unchanged |
 | `post` | "Post a public message at address …", with an `address` property | the `address` property and "at address" are removed; it posts in this thread |
-| `reply` | "Reply to the recorded sender at the recorded place of message id … No destination is needed. Reply to the message that gave you the task when done, blocked or failed." | "Report on a task in this place to your commander. Start with done:, blocked: or needs-decision:. Files and everything else stay here." It keeps the prefix grammar, so block tracking still works (Astra v2 #5) |
+| `reply` | "Reply to the recorded sender at the recorded place of message id … No destination is needed. Reply to the message that gave you the task when done, blocked or failed." | "Report on a task in this place to your commander. Start with done:, blocked: or needs-decision:. Files and everything else stay here. To involve another agent, ask your commander in your report." It keeps the prefix grammar, so block tracking still works (Astra v2 #5). The last sentence was added by the owner on 24 Nov: a thread agent reaches other agents only through its chain of command |
 
 Two more prompt sentences send deliverables through `reply` and are deleted (Astra v2 #17):
 - `prompt-assembly.ts:449`, repo-less threads: "Reply to the task message with the deliverable, adding ask if an answer is needed."
@@ -134,6 +134,17 @@ The implementer contract's other deliverable sentence also loses the word "reply
 The v1 §4b deletions also apply, prompt text only:
 - "Blocks (blocked:/needs-decision:) are plain text by default …" in three places;
 - the nudge sentence at `prompt-assembly.ts:446`.
+
+### 4.3b Owner decisions applied (24 Nov)
+
+The owner accepted D1–D3 as recommended (§10):
+- **D1.** An order that ends with closing text and no report completes in the worker's session, and the issuer is not told. No System line is added.
+- **D2.** The legacy `order` / `report` operations follow P2c / P2a and are deleted at the `messaging-cutover.ts` drain point, not now.
+- **D3.** A block in a thread opened by an agent on a person's behalf goes to that agent, its commander. The person is not copied; the agent relays (chain of command).
+
+Addition: the thread `reply` description gains exactly one line, "To involve another agent, ask your commander in your report." (§4.3 table).
+
+D4 (server-side enforcement for connected apps and old helpers) is still open.
 
 ### 4.4 Turn message (fresh-thread first turn)
 
@@ -279,10 +290,10 @@ These existing tests flip:
 ## 10. Decisions for the owner
 
 - **D1. An order finished without a report.** B's closing text completes the order, stays in B's session, and the issuer is not told. Astra v2 #13 confirms the thread idle notice cannot rescue a *chat* order (`corner-lifecycle.ts:649-659` is corner-only), so C@P sleeps until someone tags it.
-  - Recommended: accept, so C2 holds literally. `Reply needed` and the `Reply(id…)` line stay on chat-session turns, and threads still get the idle notice.
+  - **Accepted by the owner, 24 Nov.** Recommended: accept, so C2 holds literally. `Reply needed` and the `Reply(id…)` line stay on chat-session turns, and threads still get the idle notice.
   - Alternative: the server adds one System line in the issuer's session ("B finished without reporting; output in Q"). That is one added write and no new column.
-- **D2. Legacy `order` / `report` operations** (cutover only) follow P2c and P2a. Delete them now, or at the cutover point already named in `messaging-cutover.ts`? Recommended: at cutover.
-- **D3 (carried from v1 D4).** When an agent opened a thread on a person's behalf, a block reaches that agent, its commander. Should a person be copied? Recommended: no. Chain of command (C3) means the agent relays.
+- **D2. Legacy `order` / `report` operations** (cutover only) follow P2c and P2a. **Accepted 24 Nov: at cutover.** Delete them now, or at the cutover point already named in `messaging-cutover.ts`? Recommended: at cutover.
+- **D3 (carried from v1 D4; accepted 24 Nov, no copy).** When an agent opened a thread on a person's behalf, a block reaches that agent, its commander. Should a person be copied? Recommended: no. Chain of command (C3) means the agent relays.
 
 ## 11. Plan-eng-review (gstack `plan-eng-review`, run autonomously)
 
