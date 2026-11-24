@@ -23,7 +23,7 @@
     "task": {
       "fromName": "System",
       "commandReason": "corner_review_dispatch",
-      "body": "From: System in #Widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: false\ntext: You are Sol, the independent configured reviewer. Your completed review of the exact green head ffffffffffffffffffffffffffffffffffffffff found no blockers. Record the verdict now; the server owns merging."
+      "body": "From: System in #Widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ntext: You are Sol, the independent configured reviewer. Your completed review of the exact green head ffffffffffffffffffffffffffffffffffffffff found no blockers. Record the verdict now; the server owns merging."
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Sol."
   },
