@@ -825,7 +825,8 @@
           "updated_by": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
           "failed_due_at": "Records the exact failed scheduled occurrence so the same due work cannot retry on a timer.",
-          "failed_revision": "Records the exact failed schedule revision; a committed edit or advance permits new work without altering the authorized due time."
+          "failed_revision": "Records the exact failed schedule revision; a committed edit or advance permits new work without altering the authorized due time.",
+          "lock_retry_revision": "Records the schedule revision that already used its one retry after a lock timeout in agent-schedules.ts, so the retry stays bounded across restarts and edits."
         }
       },
       "agent_subscriptions": {
