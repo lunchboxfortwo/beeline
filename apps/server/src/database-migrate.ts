@@ -1,4 +1,3 @@
-import { HELPER_READ_SCHEMA } from './helper-requests.js';
 import { SCHEDULE_SCHEDULER_ID, SCHEDULE_SCHEDULER_NAME, SCHEDULE_SCHEDULER_HANDLE } from '@beeline/api-contract/scheduled-prompts';
 import { IMPLEMENTER_BLOCKS_SCHEMA } from './implementer-blocks.js';
 import { needsYouMarksSchema } from './needs-you-marks.js';
@@ -175,7 +174,13 @@ export async function migrate(
   await ddlScript('retired stop controls', RETIRED_STOP_CONTROLS);
   // The previous serving/rollback image still owns its notification capture
   // triggers. Retire them together with their storage in a later contract release.
-  await ddlScript('helper conversation read windows', HELPER_READ_SCHEMA);
+  await ddlScript('helper conversation read windows', `
+    CREATE TABLE IF NOT EXISTS helper_read_windows (
+      agent_id text PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
+      expires_at timestamptz NOT NULL,
+      reads integer NOT NULL
+    )
+  `);
   await ddlScript('router command identity', ROUTER_COMMAND_SCHEMA);
   await ddlScript('retired turn recovery schema', `
     ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS startup_outcome text;

@@ -22,12 +22,6 @@ export function commandLogField(value: unknown): string[] {
 
 const READS_PER_MINUTE = 300;
 const conversationReads = new Set(['getRoomConversation', 'getRoomInbox', 'getRoomMessage', 'read']);
-export const HELPER_READ_SCHEMA = `
-CREATE TABLE IF NOT EXISTS helper_read_windows (
-  agent_id text PRIMARY KEY REFERENCES identities(id) ON DELETE CASCADE,
-  expires_at timestamptz NOT NULL,
-  reads integer NOT NULL
-)`;
 
 // The database serializes admissions across replicas and transports. Once a
 // helper exhausts its window, refuse its burst locally until the window ends.
