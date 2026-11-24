@@ -13,6 +13,14 @@ describe('daemon request errors', () => {
     ['getConnectionDetail', { ref: 'missing' }, 404, 'unknown connection reference missing'],
     ['getInstitutionalContext', {}, 409, 'institutional context requires an active command'],
     ['loadWorkspaceSkill', {}, 409, 'workspace skill load requires an active command'],
+    ['saveSkill', {}, 409, 'skill save requires an active command'],
+    ['deleteSkill', {}, 409, 'skill delete requires an active command'],
+    ['saveWorkflow', {}, 409, 'workflow save requires an active command'],
+    ['startWorkflow', {}, 409, 'workflow start requires an active command'],
+    ['cancelWorkflowRun', {}, 409, 'workflow cancellation requires an active command'],
+    ['handoff', {}, 409, 'workflow handoff requires an active command'],
+    ['archiveWorkflow', {}, 409, 'workflow archive requires an active command'],
+    ['assignWorkflowRole', {}, 409, 'workflow role assignment requires an active command'],
     ['postAgentThought', { roomId: ROOM }, 400, 'turnId is required'],
     ['postRoomMessage', { roomId: ROOM }, 400, 'reply text is required'],
     ['postAgentModelCatalog', {}, 400, 'model options are required'],
@@ -28,6 +36,18 @@ describe('daemon request errors', () => {
     const response = await fetch(fixture.origin + '/v1/free-agents/bootstrap', { method: 'POST', body: '{' });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'invalid JSON request body' });
+  });
+
+  it.each([
+    ['XX000', 'invalid page in block', 500],
+    ['P0001', 'required record is missing', 500],
+    ['57P01', 'restart required', 503],
+  ] as const)('classifies database failure %s before matching its message', async (code, message, status) => {
+    const failure = Object.assign(new Error(message), { code });
+    vi.spyOn(fixture.database, 'query').mockRejectedValueOnce(failure);
+    const response = await fetch(fixture.origin + '/health');
+    expect(response.status).toBe(status);
+    expect(Sentry.captureException).toHaveBeenCalledWith(failure, expect.anything());
   });
 
   it('returns an internal error for an unexpected database failure', async () => {

@@ -1,3 +1,4 @@
+import { postgresErrorContext } from './postgres-error.js';
 import { isTransientDatabaseConnectionError } from './database.js';
 import { ComposioRequestError } from './composio-apps.js';
 import { WallRefusal } from '@beeline/api-contract/daemon';
@@ -12,9 +13,6 @@ import { GitHubSignInError } from "./auth.js";
 
 function fallbackStatus(error: unknown, message: string): number {
   if (error instanceof ExpectedRefusalError) return 400;
-  if (isTransientDatabaseConnectionError(error)) return 503;
-  if (error instanceof Error && 'code' in error &&
-      (error.code === 'ECONNREFUSED' || error.code === '57P02')) return 503;
   if (error instanceof ComposioRequestError && error.status >= 500) return 503;
   if (message === 'Cannot use a pool after calling end on the pool' ||
       message === 'database unavailable' || message === 'Beeline Sentry Telegram delivery failed') return 503;
@@ -26,13 +24,14 @@ export function requestErrorStatus(error: unknown): number {
   if (error instanceof WallRefusal) return error.status;
   if (error instanceof ProductionReleaseBusyError) return 409;
   if (error instanceof PhoneOperationError) return error.status;
+  if (error instanceof WorkflowAuthorizationError || error instanceof CommandRefusalError ||
+      error instanceof WorkspaceSkillNotFoundError) return error.status;
+  if (isTransientDatabaseConnectionError(error)) return 503;
+  if (error instanceof Error && 'code' in error &&
+      (error.code === 'ECONNREFUSED' || error.code === '57P02')) return 503;
+  if (postgresErrorContext(error)) return 500;
   const message = error instanceof Error ? error.message : 'request failed';
-  let status =
-    error instanceof WorkflowAuthorizationError ||
-    error instanceof CommandRefusalError ||
-    error instanceof WorkspaceSkillNotFoundError
-      ? error.status
-      : institutionalMemoryErrorStatus(message) ??
+  let status = institutionalMemoryErrorStatus(message) ??
         ((message.startsWith('thread brief attachment ') &&
             message.endsWith('is missing or unavailable in this chat')) ||
           message.includes('required') ||
