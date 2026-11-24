@@ -1,3 +1,4 @@
+import { SCHEDULE_SCHEDULER_ID, SCHEDULE_SCHEDULER_NAME, SCHEDULE_SCHEDULER_HANDLE } from '@beeline/api-contract/scheduled-prompts';
 import { IMPLEMENTER_BLOCKS_SCHEMA } from './implementer-blocks.js';
 import { needsYouMarksSchema } from './needs-you-marks.js';
 import { backfillThreadImplementers } from './corner-lifecycle.js';
@@ -191,6 +192,14 @@ export async function migrate(
   await runMigrationStep('chat message number lookup', () => createIndexConcurrently(database,
     'messages_author_chat_seq_idx', CHAT_SEQ_INDEX));
   await ddlScript('stable identity handles', IDENTITY_HANDLE_SCHEMA);
+  await runMigrationStep('scheduled message author', async () => {
+    await database.query(
+      `INSERT INTO identities(id,kind,name,handle,hidden_from_roster) VALUES($1,'human',$2,$3,true)
+       ON CONFLICT(id) DO UPDATE SET handle=EXCLUDED.handle
+       WHERE identities.handle IS DISTINCT FROM EXCLUDED.handle`,
+      [SCHEDULE_SCHEDULER_ID, SCHEDULE_SCHEDULER_NAME, SCHEDULE_SCHEDULER_HANDLE],
+    );
+  });
   await runMigrationStep('one pending app sign-in card',()=>createIndexConcurrently(database,
     'messages_pending_app_sign_in_unique',`CREATE UNIQUE INDEX CONCURRENTLY messages_pending_app_sign_in_unique
       ON messages(room_id,(card->>'appId'),(card->>'ownerId')) NULLS NOT DISTINCT
