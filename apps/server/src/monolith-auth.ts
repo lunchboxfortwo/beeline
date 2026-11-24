@@ -9,10 +9,9 @@ import { verifyPhoneGitHubTicket } from '@beeline/auth/phone-github-ticket';
 import { createHash } from 'node:crypto';
 import { buildAuthServer } from '@beeline/auth/server';
 import { AuthStore, type TransactionalDatabase } from '@beeline/auth/store';
-import type { VerifyGitHubOidc, VerifyGoogleOidc } from './auth.js';
+import { GitHubSignInError, type TokenAuth, type VerifyGitHubOidc, type VerifyGoogleOidc } from './auth.js';
 import type { SqlDatabase } from './database.js';
 import { PhoneService } from './phone-service.js';
-import type { TokenAuth } from './auth.js';
 
 export interface MonolithAuthMount {
   handle(request: IncomingMessage, response: ServerResponse): void;
@@ -106,7 +105,7 @@ export async function createMonolithAuth(
     },
     verifyGitHubTicket: async (ticket) => {
       const result = await verifyPhoneGitHubTicket(store, tenant.community, ticket);
-      if (result.status !== 'verified') throw new Error('GitHub identity exchange failed');
+      if (result.status !== 'verified') throw new GitHubSignInError('GitHub identity exchange failed');
       return {
         ...result.identity,
         githubCredential: await store.githubUserCredential(
