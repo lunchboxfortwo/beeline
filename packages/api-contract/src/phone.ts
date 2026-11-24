@@ -30,6 +30,7 @@ export * from './workbench.js';
 export * from './wallet.js';
 export * from './message-search.js';
 export * from './agent-sign-in.js';
+export { OPERATOR_OWNER_ID } from './agent-messaging.js';
 
 export * from './tray-ask.js';
 

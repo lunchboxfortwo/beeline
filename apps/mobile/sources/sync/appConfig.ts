@@ -5,6 +5,7 @@ export interface AppConfig {
   consoleLoggingDefault?: boolean;
   buildCommitSha?: string;
   buildCommitTimestamp?: string;
+  appVersion?: string;
   releaseVersion?: string;
   releaseSha?: string;
   buzzyMonolithUrl?: string;
@@ -13,33 +14,35 @@ export interface AppConfig {
 let sessionConfig: AppConfig | undefined;
 
 /**
- * Loads app configuration from the embedded manifest once per app session.
- * Later opens reuse that object. A Room open used to read and print it again
- * from every call site.
- *
- * Priority (later overrides earlier), applied on that single read:
- * 1. Constants.expoConfig (embedded and OTA manifests)
- * 2. Monolith URL and release SHA overrides present at startup
+ * Loads the running bundle's app configuration once per app session.
  */
 export function loadAppConfig(): AppConfig {
   if (sessionConfig) return sessionConfig;
-  const config: Partial<AppConfig> = {};
+  const config: AppConfig = {};
 
   try {
-    const appConfig = Constants.expoConfig?.extra?.app;
+    const expoConfig = Constants.expoConfig;
+    const appConfig = expoConfig?.extra?.app;
     if (appConfig && typeof appConfig === 'object') Object.assign(config, appConfig);
+    config.appVersion = expoConfig?.version;
+    const metadata = Constants.manifest2?.metadata as { branchName?: unknown } | undefined;
+    if (typeof metadata?.branchName === 'string') {
+      config.releaseVersion ??= /^release-(v\d+\.\d+\.\d+(?:-rc\.\d+)?)$/.exec(metadata.branchName)?.[1];
+    }
   } catch (e) {
     console.warn('[loadAppConfig] Error accessing Constants.expoConfig:', e);
   }
 
-  // app.config owns provider keys and release version in both embedded and OTA
-  // manifests. Keep the dev-server URL and diagnostics SHA overrides here.
+  // The release exporter stamps the bundle as well as its manifest.
+  if (process.env.EXPO_PUBLIC_BEELINE_RELEASE_VERSION) {
+    config.releaseVersion = process.env.EXPO_PUBLIC_BEELINE_RELEASE_VERSION;
+  }
   if (process.env.EXPO_PUBLIC_BUZZY_MONOLITH_URL) {
     config.buzzyMonolithUrl = process.env.EXPO_PUBLIC_BUZZY_MONOLITH_URL;
   }
   if (process.env.EXPO_PUBLIC_BEELINE_RELEASE_SHA) {
     config.releaseSha = process.env.EXPO_PUBLIC_BEELINE_RELEASE_SHA;
   }
-  sessionConfig = config as AppConfig;
+  sessionConfig = config;
   return sessionConfig;
 }

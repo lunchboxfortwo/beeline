@@ -2,6 +2,7 @@ import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { OPERATOR_OWNER_ID } from '@beeline/api-contract/phone';
 
 const route = vi.hoisted(() => ({ pathname: '/beeline/onboarding' }));
 const desktopShell = vi.hoisted(() => ({ enabled: false }));
@@ -14,11 +15,15 @@ vi.mock('@/sync/transport/live-connection', () => ({ sharedLiveConnection: () =>
   subscribeConnected: (listener: () => void) => { connections.listeners.add(listener); return () => { connections.listeners.delete(listener); }; },
 }) }));
 const updates = vi.hoisted(() => ({
+  enabled: false,
+  channel: 'production',
   runtimeVersion: '55',
+  setUpdateRequestHeadersOverride: vi.fn(),
   checkForUpdateAsync: vi.fn(),
   fetchUpdateAsync: vi.fn(),
   reloadAsync: vi.fn(),
 }));
+const viewer = vi.hoisted(() => ({ load: vi.fn() }));
 const tracking = vi.hoisted(() => ({
   available: vi.fn(),
   applied: vi.fn(),
@@ -28,11 +33,15 @@ const desktopProcess = vi.hoisted(() => ({ relaunch: vi.fn() }));
 
 vi.mock('expo-router', () => ({ usePathname: () => route.pathname }));
 vi.mock('expo-updates', () => ({
+  get isEnabled() { return updates.enabled; },
+  get channel() { return updates.channel; },
   get runtimeVersion() { return updates.runtimeVersion; },
+  setUpdateRequestHeadersOverride: updates.setUpdateRequestHeadersOverride,
   checkForUpdateAsync: updates.checkForUpdateAsync,
   fetchUpdateAsync: updates.fetchUpdateAsync,
   reloadAsync: updates.reloadAsync,
 }));
+vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzViewerPubkey: viewer.load }));
 vi.mock('@/utils/isTauri', () => ({ isTauri: () => desktopShell.enabled }));
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: desktopUpdater.check }));
 vi.mock('@tauri-apps/plugin-process', () => ({ relaunch: desktopProcess.relaunch }));
@@ -104,6 +113,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   appState.listeners.clear(); connections.listeners.clear(); connections.epoch = 1;
   route.pathname = '/beeline/onboarding';
+  updates.enabled = false;
+  viewer.load.mockResolvedValue(null);
   desktopShell.enabled = false; updates.runtimeVersion = '55';
   updates.checkForUpdateAsync.mockResolvedValue({
     isAvailable: false,
@@ -114,6 +125,38 @@ beforeEach(() => {
   desktopUpdater.check.mockResolvedValue(null);
   desktopProcess.relaunch.mockResolvedValue(undefined);
   delete process.env.EXPO_PUBLIC_BEELINE_DESKTOP_UPDATES;
+});
+
+it('selects the account channel before checking and preserves the launch channel if switching fails', async () => {
+  updates.enabled = true;
+  viewer.load.mockResolvedValue(OPERATOR_OWNER_ID);
+  let channel = updates.channel;
+  updates.setUpdateRequestHeadersOverride.mockImplementation(headers => {
+    channel = headers['expo-channel-name'];
+  });
+  updates.checkForUpdateAsync.mockImplementationOnce(async () => {
+    expect(channel).toBe('next');
+    throw new Error('offline');
+  });
+  await expect(checkNativeUpdate()).rejects.toThrow('offline');
+  expect(channel).toBe('production');
+
+  updates.checkForUpdateAsync.mockResolvedValueOnce({ isAvailable: true });
+  updates.fetchUpdateAsync.mockImplementationOnce(async () => {
+    expect(channel).toBe('next');
+    return { isNew: true };
+  });
+  await expect(checkNativeUpdate()).resolves.toMatchObject({ available: true });
+  expect(channel).toBe('next');
+
+  viewer.load.mockResolvedValue('another-account');
+  updates.checkForUpdateAsync.mockResolvedValueOnce({ isAvailable: true });
+  updates.fetchUpdateAsync.mockImplementationOnce(async () => {
+    expect(channel).toBe('production');
+    return { isNew: true };
+  });
+  await expect(checkNativeUpdate()).resolves.toMatchObject({ available: true });
+  expect(channel).toBe('production');
 });
 
 async function renderUpdateRoot(child?: React.ReactNode): Promise<ReactTestRenderer> {
@@ -323,7 +366,7 @@ it('coalesces manual and automatic native work into one manifest/download flight
   updates.checkForUpdateAsync.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
   updates.fetchUpdateAsync.mockResolvedValueOnce({ isNew: true, manifest: { id: 'same-update', runtimeVersion: '40' } });
   const automatic = checkNativeUpdate(), stage = vi.fn(), manual = checkNativeUpdate(stage);
-  expect(updates.checkForUpdateAsync).toHaveBeenCalledTimes(1);
+  await settleUpdate(() => expect(updates.checkForUpdateAsync).toHaveBeenCalledTimes(1));
   release({ isAvailable: true });
   await expect(automatic).resolves.toEqual(await manual);
   expect(updates.fetchUpdateAsync).toHaveBeenCalledTimes(1);
