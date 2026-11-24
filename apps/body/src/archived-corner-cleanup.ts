@@ -6,6 +6,7 @@ import {
   ordinaryDirectory,
   storageTree,
   hasMount,
+  beginStorageSummary,
   type WholeStorageOptions,
   type StorageReclaimEntry,
 } from './helper-storage.js';
@@ -283,6 +284,7 @@ export async function removeArchivedCornerData(
       // A remaining mount is an operational failure, never permission
       // to walk into an unrelated mounted filesystem.
       if (await hasMount(path)) throw new Error(`archived thread mount still present: ${path}`);
+      let files = 0;
       let allocatedBytes = 0,
         freedBytes = 0;
       const tree = await storageTree(path, options.progress).catch(() => undefined);
@@ -291,6 +293,7 @@ export async function removeArchivedCornerData(
         { bytes: number; links: number; count: number; directory: boolean }
       >();
       for (const item of tree?.values() ?? []) {
+        if (options.summarize && !item.directory) files++;
         const key = `${item.dev}:${item.ino}`;
         const inode = seen.get(key) ?? {
           bytes: item.blocks,
@@ -309,7 +312,15 @@ export async function removeArchivedCornerData(
         const layers = resolve(path, DEPENDENCY_LAYERS_DIR);
         for (const layer of await readdir(layers).catch(() => []))
           await openDependencyLayer(resolve(layers, layer));
-        await rm(path, { recursive: true, force: true });
+        const summarize = beginStorageSummary(path, options.summarize);
+        let removed = false;
+        try {
+          const existed = summarize && (await lstat(path).catch(() => undefined));
+          await rm(path, { recursive: true, force: true });
+          removed = Boolean(existed);
+        } finally {
+          summarize?.(removed, files, freedBytes);
+        }
       }
       const entry: StorageReclaimEntry = {
         roomId: cornerId,

@@ -168,12 +168,8 @@ async function serveMachineHelper(
           const batch = [...archiveStoragePending.values()];
           archiveStoragePending.clear();
           await reclaimArchivedMemberStorage(supervisorRoot, batch, {
-            log: (entry) => {
-              usage?.cleanup(entry);
-              console.log(
-                `[helper] chat ${entry.roomId} private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`,
-              );
-            },
+            log: usage?.cleanup,
+            summarize: true,
           });
         }
       } catch (error) {
@@ -197,11 +193,7 @@ async function serveMachineHelper(
       return;
     diskSweepRunning = true;
     try {
-      const log = (entry: import('./helper-storage.js').StorageReclaimEntry) => {
-        usage?.cleanup(entry);
-        console.log(`[helper] storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`);
-      };
-      const options = storageOperation({ log });
+      const options = storageOperation({ log: usage?.cleanup, summarize: true });
       await pruneStoppedAgentStorage(supervisorRoot, options);
       await pruneEndedOwnerStorage(supervisorRoot, options);
       await pruneDeletedRuntimes(supervisorRoot, now, options);
