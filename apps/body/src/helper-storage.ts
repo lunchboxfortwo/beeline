@@ -480,6 +480,7 @@ export async function reclaimHelperStorage(input: {
       (await Promise.all([root, ...(input.relatedRoots?.(room.name) ?? [])].map(observedUse))).some(
         Boolean,
       );
+    let files = 0, bytes = 0;
     await input
       .withIdleRoom(room.name, async () => {
         if (state.archived && input.removeArchived) {
@@ -538,7 +539,9 @@ export async function reclaimHelperStorage(input: {
             const removed = (removedLinks.get(key) ?? 0) + inode.paths.length;
             removedLinks.set(key, removed);
             if (inode.directory || removed >= inode.links) freedBytes += inode.blocks;
+            if (!inode.directory) files += inode.paths.length;
           }
+          bytes += freedBytes;
           const entry: StorageReclaimEntry = {
             roomId: room.name,
             path,
@@ -554,6 +557,8 @@ export async function reclaimHelperStorage(input: {
         if (input.onError) input.onError(room.name, error);
         else console.error(`[body] private storage cleanup deferred for chat ${room.name}:`, error);
       });
+    if (!input.dryRun && files > 0)
+      console.log(`[helper] storage cleared ${root}; deleted ${files} files; freed ${bytes} bytes`);
   }
   return entries;
 }
@@ -706,6 +711,7 @@ export async function reclaimWholeStorageObject(
   if (options.beforeRemove && !(await options.beforeRemove())) return [];
   const entries: StorageReclaimEntry[] = [];
   const links = new Map<string, number>();
+  let files = 0, bytes = 0;
   for (const path of ended
     ? wholeObjectsExceptSquire(root, tree)
     : options.expireFiles
@@ -723,7 +729,9 @@ export async function reclaimWholeStorageObject(
         const removed = (links.get(key) ?? 0) + inode.paths.length;
         links.set(key, removed);
         if (inode.directory || removed >= inode.links) freedBytes += inode.blocks;
+        if (!inode.directory) files += inode.paths.length;
       }
+      bytes += freedBytes;
       const entry: StorageReclaimEntry = {
         roomId: '',
         path,
@@ -738,6 +746,8 @@ export async function reclaimWholeStorageObject(
       console.warn(`[helper] storage object retained ${path}:`, error);
     }
   }
+  if (!options.dryRun && files > 0)
+    console.log(`[helper] storage cleared ${root}; deleted ${files} files; freed ${bytes} bytes`);
   return entries;
 }
 

@@ -284,13 +284,15 @@ export async function removeArchivedCornerData(
       // to walk into an unrelated mounted filesystem.
       if (await hasMount(path)) throw new Error(`archived thread mount still present: ${path}`);
       let allocatedBytes = 0,
-        freedBytes = 0;
+        freedBytes = 0,
+        files = 0;
       const tree = await storageTree(path, options.progress).catch(() => undefined);
       const seen = new Map<
         string,
         { bytes: number; links: number; count: number; directory: boolean }
       >();
       for (const item of tree?.values() ?? []) {
+        if (!item.directory) files++;
         const key = `${item.dev}:${item.ino}`;
         const inode = seen.get(key) ?? {
           bytes: item.blocks,
@@ -310,6 +312,8 @@ export async function removeArchivedCornerData(
         for (const layer of await readdir(layers).catch(() => []))
           await openDependencyLayer(resolve(layers, layer));
         await rm(path, { recursive: true, force: true });
+        if (files > 0)
+          console.log(`[helper] storage cleared ${path}; deleted ${files} files; freed ${freedBytes} bytes`);
       }
       const entry: StorageReclaimEntry = {
         roomId: cornerId,

@@ -75,9 +75,7 @@ export class PlaceStorage {
     for (const owner of [...owners, { workspaceId, roomId: cornerId, kind: 'corners', itemId: cornerId } as StorageOwner]) {
       const ended: StorageOwner = { ...owner, archived: true, ended: true, endedAt: owner.endedAt ?? Date.now() };
       await rememberStorageOwner(supervisorRoot, ended);
-      await reclaimOwnedCheckout(supervisorRoot, ended, { ...operation,
-        log: entry => console.log(`[body] archived thread ${entry.roomId} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
-      });
+      await reclaimOwnedCheckout(supervisorRoot, ended, operation);
     }
     await this.reclaim([{ roomId: cornerId, archived: true }], operation);
   }
@@ -99,7 +97,7 @@ export class PlaceStorage {
     return readStorageOwners(supervisorRoot).then(owners => reclaimHelperStorage({
       ...operation, runtimeDir,
       removeArchived: roomId => removeArchivedCornerData(supervisorRoot, roomId, resolve(supervisorRoot, 'beeline/corners', roomId), {
-        ...operation, runtimeDir, log: entry => console.log(`[body] archived private storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
+        ...operation, runtimeDir,
       }),
       readStates: async () => states,
       relatedRoots: roomId => [resolve(supervisorRoot, 'beeline/corners', roomId),
@@ -109,7 +107,6 @@ export class PlaceStorage {
         await task();
         return true;
       },
-      log: entry => console.log(`[body] private storage: chat ${entry.roomId} ${entry.kind} deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
     }));
   }
 
@@ -118,9 +115,7 @@ export class PlaceStorage {
     for (const owner of await discoverLegacyStorageOwners(supervisorRoot, workspaceId, states, async () => undefined))
       await rememberStorageOwner(supervisorRoot, owner);
     await this.reclaim(states, operation);
-    await pruneOpenCheckoutObjects(supervisorRoot, states, { ...operation,
-      log: entry => console.log(`[body] open checkout storage deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
-    });
+    await pruneOpenCheckoutObjects(supervisorRoot, states, operation);
     const archived = new Set(states.filter(state => state.archived).map(state => state.roomId));
     for (const owner of await readStorageOwners(supervisorRoot)) {
       if (!archived.has(owner.roomId) || owner.agentId && owner.agentId !== agentId || this.options.live(owner.roomId)) continue;
@@ -129,7 +124,6 @@ export class PlaceStorage {
       await rememberStorageOwner(supervisorRoot, ended);
       await reclaimOwnedCheckout(supervisorRoot, ended, { ...operation,
         landedHeadSha: state.landedHeadSha,
-        log: entry => console.log(`[body] chat ${owner.roomId} checkout deleted ${entry.path}; freed ${entry.freedBytes} bytes`),
       });
     }
   }

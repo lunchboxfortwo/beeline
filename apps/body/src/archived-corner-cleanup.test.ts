@@ -48,7 +48,12 @@ it('reports an unreadable archived proof once, without scheduling cleanup retrie
   // A fresh trigger can clean up after the proof owner repairs access.
   await chmod(work, 0o700);
   unreadable.pop();
-  expect(await removeArchivedCornerData(root, 'closed', checkout)).toHaveLength(1);
+  const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  const entries = await removeArchivedCornerData(root, 'closed', checkout);
+  expect(entries).toHaveLength(1);
+  expect(log.mock.calls.filter(([line]) => line.startsWith('[helper] storage cleared '))).toEqual([
+    [`[helper] storage cleared ${checkout}; deleted 1 files; freed ${entries[0]!.freedBytes} bytes`],
+  ]);
   expect(removal).toHaveBeenCalledTimes(2);
   expect(warn).toHaveBeenCalledOnce();
 });
