@@ -802,6 +802,7 @@
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
           "paused_at": "Preserves explicit suspension managed by agent-wake-pause.ts so schedule admission stops without deleting its cadence or prompt.",
+          "lock_retry_revision": "Records the schedule revision that already used its one retry after a lock timeout in agent-schedules.ts, so the retry stays bounded across restarts and edits.",
           "id": "existing before the registry; weekly audit reviews",
           "workspace_id": "existing before the registry; weekly audit reviews",
           "room_id": "existing before the registry; weekly audit reviews",
