@@ -1,3 +1,5 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
+import { useReaderZone } from '@/buzz/report-time';
 import React, { useEffect, useRef } from 'react';
 import { Card, Image, XStack, YStack } from 'tamagui';
 import { CornerUpLeft, FileText } from 'lucide-react-native';
@@ -115,11 +117,12 @@ export function ComposerAdjuncts({ testID, children }: { testID: string; childre
 }
 
 export function ComposerReply({ handle, preview, onCancel }: { handle: string; preview: string; onCancel?: () => void }) {
+    const zone = useReaderZone();
     return (
         <XStack gap="2" alignItems="center" paddingLeft="2" borderBottomWidth={1} borderColor="stroke" testID="reply-composer-banner">
             <Glyph icon={CornerUpLeft} size={16} />
             <T flex={1} minWidth={0} v="meta" color="secondary" numberOfLines={1}>
-                <T v="metaStrong" color="needsYou">@{handle}</T> {preview}
+                <T v="metaStrong" color="needsYou">@{handle}</T> {localizeReportTimes(preview, zone)}
             </T>
             <CloseButton accessibilityLabel="Cancel reply" onPress={onCancel} testID="reply-composer-cancel" />
         </XStack>

@@ -1,3 +1,4 @@
+import { namedTimeZone } from '@beeline/api-contract/report-time';
 import { closeAgentAsk } from '../agent-open-asks.js';
 import { requestPersonalGitHubCatalog } from '../github-account-catalog.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
@@ -477,6 +478,16 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
           input as Input<'updateRoomPushState'>,
           viewerId,
         )) as Output<Name>;
+      case 'updateIdentityTimeZone': {
+        const { timeZone, seed } = input as Input<'updateIdentityTimeZone'>;
+        const zone = namedTimeZone(timeZone);
+        if (!zone) throw new Error('Invalid time zone');
+        await ctx.database.query(
+          `UPDATE identities SET time_zone=$2,updated_at=now()
+           WHERE id=$1 AND kind='human' AND (NOT $3::boolean OR time_zone IS NULL)`,
+          [viewerId, zone, seed === true]);
+        return await phoneManagedIdentity(ctx, viewerId) as Output<Name>;
+      }
       case 'updateIdentitySpeakingSpeed': {
         const { speakingSpeed } = input as Input<'updateIdentitySpeakingSpeed'>;
         if (![1.15, 1.3, 1.5].includes(speakingSpeed)) throw new Error('invalid speaking speed');

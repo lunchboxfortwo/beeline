@@ -1,3 +1,5 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
+import { useReaderZone } from '@/buzz/report-time';
 import { useArtifactRowVisible } from '@/buzz/artifact-viewport';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LedgerUntaggedHint } from '@/components/buzz/Ledger';
@@ -82,6 +84,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
   announcementFeed = false,
   desktopLayout = false,
 }: OrdinaryLedgerMessageProps) {
+  const zone = useReaderZone();
   const liveDraftDrainStore = React.useContext(RoomPresentationContext);
   const artifactVisible = useArtifactRowVisible(message.id, Boolean(message.attachments?.some(attachment => !attachment.expired)));
   const replyAvailable = canBeginReply(message, codeRoomId ?? message.reference?.channelId ?? '');
@@ -305,7 +308,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       testID={`reply-reference-${message.id}`}
     >
       ↳ {referencedTarget?.authorName ?? 'ORIGINAL MESSAGE'} ·{' '}
-      {referencedTarget?.preview ?? 'Message not loaded'}
+      {referencedTarget ? localizeReportTimes(referencedTarget.preview, zone) : 'Message not loaded'}
     </TranscriptReference>
   ) : null;
   // An ask keeps its stored card shape; only the transcript reads it as prose.

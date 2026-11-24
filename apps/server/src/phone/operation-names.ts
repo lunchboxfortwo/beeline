@@ -110,6 +110,7 @@ export const PHONE_OPERATION_NAMES = new Set<keyof PhoneOperationMap>([
   'updatePersonProfile',
   'updateIdentityFace',
   'updateRoomPushState',
+  'updateIdentityTimeZone',
   'updateIdentitySpeakingSpeed',
   'updateIdentityPushLevel',
   'actOnRepositoryCard',

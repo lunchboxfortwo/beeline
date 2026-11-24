@@ -13,11 +13,15 @@ import { VoiceRoomRuntime, confirmedVoiceSpeech, voicePlaybackEcho, DeliveredVoi
     const version = ctx.inputVersions.get(human);
     const refresh = Symbol();
     ctx.speedRefreshes.set(human, refresh);
+    ctx.readerZones.delete(human);
     ctx.speakingSpeeds.delete(human);
     try {
-      const row = (await ctx.service.db.query<{ speaking_speed: number }>(
-        `SELECT speaking_speed FROM identities WHERE id=$1`, [human])).rows[0];
-      if (ctx.inputs.has(human) && ctx.inputVersions.get(human) === version && ctx.speedRefreshes.get(human) === refresh) ctx.speakingSpeeds.set(human, row?.speaking_speed ?? 1.15);
+      const row = (await ctx.service.db.query<{ speaking_speed: number; time_zone: string | null }>(
+        `SELECT speaking_speed,time_zone FROM identities WHERE id=$1`, [human])).rows[0];
+      if (ctx.inputs.has(human) && ctx.inputVersions.get(human) === version && ctx.speedRefreshes.get(human) === refresh) {
+        ctx.speakingSpeeds.set(human, row?.speaking_speed ?? 1.15);
+        ctx.readerZones.set(human, row?.time_zone ?? 'UTC');
+      }
     } catch { /* Optional preference reads never block a call. */ }
   }
 
@@ -100,6 +104,7 @@ import { VoiceRoomRuntime, confirmedVoiceSpeech, voicePlaybackEcho, DeliveredVoi
     ctx.inputSpeech.delete(human);
     ctx.externalContacts.delete(human);
     ctx.awaitingAnswer.delete(human);
+    ctx.readerZones.delete(human);
     ctx.speakingSpeeds.delete(human);
     ctx.speedRefreshes.delete(human);
     const input = ctx.inputs.get(human);

@@ -31,7 +31,7 @@ import { VoiceRoomRuntime } from './voice-room-runtime.js';
 import { modelText,personText } from './message-origin.js';
 
 export type VoiceConfig = { url: string; apiKey: string; apiSecret: string; brain: VoiceBrain;
-  speech: VoiceSpeech; stt: VoiceSttFactory; searchWeb?: (query: string, signal: AbortSignal, currentTime?: number) => Promise<string>; budgetLimitMs?: number; objects?: ObjectService; publicOrigin?: string };
+  speech: VoiceSpeech; stt: VoiceSttFactory; searchWeb?: (query: string, signal: AbortSignal, currentTime?: number, timeZone?: string) => Promise<string>; budgetLimitMs?: number; objects?: ObjectService; publicOrigin?: string };
 type CallRow = { id: string; room_id: string; message_id: string; started_at: Date; ended_at: Date | null; end_reason?: string | null };
 
 /** The DB owns membership/session facts. LiveKit transports audio, never authority. */
@@ -490,16 +490,16 @@ export class VoiceService {
       }));
     }
     if (!this.config.searchWeb) throw new Error('Voice web search is unavailable');
-    return this.config.searchWeb(request.query, signal, request.currentTime);
+    return this.config.searchWeb(request.query, signal, request.currentTime, request.timeZone);
   }
 
   async dispatch(callId: string, sourceId: string, agentId: string) {
     await this.db.transaction(async db => {
-      const row = (await db.query<{ room_id: string; author_id: string; text: string }>(
-        'SELECT room_id,author_id,text FROM messages WHERE id=$1', [sourceId])).rows[0];
+      const row = (await db.query<{ room_id: string; author_id: string; text: string; time_zone: string | null }>(
+        'SELECT m.room_id,m.author_id,m.text,i.time_zone FROM messages m JOIN identities i ON i.id=m.author_id WHERE m.id=$1', [sourceId])).rows[0];
       if (!row) throw new Error('Voice request is no longer available');
       await queueMessage(db,{roomId:row.room_id,agentId,sourceMessageId:sourceId,reason:'voice_order',
-        wakeNote:`This input came from a live voice call. ${voiceDateContext(Date.now())} Answer it as a short continuation of the conversation. Never start your reply with your name.`});
+        wakeNote:`This input came from a live voice call. ${voiceDateContext(Date.now(), row.time_zone ?? 'UTC')} Answer it as a short continuation of the conversation. Never start your reply with your name.`});
       await db.query(`INSERT INTO voice_orders(source_message_id,call_id,agent_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
         [sourceId, callId, agentId]);
     });

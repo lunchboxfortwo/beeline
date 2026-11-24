@@ -1,3 +1,5 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
+import { useReaderZone } from '@/buzz/report-time';
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { Platform, type StyleProp, type TextStyle } from 'react-native';
 import { XStack, YStack } from 'tamagui';
@@ -472,7 +474,8 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
   tail,
   testID,
 }: MonoMarkdownProps) {
-  const blocks = useMemo(() => parseMarkdown(markdown, document), [markdown, document]);
+  const zone = useReaderZone();
+  const blocks = useMemo(() => parseMarkdown(document ? markdown : localizeReportTimes(markdown, zone), document), [markdown, document, zone]);
   // Android starts native text selection under a long-pressed link as well as
   // the link's preview. The row's long press already owns selection there
   // (the message menu's Select), so prose holding a link is not selectable.

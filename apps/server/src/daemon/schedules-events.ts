@@ -52,15 +52,15 @@ import { daemonWriteResult } from './corner-messages.js';
       input.workflowName,
     );
     const scheduleId = randomUUID();
-    const nextRunAt = nextScheduleOccurrence(input.cadence, new Date());
+
     // The person whose message led to this schedule owns the workflow runs it
     // starts; never the hidden scheduler that posts an agent's own schedule.
     const requestId = (input as { requestId?: unknown }).requestId;
-    const ownerId =
+    const owner =
       typeof requestId === 'string'
         ? (
-            await db.query<{ author_id: string }>(
-              `SELECT root.author_id FROM agent_commands command
+            await db.query<{ author_id: string; time_zone: string | null }>(
+              `SELECT root.author_id,person.time_zone FROM agent_commands command
                JOIN messages root ON root.id=command.root_source_message_id
                JOIN identities person ON person.id=root.author_id AND person.kind='human'
                  AND NOT COALESCE(person.hidden_from_roster,false)
@@ -68,8 +68,13 @@ import { daemonWriteResult } from './corner-messages.js';
                ORDER BY command.created_at DESC LIMIT 1`,
               [input.roomId, agentId, requestId],
             )
-          ).rows[0]?.author_id
+          ).rows[0]
         : undefined;
+    const ownerId = owner?.author_id;
+    const cadence = process.env.BEELINE_LOCAL_SCHEDULE_ZONE === '1' &&
+      input.cadence.kind === 'cron' && !input.cadence.timeZone && owner?.time_zone
+      ? { ...input.cadence, timeZone: owner.time_zone } : input.cadence;
+    const nextRunAt = nextScheduleOccurrence(cadence, new Date());
     await db.query(
       `INSERT INTO agent_schedules(
          id,workspace_id,room_id,agent_id,creator_id,cadence,message,max_runs,next_run_at,workflow_slug,owner_id,title
@@ -79,7 +84,7 @@ import { daemonWriteResult } from './corner-messages.js';
         room.rows[0].workspace_id,
         input.roomId,
         agentId,
-        JSON.stringify(input.cadence),
+        JSON.stringify(cadence),
         input.prompt.trim(),
         input.maxRuns ?? null,
         nextRunAt,

@@ -1,3 +1,4 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
 import { commandGrantAction } from '@beeline/api-contract/agent-grants';
 import { messageColumns } from './message-columns.js';
 import { captureServerError } from './sentry.js';
@@ -279,6 +280,8 @@ export class PushDeliveryLoop {
       text: string;
       token: string;
       identity_id: string;
+      time_zone: string | null;
+      prefix_author: boolean;
       platform: 'android' | 'ios' | 'web';
       action: 'grant' | 'reply' | null;
       grant_id: string | null;
@@ -351,12 +354,9 @@ export class PushDeliveryLoop {
           CASE WHEN room.parent_id IS NOT NULL THEN room.id::text END corner_id,
           'message' target,
           'message' notification_type,
-          CASE
-            -- System/card text already came from the one lifecycle grammar.
-            WHEN m.presentation IN ('system','card') THEN btrim(m.text)
-            ELSE concat_ws(': ',COALESCE(NULLIF(author.name,''),'Someone'),btrim(m.text))
-          END text,
-          m.push_token token,m.push_identity_id identity_id,m.created_at,
+          m.text,
+          m.presentation NOT IN ('system','card') AS prefix_author,
+          m.push_token token,m.push_identity_id identity_id,recipient.time_zone,m.created_at,
           -- Inline notification actions. A grant card answers from the
           -- notification only while it asks exactly one thing that is still
           -- pending, since three buttons cannot answer two asks. A reply is offered
@@ -420,7 +420,7 @@ export class PushDeliveryLoop {
           notification.room_id::text room_id,
           notification.room_id::text channel_id,NULL::text corner_id,'message' target,
           'workspace-join' notification_type,
-          btrim(notification.text) text,device.device_token token,push_device.identity_id,
+          btrim(notification.text) text,false prefix_author,device.device_token token,push_device.identity_id,recipient.time_zone,
           notification.created_at,
           NULL::text action,NULL::text grant_id,NULL::text grant_kind,NULL::text grant_target,NULL::jsonb grant_detail,
           NULL::text grant_agent_name,NULL::text author_name,NULL::text collapse_id,
@@ -444,7 +444,7 @@ export class PushDeliveryLoop {
           candidate.message_id,candidate.workspace_id,candidate.room_id,candidate.channel_id,
           candidate.corner_id,candidate.target,
           candidate.notification_type,candidate.text,candidate.token,candidate.identity_id,
-          candidate.created_at,device.platform,
+          candidate.prefix_author,candidate.time_zone,candidate.created_at,device.platform,
           candidate.action,candidate.grant_id,candidate.grant_kind,candidate.grant_target,candidate.grant_detail,
           candidate.grant_agent_name,candidate.author_name,candidate.collapse_id,
           candidate.direct_attention,candidate.room_name,candidate.corner_name,candidate.dm_peer
@@ -457,7 +457,7 @@ export class PushDeliveryLoop {
         ORDER BY candidate.message_id,candidate.token
       )
       SELECT message_id,workspace_id,room_id,channel_id,corner_id,target,
-        notification_type,text,token,identity_id,platform,
+        notification_type,text,token,identity_id,platform,time_zone,prefix_author,
         action,grant_id,grant_kind,grant_target,grant_detail,grant_agent_name,author_name,collapse_id,
         direct_attention,room_name,corner_name,dm_peer
       FROM unclaimed ORDER BY created_at,message_id
@@ -586,7 +586,8 @@ export class PushDeliveryLoop {
                 type: 'message' as const,
                 text: candidate.grant_kind === 'command'
                   ? `${candidate.grant_agent_name ?? candidate.author_name ?? 'An agent'} wants to ${commandGrantAction(candidate.grant_detail ?? {})}`
-                  : candidate.text,
+                  : (candidate.prefix_author ? `${candidate.author_name}: ` : '') +
+                    localizeReportTimes(candidate.text, candidate.time_zone ?? 'UTC').trim(),
                 ...(candidate.collapse_id ? { collapseId: candidate.collapse_id } : {}),
                 ...pushTitleFor(
                   candidate.room_name,

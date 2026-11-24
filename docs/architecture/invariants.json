@@ -1471,6 +1471,7 @@
           "updated_at": "existing before the registry; weekly audit reviews",
           "face_id": "existing before the registry; weekly audit reviews",
           "welcome_cards_due": "existing before the registry; weekly audit reviews",
+          "time_zone": "The reader’s chosen IANA zone follows their account across devices and can differ from every device setting.",
           "speaking_speed": "existing before the registry; weekly audit reviews",
           "workspace_handle_base": "Preferred first workspace address for newly created agents; null preserves legacy handles."
         }

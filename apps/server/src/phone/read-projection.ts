@@ -411,10 +411,15 @@ function projectedReplyPreview(
   publicOrigin: string,
 ): RoomViewMessage['replyPreview'] | undefined {
   if (!preview) return undefined;
-  const line = preview.text.split('\n').map((part) => part.trim()).find(Boolean);
-  const text = line ?? preview.attachment_name?.trim();
+  const line = preview.text.split('\n').find((part) => part.trim());
+  const text = line?.trim() ?? preview.attachment_name?.trim();
   if (!text) return undefined;
-  return { author: identity(preview, publicOrigin), text: text.slice(0, REPLY_PREVIEW_LIMIT) };
+  return {
+    author: identity(preview, publicOrigin),
+    text: text.slice(0, REPLY_PREVIEW_LIMIT),
+    ...(line && line !== text.slice(0, REPLY_PREVIEW_LIMIT) && /T\d{2}:\d{2}:\d{2}/.test(line)
+      ? { sourceLine: line } : {}),
+  };
 }
 
 

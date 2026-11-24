@@ -278,6 +278,7 @@ export type RoomViewMessage = {
    * only when the original is in the same Room and not deleted.
    */
   readonly replyPreview?: {
+    readonly sourceLine?: string;
     readonly author: RoomViewIdentity;
     readonly text: string;
   };
