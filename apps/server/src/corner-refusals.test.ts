@@ -96,8 +96,8 @@ it('Reproduction OPEN-1 / SENTRY-D: agent-message opening succeeds without Sentr
 });
 
 it.each([
-  ['listAppTools', { roomId: parent, appId: '44444444-4444-4444-8444-444444444444' }, 503, 'Connected app is unavailable in this chat'],
-  ['createCorner', { roomId: parent, name: 'missing-implementer', objective: 'Prove refusal', implementer: 'absent', brief: { spec: 'Prove refusal' } }, 503, 'implementer must be a current member of the parent chat'],
+  ['listAppTools', { roomId: parent, appId: '44444444-4444-4444-8444-444444444444' }, 400, 'Connected app is unavailable in this chat'],
+  ['createCorner', { roomId: parent, name: 'missing-implementer', objective: 'Prove refusal', implementer: 'absent', brief: { spec: 'Prove refusal' } }, 400, 'implementer must be a current member of the parent chat'],
 ])('Reproduction SENTRY-REMAINING: %s preserves caller message without capture', async (operation, input, status, message) => {
   const source = operation === 'listAppTools' ? '3'.repeat(64) : '4'.repeat(64);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'Prove refusal')`, [source, parent, owner]);

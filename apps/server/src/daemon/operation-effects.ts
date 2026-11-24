@@ -32,7 +32,7 @@ import { daemonAgentWorkbench, daemonOfferContext } from './workbench.js';
 
 export async function getInstitutionalContextOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('institutional context requires an active command');
+          throw new CommandRefusalError('institutional context requires an active command', 409);
         }
         if (!ctx.institutionalMemoryShadow.live) {
           return {
@@ -117,7 +117,7 @@ export async function searchInstitutionalHistoryOperation<Name extends keyof Dae
 
 export async function loadWorkspaceSkillOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
 if (!ctx.commandTransaction || !ctx.authorizedCommand) {
-          throw new Error('workspace skill load requires an active command');
+          throw new CommandRefusalError('workspace skill load requires an active command', 409);
         }
         if (!ctx.institutionalMemoryShadow.live && !isBeelineGuideName((input as Input<'loadWorkspaceSkill'>).slug.trim())) {
           throw new Error('institutional memory is disabled');

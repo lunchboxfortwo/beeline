@@ -1,3 +1,4 @@
+import { CommandRefusalError } from '../command-refusal.js';
 import { sanitizeTurnReplay } from '@beeline/api-contract/daemon';
 import { answerQueuedMessage,queueMessage,turnRootMessageSql } from '../agent-command.js';
 import { cornerRequestSql } from '../corner-opening.js';
@@ -86,6 +87,8 @@ import { modelText } from '../message-origin.js';
     agentId: string,
   ) {
     await daemonAccess(ctx, input.roomId, agentId);
+    if (typeof input.turnId !== 'string' || !input.turnId.trim())
+      throw new CommandRefusalError('turnId is required', 400);
     const written = await ctx.database.query(
       `INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body)
        SELECT room.id,$2,$3,$4,$5::jsonb FROM rooms room

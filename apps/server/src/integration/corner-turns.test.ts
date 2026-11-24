@@ -764,7 +764,7 @@ const fixture = monolithFixture();
       roomId: cornerId,
       visibility: 'invite-only',
     });
-    expect(visibility.status).toBe(503);
+    expect(visibility.status).toBe(500);
     expect(await visibility.json()).toEqual({ error: 'room lifecycle cannot target a corner' });
   });
 

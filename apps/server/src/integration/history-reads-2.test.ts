@@ -325,7 +325,7 @@ const fixture = monolithFixture();
           },
         })
       ).status,
-    ).toBe(503);
+    ).toBe(500);
     expect(
       (
         await fixture.daemonOperation('postAgentAttachment', {
@@ -333,7 +333,7 @@ const fixture = monolithFixture();
           attachment: { ...attachment, url: 'https://elsewhere.example/file.txt' },
         })
       ).status,
-    ).toBe(503);
+    ).toBe(500);
 
     // Queue then drain onto the agent's final reply.
     expect(

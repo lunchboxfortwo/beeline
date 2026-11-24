@@ -702,7 +702,7 @@ const fixture = monolithFixture();
       FOR EACH ROW EXECUTE FUNCTION fail_member_left_insert()
     `);
     const failedLeave = await fixture.operation('leaveRoom', { roomId: failedRoom.id }, aliceToken);
-    expect(failedLeave.status).toBe(503);
+    expect(failedLeave.status).toBe(500);
     expect(await failedLeave.json()).toEqual({ error: 'forced member-left failure' });
     await fixture.database.query(`
       DROP TRIGGER fail_member_left_insert ON messages;

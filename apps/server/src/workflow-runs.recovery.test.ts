@@ -718,7 +718,7 @@ describe('Reproduction 8: recoverable workflow visits', () => {
       : (await createAgentCommand(database, { roomId: corner, agentId: APPROVER,
           sourceMessageId: source ?? await rootMessage(WORKER_A), reason: 'test' }))!;
     await expect(handoff(database, await gateCommand(),
-      { runId, outcome: 'publish', contents: {} })).rejects.toThrow('a person answers');
+      { runId, outcome: 'publish', contents: {} })).rejects.toMatchObject({status:409, message:expect.stringContaining('a person answers')});
     await expect((async()=>handoff(database,await gateCommand(await rootMessage(OUTSIDER)),
       {runId,outcome:'publish',contents:{}}))()).rejects.toThrow(/room access denied|address requires current membership/);
     const answer = await rootMessage(OWNER, 'publish for this exact run');

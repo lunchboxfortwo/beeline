@@ -270,6 +270,10 @@ function customOAuthConfig(items: readonly Json[], toolkit: string): Json | unde
   ).sort((a, b) => created(b) - created(a) || String(a.id).localeCompare(String(b.id)))[0];
 }
 
+export class ComposioRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 export class ComposioApps {
   /** Public service metadata only, loaded for the server's discovery index. */
   async catalog(): Promise<readonly { slug: string; name: string; description?: string; appUrl?: string }[]> {
@@ -351,7 +355,11 @@ export class ComposioApps {
         ...(data ? { 'content-type': 'application/json' } : {}),
       },
       ...(data ? { body: JSON.stringify(data) } : {}),
-
+    }).catch((error: unknown) => {
+      if (error instanceof ExpectedRefusalError) throw error;
+      const status = error instanceof Error && 'status' in error && typeof error.status === 'number'
+        ? error.status : 503;
+      throw new ComposioRequestError(error instanceof Error ? error.message : 'App provider connection failed', status);
     });
     if (!response.ok) {
       const body = await readBoundedBody(response);
@@ -364,11 +372,10 @@ export class ComposioApps {
         if (body.trim()) detail = boundedDetail(body.trim());
       }
       detail = detail?.replaceAll(this.apiKey, '[redacted]');
-      const error = new Error(detail
+      const error = new ComposioRequestError(detail
         ? `App provider request failed (${response.status}): ${detail}`
-        : `App provider request failed (${response.status})`);
+        : `App provider request failed (${response.status})`, response.status);
       checkProviderRequestFailure(path, payload, error.message);
-      Object.assign(error, { status: response.status });
       throw error;
     }
     if (method === 'DELETE') return {};
@@ -631,7 +638,7 @@ export class ComposioApps {
       method: 'PUT', headers: { 'content-type': mimetype }, body: bytes,
 
     }).catch(() => undefined);
-    if (!uploaded?.ok) throw new Error('App file upload failed');
+    if (!uploaded?.ok) throw new ComposioRequestError('App file upload failed', uploaded?.status ?? 503);
     return { name: file.name, mimetype, s3key };
   }
 
@@ -649,6 +656,7 @@ export class ComposioApps {
         const message = conceal(error.message) as string;
         const concealed = (error as Error & { status?: unknown }).status === 404
           ? new CommandRefusalError(message, 404)
+          : error instanceof ComposioRequestError ? new ComposioRequestError(message, error.status)
           : error instanceof YouTubeUploadRefusal ? new YouTubeUploadRefusal(message)
           : error instanceof CommandRefusalError
           ? new CommandRefusalError(message, error.status)

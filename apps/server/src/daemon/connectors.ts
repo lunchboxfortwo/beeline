@@ -1,3 +1,4 @@
+import { CommandRefusalError } from '../command-refusal.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { providerWebhookAssignments } from '../provider-webhooks.js';
 import { settleFirstPartySignIn } from '../first-party-integrations.js';
@@ -610,6 +611,8 @@ import { Output, id, Input, registrySubject } from './values.js';
     input: Input<'getConnectionDetail'>,
     agentId: string,
   ): Promise<Output<'getConnectionDetail'>> {
+    if (typeof input.ref !== 'string' || !input.ref.trim())
+      throw new CommandRefusalError('connection reference is required', 400);
     const row = (
       await ctx.database.query<{
         id: string;
@@ -633,7 +636,7 @@ import { Output, id, Input, registrySubject } from './values.js';
         [agentId, input.ref],
       )
     ).rows[0];
-    if (!row) throw new Error(`unknown connection reference ${input.ref}`);
+    if (!row) throw new CommandRefusalError(`unknown connection reference ${input.ref}`, 404);
     if (isMetadataStale(row.last_synced_at)) {
       if (squireMachineId(row.connector_id)) {
         await ctx.database.transaction((db) => queueSquireWork(db, agentId, { op: 'sync' }));

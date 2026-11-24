@@ -74,7 +74,8 @@ export function phoneSocketRequests(
         const code = typeof explicitCode === 'string' && /^[a-z][a-z0-9_-]*$/.test(explicitCode) ? explicitCode
           : status === 400 ? 'invalid_args' : status === 401 ? 'unauthorized'
           : status === 403 ? 'access_denied' : status === 404 ? 'not_found'
-          : status === 409 ? 'conflict' : status === 429 ? 'too_many_requests' : 'unavailable';
+          : status === 409 ? 'conflict' : status === 429 ? 'too_many_requests'
+          : status === 500 ? 'internal_error' : 'unavailable';
         fail(id, code, message, status === 429 || status >= 500);
       }).finally(() => active.delete(controller));
     return true;

@@ -1,16 +1,25 @@
+import { isTransientDatabaseConnectionError } from './database.js';
+import { ComposioRequestError } from './composio-apps.js';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { PhoneOperationError } from "./phone-operations.js";
 import { WorkflowAuthorizationError } from "./workflow-admin.js";
-import { CommandRefusalError } from "./commander.js";
+import { CommandRefusalError, ExpectedRefusalError } from "./command-refusal.js";
 import { WorkspaceSkillNotFoundError } from "./institutional-skills.js";
 import { institutionalMemoryErrorStatus } from "./institutional-memory-shadow.js";
 import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE, SPENDING_OWNER_AUTHORITY_MESSAGE, YOLO_AUTHORITY_MESSAGE, CONNECTOR_OFFER_AUTHORITY_MESSAGE, CONNECTOR_OFFER_WALLET_AUTHORITY_MESSAGE } from "./phone-service.js";
 import { GitHubHttpError, ProductionReleaseBusyError } from "@beeline/auth/github";
 import { GitHubSignInError } from "./auth.js";
 
-
-
-
+function fallbackStatus(error: unknown, message: string): number {
+  if (error instanceof ExpectedRefusalError) return 400;
+  if (isTransientDatabaseConnectionError(error)) return 503;
+  if (error instanceof Error && 'code' in error &&
+      (error.code === 'ECONNREFUSED' || error.code === '57P02')) return 503;
+  if (error instanceof ComposioRequestError && error.status >= 500) return 503;
+  if (message === 'Cannot use a pool after calling end on the pool' ||
+      message === 'database unavailable' || message === 'Beeline Sentry Telegram delivery failed') return 503;
+  return 500;
+}
 
 export function requestErrorStatus(error: unknown): number {
   if (error instanceof GitHubSignInError) return 401;
@@ -52,7 +61,7 @@ export function requestErrorStatus(error: unknown): number {
             ? 403
             : message.includes('not found')
               ? 404
-              : 503);
+              : fallbackStatus(error, message));
   // GitHub's own outage or rate limit is a bad gateway, not this server
   // being unavailable; the message already names GitHub's status.
   if (error instanceof GitHubHttpError && (error.status >= 500 || error.status === 429 || error.rateLimited)) {

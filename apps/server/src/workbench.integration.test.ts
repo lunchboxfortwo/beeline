@@ -563,7 +563,7 @@ const scope1 = fixtureScope1();
           helperAgentId: HELPER,
         })
       ).status,
-    ).toBe(503);
+    ).toBe(500);
     expect(
       (
         await scope1.operation('pairConnector', {
@@ -572,7 +572,7 @@ const scope1 = fixtureScope1();
           helperAgentId: 'd'.repeat(64),
         })
       ).status,
-    ).toBe(503);
+    ).toBe(500);
   });
 
 

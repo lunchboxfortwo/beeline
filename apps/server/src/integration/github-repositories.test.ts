@@ -295,7 +295,7 @@ const fixture = monolithFixture();
     expect(outage.status).toBe(502);
     expect(await outage.json()).toEqual({ error: 'GitHub installation token failed: HTTP 500' });
     fixture.roomTokenFailure = new GitHubHttpError('GitHub installation token', 422);
-    expect((await fixture.request(`/v1/phone/github/room-token/${ROOM}`)).status).toBe(503);
+    expect((await fixture.request(`/v1/phone/github/room-token/${ROOM}`)).status).toBe(500);
     fixture.roomTokenFailure = undefined;
     const payload = Buffer.from(JSON.stringify({ action: 'opened' }));
     const signature = `sha256=${createHmac('sha256', 'webhook-secret').update(payload).digest('hex')}`;
@@ -311,7 +311,7 @@ const fixture = monolithFixture();
         body: payload,
       });
     fixture.processWebhook.mockRejectedValueOnce(new Error('transient webhook failure'));
-    expect((await send()).status).toBe(503);
+    expect((await send()).status).toBe(500);
     expect(
       (
         await fixture.database.query(`SELECT 1 FROM github_webhook_deliveries WHERE delivery_id=$1`, [
