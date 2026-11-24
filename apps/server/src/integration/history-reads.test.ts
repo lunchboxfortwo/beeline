@@ -356,6 +356,29 @@ const fixture = monolithFixture();
   });
 
 
+  it('reopens a schedule event listed in a child transcript from the parent Room', async () => {
+    const cornerId = '22222222-2222-4222-8222-222222222228';
+    const messageId = createHash('sha256').update('listed-schedule-event').digest('hex');
+    const body = 'Scheduler ran the saved check';
+    await fixture.database.query(
+      `INSERT INTO rooms(id,workspace_id,parent_id,name) VALUES($1,$2,$3,'Scheduled thread')`,
+      [cornerId, WORKSPACE, ROOM],
+    );
+    await fixture.database.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)
+       VALUES($1,$2,$3,$4,'system','{"kind":"schedule-ran"}')`,
+      [messageId, cornerId, HUMAN, body],
+    );
+    const list = await fixture.daemonOperation('getRoomConversation', { roomId: cornerId });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject({ items: [expect.objectContaining({ id: messageId })] });
+    for (const id of [messageId, messageId.slice(0, 25)]) {
+      const read = await fixture.daemonOperation('getRoomMessage', { roomId: ROOM, messageId: id });
+      expect(read.status).toBe(200);
+      expect(await read.json()).toMatchObject({ messageId, body });
+    }
+  });
+
   it('names the stored sha256 of each ready attachment in getRoomMessage', async () => {
     const mediaId = '33333333-3333-4333-8333-333333333331';
     const digest = createHash('sha256').update('screenshot-bytes').digest('hex');
