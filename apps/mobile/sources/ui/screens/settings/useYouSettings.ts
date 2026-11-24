@@ -479,7 +479,7 @@ export function useYouSettings({
       message: manualUpdateMessage(manualUpdate),
       label: manualUpdateButtonLabel(manualUpdate),
       check: () => void checkForUpdate(),
-      version: `${release.releaseVersion ?? 'development'}${release.releaseSha ? ` · ${release.releaseSha.slice(0, 12)}` : ''}`,
+      version: `${release.releaseVersion ?? release.appVersion ?? 'development'}${release.releaseSha ? ` · ${release.releaseSha.slice(0, 12)}` : ''}`,
     },
   };
 }
