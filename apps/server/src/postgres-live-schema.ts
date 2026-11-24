@@ -73,6 +73,13 @@ BEGIN
         'kind', COALESCE(NEW.kind, OLD.kind)
       );
     WHEN 'agent_commands' THEN
+      -- Startup progress refreshes the room. Sending the agent its own progress
+      -- notification would dispatch another machine reconciliation.
+      IF TG_OP='UPDATE' AND NEW.startup_operation_id IS DISTINCT FROM OLD.startup_operation_id THEN
+        PERFORM pg_notify('${POSTGRES_LIVE_CHANNEL}', jsonb_build_object(
+          'table',TG_TABLE_NAME,'operation',TG_OP,'roomId',NEW.room_id)::text);
+        RETURN NEW;
+      END IF;
       -- A command for a corner this agent's helper has never watched carries
       -- its own parent Room and opener, exactly as a membership push does, so
       -- the agent-wide wake can start that corner's intake directly instead

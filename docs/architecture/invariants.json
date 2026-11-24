@@ -631,6 +631,7 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
+          "startup_operation_id": "Records which VM wake announced startup for this command so a failed wake clears only its own progress.",
           "startup_wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
@@ -824,7 +825,7 @@
           },
           "updated_by": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
-          "lock_retry_revision": "Records which schedule revision has already deferred a lock timeout so the retry limit survives a worker restart.",
+          "lock_retry_revision": "Records which schedule revision already received a lock-timeout retry so the limit survives a worker restart.",
           "failed_due_at": "Records the exact failed scheduled occurrence so the same due work cannot retry on a timer.",
           "failed_revision": "Records the exact failed schedule revision; a committed edit or advance permits new work without altering the authorized due time."
         }
