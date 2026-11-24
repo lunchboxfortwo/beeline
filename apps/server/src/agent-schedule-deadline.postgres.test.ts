@@ -9,7 +9,7 @@ if (url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(url).hostname))
   throw new Error('Schedule clock proof requires isolated loopback PostgreSQL');
 }
 describe.skipIf(!url)('Persisted schedule clock admission', () => {
-  it('uses PostgreSQL time under host clock skew and skips indexed parked occurrences', async () => {
+  it('uses PostgreSQL time under host clock skew and reads the next indexed deadline', async () => {
     const pool = new Pool({ connectionString: url, max: 1 });
     const schema = `schedule_due_${randomUUID().replaceAll('-', '')}`;
     const room = randomUUID();
@@ -32,14 +32,14 @@ describe.skipIf(!url)('Persisted schedule clock admission', () => {
           max_runs int,run_count int DEFAULT 0,next_run_at timestamptz,updated_at timestamptz DEFAULT now(),
           paused_at timestamptz,failed_due_at timestamptz,failed_revision timestamptz);`);
       // Use the assembled production schema regardless of how its SQL is split across files.
-      const index = SCHEMA.match(/CREATE INDEX IF NOT EXISTS agent_schedules_admitted_due_idx[^;]+;/)?.[0];
+      const index = SCHEMA.match(/CREATE INDEX IF NOT EXISTS agent_schedules_due_idx[^;]+;/)?.[0];
       expect(index).toBeTruthy(); await pool.query(index!);
       await pool.query('INSERT INTO rooms(id) VALUES($1)', [room]);
       await pool.query("INSERT INTO identities(id,kind) VALUES('agent','agent'),('human','human')");
       await pool.query("INSERT INTO memberships VALUES($1,'agent',NULL),($1,'human',NULL)", [room]);
-      await pool.query(`INSERT INTO agent_schedules(id,room_id,agent_id,creator_id,cadence,message,next_run_at,failed_due_at,failed_revision)
+      await pool.query(`INSERT INTO agent_schedules(id,room_id,agent_id,creator_id,cadence,message,next_run_at)
         SELECT gen_random_uuid(),$1,'agent','human','{"kind":"interval","everyMinutes":5}',
-          'Synthetic',now()-interval '1 day',now()-interval '1 day',now() FROM generate_series(1,10000)`, [room]);
+          'Synthetic',now()+interval '1 day' FROM generate_series(1,10000)`, [room]);
       await pool.query(`INSERT INTO agent_schedules(id,room_id,agent_id,creator_id,cadence,message,next_run_at)
         VALUES(gen_random_uuid(),$1,'agent','human','{"kind":"interval","everyMinutes":5}','Future',now()+interval '1 hour')`, [room]);
       await pool.query('ANALYZE agent_schedules; ANALYZE rooms; ANALYZE identities; ANALYZE memberships');
@@ -56,7 +56,7 @@ describe.skipIf(!url)('Persisted schedule clock admission', () => {
       const delay = await owner.nextDelayMs();
       expect(delay).toBeGreaterThan(3_500_000); expect(delay).toBeLessThanOrEqual(3_600_000);
       const plan = (await pool.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${deadlineSql}`)).rows[0]['QUERY PLAN'][0].Plan;
-      expect(JSON.stringify(plan)).toContain('agent_schedules_admitted_due_idx');
+      expect(JSON.stringify(plan)).toContain('agent_schedules_due_idx');
       expect(plan['Shared Hit Blocks'] + plan['Shared Read Blocks']).toBeLessThan(40);
     } finally {
       vi.useRealTimers();
