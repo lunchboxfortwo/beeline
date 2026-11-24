@@ -167,10 +167,7 @@ async function serveMachineHelper(
         while (!controller.signal.aborted && archiveStoragePending.size) {
           const batch = [...archiveStoragePending.values()];
           archiveStoragePending.clear();
-          await reclaimArchivedMemberStorage(supervisorRoot, batch, {
-            log: usage?.cleanup,
-            summarize: true,
-          });
+          await reclaimArchivedMemberStorage(supervisorRoot, batch, { log: usage?.cleanup });
         }
       } catch (error) {
         console.warn('[helper] archived member cleanup deferred:', error);
@@ -193,7 +190,7 @@ async function serveMachineHelper(
       return;
     diskSweepRunning = true;
     try {
-      const options = storageOperation({ log: usage?.cleanup, summarize: true });
+      const options = storageOperation({ log: usage?.cleanup });
       await pruneStoppedAgentStorage(supervisorRoot, options);
       await pruneEndedOwnerStorage(supervisorRoot, options);
       await pruneDeletedRuntimes(supervisorRoot, now, options);

@@ -36,7 +36,7 @@ it('retains caller supplied active-use evidence across related operations', asyn
   expect(operation.inUse).toBe(inUse);
 });
 
-it('logs one summary for overlapping Room sweeps that remove the same files', async () => {
+it('logs one summary for all files cleared from a Room', async () => {
   const runtimeDir = await fs.mkdtemp(resolve(process.env.XDG_STATE_HOME!, 'reclaim-summary-'));
   try {
     const room = resolve(runtimeDir, 'rooms/room');
@@ -52,30 +52,17 @@ it('logs one summary for overlapping Room sweeps that remove the same files', as
       runtimeDir,
       readStates: async () => [{ roomId: 'room', archived: false }],
       withIdleRoom: async (_, task) => { await task(); return true; },
-      summarize: true,
-    };
-    let arrived = 0;
-    let release!: () => void;
-    const ready = new Promise<void>(resolve => { release = resolve; });
-    const sweep = () => {
-      let checks = 0;
-      return reclaimHelperStorage({ ...options, inUse: async () => {
-        if (++checks === 2) {
-          if (++arrived === 2) release();
-          await ready;
-        }
-        return false;
-      } });
+      inUse: async () => false,
     };
 
-    await reclaimHelperStorage({ ...options, inUse: async () => false, dryRun: true });
+    await reclaimHelperStorage({ ...options, dryRun: true });
     expect(log).not.toHaveBeenCalled();
-    const [entries] = await Promise.all([sweep(), sweep()]);
+    const entries = await reclaimHelperStorage(options);
     const bytes = entries.reduce((total, entry) => total + entry.freedBytes, 0);
     expect(await fs.readdir(room)).toEqual(['recent']);
     expect(log.mock.calls).toEqual([[`[helper] storage cleared ${room}; deleted 2 files; freed ${bytes} bytes`]]);
 
-    await reclaimHelperStorage({ ...options, inUse: async () => false });
+    await reclaimHelperStorage(options);
     expect(log).toHaveBeenCalledOnce();
   } finally {
     await fs.rm(runtimeDir, { recursive: true, force: true });

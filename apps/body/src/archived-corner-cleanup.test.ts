@@ -49,10 +49,10 @@ it('reports an unreadable archived proof once, without scheduling cleanup retrie
   await chmod(work, 0o700);
   unreadable.pop();
   const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-  const entries = await removeArchivedCornerData(root, 'closed', checkout, { summarize: true });
+  const entries = await removeArchivedCornerData(root, 'closed', checkout);
   expect(entries).toHaveLength(1);
   expect(log.mock.calls.filter(([line]) => line.startsWith('[helper] storage cleared '))).toEqual([
-    [`[helper] storage cleared ${checkout}; deleted 1 file; freed ${entries[0]!.freedBytes} bytes`],
+    [`[helper] storage cleared ${checkout}; deleted 1 files; freed ${entries[0]!.freedBytes} bytes`],
   ]);
   expect(removal).toHaveBeenCalledTimes(2);
   expect(warn).toHaveBeenCalledOnce();

@@ -44,22 +44,6 @@ export interface StorageReclaimEntry {
   freedBytes: number;
 }
 
-const activeStorageSummaries = new Map<string, { pending: number; logged: boolean }>();
-
-/** Overlapping host and agent sweeps share one log record for the same root. */
-export function beginStorageSummary(root: string, enabled: boolean | undefined) {
-  if (!enabled) return undefined;
-  const active = activeStorageSummaries.get(root) ?? { pending: 0, logged: false };
-  active.pending++;
-  activeStorageSummaries.set(root, active);
-  return (removed: boolean, files: number, bytes: number) => {
-    if (--active.pending === 0) activeStorageSummaries.delete(root);
-    if (!removed || active.logged) return;
-    active.logged = true;
-    console.log(`[helper] storage cleared ${root}; deleted ${files} ${files === 1 ? 'file' : 'files'}; freed ${bytes} bytes`);
-  };
-}
-
 type Inode = {
   blocks: number;
   links: number;
@@ -470,7 +454,6 @@ export async function reclaimHelperStorage(input: {
   inUse?: (root: string) => Promise<boolean>;
   dryRun?: boolean;
   log?: (entry: StorageReclaimEntry) => void;
-  summarize?: boolean;
   unknown?: (roomId: string, path: string) => void;
   now?: number;
   onError?: (roomId: string, error: unknown) => void;
@@ -497,10 +480,7 @@ export async function reclaimHelperStorage(input: {
       (await Promise.all([root, ...(input.relatedRoots?.(room.name) ?? [])].map(observedUse))).some(
         Boolean,
       );
-    const summarize = beginStorageSummary(root, input.summarize && !input.dryRun);
-    let removed = false;
-    let files = 0;
-    let bytes = 0;
+    let files = 0, bytes = 0;
     await input
       .withIdleRoom(room.name, async () => {
         if (state.archived && input.removeArchived) {
@@ -559,9 +539,8 @@ export async function reclaimHelperStorage(input: {
             const removed = (removedLinks.get(key) ?? 0) + inode.paths.length;
             removedLinks.set(key, removed);
             if (inode.directory || removed >= inode.links) freedBytes += inode.blocks;
-            if (summarize && !inode.directory) files += inode.paths.length;
+            if (!inode.directory) files += inode.paths.length;
           }
-          removed = true;
           bytes += freedBytes;
           const entry: StorageReclaimEntry = {
             roomId: room.name,
@@ -577,8 +556,9 @@ export async function reclaimHelperStorage(input: {
       .catch((error) => {
         if (input.onError) input.onError(room.name, error);
         else console.error(`[body] private storage cleanup deferred for chat ${room.name}:`, error);
-      })
-      .finally(() => summarize?.(removed, files, bytes));
+      });
+    if (!input.dryRun && files > 0)
+      console.log(`[helper] storage cleared ${root}; deleted ${files} files; freed ${bytes} bytes`);
   }
   return entries;
 }
@@ -657,7 +637,6 @@ export interface WholeStorageOptions {
   now?: number;
   inUse?: (path: string) => Promise<boolean>;
   log?: (entry: StorageReclaimEntry) => void;
-  summarize?: boolean;
   beforeRemove?: () => Promise<boolean>;
   onError?: (path: string, error: unknown) => void;
   /** Expire unused files independently inside regenerable caches. */
@@ -705,75 +684,71 @@ export async function reclaimWholeStorageObject(
   const mounted = observeMountUse();
   const inUse = storageProcessUse(options);
   if ((!options.expireFiles && (await inUse(root))) || (await mounted(root))) return [];
-  const summarize = beginStorageSummary(root, options.summarize && !options.dryRun);
+  const tree = await storageTree(root, options.progress).catch((error) => {
+    options.onError?.(root, error);
+    return undefined;
+  });
+  if (!tree) return [];
+  if (
+    !ended &&
+    [...tree.keys()].some(
+      (path) =>
+        isSquirePath(path) ||
+        /(?:^|\/)(?:(?:chrome|chromium|browser|firefox)[-_]?profiles?|\.expo)$/.test(path),
+    )
+  )
+    return [];
+  if (
+    !ended &&
+    !options.expireFiles &&
+    [...tree.values()].some(
+      (item) =>
+        !Number.isFinite(item.lastUsed) ||
+        (options.now ?? Date.now()) - item.lastUsed < STORAGE_ITEM_UNUSED_MS,
+    )
+  )
+    return [];
+  if (options.beforeRemove && !(await options.beforeRemove())) return [];
   const entries: StorageReclaimEntry[] = [];
-  let files = 0;
-  let bytes = 0;
-  try {
-    const tree = await storageTree(root, options.progress).catch((error) => {
-      options.onError?.(root, error);
-      return undefined;
-    });
-    if (!tree) return [];
-    if (
-      !ended &&
-      [...tree.keys()].some(
-        (path) =>
-          isSquirePath(path) ||
-          /(?:^|\/)(?:(?:chrome|chromium|browser|firefox)[-_]?profiles?|\.expo)$/.test(path),
-      )
-    )
-      return [];
-    if (
-      !ended &&
-      !options.expireFiles &&
-      [...tree.values()].some(
-        (item) =>
-          !Number.isFinite(item.lastUsed) ||
-          (options.now ?? Date.now()) - item.lastUsed < STORAGE_ITEM_UNUSED_MS,
-      )
-    )
-      return [];
-    if (options.beforeRemove && !(await options.beforeRemove())) return [];
-    const links = new Map<string, number>();
-    for (const path of ended
-      ? wholeObjectsExceptSquire(root, tree)
-      : options.expireFiles
-        ? unusedStorageObjects(root, tree, options.now ?? Date.now())
-        : [root]) {
-      if ((await inUse(options.expireFiles ? path : root)) || (await mounted(path))) {
-        if (options.expireFiles) continue;
-        break;
-      }
-      const before = inventory(path, tree);
-      try {
-        if (!options.dryRun) await removeStoragePath(path, tree);
-        let freedBytes = 0;
-        for (const [key, inode] of before) {
-          const removed = (links.get(key) ?? 0) + inode.paths.length;
-          links.set(key, removed);
-          if (inode.directory || removed >= inode.links) freedBytes += inode.blocks;
-          if (summarize && !inode.directory) files += inode.paths.length;
-        }
-        bytes += freedBytes;
-        const entry: StorageReclaimEntry = {
-          roomId: '',
-          path,
-          kind: ended ? 'archived' : 'open',
-          allocatedBytes: [...before.values()].reduce((sum, inode) => sum + inode.blocks, 0),
-          freedBytes,
-        };
-        entries.push(entry);
-        options.log?.(entry);
-      } catch (error) {
-        options.onError?.(path, error);
-        console.warn(`[helper] storage object retained ${path}:`, error);
-      }
+  const links = new Map<string, number>();
+  let files = 0, bytes = 0;
+  for (const path of ended
+    ? wholeObjectsExceptSquire(root, tree)
+    : options.expireFiles
+      ? unusedStorageObjects(root, tree, options.now ?? Date.now())
+      : [root]) {
+    if ((await inUse(options.expireFiles ? path : root)) || (await mounted(path))) {
+      if (options.expireFiles) continue;
+      break;
     }
-    return entries;
-  } finally {
-    summarize?.(entries.length > 0, files, bytes);
+    const before = inventory(path, tree);
+    try {
+      if (!options.dryRun) await removeStoragePath(path, tree);
+      let freedBytes = 0;
+      for (const [key, inode] of before) {
+        const removed = (links.get(key) ?? 0) + inode.paths.length;
+        links.set(key, removed);
+        if (inode.directory || removed >= inode.links) freedBytes += inode.blocks;
+        if (!inode.directory) files += inode.paths.length;
+      }
+      bytes += freedBytes;
+      const entry: StorageReclaimEntry = {
+        roomId: '',
+        path,
+        kind: ended ? 'archived' : 'open',
+        allocatedBytes: [...before.values()].reduce((sum, inode) => sum + inode.blocks, 0),
+        freedBytes,
+      };
+      entries.push(entry);
+      options.log?.(entry);
+    } catch (error) {
+      options.onError?.(path, error);
+      console.warn(`[helper] storage object retained ${path}:`, error);
+    }
   }
+  if (!options.dryRun && files > 0)
+    console.log(`[helper] storage cleared ${root}; deleted ${files} files; freed ${bytes} bytes`);
+  return entries;
 }
 
 /** Squire-only ancestors are exempt; an empty non-Squire directory is still

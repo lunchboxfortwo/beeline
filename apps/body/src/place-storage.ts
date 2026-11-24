@@ -32,7 +32,7 @@ export class PlaceStorage {
       while (this.next) {
         const current = this.next;
         this.next = undefined;
-        const operation = storageOperation({ summarize: true });
+        const operation = storageOperation({});
         await this.sweepCorners(operation).catch(error => console.warn('[body] thread cleanup deferred:', error));
         await this.sweepRooms(current, operation).catch(error => console.warn('[body] private storage cleanup deferred:', error));
       }
@@ -59,7 +59,7 @@ export class PlaceStorage {
   }
 
   /** A corner the server reports archived loses its local copies. */
-  async reapCorner(cornerId: string, operation: WholeStorageOptions = storageOperation({ summarize: true })): Promise<void> {
+  async reapCorner(cornerId: string, operation = storageOperation({})): Promise<void> {
     if (this.options.live(cornerId) || await this.wasRefused(cornerId)) return;
     let archived: boolean | undefined;
     try {
