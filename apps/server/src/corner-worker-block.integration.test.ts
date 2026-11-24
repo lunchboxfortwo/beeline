@@ -287,11 +287,11 @@ it('BLOCK-MESSAGE: plain blocks route to commander, who can pass a linked questi
   const { sendMessage }=await import('./agent-messaging.js');
   const opening=(await createAgentCommand(db,{roomId:C,agentId:WORKER,sourceMessageId:null,reason:'corner_objective',
     privatePayload:{kind:'order',authorId:COMMANDER,fromRoomId:ROOM,text:modelText('Build')}}))!;
-  const block=await sendMessage(db,{route:{from:{agent:WORKER,place:C},to:{agent:HUMAN,place:ROOM}},text:'blocked: Need the access code',parent:opening});
+  const block=await daemon.execute('reply',{roomId:C,id:opening.id,text:'blocked: Need the access code'},WORKER);
   const row=(await db.query(`SELECT presentation,card_type,block_corner_id,card->>'reportToId' recipient FROM messages WHERE id=$1`,[block.id])).rows[0];
   expect(row).toEqual({presentation:'message',card_type:null,block_corner_id:C,recipient:COMMANDER});
   const parent=(await db.query<import('./agent-command.js').CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[block.id])).rows[0]!;
-  expect(parent).toMatchObject({agent_id:COMMANDER,room_id:ROOM,reason:'message',state:'pending'});
+  expect(parent).toMatchObject({agent_id:COMMANDER,room_id:ROOM,reason:'message',state:'pending',private_payload:{kind:'reply'}});
   const response=await sendMessage(db,{route:{from:{agent:COMMANDER,place:ROOM},to:{agent:WORKER,place:C}},text:'I am checking access',replyTo:block.id,parent});
   expect(await blockReminder(db,WORKER,C)).toContain('; answered');
   await sendMessage(db,{route:{from:{agent:WORKER,place:C},to:{agent:COMMANDER,place:ROOM}},text:'Still need access',replyTo:response.id});
