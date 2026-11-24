@@ -314,8 +314,8 @@ describe('manager schedule phone operations', () => {
 });
 
 describe('agent schedule background posting', () => {
-  it.each(['lock timeout', 'legacy parked occurrence'] as const)(
-    'advances the failed occurrence after %s and posts on the next normal tick', async (failure) => {
+  it.each(['transient lock timeout', 'persistent lock timeout', 'other delivery error', 'legacy parked occurrence'] as const)(
+    'handles %s without blocking another due schedule', async (failure) => {
       const database = await fixture();
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
       const failedId = '44444444-4444-4444-8444-444444444444';
@@ -330,10 +330,11 @@ describe('agent schedule background posting', () => {
                  ($2::uuid,$3,$4,$5,$6,'{"kind":"interval","everyMinutes":10}',($2::uuid)::text,$7,NULL)`,
           [failedId, healthyId, WORKSPACE, ROOM, AGENT, OWNER, due],
         );
-        if (failure === 'lock timeout') {
+        if (failure !== 'legacy parked occurrence') {
+          const code = failure === 'other delivery error' ? 'P0001' : '55P03';
           await database.query(`CREATE FUNCTION schedule_test_timeout() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
-              IF NEW.text = '${failedId}' THEN RAISE EXCEPTION 'fixture lock timeout' USING ERRCODE='55P03'; END IF;
+              IF NEW.text = '${failedId}' THEN RAISE EXCEPTION 'fixture lock timeout' USING ERRCODE='${code}'; END IF;
               RETURN NEW;
             END $$;
             CREATE TRIGGER schedule_test_timeout BEFORE INSERT ON messages
@@ -343,19 +344,28 @@ describe('agent schedule background posting', () => {
         }
         const loop = new AgentScheduleLoop(database);
         await expect(loop.runOnce(now)).resolves.toBe(1);
-        if (failure === 'lock timeout') {
-          expect(errors).toHaveBeenCalledWith(expect.stringContaining(failedId), expect.objectContaining({ code: '55P03' }));
-          await database.query('DROP TRIGGER schedule_test_timeout ON messages');
-        }
         expect((await database.query('SELECT text FROM messages')).rows).toEqual([{ text: healthyId }]);
         expect((await database.query('SELECT schedule_id FROM agent_schedule_occurrences')).rows)
           .toEqual([{ schedule_id: healthyId }]);
+        if (failure.endsWith('lock timeout')) {
+          expect(errors).toHaveBeenCalledWith(expect.stringContaining(failedId), expect.objectContaining({ code: '55P03' }));
+          expect((await database.query('SELECT next_run_at,run_count FROM agent_schedules WHERE id=$1', [failedId])).rows)
+            .toEqual([{ next_run_at: due, run_count: 0 }]);
+          if (failure === 'transient lock timeout') await database.query('DROP TRIGGER schedule_test_timeout ON messages');
+          const retry = new AgentScheduleLoop(database);
+          await expect(retry.runOnce(now)).resolves.toBe(failure === 'transient lock timeout' ? 1 : 0);
+          expect((await database.query('SELECT scheduled_for FROM agent_schedule_occurrences WHERE schedule_id=$1', [failedId])).rows)
+            .toEqual(failure === 'transient lock timeout' ? [{ scheduled_for: due }] : []);
+        }
+        await database.query('DROP TRIGGER IF EXISTS schedule_test_timeout ON messages');
         expect((await database.query('SELECT next_run_at,run_count FROM agent_schedules WHERE id=$1', [failedId])).rows)
           .toEqual([{ next_run_at: next, run_count: 1 }]);
         await expect(loop.runOnce(now)).resolves.toBe(0);
         await expect(loop.runOnce(next)).resolves.toBe(1);
         expect((await database.query('SELECT text FROM messages ORDER BY text')).rows)
-          .toEqual([{ text: failedId }, { text: healthyId }]);
+          .toEqual(failure === 'transient lock timeout'
+            ? [{ text: failedId }, { text: failedId }, { text: healthyId }]
+            : [{ text: failedId }, { text: healthyId }]);
         expect((await database.query('SELECT 1 FROM agent_schedules WHERE id=$1', [failedId])).rowCount).toBe(0);
       } finally {
         errors.mockRestore();

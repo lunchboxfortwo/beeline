@@ -47,7 +47,10 @@ test('promotion reuses published bytes and resumes after a partial OTA republish
     return { group: platform + '-source-group', platform, runtimeVersion, message: `release ${sourceSha.slice(0, 12)} ${platform}@${runtimeVersion}` };
   });
   const run = (tool, args) => {
-    if (tool === 'npm') {
+    // eas-cli needs a repository root or its git warning corrupts --json output.
+    if (tool === 'git') {
+      assert.deepEqual(args.slice(0, 2), ['init', '--quiet']);
+    } else if (tool === 'npm') {
       assert.deepEqual(args, ['dist-tag', 'add', `usebeeline@${version.slice(1)}`, 'latest']);
       writes.push('npm tag');
     } else {

@@ -20,6 +20,8 @@ export async function promote(directory, next, staged, previous, dispatchedBy, e
     throw new Error(`Publish a complete next candidate before promoting ${version}`);
   }
   mkdirSync(directory, { recursive: true });
+  // eas-cli prints a git-root warning on stdout outside a repository, which breaks its --json output.
+  run('git', ['init', '--quiet', directory], { stdio: 'inherit', timeout: 60_000 });
   write(join(directory, 'app.json'), { expo: staged.easProject });
   write(join(directory, 'package.json'), { name: staged.easProject.slug, version: staged.easProject.version, private: true });
   const expo = (args, options) => eas(args, { ...options, cwd: directory, env: { EAS_NO_VCS: '1' }, timeout: 60_000 });

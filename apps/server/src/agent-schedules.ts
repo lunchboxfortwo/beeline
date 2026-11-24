@@ -7,7 +7,6 @@ import { CronExpressionParser } from 'cron-parser';
 import type { RoomScheduleCadence } from '@beeline/api-contract/phone';
 import {
   SCHEDULE_RAN_VERB,
-  SCHEDULE_SCHEDULER_HANDLE,
   SCHEDULE_SCHEDULER_ID,
   SCHEDULE_SCHEDULER_NAME,
 } from '@beeline/api-contract/scheduled-prompts';
@@ -93,9 +92,10 @@ type DueSchedule = {
   agent_name: string;
   updated_at: string;
   previously_failed: boolean;
+  retrying: boolean;
 };
 
-type ScheduleAttempt = Pick<DueSchedule, 'id' | 'cadence' | 'max_runs' | 'run_count' | 'next_run_at' | 'due_revision' | 'updated_at'>;
+type ScheduleAttempt = Pick<DueSchedule, 'id' | 'cadence' | 'max_runs' | 'run_count' | 'next_run_at' | 'due_revision' | 'updated_at' | 'retrying'>;
 
 export class AgentScheduleLoop {
   constructor(
@@ -136,7 +136,8 @@ export class AgentScheduleLoop {
     for (const roomId of await expireWorkflowRuns(this.database, now)) this.onPosted?.(roomId);
     const due = await this.database.query<ScheduleAttempt>(
       `SELECT schedule.id,schedule.cadence,schedule.max_runs,schedule.run_count,schedule.next_run_at,
-        schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision
+        schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision,
+        COALESCE(schedule.lock_retry_revision=schedule.updated_at,false) retrying
        FROM agent_schedules schedule
        JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
        JOIN identities creator ON creator.id=schedule.creator_id
@@ -163,6 +164,7 @@ export class AgentScheduleLoop {
               `SELECT schedule.id,schedule.room_id,schedule.agent_id,schedule.creator_id,schedule.owner_id,schedule.workflow_slug,schedule.human_command_message_id,schedule.requester_command_id,
                 schedule.cadence,schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,
                 agent.name agent_name,schedule.updated_at::text updated_at,schedule.next_run_at::text due_revision,
+                COALESCE(schedule.lock_retry_revision=schedule.updated_at,false) retrying,
                 COALESCE(schedule.failed_due_at=schedule.next_run_at AND schedule.failed_revision=schedule.updated_at,false) previously_failed
                FROM agent_schedules schedule
                JOIN rooms room ON room.id=schedule.room_id AND room.archived_at IS NULL
@@ -198,6 +200,7 @@ export class AgentScheduleLoop {
           } catch (error) {
             await database.query('ROLLBACK TO SAVEPOINT schedule_delivery');
             console.error(`schedule ${current.id} failed`, error);
+            if (await this.deferLockTimeout(database, current, error)) return undefined;
             started = true;
             delivered = false;
           }
@@ -207,10 +210,13 @@ export class AgentScheduleLoop {
           return delivered ? current.room_id : undefined;
         });
       } catch (error) {
-        // The occurrence and dispatch rolled back together. Consume the
-        // failed tick on the normal calendar without replaying its work.
+        // The occurrence and dispatch rolled back together.
         console.error(`schedule ${candidate.id} failed`, error);
-        try { await this.advance(this.database, attempt, now, true); }
+        try {
+          if (!await this.deferLockTimeout(this.database, attempt, error)) {
+            await this.advance(this.database, attempt, now, true);
+          }
+        }
         catch (failure) { advanceFailure = failure; }
         continue;
       }
@@ -240,14 +246,6 @@ export class AgentScheduleLoop {
     // transcript would show the agent talking to itself. A human creator
     // keeps authoring its schedule posts exactly as before.
     const selfCreated = current.creator_id === current.agent_id;
-    if (selfCreated) {
-      await database.query(
-        `INSERT INTO identities(id,kind,name,handle,hidden_from_roster)
-         VALUES($1,'human',$2,$3,true)
-         ON CONFLICT(id) DO UPDATE SET handle=EXCLUDED.handle`,
-        [SCHEDULE_SCHEDULER_ID, SCHEDULE_SCHEDULER_NAME, SCHEDULE_SCHEDULER_HANDLE],
-      );
-    }
     if (selfCreated) {
       await systemLine(database, {
         id: messageId,
@@ -294,6 +292,21 @@ export class AgentScheduleLoop {
     return true;
   }
 
+  private async deferLockTimeout(database: SqlDatabase, attempt: ScheduleAttempt, error: unknown): Promise<boolean> {
+    if (attempt.retrying || !error || typeof error !== 'object' || !('code' in error) || error.code !== '55P03') {
+      return false;
+    }
+    // Leave the occurrence due. The revision bounds the retry across restarts
+    // and prevents an old failure from changing an edited or completed schedule.
+    await database.query(
+      `UPDATE agent_schedules SET lock_retry_revision=updated_at
+       WHERE id=$1 AND next_run_at=$2::timestamptz AND updated_at=$3::timestamptz
+         AND lock_retry_revision IS DISTINCT FROM updated_at`,
+      [attempt.id, attempt.due_revision, attempt.updated_at],
+    );
+    return true;
+  }
+
   private async advance(
     database: SqlDatabase,
     current: ScheduleAttempt,
@@ -313,7 +326,7 @@ export class AgentScheduleLoop {
     const next = nextScheduleOccurrence(current.cadence, now, current.next_run_at);
     await database.query(
       `UPDATE agent_schedules SET next_run_at=$4,run_count=run_count+$5,updated_at=now(),
-         failed_due_at=NULL,failed_revision=NULL WHERE ${unchanged}`,
+         failed_due_at=NULL,failed_revision=NULL,lock_retry_revision=NULL WHERE ${unchanged}`,
       [...revision, next, increment],
     );
   }
