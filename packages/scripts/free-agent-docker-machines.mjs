@@ -52,16 +52,19 @@ createServer(async (request, response) => {
     if (!id && request.method === 'POST') {
       const machine = `${prefix}-${Date.now().toString(36)}-${++next}`;
       const config = body.config;
-      configs.set(machine, config);versions.set(machine,1);
+      const skipLaunch = body.skip_launch === true;
       const env = Object.entries(config.env ?? {}).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
       docker(
-        'run', '-d', '--name', machine, '--network', 'host',
+        ...(skipLaunch ? ['create'] : ['run', '-d']),
+        '--name', machine, '--network', 'host',
         '--memory', `${config.guest.memory_mb}m`, '--cpus', String(config.guest.cpus),
         '--label', `beeline_agent=${config.metadata.beeline_agent}`,
         ...sandboxArgs, '-v', `${machine}-home:/root`,
         ...env, config.image,
       );
-      log(`create ${machine}`);
+      configs.set(machine, config);
+      versions.set(machine, 1);
+      log(`create ${machine} (skip_launch=${skipLaunch})`);
       return send(200, { id: machine, state: 'created',instance_id:'1',config });
     }
     if (!id && request.method === 'GET') {
@@ -102,7 +105,12 @@ createServer(async (request, response) => {
       log(`start ${id} (was ${current})`);
       return send(200, { previous_state: current });
     }
-    if (action === 'wait') return send(state(id)===url.searchParams.get('state')?200:409, { state: state(id) });
+    if (action === 'wait') {
+      const states = url.searchParams.getAll('state');
+      if (!states.length) states.push('started');
+      const current = state(id);
+      return send(states.includes(current) ? 200 : 409, { state: current });
+    }
     if (action === 'suspend') {
       docker('pause', id);
       log(`suspend ${id}`);
