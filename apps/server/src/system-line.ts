@@ -405,6 +405,7 @@ type SystemRowUpdate = {
   event?: SystemEvent;
   eventKind?: SystemEventKind;
   deletedAt?: Date;
+  deletedBy?: string;
   card?: Record<string, unknown>;
   presentation?: SystemLineInput['presentation'];
   createdAt?: Date;
@@ -423,11 +424,14 @@ async function persistSystemRows(database: SqlDatabase, input: SystemLineOperati
   if (input.operation === 'update') {
     const result = await database.query<{ id: string }>(
       `UPDATE messages message SET
-        text=COALESCE(line.text,message.text),
+        text=CASE WHEN line."deletedBy" IS NOT NULL THEN '' ELSE COALESCE(line.text,message.text) END,
+        attachments=CASE WHEN line."deletedBy" IS NOT NULL THEN '[]'::jsonb ELSE message.attachments END,
+        reactions=CASE WHEN line."deletedBy" IS NOT NULL THEN '{}'::jsonb ELSE message.reactions END,
         system_event=CASE WHEN line."eventKind" IS NOT NULL
           THEN message.system_event || jsonb_build_object('kind',line."eventKind")
           ELSE COALESCE(line.event,message.system_event) END,
-        deleted_at=COALESCE(message.deleted_at,line."deletedAt"),
+        deleted_at=COALESCE(message.deleted_at,line."deletedAt",CASE WHEN line."deletedBy" IS NOT NULL THEN now() END),
+        deleted_by=COALESCE(message.deleted_by,line."deletedBy"),
         card=CASE WHEN line."clearCard" THEN NULL ELSE COALESCE(line.card,message.card) END,
         card_type=CASE WHEN line."clearCard" THEN NULL ELSE message.card_type END,
         author_id=COALESCE(line."authorId",message.author_id),
@@ -436,7 +440,7 @@ async function persistSystemRows(database: SqlDatabase, input: SystemLineOperati
         system_transcript=COALESCE(line.transcript,message.system_transcript),
         durable_fact=COALESCE(line."durableFact",message.durable_fact)
        FROM jsonb_to_recordset($1::jsonb) AS line(id text,text text,event jsonb,card jsonb,
-         "eventKind" text,"deletedAt" timestamptz,"clearCard" boolean,"authorId" text,
+         "eventKind" text,"deletedAt" timestamptz,"deletedBy" text,"clearCard" boolean,"authorId" text,
          presentation text,"createdAt" timestamptz,transcript jsonb,"durableFact" text)
        WHERE message.id=line.id RETURNING message.id`,
       [JSON.stringify(input.rows)],
@@ -760,7 +764,7 @@ export async function settleSystemCard(
   return { id: messageId, text, event };
 }
 
-/** Give a deleted member row a tombstone in place, leaving its erased text empty. */
+/** Erase a member message and leave its tombstone in the same write. The caller locks the authorized row. */
 export async function tombstoneSystemLine(
   database: SqlDatabase,
   messageId: string,
@@ -783,7 +787,7 @@ export async function tombstoneSystemLine(
     ...(authorId === deleterId ? {} : { attribution: { verb: 'sent by', actor: identitySubject(author) } }),
   }, undefined, roomId));
   await systemLine(database, { operation: 'update', rows: [{
-    id: messageId, event, transcript: { origin: 'system', visibility: 'notice' },
+    id: messageId, event, deletedBy: deleterId, transcript: { origin: 'system', visibility: 'notice' },
   }] });
 }
 

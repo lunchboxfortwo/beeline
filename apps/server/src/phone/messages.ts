@@ -224,10 +224,9 @@ import { personText } from '../message-origin.js';
     if (!/^[0-9a-f]{64}$/.test(input.messageId)) throw new Error('messageId is invalid');
     await ctx.database.transaction(async (database) => {
       const deleted = await database.query<{ author_id: string; deleted_by: string }>(
-        `UPDATE messages message SET deleted_at=COALESCE(message.deleted_at,now()),
-           deleted_by=COALESCE(message.deleted_by,$3),text='',attachments='[]'::jsonb,reactions='{}'::jsonb
-         FROM rooms room
-         WHERE message.id=$1 AND message.room_id=$2 AND message.room_id=room.id
+        `SELECT message.author_id,COALESCE(message.deleted_by,$3) deleted_by
+         FROM messages message JOIN rooms room ON room.id=message.room_id
+         WHERE message.id=$1 AND message.room_id=$2
            AND message.presentation='message' AND EXISTS(
                SELECT 1 FROM memberships member
                WHERE member.room_id=COALESCE(room.parent_id,room.id) AND member.identity_id=$3
@@ -238,7 +237,7 @@ import { personText } from '../message-origin.js';
                  AND manager.identity_id=$3 AND manager.role IN ('owner','admin')
                  AND manager.removed_at IS NULL
              ))
-         RETURNING message.author_id,message.deleted_by`,
+         FOR UPDATE OF message`,
         [input.messageId, input.roomId, viewerId],
       );
       database = new CornerAccessDatabase(database);

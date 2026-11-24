@@ -57,6 +57,29 @@ const INSERT = new RegExp(`\\bINSERT\\s+INTO\\s+${TABLE}\\s*\\(([^)]*)\\)`, 'gi'
 const ANY_INSERT = new RegExp(`\\bINSERT\\s+INTO\\s+${TABLE}(?=\\s|\\()`, 'gi');
 const MERGE = new RegExp(`\\bMERGE\\s+INTO\\s+${TABLE}(?=\\s|\\()`, 'i');
 const UPDATE = new RegExp(`\\bUPDATE\\s+${TABLE}(?:\\s+(?:AS\\s+)?\\w+)?\\s+SET\\b([^;]*)`, 'gi');
+const TRANSCRIPT_COLUMNS = new Set([
+  'system_event', 'system_transcript', 'presentation', 'author_id', 'durable_fact', 'text', 'deleted_at', 'deleted_by',
+]);
+const ASSIGNMENT = new RegExp(`(?:^|,)\\s*"?(${[...TRANSCRIPT_COLUMNS].join('|')})"?\\s*=`, 'gi');
+
+/** Treat PostgreSQL comments as whitespace, preserving comment markers in quoted strings. */
+function stripSqlComments(sql) {
+  const tokens = /\bE'(?:\\[\s\S]|''|[^'\\])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|(\/\*|--[^\r\n]*)/gi;
+  const block = /\/\*|\*\//g;
+  let result = '', end = 0;
+  for (let match; (match = tokens.exec(sql));) {
+    if (!match[1]) continue;
+    result += sql.slice(end, match.index) + ' ';
+    if (match[1] === '/*') {
+      block.lastIndex = tokens.lastIndex;
+      let depth = 1;
+      for (let marker; depth && (marker = block.exec(sql));) depth += marker[0] === '/*' ? 1 : -1;
+      tokens.lastIndex = depth ? sql.length : block.lastIndex;
+    }
+    end = tokens.lastIndex;
+  }
+  return result + sql.slice(end);
+}
 
 function sourceCheck(file, code) {
   const source = ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true);
@@ -73,7 +96,9 @@ export function inspectSystemWrites(file, code) {
   const { source, errors, deny } = sourceCheck(file, code);
   const inserts = new Map();
 
-  function inspectSql(node, sql) {
+  function inspectSql(node, rawSql) {
+    if (!/\b(?:INSERT|MERGE|UPDATE)\b/i.test(rawSql)) return;
+    const sql = stripSqlComments(rawSql);
     const { name, start } = scope(node, source);
     const privateOwner = file === WRITER && name === 'persistSystemRows';
     const key = `${file}#${name}`;
@@ -84,7 +109,7 @@ export function inspectSystemWrites(file, code) {
       const [insert] = sql.matchAll(INSERT);
       const columns = insert?.[1]?.replaceAll('"', '').toLowerCase().split(',').map(column => column.trim());
       const memberShape = columns?.includes('author_id') &&
-        !columns.some(column => ['system_event', 'system_transcript', 'durable_fact'].includes(column)) &&
+        !columns.some(column => ['system_event', 'system_transcript', 'durable_fact', 'deleted_at', 'deleted_by'].includes(column)) &&
         !/['"]system['"]|SYSTEM_(?:AUTHOR|IDENTITY)_ID|SCHEDULE_SCHEDULER_ID|\bDO\s+UPDATE\b/i.test(sql);
       const backfill = file === SERVER + 'needs-you-marks.ts' && name === 'needsYouMarksSchema' &&
         sql.includes('DO $blocks$') && node.getText(source).includes(
@@ -99,19 +124,16 @@ export function inspectSystemWrites(file, code) {
       if (privateOwner || file.startsWith(SERVER + 'migrations/')) continue;
       const positional = [...assignments.matchAll(/(?:^|,)\s*\(([^)]+)\)\s*=/g)]
         .flatMap(([, fields]) => fields.split(',').map(field => field.trim().replaceAll('"', '').toLowerCase()));
-      const columns = [...assignments.matchAll(/(?:^|,)\s*"?(system_event|system_transcript|presentation|author_id|durable_fact|text)"?\s*=/gi)]
+      const columns = [...assignments.matchAll(ASSIGNMENT)]
         .map(([, column]) => column.toLowerCase())
-        .concat(positional.filter(column => ['system_event', 'system_transcript', 'presentation', 'author_id', 'durable_fact', 'text'].includes(column)));
+        .concat(positional.filter(column => TRANSCRIPT_COLUMNS.has(column)));
       if (!columns.length) continue;
       const accountAnonymization = key === SERVER + 'message-origin.ts#anonymizeMessageAuthors' &&
         columns.length === 1 && columns[0] === 'author_id' && prior.includes('assertMemberTranscript(replacement)');
       const memberRevision = key === SERVER + 'voice-service.ts#reviseHuman' && columns.every(column => column === 'text') &&
         /m\.presentation='message' AND m\.system_transcript IS NULL AND m\.system_event IS NULL/.test(assignments);
-      const memberDeletion = key === SERVER + 'phone/messages.ts#phoneDeleteRoomMessage' &&
-        columns.every(column => column === 'text') && /text=''/.test(assignments) &&
-        /message\.presentation='message'/.test(assignments);
-      if (!(accountAnonymization || memberRevision || memberDeletion))
-        deny(node, 'message text, authorship, event or presentation change requires systemLine');
+      if (!(accountAnonymization || memberRevision))
+        deny(node, 'message text, authorship, deletion, event or presentation change requires systemLine');
     }
   }
 
@@ -124,6 +146,10 @@ export function inspectSystemWrites(file, code) {
   }
   visit(source);
   return errors;
+}
+
+function contains(node, matches) {
+  return Boolean(node && (matches(node) || ts.forEachChild(node, child => contains(child, matches) || undefined)));
 }
 
 export function inspectSystemRenders(file, code) {
@@ -140,12 +166,29 @@ export function inspectSystemRenders(file, code) {
     const name = value?.getText(source).split('.').at(-1);
     return imported.get(name) ?? name;
   };
+  const element = node => ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node);
+  const factory = node => ts.isCallExpression(node) && ['createElement', 'jsx', 'jsxs'].includes(unqualified(node.expression));
+  const component = node => unqualified(element(node) ? node.tagName : factory(node) ? node.arguments[0] : undefined);
+  const noticeFields = new Set(['isSystemNotice', 'systemTranscript', 'systemEvent']);
+  const noticeSelector = node => {
+    if (ts.isIdentifier(node)) return noticeFields.has(node.text);
+    if (ts.isPropertyAccessExpression(node)) return noticeFields.has(node.name.text);
+    if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression))
+      return noticeFields.has(node.argumentExpression.text);
+    if (ts.isCallExpression(node)) return unqualified(node.expression) === 'isSystemLine';
+    if (ts.isBinaryExpression(node) && ts.isStringLiteralLike(node.right) && node.right.text === 'system') {
+      return ts.isPropertyAccessExpression(node.left) && node.left.name.text === 'presentation';
+    }
+    return false;
+  };
 
   function visit(node) {
     const owner = scope(node, source).name;
-    const jsx = ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node);
-    const factory = ts.isCallExpression(node) && ['createElement', 'jsx', 'jsxs'].includes(unqualified(node.expression));
-    const name = unqualified(jsx ? node.tagName : factory ? node.arguments[0] : undefined);
+    const jsx = element(node);
+    const name = component(node);
+    const buildsOpenedBody = file === PILLS && owner === 'pillItem';
+    if (name === 'OpenedSystemBody' && !buildsOpenedBody)
+      deny(node, 'OpenedSystemBody may only be created for the pill to open');
     if (name === 'TranscriptPills') {
       calls++;
       if (file !== RENDERER || owner !== 'renderPills' || !jsx ||
@@ -159,10 +202,31 @@ export function inspectSystemRenders(file, code) {
     if ((BODY_COMPONENTS.has(name) || ['CornerOpenedMarkers', 'GrantRequestPill'].includes(name)) &&
         (file !== RENDERER || owner !== 'renderSystemBody')) deny(node, `${name} must render inside the opened pill`);
     if (ts.isIdentifier(node) && node.text === 'renderSystemBody' && file === RENDERER &&
-        !(ts.isVariableDeclaration(node.parent) && node.parent.name === node) &&
-        !(ts.isJsxExpression(node.parent) && ts.isJsxAttribute(node.parent.parent) &&
-          node.parent.parent.name.getText(source) === 'renderBody')) {
-      deny(node, 'the system body renderer may only be passed to TranscriptPills');
+        !(ts.isVariableDeclaration(node.parent) && node.parent.name === node)) {
+      const attribute = ts.isJsxExpression(node.parent) && ts.isJsxAttribute(node.parent.parent) ? node.parent.parent : undefined;
+      if (!attribute || attribute.name.getText(source) !== 'renderBody' ||
+          owner !== 'renderPills' || component(attribute.parent.parent) !== 'TranscriptPills') {
+        deny(node, 'the system body renderer may only be passed to TranscriptPills');
+      }
+    }
+    const openedBody = (file === RENDERER && owner === 'renderSystemBody') || (file === PILLS && owner === 'OpenedSystemBody');
+    if (!openedBody) {
+      // System-specific render branches must go through the pill even when the
+      // branch uses generic text, a fragment, or a React element factory.
+      const condition = ts.isIfStatement(node) ? node.expression
+        : ts.isConditionalExpression(node) ? node.condition
+        : ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ? node.left : undefined;
+      const inlineBody = ts.isJsxExpression(node) && contains(node.expression, noticeSelector);
+      if (inlineBody || contains(condition, noticeSelector)) {
+        const branches = ts.isIfStatement(node) ? [node.thenStatement, node.elseStatement]
+          : ts.isConditionalExpression(node) ? [node.whenTrue, node.whenFalse] : [node.right];
+        const bareBody = child => {
+          if (ts.isJsxFragment(child)) return true;
+          return (element(child) || factory(child)) && !(buildsOpenedBody && component(child) === 'OpenedSystemBody');
+        };
+        if (inlineBody || branches.some(branch => contains(branch, bareBody)))
+          deny(node, 'system notice text or elements must render inside the opened pill');
+      }
     }
     ts.forEachChild(node, visit);
   }
