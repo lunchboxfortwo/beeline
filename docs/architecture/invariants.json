@@ -631,6 +631,7 @@
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
           },
+          "startup_operation_id": "Records which VM wake announced startup for this command so a failed wake clears only its own progress.",
           "startup_wake_after": {
             "reason": "Retained without runtime use until the previous server drains during this rolling release.",
             "drop": "Next release after turn-lifecycle cleanup: docs/agent-server-surfaces.md#turn-recovery-storage-retirement"
@@ -824,6 +825,7 @@
           },
           "updated_by": "existing before the registry; weekly audit reviews",
           "owner_id": "existing before the registry; weekly audit reviews",
+          "lock_retry_revision": "Records which schedule revision already received a lock-timeout retry so the limit survives a worker restart.",
           "failed_due_at": "Records the exact failed scheduled occurrence so the same due work cannot retry on a timer.",
           "failed_revision": "Records the exact failed schedule revision; a committed edit or advance permits new work without altering the authorized due time.",
           "lock_retry_revision": "Records the schedule revision that already used its one retry after a lock timeout in agent-schedules.ts, so the retry stays bounded across restarts and edits."
@@ -3238,6 +3240,15 @@
           "epoch": "Distinguishes successive registrations even when a machine reconnects with the same agent identity.",
           "revision": "Records the highest accepted source publication so duplicates cannot repeat or reorder updates.",
           "digest": "Rejects conflicting content that attempts to reuse an already accepted source revision."
+        }
+      },
+      "helper_read_windows": {
+        "module": "Helper conversation reads (apps/server/src/helper-requests.ts)",
+        "reason": "Every server replica needs the same count to enforce one read allowance per authenticated helper.",
+        "columns": {
+          "agent_id": "Groups HTTP and socket reads under the same helper identity across reconnects.",
+          "expires_at": "Sets the deadline for renewing the allowance and calculating the retry delay.",
+          "reads": "Counts reads in the current window, capped one past the allowance to distinguish a refusal."
         }
       },
       "helper_overlay_demand": {

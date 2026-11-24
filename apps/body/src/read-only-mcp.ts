@@ -321,13 +321,13 @@ export function requiredEnv(name: string): string {
 
 export const commandRequest = new AsyncLocalStorage<string | undefined>();
 
-export async function activeCommandContext(): Promise<{
+export async function activeCommandContext(context?: Record<string, unknown>): Promise<{
   roomId: string;
   requestId: string;
   taskId?: string;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
 }> {
-  const value = await readTurnContextFile();
+  const value = context ?? await readTurnContextFile();
   const requestId = commandRequest.getStore() ?? value.requestId;
   const commands = value.commands as
     { requestId: string; commandReason: string; taskId: string }[] | undefined;
@@ -411,16 +411,30 @@ export function isDaemonNetworkFailure(error: unknown): boolean {
   return error instanceof Error && error.cause !== undefined && isDaemonNetworkFailure(error.cause);
 }
 
+function turnCommandId(turn: Record<string, unknown>): string | undefined {
+  const selected = commandRequest.getStore();
+  const itemId = selected && selected !== turn.requestId
+    ? (turn.commands as { requestId: string; itemId?: string }[] | undefined)?.find(command => command.requestId === selected)?.itemId
+    : turn.itemId;
+  return typeof itemId === 'string' ? itemId : undefined;
+}
+
+async function optionalTurnContext(): Promise<Record<string, unknown>> {
+  return process.env.BEELINE_TURN_CONTEXT_FILE ? readTurnContextFile().catch(() => ({})) : {};
+}
+
 // Conversational tools share the parent helper's bound native connection.
 // Optional resource tools and installed older helpers retain the HTTP adapter.
 export async function daemonExecute(name: string, input: JsonObject): Promise<JsonObject> {
+  const turn = await optionalTurnContext();
+  const commandId = turnCommandId(turn);
   const body = JSON.stringify({
     ...input,
     ...(process.env.BEELINE_TURN_CONTEXT_FILE &&
     (!name.startsWith('get') || name.startsWith('getWallet')) &&
     !name.startsWith('list') &&
     name !== 'searchInstitutionalHistory'
-      ? await activeCommandContext()
+      ? await activeCommandContext(turn)
       : {}),
   });
   try {
@@ -433,6 +447,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
         placeId: input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
         action: 'operation',
         operation: name,
+        ...(commandId ? { commandId } : {}),
         input,
       })) as JsonObject;
     }
@@ -445,6 +460,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
         headers: {
           authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
           'content-type': 'application/json',
+          ...(typeof commandId === 'string' ? { 'x-beeline-command-id': commandId } : {}),
           'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
         },
         body,
@@ -763,6 +779,7 @@ export async function daemonUploadArtifact(
   mime: string,
   title: string,
 ): Promise<DaemonArtifactUploadResult> {
+  const commandId = turnCommandId(await optionalTurnContext());
   const response = await ask(
     {
       url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`),
@@ -771,6 +788,7 @@ export async function daemonUploadArtifact(
       method: 'POST',
       headers: {
         authorization: `Bearer ${requiredEnv('BEELINE_DAEMON_TOKEN')}`,
+        ...(commandId ? { 'x-beeline-command-id': commandId } : {}),
         'content-type': mime,
         'x-artifact-title': encodeArtifactTitleHeader(title),
         'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',

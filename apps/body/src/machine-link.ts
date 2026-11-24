@@ -95,9 +95,10 @@ export class AgentChannel {
   requestOperation<N extends keyof DaemonOperationMap>(
     operation: N,
     input: DaemonOperationMap[N]['input'],
+    commandId?: string,
   ): Promise<DaemonOperationMap[N]['output']> {
     const requestId = randomUUID();
-    const frame = { type: 'daemon-operation', requestId, operation, input };
+    const frame = { type: 'daemon-operation', requestId, operation, input, ...(commandId ? { commandId } : {}) };
     // The result for this requestId; refusal, unregistration, retirement or a
     // sent request's lost connection ends it (D5: unsent work waits for registration).
     return answer<DaemonOperationMap[N]['output']>(
@@ -237,7 +238,7 @@ export class AgentChannel {
       this.#requests.delete(event.requestId);
       if (typeof event.error === 'string')
         pending.reject(
-          Object.assign(new Error(event.error), { status: event.status, code: event.error }),
+          Object.assign(new Error(event.error), { status: event.status, code: event.error, retryAfter: event.retryAfter }),
         );
       else {
         const input = pending.frame.input as Record<string, unknown>;

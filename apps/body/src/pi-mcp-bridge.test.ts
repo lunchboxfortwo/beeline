@@ -46,14 +46,14 @@ it('loads the Pi extension and permits prompts without contacting an unresponsiv
 });
 
 it('asks the Beeline server before a Squire call and keeps its refusal', async () => {
-  const seen: Array<{ url?: string; authorization?: string; body: string }> = [];
+  const seen: Array<{ url?: string; authorization?: string; commandId: unknown; body: string }> = [];
   const server = createServer((request, response) => {
     let body = '';
     request.on('data', (chunk) => {
       body += chunk;
     });
     request.on('end', () => {
-      seen.push({ url: request.url, authorization: request.headers.authorization, body });
+      seen.push({ url: request.url, authorization: request.headers.authorization, commandId: request.headers['x-beeline-command-id'], body });
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ allowed: false }));
     });
@@ -63,7 +63,7 @@ it('asks the Beeline server before a Squire call and keeps its refusal', async (
     const { port } = server.address() as AddressInfo;
     const spawn = vi.fn();
     const readFile = vi.fn(async () =>
-      JSON.stringify({ roomId: 'room-1', requestId: 'request-1' }),
+      JSON.stringify({ roomId: 'room-1', requestId: 'request-1', itemId: 'c'.repeat(64) }),
     );
     const tools: Tool[] = [];
     const extension = loadBridge(
@@ -94,6 +94,7 @@ it('asks the Beeline server before a Squire call and keeps its refusal', async (
       {
         url: '/v1/daemon/operations/authorizeSquireCall',
         authorization: 'Bearer daemon-token',
+        commandId: 'c'.repeat(64),
         body: JSON.stringify({ roomId: 'room-1', requestId: 'request-1' }),
       },
     ]);

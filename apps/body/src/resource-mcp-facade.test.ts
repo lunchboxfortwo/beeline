@@ -112,7 +112,8 @@ it('keeps permission denial per-call and ends an invalidated local generation wi
   const authPath = join(root, 'auth.json');
   const message = { jsonrpc: '2.0', id: 1, method: 'tools/call' };
   let calls = 0;
-  const fetchImpl = (async () => {
+  const fetchImpl = (async (_url, init) => {
+    expect(new Headers(init?.headers).get('x-beeline-command-id')).toBe(calls ? 'd'.repeat(64) : null);
     calls++;
     return new Response(JSON.stringify({ allowed: calls > 1 }), { status: 200 });
   }) as typeof fetch;
@@ -120,6 +121,7 @@ it('keeps permission denial per-call and ends an invalidated local generation wi
     await writeFile(authPath, JSON.stringify({ baseUrl: 'https://unused.test', daemonToken: 'test', turnContextPath: contextPath }));
     await writeFile(contextPath, JSON.stringify({ roomId: 'room', requestId: 'command', generationId: 'generation' }));
     expect(await authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).toBe(false);
+    await writeFile(contextPath, JSON.stringify({ roomId: 'room', requestId: 'request', itemId: 'd'.repeat(64) }));
     expect(await authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).toBe(true);
     await writeFile(contextPath, '{}');
     await expect(authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).rejects.toBeInstanceOf(TurnStoppedError);

@@ -807,3 +807,67 @@ it('registers a ready agent while its batch sibling is still authenticating', as
   } finally { release(); }
   await client.next(frame => frame.type === 'registered' && frame.agentId === AGENT_A);
 });
+
+it('attributes helper reads and preserves separate reconnect allowances', async () => {
+  const daemon = daemonStub();
+  const tokenAuth = auth();
+  vi.mocked(tokenAuth.authenticateDaemon).mockImplementation(async token =>
+    token === 'bdt_' + AGENT_A ? AGENT_A : token === 'bdt_' + AGENT_B ? AGENT_B : null);
+  const database = await migratedDatabase();
+  requestDatabases.push(database);
+  await database.query(`INSERT INTO identities(id,kind,name) VALUES ($1,'agent','A'),($2,'agent','B')`, [AGENT_A, AGENT_B]);
+  const humanToken = 'phone-token-for-this-test';
+  vi.mocked(tokenAuth.authenticatePhone).mockImplementation(async token => token === humanToken ? AGENT_A : null);
+  const phone = { readRoom: vi.fn(async () => ({ messages: [] })) } as unknown as PhoneService;
+  const { port } = await start({ database, daemon, auth: tokenAuth, phone });
+  const commandId = 'c'.repeat(64);
+  const logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const read = (agent: string, room: number, operation = 'getRoomConversation', page = 0) =>
+    fetch(`http://127.0.0.1:${port}/v1/daemon/operations/${operation}`, {
+      method: 'POST',
+      headers: { authorization: `Bearer bdt_${agent === 'a' ? AGENT_A : AGENT_B}`, 'x-beeline-command-id': commandId },
+      body: JSON.stringify({ roomId: `private-room-${room}`, ...(page ? { window: "recent", before: `${1000 - page},${commandId}` } : {}) }),
+    });
+  try {
+    // Reconnect to fifty rooms, then page through five more windows in each.
+    for (let page = 0; page < 6; page++) {
+      const responses = await Promise.all(Array.from({ length: 50 }, (_, room) => read('a', room, 'getRoomConversation', page)));
+      for (const response of responses) if (!response.ok) throw new Error(await response.text());
+      await Promise.all(responses.map(response => response.json()));
+    }
+    const refusal = await read('a', 0, 'read');
+    expect(refusal.status).toBe(429);
+    const delay = Number(refusal.headers.get('retry-after'));
+    expect(delay).toBeGreaterThan(0);
+    expect(delay).toBeLessThanOrEqual(60);
+    expect(await refusal.json()).toEqual({ error: 'helper_read_rate_limited', retryAfter: delay });
+    expect((await read('b', 0)).status).toBe(200);
+    expect(daemon.execute).toHaveBeenCalledTimes(301);
+    for (const operation of ['authorizeSquireCall', 'authorizeResourceCall', 'postSquireApproval', 'postSquireLoginWall']) {
+      expect((await read('a', 0, operation)).status).toBe(200);
+      expect(logs).toHaveBeenCalledWith('[req]', 'POST', `/v1/daemon/operations/${operation}`,
+        `agent=${AGENT_A}`, `command=${commandId}`, 'status=200');
+    }
+    const humanRead = await fetch(`http://127.0.0.1:${port}/v1/phone/rooms/00000000-0000-4000-8000-000000000001`,
+      { headers: { authorization: `Bearer ${humanToken}` } });
+    expect(await humanRead.json()).toEqual({ messages: [] });
+    expect(logs).toHaveBeenCalledWith('[req]', 'POST', '/v1/daemon/operations/read',
+      `agent=${AGENT_A}`, `command=${commandId}`, 'status=429');
+    // A replica has its own refusal cache and shares the database window.
+    const replica = await start({ daemon, auth: tokenAuth, database: {
+      query: database.query.bind(database), transaction: database.transaction.bind(database),
+    } });
+    const client = await machine(replica.port);
+    client.send({ type: 'register', agentId: AGENT_A, token: 'bdt_' + AGENT_A, daemonOperationsV1: true });
+    await client.next(frame => frame.type === 'registered');
+    client.send({ type: 'daemon-operation', agentId: AGENT_A, requestId: 'socket-read', commandId,
+      operation: 'getRoomConversation', input: { roomId: 'private-room' } });
+    expect(await client.next(frame => frame.requestId === 'socket-read')).toMatchObject({
+      status: 429, error: 'helper_read_rate_limited', retryAfter: expect.any(Number),
+    });
+    expect(logs).toHaveBeenCalledWith('[req]', 'LIVE', 'getRoomConversation', `agent=${AGENT_A}`, `command=${commandId}`);
+    expect(JSON.stringify(logs.mock.calls)).not.toMatch(/bdt_|private-room/);
+  } finally {
+    logs.mockRestore();
+  }
+}, 30_000);

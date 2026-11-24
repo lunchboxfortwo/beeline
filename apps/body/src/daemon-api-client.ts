@@ -386,6 +386,7 @@ export class DaemonApiClient {
   async execute<Name extends keyof DaemonOperationMap>(
     name: Name,
     input: Input<Name>,
+    commandId?: string,
   ): Promise<Output<Name>> {
     if (this.registrationRefusal) throw this.registrationRefusal;
     if (this.#repositoryCredentialRoom !== undefined) {
@@ -409,20 +410,21 @@ export class DaemonApiClient {
       ) as Promise<Output<Name>>;
     this.inFlight++;
     try {
-      const result = await this.#channel.requestOperation(name, input);
+      const result = await this.#channel.requestOperation(name, input, commandId);
       if (name === 'postAgentUsage' && (input as Input<'postAgentUsage'>).usage?.spend) {
         const scope = this.#channel.usageAccountScope();
         if (scope) invalidateUsageAccountAttachment(scope.origin, scope.ownerId, this.agentId);
       }
       return result;
     } catch (error) {
-      const failure = error as { status?: number; code?: string };
+      const failure = error as { status?: number; code?: string; retryAfter?: number };
       const status = failure.status ?? 503;
       const refusal = new DaemonApiError(
         error instanceof Error ? error.message : 'Machine operation refused',
         status,
         status === 408 || status === 429 || status >= 500,
         failure.code,
+        typeof failure.retryAfter === 'number' ? failure.retryAfter * 1000 : undefined,
       );
       if (status === 401) this.authorityRefusalListener?.(refusal);
       throw refusal;

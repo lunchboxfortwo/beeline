@@ -130,6 +130,7 @@ export class AgentRunner {
           return options.daemonApi.execute(
             input.operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,
             input.input as never,
+            typeof input.commandId === 'string' ? input.commandId : undefined,
           );
         const session = this.places.get(placeId)?.session;
         if (!session) throw new Error('This place has no live session');

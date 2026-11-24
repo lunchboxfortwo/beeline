@@ -1,3 +1,4 @@
+import { helperReadRetryAfter, helperRequestCommand } from './helper-requests.js';
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { InvitePreviewAccess } from "./invite-preview.js";
 import { HelperVersionGate } from "./helper-version-gate.js";
@@ -436,6 +437,13 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
       return;
     }
     const input = await body(request);
+    if (typeof input.commandId === 'string') helperRequestCommand.set(request, input.commandId);
+    const retryAfter = await helperReadRetryAfter(options.database, agentId, name);
+    if (retryAfter) {
+      response.setHeader('Retry-After', retryAfter);
+      json(response, 429, { error: 'helper_read_rate_limited', retryAfter });
+      return;
+    }
     const result = await options.daemon.execute(name as never, input as never, agentId);
     json(response, 200, result);
     return;
