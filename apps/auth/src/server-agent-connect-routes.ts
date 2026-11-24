@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
-  AGENT_SIGN_IN_HARNESSES,
+  AGENT_CONNECT_HARNESSES,
   createAgentPairingCode,
   normalizeAgentPairingCode,
 } from '@beeline/api-contract/phone';
@@ -10,8 +10,9 @@ import { GITHUB_IDENTITY_AUDIENCE } from './github.js';
 import type { AuthRouteContext } from './server-context.js';
 
 const DEVICE_TTL_MS = 10 * 60_000;
-// The contract's harness list, so a harness the CLI offers is never refused here.
-const SUPPORTED_HARNESSES = new Set<string>(AGENT_SIGN_IN_HARNESSES);
+// The CLI's own connect list, so a harness `beeline connect` offers is never
+// refused here. Not the `/login` list: a harness can connect without a Room sign-in.
+const SUPPORTED_HARNESSES = new Set<string>(AGENT_CONNECT_HARNESSES);
 const PROVIDER_REQUIRED = new Set(['goose', 'pi']);
 const SUPPORTED_PROVIDERS = new Set(['openrouter', 'openai', 'anthropic', 'google', 'xai']);
 const PAIRING_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
