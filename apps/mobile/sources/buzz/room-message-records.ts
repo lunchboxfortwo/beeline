@@ -125,8 +125,17 @@ function accept(room: RoomRecords, incoming: RoomViewMessage, shared: boolean, c
   if (held && !shared && !upgrading && (held.version ?? 0) === (incoming.version ?? 0) &&
     (readAt.get(held) ?? 0) > readAt.get(incoming)!) return false;
   const feedbackReported = Boolean(held?.feedbackReported || incoming.feedbackReported);
-  const next = feedbackReported === Boolean(incoming.feedbackReported)
-    ? incoming : { ...incoming, feedbackReported };
+  // The chat list's latest-message copy has no reply preview; keep the one the
+  // Room read gave for the same original.
+  const replyPreview = !incoming.replyPreview && held?.replyPreview && incoming.reply &&
+    incoming.reply.eventId === held.reply?.eventId ? held.replyPreview : undefined;
+  const next = feedbackReported === Boolean(incoming.feedbackReported) && !replyPreview
+    ? incoming
+    : {
+      ...incoming,
+      ...(feedbackReported ? { feedbackReported } : {}),
+      ...(replyPreview ? { replyPreview } : {}),
+    };
   // Identity selection can recreate an unchanged row when turn subscribers refresh.
   // Keep its record stable so the layout effect does not notify those subscribers again.
   if (held && equal(held, next)) return false;
