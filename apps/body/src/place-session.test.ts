@@ -209,11 +209,7 @@ it('does not restore a streamed preamble after ACP selects no final answer', asy
   await f.session.start();
   f.prompt.mockImplementation(
     async (_sessionId?: unknown, _prompt?: unknown, onChunk?: unknown) => {
-      (onChunk as (delta: string, full: string, run: string) => void)(
-        'Gathering data',
-        'Gathering data',
-        'Gathering data',
-      );
+      (onChunk as (currentRun: string) => void)('Gathering data');
       return { agentText: '', stopReason: 'end_turn', updates: [], toolCalls: [] };
     },
   );
@@ -227,7 +223,7 @@ it('fails a Codex turn whose whole reply is the proxy signed-out refusal, so the
   const refusal = 'unknown provider for model gpt-6.1-sol';
   f.prompt.mockImplementationOnce(
     async (_sessionId?: unknown, _prompt?: unknown, onChunk?: unknown) => {
-      (onChunk as (delta: string, full: string, run: string) => void)(refusal, refusal, refusal);
+      (onChunk as (currentRun: string) => void)(refusal);
       return { agentText: `${refusal}  `, stopReason: 'end_turn', updates: [], toolCalls: [] };
     },
   );

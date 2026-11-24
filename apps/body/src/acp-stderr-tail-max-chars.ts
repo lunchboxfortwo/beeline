@@ -228,14 +228,8 @@ export type AcpPermissionHandler = (
 export type AcpPermissionAllowlist = (request: AcpPermissionRequest) => boolean;
 
 
-/** Invoked once per incremental `agent_message_chunk` delta during a live prompt. */
-export type AcpTextChunkHandler = (
-  delta: string,
-  fullTextSoFar: string,
-  /** The normalized assistant-message run currently accumulating. */
-  currentRun?: string,
-  runs?: readonly string[],
-) => void;
+/** Delivers the current assistant message after each text chunk. */
+export type AcpTextChunkHandler = (currentRun: string) => void;
 
 
 export type AcpStreamSnapshot = {

@@ -380,12 +380,9 @@ export async function acpClientSessionPrompt(
     onActivity?.(agentStreamSnapshot(updates, ctx.agentLabel));
     const calls = [...toolCallEntries(updates), ...asyncTasks.values()];
     onToolCalls?.(calls);
-    if (onChunk) {
-      const delta = agentMessageChunkText(u.update);
-      if (delta) {
-        const runs = agentMessageRuns(updates, ctx.agentLabel);
-        onChunk(delta, runs.join('\n\n'), runs.at(-1), runs);
-      }
+    if (onChunk && agentMessageChunkText(u.update)) {
+      const currentRun = agentMessageRuns(updates, ctx.agentLabel).at(-1);
+      if (currentRun) onChunk(currentRun);
     }
   };
   ctx.on('session/update', onUpdate);

@@ -2,30 +2,7 @@ import type { DaemonApiClient } from './daemon-api-client.js';
 import { HelperOverlayOwner } from './helper-overlay.js';
 import { sanitizeAgentReply } from './reply-sanitizer.js';
 
-/**
- * ONE streamed-turn presentation, shared by top-level Rooms and repository
- * corners (C100).
- *
- * In both places the current answer arrives as a provisional draft row while
- * the harness is writing, then dissolves into exactly one durable final
- * message carrying the turn's request id (#903 renders that settle; this is
- * its producer). A corner separately records completed pre-tool assistant runs
- * as output activity, and tells this lane how far into the stream that ledger
- * reaches (`markPersisted`). From there the draft shows only the UNSAVED tail
- * and the final reply carries only the remainder, so prose the reader can
- * already scroll to above the answer is never repeated inside it.
- *
- * Before C100 a corner offset did that job by arithmetic and lost text: it
- * counted the whole stream (every assistant run joined) while the cut was
- * applied to `PromptResult.agentText` (the LAST run only), so any turn that
- * spoke, called a tool and spoke again sliced past the end of a shorter string
- * and lost its closing message. The offset here is a SNAPSHOT of the stream
- * rather than a number: every cut is taken against the same string the
- * snapshot was observed on, and is checked with `startsWith`/`endsWith`
- * first, so a stream that no longer agrees with what was saved cuts nothing
- * and the whole text stands. A Room never calls `markPersisted` — it saves no
- * mid-turn prose — so its lane keeps publishing the stream entire.
- */
+/** The provisional draft and durable reply share a turn identifier. */
 export interface AgentTurnStreamOptions {
   api: DaemonApiClient;
   agentId: string;
@@ -42,26 +19,12 @@ export interface AgentTurnStreamOptions {
   label: string;
 }
 
-/**
- * What a streamed turn leaves behind in the transcript.
- *
- * The caller selects the prose for its surface: Rooms commit the last run and
- * carry earlier runs as the reply's steps, while corners separately save
- * earlier runs and settle the final remainder.
- * Sanitize that selection whole, without slicing any authored text.
- */
+/** Sanitize the closing message selected by ACP for the durable reply. */
 export function durableReplyText(agentText: string): string {
   return sanitizeAgentReply(agentText);
 }
 
 export class AgentTurnStream {
-  private latest = '';
-  /**
-   * The assistant run currently accumulating — what `finalAgentMessageText`
-   * would return if the prompt ended here. The join above is the draft lane's
-   * material; this is the only part of the stream an ending may commit.
-   */
-  private latestRun = '';
   /**
    * The newest snapshot not yet handed to a write. A draft is a picture of the
    * whole answer so far, so an older snapshot that never reached the wire is
@@ -69,15 +32,6 @@ export class AgentTurnStream {
    * one bounds the lane at ONE write in flight plus ONE waiting.
    */
   private pending: string | undefined;
-  private latestChunk = '';
-  /**
-   * The stream as it stood when a corner handed everything up to that point to
-   * its durable work ledger — this turn's persisted stream offset. Held as the
-   * text rather than a character count so every cut can be checked against the
-   * string it is about to be applied to, which is the one thing the retired
-   * offset never did.
-   */
-  private persisted = '';
   /** The draft write on the wire, if any. Never rejects; failures are logged. */
   private inFlight: Promise<void> | undefined;
   /** Closed lanes publish nothing more, so the answer never queues behind a draft. */
@@ -101,92 +55,13 @@ export class AgentTurnStream {
     }
   }
 
-  /**
-   * The ACP delta hook: hand it straight to `sessionPrompt`. `full` is every
-   * assistant run so far joined — not the final answer — so it is only ever
-   * shown provisionally, and only the part of it no durable record carries
-   * yet. A caller that cannot name the current run leaves `lastRunText` empty
-   * rather than letting the join stand in for it: an unknown last run is not
-   * an answer, and an ending that reads one must settle through whatever else
-   * it has.
-   */
-  readonly onChunk = (_delta: string, full: string, currentRun?: string): void => {
-    // ACP deltas can split words; keep the current narration run readable
-    // when the bounded draft lane coalesces several token updates.
-    this.latestChunk = sanitizeAgentReply(currentRun ?? '');
-    this.latest = full;
-    this.latestRun = currentRun ?? '';
-    const text = sanitizeAgentReply(this.tailOf(full));
+  /** Replace the draft with the current ACP message. */
+  readonly onChunk = (currentRun: string): void => {
+    const text = sanitizeAgentReply(currentRun);
     if (!text || this.closed) return;
     this.pending = text;
     this.publishPending();
   };
-
-  /** The part of `full` this lane has not been told is saved anywhere else. */
-  private tailOf(full: string): string {
-    return this.persisted && full.startsWith(this.persisted)
-      ? full.slice(this.persisted.length)
-      : full;
-  }
-
-  /**
-   * Record that everything in `snapshot` now lives in a durable record of its
-   * own. Pass the value `streamedText` had when the save was taken, and pass
-   * it only once that write has LANDED: an offset that ran ahead of the wire
-   * would cut text out of both the draft and the reply that nothing else ever
-   * recorded, which is a loss where a duplicate is merely untidy.
-   *
-   * Ignored unless the snapshot still starts this turn's stream and reaches
-   * further than the last one, so a replayed or rewritten stream, a retried
-   * run, and an out-of-order write all leave the offset where it was.
-   */
-  markPersisted(snapshot: string): void {
-    if (snapshot.length <= this.persisted.length) return;
-    if (!this.latest.startsWith(snapshot)) return;
-    this.persisted = snapshot;
-    // A snapshot waiting on the wire was measured against the OLD offset, so
-    // it still carries the head this save just took. Letting it go out would
-    // publish narration the reader can already scroll to back under the
-    // answer — the duplicate the offset exists to remove — and it would do it
-    // AFTER the save, which is the one moment the lane is supposed to be
-    // right. So the queue is recomputed from the stream, and dropped outright
-    // when nothing of it is unsaved: no draft at all beats a stale one.
-    const tail = this.closed ? '' : sanitizeAgentReply(this.unsavedTail);
-    this.pending = tail || undefined;
-    if (this.pending !== undefined) this.publishPending();
-  }
-
-  /** How much of this turn's stream a durable record already carries. */
-  get persistedOffset(): string {
-    return this.persisted;
-  }
-
-  /** What the draft lane is showing: the stream past the persisted offset. */
-  get unsavedTail(): string {
-    return this.tailOf(this.latest);
-  }
-
-  /**
-   * The turn's answer with any already-saved head removed — the remainder the
-   * final reply settles.
-   *
-   * `agentText` is the LAST assistant run, while the offset is measured on
-   * every run joined. Those are two different strings, and cutting one by the
-   * other's length is precisely what the retired corner offset got wrong. So
-   * the run is located inside the stream first (`endsWith`), and a cut is
-   * taken only for the part of the saved snapshot reaching PAST where that run
-   * begins. An offset stopping at or before the seam cuts nothing and the
-   * closing message lands whole, exactly as it does with no offset at all.
-   */
-  remainderOf(agentText: string): string {
-    if (!agentText || !this.persisted) return agentText;
-    if (!this.latest.startsWith(this.persisted)) return agentText;
-    if (!this.latest.endsWith(agentText)) return agentText;
-    const runStart = this.latest.length - agentText.length;
-    if (this.persisted.length <= runStart) return agentText;
-    const savedHead = this.persisted.slice(runStart);
-    return agentText.startsWith(savedHead) ? agentText.slice(savedHead.length) : agentText;
-  }
 
   /**
    * Hand the newest snapshot to the wire, one write at a time.
@@ -208,52 +83,16 @@ export class AgentTurnStream {
       }
       return;
     }
-    const latestChunk = this.latestChunk;
     this.pending = undefined;
     const { api, agentId, roomId, requestId, label } = this.options;
     this.inFlight = api
-      .execute('postAgentDraft', { agentId, roomId, turnId: requestId, text, latestChunk })
+      .execute('postAgentDraft', { agentId, roomId, turnId: requestId, text, latestChunk: text })
       .then(() => undefined)
       .catch((error) => console.error(`[thin-core] ${label} draft publish failed:`, error))
       .then(() => {
         this.inFlight = undefined;
         this.publishPending();
       });
-  }
-
-  /**
-   * Everything the delta hook has seen this turn: every assistant run joined,
-   * which is a LONGER string than `PromptResult.agentText` whenever the turn
-   * spoke before a tool call. A corner records its runs independently and
-   * hands this value back through `markPersisted` to say how much of the
-   * stream that record now covers.
-   */
-  get streamedText(): string {
-    return this.latest;
-  }
-
-  /**
-   * The LAST assistant run alone — the same text `PromptResult.agentText`
-   * carries when the prompt returns, available to an ending the prompt never
-   * reached. An earlier run is progress narration around tool work and is not
-   * this turn's answer, however the turn ends.
-   */
-  get lastRunText(): string {
-    return this.latestRun;
-  }
-
-  /** Forget the previous run's stream text; a re-pinned retry starts clean. */
-  beginRun(): void {
-    this.overlay?.beginRun();
-    this.latest = '';
-    this.latestRun = '';
-    this.latestChunk = '';
-    // The offset measured the abandoned run. The retry rewrites the answer
-    // from its first delta, so nothing of the new stream is saved yet.
-    this.persisted = '';
-    // A snapshot of the abandoned run that never reached the wire is dead text:
-    // the new run rewrites the answer from its first delta.
-    this.pending = undefined;
   }
 
   /**

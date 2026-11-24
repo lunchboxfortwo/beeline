@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest';
 import { AcpClient } from './acp.js';
 import { startAgentProcess, stopAgentProcess } from './agent-process.js';
+import type { DaemonApiClient } from './daemon-api-client.js';
+import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 
 // Model the adapter's documented INITIAL_AGENT_MODE policy across both open
 // paths, using a child process so this covers the actual spawn environment.
@@ -59,6 +61,58 @@ it('keeps closing prose when an earlier tool result arrives after its last token
     return {stopReason:'end_turn'};
   };
   expect(await client.sessionPrompt('live','Please post the briefing')).toMatchObject({agentText:'The briefing is ready.'});
+});
+
+it('replaces the live draft after each tool and settles with only the closing text', async () => {
+  const client = new AcpClient({ agentCommand: 'pi-acp', agentEnv: {}, resourceScope: 'none' });
+  const drafts: string[] = [];
+  const stream = new AgentTurnStream({
+    api: {
+      async execute(operation: string, { text }: { text: string }) {
+        if (operation === 'postAgentDraft') drafts.push(text);
+      },
+    } as DaemonApiClient,
+    agentId: 'grunt',
+    roomId: 'apm',
+    requestId: 'turn',
+    commandId: 'command',
+    label: 'test',
+  });
+  const emit = (update: Record<string, unknown>) =>
+    client.emit('session/update', { sessionId: 'live', update });
+  const chunk = async (text: string) => {
+    emit({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  };
+  const read = (toolCallId: string) => {
+    emit({ sessionUpdate: 'tool_call', toolCallId, title: 'Read', status: 'in_progress' });
+    emit({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });
+  };
+
+  client.request = async () => {
+    await chunk("I'll start by reading");
+    await chunk(' my session context.');
+    read('session');
+    await chunk('The read tool needs a path.');
+    read('context');
+    await chunk('Now let me find the messages.');
+    read('messages');
+    await chunk('\n\nI found');
+    await chunk(' the requested messages.');
+    return { stopReason: 'end_turn' };
+  };
+
+  const result = await client.sessionPrompt('live', 'Find the messages', stream.onChunk);
+  stream.close();
+  expect(durableReplyText(result.agentText)).toBe('I found the requested messages.');
+  expect(drafts).toEqual([
+    "I'll start by reading",
+    "I'll start by reading my session context.",
+    'The read tool needs a path.',
+    'Now let me find the messages.',
+    'I found',
+    'I found the requested messages.',
+  ]);
 });
 
 const harnesses = [
