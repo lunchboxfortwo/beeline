@@ -80,7 +80,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
     if (!success) setStoppingAgents(current => { const next = new Set(current); next.delete(key); return next; });
   };
   const group = agents && agents.length > 1 ? agents : undefined;
-  useEffect(() => { setExpanded(false); setStoppingAgents(new Set()); }, [group?.map(agent => `${agent.pubkey}:${agent.stop?.requestId}`).join(',')]);
+  useEffect(() => { setExpanded(false); setStoppingAgents(new Set()); }, [group?.map(agent => agent.turnKey ?? `${agent.pubkey}:${agent.stop?.requestId}`).join(',')]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (startedAt == null) return;
@@ -98,7 +98,7 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   const stateLabel = [counter, received ? 'received' : undefined].filter(Boolean).join(' · ');
   const workingAvatars = agents?.length ? (
     <XStack alignItems="center" flexShrink={0}>
-      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.pubkey} width={index === Math.min(agents.length, 3) - 1 ? 24 : 16} flexShrink={0}
+      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.turnKey ?? agent.pubkey} width={index === Math.min(agents.length, 3) - 1 ? 24 : 16} flexShrink={0}
         borderWidth={2} borderColor="canvas" borderRadius="sm">
         <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
       </YStack>)}
@@ -119,10 +119,10 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
           <ScrollView>
             {group.map(agent => {
               const busy = stoppingAgents.has(`${agent.pubkey}:${agent.stop?.requestId}`);
-              return <XStack key={agent.pubkey} paddingHorizontal="3" minHeight={44} gap="2" alignItems="center">
+              return <XStack key={agent.turnKey ?? agent.pubkey} paddingHorizontal="3" minHeight={44} gap="2" alignItems="center">
                 <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={24} />
                 <T v="meta" flex={1}>{agent.name}</T>
-                <T v="meta" color="secondary">{formatWorkingCounter(agent.startedAt * 1_000, now, busy ? 'stopping' : 'thinking')}</T>
+                {agent.startedAt != null && <T v="meta" color="secondary">{formatWorkingCounter(agent.startedAt * 1_000, now, busy ? 'stopping' : 'thinking')}</T>}
                 {agent.stop && onStopAgent ? <Button size="inline" variant="quiet" alignSelf="center" label="Stop" disabled={busy}
                   accessibilityLabel={`Stop ${agent.name}`} onPress={() => void stopAgent(agent)} testID={`stop-agent-${agent.pubkey}`} /> : null}
               </XStack>;

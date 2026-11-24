@@ -33,3 +33,24 @@ it('keeps the server-assigned face when only membership detail is available', ()
   const ack=selectComposerAckPresentation({...input,conversationIdentities:new Map(),agentsByPubkey,activeTurns:turns});
   expect(ack?.agents?.map(agent=>agent.face)).toEqual(['owl','owl','owl','owl']);
 });
+
+it('keeps a starting free agent beside a regular turn through helper pickup', () => {
+  const ruby = turns[0]!;
+  const beebee = { ...turns[1]!, agentPubkey: 'Beebee', requestId: ruby.requestId };
+  const pending = { agentPubkey: beebee.agentPubkey, requestId: beebee.requestId, createdAt: 90,
+    runtimePhase: { phase: 'starting' as const, operationId: 'wake' } };
+  const mixed = { ...input, conversationIdentities: new Map([...conversationIdentities,
+    ['Beebee', { pubkey: 'Beebee', kind: 'agent', name: 'Beebee' } as RoomViewIdentity]]),
+    activeTurnPubkey: ruby.agentPubkey, activeTurnRequestId: ruby.requestId,
+    activeTurnStartedAt: ruby.startedAt, pendingAgentCommands: [pending] };
+  for (const activeTurns of [undefined, [ruby], [ruby, beebee]]) {
+    const ack = selectComposerAckPresentation({ ...mixed, activeTurns });
+    expect(ack?.label).toBe('Ruby, Beebee brewing…');
+    expect(ack?.agents?.map(agent => [agent.pubkey, agent.startedAt, agent.stop])).toEqual([
+      ['Ruby', ruby.startedAt, { agentPubkey: 'Ruby', requestId: ruby.requestId }],
+      ['Beebee', activeTurns?.includes(beebee) ? beebee.startedAt : undefined,
+        { agentPubkey: 'Beebee', requestId: beebee.requestId }],
+    ]);
+    expect(ack?.startedAt).toBe(ruby.startedAt);
+  }
+});

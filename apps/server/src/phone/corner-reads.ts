@@ -209,7 +209,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ORDER BY turn.agent_id
          ), pending_command_rows AS (
            SELECT DISTINCT ON(command.agent_id)
-             command.agent_id,command.turn_request_id,command.created_at
+             command.agent_id,command.turn_request_id,command.created_at,command.startup_operation_id
            FROM authorized_room room
            JOIN agent_commands command ON command.room_id=room.id
            JOIN messages source ON source.id=command.source_message_id AND source.room_id=room.id
