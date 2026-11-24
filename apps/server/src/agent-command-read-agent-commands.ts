@@ -1,5 +1,6 @@
 import { connectorHostAcceptedSql } from './rooms-mcp-delivery.js';
 import { legacyMessageBody } from './messaging-cutover.js';
+import { publicMentionCommandSql } from './owed-mentions.js';
 import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { isResumeKind } from '@beeline/api-contract/phone';
@@ -29,11 +30,17 @@ export function queuedWakeBody(item: CommandRow & { review_rollup?: ReviewRollup
 }
 
 /** One durable queue read, shared by helper push and connected-app delivery. */
-export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:string) {
+export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: { roomId?: string; pairedWithMentions?: boolean } = {}) {
   // Idle notices describe one episode, unlike accepted human work. Retire an
   // obsolete episode through the terminal owner before delivering the queue.
   // An automatic review wake not yet started is obsolete once its head is no
   // longer the thread head or that head is approved.
+  // Public tags and DMs with a mention record are delivered by message ID.
+  // The queued command still owns the request and resolves its reply route.
+  const wakeSource = options.pairedWithMentions ? `AND NOT (${publicMentionCommandSql('item')}
+      AND EXISTS(SELECT 1 FROM rooms_mcp_mentions mention
+        WHERE mention.member_id=item.agent_id AND mention.room_id=item.room_id
+          AND mention.message_id=item.source_message_id))` : '';
   return db.query<CommandRow & { parent_room_id: string | null; room_name: string | null;
     return_room_name: string | null; offline_seconds: number | null; operator_agent:boolean;
     selected_model: string | null; selected_effort: string | null; fast_mode: boolean | null;
@@ -79,7 +86,8 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,roomId?:s
        AND review.lifecycle->'pr'->'number'=item.review_context->'pullRequest'
      WHERE NOT EXISTS(SELECT 1 FROM retired WHERE retired.id=item.id)
        AND NOT ${connectorHostAcceptedSql('item')}
-     ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, roomId ?? null]);
+       ${wakeSource}
+     ORDER BY item.inbox_sequence,item.created_at,item.id`, [agentId, options.roomId ?? null]);
  }
 
 /** A pending automatic review wake whose turn never started, for a head, PR or
@@ -107,7 +115,7 @@ export async function readAgentCommands(
   agentId: string,
   roomId?: string,
 ): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
-  const rows = await readAgentQueueRows(db,agentId,roomId);
+  const rows = await readAgentQueueRows(db,agentId,{roomId});
   // Loaded here: a static import closes a module cycle through the migrations.
   const { daemonCorners } = await import('./daemon/corner-reads.js');
   const threads = new Map(await Promise.all(

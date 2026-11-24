@@ -65,7 +65,7 @@ export const CORNER = '44444444-4444-4444-8444-444444444444';
 export const PUBLIC_CORNER = '55555555-5555-4555-8555-555555555555';
 
 export const opaque = () => randomBytes(32).toString('base64url');
-export function fixtureScope1() {
+export function fixtureScope1(memberStreamReady = false) {
 
   let db: PgliteDatabase, server: ReturnType<typeof createBeelineServer>, origin: string, phone: PhoneService, daemon: DaemonService;
 
@@ -103,7 +103,7 @@ export function fixtureScope1() {
     origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     options.roomsMcp = new RoomsMcp(new RoomsMcpOAuth(db, origin, auth, 'localhost'), phone, live, daemon,
       new ObjectService(db, new MemoryObjectStorage().asStorage(), origin),
-      new RoomsMcpEvents(db, (url, init) => eventTransport(url, init)));
+      new RoomsMcpEvents(db, (url, init) => eventTransport(url, init)), () => memberStreamReady);
   }, 60_000);
 
   beforeEach(async () => {

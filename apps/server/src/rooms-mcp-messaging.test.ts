@@ -1,15 +1,19 @@
 import { sendMessage } from './agent-messaging.js';
 import { readAgentCommands } from './agent-command-read-agent-commands.js';
+import { applySkillRevision } from './institutional-skills.js';
 import { mkdtemp,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { vi } from 'vitest';
+import { memberStream } from '../../body/src/session-join/beeline-api.js';
 import { acceptMemberDelivery } from '../../body/src/session-join/bridge.js';
 import { takeInbox,updateState,type JoinedSession } from '../../body/src/session-join/store.js';
+import { memberStreamFrame } from '../../body/src/session-join/stream-frame.js';
 import { itemPrompt } from '../../body/src/place-prompt.js';
-import { AGENT,PRIVATE,PUBLIC_CORNER,ROOM,USER,describe,expect,fixtureScope1,fixtureScope3,it } from './test-support-rooms-mcp.test-support.js';
+import { AGENT,PRIVATE,PUBLIC_CORNER,ROOM,USER,WORKSPACE,describe,expect,fixtureScope1,fixtureScope3,it } from './test-support-rooms-mcp.test-support.js';
 
 describe('connected agent message protocol',()=>{
-  const scope=fixtureScope1(), tools=fixtureScope3(scope);
+  const scope=fixtureScope1(true), tools=fixtureScope3(scope);
   const handle=async(member:string)=>(await scope.db.query<{handle:string}>(
     'SELECT beeline_room_handle($1,$2) handle',[member,ROOM])).rows[0]!.handle;
   const humanTask=async(member:string,text='Inspect the widget')=>{
@@ -17,33 +21,79 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
-  it('keeps a tagged image on message reads and the session-helper wake',async()=>{
-    const {client,member}=await scope.connected();
+  it('renders one person tag with its context and attachment and replies by message id in a joined Claude session', async () => {
+    vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
+    const { client, member, token, grant } = await scope.connected();
+    const seed = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Save the image review procedure.' }, USER);
+    const procedure = 'Measure the distance from each edge before giving feedback.';
+    await applySkillRevision(scope.db, {
+      workspaceId: WORKSPACE, sourceRoomId: ROOM, slug: 'image-review', kind: 'procedure',
+      description: 'Review an annotated screenshot.', markdown: procedure, sourceMessageIds: [seed.messageId],
+    });
+    const brief = 'Review the keyboard alignment on the mobile layout.';
+    await scope.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,spec,objective,author_id,source_room_id)
+      VALUES($1,1,$2,'Review the layout',$3,$4)`, [PUBLIC_CORNER, brief, USER, ROOM]);
+    await tools.ok(client, 'setup_delivery', {
+      mechanism: 'local', host: 'Claude', surface: 'CLI', conversation: 'image-proof', installed: true,
+    });
     const image={url:'https://files.example.test/browser-screen.jpg',name:'browser-screen.jpg',mimeType:'image/jpeg',size:176684,width:1080,height:2340};
-    const source=await scope.phone.execute('sendRoomMessage',{
-      roomId:ROOM,text:`@${await handle(member)} keyboard not centered in its button`,attachments:[image],
-    },USER);
-    const direct=await tools.ok(client,'read',{address:ROOM,facet:'message',messageId:source.messageId});
-    const page=await tools.ok(client,'read_messages',{room:ROOM});
+    const dir = await mkdtemp(join(tmpdir(), 'tagged-image-session-'));
+    const joined: JoinedSession = {
+      key: 'claude-code:/image-proof', agent: 'claude-code', cwd: '/image-proof', name: 'Image proof',
+      server: scope.origin, clientId: grant.clientId, cursor: '0', deliveredWakes: [], joinedAt: '',
+    };
+    const runner = { node: '/proof/node', bundle: '/proof/beeline.mjs' };
+    const stream = memberStream(joined, token, AbortSignal.timeout(10_000));
+    const instruction = 'Check the keyboard alignment in the attached image.';
+    const text = `@${await handle(member)} follow image-review. ${'Context. '.repeat(2_000)}${instruction}`;
+    let messageId: string | undefined;
+    let rendered = 0;
+    let tagCheckpoint = false;
+    try {
+      await updateState(dir, state => state.sessions.push(joined));
+      for await (const raw of stream) {
+        const frame = memberStreamFrame(raw);
+        const count = await acceptMemberDelivery(dir, joined.key, runner, frame);
+        if (messageId) rendered += count;
+        if (frame.type !== 'checkpoint') continue;
+        if (frame.mentionCursor !== '0') {
+          tagCheckpoint = true;
+          break;
+        }
+        if (!messageId) {
+          takeInbox(dir, joined.key);
+          const source = await scope.phone.execute('sendRoomMessage', { roomId: PUBLIC_CORNER, text, attachments: [image] }, USER);
+          messageId = source.messageId;
+        }
+      }
+      expect(tagCheckpoint).toBe(true);
+      expect(rendered).toBe(1);
+      const inbox = takeInbox(dir, joined.key);
+      expect(inbox).toContain(`id: ${messageId}\n`);
+      expect(inbox).toContain(instruction);
+      expect(inbox).toContain(procedure);
+      expect(inbox).toContain(brief);
+      expect(inbox).toContain(image.name);
+      expect(inbox).toContain(image.url);
+      expect(inbox).toContain(image.mimeType);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+    const direct=await tools.ok(client,'read',{address:PUBLIC_CORNER,facet:'message',messageId});
+    const page=await tools.ok(client,'read_messages',{room:PUBLIC_CORNER});
     const delivery=await tools.ok(client,'list_mentions',{});
-    const command=(await readAgentCommands(scope.db,member)).commands.find(item=>item.sourceMessageId===source.messageId)!;
+    const command=(await readAgentCommands(scope.db,member)).commands.find(item=>item.sourceMessageId===messageId)!;
     expect(direct.attachments).toEqual([image]);
     expect(command.source.attachments).toEqual([image]);
     expect(itemPrompt(command,{names:new Map()})).toContain('📎 browser-screen.jpg (image/jpeg, 173 KB)');
-    expect(page.messages.find((item:{id:string})=>item.id===source.messageId)).toMatchObject({attachments:[image]});
-    expect(delivery.mentions.find((item:{id:string})=>item.id===source.messageId)).toMatchObject({attachments:[image]});
-    expect(delivery.wakes.find((item:{id:string})=>item.id===command.id)).toMatchObject({attachments:[image]});
-    const dir=await mkdtemp(join(tmpdir(),'tagged-image-session-'));
-    try {
-      const joined:JoinedSession={key:'codex:/image-proof',agent:'codex',cwd:'/image-proof',name:'Image proof',server:scope.origin,
-        clientId:'fixture',cursor:'0',deliveredWakes:[],joinedAt:''};
-      await updateState(dir,state=>state.sessions.push(joined));
-      const mention=delivery.mentions.find((item:{id:string})=>item.id===source.messageId);
-      await acceptMemberDelivery(dir,joined.key,{node:'/proof/node',bundle:'/proof/beeline.mjs'},
-        {v:1,type:'delivery',deliveryId:`mention:${source.messageId}`,mentionCursor:delivery.nextCursor,mentions:[mention],wakes:[]});
-      const inbox=takeInbox(dir,joined.key);
-      expect(inbox).toContain(image.name);expect(inbox).toContain(image.url);expect(inbox).toContain(image.mimeType);
-    } finally {await rm(dir,{recursive:true,force:true});}
+    expect(page.messages.find((item:{id:string})=>item.id===messageId)).toMatchObject({attachments:[image]});
+    expect(delivery.mentions).toEqual([expect.objectContaining({
+      id: messageId, text: text.slice(0, 16_000), truncated: true, attachments: [image],
+    })]);
+    expect(delivery.wakes).toEqual([]);
+    const reply = await tools.ok(client, 'reply', { id: messageId, text: 'I checked the image.' });
+    expect((await scope.db.query('SELECT room_id,card FROM messages WHERE id=$1', [reply.id])).rows)
+      .toMatchObject([{ room_id: PUBLIC_CORNER, card: { route: { to: { agent: USER, place: PUBLIC_CORNER } } } }]);
   });
   it('names to and its {agent, place} shape when to is a string',async()=>{
     const {client}=await scope.connected();
