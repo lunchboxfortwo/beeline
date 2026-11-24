@@ -212,7 +212,8 @@ async function request(messageId: string) {
       text: string;
       card: Record<string, unknown>;
       system_event: { kind?: string };
-    }>(`SELECT room_id,author_id,text,card,system_event FROM messages WHERE card_type='squire-approval-decision'`);
+      id: string;
+    }>(`SELECT id,room_id,author_id,text,card,system_event FROM messages WHERE card_type='squire-approval-decision'`);
     expect(rows.rows).toHaveLength(1);
     const row = rows.rows[0]!;
     expect(row.room_id).toBe(ROOM);
@@ -227,6 +228,8 @@ async function request(messageId: string) {
       status: 'approved',
       agentId: AGENT,
     });
+    // The decision row only wakes the agent: the settled approval card already shows the answer.
+    expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.some(message => message.id === row.id)).toBe(false);
     const resume = await fixture.database.query<{ action: string; state: string }>(
       `SELECT action,state FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND parent_command_id=$3 AND action='input' AND reason='resume'`,
       [ROOM, AGENT, await request(asked.messageId)],

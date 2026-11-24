@@ -49,17 +49,16 @@ describe('PillRow', () => {
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
     });
-    it('draws a lone agent message as its plain face → face row, with no pill above it', () => {
+    it('folds a lone agent-to-agent message into a pill that opens on tap', () => {
         let tree: any;
         act(() => { tree = create(<PillRow items={[items[1]!]} />); });
-        expect(tree.root.findAll((node: any) => node.type === 'Button')).toHaveLength(0);
+        const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'agent-pill');
+        expect(tree.root.findAll((node: any) => node.type === 'Button')).toHaveLength(1);
+        expect(pill().findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
+        expect(tree.root.findAllByProps({ testID: 'a2a-body' })).toHaveLength(0);
+        act(() => pill().props.onPress());
         const entry = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-run-entry-a2a');
-        expect(entry.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
-        expect(entry.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
-        expect(text(entry)).toContain('· 10:00');
         expect(entry.findByProps({ testID: 'a2a-body' }).props.children).toBe('@jimmy Keep it visible');
-        // The faces appear once: only in the row's heading.
-        expect(tree.root.findAll((node: any) => node.type === 'IdentityMark')).toHaveLength(2);
     });
 
     const ruby = { kind: 'agent', seed: 'ruby', name: 'Ruby' } as const;

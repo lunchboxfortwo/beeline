@@ -16,7 +16,9 @@ export async function recordedMessageRoute(db:SqlDatabase,item:CommandRow):Promi
 /** Reports follow the session's recorded chain of command. */
 export async function reportRecipient(db:SqlDatabase,item:CommandRow):Promise<MessageAddress> {
   const address = (await recordedMessageRoute(db,item)).from;
-  const issuer = item.message?.route?.from ?? item.private_payload?.route?.from ?? address;
+  const sender = item.message?.route?.from ?? item.private_payload?.route?.from ?? address;
+  // A system wake (a Sentry alert) records who it answers; that is the issuer, not the System.
+  const issuer = sender.agent === SYSTEM_IDENTITY_ID ? address : sender;
   const thread = (await db.query<{address:MessageAddress|null}>(`SELECT CASE
     WHEN ${cornerReviewerSql('room','parent')}=$2 AND fact.implementer_agent_id IS NOT NULL
       THEN jsonb_build_object('agent',fact.implementer_agent_id,'place',room.id)

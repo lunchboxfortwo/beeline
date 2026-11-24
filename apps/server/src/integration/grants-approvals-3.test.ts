@@ -565,7 +565,8 @@ const fixture = monolithFixture();
     const card = (await fixture.phone.readRoom(posted.room_id, HUMAN))?.messages.find(message => message.id === posted.id)?.squireApproval;
     expect(card).toMatchObject({ status, decidedAt: expect.any(Number) });
     expect(card?.decidedBy).toBeUndefined();
-    expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.find(message => message.id === id)?.presentation).toBe('card');
+    // The decision only wakes the agent; the settled card above already shows it.
+    expect((await fixture.phone.readRoom(ROOM, HUMAN))?.messages.some(message => message.id === id)).toBe(false);
     expect((await fixture.database.query(`SELECT action FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2`, [id, AGENT])).rows).toEqual([{ action: 'input' }]);
   });
 

@@ -381,20 +381,12 @@ function RunList({ run }: { run: readonly PillRunEntry[] }) {
  * pill is faces and marks only; a tap opens the full message under the row.
  * A run folds into one pill of faces and a count ("5 messages · 13 events"),
  * and opens as a plain list in send order. A stop is face, stop glyph, face. A
- * lone event is its GitHub or Beeline ring and its state mark. A lone agent message has
- * nothing to fold, so it reads as its open row with no pill.
+ * lone event is its GitHub or Beeline ring and its state mark. A lone agent message is
+ * a pill too, and opens on tap like any other.
  */
 export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?: string }) {
     const [openId, setOpenId] = useState<string | null>(null);
     const open = items.find((item) => item.id === openId);
-    const lone = items.length === 1 && !items[0]!.run && !items[0]!.stop && !items[0]!.system && !items[0]!.event ? items[0] : undefined;
-    if (lone) {
-        return (
-            <YStack width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
-                <RunList run={[lone]} />
-            </YStack>
-        );
-    }
     return (
         <YStack gap="3" width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
             <XStack gap="2" flexWrap="wrap" alignItems="flex-start">
