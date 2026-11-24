@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { toolCallEntries } from './acp.js';
 import { type TurnTokenFigure } from './harness-turn-tokens.js';
+import { maskCredentialResult } from './mask-credential-result.js';
 
 
 
@@ -508,20 +508,30 @@ export function finalAgentMessageText(
   agentLabel?: string,
 ): string {
   const runs = agentMessageRunSpans(updates, agentLabel);
-  const last = runs[finalRunIndex(runs)]?.text;
-  if (!last || isPureRetryNarration(last)) return '';
+  return runs[finalMessageRunIndex(updates, runs)]?.text ?? '';
+}
+
+
+function finalMessageRunIndex(
+  updates: readonly SessionUpdate[],
+  runs: readonly { text: string }[],
+  calls?: readonly { at: number }[],
+): number {
+  const final = finalRunIndex(runs);
+  const last = runs[final]?.text;
+  if (!last || isPureRetryNarration(last)) return -1;
   // A prompt can end after tools without ever producing closing prose. Its
   // earlier progress sentence is not an answer. Use the last text delta so
   // metadata interleaved inside a word and late results for an older tool do
   // not discard a real closing message.
   const lastText = updates.reduce((last, {update}, index) => agentMessageChunkText(update).trim() ? index : last, -1);
-  if (toolCallOpenings(updates).some(at => at > lastText)) return '';
-  return last;
+  const openings = calls ?? projectToolCalls(updates, () => undefined);
+  return openings.some(({ at }) => at > lastText) ? -1 : final;
 }
 
 
 /** The last run with any text in it: a whitespace-only run is not an answer. */
-export function finalRunIndex(runs: readonly { text: string }[]): number {
+function finalRunIndex(runs: readonly { text: string }[]): number {
   for (let index = runs.length - 1; index >= 0; index -= 1) {
     if (runs[index]!.text.trim()) return index;
   }
@@ -548,24 +558,24 @@ export function agentTurnSteps(
   agentLabel?: string,
 ): AgentTurnStep[] {
   const runs = agentMessageRunSpans(updates, agentLabel);
-  const final = finalAgentMessageText(updates, agentLabel) ? finalRunIndex(runs) : -1;
+  const calls = toolCallSpans(updates);
+  const final = finalMessageRunIndex(updates, runs, calls);
   const steps: { at: number; step: AgentTurnStep }[] = runs.flatMap((run, index) =>
     index === final || !run.text.trim() || isPureRetryNarration(run.text)
       ? []
       : [{ at: run.at, step: { kind: 'note' as const, text: run.text.trim() } }],
   );
-  const calls = toolCallEntries(updates);
-  const opened = toolCallOpenings(updates);
-  calls.forEach((call, index) => {
-    steps.push({ at: opened[index] ?? updates.length, step: { kind: 'tool', call } });
-  });
+  for (const { at, call } of calls) steps.push({ at, step: { kind: 'tool', call } });
   return steps.sort((left, right) => left.at - right.at).map(({ step }) => step);
 }
 
 
-/** The update index that opened each entry of `toolCallEntries`, same order. */
-export function toolCallOpenings(updates: readonly SessionUpdate[]): number[] {
-  const opened = new Map<string, number>();
+/** Track each physical call at its first occurrence and fold subsequent notifications into it. */
+function projectToolCalls<T>(
+  updates: readonly SessionUpdate[],
+  merge: (id: string, update: SessionUpdate['update'], previous: T | undefined) => T,
+): { at: number; call: T }[] {
+  const calls = new Map<string, { at: number; call: T }>();
   let anonymous = 0;
   let activeAnonymous: string | undefined;
   for (const [index, { update }] of updates.entries()) {
@@ -577,10 +587,37 @@ export function toolCallOpenings(updates: readonly SessionUpdate[]): number[] {
       activeAnonymous = `anonymous-${anonymous++}`;
     }
     const key = id ?? activeAnonymous!;
-    if (!opened.has(key)) opened.set(key, index);
+    const previous = calls.get(key);
+    const call = merge(key, update, previous?.call);
+    if (previous) previous.call = call;
+    else calls.set(key, { at: index, call });
     if (!id && sessionUpdate === 'tool_result') activeAnonymous = undefined;
   }
-  return [...opened.values()];
+  return [...calls.values()];
+}
+
+
+function toolCallSpans(updates: readonly SessionUpdate[]): { at: number; call: ToolCallEntry }[] {
+  return projectToolCalls<ToolCallEntry>(updates, (id, update, previous) =>
+    maskCredentialResult({
+      ...previous,
+      id,
+      ...(typeof update.name === 'string' ? { name: update.name } : {}),
+      ...(typeof update.title === 'string' ? { title: update.title } : {}),
+      ...(typeof update.kind === 'string' ? { kind: update.kind } : {}),
+      ...(typeof update.status === 'string' ? { status: update.status } : {}),
+      ...(update.sessionUpdate === 'tool_result' ? { resultReceived: true } : {}),
+      ...('rawInput' in update ? { rawInput: update.rawInput } : {}),
+      ...('content' in update ? { content: update.content } : {}),
+      ...('rawOutput' in update ? { rawOutput: update.rawOutput } : {}),
+      ...('locations' in update ? { locations: update.locations } : {}),
+    }),
+  );
+}
+
+
+export function toolCallEntries(updates: readonly SessionUpdate[]): ToolCallEntry[] {
+  return toolCallSpans(updates).map(({ call }) => call);
 }
 
 
