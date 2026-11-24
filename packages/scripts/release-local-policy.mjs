@@ -53,11 +53,11 @@ export function releasePlan(workflow, checks, options = {}) {
   return {
     targetSeconds: 1800,
     target: 'routine squire release; check budget ~5 min + concurrent delivery ~20 min + finalization',
-    localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job; iOS store compilation runs remotely',
+    localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job',
     checks: options.channel === 'latest' ? { retained: [], reusedFrom: 'successful same-SHA next release' }
       : { profile: 'quick', retained: localChecks, dropped: droppedChecks(checks) },
     jobs: Object.entries(local.jobs).map(([id, job]) => ({ id, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()',
-      placement: id === 'mobile_native_ios' ? 'remote Mac, separate queue' : id === 'helper_macos' && !carryMac ? 'GitHub-hosted macOS runners; one dispatched run for both architectures' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
+      placement: id === 'helper_macos' && !carryMac ? 'GitHub-hosted macOS runners; one dispatched run for both architectures' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
       policy: id === 'helper_macos' ? carryMac ? 'published Apple-silicon and Intel Mac helpers carried unchanged' : 'ARM and Intel helpers built natively on GitHub-hosted macos-15 and macos-15-intel; publication stays on squire'
         : id === 'desktop_installers' ? carryDesktop ? 'installer proof plan requests the published desktop set' : WINDOWS_DESKTOP === 'build' ? 'complete native signed updater set, including Windows, signed and staged on next' : 'macOS and Linux signed updater set staged on next; published Windows installers carried unchanged and omitted from the updater manifest' : undefined })),
     coverage: 'no release coverage map is fabricated; PR Checks remain unchanged',

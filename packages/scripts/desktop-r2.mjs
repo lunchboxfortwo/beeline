@@ -35,12 +35,8 @@ export async function publishDesktopR2({ directory, manifestPath, tag, output,
     if (!files.includes(file) || !files.includes(`${file}.sig`)) throw new Error(`Missing desktop payload or signature: ${file}`);
   }
   await writeFile(output, `${JSON.stringify(manifest, null, 2)}\n`);
-  // Finish the immutable set first, then advance latest. The latest manifest
-  // is last so an updater never observes a reference to an unfinished upload.
-  for (const prefix of tag.includes('-rc.') ? [tag] : [tag, 'latest']) {
-    for (const file of files) await put(prefix, file, join(directory, file));
-    await put(prefix, 'Beeline-latest.json', output);
-  }
+  for (const file of files) await put(tag, file, join(directory, file));
+  await put(tag, 'Beeline-latest.json', output);
   return manifest;
 }
 

@@ -55,7 +55,7 @@ Before the first promotion, deploy the [download pointer Worker](../apps/infra/h
 and enable **Allow npm dist-tag** on the existing `usebeeline` trusted publisher for
 `unified-release.yml`. The job uses the existing OIDC trust and npm 11.21+.
 Candidates published before artifact staging need a new `next` delivery.
-The promotion job refuses incomplete candidates before moving any endpoints.
+Promotion uses the delivered record and the staged website metadata for the same SHA.
 
 The next command prints redacted job outcomes and timings before cleaning up
 its private checkout and logs. It keeps the current and newest previous
@@ -111,8 +111,8 @@ caches, Docker configuration and logs.
 The existing `beeline-ci1..4.slice` parents enforce 3 CPUs / 12 GiB each.
 After the checks verdict, the delivery queue uses at most three local slots
 and one separate capped slot for remote Mac orchestration.
-iOS store compilation uses the remote orchestration slot while server,
-Linux helper, OTA and web app legs use available local slots. Both Mac helpers
+macOS desktop uses the remote orchestration slot. Server, Linux helper,
+OTA and web app legs use available local slots. Both Mac helpers
 build on GitHub (below) and use no local slot.
 Each delivery worker runs as the operator in its own source checkout and process,
 so production credentials never enter credential-free CI jails.
@@ -143,7 +143,7 @@ their digests preserved; consumers and the mirror script must stay in sync.
 The website stages both origins on `next`. The shared `pages-leg` composite
 assembles the static marketing site without downloads and uses Wrangler to
 upload a preview to the existing Cloudflare Pages project. It saves the
-uploaded asset manifest and Pages deployment ID on the candidate release.
+uploaded asset manifest on the candidate release.
 The EAS web leg exports once, uploads private source maps when configured,
 and verifies the immutable preview URL. The same release asset saves its EAS deployment ID and the Expo project
 identity read from that candidate configuration.
@@ -199,20 +199,8 @@ token for WiX; no new listener or login policy is provisioned. Windows uses
 the workflow's Tauri updater signing, which has no Authenticode step.
 Updater signatures are cryptographically verified before local artifacts
 enter finalization.
-For the iOS store build on the Mac host, Apple's `security`, `codesign`,
-`xcodebuild`, `xcrun` and Fastlane launchers
-receive the operator's real HOME through private executable adapters. Their
-native children inherit that HOME, including absolute-path Xcode tools and
-`altool`, with an explicit build/login/System keychain search list. The calling
-npm/EAS processes keep the job's private HOME and caches; npm children of Apple
-tools also retain private cache/config paths. For iOS, the private
-provisioning-profile directory links to the operator's profile directory so
-EAS's temporary profiles and Xcode's identity discovery use the same home.
-The original keychain search list is restored after the job. Successful Mac jobs
-remove their own temporary source/tool directories after collecting local artifacts, so
-builds fit on the laptop. Windows file transfer uses Chad's existing
-Python libvirt bindings and guest agent, with private transport files and no new
-network listener.
+Windows file transfer uses Chad's existing Python libvirt bindings and guest
+agent with private transport files.
 The existing workflow assigns the next desktop version, stages stable names,
 and stages the set and manifest during next finalization. Latest switches the
 download pointer to that staged set.
@@ -312,18 +300,13 @@ build uses the repository's updater secrets described in the
 [signing guide](./macos-desktop-signing.md#ci-contract), and squire verifies its
 updater signature against the local public key. Linux and Windows desktop
 workers receive only signing inputs, never publication or deployment tokens.
-The carried desktop set requires no Apple signing or Tauri private keys.
 Keep vaulted keys vaulted; suitable provider API calls can use Squire's
 `use_credential`. A CLI requiring a raw credential needs a provider-issued
 local credential or approved secure injection, not plaintext vault retrieval.
 
 Run the command using Node 22 or newer,
-the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The iOS build Mac needs
-Git, curl, tar, shasum, rustup and its normal compiler/SDK. The controller downloads
-checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
-temporary directory, without changing shared host tools or toolchain defaults.
-`--dry-run --leg mac-tools` proves that setup alone. The runner never
-shallow-fetches shared history. It checks for active hosted releases;
+the pinned Rust toolchain, Docker, Fly, gh, gh-axi and SSH tools. The runner
+uses the existing repository history. It checks for active hosted releases;
 `release.mjs` holds the local lock for each invocation and clears dead owners.
 
 When available, fnm selects an installed Node version using a compatible
@@ -650,24 +633,9 @@ is `none`, the plan ships the OTA to the runtimes live in the stores and prints
 a notice; the new runtime gets OTAs once a store release puts it live. With an
 explicit beta track, next builds Android. The `allow_pin_restore` input is accepted and ignored.
 
-On hosted releases, iOS store binaries build locally on the self-hosted
-`macbook-pro-7` Mac runner. On squire, iOS uses the authorized
-`dani@100.104.88.126` Mac through its serialized remote queue. The remote job
-receives its Expo/ASC credentials and existing GitHub authority through stdin
-into a temporary job file removed on exit; other local
-delivery secrets stay on squire. The remote runner uses a private
-HOME, TMPDIR and signing keychain, and restores the prior keychain selection.
-The generated IPA is submitted directly to TestFlight. The iOS leg inspects the
-IPA's bundle, version, build number, runtime and required photo purpose string
-(`packages/scripts/ios-build-evidence.py`), then verifies the exact Apple delivery UUID
-and a new `VALID` build under App Store app `6803948500`
-(`packages/scripts/ios-store-build.mjs`). Apple processing errors fail immediately;
-missing or unfinished builds fail after 20 minutes. The native build evidence keeps
-the delivery UUID and App Store build ID. Transport success alone does not
-authorize the native component or OTA promotion. Android store binaries
-build locally on the Linux runner and use the existing Google Play authentication
-and upload path. Mac helper placement is described under
-[local recovery legs](#local-recovery-legs-during-an-actions-outage).
+The Android beta leg uses the existing Linux runner and Google Play
+authentication. Production store submissions run outside unified release.
+See the [mobile store runbook](../apps/mobile/docs/store-submission.md).
 
 Selected jobs build immutable artifacts named with both release version and
 source SHA, promote them, and run bounded checks. A component job that succeeds

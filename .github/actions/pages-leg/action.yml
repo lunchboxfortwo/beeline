@@ -5,12 +5,10 @@ description: Deploy the static website without helper download bytes
 inputs:
   branch:
     description: Pages branch to deploy
-    required: false
-    default: main
+    required: true
   deployment_json:
     description: File to receive the staged Pages preview and asset manifest
-    required: false
-    default: ''
+    required: true
   cloudflare_api_token:
     description: Cloudflare token with Pages Edit authority
     required: true

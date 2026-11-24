@@ -12,7 +12,7 @@ import { localHooks } from './release-local.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const origin = 'https://downloads.usebeeline.app';
-const tag = 'v1.2.3';
+const tag = 'v1.2.3-rc.2';
 const accountId = 'a'.repeat(32);
 const installers = ['Beeline-universal.dmg', 'Beeline-universal.app.tar.gz',
   'Beeline-x86_64.AppImage', 'Beeline-x86_64-setup.exe', 'Beeline-x86_64.msi',
@@ -57,7 +57,7 @@ test('production build CLI preserves endpoint priority from the desktop workflow
   assert.deepEqual(JSON.parse(await readFile(output, 'utf8')).plugins.updater.endpoints, endpoints);
 });
 
-test('R2 publishes all installers and signatures to both prefixes, with manifests last', async t => {
+test('R2 publishes all installers and signatures to the candidate prefix, with the manifest last', async t => {
   const args = await fixture(t), calls = [];
   for (const entry of Object.values(args.manifest.platforms)) {
     assert.ok(entry.url.startsWith(`${origin}/${tag}/`));
@@ -77,8 +77,7 @@ test('R2 publishes all installers and signatures to both prefixes, with manifest
     return Response.json({ success: true });
   } });
   const files = [...installers, ...signed.map(file => `${file}.sig`)].sort();
-  assert.deepEqual(calls.map(call => call.key), [tag, 'latest'].flatMap(prefix =>
-    [...files, 'Beeline-latest.json'].map(file => `${prefix}/${file}`)));
+  assert.deepEqual(calls.map(call => call.key), [...files, 'Beeline-latest.json'].map(file => `${tag}/${file}`));
   for (const call of calls) {
     const file = call.key.split('/')[1];
     assert.deepEqual(call.bytes, await readFile(join(args.directory, file)));

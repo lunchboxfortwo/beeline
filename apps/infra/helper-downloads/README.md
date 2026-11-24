@@ -42,8 +42,7 @@ code does not configure Cloudflare. Do not dispatch a release for this setup.
    The existing proxied apex DNS record remains unchanged. Verify both
    canonical helper manifests, sidecars, bootstrap, GET/HEAD and the squire
    read-only check again. Verify that the desktop updater manifest under
-   `downloads.usebeeline.app/latest/` serves the current version and carries
-   `X-Beeline-Release-Pointer: 1`. Check `/install`, `/install.sh`, `/` and app associations still
+   `downloads.usebeeline.app/latest/` serves the current version. Check `/install`, `/install.sh`, `/` and app associations still
    resolve through the existing static site.
 
 To roll back the download channels, restore the preceding pointer to its

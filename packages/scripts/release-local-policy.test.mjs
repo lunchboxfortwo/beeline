@@ -83,7 +83,7 @@ test('the latest path reaches only the promotion job', async () => {
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('only iOS uses the remote queue while both carried Mac helpers and Android use local slots', async () => {
+test('Mac desktop uses the separate queue while carried helpers and Android use local slots', async () => {
   const engine = { cancelled: false }, delivery = new LocalDelivery(engine), placements = [];
   let activeMac = 0;
   delivery.execute = async (slot, _job, context) => {
@@ -93,12 +93,11 @@ test('only iOS uses the remote queue while both carried Mac helpers and Android 
     if (slot === 4) activeMac--;
     return { result: 'success', outputs: {} };
   };
-  await Promise.all([['helper_macos', 'darwin-arm64'], ['helper_macos', 'darwin-x64'], ['mobile_native_ios'], ['mobile_native_android']].map(([id, platform]) => delivery.run({}, { github: { job: id }, matrix: { platform } }, `${id}-${platform}`)));
-  assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['mobile_native_ios']);
+  await Promise.all([['helper_macos', 'darwin-arm64'], ['helper_macos', 'darwin-x64'], ['desktop_build', 'macos-universal'], ['mobile_native_android']].map(([id, platform]) => delivery.run({}, { github: { job: id }, matrix: { platform, label: platform } }, `${id}-${platform}`)));
+  assert.deepEqual(placements.filter(([, slot]) => slot === 4).map(([id]) => id), ['desktop_build']);
   assert.equal(placements.filter(([id, slot]) => id === 'helper_macos' && slot < 4).length, 2);
   assert.ok(placements.some(([id, slot]) => id === 'mobile_native_android' && slot < 4));
   const plan = releasePlan(read('unified-release.yml'), read('checks.yml'), { channel: 'next', macHelpers: 'carry' });
-  assert.equal(plan.jobs.find(job => job.id === 'mobile_native_ios').placement, 'remote Mac, separate queue');
   assert.equal(plan.jobs.find(job => job.id === 'helper_macos').placement, 'bounded local queue');
   assert.match(plan.jobs.find(job => job.id === 'helper_macos').policy, /Apple-silicon and Intel Mac helpers carried unchanged/);
 });
@@ -140,7 +139,7 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
     placement.execute = async (_slot, _job, context) => {
       const id = context.github.job;
       started.add(id); active.add(id); peak = Math.max(peak, active.size);
-      if (active.has('mobile_native_ios') && ['server', 'mobile_ota', 'website'].every(name => active.has(name))) overlap = true;
+      if (active.has('desktop_build') && ['server', 'mobile_ota', 'website'].every(name => active.has(name))) overlap = true;
       if (id === 'helper') {
         assert.ok(finished.has('helper_linux') && finished.has('helper_macos'));
         helperBeforeDelivery = !finished.has('website');
@@ -150,19 +149,22 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
         assert.equal(context.needs.server.outputs.marker, 'server');
       }
       if (id === 'initialize') await new Promise(resolve => setTimeout(resolve, 1));
-      else await new Promise(resolve => setTimeout(resolve, id === 'mobile_native_ios' ? 200 : ['server', 'mobile_ota', 'website'].includes(id) ? 80 : 20));
+      else await new Promise(resolve => setTimeout(resolve, id === 'desktop_build' ? 200 : ['server', 'mobile_ota', 'website'].includes(id) ? 80 : 20));
       active.delete(id); finished.add(id);
       return { result: 'success', outputs: id === 'initialize' ? {
-        run_mobile_native: 'true', native_ios: 'true', release_sha: 'a'.repeat(40), run_server: 'true', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true',
+        run_mobile_native: 'true', native_android: 'true', release_sha: 'a'.repeat(40), run_server: 'true', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true',
       } : { marker: id } };
     };
     // Execute the actual dependency/condition graph, substituting only job bodies.
     // Checks keep their reusable workflow boundary and their three-job profile.
     controller.hooks.workflow = ({ workflow, file }) => ({
-      workflow: file.endsWith('checks.yml') ? quickChecks(workflow) : localWorkflow(workflow), parallel: true,
-      job: (...args) => placement.run(...args),
+      workflow: file.endsWith('checks.yml') ? quickChecks(workflow) : file.endsWith('desktop.yml') ? { jobs: {
+        build: { steps: [], strategy: { matrix: { include: [{ label: 'macos-universal' }] } } },
+      } } : localWorkflow(workflow), parallel: true,
+      job: (job, context, ...rest) => placement.run(job, file.endsWith('desktop.yml')
+        ? { ...context, github: { ...context.github, job: 'desktop_build' } } : context, ...rest),
     });
-    const results = await controller.workflow('.github/workflows/unified-release.yml', { channel: 'next', run_release_proof: false, store_track: 'production' }, {
+    const results = await controller.workflow('.github/workflows/unified-release.yml', { channel: 'next', run_release_proof: false, store_track: 'beta' }, {
       github: { repository: 'Beeline-Work/beeline', sha: 'a'.repeat(40), run_id: '1' },
     });
     assert.equal(results.release_result.result, 'success');

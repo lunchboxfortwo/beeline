@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { promote, validateCandidate } from './release-promote.mjs';
+import { promote } from './release-promote.mjs';
 import { assignReleaseVersion } from './release-record.mjs';
 
 const version = 'v0.1.245-rc.10';
@@ -12,11 +12,9 @@ const source = `release-${version}`;
 const target = `release-promoted-${version}`;
 const old = 'release-v0.1.244';
 const desktopVersion = '0.2.11';
-const webOrigin = 'https://beeline--sample.expo.app';
-const desktopOrigin = 'https://downloads.usebeeline.app';
 const pages = { id: 'a1-b2', sourceSha, branch: `next-${version}`, manifest: { '/index.html': 'prepared-hash' }, files: { _headers: 'prepared headers' } };
 const easProject = { name: 'Beeline', slug: 'beeline', version: '0.0.0', extra: { eas: { projectId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' } } };
-const website = { webOrigin, webDeployment: 'sample', sourceSha, version, pages, easProject };
+const website = { webDeployment: 'sample', sourceSha, version, pages, easProject };
 const delivered = {
   channel: 'next', state: 'delivered', version, sourceSha, staged: website,
   components: {
@@ -26,38 +24,31 @@ const delivered = {
     website: { version, sourceSha },
   },
 };
-const release = { tag_name: version, prerelease: true,
-  assets: ['Beeline-latest.json', 'Beeline-universal.dmg', 'Beeline-x86_64.AppImage', 'Beeline-x86_64-setup.exe'].map(name => ({ name })) };
-
-test('promotion fails closed on an old candidate or a different artifact identity', () => {
-  assert.equal(validateCandidate(delivered, release), delivered);
-  assert.throws(() => validateCandidate({ ...delivered, staged: undefined }, release), /Publish a complete next candidate first/);
-  assert.throws(() => validateCandidate(delivered, release, { requestedSha: 'b'.repeat(40) }), /current next source SHA/);
-  assert.throws(() => validateCandidate(delivered, { ...release, assets: [] }), /Beeline-latest.json/);
-  assert.throws(() => validateCandidate(delivered, release, { requestedVersion: 'v0.1.245' }), /published next version/);
-  assert.equal(assignReleaseVersion({ releases: [release], previous: { ...delivered, channel: 'latest' }, sha: sourceSha }).version, 'v0.1.246-rc.1');
+test('promotion refuses a missing or mismatched staged candidate before calling a provider', async () => {
+  const unexpected = () => assert.fail('Promotion started with an incomplete candidate');
+  for (const staged of [undefined, { ...website, sourceSha: 'b'.repeat(40) }]) {
+    await assert.rejects(promote('/unused', delivered, staged, {}, {}, {}, unexpected, unexpected, unexpected), /Publish a complete next candidate/);
+  }
+  assert.equal(assignReleaseVersion({ releases: [], previous: { ...delivered, channel: 'latest' }, sha: sourceSha }).version, 'v0.1.246-rc.1');
 });
 
 test('promotion reuses published bytes and resumes after a partial OTA republish', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'release-promotion-fixture-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const dispatch = { auditMessageId: 'owner-audit' };
-  writeFileSync(join(directory, 'candidate.json'), JSON.stringify({ next: delivered, dispatch,
-    previous: { version: 'v0.1.244', components: { 'mobile-ota': { otaBranch: old } } } }));
+  const previous = { version: 'v0.1.244', components: { 'mobile-ota': { otaBranch: old } } };
   const env = { GITHUB_REPOSITORY: 'owner/repo', CLOUDFLARE_PAGES_TOKEN: 'fixture', CLOUDFLARE_R2_TOKEN: 'fixture',
     CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), EXPO_TOKEN: 'fixture', EAS_CLI_PATH: 'fixture' };
   const writes = [], republished = [];
-  let npmLatest = '0.1.244', branchExists = false, production = old, failAndroid = true;
+  let branchExists = false, production = old, failAndroid = true;
   const channel = branch => ({ branchMapping: { data: [{ branchId: 'b', branchMappingLogic: 'true' }] }, updateBranches: [{ id: 'b', name: branch }] });
   const original = ['ios', 'android'].map((platform, i) => {
     const runtimeVersion = ['41', '53'][i];
     return { group: platform + '-source-group', platform, runtimeVersion, message: `release ${sourceSha.slice(0, 12)} ${platform}@${runtimeVersion}` };
   });
   const run = (tool, args) => {
-    if (tool === 'npm' && args[0] === 'view') return JSON.stringify({ next: version.slice(1), latest: npmLatest });
     if (tool === 'npm') {
       assert.deepEqual(args, ['dist-tag', 'add', `usebeeline@${version.slice(1)}`, 'latest']);
-      npmLatest = version.slice(1);
       writes.push('npm tag');
     } else {
       assert.equal(tool, 'gh');
@@ -112,20 +103,6 @@ test('promotion reuses published bytes and resumes after a partial OTA republish
   const cloudflare = (result) => Response.json({ success: true, result });
   const fetchImpl = async (url, options) => {
     const path = new URL(url).pathname;
-    if (options.method === 'HEAD') return new Response(null, { headers: { 'X-Beeline-Release-Pointer': '1' } });
-    if (url === `${webOrigin}/beeline-web-release.json`) return Response.json({ version, sourceSha });
-    if (url === `${desktopOrigin}/dl/releases/${version}/manifest.json`) {
-      return Response.json({ version, sourceCommit: sourceSha, bundles: Object.fromEntries(
-        ['linux-x64', 'darwin-arm64', 'darwin-x64'].map(platform => [platform, { verified: true, commit: sourceSha, version }])), });
-    }
-    if (url === `${desktopOrigin}/${version}/Beeline-latest.json`) {
-      return Response.json({ version: desktopVersion, platforms: Object.fromEntries(
-        ['darwin-aarch64', 'darwin-x86_64', 'linux-x86_64'].map(platform => [platform, { signature: 'signed', url: `${desktopOrigin}/${version}/Beeline-package` }])), });
-    }
-    if (path.endsWith('/projects/usebeeline')) return cloudflare({ production_branch: 'main' });
-    if (path.endsWith('/deployments/' + pages.id)) {
-      return cloudflare({ environment: 'preview', latest_stage: { status: 'success' }, deployment_trigger: { metadata: { commit_hash: sourceSha, branch: pages.branch } } });
-    }
     if (path.endsWith('/deployments') && options.method === 'POST') {
       assert.equal(options.body.get('branch'), 'main');
       assert.equal(options.body.get('manifest'), JSON.stringify(pages.manifest));
@@ -143,12 +120,12 @@ test('promotion reuses published bytes and resumes after a partial OTA republish
     }
     assert.fail(`Unexpected URL ${url}`);
   };
-  await assert.rejects(promote(directory, env, run, fetchImpl, eas), /temporary Expo failure/);
+  await assert.rejects(promote(directory, delivered, website, previous, dispatch, env, run, eas, fetchImpl), /temporary Expo failure/);
   assert.equal(production, old);
   assert.deepEqual(writes, ['OTA branch', 'ios']);
   failAndroid = false;
   const start = performance.now();
-  await promote(directory, env, run, fetchImpl, eas);
+  await promote(directory, delivered, website, previous, dispatch, env, run, eas, fetchImpl);
   t.diagnostic(`Promotion fixture wall time ${Math.round(performance.now() - start)} ms`);
   assert.deepEqual(writes, ['OTA branch', 'ios', 'android', 'npm tag', 'production OTA', 'EAS alias',
     'Pages manifest', 'download pointer', 'promotion record', 'GitHub latest']);

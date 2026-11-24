@@ -55,7 +55,7 @@ test('every delivery leg requires successful release tests, including jobs with 
   const gate = release.jobs.release_validation;
   assert.deepEqual(gate.needs, ['initialize', 'release_checks']);
   for (const name of ['server', 'helper_linux', 'helper_macos', 'helper', 'release_proof', 'mobile_ota',
-    'mobile_ota_after_proof', 'desktop_installers', 'website', 'mobile_native_android', 'mobile_native_ios']) {
+    'mobile_ota_after_proof', 'desktop_installers', 'website', 'mobile_native_android']) {
     const job = release.jobs[name];
     assert.ok(job.needs.includes('release_validation'), name);
     assert.match(job.if, /needs.release_validation.result == 'success'/, name);

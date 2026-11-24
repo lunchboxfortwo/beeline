@@ -18,9 +18,7 @@
 #
 # Sourced by .github/workflows/unified-release.yml (initialize reserves the
 # draft identity; release_result publishes it).
-# The rollback trap and manifest-commit-point semantics of that job are
-# unchanged: these wrappers fail (nonzero) only when every attempt failed,
-# exactly like the bare calls they replace.
+# These wrappers fail only after every attempt failed.
 
 # Test hooks: the backoff schedule and attempt cap are overridable so the
 # unit tests (packages/scripts/gh-release-retry.test.mjs) run in milliseconds.
@@ -140,51 +138,6 @@ ghr_create() {
     fi
     if [ "$attempt" -ge "$GHR_MAX_ATTEMPTS" ]; then
       ghr_exhausted "release create $release"
-      return 1
-    fi
-    ghr_sleep_backoff "$attempt"
-    attempt=$((attempt + 1))
-  done
-}
-
-# ghr_publish <release> <notes-file>
-# Publish only after every installer and the updater manifest are on the draft.
-# A successful edit whose response was lost is confirmed by reading isDraft.
-# Keep this retry short: release_result has a two-minute job budget.
-ghr_publish() {
-  local release="$1"
-  local notes="$2"
-  local attempt=1
-  while :; do
-    if gh release edit "$release" --notes-file "$notes" --draft=false --prerelease=false --latest &&
-       [ "$(gh release view "$release" --json isDraft,isPrerelease --jq '(.isDraft or .isPrerelease)')" = false ]; then
-      return 0
-    fi
-    if [ "$(gh release view "$release" --json isDraft,isPrerelease --jq '(.isDraft or .isPrerelease)' 2>/dev/null)" = false ]; then
-      return 0
-    fi
-    if [ "$attempt" -ge 3 ]; then
-      ghr_exhausted "release publish $release"
-      return 1
-    fi
-    ghr_sleep_backoff "$attempt"
-    attempt=$((attempt + 1))
-  done
-}
-
-# ghr_delete_asset <release> <asset-name>
-# Bounded retry around `gh release delete-asset --yes`. Callers keep `|| true`
-# where deletion is best-effort, unchanged.
-ghr_delete_asset() {
-  local release="$1"
-  local asset="$2"
-  local attempt=1
-  while :; do
-    if gh release delete-asset "$release" "$asset" --yes; then
-      return 0
-    fi
-    if [ "$attempt" -ge "$GHR_MAX_ATTEMPTS" ]; then
-      ghr_exhausted "release delete-asset $asset from $release"
       return 1
     fi
     ghr_sleep_backoff "$attempt"

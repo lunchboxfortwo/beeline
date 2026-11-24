@@ -48,7 +48,6 @@ export async function serveDownloads(request, fetchImpl = fetch) {
   outgoing.set('Access-Control-Allow-Origin', '*');
   outgoing.set('X-Content-Type-Options', 'nosniff');
   outgoing.set('X-Beeline-Downloads', 'r2');
-  outgoing.set('X-Beeline-Release-Pointer', '1');
   const file = helper?.[2];
   outgoing.set('Content-Type', file === 'manifest.json' ? 'application/json; charset=utf-8'
     : file?.endsWith('.sha256') ? 'text/plain; charset=utf-8'

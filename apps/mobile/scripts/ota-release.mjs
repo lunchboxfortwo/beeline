@@ -276,46 +276,29 @@ function pointChannel(channel, branch, { dryRun } = {}) {
   return { channel, branch, previousBranch: current, changed: true };
 }
 
-// Copy the exact recorded runtime groups to a fresh production branch, then
-// move the channel together. A retry recognizes groups it already copied.
-export function planOtaPromotion({ sourceSha, version, ota, run = runEas }) {
-  const list = branch => {
-    const payload = run(['update:list', '--branch', branch, '--limit', BRANCH_LOOKUP_LIMIT, '--json', '--non-interactive'],
-      { missing: /Could not find (?:a )?branch/i });
-    return payload ? branchState(payload) : null;
-  };
+export function republishOta({ version, sourceSha, components }, run) {
+  const list = branch => run(['update:list', '--branch', branch, '--limit', BRANCH_LOOKUP_LIMIT, '--json', '--non-interactive'],
+    { missing: /Could not find (?:a )?branch/i });
+  const ota = components['mobile-ota'];
   const source = releaseBranchName(version);
   if (ota.otaBranch !== source || !ota.otaTargets?.length) fail(`${version} has no published OTA targets`);
-  const next = channelBranchName(run(['channel:view', 'next', '--json', '--non-interactive']));
-  if (next !== source) fail(`next points at ${next}, expected ${source}`);
   const targets = ota.otaTargets.map(key => {
     const [platform, runtimeVersion] = key.split('@');
-    if (!RELEASE_PLATFORMS.includes(platform) || !runtimeVersion) fail(`invalid OTA target ${key}`);
     return { platform, runtimeVersion };
   });
-  const updates = assertBranchCovers({ branch: source, targets, branchUpdates: list(source) ?? [], sha: sourceSha });
+  const updates = assertBranchCovers({ branch: source, targets, branchUpdates: branchState(list(source)), sha: sourceSha });
   const branch = `release-promoted-${version}`;
-  const production = channelBranchName(run(['channel:view', 'production', '--json', '--non-interactive']));
-  const before = list(branch);
-  const messages = new Map(updates.map(update => [targetKey(update), `${updateMessage(sourceSha, update)} promoted from ${update.group}`]));
-  for (const update of before ?? []) {
-    if (update.message !== messages.get(targetKey(update))) fail(`${branch} has an unexpected update for ${targetKey(update)}`);
+  const previousBranch = channelBranchName(run(['channel:view', 'production', '--json', '--non-interactive']));
+  const published = list(branch);
+  if (!published) run(['branch:create', branch, '--json', '--non-interactive']);
+  const present = new Map(branchState(published).map(update => [targetKey(update), update.message]));
+  for (const update of updates) {
+    const message = `${update.message} promoted from ${update.group}`;
+    if (present.get(targetKey(update)) === message) continue;
+    run(['update:republish', '--group', update.group, '--destination-branch', branch, '--platform', update.platform,
+      '--message', message, '--json', '--non-interactive']);
   }
-  const present = new Set((before ?? []).map(targetKey));
-  const missing = updates.filter(update => !present.has(targetKey(update)));
-  return {
-    branch, production,
-    republish() {
-      if (before === null) run(['branch:create', branch, '--json', '--non-interactive']);
-      for (const update of missing) {
-        run(['update:republish', '--group', update.group, '--destination-branch', branch,
-          '--platform', update.platform, '--message', messages.get(targetKey(update)), '--json', '--non-interactive']);
-      }
-    },
-    pointProduction() {
-      if (production !== branch) run(['channel:edit', 'production', '--branch', branch, '--json', '--non-interactive']);
-    },
-  };
+  return { branch, previousBranch };
 }
 
 // Live store runtimes are read from Google Play and App Store Connect. The

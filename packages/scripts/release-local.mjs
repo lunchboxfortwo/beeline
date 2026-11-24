@@ -16,17 +16,13 @@ import { LocalDelivery } from './release-local-delivery.mjs';
 import { localChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { DesktopBuild, WINDOWS_DESKTOP, carryWindowsInstallers, desktopDryRun, desktopWorkflow } from './release-local-desktop.mjs';
 import { carryHelperPlatform } from './helper-carry.mjs';
-import { macSigningTools } from './release-local-desktop-worker.mjs';
 import { githubMacHelpers } from './release-local-mac-github.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const WORKFLOW = '.github/workflows/unified-release.yml';
-const MAC = 'dani@100.104.88.126';
-const MAC_NODE = '22.23.2';
-const remoteDirectory = (engine, label) => `/tmp/beeline-release-${createHash('sha256').update(engine.directory + label).digest('hex').slice(0, 24)}`;
 
 export function parseArguments(argv) {
-  const args = { channel: 'next', mode: 'plan', 'mac-host': MAC };
+  const args = { channel: 'next', mode: 'plan' };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (['--execute', '--dry-run', '--plan'].includes(arg)) {
@@ -34,7 +30,7 @@ export function parseArguments(argv) {
       args.mode = arg.slice(2); args.explicitMode = true;
     } else if (arg === '--run-release-proof') args.proof = true;
     else if (arg === '--help') args.help = true;
-    else if (['--channel', '--release-sha', '--release-version', '--desktop-mode', '--mac-helpers', '--env-file', '--state-dir', '--leg', '--mac-host', '--remote-job', '--store-track'].includes(arg)) {
+    else if (['--channel', '--release-sha', '--release-version', '--desktop-mode', '--mac-helpers', '--env-file', '--state-dir', '--leg', '--store-track'].includes(arg)) {
       if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error(`Missing value for ${arg}`);
       args[arg.slice(2)] = argv[++i];
     } else throw new Error(`Unknown argument: ${arg}`);
@@ -43,7 +39,6 @@ export function parseArguments(argv) {
   if (args['desktop-mode'] && !['build', 'carry'].includes(args['desktop-mode'])) throw new Error('desktop-mode must be build or carry');
   if (args['mac-helpers'] && !['build', 'carry'].includes(args['mac-helpers'])) throw new Error('mac-helpers must be build or carry');
   if (args['release-sha'] && !/^[0-9a-f]{40}$/.test(args['release-sha'])) throw new Error('release-sha must be a full commit SHA');
-  if (args['mac-host'] !== MAC) throw new Error(`Only the authorized Mac build host ${MAC} is supported`);
   if (args.leg && args.mode !== 'dry-run' && !(args.mode === 'execute' && args.leg === 'release_checks')) throw new Error('--leg requires --dry-run or --execute --leg release_checks');
   if (args.mode === 'execute' && args.leg !== 'release_checks') throw new Error('Use node packages/scripts/release.mjs for delivery');
   return args;
@@ -97,120 +92,6 @@ function githubMacHelper(engine, context) {
     sha, version, directory: engine.directory, artifacts: engine.artifacts, records: engine.records, signal: engine.abortController.signal })
     .finally(() => privateWrite(join(engine.directory, 'records.json'), JSON.stringify([...engine.records.values()], null, 2)));
   return engine.macHelpers.then(results => results[context.matrix.platform]);
-}
-
-async function macJob({ job, context, label, engine }) {
-  // A private remote build tree, not the host's checkout, HOME, Pictures or keys.
-  const remote = remoteDirectory(engine, label);
-  const tools = await prepareMacTools(engine);
-  const local = join(engine.directory, 'remote', label);
-  mkdirSync(local, { recursive: true, mode: 0o700 });
-  const secrets = Object.fromEntries(
-    ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8'].map(name => [name, engine.secrets[name] || '']),
-  );
-  if (secrets.EXPO_ASC_API_KEY_P8?.includes('-----BEGIN')) secrets.EXPO_ASC_API_KEY_P8 = Buffer.from(secrets.EXPO_ASC_API_KEY_P8).toString('base64');
-  const spec = {
-    job: privateIosJob(job),
-    label, secrets, context: { ...context, secrets: {}, github: { ...context.github } },
-    variables: engine.variables, workflowEnv: engine.read?.(WORKFLOW)?.env,
-  };
-  await engine.processes.run('git', ['bundle', 'create', join(local, 'source.bundle'), 'HEAD'], { cwd: engine.root, quiet: true, env: process.env });
-  await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, `umask 077; mkdir -p '${remote}'`], { env: process.env, timeout: 30_000 });
-  await engine.processes.run('scp', ['-q', join(local, 'source.bundle'), `${MAC}:${remote}/`], { env: process.env });
-  const command = `set -e; umask 077; trap 'rm -f "${remote}/job.json"' EXIT; export PATH='${tools}/node/bin':/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH; export RUSTUP_HOME='${tools}/rustup' CARGO_HOME='${tools}/cargo'; if [ -d '${remote}/source/.git' ]; then test "$(git -C '${remote}/source' rev-parse HEAD)" = '${context.github.sha}'; else git clone --quiet '${remote}/source.bundle' '${remote}/source'; fi; ( cd '${remote}/source' && npm ci --ignore-scripts --no-audit --no-fund && cat > '${remote}/job.json' && node packages/scripts/release-local.mjs --remote-job '${remote}/job.json' )`;
-  let failure;
-  try { await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, command], { env: process.env, input: JSON.stringify(spec), timeout: (job['timeout-minutes'] ?? 40) * 60_000 }); }
-  catch (error) { failure = error; }
-  await engine.processes.run('scp', ['-q', `${MAC}:${remote}/result.json`, join(local, 'result.json')], { env: process.env });
-  const result = JSON.parse(readFileSync(join(local, 'result.json'), 'utf8'));
-  for (const [name, remoteDirectory] of result.artifacts) {
-    if (!remoteDirectory.startsWith(`${remote}/state/artifacts/`)) throw new Error('Remote artifact escaped its build directory');
-    const destination = join(engine.directory, 'artifacts', name);
-    mkdirSync(destination, { recursive: true, mode: 0o700 });
-    await engine.processes.run('scp', ['-q', '-r', `${MAC}:${remoteDirectory}/.`, destination], { env: process.env });
-    engine.artifacts.set(name, destination);
-  }
-  if (failure) throw failure;
-  try {
-    await engine.processes.run('ssh', ['-o', 'BatchMode=yes', MAC, `rm -rf -- '${remote}' '${dirname(tools)}'`], { env: process.env, timeout: 120_000, quiet: true });
-    rmSync(join(local, 'source.bundle'), { force: true });
-  } catch (error) { engine.processes.log(`Mac artifacts collected; temporary workspace cleanup incomplete: ${error.message}`); }
-  delete engine.macTools;
-  return result.job;
-}
-
-export function privateIosJob(job) {
-  const local = structuredClone(job);
-  for (const step of local.steps) {
-    // The workflow deliberately resets PATH for Apple's rsync. Keep the scoped
-    // Apple tool launchers ahead of OS tools after each reset as well.
-    if (step.run) step.run = step.run.replaceAll('export PATH', 'export PATH="$BEELINE_SIGNING_TOOLS:$PATH"');
-    if (step.name === 'Isolate the iOS signing keychain') step.run = `set -euo pipefail
-security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
-# A private HOME in an SSH session can have no default keychain yet.
-if ! security default-keychain -d user > "$RUNNER_TEMP/user-default-keychain.txt" 2> "$RUNNER_TEMP/user-default-keychain.err"; then
-  grep -Fq 'A default keychain could not be found' "$RUNNER_TEMP/user-default-keychain.err" || { cat "$RUNNER_TEMP/user-default-keychain.err" >&2; exit 1; }
-  : > "$RUNNER_TEMP/user-default-keychain.txt"
-fi
-mkdir -p "$HOME/Library/Keychains"
-# EAS writes UUID-named profiles relative to its private HOME. Apple tools use
-# the operator HOME for Security.framework, so both must see the same profiles.
-profiles="$BEELINE_OPERATOR_HOME/Library/MobileDevice/Provisioning Profiles"
-mkdir -p "$HOME/Library/MobileDevice" "$profiles"
-ln -s "$profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"
-keychain="$HOME/Library/Keychains/login.keychain-db"
-password=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')
-security create-keychain -p "$password" "$keychain"
-security set-keychain-settings -lut 21600 "$keychain"
-security unlock-keychain -p "$password" "$keychain"
-# Retain the runner login's public WWDR intermediates, as the Actions job does.
-# EAS creates its own temporary signing keychain and adds it to this list.
-security list-keychains -d user -s "$keychain" "$BEELINE_OPERATOR_HOME/Library/Keychains/login.keychain-db"
-security default-keychain -d user -s "$keychain"`;
-    if (step.name === 'Restore the runner user keychains') step.run = `set -euo pipefail
-if [ -f "$RUNNER_TEMP/user-keychains.txt" ]; then
-  xargs security list-keychains -d user -s < "$RUNNER_TEMP/user-keychains.txt"
-fi
-if [ -s "$RUNNER_TEMP/user-default-keychain.txt" ]; then
-  xargs security default-keychain -d user -s < "$RUNNER_TEMP/user-default-keychain.txt"
-fi
-if [ -f "$HOME/Library/Keychains/login.keychain-db" ]; then
-  security delete-keychain "$HOME/Library/Keychains/login.keychain-db"
-fi`;
-  }
-  return local;
-}
-
-async function prepareMacTools(engine) {
-  if (engine.macTools) return engine.macTools;
-  const directory = `${remoteDirectory(engine, 'tools')}/tools`;
-  // Install into this task's remote temp directory. The host's default Node,
-  // Rust toolchains, shell configuration, Pictures and signing keys stay alone.
-  const command = `set -euo pipefail
-export PATH=/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH
-test "$(uname -m)" = x86_64
-for tool in curl tar shasum rustup git; do command -v "$tool" >/dev/null; done
-umask 077
-mkdir -p '${directory}'
-if [ ! -x '${directory}/node/bin/node' ]; then
-  curl -fsSL 'https://nodejs.org/dist/v${MAC_NODE}/node-v${MAC_NODE}-darwin-x64.tar.gz' -o '${directory}/node.tar.gz'
-  curl -fsSL 'https://nodejs.org/dist/v${MAC_NODE}/SHASUMS256.txt' -o '${directory}/SHASUMS256.txt'
-  expected=$(awk '$2=="node-v${MAC_NODE}-darwin-x64.tar.gz" {print $1}' '${directory}/SHASUMS256.txt')
-  actual=$(shasum -a 256 '${directory}/node.tar.gz' | awk '{print $1}')
-  test -n "$expected" && test "$actual" = "$expected"
-  mkdir -p '${directory}/node'
-  tar -xzf '${directory}/node.tar.gz' -C '${directory}/node' --strip-components=1
-fi
-export RUSTUP_HOME='${directory}/rustup' CARGO_HOME='${directory}/cargo'
-rustup toolchain install 1.95.0 --profile minimal --no-self-update
-rustup target add --toolchain 1.95.0 aarch64-apple-darwin
-'${directory}/node/bin/node' --version
-rustup run 1.95.0 rustc --version
-`;
-  await engine.processes.run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', MAC, 'bash -s'], { env: process.env, input: command, timeout: 10 * 60_000 });
-  engine.macTools = directory;
-  privateWrite(join(engine.directory, 'mac-tools.json'), JSON.stringify({ host: MAC, directory, node: MAC_NODE, rust: '1.95.0' }, null, 2));
-  return directory;
 }
 
 // Evidence files hold job names, times, shards and local log paths. Publish one
@@ -282,7 +163,6 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
       }
       if (['helper_linux', 'helper_macos', 'server'].includes(context.github.job)) context.env.CARGO_BUILD_JOBS = '2';
       if (context.github.job === 'helper_macos') return carryMacHelper(engine, context);
-      if (context.github.job === 'mobile_native_ios') return macJob(args);
       if (context.github.job === 'helper' && engine.variables?.macHelperMode !== 'build') {
         context.env.BEELINE_RELEASE_CARRIED_ARM64_DIR = join(directory, 'carried-arm64');
         context.env.BEELINE_RELEASE_CARRIED_X64_DIR = join(directory, 'carried-x64');
@@ -430,26 +310,6 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
   };
 }
 
-export async function remoteJob(path, { platform = process.platform, arch = process.arch } = {}) {
-  if (platform !== 'darwin' || arch !== 'x64') throw new Error('Remote job requires the authorized Intel Mac');
-  const spec = JSON.parse(readFileSync(path, 'utf8')), directory = join(dirname(path), 'state');
-  const secrets = spec.secrets ?? {}, processes = new Processes({ ...secrets, token: spec.context.github.token });
-  const hooks = { job: async ({ context }) => {
-    if (spec.context.github.job !== 'mobile_native_ios') return;
-    // Security.framework preferences do not persist reliably under a synthetic
-    // HOME over SSH. Apple launchers and their native children share the runner
-    // HOME; npm/EAS retain private HOME and caches, with a scoped profile link.
-    context.env.BEELINE_OPERATOR_HOME = homedir();
-    context.env.BEELINE_SIGNING_TOOLS = macSigningTools(join(directory, 'signing-tools'));
-    context.env.PATH = `${context.env.BEELINE_SIGNING_TOOLS}:${context.env.PATH}`;
-  } };
-  const engine = new LocalActions({ root, directory, secrets, variables: spec.variables, processes, github: localGithub, isolateTemporary: true, hooks });
-  Object.assign(spec.context, { secrets, vars: engine.variables });
-  const job = await engine.job(spec.job, spec.context, spec.label || 'mobile_native_ios-local', spec.workflowEnv);
-  privateWrite(join(dirname(path), 'result.json'), JSON.stringify({ job, artifacts: [...engine.artifacts] }));
-  if (job.result !== 'success') process.exitCode = 1;
-}
-
 export function dryInitializeJob(workflow) {
   const job = structuredClone(workflow.jobs.initialize);
   const identity = job.steps.find(step => step.id === 'identity');
@@ -497,7 +357,6 @@ export async function dryRun(args, engine, context) {
     else if (leg === 'mobile-ota') steps = [...engine.read('.github/actions/mobile-ota-leg/action.yml').runs.steps.slice(0, 1), { run: 'npx --no-install expo export --platform all --output-dir "$RUNNER_TEMP/ota-export"', 'working-directory': 'apps/mobile', env: { EXPO_PUBLIC_BUZZY_MONOLITH_URL: 'https://server.usebeeline.app' } }];
     else if (leg === 'pages') steps = engine.read('.github/actions/pages-leg/action.yml').runs.steps.slice(0, 1);
     else if (leg === 'web-app') steps = engine.read('.github/actions/web-app-leg/action.yml').runs.steps.filter(step => ['Install mobile dependencies', 'Export the production web bundle', 'Verify the push worker is in the export', 'Stamp the immutable release identity'].includes(step.name));
-    else if (leg === 'mac-tools') { await prepareMacTools(engine); continue; }
     else if (leg === 'mac-helpers') {
       if (!context.github.token) throw new Error('Dry-run mac-helpers requires --env-file with GITHUB_TOKEN or GH_TOKEN');
       const cancel = () => engine.abortController.abort();
@@ -533,8 +392,7 @@ export async function releaseChecks(engine, context) {
 
 export async function runLocalRelease(args, { repository = root, secrets: providedSecrets } = {}) {
   const root = repository;
-  if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|mac-helpers|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
-  if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
+  if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-helpers|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args.channel === 'latest') {
     if (args.mode === 'plan') {
       console.log('Latest moves the published next candidate through the unified workflow promote job.');

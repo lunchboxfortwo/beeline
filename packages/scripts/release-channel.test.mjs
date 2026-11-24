@@ -7,46 +7,17 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { parse } from 'yaml';
-import { releaseChannel, channelComponents, promotionSource } from './release-channel.mjs';
-import { initializeRelease, planOutputs, restoreReleasePlan, applyJobFacts, applyComponentCheckpoints, checkpointsFromJobs } from './unified-release.mjs';
+import { releaseChannel, channelComponents } from './release-channel.mjs';
+import { initializeRelease, planOutputs, restoreReleasePlan, applyJobFacts } from './unified-release.mjs';
 import { latestPublished, assignReleaseVersion, compareVersions, versionedReleases, staleDrafts, listReleasePage, releaseIdentityReads, releaseStartRestCallCount } from './release-record.mjs';
 import { pagesChannelTag, publishPagesChannel, downloadPagesChannel } from './pages-channel.mjs';
 import { buildPagesSite } from './pages-site.mjs';
-import { deployPages } from './deploy-pages.mjs';
-import { LocalActions } from './release-local-actions.mjs';
-import { localHooks } from './release-local.mjs';
-import { Processes } from './release-local-process.mjs';
 import { readStores } from './read-store-runtimes.mjs';
 import { readPlayRuntime, runtimeFromApkDump, easBuildInventory } from './store-build-runtime.mjs';
 import { androidReleaseProfile } from './android-release-channel.mjs';
 import { computeTargets } from '../../apps/mobile/scripts/ota-release.mjs';
 import { playLiveBuilds } from '../../apps/mobile/scripts/store-runtime-targets.mjs';
 import { prepareWebSourcemaps } from '../../apps/mobile/scripts/prepare-web-sourcemaps.mjs';
-import { condition } from './release-local-expressions.mjs';
-
-test('Cloudflare Pages publishes the exact release to production without GitHub Pages artifacts or OIDC', async () => {
-  const options = { directory: '/tmp/static-site', sha: 'a'.repeat(40), token: 'fixture-token', accountId: 'b'.repeat(32) };
-  const calls = [];
-  const execute = async (command, args, config) => { calls.push({ command, args, config }); return {}; };
-  await deployPages({ ...options, execute });
-  assert.equal(calls.length, 1);
-  const { command, args, config } = calls[0];
-  assert.equal(command, 'npx');
-  assert.ok(args.includes('--project-name=usebeeline'));
-  assert.ok(args.includes('--branch=main'));
-  assert.ok(args.includes(`--commit-hash=${options.sha}`));
-  assert.ok(args.includes(options.directory));
-  assert.equal(args.some(arg => arg.includes(options.token)), false);
-  assert.equal(config.env.CLOUDFLARE_API_TOKEN, options.token);
-  assert.equal(config.env.CLOUDFLARE_ACCOUNT_ID, options.accountId);
-  assert.notEqual(config.cwd, '/', 'wrangler needs a writable working directory');
-  for (const [key, value, error] of [['token', '', /CLOUDFLARE_PAGES_TOKEN/],
-    ['accountId', '', /CLOUDFLARE_ACCOUNT_ID/], ['sha', 'main', /exact release commit/]]) {
-    await assert.rejects(deployPages({ ...options, [key]: value, execute }), error);
-  }
-  assert.equal(calls.length, 1, 'invalid configuration never starts publication');
-  await assert.rejects(deployPages({ ...options, execute: async () => { throw new Error('Cloudflare upload failed'); } }), /Cloudflare upload failed/);
-});
 
 const sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 // Unit fixture identities must work in CI's single-commit checkout.
@@ -105,27 +76,13 @@ test('channel defaults to next; native consent and latest selection stay separat
   assert.deepEqual(channelComponents(['mobile-native'], { storeTrack: 'beta' }), ['server', 'helper', 'mobile-ota', 'desktop', 'website', 'mobile-native']);
   assert.throws(() => channelComponents(['mobile-native']), /explicit store_track=beta/);
   assert.throws(() => channelComponents([], { storeTrack: 'production' }), /store_track=beta/);
-  assert.deepEqual(channelComponents([], { channel: 'latest' }), ['helper', 'mobile-ota', 'desktop', 'website']);
-  assert.throws(() => channelComponents([], { channel: 'latest', storeTrack: 'beta' }), /cannot publish/);
 });
 
 test('retired nightly channel is rejected without aliases', () => {
   assert.throws(() => releaseChannel('nightly'), /invalid release channel/);
-  assert.throws(() => channelComponents([], { channel: 'nightly' }), /invalid release channel/);
   assert.throws(() => pagesChannelTag('nightly'), /invalid helper channel/);
   assert.equal(pagesChannelTag('next'), 'helper-update-channel-next');
   assert.throws(() => androidReleaseProfile({}, 'nightly'), /invalid Android release channel/);
-  assert.throws(() => promotionSource({ ...nextRecord(), channel: 'nightly' }), /successfully published next/);
-});
-
-test('promotion pins a successful rc commit and strips its suffix', () => {
-  const next = nextRecord();
-  assert.equal(promotionSource(next).sourceSha, sha);
-  assert.throws(() => promotionSource(next, previousSha), /current next source SHA/);
-  assert.throws(() => promotionSource(delivered()), /successfully published next/);
-  assert.equal(promotionSource(next).version, 'v0.1.2');
-  assert.throws(() => promotionSource({ ...next, version: 'v0.1.2' }), /next rc version/);
-  assert.throws(() => promotionSource({ ...next, version: 'v0.1.2-rc3' }), /next rc version/);
 });
 
 test('next release records cannot become GitHub latest; identities include reserved next releases', () => {
@@ -163,18 +120,6 @@ test('rc versions sort numerically, below their final, and drafts reserve rc cou
   assert.throws(() => assignReleaseVersion({ releases: [], previous, sha, requestedVersion: 'v0.1.184-rc10' }), /requires an rc/);
 });
 
-test('latest reserves the final at the rc source and rejects a conflicting identity', () => {
-  const next = nextRecord();
-  const assign = options => assignReleaseVersion({ releases: [], channel: 'latest', next, sha, ...options });
-  assert.deepEqual(assign({}), { version: 'v0.1.2', reason: 'promotion' });
-  assert.equal(assign({ releases: [{ tag_name: 'v0.1.2', target_commitish: sha, draft: true }] }).reason, 'existing-identity');
-  assert.throws(() => assign({ releases: [{ tag_name: 'v0.1.2', target_commitish: previousSha }] }), /another commit|not/);
-  assert.throws(() => assign({ sha: previousSha }), /current next source SHA/);
-  assert.throws(() => promotionSource({ ...next, checks: { sourceSha: previousSha } }), /checks do not match/);
-  assert.throws(() => promotionSource({ ...next, state: 'failed' }), /successfully published next/);
-  assert.throws(() => assign({ requestedVersion: next.version }), /final version/);
-});
-
 // A stub for npm and gh that records each call; gh answers the local hand-off.
 const recordingTools = (directory, conclusion = 'success') => {
   const calls = join(directory, 'calls.jsonl');
@@ -204,20 +149,20 @@ if (${JSON.stringify(tool)} === 'gh') {
   return { calls, read: () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse) };
 };
 
-test('the workflow publishes rc with next and final with the default npm tag, using OIDC', () => fixture(directory => {
+test('the workflow publishes the rc to next using OIDC', () => fixture(directory => {
   const publish = workflow.jobs.helper.steps.find(s => s.name === 'Publish the exact helper CLI package');
   assert.equal(publish.if, undefined);
   assert.equal(workflow.jobs.helper.permissions['id-token'], 'write');
-  for (const channel of ['next', 'latest']) {
+  {
     const tools = recordingTools(directory);
-    const version = channel === 'next' ? 'v0.1.184-rc.10' : 'v0.1.184';
+    const version = 'v0.1.184-rc.10';
     const tarball = join(directory, `usebeeline-${version.slice(1)}.tgz`);
     execFileSync('bash', ['-c', publish.run], { env: { ...process.env, BEELINE_LOCAL_RELEASE: '',
-      PATH: `${directory}:${process.env.PATH}`, CALLS: tools.calls, CHANNEL: channel, RELEASE_VERSION: version, HELPER_TARBALL: tarball } });
+      PATH: `${directory}:${process.env.PATH}`, CALLS: tools.calls, CHANNEL: 'next', RELEASE_VERSION: version, HELPER_TARBALL: tarball } });
     const commands = tools.read();
     assert.deepEqual(commands.find(c => c[1] === 'view'), ['npm', 'view', `usebeeline@${version.slice(1)}`, 'dist.integrity']);
     assert.deepEqual(commands.find(c => c[1] === 'publish'),
-      ['npm', 'publish', '--no-provenance', ...(channel === 'next' ? ['--tag', 'next'] : []), tarball]);
+      ['npm', 'publish', '--no-provenance', '--tag', 'next', tarball]);
     assert.equal(commands.some(c => c[1] === 'dist-tag' || c[0] === 'gh'), false);
   }
 }));
@@ -248,7 +193,7 @@ test('a local release hands its exact tarball to the publish-only job and fails 
   assert.equal(workflow.jobs.initialize.if, "inputs.channel != 'latest' && inputs.selection != 'npm-publish'");
   assert.equal(job.permissions['id-token'], 'write');
   const step = job.steps.find(s => s.name === "Publish the local release's exact helper CLI package");
-  for (const channel of ['next', 'latest']) {
+  for (const channel of ['next']) {
     tools = recordingTools(directory);
     const version = channel === 'next' ? 'v0.1.184-rc.10' : 'v0.1.184';
     execFileSync('bash', ['-c', step.run], { env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CALLS: tools.calls,
@@ -269,66 +214,37 @@ test('a local release hands its exact tarball to the publish-only job and fails 
   assert.equal(tools.read().some(c => c[1] === 'publish'), false);
 }));
 
-for (const channel of ['next', 'latest']) test(`offline workflow plan: ${channel}`, () => fixture(directory => {
+test('offline next workflow plan', () => fixture(directory => {
   const previous = delivered();
   // The CLI reads native pins with git show. Both fixture releases use the
   // current pins, so HEAD supplies that input without requiring its parent.
   previous.sourceSha = sha;
   const next = nextRecord();
   writeFileSync(join(directory, 'previous.json'), JSON.stringify(previous));
-  writeFileSync(join(directory, 'next.json'), JSON.stringify(next));
   writeFileSync(join(directory, 'paths.txt'), 'apps/body/src/self-update-manifest.ts\napps/mobile/sources/app/index.tsx\n');
-  const args = ['packages/scripts/unified-release.mjs', 'plan', '--version', channel === 'next' ? next.version : promotionSource(next).version, '--sha', sha,
+  const args = ['packages/scripts/unified-release.mjs', 'plan', '--version', next.version, '--sha', sha,
     '--paths', join(directory, 'paths.txt'), '--previous', join(directory, 'previous.json'),
-    '--channel', channel, '--state', join(directory, 'state.json'), '--outputs', join(directory, 'outputs.txt')];
-  if (channel === 'latest') args.push('--next', join(directory, 'next.json'));
+    '--channel', 'next', '--state', join(directory, 'state.json'), '--outputs', join(directory, 'outputs.txt')];
   const output = execFileSync(process.execPath, args, { encoding: 'utf8' });
   const plan = JSON.parse(output.trim().split('\n').at(-1));
-  console.log(`${channel} component plan: ${JSON.stringify(plan)}`);
-  assert.deepEqual(plan.selected, channel === 'next' ? ['server', 'helper', 'mobile-ota', 'desktop', 'website'] : ['helper', 'mobile-ota', 'desktop', 'website']);
+  assert.deepEqual(plan.selected, ['server', 'helper', 'mobile-ota', 'desktop', 'website']);
   const state = JSON.parse(readFileSync(join(directory, 'state.json')));
-  assert.deepEqual(state.plan.nativePlatforms, channel === 'next' ? ['android'] : ['android', 'ios']);
+  assert.deepEqual(state.plan.nativePlatforms, ['android']);
   const outputs = Object.fromEntries(readFileSync(join(directory, 'outputs.txt'), 'utf8').trim().split('\n').map(line => {
     const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)];
   }));
-  const restored = restoreReleasePlan({ version: state.version, sourceSha: sha, plan: outputs, previous, next: channel === 'latest' ? next : undefined });
-  assert.equal(restored.channel, channel);
+  const restored = restoreReleasePlan({ version: state.version, sourceSha: sha, plan: outputs, previous });
+  assert.equal(restored.channel, 'next');
   assert.deepEqual(restored.plan.selected, state.plan.selected);
-  if (channel === 'latest') {
-    assert.equal(outputs.ota_branch, undefined);
-    assert.equal(restored.components.helper.version, 'v0.1.2');
-    assert.equal(restored.components.server.imageRef, next.components.server.imageRef);
-  }
 }));
 
-test('promotion rebuilds helper and OTA with the final version at the rc commit', () => {
-  const previous = delivered();
-  const next = nextRecord();
-  const version = promotionSource(next).version;
-  const state = initializeRelease({ version, sourceSha: sha, previous, next,
-    channel: 'latest', selectedComponents: channelComponents([], { channel: 'latest' }) });
-  const needs = { initialize: { outputs: { run_helper: 'true', run_mobile_ota: 'true' } }, helper: { result: 'success' }, mobile_ota: { result: 'success', outputs: {
-    ota_branch: `release-${version}`, ota_targets: 'android@1,ios@2',
-  } } };
-  applyComponentCheckpoints(state, checkpointsFromJobs(needs, { version, sourceSha: sha, releaseId: 'fixture' }));
-  applyJobFacts(state, needs, { previous });
-  for (const component of ['helper', 'mobile-ota']) {
-    assert.equal(state.components[component].sourceSha, sha);
-    assert.equal(state.components[component].version, version);
-  }
-  assert.equal(state.components['mobile-ota'].otaBranch, `release-${version}`);
-  assert.equal(state.components.server.version, next.version);
-  assert.equal(state.components.server.selected, false);
-  assert.throws(() => initializeRelease({ version: next.version, sourceSha: sha, previous, next, channel: 'latest' }), /final version/);
-});
-
-test('workflow rebuilds both channels and preserves native beta selection', () => {
+test('next builds and latest uses its dedicated promotion job', () => {
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.channel.options, ['next', 'latest']);
   assert.equal(workflow.on.workflow_dispatch.inputs.channel.default, 'next');
   for (const name of ['helper_linux', 'helper_macos']) assert.equal(workflow.jobs[name].if, "needs.release_validation.result == 'success' && needs.initialize.outputs.run_helper == 'true'");
   for (const name of ['mobile_ota', 'mobile_ota_after_proof']) {
     const action = workflow.jobs[name].steps.find(s => s.uses === './.github/actions/mobile-ota-leg');
-    assert.match(action.with.channel, /channel == 'next' && 'next' \|\| 'production'/);
+    assert.equal(action.with.channel, 'next');
     assert.equal(action.with.mode, undefined);
     assert.equal(action.with.targets, undefined);
   }
@@ -344,19 +260,14 @@ test('workflow rebuilds both channels and preserves native beta selection', () =
   assert.equal(workflow.jobs.helper.steps.some(s => /exact next helper/.test(s.name)), false);
   const nextPublication = workflow.jobs.release_result.steps.find(s => s.name?.startsWith('Publish the next record'));
   assert.match(nextPublication.run, /--prerelease --latest=false/);
-  assert.match(nextPublication.if, /channel == 'next'/);
-  assert.match(readFileSync('packages/scripts/gh-release-retry.sh', 'utf8'), /--prerelease=false --latest/);
+  assert.equal(workflow.jobs.promote.if, "inputs.channel == 'latest'");
 });
 
 test('next helper checks and publication verify the public manifest without a Pages redirect', () => {
   const manifests = Object.values(workflow.jobs).flatMap(job => job.steps ?? [])
     .map(step => step.env?.MANIFEST_URL ?? step.with?.manifest_url)
-    .filter(value => value?.includes("channel == 'next'"));
+    .filter(value => value === 'https://usebeeline.app/dl/next/manifest.json');
   assert.equal(manifests.length, 4); // Linux/Mac reuse, helper publication, release notification.
-  for (const manifest of manifests) {
-    assert.match(manifest, /channel == 'next' && 'https:\/\/usebeeline\.app\/dl\/next\/manifest\.json'/);
-    assert.doesNotMatch(manifest, /github\.io\/beeline\/dl\/next/);
-  }
 });
 
 function bundle(directory, version, sourceCommit) {
@@ -454,11 +365,6 @@ test('a next at the promoted SHA gets a fresh prerelease identity and cannot dem
   const next = initializeRelease({ version, sourceSha: sha, previous, channel: 'next', selectedComponents: ['server'] });
   assert.equal(next.state, 'planned');
   assert.equal(next.version, version);
-  next.state = 'delivered';
-  const promoted = initializeRelease({ version: promotionSource(next).version, sourceSha: sha, previous, next, channel: 'latest',
-    selectedComponents: channelComponents([], { channel: 'latest' }) });
-  assert.equal(promoted.state, 'planned');
-  assert.equal(promoted.channel, 'latest');
 });
 
 
@@ -747,7 +653,7 @@ test('targets CLI reports store failures in Actions and the summary while preser
   assert.throws(() => readFileSync(blockedOutput), /ENOENT/);
 }));
 
-test('OTA rebuilds from the rc commit with the final stamp, then reuses only that final branch on rerun', () => fixture(directory => {
+test('next OTA exports once per platform and skips the existing groups on a retry', () => fixture(directory => {
   const eas = join(directory, 'eas-stub.mjs');
   const calls = join(directory, 'eas-calls.jsonl');
   const store = join(directory, 'eas-state.json');
@@ -779,66 +685,28 @@ writeFileSync(process.env.STUB_STATE, JSON.stringify(state));
     '--output', join(directory, `${channel}-facts.json`)], { cwd: 'apps/mobile', encoding: 'utf8',
     env: { ...process.env, TMPDIR: directory, EAS_CLI_PATH: eas, STUB_STATE: store, STUB_CALLS: calls, SENTRY_AUTH_TOKEN: '' } });
   publish('v0.1.2-rc.3', 'next');
-  publish('v0.1.2', 'production');
   const updates = () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse).filter(c => c.args[0] === 'update');
-  assert.deepEqual(updates().map(c => c.version), ['v0.1.2-rc.3', 'v0.1.2-rc.3', 'v0.1.2', 'v0.1.2']);
+  assert.deepEqual(updates().map(c => c.version), ['v0.1.2-rc.3', 'v0.1.2-rc.3']);
   assert.ok(updates().every(c => c.sha === sha && c.args.includes('--clear-cache')));
   const state = JSON.parse(readFileSync(store, 'utf8'));
   assert.equal(state.channels.next, 'release-v0.1.2-rc.3');
-  assert.equal(state.channels.production, 'release-v0.1.2');
-  publish('v0.1.2', 'production');
-  assert.equal(updates().length, 4);
+  assert.equal(state.channels.production, 'release-v0.1.1');
+  publish('v0.1.2-rc.3', 'next');
+  assert.equal(updates().length, 2);
 }));
 
 
 test('an explicit store build cannot reuse a binary subscribed to the other OTA channel', () => {
   const next = nextRecord();
   next.components['mobile-native'].storeTrack = 'beta';
-  const latest = initializeRelease({ version: promotionSource(next).version, sourceSha: sha, previous: delivered(), next,
-    channel: 'latest', selectedComponents: channelComponents([], { channel: 'latest' }) });
-  latest.state = 'delivered';
-  for (const entry of Object.values(latest.components)) if (entry.selected) entry.state = 'checked';
-  latest.components['mobile-native'].storeTrack = 'beta';
-  const native = initializeRelease({ version: latest.version, sourceSha: sha, previous: latest, next,
-    channel: 'latest', selectedComponents: channelComponents([], { channel: 'latest', storeTrack: 'production' }) });
-  assert.equal(native.state, 'planned');
-  assert.equal(native.components['mobile-native'].state, 'pending');
-  assert.deepEqual(native.plan.selected, ['mobile-native']);
-  assert.deepEqual(native.plan.nativePlatforms, ['android', 'ios']);
-  const needs = { initialize: { outputs: { run_mobile_native: 'true', native_android: 'true', native_ios: 'true' } },
-    mobile_native_android: { result: 'success', outputs: { version_code: '100' } },
-    mobile_native_ios: { result: 'success', outputs: { build_number: '100' } } };
-  applyComponentCheckpoints(native, checkpointsFromJobs(needs, { version: native.version, sourceSha: sha, releaseId: 'fixture' }));
-  applyJobFacts(native, needs, { previous: latest, runtimePins: { android: '1', ios: '2' } });
-  assert.equal(native.components['mobile-native'].storeTrack, 'production');
-  assert.equal(native.components.server.selected, false);
   const beta = initializeRelease({ version: next.version, sourceSha: sha, previous: next,
-    channel: 'next', selectedComponents: channelComponents(['mobile-native'], { storeTrack: 'beta' }) });
+    channel: 'next', selectedComponents: ['mobile-native'] });
   assert.equal(beta.state, 'delivered'); // This beta identity already shipped.
   beta.components['mobile-native'].storeTrack = 'production';
   const missingBeta = initializeRelease({ version: next.version, sourceSha: sha, previous: beta,
-    channel: 'next', selectedComponents: channelComponents(['mobile-native'], { storeTrack: 'beta' }) });
+    channel: 'next', selectedComponents: ['mobile-native'] });
   assert.equal(missingBeta.components['mobile-native'].state, 'pending');
   assert.deepEqual(missingBeta.plan.nativePlatforms, ['android']);
-});
-
-test('production promotion selects Android even when only the iOS runtime changed', () => {
-  const next = nextRecord();
-  next.components['mobile-native'].storeTrack = 'beta';
-  const state = initializeRelease({ version: promotionSource(next).version, sourceSha: sha, previous: delivered(), next, channel: 'latest',
-    selectedComponents: channelComponents([], { channel: 'latest', storeTrack: 'production' }),
-    runtimePin: { changed: true, changedPlatforms: ['ios'], previous: { android: '53', ios: '40' }, next: { android: '53', ios: '41' } } });
-  const flags = Object.fromEntries(planOutputs(state, delivered()).trim().split('\n').map(line => line.split('=')));
-  assert.equal(flags.run_mobile_native, 'true');
-  assert.equal(flags.native_android, 'true');
-  assert.equal(flags.native_ios, 'true');
-  assert.deepEqual(state.plan.nativePlatforms, ['android', 'ios']);
-  const context = { inputs: { store_track: 'production', selection: 'auto' }, steps: { android_build: { outcome: 'success' } },
-    needs: { initialize: { result: 'success', outputs: flags }, release_validation: { result: 'success' }, delivery_result: { result: 'success' } },
-    job: { status: 'success' } };
-  assert.equal(condition(workflow.jobs.mobile_native_android.if, context, { success: true, cancelled: false }), true);
-  const upload = workflow.jobs.mobile_native_android.steps.find(step => step.name === 'Publish Android to Play');
-  assert.equal(condition(upload.if, context, { success: true, cancelled: false }), true);
 });
 
 test('a delivered no-op needs no outputs from skipped jobs', () => {
@@ -878,44 +746,3 @@ test('release identity reads one page even when that page is full', () => {
   assert.equal(page.length, 100);
   assert.equal(releaseStartRestCallCount(), 4);
 });
-
-test('the local runner executes the real static-site composite and propagates Cloudflare failure', () => fixture(async directory => {
-  const root = resolve(import.meta.dirname, '../..');
-  const bin = join(directory, 'bin'); mkdirSync(bin);
-  const capture = join(directory, 'upload.json');
-  const stub = join(bin, 'npx');
-  writeFileSync(stub, `#!/usr/bin/env node
-require('node:fs').writeFileSync(${JSON.stringify(capture)}, JSON.stringify({
-  args: process.argv.slice(2), token: process.env.CLOUDFLARE_API_TOKEN,
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-}));
-`);
-  chmodSync(stub, 0o700);
-  const secrets = { CLOUDFLARE_PAGES_TOKEN: 'fixture-token' };
-  const logs = [];
-  const processes = new Processes(secrets, line => logs.push(line));
-  const engine = new LocalActions({ root, directory, secrets, processes,
-    github: () => ({ request: () => { throw new Error('Website must not call GitHub Pages'); } }),
-    hooks: localHooks(directory, processes) });
-  const context = { github: { repository: 'lunchboxfortwo/beeline', sha, job: 'website' },
-    runner: { temp: directory }, deadline: Date.now() + 60000,
-    job: { status: 'success' }, secrets, vars: { CLOUDFLARE_ACCOUNT_ID: 'b'.repeat(32) },
-    inputs: {}, steps: {}, env: { PATH: `${bin}:${process.env.PATH}`, HOME: directory,
-      GITHUB_WORKSPACE: root, RUNNER_TEMP: directory, GITHUB_STEP_SUMMARY: join(directory, 'summary.md') } };
-  const steps = [{ uses: './.github/actions/pages-leg', with: {
-    cloudflare_api_token: '${{ secrets.CLOUDFLARE_PAGES_TOKEN }}',
-    cloudflare_account_id: '${{ vars.CLOUDFLARE_ACCOUNT_ID }}' } }];
-  await engine.steps(steps, context);
-  assert.equal(context.job.status, 'success', logs.join('\n'));
-  const upload = JSON.parse(readFileSync(capture));
-  assert.equal(upload.token, secrets.CLOUDFLARE_PAGES_TOKEN);
-  assert.equal(upload.accountId, context.vars.CLOUDFLARE_ACCOUNT_ID);
-  assert.ok(upload.args.includes(`--commit-hash=${sha}`));
-  assert.ok(upload.args.includes('--branch=main'));
-  const site = join(directory, 'usebeeline-pages');
-  assert.equal(readFileSync(join(site, 'index.html'), 'utf8'), readFileSync(join(root, 'apps/site/index.html'), 'utf8'));
-  assert.throws(() => readFileSync(join(site, 'dl/manifest.json')), /ENOENT/);
-  writeFileSync(stub, '#!/bin/sh\nexit 17\n');
-  await engine.steps(steps, context);
-  assert.equal(context.job.status, 'failure');
-}));

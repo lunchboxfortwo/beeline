@@ -34,7 +34,6 @@ on:
         default: none
         options:
           - none
-          - production
           - beta
         required: true
       run_release_proof:
@@ -88,18 +87,6 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: Read the published next identity
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DISPATCHED_BY: ${{ inputs.dispatched_by }}
-          REQUESTED_SHA: ${{ inputs.release_sha }}
-          REQUESTED_VERSION: ${{ inputs.release_version }}
-          STORE_TRACK: ${{ inputs.store_track }}
-          SELECTION: ${{ inputs.selection }}
-          RUN_RELEASE_PROOF: ${{ inputs.run_release_proof }}
-          MOBILE_STORE_MINIMUM: ${{ inputs.mobile_store_minimum }}
-          PUBLISH_LISTING: ${{ inputs.publish_listing }}
-        run: node packages/scripts/release-promote.mjs prepare "$RUNNER_TEMP/promotion"
       - uses: ./.github/actions/eas-cli
       - name: Install npm with OIDC dist-tag support
         run: npm install --global npm@^11.21.0
@@ -110,6 +97,14 @@ jobs:
           CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
           CLOUDFLARE_PAGES_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          DISPATCHED_BY: ${{ inputs.dispatched_by }}
+          REQUESTED_SHA: ${{ inputs.release_sha }}
+          REQUESTED_VERSION: ${{ inputs.release_version }}
+          STORE_TRACK: ${{ inputs.store_track }}
+          SELECTION: ${{ inputs.selection }}
+          RUN_RELEASE_PROOF: ${{ inputs.run_release_proof }}
+          MOBILE_STORE_MINIMUM: ${{ inputs.mobile_store_minimum }}
+          PUBLISH_LISTING: ${{ inputs.publish_listing }}
         run: node packages/scripts/release-promote.mjs promote "$RUNNER_TEMP/promotion"
   initialize:
     if: inputs.channel != 'latest' && inputs.selection != 'npm-publish'
@@ -136,13 +131,10 @@ jobs:
       run_desktop: ${{ steps.plan.outputs.run_desktop }}
       run_website: ${{ steps.plan.outputs.run_website }}
       native_android: ${{ steps.plan.outputs.native_android }}
-      native_ios: ${{ steps.plan.outputs.native_ios }}
       native_app_version: ${{ steps.native_version.outputs.version }}
       release_marker: ${{ steps.store_shipped.outputs.release_marker }}
       android_shipped: ${{ steps.store_shipped.outputs.android_shipped }}
       android_version_code: ${{ steps.store_shipped.outputs.android_version_code }}
-      ios_shipped: ${{ steps.store_shipped.outputs.ios_shipped }}
-      ios_build_number: ${{ steps.store_shipped.outputs.ios_build_number }}
       runtime_pin_changed: ${{ steps.plan.outputs.runtime_pin_changed }}
       has_runtime_pin: ${{ steps.plan.outputs.has_runtime_pin }}
       previous_runtime_android: ${{ steps.plan.outputs.previous_runtime_android }}
@@ -269,7 +261,6 @@ jobs:
           RELEASE_VERSION: ${{ steps.identity.outputs.version }}
           RELEASE_SHA: ${{ steps.identity.outputs.release_sha }}
           NATIVE_ANDROID: ${{ steps.plan.outputs.native_android }}
-          NATIVE_IOS: ${{ steps.plan.outputs.native_ios }}
           ACCESS_TOKEN: ${{ steps.play_read.outputs.access_token }}
           EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
           EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
@@ -451,7 +442,7 @@ jobs:
       - name: Ask the download host whether this helper already shipped
         id: shipped
         env:
-          MANIFEST_URL: ${{ needs.initialize.outputs.channel == 'next' && 'https://usebeeline.app/dl/next/manifest.json' || 'https://usebeeline.app/dl/manifest.json' }}
+          MANIFEST_URL: https://usebeeline.app/dl/next/manifest.json
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
         run: |
@@ -542,7 +533,7 @@ jobs:
       - name: Ask the download host whether this helper already shipped
         id: shipped
         env:
-          MANIFEST_URL: ${{ needs.initialize.outputs.channel == 'next' && 'https://usebeeline.app/dl/next/manifest.json' || 'https://usebeeline.app/dl/manifest.json' }}
+          MANIFEST_URL: https://usebeeline.app/dl/next/manifest.json
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
         run: |
@@ -696,7 +687,7 @@ jobs:
           channel: ${{ needs.initialize.outputs.channel }}
           release_sha: ${{ needs.initialize.outputs.release_sha }}
           release_version: ${{ needs.initialize.outputs.release_version }}
-          manifest_url: ${{ needs.initialize.outputs.channel == 'next' && 'https://usebeeline.app/dl/next/manifest.json' || 'https://usebeeline.app/dl/manifest.json' }}
+          manifest_url: https://usebeeline.app/dl/next/manifest.json
       - name: Publish the exact helper CLI package
         # npm accepts usebeeline only through trusted publishing (OIDC) from
         # this workflow on GitHub Actions. A local release attaches its exact
@@ -724,12 +715,10 @@ jobs:
             exit 0
           fi
           npm install --global npm@^11.15.0
-          publish_args=(--no-provenance)
-          if [ "$CHANNEL" = next ]; then publish_args+=(--tag next); fi
           if integrity=$(npm view "usebeeline@${RELEASE_VERSION#v}" dist.integrity); then
             test -n "$integrity" && test "$integrity" = "sha512-$(openssl dgst -sha512 -binary "$HELPER_TARBALL" | openssl base64 -A)"
           else
-            npm publish "${publish_args[@]}" "$HELPER_TARBALL"
+            npm publish --no-provenance --tag next "$HELPER_TARBALL"
           fi
   npm_publish:
     # Publish-only path (selection=npm-publish) that a local release's helper
@@ -749,7 +738,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.release_version }}
-          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
           tarball="$RUNNER_TEMP/usebeeline-${RELEASE_VERSION#v}.tgz"
@@ -758,12 +746,10 @@ jobs:
             printf '%s  %s\n' "$(cat "$tarball.sha256")" "$tarball" | sha256sum --check
           fi
           npm install --global npm@^11.15.0
-          publish_args=(--no-provenance)
-          if [ "$CHANNEL" = next ]; then publish_args+=(--tag next); fi
           if integrity=$(npm view "usebeeline@${RELEASE_VERSION#v}" dist.integrity); then
             test -n "$integrity" && test "$integrity" = "sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
           else
-            npm publish "${publish_args[@]}" "$tarball"
+            npm publish --no-provenance --tag next "$tarball"
           fi
   release_proof:
     needs: [initialize, release_validation]
@@ -859,7 +845,7 @@ jobs:
       - uses: ./.github/actions/mobile-ota-leg
         id: ota
         with:
-          channel: ${{ needs.initialize.outputs.channel == 'next' && 'next' || 'production' }}
+          channel: next
           sentry_auth_token: ${{ secrets.SENTRY_AUTH_TOKEN }}
           release_sha: ${{ needs.initialize.outputs.release_sha }}
           release_version: ${{ needs.initialize.outputs.release_version }}
@@ -909,7 +895,7 @@ jobs:
       - uses: ./.github/actions/mobile-ota-leg
         id: ota
         with:
-          channel: ${{ needs.initialize.outputs.channel == 'next' && 'next' || 'production' }}
+          channel: next
           sentry_auth_token: ${{ secrets.SENTRY_AUTH_TOKEN }}
           release_sha: ${{ needs.initialize.outputs.release_sha }}
           release_version: ${{ needs.initialize.outputs.release_version }}
@@ -1148,149 +1134,6 @@ jobs:
       - name: Remove Android build output
         if: always()
         run: rm -rf "$RUNNER_TEMP/beeline.aab" apps/mobile/android/app/build apps/mobile/android/build 2>/dev/null || true
-  mobile_native_ios:
-    needs: [initialize, release_validation]
-    if: |-
-      needs.release_validation.result == 'success' &&
-      needs.initialize.outputs.run_mobile_native == 'true' && ((inputs.store_track != '' && inputs.store_track != 'none') ||
-       (inputs.selection != '' && inputs.selection != 'auto')) &&
-      needs.initialize.outputs.native_ios == 'true'
-    runs-on:
-      - self-hosted
-      - macOS
-      - X64
-      - ios-builder
-    timeout-minutes: 90
-    outputs:
-      build_number: ${{ steps.ios_identity.outputs.build_number }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.initialize.outputs.release_sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - uses: ./.github/actions/eas-cli
-      - name: Isolate the iOS signing keychain
-        run: |
-          set -euo pipefail
-          security list-keychains -d user > "$RUNNER_TEMP/user-keychains.txt"
-          security default-keychain -d user > "$RUNNER_TEMP/user-default-keychain.txt"
-          security list-keychains -d user -s ~/Library/Keychains/login.keychain-db
-      - name: Require iOS release credentials
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
-          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
-          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
-        run: |
-          set -euo pipefail
-          # Keep Apple's openrsync ahead of Homebrew rsync during Xcode IPA export.
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          for name in EXPO_TOKEN EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID EXPO_ASC_API_KEY_P8; do
-            test -n "${!name}" || { echo "$name is required for an iOS store release" >&2; exit 1; }
-          done
-          key_path="$RUNNER_TEMP/AuthKey_${EXPO_ASC_KEY_ID}.p8"
-          printf '%s' "$EXPO_ASC_API_KEY_P8" | base64 -D > "$key_path"
-          chmod 600 "$key_path"
-          {
-            echo "EXPO_ASC_API_KEY_PATH=$key_path"
-            echo "EXPO_ASC_KEY_ID=$EXPO_ASC_KEY_ID"
-            echo "EXPO_ASC_ISSUER_ID=$EXPO_ASC_ISSUER_ID"
-            echo "EXPO_APPLE_TEAM_ID=89KT3SWYAF"
-            echo "EXPO_NO_CAPABILITY_SYNC=1"
-            echo "EAS_SKIP_AUTO_FINGERPRINT=1"
-            echo "EXPO_TOKEN=$EXPO_TOKEN"
-          } >> "$GITHUB_ENV"
-      - name: Apply the resolved native store version
-        working-directory: apps/mobile
-        env:
-          NATIVE_APP_VERSION: ${{ needs.initialize.outputs.native_app_version }}
-        run: |
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          node scripts/check-release-version.cjs --apply-store-version
-      - name: Reuse the iOS build this release already shipped
-        if: needs.initialize.outputs.ios_shipped == 'true'
-        run: |
-          set -euo pipefail
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          node packages/scripts/store-shipped.mjs ios-evidence --marker "${{ needs.initialize.outputs.release_marker }}" --output "$RUNNER_TEMP/ios-build.json"
-      - name: Build immutable iOS store binary locally
-        if: needs.initialize.outputs.ios_shipped != 'true'
-        working-directory: apps/mobile
-        run: |
-          set -euo pipefail
-          # Keep Apple's openrsync ahead of Homebrew rsync during Xcode IPA export.
-          # The pinned eas-cli runs by its absolute path, never through npm exec,
-          # which would prepend a global eas-cli's bin dir (/usr/local/bin) to PATH.
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          bash ../../packages/scripts/npm-ci-timed.sh
-          # The IPA's file name carries the release marker. altool sends it with
-          # the upload, so a rerun finds an accepted upload even if this job dies
-          # before verify marks the build.
-          ipa="$RUNNER_TEMP/$(node ../../packages/scripts/store-shipped.mjs ios-file-name --marker "${{ needs.initialize.outputs.release_marker }}")"
-          echo "IOS_IPA=$ipa" >> "$GITHUB_ENV"
-          "$EAS_CLI_PATH" build --local --platform ios --profile production-ci --non-interactive --output "$ipa"
-          test -s "$ipa" || { echo 'local EAS build did not produce a non-empty ipa' >&2; exit 1; }
-          python3 ../../packages/scripts/ios-build-evidence.py "$ipa" "$RUNNER_TEMP/ios-build.json"
-          # verify writes this marker into the build's What to Test text.
-          node -e 'const fs=require("node:fs");const p=process.argv[1];fs.writeFileSync(p,JSON.stringify({...JSON.parse(fs.readFileSync(p,"utf8")),releaseMarker:process.argv[2]})+"\n")' \
-            "$RUNNER_TEMP/ios-build.json" "${{ needs.initialize.outputs.release_marker }}"
-      - name: Submit iOS build to TestFlight for a selected store track
-        if: inputs.store_track != 'none' && needs.initialize.outputs.ios_shipped != 'true'
-        working-directory: apps/mobile
-        run: |
-          set -euo pipefail
-          # Keep Apple's openrsync ahead of Homebrew rsync during Xcode IPA export.
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          # Verify the actual IPA targets this App Store app and a new build
-          # number before accepting Apple's transport receipt.
-          node ../../packages/scripts/ios-store-build.mjs prepare "$RUNNER_TEMP/ios-build.json"
-          # Upload with Apple's own altool, not `eas submit`: EAS Submit is Expo's cloud
-          # queue, and on this account its wait grew from 7 min to 54 min and then past
-          # the job's 90-minute timeout (run 34863479172: build done in 19 min, then
-          # "in queue" for 71 min). altool talks to App Store Connect directly with the
-          # same API key; it finds the .p8 under ./private_keys of its working directory.
-          mkdir -p "$RUNNER_TEMP/private_keys"
-          cp "$EXPO_ASC_API_KEY_PATH" "$RUNNER_TEMP/private_keys/AuthKey_${EXPO_ASC_KEY_ID}.p8"
-          (cd "$RUNNER_TEMP" && xcrun altool --upload-app -t ios -f "$IOS_IPA" \
-            --apiKey "$EXPO_ASC_KEY_ID" --apiIssuer "$EXPO_ASC_ISSUER_ID" --output-format json) | tee "$RUNNER_TEMP/ios-upload.json"
-          # altool success only confirms transport. Processing can still fail
-          # (90683 rejected build 87 after a successful upload). Require the
-          # exact delivery to finish and a new VALID build in our App Store app.
-          node ../../packages/scripts/ios-store-build.mjs verify "$RUNNER_TEMP/ios-build.json" "$RUNNER_TEMP/ios-upload.json"
-      - name: Send production iOS version to App Review
-        if: inputs.store_track == 'production'
-        run: |
-          set -euo pipefail
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          node packages/scripts/ios-store-build.mjs submit "$RUNNER_TEMP/ios-build.json"
-      - name: Report the uploaded iOS build number to the release record
-        id: ios_identity
-        if: inputs.store_track != 'none'
-        run: |
-          PATH="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-          export PATH
-          echo "build_number=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")).buildNumber' "$RUNNER_TEMP/ios-build.json")" >> "$GITHUB_OUTPUT"
-      - name: Remove iOS credentials and build output
-        if: always()
-        run: |
-          rm -f "$RUNNER_TEMP/AuthKey_${{ secrets.EXPO_ASC_KEY_ID }}.p8" "$RUNNER_TEMP"/beeline-*.ipa "$RUNNER_TEMP/ios-upload.json"
-          rm -rf "$RUNNER_TEMP/private_keys" "${TMPDIR:-/tmp}/eas-build-local-nodejs" ~/Library/Developer/Xcode/DerivedData
-          df -h / | tail -1
-      - name: Restore the runner user keychains
-        if: always()
-        run: |
-          xargs security list-keychains -d user -s < "$RUNNER_TEMP/user-keychains.txt"
-          xargs security default-keychain -d user -s < "$RUNNER_TEMP/user-default-keychain.txt"
   delivery_result:
     needs:
       - initialize
@@ -1331,7 +1174,6 @@ jobs:
       - mobile_ota
       - mobile_ota_after_proof
       - mobile_native_android
-      - mobile_native_ios
       - desktop_installers
       - website
       - release_proof
@@ -1461,7 +1303,7 @@ jobs:
           node packages/scripts/release-delivery.mjs record "$state"
           node -e 'const fs=require("node:fs");const p=process.argv[1];const r=JSON.parse(fs.readFileSync(p,"utf8"));r.runId=Number(process.env.GITHUB_RUN_ID);fs.writeFileSync(p,JSON.stringify(r,null,2)+"\n")' "$state"
       - name: Publish the next record and staged artifacts
-        if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true' && needs.initialize.outputs.channel == 'next'
+        if: steps.result.outputs.outcome == 'success' && steps.result.outputs.no_op != 'true'
         env:
           CLOUDFLARE_R2_TOKEN: ${{ secrets.CLOUDFLARE_R2_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -1506,7 +1348,7 @@ jobs:
         if: "!cancelled() && needs.release_validation.result == 'success' && needs.initialize.outputs.no_op != 'true'"
         continue-on-error: true
         env:
-          MANIFEST_URL: ${{ needs.initialize.outputs.channel == 'next' && 'https://usebeeline.app/dl/next/manifest.json' || 'https://usebeeline.app/dl/manifest.json' }}
+          MANIFEST_URL: https://usebeeline.app/dl/next/manifest.json
           RELEASE_VERSION: ${{ needs.initialize.outputs.release_version }}
           RELEASE_SHA: ${{ needs.initialize.outputs.release_sha }}
           BEELINE_RELEASE_NOTIFY_SECRET: ${{ secrets.BEELINE_RELEASE_NOTIFY_SECRET }}
