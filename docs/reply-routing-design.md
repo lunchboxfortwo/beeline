@@ -126,8 +126,8 @@ Everything you write stays in this thread. reply(id) reports to your commander: 
 | `reply` | "Reply to the recorded sender at the recorded place of message id … No destination is needed. Reply to the message that gave you the task when done, blocked or failed." | "Report on a task in this place to your commander. Start with done:, blocked: or needs-decision:. Files and everything else stay here." It keeps the prefix grammar, so block tracking still works (Astra v2 #5) |
 
 Two more prompt sentences send deliverables through `reply` and are deleted (Astra v2 #17):
-- `prompt-assembly.ts:448`, repo-less threads: "Reply to the task message with the deliverable, adding ask if an answer is needed."
-- `place-prompt.ts:207`, offline batch, on thread surfaces: "Answer each asker in one combined reply." Phase 1 settles every batch item against the session's single output post (P1c), so the sentence is not needed.
+- `prompt-assembly.ts:449`, repo-less threads: "Reply to the task message with the deliverable, adding ask if an answer is needed."
+- `place-prompt.ts:208`, offline batch, on thread surfaces: "Answer each asker in one combined reply." Phase 1 settles every batch item against the session's single output post (P1c), so the sentence is not needed.
 
 The implementer contract's other deliverable sentence also loses the word "reply": `prompt-assembly.ts:170` and `176` ("Deliver artifacts with post_artifact and reply without requiring a PR" / "Non-repo work: post_artifact and reply") become "Deliver artifacts with post_artifact without requiring a PR" / "Non-repo work: post_artifact".
 
@@ -326,6 +326,6 @@ The pass ran `codex exec -m gpt-6.2-astra`, medium effort, read-only, on `4f396c
 | 14 | P1 | An offline batch republishes the final per item | yes, `agent-command.ts:821-837` | P1c, T21 |
 | 15 | P2 | I1–I3 blind spots and over-acceptance | yes | the I3 full-address comparison; per-request route asserts in T9 |
 | 16 | P2 | "thisCornerAddress" is a placeholder; self-opened nested destination | yes | `room` optional; two nested rows plus T22 |
-| 17 | P2 | Prompt still says to send deliverables via `reply` (repo-less, batch) | yes, `prompt-assembly.ts:448`, `place-prompt.ts:207` | deleted (§4.3) |
+| 17 | P2 | Prompt still says to send deliverables via `reply` (repo-less, batch) | yes, `prompt-assembly.ts:449`, `place-prompt.ts:208` | deleted (§4.3) |
 
 - **D4 (new, from Astra #10).** Enforce "output never leaves a thread" on the server for connected apps and old helpers too: a `postCornerMessage` / `message` from a thread command to another place is refused. Recommended: no, not without the owner's explicit approval (standing rule). The Body thread surface plus the I1 production query is the proposal.
