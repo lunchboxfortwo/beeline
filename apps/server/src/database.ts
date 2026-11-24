@@ -68,6 +68,10 @@ export function postgresPoolConfig(
     // dead connection so the pool can reclaim it instead of wedging.
     keepAlive: true,
     keepAliveInitialDelayMillis: 10_000,
+    // Keep idle connections. pg-pool otherwise closes them after 10 s, so each
+    // burst opened new Neon backends that had to sign in, load catalog caches
+    // and plan every large read again while the database CPU was busiest.
+    idleTimeoutMillis: 0,
     application_name:
       mode === 'enrichment'
         ? ENRICHMENT_DATABASE_NAME

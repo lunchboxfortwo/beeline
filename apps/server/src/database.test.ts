@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import { Pool as PgPool } from 'pg';
 import { CornerAccessDatabase, CommandScopedDatabase, describe, expect, it, vi, INSTITUTIONAL_HISTORY_MAX_AGE_DAYS, assertSchemaCurrent, backfillMessageSearchDocuments, MESSAGE_SEARCH_DOCUMENT_MAX_BYTES, migrate, APP_POOL_WAIT_TIMEOUT_MS, postgresPoolConfig, REQUIRED_SCHEMA_VERSION, REQUIRED_ROUTER_SCHEMA_VERSION, migrateData, PostgresDatabase, HEALTH_POOL_WAIT_TIMEOUT_MS, MIGRATION_LOCK_TIMEOUT_MS, MIGRATION_STATEMENT_TIMEOUT_MS, isTransientDatabaseConnectionError, PgliteDatabase, migratedDatabase, requireRoomSlug, reserveRoomName, result, TERMINATED, stubClient, poolHandingOut, poolWithQuery, type Pool, type SqlDatabase } from './test-support-database.test-support.js';
 
 it('installs current-table constraints when another schema uses the same names', async () => {
@@ -497,6 +499,29 @@ describe('a terminated checked-out connection never wedges the pool', () => {
     });
   });
 
+
+  it('keeps idle connections open so the next burst does not reconnect and replan', async () => {
+    // A new Neon backend must fork, sign in, load its catalog caches and plan
+    // each large read again. pg-pool closes idle connections after 10 s unless
+    // told otherwise, so each burst used to start on new backends.
+    vi.useFakeTimers();
+    try {
+      for (const mode of ['app', 'enrichment', 'diagnostics', 'long-running'] as const) {
+        const ended = vi.fn();
+        class IdleClient extends EventEmitter {
+          _queryable = true;
+          connect(callback: (error?: Error) => void) { callback(); }
+          end(callback?: () => void) { ended(); callback?.(); }
+        }
+        const pool = new PgPool({ ...postgresPoolConfig('postgres://app', 1, mode), Client: IdleClient as never });
+        (await pool.connect()).release();
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect({ mode, open: pool.totalCount, ended: ended.mock.calls.length }).toEqual({ mode, open: 1, ended: 0 });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('retries server startup and connection saturation responses', () => {
     expect(isTransientDatabaseConnectionError({ code: '57P03' })).toBe(true);
