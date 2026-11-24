@@ -1,3 +1,4 @@
+import { deviceTimeZone, namedTimeZone } from '@beeline/api-contract/report-time';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import * as Updates from 'expo-updates';
@@ -463,6 +464,19 @@ export function useYouSettings({
       retryable: pushRetryable,
       retry: () => void retryPush(),
       change: changePushLevel,
+    },
+    timeZone: managed?.timeZone ?? deviceTimeZone(),
+    async changeTimeZone() {
+      const entered = await Modal.prompt('Time zone', 'Enter a named time zone such as Asia/Tokyo.', {
+        defaultValue: managed?.timeZone ?? deviceTimeZone(), confirmText: 'Save',
+      });
+      if (entered == null) return;
+      const timeZone = namedTimeZone(entered.trim());
+      if (!timeZone) { setError('Enter a valid named time zone.'); return; }
+      try {
+        await publishManagedIdentity(await monolithPhoneOperation('updateIdentityTimeZone', { timeZone }));
+        setError(null);
+      } catch (caught) { setError(appErrorCopy(caught, 'Could not save time zone')); }
     },
     speakingSpeed: managed?.speakingSpeed ?? 1.15,
     changeSpeakingSpeed,

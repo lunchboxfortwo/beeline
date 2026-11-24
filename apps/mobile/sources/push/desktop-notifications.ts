@@ -1,3 +1,4 @@
+import { deviceTimeZone, localizeReportTimes } from '@beeline/api-contract/report-time';
 import type { ChatListItem, RoomViewMessage } from '@beeline/buzz-client';
 import { cornerTitle, directMessageTitle, roomTitle } from '@beeline/api-contract/phone';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
@@ -172,9 +173,10 @@ export function startDesktopNotifications(): () => void {
         return;
       const notification = await import('@tauri-apps/plugin-notification');
       if (!(await notification.isPermissionGranted()) || disposed || current !== generation) return;
+      const prose = localizeReportTimes(message.text, managed?.timeZone ?? deviceTimeZone());
       notification.sendNotification({
         title: desktopNotificationTitle(room, parentName),
-        body: (room.directMessage ? message.text : `${message.author.name}: ${message.text}`).slice(
+        body: (room.directMessage ? prose : `${message.author.name}: ${prose}`).slice(
           0,
           240,
         ),

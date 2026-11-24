@@ -1,3 +1,5 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
+import { useReaderZone } from '@/buzz/report-time';
 import { Button } from '@/components/buzz/Button';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
@@ -188,6 +190,7 @@ export const ChatRow = React.memo(
       viewer,
     );
     const title = chatTitle(item);
+    const zone = useReaderZone();
     const preview = chatPreview(item, viewer);
     const unread = item.unread === true;
     // Needs you: the chat's own ask or @mention, or a thread waiting on the viewer that is not
@@ -267,7 +270,7 @@ export const ChatRow = React.memo(
                     {preview.who}:{' '}
                   </T>
                 ) : null}
-                {preview.text}
+                {localizeReportTimes(preview.text, zone)}
               </Copy>
             )}
           </YStack>

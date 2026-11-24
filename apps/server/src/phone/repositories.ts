@@ -111,8 +111,8 @@ import { unix } from './values.js';
   export async function phoneManagedIdentity(ctx: PhoneContext, viewerId: string) {
     const id = await phoneRequireIdentity(ctx, viewerId);
     const preferences = (
-      await ctx.database.query<{ push_level: import('@beeline/api-contract/phone').PushLevel; speaking_speed: number }>(
-        `SELECT push_level,speaking_speed FROM identities WHERE id=$1`,
+      await ctx.database.query<{ push_level: import('@beeline/api-contract/phone').PushLevel; speaking_speed: number; time_zone: string | null }>(
+        `SELECT push_level,speaking_speed,time_zone FROM identities WHERE id=$1`,
         [viewerId],
       )
     ).rows[0];
@@ -140,6 +140,7 @@ import { unix } from './values.js';
       ...(id.avatar ? { avatar: id.avatar } : {}),
       ...(id.face ? { face: id.face } : {}),
       pushLevel: preferences?.push_level ?? 'attention',
+      timeZone: preferences?.time_zone ?? null,
       speakingSpeed: preferences?.speaking_speed === 1.3 ? 1.3 as const : preferences?.speaking_speed === 1.5 ? 1.5 as const : 1.15 as const,
     };
   }

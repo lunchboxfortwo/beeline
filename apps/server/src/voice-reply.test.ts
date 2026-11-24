@@ -21,3 +21,9 @@ it('preserves a quotation in the answer after an unquoted label', () => {
 it.each(['Dr. Ruby', '[Ruby]', 'Ruby+'])('escapes the own name literally: %s', name => {
   expect(cleanVoiceReply(`${name}: Hello.`, name)).toBe('Hello.');
 });
+
+it('uses the requester calendar date across midnight', () => {
+  const instant = Date.parse('2026-11-01T03:30:00Z');
+  expect(voiceDateContext(instant, 'America/New_York')).toContain('31 October 2026');
+  expect(voiceDateContext(instant, 'Asia/Tokyo')).toContain('1 November 2026');
+});

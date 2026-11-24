@@ -243,4 +243,21 @@ describe('live Workspace and identity changes across sessions', () => {
       'updateIdentitySpeakingSpeed', {speakingSpeed} as any, VIEWER)).rejects.toThrow('invalid speaking speed');
   });
 
+  it('seeds once across devices and always gives an explicit override precedence', async () => {
+    const first = new PhoneService(database, 'http://local.test');
+    const second = new PhoneService(database, 'http://local.test');
+    const write = (phone: PhoneService, timeZone: string, seed = false) =>
+      phone.execute('updateIdentityTimeZone', { timeZone, seed }, VIEWER);
+    const read = () => second.execute('getManagedIdentity', {}, VIEWER);
+    await Promise.all([write(first, 'Asia/Tokyo', true), write(second, 'Europe/Paris', true)]);
+    const seeded = (await read()).timeZone;
+    expect(['Asia/Tokyo', 'Europe/Paris']).toContain(seeded);
+    await write(first, 'UTC', true);
+    expect((await read()).timeZone).toBe(seeded);
+    await Promise.all([write(first, 'America/New_York'), write(second, 'UTC', true)]);
+    expect((await read()).timeZone).toBe('America/New_York');
+    expect((await second.execute('getManagedIdentity', {}, MATE)).timeZone).toBeNull();
+    await expect(write(first, 'Bad/Zone')).rejects.toThrow('Invalid time zone');
+  });
+
 });

@@ -168,6 +168,7 @@ const phoneOperations = {
   updateAgentYolo: true,
   updateIdentityFace: true,
   updateIdentityPushLevel: true,
+  updateIdentityTimeZone: true,
   updateIdentitySpeakingSpeed: true,
   updatePersonProfile: true,
   updateRoom: true,

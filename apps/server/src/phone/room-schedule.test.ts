@@ -32,4 +32,12 @@ describe('routine next run projection', () => {
     expect(next({ ...row, paused_at: now })).toBe(due);
     expect(next({ ...row, max_runs: 1 })).toBe(due);
   });
+  it('moves the missing spring hour forward and runs only the first autumn hour', () => {
+    expect(next({ ...row, next_run_at: at('2026-03-07T07:00:00Z') }, at('2026-03-08T06:59:59Z'))).toBe(at('2026-03-08T07:00:00Z').getTime()/1000);
+    const fold = { ...row, next_run_at: at('2026-10-31T05:00:00Z'),
+      cadence: { kind: 'cron' as const, expression: '0 1 * * *', timeZone: 'America/New_York' } };
+    expect(next(fold, at('2026-11-01T04:59:59Z'))).toBe(at('2026-11-01T05:00:00Z').getTime()/1000);
+    expect(next(fold, at('2026-11-01T05:00:00Z'))).toBe(at('2026-11-02T06:00:00Z').getTime()/1000);
+  });
+
 });

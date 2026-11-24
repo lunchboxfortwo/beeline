@@ -24,7 +24,7 @@ export function replyPreviewTarget(message: ChatDisplayMessage): MessageReplyDis
     ...(preview.author.handle ? { authorHandle: preview.author.handle } : {}),
     authorPubkey: preview.author.pubkey,
     isAgent: preview.author.kind === 'agent',
-    preview: preview.text,
+    preview: preview.sourceLine ?? preview.text,
   };
 }
 

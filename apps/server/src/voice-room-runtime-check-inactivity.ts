@@ -1,3 +1,4 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
 import { namedVoiceTarget, openingVoiceName } from "./voice-target.js";
 import type { FluxEvent, VoiceBrain } from "./voice-providers.js";
 import { VoiceEagerReply } from "./voice-eager-reply.js";
@@ -11,6 +12,10 @@ import { cleanVoiceReply } from "./voice-reply.js";
 import { readMemberDelivery } from './rooms-mcp-delivery.js';
 import { VoiceRoomRuntime, DeliveredVoicePlaybackError, spokenReport } from './voice-room-runtime.js';
 
+
+function spokenTimes(text: string, zone = 'UTC') {
+  return localizeReportTimes(text, zone, 'en-US', true);
+}
 
 // Speech arrives through the same durable command queue as text. Inspect it
 // only on speech events; the existing helper claim owns the pending batch.
@@ -105,7 +110,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
       'Call work still pending; no report or progress is available for these requests: ' + JSON.stringify(pending.map(row => row.text)) });
     history.push({ role: 'user', content: event.transcript });
     if (ctx.eager.get(human) !== draft || ctx.closed || event.turn_index <= (ctx.turnIndices.get(human) ?? -1)) return;
-    draft.reply = new VoiceEagerReply(ctx.service.config.brain, agent, history, agents.map(({ name, handle }) => ({ name, handle })), ctx.externalContacts.get(human));
+    draft.reply = new VoiceEagerReply(ctx.service.config.brain, agent, history, agents.map(({ name, handle }) => ({ name, handle })), ctx.externalContacts.get(human), ctx.readerZones.get(human));
     console.info('[voice-eager]', JSON.stringify({ callId: ctx.callId, outcome: 'started' }));
   }
 
@@ -252,7 +257,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
       let streamed = false;
       let firstAudio = false;
       const brain: VoiceBrain = { answer: (selectedAgent, selectedHistory, delta, signal, search) => {
-        if (eager?.text === request.text && search && eager.reply?.matches(selectedAgent, selectedHistory, search.agents, search.externalContacts)) {
+        if (eager?.text === request.text && search && eager.reply?.matches(selectedAgent, selectedHistory, search.agents, search.externalContacts, search.timeZone)) {
           console.info('[voice-eager]', JSON.stringify({ traceId, callId: ctx.callId, outcome: 'used' }));
           return eager.reply.consume(delta, search, signal);
         }
@@ -268,7 +273,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
           if (openingText.length > 240 || /[\[\]()*_`~@#>|\n]/.test(openingText)) { openingSkipped = true; return; }
           const phrase = openingStream.push(delta)[0];
           if (!phrase || phrase.length > 240) return;
-          const text = markdownToSpeech(cleanVoiceReply(phrase, agent.name), members);
+          const text = markdownToSpeech(spokenTimes(cleanVoiceReply(phrase, agent.name), ctx.readerZones.get(human)), members);
           if (!text) return;
           const service = ctx.service; const thisRoom = ctx.roomId;
           opening = new VoiceSpeechPrefetch(text, AbortSignal.any([generation.signal, controller.signal]), async function* (signal) {
@@ -279,6 +284,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
           });
         }, generation.signal, {
           agents: agents.map(({ name, handle }) => ({ name, handle })),
+          timeZone: ctx.readerZones.get(human),
           externalContacts: ctx.externalContacts.get(human),
           diagnostic: metadata => console.info('[voice-brain-trace]', JSON.stringify({ traceId, callId: ctx.callId, ...metadata })),
           search: (search, signal) => {
@@ -351,7 +357,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
         return;
       }
       const stream = new MarkdownSpeechStream(members);
-      const phrases = streamed ? [...stream.push(answer), stream.finish()] : [answer];
+      const phrases = streamed ? [...stream.push(spokenTimes(answer, ctx.readerZones.get(human))), stream.finish()] : [spokenTimes(answer, ctx.readerZones.get(human))];
       if (opening?.text !== markdownToSpeech(cleanVoiceReply(phrases[0] ?? '', agent.name), members)) {
         opening?.cancel(); opening = undefined;
       }
@@ -466,7 +472,7 @@ async function voiceAgentBusy(ctx: VoiceRoomRuntime, agentId: string): Promise<b
             ctx.speechIdle = new Promise<void>(resolve => { finishSpeech = resolve; });
             try {
               ctx.awaitingAnswer.delete(report.human_id);
-              await ctx.signal({ type: 'speaker', agentId: agent.id }); await ctx.play(spokenReport(cleanVoiceReply(report.text, agent.name)), agent, controller.signal, () => {
+              await ctx.signal({ type: 'speaker', agentId: agent.id }); await ctx.play(spokenReport(spokenTimes(cleanVoiceReply(report.text, agent.name), ctx.readerZones.get(report.human_id))), agent, controller.signal, () => {
                 ctx.voicedReply = { human: report.human_id, traceId: report.id, kind: 'report', signal: controller.signal,
                   firstAt: performance.now(), lastAt: performance.now() };
                 const request = ctx.assembler.current(report.human_id);

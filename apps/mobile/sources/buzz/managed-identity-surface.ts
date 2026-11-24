@@ -1,3 +1,5 @@
+import { deviceTimeZone } from '@beeline/api-contract/report-time';
+import { receiveReaderZone } from './report-time';
 import type { ManagedIdentityResult, PhoneOperationMap, PushLevel } from '@beeline/api-contract/phone';
 import { isWorkspaceListView, type RoomViewIdentity } from '@beeline/buzz-client';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
@@ -34,6 +36,7 @@ async function scope() {
 }
 
 export async function readManagedIdentity(reconcile = false): Promise<ManagedIdentityResult> {
+  const generation = clientResetGeneration();
   const { relay, pubkey } = await scope();
   const address = surfaceAddress(relay, pubkey, '/identity/managed');
   if (!reconcile) {
@@ -42,7 +45,10 @@ export async function readManagedIdentity(reconcile = false): Promise<ManagedIde
   }
   const result = await mobileSurfaceCache.fetch(address, isManagedIdentity, () =>
     monolithPhoneOperation('getManagedIdentity', {}));
-  if (result) return result;
+  if (result) {
+    if (generation === clientResetGeneration() && result.personId === pubkey) receiveReaderZone(result.timeZone);
+    return result;
+  }
   const held = mobileSurfaceCache.peek(address, isManagedIdentity);
   if (held) return held;
   throw new Error('Managed identity response was superseded');
@@ -50,6 +56,8 @@ export async function readManagedIdentity(reconcile = false): Promise<ManagedIde
 
 export async function publishManagedIdentity(result: ManagedIdentityResult): Promise<void> {
   const { relay, pubkey } = await scope();
+  if (pubkey !== result.personId) return;
+  receiveReaderZone(result.timeZone);
   await mobileSurfaceCache.write(surfaceAddress(relay, pubkey, '/identity/managed'),
     result, isManagedIdentity);
 }
@@ -67,9 +75,19 @@ export async function readIdentitySettings(workspaceId?: string) {
   if (!pending) {
     const generation = clientResetGeneration();
     pending = (async () => {
-      const result = await monolithPhoneOperation('readIdentitySettings',
+      const held = await mobileSurfaceCache.read(identityAddress, isManagedIdentity);
+      if (held && generation === clientResetGeneration()) receiveReaderZone(held.timeZone);
+      let result = await monolithPhoneOperation('readIdentitySettings',
         workspaceId ? { workspaceId } : {});
+      // An absent field identifies an older server. Only a null field needs seeding.
+      if (result.identity.timeZone === null && generation === clientResetGeneration()) {
+        const seeded = await monolithPhoneOperation('updateIdentityTimeZone', {
+          timeZone: deviceTimeZone(), seed: true,
+        });
+        result = { ...result, identity: seeded };
+      }
       if (generation !== clientResetGeneration()) throw new Error('Settings answer superseded');
+      receiveReaderZone(result.identity.timeZone);
       await Promise.all([
         mobileSurfaceCache.write(identityAddress, result.identity, isManagedIdentity),
         mobileSurfaceCache.write(workspacesAddress, result.workspaces, isWorkspaceListView),

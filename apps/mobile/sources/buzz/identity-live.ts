@@ -2,12 +2,12 @@ import type { RoomViewIdentity } from '@beeline/buzz-client';
 import type { PushLevel } from '@beeline/api-contract/phone';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
 import { saveStoredPushLevel } from '@/push/push-level-storage';
-import { clientResetGeneration } from '@/sync/client-reset';
+import { clientResetGeneration, subscribeClientReset } from '@/sync/client-reset';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { identityScope, recordPerson, recordWorkspaceHeader, type WorkspaceHeaderChange } from './identity-records';
 import { savePreferredPersonName } from './person-name';
 import { mobileSurfaceCache } from './surface-storage';
-import { readManagedIdentity, applyManagedIdentityLive } from './managed-identity-surface';
+import { readIdentitySettings, readManagedIdentity, applyManagedIdentityLive } from './managed-identity-surface';
 
 const ownIdentityListeners = new Set<(person: RoomViewIdentity) => void>();
 
@@ -54,6 +54,9 @@ export async function applyPersonChanged(
 
 /** App-wide: apply every Workspace and identity change the server sends this viewer. */
 export function startIdentityLive(): () => void {
+  const restoreZone = () => { void readIdentitySettings().catch(() => undefined); };
+  restoreZone();
+  const stopReset = subscribeClientReset(restoreZone);
   let cancelled = false;
   let stop: (() => void) | undefined;
   void sharedLiveConnection().register([], (event) => {
@@ -69,6 +72,7 @@ export function startIdentityLive(): () => void {
   }).catch(() => undefined);
   return () => {
     cancelled = true;
+    stopReset();
     stop?.();
   };
 }

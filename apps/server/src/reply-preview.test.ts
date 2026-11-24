@@ -59,6 +59,18 @@ it('a reply on the newest page carries the older original author and first line'
     .toBe('Deploy plan ready');
 });
 
+it('carries a complete instant across the legacy quote cutoff', async () => {
+  const database = await seed();
+  const prefix = 'a'.repeat(268) + ' ';
+  const raw = prefix + '2026-11-01T06:30:00Z';
+  await database.query('UPDATE messages SET text=$2 WHERE id=$1', [ORIGINAL, raw]);
+  const phone = new PhoneService(database, 'https://example.invalid');
+  const view = await phone.readRoom(ROOM, OWNER);
+  const quote = view?.messages.find(message => message.id === REPLY)?.replyPreview;
+  expect(quote?.text).toBe(raw.slice(0, 280));
+  expect(quote?.sourceLine).toBe(raw);
+});
+
 it('a deleted or other-room original sends no preview', async () => {
   const phone = new PhoneService(await seed(), 'https://example.invalid');
   const view = await phone.readRoom(ROOM, OWNER);

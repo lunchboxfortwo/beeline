@@ -84,6 +84,7 @@ describe('background advisory-lock ownership', () => {
            now()-interval '30 minutes' FROM generate_series(1,960) n`,
         [room, agent],
       );
+      await db.query("UPDATE identities SET time_zone='America/New_York' WHERE id=$1", [human]);
       const send = vi.fn().mockResolvedValue(undefined);
       const loop = new PushDeliveryLoop(db, { send });
       const query = vi.spyOn(db, 'query');
@@ -99,11 +100,12 @@ describe('background advisory-lock ownership', () => {
       expect(send).not.toHaveBeenCalled();
 
       await db.query(
-        `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@owner new message')`,
+        `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@owner new message 2026-11-01T06:30:00Z')`,
         ['f'.repeat(64), room, agent],
       );
       expect(await loop.runOnce()).toBe(7);
       expect(send).toHaveBeenCalledTimes(7);
+      expect(send.mock.calls[0]?.[1].text).toContain('1:30:00 AM GMT-5');
       const candidateQueries = transactionSqls.filter(sql => sql.includes('FROM unclaimed'));
       expect(candidateQueries).toHaveLength(1);
       const sql = candidateQueries[0]!;

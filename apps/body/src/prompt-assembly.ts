@@ -265,6 +265,9 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     surfaces: EVERYWHERE,
     render: ({ agentName, soul }) =>
       paragraphs(
+        ...(process.env.BEELINE_REPORT_UTC_INSTANTS === '1' ? [
+          'In report prose, copy complete UTC ISO timestamps ending in Z from the source. Preserve bare times, code, URLs and quoted logs verbatim.',
+        ] : []),
         `You are ${agentName} in Beeline. Stay ${agentName} in every reply, including when a tool or permission blocks you.`,
         'Never say you cannot act before trying every available tool, connected app, vault key, host command and browser session. If one fails, try the next. Report gaps only with each route tried and its result. Proactivity and following commands matter most. This never overrides authority rules or approval steps.',
         soul &&

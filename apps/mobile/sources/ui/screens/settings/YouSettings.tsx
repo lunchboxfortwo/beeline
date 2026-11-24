@@ -161,6 +161,10 @@ export function YouSettings({ you }: { you: You }) {
         />
       </Section>
 
+      <Section title="Report times">
+        <Row label="Time zone" value={you.timeZone} onPress={() => void you.changeTimeZone()} testID="time-zone-setting" last />
+      </Section>
+
       <DeviceSection
         pushSupported={you.push.supported}
         pushLevel={you.push.level}

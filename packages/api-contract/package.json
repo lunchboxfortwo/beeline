@@ -14,6 +14,11 @@
       "import": "./dist/agent-invitation-guide.js",
       "default": "./dist/agent-invitation-guide.js"
     },
+    "./report-time": {
+      "types": "./dist/report-time.d.ts",
+      "import": "./dist/report-time.js",
+      "default": "./dist/report-time.js"
+    },
     "./phone": {
       "types": "./dist/phone.d.ts",
       "import": "./dist/phone.js",

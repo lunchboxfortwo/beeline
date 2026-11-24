@@ -1,3 +1,5 @@
+import { localizeReportTimes } from '@beeline/api-contract/report-time';
+import { useReaderZone } from '@/buzz/report-time';
 import React, { useContext, useEffect, useState } from 'react';
 import type { TextStyle } from 'react-native';
 import { ProseRun } from '@/ui/grammar';
@@ -36,12 +38,13 @@ export function StreamingProse({
   textStyle,
   testID,
 }: StreamingProseProps) {
+  const zone = useReaderZone();
   const visitStore = useContext(RoomPresentationContext);
   const store = suppliedStore ?? visitStore;
   if (!streamKey) {
     return (
       <ProseRun userSelect="text" body={textStyle} testID={testID}>
-        {markdown ?? ''}
+        {localizeReportTimes(markdown ?? '', zone)}
       </ProseRun>
     );
   }
@@ -60,6 +63,7 @@ function LiveDraftText({
   body: TextStyle;
   testID?: string;
 }) {
+  const zone = useReaderZone();
   const [text, setText] = useState(() => store.getPresentation(streamKey).text);
 
   useEffect(() => {
@@ -76,7 +80,7 @@ function LiveDraftText({
 
   return (
     <ProseRun userSelect="text" body={body} testID={testID}>
-      {text}
+      {localizeReportTimes(text, zone)}
     </ProseRun>
   );
 }

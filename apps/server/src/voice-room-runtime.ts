@@ -124,6 +124,7 @@ export class VoiceRoomRuntime {
 
    readonly speedRefreshes = new Map<string, symbol>();
 
+   readonly readerZones = new Map<string, string>();
    readonly speakingSpeeds = new Map<string, number>();
 async refreshSpeakingSpeed(human: string) { return voiceRoomRuntimeRefreshSpeakingSpeed(this, human); }
 

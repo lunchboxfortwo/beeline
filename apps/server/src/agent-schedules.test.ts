@@ -552,6 +552,33 @@ describe('agent schedule background posting', () => {
 });
 
 describe('agent tool schedule daemon operations', () => {
+  it('snapshots the requester zone only for new implicit-zone cron schedules after rollout', async () => {
+    const database = await fixture();
+    try {
+      const daemon = new DaemonService(database, new LiveHub());
+      const turn = await turnFrom(database, daemon, ROOM, AGENT);
+      await database.query("UPDATE identities SET time_zone='Asia/Tokyo' WHERE id=$1", [OWNER]);
+      const create = (timeZone?: string) => daemon.execute('createAgentSchedule', {
+        ...turn, title: 'Daily check', roomId: ROOM, prompt: 'Summarize',
+        cadence: { kind: 'cron', expression: '0 9 * * *', ...(timeZone ? { timeZone } : {}) },
+      }, AGENT);
+      vi.stubEnv('BEELINE_LOCAL_SCHEDULE_ZONE', '0');
+      const legacy = await create();
+      vi.stubEnv('BEELINE_LOCAL_SCHEDULE_ZONE', '1');
+      const local = await create();
+      const explicit = await create('UTC');
+      await database.query("UPDATE identities SET time_zone='Europe/Paris' WHERE id=$1", [OWNER]);
+      const zone = async (id: string) => (await database.query<{zone: string|null}>(
+        "SELECT cadence->>'timeZone' zone FROM agent_schedules WHERE id=$1", [id])).rows[0]?.zone;
+      expect(await zone(legacy.scheduleId)).toBeNull();
+      expect(await zone(local.scheduleId)).toBe('Asia/Tokyo');
+      expect(await zone(explicit.scheduleId)).toBe('UTC');
+    } finally {
+      vi.unstubAllEnvs();
+      await database.close();
+    }
+  });
+
   it.each(['Room', 'corner', 'DM'])('manages only its own schedules across places from a %s (cross-place-schedules-1)', async (surface) => {
     const database = await fixture();
     const elsewhere = '55555555-5555-4555-8555-555555555555';
