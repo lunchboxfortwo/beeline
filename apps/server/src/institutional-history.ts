@@ -3,6 +3,7 @@ import {
   INSTITUTIONAL_HISTORY_MATCH_SCAN_MAX,
   INSTITUTIONAL_HISTORY_MAX_AGE_DAYS,
   INSTITUTIONAL_HISTORY_QUERY_SCHEMA,
+  institutionalSearchQueryHasNul,
   INSTITUTIONAL_HISTORY_RESULT_MAX,
   INSTITUTIONAL_HISTORY_RESULT_MIN,
   INSTITUTIONAL_HISTORY_SNIPPET_MAX_BYTES,
@@ -69,7 +70,7 @@ export const AUTHORIZED_ROOMS_CTE = `authorized_rooms AS (
        )`;
 
 function boundedQuery(value: unknown): string {
-  if (typeof value !== 'string' || !Check(INSTITUTIONAL_HISTORY_QUERY_SCHEMA, value)) {
+  if (typeof value !== 'string' || institutionalSearchQueryHasNul(value) || !Check(INSTITUTIONAL_HISTORY_QUERY_SCHEMA, value)) {
     throw new Error('institutional history query is invalid: use 1–500 characters, including a non-whitespace character, without NUL');
   }
   return value.trim();

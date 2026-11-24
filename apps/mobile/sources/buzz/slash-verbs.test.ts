@@ -6,6 +6,7 @@ import {
   agentMentionSlashQuery,
   insertAgentSlashCommand,
   availableAgentMentionCommands,
+  DRAW_AVATAR_COMMAND,
   fastModeCommandState,
   FAST_MODE_COMMAND,
   matchesAgentCommand,
@@ -143,7 +144,7 @@ describe('the Fast mode palette entry', () => {
   it('filters as the owner types and shows the current state', () => {
     const names = (query: string, enabled = false) =>
       availableAgentMentionCommands([], query, { enabled }).map((command) => command.name);
-    expect(names('')).toEqual(['restart', FAST_MODE_COMMAND, 'login']);
+    expect(names('')).toEqual(['restart', FAST_MODE_COMMAND, 'login', 'draw-avatar']);
     expect(names('fa')).toEqual([FAST_MODE_COMMAND]);
     expect(names('fast')).toEqual([FAST_MODE_COMMAND]);
     expect(names('res')).toEqual(['restart']);
@@ -171,6 +172,7 @@ describe('agent-mention slash palette query', () => {
     expect(availableAgentMentionCommands([], '')).toEqual([
       { name: 'restart', description: 'Restart this agent' },
       { name: 'login', description: 'Sign in to this agent’s provider' },
+      DRAW_AVATAR_COMMAND,
     ]);
     expect(availableAgentMentionCommands([], 'res')).toHaveLength(1);
     expect(availableAgentMentionCommands([], 'loop')).toEqual([]);
@@ -181,7 +183,18 @@ describe('agent-mention slash palette query', () => {
     expect(availableAgentMentionCommands([
       { name: 'restart', description: 'Harness restart' },
       { name: 'loop', description: 'Run repeatedly' },
-    ], '').map((command) => command.name)).toEqual(['restart', 'login', 'loop']);
+    ], '').map((command) => command.name)).toEqual(['restart', 'login', 'loop', 'draw-avatar']);
+  });
+
+  it('offers /draw-avatar to an agent that has not published commands yet', () => {
+    expect(availableAgentMentionCommands([], 'draw')).toEqual([DRAW_AVATAR_COMMAND]);
+    expect(availableAgentMentionCommands([], '').map((command) => command.name)).toContain('draw-avatar');
+  });
+
+  it('keeps a published catalog in its published order without a second /draw-avatar', () => {
+    const published = [{ name: 'loop', description: 'Run repeatedly' }, DRAW_AVATAR_COMMAND];
+    expect(availableAgentMentionCommands(published, '').map((command) => command.name))
+      .toEqual(['restart', 'login', 'loop', 'draw-avatar']);
   });
 
   it('detects a slash token typed right after a completed @mention', () => {

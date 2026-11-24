@@ -127,6 +127,13 @@ export type AgentPaletteCommand = {
   toggle?: boolean;
 };
 
+/** Beeline's own skill on every agent body; mirrors apps/body/src/draw-avatar-skill.ts. */
+export const DRAW_AVATAR_COMMAND: AgentPaletteCommand = {
+  name: 'draw-avatar',
+  description: 'Draw an avatar from my soul, or refine my current look',
+  inputHint: '"make him more scary"',
+};
+
 /** The owner's Fast mode toggle in the `@agent /` palette. */
 export const FAST_MODE_COMMAND = 'fast-mode';
 
@@ -209,10 +216,14 @@ export function availableAgentMentionCommands(
   const login = { name: 'login', description: 'Sign in to this agent’s provider' };
   const beeline = fastMode ? [restart, fastModePaletteCommand(fastMode), login] : [restart, login];
   const reserved = new Set(beeline.map((command) => command.name));
-  return [
-    ...beeline,
-    ...advertised.filter((command) => !reserved.has(command.name.toLowerCase())),
-  ].filter((command) => matchesAgentCommand(command, query));
+  const listed = advertised.filter((command) => !reserved.has(command.name.toLowerCase()));
+  // Every Beeline body ships /draw-avatar, but an agent's row lists it only
+  // after its first session publishes a catalog. Offer it before then too, in
+  // the same last place the body publishes it.
+  const drawAvatar = listed.some((command) => command.name.toLowerCase() === DRAW_AVATAR_COMMAND.name)
+    ? []
+    : [DRAW_AVATAR_COMMAND];
+  return [...beeline, ...listed, ...drawAvatar].filter((command) => matchesAgentCommand(command, query));
 }
 
 
