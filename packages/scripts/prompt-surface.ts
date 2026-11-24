@@ -134,9 +134,9 @@ export async function renderAuditPrompts() {
       ...(situation.name === 'fresh-thread-first-turn'
         ? [generatedThreadRenamePrompt(saved.turn.generatedTitle as string)] : []),
       ...(saved.session?.brief ? [`Current thread brief, revision 1. It governs this thread; earlier instructions that conflict with it are historical:\n${(saved.session.brief as { spec: string }).spec}`] : []),
-      ...(['person-tag', 'fresh-thread-first-turn'].includes(situation.name) ? ['Members (exact tag spellings):\n- @owner — Owner (person)\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)\nYou are @jellybean, a member here; you are not listed above.'] : []),
+      ...(['person-tag', 'fresh-thread-first-turn'].includes(situation.name) ? ['Members (exact tag spellings):\n- @owner — Owner (person)' + (situation.place === thread ? '' : '\n- @ruby — Ruby (agent)\n- @worker — Worker (agent)') + '\nYou are @jellybean, a member here; you are not listed above.'] : []),
     ].join('\n\n');
-    const command: AgentCommand = { id, roomId: situation.place, roomName: situation.place === thread ? 'widget' : 'Inventory',
+    const command: AgentCommand = { id, roomId: situation.place, parentRoomId: situation.place === thread ? room : undefined, roomName: situation.place === thread ? 'widget' : 'Inventory',
       returnRoomId: situation.returnPlace ?? situation.from,
       returnRoomName: (situation.returnPlace ?? situation.from) === thread ? 'widget' : 'Inventory', agentId: 'jellybean',
       sourceMessageId: 'a'.repeat(64), from: { agent: situation.author, place: situation.from }, turnRequestId: id,

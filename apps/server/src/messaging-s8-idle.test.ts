@@ -43,7 +43,7 @@ it('S8: replying to a System idle notice reaches the receiving commander task se
   await idleThread();
   await refreshCornerAttention(db,THREAD);
   const notice=(await db.query<{id:string}>("SELECT id FROM agent_commands WHERE private_payload->>'automatic'='true'")).rows[0]!;
-  await replyToMessage(db,A,{id:notice.id,text:'I will resume widget work'});
+  await replyToMessage(db,A,{roomId:CHAT,id:notice.id,text:'I will resume widget work'});
   expect(await queued()).toEqual([]);
   expect((await db.query('SELECT room_id,author_id,text FROM messages WHERE author_id=$1',[A])).rows)
     .toEqual([{room_id:CHAT,author_id:A,text:'I will resume widget work'}]);
@@ -54,10 +54,10 @@ it('S8: a notice without a parent task retains its actual System sender and neve
   await refreshCornerAttention(db,THREAD);
   const notice=(await db.query<{id:string;message:{replyAddress?:unknown}}>("SELECT id,message FROM agent_commands WHERE private_payload->>'automatic'='true'")).rows[0]!;
   expect(notice.message.replyAddress).toBeUndefined();
-  await replyToMessage(db,A,{id:notice.id,text:'I will resume widget work'});
+  await replyToMessage(db,A,{roomId:CHAT,id:notice.id,text:'I will resume widget work'});
   expect(await queued()).toEqual([]);
   expect((await db.query('SELECT room_id,author_id,text FROM messages WHERE author_id=$1',[A])).rows)
-    .toEqual([{room_id:THREAD,author_id:A,text:'I will resume widget work'}]);
+    .toEqual([{room_id:CHAT,author_id:A,text:'I will resume widget work'}]);
 });
 
 it('a brief revision under an idle notice replies to the reviser instead of the inherited requester',async()=>{
@@ -70,7 +70,7 @@ it('a brief revision under an idle notice replies to the reviser instead of the 
   const delivered=(await readAgentCommands(db,B,THREAD)).commands.find(command=>command.id===revision!.id)!;
   expect(delivered.from).toEqual({agent:A,place:CHAT});
   expect(delivered.returnRoomId).toBe(CHAT);
-  await replyToMessage(db,B,{id:revision!.id,text:'Blocked by the revised prerequisite'});
+  await replyToMessage(db,B,{roomId:THREAD,id:revision!.id,text:'Blocked by the revised prerequisite'});
   const replies=(await readAgentCommands(db,A,CHAT)).commands.filter(command=>command.reason==='reply');
   expect(replies).toHaveLength(1);
   expect(replies[0]!.source.body).toBe('Blocked by the revised prerequisite');
@@ -85,7 +85,7 @@ it.each(['queue','answer'] as const)('parking a thread retires its queued idle n
   expect((await readAgentCommands(db,A,CHAT)).commands.map(command=>command.id)).toEqual([notice.id]);
   await updateWorkItem(db,{roomId:THREAD,state:'backlog'},H);
   if(boundary==='queue') expect((await readAgentCommands(db,A,CHAT)).commands).toEqual([]);
-  else await replyToMessage(db,A,{id:notice.id,text:'Resume the thread'});
+  else await replyToMessage(db,A,{roomId:CHAT,id:notice.id,text:'Resume the thread'});
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[notice.id])).rows).toEqual([{state:'complete'}]);
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1',[A])).rows).toEqual([]);
   expect(await queued()).toEqual([]);

@@ -689,7 +689,7 @@ it('Reproduction VOICE-TAG-1: final call tags stay quiet; the full agent message
     const child=(await daemon.execute('getAgentCommands',{roomId:room},B)).commands.find(item=>item.id===sent.id)!;
     expect(child).toMatchObject({reason:'message',from:{agent:A,place:room}});
     await startQueuedCommand(daemon,{roomId:room,commandId:child.id},B);
-    await daemon.execute('reply',{id:child.id,text:'I am checking the call history.'},B);
+    await daemon.execute('reply',{roomId:room,id:child.id,text:'I am checking the call history.'},B);
     expect((await daemon.execute('getAgentCommands',{roomId:room},A)).commands.some(item=>item.reason==='reply' && item.source.body==='I am checking the call history.')).toBe(true);
     await service.recordAnswer(room,A,'Sol is checking the call history.');
     expect(JSON.stringify(await readVoiceContext(db,room,'next-turn',A))).toContain('Sol is checking the call history.');
@@ -799,7 +799,7 @@ it.each([false,true])('voice closing text answers its own request after an expli
   const eligible=(await db.query(`SELECT m.id FROM voice_orders o JOIN agent_commands c ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id
     JOIN messages m ON m.author_id=o.agent_id AND m.room_id=$2 AND (m.id=c.result_message_id OR m.request_id=c.id OR m.request_id=c.turn_request_id)
     WHERE o.call_id=$1 AND o.spoken_message_id IS NULL AND m.presentation='message' AND m.deleted_at IS NULL`,[joined.call.id,room])).rows;
-  expect(eligible).toEqual([{id:unrelated ? final.id : reply.id}]);
+  expect(eligible.map(row=>row.id).sort()).toEqual((unrelated ? [final.id] : [reply.id,final.id]).sort());
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
  }finally{await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
 });

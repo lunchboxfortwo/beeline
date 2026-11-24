@@ -205,7 +205,7 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
-    await result(review!, '@hoots attach the production proof.');
+    await rootFixture.daemon.execute('reply',{roomId:review!.roomId,id:review!.id,text:'@hoots attach the production proof.'},review!.agentId);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'checks', result: 'passing', sourceMessageId: review!.sourceMessageId });
     expect(await reasons(cornerId, A)).not.toContain('corner_review_needed');
   });

@@ -4,8 +4,8 @@ import { createHash,randomBytes } from 'node:crypto';
 import { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 import { queueMessage,type CommandRow,type PrivateCommandPayload,type QueuedDelivery } from './agent-command.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { cornerCommanderBriefSql,cornerCommanderIdSql,threadTaskSql } from './corner-commander.js';
-import { recordedMessageRoute } from './message-route.js';
+import { cornerCommanderBriefSql,cornerCommanderIdSql,threadCommanderAddressSql,threadTaskSql } from './corner-commander.js';
+import { recordedMessageRoute,reportRecipient } from './message-route.js';
 import { cornerOpenedFromSql,cornerOpeningSql } from './corner-opening.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
@@ -210,7 +210,7 @@ export function commanderChainSql(corner: string, asker: string, askedAt: string
       AND (identity.kind='human' OR identity.id IN (SELECT id FROM commanders))`;
 }
 
-type ReportOptions = { orderIssuer?: boolean; automatic?: boolean; wakeInCorner?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string; afterCommit?: AfterCommit };
+type ReportOptions = { orderIssuer?: boolean; automatic?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string; afterCommit?: AfterCommit };
 
 type ReportReceipt = { id: string; createdAt: number; delivered?: boolean; receipt?: string };
 /** A worker reports in its model's words; a machine report is System-authored. */
@@ -291,12 +291,10 @@ async function cornerReportOpening(db: SqlDatabase, roomId: string) {
 
 /** The recorded return route shared by lifecycle reports and commander approvals. */
 export async function commanderReportAddress(db: SqlDatabase, roomId: string, command?: CommandRow, orderIssuer = false) {
-  const task=command?.message?.route || command?.private_payload?.route ? command : (await db.query<CommandRow>(
-    threadTaskSql('$1'),[roomId])).rows[0];
-  if (task?.message?.route || task?.private_payload?.route) {
-    const route=await recordedMessageRoute(db,task!);
-    return {recipient:route.from.agent,returnRoom:route.from.place,parent:task,origin:roomId,incoming:task};
-  }
+  const task = command ?? (await db.query<CommandRow>(threadTaskSql('$1'),[roomId])).rows[0];
+  const address = task?.room_id === roomId && command ? await reportRecipient(db,task)
+    : (await db.query<{address:{agent:string;place:string}|null}>(`SELECT ${threadCommanderAddressSql('$1')} address`,[roomId])).rows[0]?.address;
+  if (address) return {recipient:address.agent,returnRoom:address.place,parent:task,origin:roomId,incoming:task};
   const reporter = command?.agent_id;
   const corner = await cornerReportOpening(db, roomId);
   const incoming = command ?? corner?.opening ?? undefined;

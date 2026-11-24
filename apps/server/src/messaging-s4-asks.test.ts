@@ -29,17 +29,17 @@ it('S4: an ask to an agent commander keeps the thread waiting after that recipie
     CROSS JOIN LATERAL (${cornerWaitingReportSql('thread')}) waiting WHERE thread.id=$1`,[THREAD])).rows;
   expect(await waiting()).toEqual([{person_id:A}]);
   expect(await tray()).toEqual([]);
-  await replyToMessage(db,A,{id:question.id,text:'Web'});
+  await replyToMessage(db,A,{roomId:CHAT,id:question.id,text:'Web'});
   expect(await waiting()).toEqual([{person_id:A}]);
   expect(await queued()).toEqual([[B,THREAD]]);
 });
 
 it('S4: a request retry creates one card and separate requests can ask independent questions',async()=>{
   const task=await sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:THREAD}},text:'Build widget'});
-  const first=await replyToMessage(db,B,{id:task.id,text:'Choose output',ask,messageId:'e'.repeat(64)});
-  await replyToMessage(db,B,{id:task.id,text:'Choose output',ask,messageId:'e'.repeat(64)});
+  const first=await replyToMessage(db,B,{roomId:THREAD,id:task.id,text:'Choose output',ask,messageId:'e'.repeat(64)});
+  await replyToMessage(db,B,{roomId:THREAD,id:task.id,text:'Choose output',ask,messageId:'e'.repeat(64)});
   const next=await sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:THREAD}},text:'Build another widget'});
-  const second=await replyToMessage(db,B,{id:next.id,text:'Choose another output',ask});
+  const second=await replyToMessage(db,B,{roomId:THREAD,id:next.id,text:'Choose another output',ask});
   expect(second.id).not.toBe(first.id);
   expect((await tray()).map(item=>item.messageId)).toEqual([first.id,second.id]);
   expect((await db.query('SELECT 1 FROM room_choices')).rowCount).toBe(2);

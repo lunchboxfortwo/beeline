@@ -6,7 +6,7 @@ import { callAgentTool } from './read-only-mcp-open-poll.js';
 import { agentToolsFor } from './minimal-tool-surface.js';
 import { validateAdvertisedToolInput } from './read-only-mcp-open-poll.js';
 describe('typed Work board tools', () => {
-  const tools = agentToolsFor(true, false, true, true);
+  const tools = agentToolsFor(true, false, false, false);
   const reply = tools.find(tool=>tool.name==='reply')!;
   it('advertises short asks on replies and one work update surface',()=>{
     expect(()=>validateAdvertisedToolInput(reply,{id:'task',text:'Choose output',ask:{question:'Which output?',options:['Web','Phone'],recommended:'Web'}})).not.toThrow();
@@ -112,7 +112,7 @@ describe('typed Work board tools', () => {
 
 for (const name of ['message', 'reply']) {
   it(`${name} accepts optional report digests and refuses over-limit Unicode fields`, () => {
-    const tool = agentToolsFor(true, false, true, true).find(tool => tool.name === name)!;
+    const tool = agentToolsFor(true, false, false, false).find(tool => tool.name === name)!;
     const args = name === 'reply' ? { id: 'task', text: 'blocked: Need a build.' } : { to: { agent: 'owner', place: 'chat' }, text: 'needs-decision: Need a build.' };
     expect(() => validateAdvertisedToolInput(tool, { ...args, question: '🐝'.repeat(120), brief: '🐝'.repeat(280), options: ['Sign build', 'Wait'] })).not.toThrow();
     expect(() => validateAdvertisedToolInput(tool, { ...args, question: '🐝'.repeat(121) })).toThrow('question is 121 characters; the limit is 120');

@@ -133,7 +133,7 @@ it('empty output and silence acknowledgements leave an unanswered request queued
   expect(await queue()).toEqual([]);
 });
 
-it('posts a private answer to the return address fixed at insertion, then completes the item', async () => {
+it('completes with local output and preserves the stored return address', async () => {
   const item = await createAgentCommand(db, { roomId: R1, agentId: A, sourceMessageId: null, reason: 'order',
     privatePayload: { kind: 'order', text: 'answer in Two', authorId: H, fromRoomId: R2 } });
   expect((await queue()).find(entry => entry.id === item!.id)).toMatchObject({
@@ -144,7 +144,7 @@ it('posts a private answer to the return address fixed at insertion, then comple
     WHERE id=$1`, [item!.id, R1, A]);
   await answer(R1, item!.turn_request_id, 'recorded-route answer');
   expect((await db.query('SELECT room_id,text FROM messages WHERE author_id=$1 AND text=$2', [A, 'recorded-route answer'])).rows)
-    .toEqual([{ room_id: R2, text: 'recorded-route answer' }]);
+    .toEqual([{ room_id: R1, text: 'recorded-route answer' }]);
   expect(await queue()).toEqual([]);
   await answer(R1, item!.turn_request_id, 'recorded-route answer');
   expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND text=$2', [A, 'recorded-route answer'])).rows[0])
@@ -156,7 +156,7 @@ it('retains the answer obligation when return membership is gone, with no public
     privatePayload: { kind: 'order', text: 'private question', authorId: H, fromRoomId: R2 } });
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [R2, H]);
   try {
-    await expect(answer(R1, item!.turn_request_id, 'private answer')).rejects.toThrow('return address');
+    await expect(daemon.execute('reply',{roomId:R1,id:item!.id,text:'private answer'},A)).rejects.toThrow();
     expect((await queue()).map(entry => entry.id)).toContain(item!.id);
     expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND text=$2', [A, 'private answer'])).rows).toEqual([]);
   } finally {
@@ -286,17 +286,15 @@ it('normalizes unrepresentable text without refusing the message or truncating i
   expect((await db.query('SELECT text FROM messages WHERE id=$1', [saved.id])).rows[0]?.text).toBe(text.trim());
 });
 
-it('keeps closing text in activity when a reply tool already answered this request', async () => {
+it('publishes closing output locally after a mid-turn post', async () => {
   const item = await ask(R1, 'Publish one reply');
   const posted = await daemon.execute('postCornerMessage', { roomId: R1, cornerId: R1,
     requestId: item.turn_request_id, text: 'The reply from the tool.' }, A);
   const settled = await answer(R1, item.turn_request_id, 'Closing details belong in activity.');
-  expect((await db.query("SELECT id,text FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
-    [item.turn_request_id,A])).rows).toEqual([{id:posted.id,text:'The reply from the tool.'}]);
-  expect(settled.id).toBe(posted.id);
-  expect((await db.query('SELECT result_message_id FROM agent_commands WHERE id=$1',[item.id])).rows[0]?.result_message_id).toBe(posted.id);
-  expect((await db.query("SELECT activity FROM messages WHERE request_id=$1 AND presentation='activity'", [item.id])).rows[0]?.activity)
-    .toContainEqual({kind:'note',title:'Turn summary',text:'Closing details belong in activity.'});
+  expect((await db.query("SELECT id FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
+    [item.turn_request_id,A])).rows).toEqual(expect.arrayContaining([{id:posted.id},{id:settled.id}]));
+  expect(settled.id).not.toBe(posted.id);
+  expect((await db.query('SELECT result_message_id FROM agent_commands WHERE id=$1',[item.id])).rows[0]?.result_message_id).toBe(settled.id);
   expect((await answer(R1,item.turn_request_id,'Closing details belong in activity.')).id).toBe(settled.id);
   expect(await queue()).toEqual([]);
 });
@@ -329,15 +327,16 @@ it('a late attachment must reach the existing reply before its item can finish',
   const file={url:'https://example.test/late-proof',name:'proof.txt',mimeType:'text/plain',size:10};
   await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[item.id,JSON.stringify([file])]);
   await db.query(`CREATE FUNCTION refuse_late_proof() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
-    IF NEW.id='${posted.id}' THEN RAISE EXCEPTION 'late proof write failed'; END IF; RETURN NEW; END $$;
-    CREATE TRIGGER refuse_late_proof BEFORE UPDATE OF attachments ON messages FOR EACH ROW EXECUTE FUNCTION refuse_late_proof()`);
+    IF NEW.request_id='${item.id}' THEN RAISE EXCEPTION 'late proof write failed'; END IF; RETURN NEW; END $$;
+    CREATE TRIGGER refuse_late_proof BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION refuse_late_proof()`);
   try { await expect(answer(R1,item.turn_request_id,'Closing summary')).rejects.toThrow('late proof write failed'); }
   finally { await db.query('DROP TRIGGER refuse_late_proof ON messages;DROP FUNCTION refuse_late_proof()'); }
   expect((await queue()).map(item=>item.id)).toContain(item.id);
   await answer(R1,item.turn_request_id,'Closing summary');
   expect(await queue()).toEqual([]);
-  expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[file]});
-  expect((await db.query("SELECT count(*)::int n FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",[item.turn_request_id,A])).rows[0]).toEqual({n:1});
+  expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[]});
+  expect((await db.query('SELECT attachments FROM messages WHERE room_id=$1 AND author_id=$2 AND text=$3',[R1,A,'Closing summary'])).rows).toContainEqual({attachments:[file]});
+  expect((await db.query("SELECT count(*)::int n FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",[item.turn_request_id,A])).rows[0]).toEqual({n:2});
 });
 
 
@@ -468,14 +467,14 @@ it('no_reply_needed explicitly finishes a schedule but not an owed human answer'
   expect((await db.query(`SELECT 1 FROM messages WHERE author_id=$1 AND request_id=$2`, [A, schedule.id])).rows).toEqual([]);
 });
 
-it('publishes a combined answer to each recorded return address', async () => {
+it('publishes a combined answer in the session', async () => {
   const first = await ask(R1,'answer here');
   const second = (await createAgentCommand(db, { roomId:R1,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',text:'answer in Two',authorId:H,fromRoomId:R2} }))!;
   await daemon.execute('postRoomMessage', {roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Both answers'}, A);
   expect(await queue()).toEqual([]);
   expect((await db.query(`SELECT room_id FROM messages WHERE author_id=$1 AND text='Both answers' ORDER BY room_id`, [A])).rows)
-    .toEqual([{room_id:R1},{room_id:R2}]);
+    .toEqual([{room_id:R1}]);
 });
 
 it('publishes one answer for a chat batch, dedupes replay, and settles every covered tag', async () => {
@@ -510,9 +509,10 @@ it.each([0, 1].flatMap(postedIndex => ['', 'Closing summary'].map(closing => ({p
   await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[second.id,JSON.stringify([file])]);
   await daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:closing},A);
   expect(await queue()).toEqual([]);
-  expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[file]});
-  expect((await db.query("SELECT count(*)::int n FROM messages WHERE author_id=$1 AND room_id=$2 AND text='Closing summary' AND presentation='message'",[A,R1])).rows[0])
-    .toEqual({n:0});
+  expect((await db.query('SELECT attachments FROM messages WHERE id=$1',[posted.id])).rows[0]).toEqual({attachments:[]});
+  expect((await db.query('SELECT attachments FROM messages WHERE room_id=$1 AND author_id=$2 AND text=$3',[R1,A,closing])).rows).toContainEqual({attachments:[file]});
+  expect((await db.query("SELECT count(*)::int n FROM messages WHERE author_id=$1 AND room_id=$2 AND text='Closing summary' AND request_id=ANY($3::text[]) AND presentation='message'",[A,R1,[first.id,second.id]])).rows[0])
+    .toEqual({n:closing ? 1 : 0});
 });
 
 it('an empty mixed batch finishes the event and retains the schedule and human request', async () => {
@@ -524,16 +524,15 @@ it('an empty mixed batch finishes the event and retains the schedule and human r
   expect((await queue()).map(item=>item.id)).toEqual([human.id,before.id]);
 });
 
-it('keeps the whole batch queued if one recorded return address cannot receive its answer', async () => {
+it('finishes the local batch if a remote issuer leaves', async () => {
   const first = await ask(R1,'answer here atomically');
   const second = (await createAgentCommand(db,{roomId:R1,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',text:'answer in Two atomically',authorId:H,fromRoomId:R2}}))!;
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[R2,H]);
   try {
-    await expect(daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Atomic batch answer'},A))
-      .rejects.toThrow('return address');
-    expect((await queue()).map(item=>item.id)).toEqual([first.id,second.id]);
-    expect((await db.query("SELECT 1 FROM messages WHERE author_id=$1 AND text='Atomic batch answer'",[A])).rows).toEqual([]);
+    await daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:'Atomic batch answer'},A);
+    expect((await queue()).map(item=>item.id)).toEqual([]);
+    expect((await db.query("SELECT room_id FROM messages WHERE author_id=$1 AND text='Atomic batch answer'",[A])).rows).toEqual([{room_id:R1}]);
   } finally { await db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[R2,H]); }
 });
 

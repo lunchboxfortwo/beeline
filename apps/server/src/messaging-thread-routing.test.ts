@@ -23,12 +23,11 @@ it.each([false, true])('Nerd’s reply to Emberus’s avatar-background-color re
     route: { from: { agent: A, place: CHAT }, to: { agent: C, place: THREAD } }, text: 'Review this PR',
   });
   await db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1', [OTHER, CHAT]);
-  if (explicit) await daemon.execute('reply', { id: task.id, roomId: OTHER, text: 'PASS: reviewed the PR' }, C);
+  if (explicit) await daemon.execute('reply', { id: task.id, roomId: THREAD, text: 'PASS: reviewed the PR' }, C);
   else await answerQueuedMessage(db, C, { roomId: THREAD, requestId: task.id, text: 'PASS: reviewed the PR' });
-  expect(await queued()).toEqual([[A, CHAT]]);
+  expect(await queued()).toEqual(explicit ? [[A, CHAT]] : []);
   const replies = (await db.query('SELECT room_id FROM messages WHERE author_id=$1', [C])).rows;
-  expect(replies).toEqual([{ room_id: CHAT }]);
-  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2', [THREAD, C])).rows).toEqual([]);
+  expect(replies).toEqual([{ room_id: explicit ? CHAT : THREAD }]);
 });
 
 it('person-facing messages and questions retain the owner’s chat address', async () => {
@@ -48,7 +47,7 @@ it('a review request cannot reply after its recorded return chat closes', async 
   });
   await db.query('UPDATE agent_commands SET return_room_id=$2 WHERE id=$1', [task.id, CHAT]);
   await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [CHAT]);
-  await daemon.execute('reply', { id: task.id, text: 'PASS: reviewed the PR' }, C);
+  await daemon.execute('reply', { roomId:THREAD, id: task.id, text: 'PASS: reviewed the PR' }, C);
   expect(await queued()).toEqual([]);
   expect((await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [task.id])).rows[0]!.state).toBe('cancelled');
 });
@@ -57,7 +56,7 @@ it('replies to an owner request delivered in a thread keep the owner’s recorde
   const task = await sendMessage(db, {
     route: { from: { agent: H, place: CHAT }, to: { agent: B, place: THREAD } }, text: 'Build widget',
   });
-  await daemon.execute('reply', { id: task.id, text: 'Done' }, B);
+  await daemon.execute('reply', { roomId:THREAD, id: task.id, text: 'Done' }, B);
   expect((await db.query('SELECT room_id FROM messages WHERE author_id=$1', [B])).rows).toEqual([{ room_id: CHAT }]);
   expect(await queued()).toEqual([]);
 });

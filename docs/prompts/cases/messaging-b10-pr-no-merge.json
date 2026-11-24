@@ -28,7 +28,7 @@
     "task": {
       "fromName": "Ruby",
       "commandReason": "message",
-      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: The widget implementation is committed, tested and pushed. Open its PR with gh pr create now, then end the turn.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
+      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ntext: The widget implementation is committed, tested and pushed. Open its PR with gh pr create now, then end the turn."
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

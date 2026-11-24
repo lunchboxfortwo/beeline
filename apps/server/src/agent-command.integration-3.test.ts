@@ -635,6 +635,6 @@ it('Reproduction 13: a corner order closes when its final reply commits without 
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND agent_id=$2 AND request_id=$3`,
     [C, A, command.turnRequestId])).rows[0]?.status).toBe('complete');
   const room = await rootFixture.phone.readRoom(C, H);
-  expect((await rootFixture.phone.readRoom(R,H))?.messages.some(message => message.text === 'Finished the requested work')).toBe(true);
+  expect(room?.messages.some(message => message.text === 'Finished the requested work')).toBe(true);
   expect(room?.latestAgentTurns?.some(turn => turn.agentPubkey === A && turn.status === 'working')).toBe(false);
 });

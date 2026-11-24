@@ -1,0 +1,79 @@
+{
+  "id": "thread-interim-inventory",
+  "section": "place",
+  "summary": "An implementer writes interim counts in the inventory thread while collection continues.",
+  "place": "repo-less-corner",
+  "turn": {
+    "task": {
+      "fromName": "Dana",
+      "commandReason": "human_tag",
+      "body": "From: Dana in #Inventory\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ntext: Write the interim count as a table here. Red has 12 widgets and blue has 8. Collection continues tomorrow."
+    },
+    "members": "Members: dana (Dana, person). You are Ruby."
+  },
+  "tools": [
+    "Bash"
+  ],
+  "pass": {
+    "all": [
+      {
+        "text": {
+          "matches": "12"
+        }
+      },
+      {
+        "text": {
+          "matches": "8"
+        }
+      },
+      {
+        "noCall": "reply"
+      },
+      {
+        "noCall": "message"
+      }
+    ]
+  },
+  "scenario": {
+    "history": [],
+    "files": {},
+    "results": [
+      {
+        "call": "read",
+        "args": {
+          "facet": "procedure"
+        },
+        "result": {
+          "slug": "workspace-core",
+          "markdown": "Machine: forge. Shell and connected services are described by the session tool surface. No additional saved procedures."
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "brief"
+        },
+        "result": {
+          "repositoryWork": false,
+          "spec": "Maintain the inventory count as shipments arrive."
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
+      }
+    ],
+    "connect": {
+      "status": {
+        "apps": [],
+        "readiness": "No additional connected services recorded for this case."
+      },
+      "discover": {
+        "apps": []
+      }
+    }
+  }
+}

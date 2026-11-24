@@ -29,7 +29,15 @@ describe('Beeline tool surface across harnesses', () => {
       // accepts the same schema: this was Ruby's exact 28 -> 22 discrepancy.
       const accepted = tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)));
       expect(accepted.map(tool => tool.name)).toEqual(tools.map(tool => tool.name));
-      expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude));
+      expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude.filter(name => !corner || name !== 'message')));
+      if (corner) {
+        expect(tools.map(tool => tool.name)).not.toContain('message');
+        expect(tools.find(tool => tool.name === 'post')?.inputSchema.properties).not.toHaveProperty('address');
+        const facets = tools.find(tool => tool.name === 'read')?.inputSchema.properties as {facet:{enum:string[]}};
+        expect(facets.facet.enum).not.toContain('threads');
+        expect(facets.facet.enum).not.toContain('addresses');
+        expect(tools.find(tool => tool.name === 'open_thread')?.inputSchema.required).not.toContain('room');
+      }
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand }).systemPrompt;
       const inventory = prompt.match(/^Beeline tools: (.+)\.$/m)?.[1]?.replaceAll('`', '').split(/,\s*/);
       const core = agentToolsFor(true, surface === 'dm', corner, surface === 'code-corner', false, true, true);

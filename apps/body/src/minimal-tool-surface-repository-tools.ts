@@ -113,9 +113,23 @@ export function placeBeelineApps(_cornerTurn: boolean, onboarding = false): stri
 /** app_tool names only the Beeline apps that work in this place, so discovery never offers one that refuses. */
 export function minimalTools(cornerTurn: boolean): ToolDefinition[] {
   const apps = placeBeelineApps(cornerTurn).join(', ');
-  return structuredClone(ORDINARY_TOOLS).map(tool =>
-    providerCompatibleTool(tool.name === 'app_tool'
-      ? { ...tool, description: tool.description.replace('BEELINE_APPS', apps) } : tool));
+  const tools = structuredClone(ORDINARY_TOOLS).filter(tool => !cornerTurn || tool.name !== 'message');
+  for (const tool of tools) {
+    if (tool.name === 'app_tool') tool.description = tool.description.replace('BEELINE_APPS', apps);
+    if (!cornerTurn) continue;
+    const properties = tool.inputSchema.properties as Record<string, { enum: string[]; description: string }>;
+    if (tool.name === 'read') {
+      tool.description = tool.description.replace('Discover with facet addresses; read', 'Read');
+      properties.facet!.enum = properties.facet!.enum.filter(facet => facet !== 'addresses' && facet !== 'threads');
+      properties.facet!.description = properties.facet!.description.replace('addresses discovers places; ', '');
+    }
+    if (tool.name === 'post') {
+      delete properties.address;
+      tool.description = 'Post a public message in this thread.';
+    }
+    if (tool.name === 'reply') tool.description = 'Report on a task in this place to your commander. Start with done:, blocked: or needs-decision:. Files and everything else stay here. To involve another agent, ask your commander in your report.';
+  }
+  return tools.map(providerCompatibleTool);
 }
 
 export function repositoryTools(): ToolDefinition[] { return structuredClone(REPOSITORY_TOOLS).map(providerCompatibleTool); }

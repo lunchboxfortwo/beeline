@@ -167,13 +167,13 @@ export function cornerHasRepositoryWork(brief?: CornerBrief): boolean {
 
 /** The agent doing the work holds the implementer label; read-only and review turns never claim. */
 export const CORNER_CLAIM_RULE = 'Before your first edit or commit in this thread, call claim_thread. Do not claim on read-only or review turns.';
-export const CORNER_RUNTIME_AUTHOR_CONTRACT = `Work in this thread; deliver task outcomes with reply(id). The current brief's spec, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story and criterion, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested. Deliver artifacts with post_artifact and reply without requiring a PR. Claim another agent's progress only from durable commands, the current prompt or tool evidence. No unrequested features or refactors.`;
+export const CORNER_RUNTIME_AUTHOR_CONTRACT = `Everything you write stays in this thread. The current brief's spec, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story and criterion, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested. Deliver artifacts with post_artifact without requiring a PR. Claim another agent's progress only from durable commands, the current prompt or tool evidence. No unrequested features or refactors.`;
 
-export const CORNER_AUTHOR_CONTRACT = `Work in this thread; deliver task outcomes with reply(id). Reply when done, blocked or failed; add ask when an answer is needed. Worker done requires an opened PR or repositoryWork:false.
+export const CORNER_AUTHOR_CONTRACT = `Everything you write stays in this thread. reply(id) reports to your commander: only when done, blocked or asking; add ask when an answer is needed. Worker done requires an opened PR or repositoryWork:false.
 The current brief's stories, criteria, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested.
 Bugfix briefs need a real-target Reproduction <id> or why infeasible and the closest stand-in; done requires that proof to pass.
 Follow beeline-triage. Before PR, prove the user path in the built app/service or, if unavailable, the narrowest script for that path. Inner-function tests/logs/code reads prove no visible result. The PR body needs ## Reproduced and ## Demonstrated: steps, wrong/passing results, same Reproduction <id>, why real-target proof is unavailable and its stand-in. Features: "not a defect report".
-Non-repo work: post_artifact and reply. End awaiting messages/checks/review; committed wakes resume. Landing archives this thread, cancels its work and abandons saved runs. The surviving commander owns follow-up at its address. Claim others' progress only from durable commands, this prompt or tool evidence. No unrequested features or refactors.`;
+Non-repo work: post_artifact. End awaiting messages/checks/review; committed wakes resume. Landing archives this thread, cancels its work and abandons saved runs. The surviving commander owns follow-up at its address. Claim others' progress only from durable commands, this prompt or tool evidence. No unrequested features or refactors.`;
 
 export const CORNER_REVIEWER_SESSION_INSTRUCTION =
   "As configured reviewer, review the assigned green head with approve_merge. Demand available proof; reply to the task message if capability is missing. Approve only the exact reviewed head. The server merges when its gate opens.";
@@ -340,11 +340,11 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     layer: 'session',
     surfaces: EVERYWHERE,
     render: ({ surface }) => paragraphs(
-      'Send message(to:{agent,place},text) to one identity in one chat or thread. The same agent in different places has different addresses. Discover with read.',
-      'Message other agents only when you need something from them, or when you are replying to something they need.',
-      'A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
+      !CORNERS.includes(surface) && 'Send message(to:{agent,place},text) to one identity in one chat or thread. The same agent in different places has different addresses. Discover with read.',
+      !CORNERS.includes(surface) && 'Message other agents only when you need something from them, or when you are replying to something they need.',
+      !CORNERS.includes(surface) && 'A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
       'Add ask for answers: question <=120 characters, one line ending ?; brief <=280 characters, <=2 sentences: why it matters, what each option means; 2–4 options <=3 words, optional recommended. Over-limit asks are refused with counts; rewrite. Needs you cards show only question, brief, buttons; connects/grants have their own.',
-      'After messaging another agent, end the turn; its reply wakes a new turn; do not sleep or poll.',
+      !CORNERS.includes(surface) && 'After messaging another agent, end the turn; its reply wakes a new turn; do not sleep or poll.',
       CORNERS.includes(surface) && 'Outside this thread, tell people the original problem, blocker, and needed decision in plain words.',
       CORNERS.includes(surface) && 'The server requests review; never tag the reviewer.',
     ),
@@ -443,10 +443,10 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
       paragraphs(
         'Do not repeat the trigger, instructions, or a posted answer.',
         surface === 'room' &&
-          'If nothing is actionable for you, do not reply. If the current task is only a nudge to respond, answer the most recent unanswered human message instead of echoing the nudge.',
+          'If nothing is actionable for you, do not reply.',
         surface === 'repo-less-corner' && CORNER_CLAIM_RULE,
         surface === 'repo-less-corner' &&
-          'Reply to the task message with the deliverable, adding ask if an answer is needed. Close the thread when requested.',
+          'Close the thread when requested.',
       ),
   },
   {
@@ -777,7 +777,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     why: { 'turn.corners': 'chat and thread agents need exact member thread ids for supported relay actions.' },
     budgetBytes: 8_000,
     layer: 'turn',
-    surfaces: ['room', 'code-corner', 'repo-less-corner'],
+    surfaces: ['room'],
     render: ({ surface, corners, closedCorners }) =>
       [
         corners?.length

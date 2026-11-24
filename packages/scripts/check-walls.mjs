@@ -163,8 +163,9 @@ export function judgeWakeDestinations(root) {
   if(!normalize(messaging).includes(normalize('roomId: to.place, agentId: to.agent')))
     errors.push('message delivery must wake its agent and place tuple');
   const queue=readFileSync(resolve(root,'apps/server/src/agent-command.ts'),'utf8');
-  if(!normalize(queue).includes(normalize('to:route.from')))
-    errors.push('replies must retain the recorded sender');
+  if(!normalize(queue).includes(normalize('const to = await reportRecipient(db,item)')) ||
+      !normalize(queue).includes(normalize('sendMessage(db,{route:{from,to},text:messageText')))
+    errors.push('reports must use the recipient resolved for the received command');
   if(normalize(queue).includes(normalize('replyAddress:chat.commander')) ||
       !normalize(queue).includes(normalize('payload?.route?.from.place')))
     errors.push('System wake answers must retain their thread destination');

@@ -83,14 +83,14 @@ it.each([
     expect(f.prompt).toHaveBeenCalledOnce();
     expect(f.execute).toHaveBeenCalledWith('listRoomCorners', { roomId: parent ?? 'room', activeOnly: true });
     const emitted = f.prompt.mock.calls[0]![1];
-    expect(emitted).toContain('Current threads you belong to');
-    expect(emitted).toContain('Game fix (open-thread)');
-    expect(emitted).toContain(`checkout ${checkout}`);
+    expect(emitted.includes('Current threads you belong to')).toBe(!parent);
+    expect(emitted.includes('Game fix (open-thread)')).toBe(!parent);
+    expect(emitted.includes(`checkout ${checkout}`)).toBe(!parent);
     reconcile(command.threads);
     await vi.waitFor(() => expect(f.session.resources.context.threads).toEqual(command.threads));
     f.execute.mockImplementation(() => new Promise(() => {}));
     await expect(f.session.deliver(next)).resolves.toMatchObject({ text: 'Done' });
-    expect(f.prompt.mock.calls[1]![1]).toContain(`checkout ${checkout}`);
+    expect(f.prompt.mock.calls[1]![1].includes(`checkout ${checkout}`)).toBe(!parent);
   } finally { await f.session.dispose(); }
 });
 

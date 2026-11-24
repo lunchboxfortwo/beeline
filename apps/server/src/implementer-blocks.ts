@@ -3,9 +3,7 @@ import { modelText } from './message-origin.js';
 import { refreshCornerAttention } from './corner-attention.js';
 import type { SqlDatabase } from './database.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { cornerCommanderIdSql, threadCommanderAddressSql } from './corner-commander.js';
-import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import type { MessageAddress } from '@beeline/api-contract/daemon';
+import { cornerCommanderIdSql } from './corner-commander.js';
 
 /** Blocks use the existing message and ask closure, independently of Tasks marks. */
 export const IMPLEMENTER_BLOCKS_SCHEMA = `
@@ -43,15 +41,6 @@ export async function refuseDoneWithBlocks(db:SqlDatabase,agent:string,room:stri
   if (!/^done:/i.test(text.trim())) return;
   const reminder=await blockReminder(db,agent,room);
   if(reminder) throw new CommandRefusalError(`Clear your open blocks before reporting done.\n${reminder}`,409);
-}
-
-/** Default report routing follows the recorded opening commander. */
-export async function blockRecipient(db:SqlDatabase,from:MessageAddress,to:MessageAddress,text:string):Promise<MessageAddress> {
-  if(!/^(blocked|needs-decision):/i.test(text.trim())) return to;
-  const row=(await db.query<{address:MessageAddress|null}>(`SELECT COALESCE(${threadCommanderAddressSql('room.id')},CASE WHEN $3::text=$4::text THEN jsonb_build_object('agent',(SELECT owner_id FROM agents WHERE agent_id=$2),'place',COALESCE(room.parent_id,room.id)) END) address
-    FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id
-    WHERE room.id=$1 AND fact.implementer_agent_id=$2`,[from.place,from.agent,to.agent,SYSTEM_IDENTITY_ID])).rows[0];
-  return row?.address?.agent && row.address.agent!==from.agent ? row.address : to;
 }
 
 /** A takeover changes authority immediately; the original author retains no special rights. */

@@ -813,7 +813,7 @@ const scope11 = fixtureScope11();
     expect(await revise(cornerId)).toMatchObject({ wake: { queued: true, agentId: A } });
     const [wake] = (await commands(A, cornerId)).filter(command => command.reason === 'corner_brief_revision');
     await claim(wake!);
-    const sent = await rootFixture.daemon.execute('reply', { id: wake!.id, text: 'Blocked by the revised output contract' }, A);
+    const sent = await rootFixture.daemon.execute('reply', {roomId:cornerId,id: wake!.id, text: 'Blocked by the revised output contract' }, A);
     expect(sent).toMatchObject({ delivered: true });
     expect((await commands(F, R)).filter(command => command.reason === 'reply')).toMatchObject([{ from: { agent: A, place: cornerId } }]);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND text LIKE 'Blocked by%'

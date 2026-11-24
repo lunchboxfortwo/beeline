@@ -205,7 +205,7 @@ describe('owed chat tags', () => {
     const message=await tag();
     await createAgentCommand(db,{roomId:room,agentId:other,sourceMessageId:message,reason:'human_tag'});
     for(const who of [member,other]) {
-      const input={id:message,text:'first',transportRequestId:'one-received-reply'};
+      const input={roomId:room,id:message,text:'first',transportRequestId:'one-received-reply'};
       const first=await daemon.execute('reply',input,who),again=await daemon.execute('reply',input,who);
       expect(again.id).toBe(first.id);
       expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[who,message])).rowCount).toBe(1);

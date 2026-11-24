@@ -44,3 +44,18 @@ it('acknowledges creation without asserting that an unstartable worker is starti
   }
   expect(calls).toEqual(['getRoomRepositoryState', 'createCorner', 'getRoomRepositoryState', 'createCorner']);
 });
+
+it('opens a fix thread from triage using the parent chat when room is omitted', async () => {
+  const root=await mkdtemp(`${testTmpDir()}/beeline-triage-open-`); roots.push(root);
+  const context=join(root,'turn.json');
+  await writeFile(context,JSON.stringify({roomId:'triage',requestId:'triage-order'}));
+  for (const [key,value] of Object.entries({BEELINE_TURN_CONTEXT_FILE:context,BEELINE_DAEMON_ROOM_ID:'parent',
+    BEELINE_DAEMON_CORNER_ID:'triage',BEELINE_DAEMON_BASE_URL:'http://daemon.test',BEELINE_DAEMON_TOKEN:'fixture'})) vi.stubEnv(key,value);
+  const calls:Record<string,unknown>[]=[];
+  vi.stubGlobal('fetch',async (url:URL,init:RequestInit) => {
+    calls.push(JSON.parse(String(init.body)));
+    return Response.json(new URL(url).pathname.endsWith('getRoomRepositoryState') ? {resolution:'none'} : {cornerId:'fix'});
+  });
+  expect(JSON.parse(await openCorner({implementer:'worker',brief:{spec:'Fix the triaged issue'}},'fix-call')).address).toBe('fix');
+  expect(calls.at(-1)).toMatchObject({roomId:'triage',requestId:'triage-order',targetRoomId:'parent'});
+});

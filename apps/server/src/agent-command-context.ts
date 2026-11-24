@@ -130,12 +130,16 @@ async function attachQueuedConversation(
       [command.room_id, command.source_message_id, MESSAGE_CHARS, CONVERSATION_WINDOW_MESSAGES],
     )
   ).rows.reverse();
+  const thread = (await db.query<{ title: string; kind: string }>(
+    `SELECT name title,${cornerKindSql('rooms.id')} kind FROM rooms WHERE id=$1 AND parent_id IS NOT NULL`,
+    [command.room_id],
+  )).rows[0];
   const self = members.find((member) => member.id === command.agent_id)?.handle;
   const memberText = [
     'Members (exact tag spellings):',
     ...[...members]
       .sort((a, b) => a.id.localeCompare(b.id))
-      .filter((member) => member.id !== command.agent_id && member.handle)
+      .filter((member) => member.id !== command.agent_id && member.handle && (!thread || member.kind === 'human'))
       .map(
         (member) =>
           `- @${member.handle}${member.name && member.name !== member.handle ? ` — ${member.name}` : ''} (${member.kind === 'agent' ? 'agent' : 'person'})`,
@@ -143,10 +147,6 @@ async function attachQueuedConversation(
     ...(self ? [`You are @${self}, a member here; you are not listed above.`] : []),
   ].join('\n');
   const memberVersion = createHash('sha256').update(memberText).digest('hex').slice(0, 16);
-  const thread = (await db.query<{ title: string; kind: string }>(
-    `SELECT name title,${cornerKindSql('rooms.id')} kind FROM rooms WHERE id=$1 AND parent_id IS NOT NULL`,
-    [command.room_id],
-  )).rows[0];
   const brief = thread ? await currentCornerBrief(db, command.room_id) : undefined;
   // Same server fact as getCornerRestoreState: a human-opened thread's
   // generated name stands until its first brief. Freeze the ask with the turn

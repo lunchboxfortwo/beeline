@@ -25,7 +25,9 @@ export async function legacyMessageRoute(db: SqlDatabase, item: CommandRow): Pro
     agent:payload?.authorId ?? source?.author_id ?? SYSTEM_IDENTITY_ID,
     place:payload?.fromRoomId ?? source?.room_id ?? item.room_id,
   };
-  if (from.agent===SYSTEM_IDENTITY_ID || source?.system_event) {
+  if (payload?.kind==='report' && payload.returnIdentityId) {
+    from={agent:payload.returnIdentityId,place:item.return_room_id ?? item.room_id};
+  } else if (from.agent===SYSTEM_IDENTITY_ID || source?.system_event) {
     if (item.report_address) from={agent:item.report_address.identityId,place:item.report_address.roomId};
     else if (payload?.returnIdentityId) from={agent:payload.returnIdentityId,place:item.return_room_id ?? item.room_id};
   }

@@ -112,10 +112,10 @@ it('Reproduction BRIEF-APPROVAL-TURN: a revision without a citation cites the hu
     revision: 2,
     approval: { sourceMessageId: doIt.messageId, approvedBy: HUMAN },
   });
-  // An empty copied citation reads the same as none.
+  // The approved revision transferred command to Ruby. An empty citation is a direct commander revision.
   expect(await revise(doIt.command, cornerId, 2, '')).toMatchObject({
     revision: 3,
-    approval: { sourceMessageId: doIt.messageId, approvedBy: HUMAN },
+    approval: { sourceMessageId: '', approvedBy: RUBY },
   });
   console.info(
     'Demonstrated BRIEF-APPROVAL-TURN: the current human delivery approves an uncited revision',

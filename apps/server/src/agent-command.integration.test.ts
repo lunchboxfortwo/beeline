@@ -40,7 +40,7 @@ it.each(['ordinary', 'tagged', 'threaded', 'private', 'private-agent', 'corner',
     const posted=await result(command,text);
     expect((await result(command,text)).id).toBe(posted.id);
     expect((await commands(A,roomId)).map(c=>c.id)).not.toContain(command.id);
-    if(path==='private-agent') expect((await commands(B)).some(c=>c.source.body.includes(text))).toBe(true);
+    if(path==='private-agent') expect((await commands(B)).some(c=>c.source.body.includes(text))).toBe(false);
     else expect((await rootFixture.db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND text=$2',[A,text])).rows).toEqual([{n:1}]);
   });
 
@@ -565,7 +565,7 @@ const scope1 = fixtureScope1(room);
     const sent=await sendMessage(rootFixture.db,{route:{from:{agent:A,place:scope1.room},to:{agent:B,place:scope1.room}},text:'Inspect',parent});
     await claim(first);await result(first,'Delegated');
     const next=(await commands(B,scope1.room)).find(item=>item.id===sent.id)!;
-    await claim(next);await result(next,'Deliberate reply');
+    await claim(next);await rootFixture.daemon.execute('reply',{roomId:next.roomId,id:next.id,text:'Deliberate reply'},B);
     expect((await commands(A,scope1.room)).map(item=>item.source.body)).toEqual(['Deliberate reply']);
     expect(await commands(B,scope1.room)).toEqual([]);
   });
@@ -730,13 +730,13 @@ it('rolls final storage back if creating the next command fails', async () => {
   await rootFixture.db.query(`CREATE FUNCTION refuse_command() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected dispatch failure'; END $$;
  CREATE TRIGGER refuse_command BEFORE INSERT ON agent_commands FOR EACH ROW EXECUTE FUNCTION refuse_command();`);
   try {
-    await expect(result(c!, '@goosy Atomic')).rejects.toThrow('injected');
+    await expect(rootFixture.daemon.execute('reply',{roomId:R,id:c!.id,text:'@goosy Atomic'},A)).rejects.toThrow('injected');
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text='Atomic'`)).rowCount).toBe(0);
   } finally {
     await rootFixture.db.query(
       `DROP TRIGGER refuse_command ON agent_commands; DROP FUNCTION refuse_command();`,
     );
   }
-  await result(c!, '@goosy Atomic');
+  await rootFixture.daemon.execute('reply',{roomId:R,id:c!.id,text:'@goosy Atomic'},A);
   expect(await commands(B)).toHaveLength(1);
 });

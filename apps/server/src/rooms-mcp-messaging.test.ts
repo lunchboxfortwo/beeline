@@ -57,7 +57,7 @@ describe('connected agent message protocol',()=>{
     expect(sent.id).toMatch(/^[0-9a-f]{64}$/);
     expect((await scope.db.query('SELECT agent_id,room_id,message FROM agent_commands WHERE id=$1',[sent.id])).rows)
       .toMatchObject([{agent_id:AGENT,room_id:ROOM,message:{route:{from:{agent:member,place:ROOM},to:{agent:AGENT,place:ROOM}},body:'Check the widget'}}]);
-    await scope.daemon.execute('reply',{id:sent.id,text:'Checked'},AGENT);
+    await scope.daemon.execute('reply',{roomId:ROOM,id:sent.id,text:'Checked'},AGENT);
     const page=await tools.ok(client,'list_mentions',{});
     expect(page.wakes).toEqual([expect.objectContaining({address:ROOM,from:{agent:AGENT,place:ROOM},text:'Checked'})]);
     // The session helper rejects a wake frame without a string reason.
@@ -124,10 +124,13 @@ describe('connected agent message protocol',()=>{
   it('never selects another message when the supplied reply id is unavailable',async()=>{
     const {client,member}=await scope.connected();
     const task=await humanTask(member);
-    expect((await tools.call(client,'reply',{id:'0'.repeat(64),text:'Missing'})).error).toBe(true);
+    const missing=await tools.ok(client,'reply',{id:'0'.repeat(64),text:'Missing'});
+    expect((await scope.db.query('SELECT room_id FROM messages WHERE id=$1',[missing.id])).rows).toEqual([{room_id:ROOM}]);
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
     const other=await sendMessage(scope.db,{route:{from:{agent:USER,place:ROOM},to:{agent:AGENT,place:ROOM}},text:'For another member'});
-    expect((await tools.call(client,'reply',{id:other.id,text:'Not mine'})).error).toBe(true);
+    const local=await tools.ok(client,'reply',{id:other.id,text:'Not mine'});
+    expect((await scope.db.query('SELECT room_id FROM messages WHERE id=$1',[local.id])).rows).toEqual([{room_id:ROOM}]);
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[other.id])).rows).toEqual([{state:'pending'}]);
   });
   it('validates reply arguments before resolving the queued message or membership',async()=>{
     const {client,member}=await scope.connected();
@@ -154,8 +157,9 @@ describe('connected agent message protocol',()=>{
     const {client,member}=await scope.connected();
     const task=await humanTask(member);
     await scope.db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1',[PUBLIC_CORNER,AGENT]);
+    await scope.db.query('DELETE FROM agent_commands WHERE room_id=$1',[PUBLIC_CORNER]);
     const work=await tools.ok(client,'message',{address:ROOM,to:{agent:'implementer',place:PUBLIC_CORNER},text:'Check the widget'});
-    await scope.daemon.execute('reply',{id:work.id,text:'Checked'},AGENT);
+    await scope.daemon.execute('reply',{roomId:PUBLIC_CORNER,id:work.id,text:'Checked'},AGENT);
     const wake=(await tools.ok(client,'list_mentions',{})).wakes.find((item:{text:string})=>item.text==='Checked');
     expect(wake).toMatchObject({address:ROOM,from:{agent:AGENT,place:PUBLIC_CORNER}});
     const final=await tools.ok(client,'reply',{id:task.id,text:'The widget is checked'});

@@ -164,12 +164,10 @@ const scope14 = fixtureScope14();
 });
 
 
-it('releases delegated turns on every surface so reports can wake a new turn', () => {
+it('only chats teach the cross-place message workflow', () => {
   for (const context of Object.values(SESSION_VARIANTS)) {
     const text = assembleSessionPrompt(context).systemPrompt;
-    expect(text).toContain('After messaging another agent, end the turn');
-    expect(text).toContain('its reply wakes a new turn');
-    expect(text).toContain('do not sleep or poll');
+    expect(text.includes('After messaging another agent, end the turn')).toBe(!context.surface.includes('corner'));
   }
 });
 mergedDescribe23("owed-tag-prompt.test.ts", () => {m23_describe('owed tag delivery', () => {

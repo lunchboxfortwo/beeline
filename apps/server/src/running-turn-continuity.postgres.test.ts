@@ -58,21 +58,20 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const assignment = (await readAgentCommands(db, worker, opened.cornerId)).commands[0]!;
     await startQueuedTurn(db, opened.cornerId, worker, assignment.id);
     await daemon.execute('report',{ roomId:opened.cornerId, requestId:assignment.turnRequestId, status:'blocked', text:'blocked: publish is pending' },worker);
-    // The blocked report wakes its commander inside the corner it concerns.
-    const thread = opened.cornerId;
-    const report = (await readAgentCommands(db, agent, thread)).commands.find(command => command.reason === 'report')!;
-    await startQueuedTurn(db, thread, agent, report.id);
-    await phone.execute('sendRoomMessage', { roomId:thread,text:'Publish is unblocked now' },human);
-    await phone.execute('sendRoomMessage', { roomId:thread,text:'@ruby The blocker is resolved; check the next step' },human);
+    // Continue the report in the session that opened the room.
+    const report = (await readAgentCommands(db, agent, room)).commands.find(command => command.reason === 'report')!;
+    await startQueuedTurn(db, room, agent, report.id);
+    await phone.execute('sendRoomMessage', { roomId:room,text:'Publish is unblocked now' },human);
+    await phone.execute('sendRoomMessage', { roomId:room,text:'@ruby The blocker is resolved; check the next step' },human);
     expect((await db.query("SELECT state FROM agent_commands WHERE id=$1",
       [report.id])).rows).toEqual([{state:'pending'}]);
-    const queued = (await readAgentCommands(db, agent, thread)).commands;
+    const queued = (await readAgentCommands(db, agent, room)).commands;
     const next = queued.find(command => command.source.body.includes('The blocker is resolved'))!;
     expect(next).toBeDefined();
-    await startQueuedTurn(db, thread, agent, report.id);
-    await finish(thread,report.turnRequestId,'The blocker handling is complete.');
+    await startQueuedTurn(db, room, agent, report.id);
+    await finish(room,report.turnRequestId,'The blocker handling is complete.');
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows).toEqual([{ state:'pending' }]);
-    await startQueuedTurn(db, thread, agent, next.id);
+    await startQueuedTurn(db, room, agent, next.id);
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[next.id])).rows)
       .toEqual([{ state:'pending' }]);
   });

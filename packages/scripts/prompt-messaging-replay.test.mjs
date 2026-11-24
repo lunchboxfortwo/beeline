@@ -53,7 +53,9 @@ test('messaging fixture envelopes use the declared recipient, sender and System 
     if(c.turn.task.fromName==='System') assert.match(body,/^From: System in #Widget$/m,c.id);
     const id=body.match(/^id: (.+)$/m)?.[1];
     const needed=body.match(/^Reply needed: (true|false)$/m)?.[1];
-    assert.ok(id && needed,c.id);
+    assert.ok(id,c.id);
+    if(c.place.includes('corner')) assert.equal(needed,undefined,c.id);
+    else assert.ok(needed,c.id);
     assert.equal(body.includes(`Reply(id: ${id}, text: ...) with your reply`),needed==='true',c.id);
   }
 });

@@ -51,7 +51,6 @@ export async function noteReviewDispatchFailure(
     systemText(systemMessage('corner-lifecycle.blocked', reason)),
     undefined,
     createHash('sha256').update(`review-dispatch:${cornerId}:${headSha}:${reason}`).digest('hex'),
-    { wakeInCorner: true },
   );
 }
 

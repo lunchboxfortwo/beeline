@@ -35,7 +35,7 @@ describe('C3: thread notices reach the commander without a worker turn in the ch
     expect((await notices()).map(row => [row.agent_id, row.room_id])).toEqual([[A, CHAT]]);
     expect((await db.query("SELECT agent_id,room_id FROM agent_commands WHERE reason='corner_review_needed'")).rows)
       .toEqual([{ agent_id: B, room_id: THREAD }]);
-    for (const notice of await notices()) await daemon.execute('reply', { id: notice.id, text: 'Resume widget work' }, A);
+    for (const notice of await notices()) await daemon.execute('reply', { roomId:notice.room_id, id: notice.id, text: 'Resume widget work' }, A);
     expect(await outsideThread()).toEqual([]);
   });
 
@@ -55,7 +55,7 @@ describe('C3: thread notices reach the commander without a worker turn in the ch
       privatePayload: { kind: 'lifecycle', authorId: B, fromRoomId: THREAD, text: modelText('Review head') } }))!;
     await sendMessage(db, { route: { from: { agent: C, place: THREAD }, to: { agent: 'implementer', place: THREAD } },
       text: 'FAIL: add the missing test', parent: (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [review.id])).rows[0] });
-    await daemon.execute('reply', { id: review.id, text: 'Findings sent' }, C);
+    await daemon.execute('reply', { roomId:THREAD, id: review.id, text: 'Findings sent' }, C);
     expect(await outsideThread()).toEqual([]);
   });
 });

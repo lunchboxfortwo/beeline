@@ -28,7 +28,7 @@
     "task": {
       "fromName": "Ruby",
       "commandReason": "message",
-      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: true\ntext: You are not the recorded implementer. The person explicitly asked you to take over and push the prepared widget commit. The only remaining step is git push origin feature/thread-case.\nReply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply"
+      "body": "From: Ruby in #Milo\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ntext: You are not the recorded implementer. The person explicitly asked you to take over and push the prepared widget commit. The only remaining step is git push origin feature/thread-case."
     },
     "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
   },

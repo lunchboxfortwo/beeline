@@ -14,11 +14,11 @@ describe('C1: a thread agent replies at the place its commander sent from', () =
     // Later conversation in the thread never moves the return place.
     await personSays(THREAD, '@ruby Conversation only');
     await settle();
-    const result = await daemon.execute('reply', { id: sent.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
-    const retry = await daemon.execute('reply', { id: sent.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
+    const result = await daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
+    const retry = await daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
     expect(retry.id).toBe(result.id);
     expect((await inbox()).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)])).toEqual([
-      [A, PLACES[place], { agent: worker, place: THREAD }, withAsk],
+      [role==='reviewer'?ROLES.implementer:A, role==='reviewer'?THREAD:PLACES[place], { agent: worker, place: THREAD }, withAsk],
     ]);
   });
 
@@ -29,12 +29,10 @@ describe('C1: a thread agent replies at the place its commander sent from', () =
     const task = (await inbox())[0]!;
     expect([task.agent_id, task.room_id]).toEqual([worker, THREAD]);
     const command = (await db.query<{ id: string }>("SELECT id FROM agent_commands WHERE state='pending'")).rows[0]!;
-    await daemon.execute('reply', { id: command.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
-    await daemon.execute('reply', { id: command.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
-    expect(await personDeliveries()).toEqual([
-      { room_id: THREAD, author_id: worker, text: 'Done' },
-    ]);
-    expect((await db.query('SELECT room_id FROM room_choices')).rows).toEqual(withAsk ? [{ room_id: THREAD }] : []);
-    expect(await inbox()).toEqual([]);
+    await daemon.execute('reply', { roomId:THREAD, id: command.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
+    await daemon.execute('reply', { roomId:THREAD, id: command.id, text: 'Done', ...(withAsk ? {ask} : {}) }, worker);
+    expect(await personDeliveries()).toEqual([{room_id:THREAD,author_id:worker,text:'Done'}]);
+    expect((await db.query('SELECT room_id FROM room_choices')).rows).toEqual(withAsk && role==='implementer' ? [{ room_id: THREAD }] : []);
+    expect((await inbox()).map(row=>row.agent_id)).toEqual(role==='reviewer'?[ROLES.implementer]:[]);
   });
 });

@@ -22,16 +22,20 @@
     "task": {
       "fromName": "System",
       "commandReason": "corner_check",
-      "body": "From: System in #Widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nReply needed: false\ntext: System: all checks on the assigned widget head failed. Your thread commander is Ruby in Milo; System is not your commander. Build access is unavailable. Tell the commander through the delivered message id."
+      "body": "From: System in #Widget\nid: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ntext: System: all checks on the assigned widget head failed. Your thread commander is Ruby in Milo; System is not your commander. Build access is unavailable. Tell the commander through the delivered message id."
     },
-    "members": "Members: ruby (Ruby, agent), jellybean (Jellybean, agent), sol (Sol, agent), owner (Owner, person). You are Jellybean."
+    "members": "Members: owner (Owner, person). You are Jellybean."
   },
   "pass": {
     "all": [
       {
         "call": "reply",
         "args": {
-          "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "text": {
+            "matches": "^blocked:",
+            "flags": "i"
+          }
         }
       },
       {
