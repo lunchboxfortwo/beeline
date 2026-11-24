@@ -345,8 +345,13 @@ const fixture = monolithFixture();
       handle: 'owner',
       pushLevel: 'attention',
       speakingSpeed: 1.15,
+      timeZone: null,
       providers: [{ provider: 'github', login: 'owner', reconnect: true }],
     });
+
+    await expect((await operation('updateIdentityTimeZone', { timeZone: 'Asia/Tokyo' })).json())
+      .resolves.toMatchObject({ personId: HUMAN, timeZone: 'Asia/Tokyo' });
+    await expect((await operation('getManagedIdentity')).json()).resolves.toMatchObject({ timeZone: 'Asia/Tokyo' });
 
     for (const speakingSpeed of [1.3, 1.5, 1.15]) {
       const saved = await operation('updateIdentitySpeakingSpeed', { speakingSpeed });

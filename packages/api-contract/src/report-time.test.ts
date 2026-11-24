@@ -28,6 +28,32 @@ describe('reader report times', () => {
       /Z\n```\nNov/,
     );
   });
+  it('preserves nested and escaped parentheses in relative Markdown targets', () => {
+    for (const target of [
+      `../reports/(archive)/${token}`,
+      `../(a(b)c)/${token}`,
+      `../archive\\)/${token}`,
+    ]) {
+      const link = `[run](${target})`;
+      expect(localizeReportTimes(link + ' at ' + token, 'Asia/Tokyo')).toBe(
+        link + ' at ' + localizeReportTimes(token, 'Asia/Tokyo'),
+      );
+    }
+  });
+  it.each(['~~~', '```'])('closes a %s fence only with enough matching markers', (opening) => {
+    const literal = [
+      opening,
+      token,
+      opening.slice(1),
+      token,
+      opening === '~~~' ? '````' : '~~~~',
+      token,
+      opening + opening,
+    ].join('\n');
+    expect(localizeReportTimes(literal + '\n' + token, 'Asia/Tokyo')).toBe(
+      literal + '\n' + localizeReportTimes(token, 'Asia/Tokyo'),
+    );
+  });
   it('requires a recognized named zone and falls back for obsolete preferences', () => {
     for (const value of [false, '+04:00', 'Bogus/Nowhere', ''])
       expect(namedTimeZone(value)).toBeUndefined();

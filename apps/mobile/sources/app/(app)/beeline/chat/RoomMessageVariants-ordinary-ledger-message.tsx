@@ -308,7 +308,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
       testID={`reply-reference-${message.id}`}
     >
       ↳ {referencedTarget?.authorName ?? 'ORIGINAL MESSAGE'} ·{' '}
-      {referencedTarget ? localizeReportTimes(referencedTarget.preview, zone).slice(0, 280) : 'Message not loaded'}
+      {referencedTarget ? localizeReportTimes(referencedTarget.preview, zone) : 'Message not loaded'}
     </TranscriptReference>
   ) : null;
   // An ask keeps its stored card shape; only the transcript reads it as prose.

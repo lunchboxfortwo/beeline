@@ -19,8 +19,29 @@ export function deviceTimeZone(): string {
 const instant = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g;
 // Consume literal Markdown before looking for instants, including an open span
 // or fence in a streaming message.
-const literal =
-  /^(?: {0,3}>| {4}|\t)[^\n]*|^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[\t ]*$|(?![\s\S]))|(`+)[^\n]*?(?:\2(?!`)|$)|^ {0,3}\[[^\]\n]+\]:[^\n]*|\[[^\]\n]*\](?:\([^\n]*?\)|\[[^\]\n]*\])|"[^"\n]*"|“[^”\n]*”|(?:[a-z][\w+.-]*:\/\/|www\.)[^\s<>]+/gim;
+const literalStart =
+  /^(?: {0,3}>| {4}|\t)[^\n]*|^ {0,3}(?<fence>`{3,}|~{3,})[^\n]*(?:\n|$)|(?<ticks>`+)[^\n]*?(?:\k<ticks>(?!`)|$)|^ {0,3}\[[^\]\n]+\]:[^\n]*|\[[^\]\n]*\](?:(?<destination>\()|\[[^\]\n]*\])|"[^"\n]*"|“[^”\n]*”|(?:[a-z][\w+.-]*:\/\/|www\.)[^\s<>]+/gim;
+
+function fenceEnd(text: string, start: number, opening: string): number {
+  const closer = /^ {0,3}(`+|~+)[ \t]*\r?$/gm;
+  closer.lastIndex = start;
+  let match;
+  while ((match = closer.exec(text))) {
+    if (match[1]!.startsWith(opening)) return closer.lastIndex;
+  }
+  return text.length;
+}
+
+function destinationEnd(text: string, start: number): number {
+  let depth = 1;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '\n') return i;
+    if (text[i] === '\\') i++;
+    else if (text[i] === '(') depth++;
+    else if (text[i] === ')' && --depth === 0) return i + 1;
+  }
+  return text.length;
+}
 
 export function localizeReportTimes(
   text: string,
@@ -58,9 +79,14 @@ export function localizeReportTimes(
   }
   let result = '';
   let start = 0;
-  for (const match of text.matchAll(literal)) {
-    result += prose(text.slice(start, match.index)) + match[0];
-    start = match.index! + match[0].length;
+  const literals = new RegExp(literalStart);
+  let match;
+  while ((match = literals.exec(text))) {
+    let end = literals.lastIndex;
+    if (match.groups?.fence) end = fenceEnd(text, end, match.groups.fence);
+    else if (match.groups?.destination) end = destinationEnd(text, end);
+    result += prose(text.slice(start, match.index)) + text.slice(match.index, end);
+    start = literals.lastIndex = end;
   }
   return result + prose(text.slice(start));
 }
