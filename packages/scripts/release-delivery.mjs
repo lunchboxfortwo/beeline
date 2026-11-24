@@ -42,10 +42,10 @@ export function liveDelivery(needs, { triggerEpoch, finishedEpoch }) {
   };
 }
 
-export function recordDelivery(state, needs) {
+export function recordDelivery(state, needs, clock) {
   const value = needs.delivery_result?.outputs?.report;
-  if (!value) throw new Error('missing live delivery report');
-  const live = decodeReleaseOutput(value, 'live delivery');
+  if (!value && !clock) throw new Error('missing live delivery report');
+  const live = value ? decodeReleaseOutput(value, 'live delivery') : liveDelivery(needs, clock);
   if (!['success', 'failure'].includes(live.state)) throw new Error('invalid live delivery report');
   state.delivery.live = live;
   state.delivery.background = Object.fromEntries(
@@ -64,6 +64,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Live delivery: ${report.state}\n\nDispatch to server (both Machines), phone OTA and website: **${report.elapsedSeconds}s** (target <${report.targetSeconds}s).\n\nNative/helper completion is recorded separately; every selected component must still pass before the release is finalized.\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
     if (report.state !== 'success') process.exitCode = 1;
   } else if (command === 'record') {
-    writeFileSync(path, `${JSON.stringify(recordDelivery(JSON.parse(readFileSync(path, 'utf8')), needs), null, 2)}\n`);
+    const clock = process.env.BEELINE_LOCAL_RELEASE === 'true'
+      ? { triggerEpoch: process.env.TRIGGER_EPOCH, finishedEpoch: Math.floor(Date.now() / 1000) } : undefined;
+    writeFileSync(path, `${JSON.stringify(recordDelivery(JSON.parse(readFileSync(path, 'utf8')), needs, clock), null, 2)}\n`);
   } else throw new Error(`unknown delivery command: ${command}`);
 }

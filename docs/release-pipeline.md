@@ -1,8 +1,8 @@
 # Production release pipeline
 
 `Unified production release` owns the shared release legs. On squire,
-`npm run release` runs them locally for current `origin/main`: first `next`,
-then `latest` at the same successful commit. The hosted workflow remains
+`npm run release` delivers current `origin/main` to `next`. A separate owner
+command promotes the published `next` identity to `latest`. The hosted workflow remains
 manually dispatched; merging to main starts no workflow.
 
 ## GitLab npm publishing during an Actions outage
@@ -30,85 +30,48 @@ It builds, packs and locally installs/smokes the exact tarball before publishing
 an already published version is skipped. It does not release native helpers
 or update the unified release record.
 
-## One-command release on squire
+## Release on squire
 
 ```sh
 npm run release
+npm run release -- --promote --dispatched-by '<owner command attribution JSON>'
 ```
 
-There are no required inputs. The command creates a fresh private release copy,
-fetches `origin/main` and tags, and sets both its detached HEAD and local `main`
-to that immutable commit. It holds one per-user lock through next and latest,
-removing an old lock only when its recorded owner PID has exited. It leaves an
-active release alone. Each identity read fetches tags again, including the rc
-published between the two legs. Version allocation reads release records and
-all versioned OTA branch names, so an orphaned OTA rc cannot be reused.
+The default command pins current `origin/main` in a private checkout. Promotion
+pins the SHA and final version from the successfully delivered `next` record,
+even if main has advanced. If promotion fails, repeat the authorized promotion
+against that published next. Each command takes the existing per-user lock.
+On next, a draft for the same SHA keeps its release version. Delivery legs
+check their current channel and artifact identity before reusing shipped work.
 
-When the command finishes, whether it succeeded or failed, it attempts to remove its own
-`/tmp/beeline-release-*` working directory, including logs and the private
-timing files; each published release keeps `release.json`,
-`release-checks.json`, `records.json` and `release-checks-timing.json`. It also removes the Docker images releases built
-(`registry.fly.io/beeline-server` and `registry.fly.io/beeline-free-agents` tags,
-and untagged images labelled with a release SHA) except this release's and the
-newest previous release's, identified by image creation time. It then prunes
-dangling Docker images regardless of their release labels, including unlabelled
-intermediate build outputs; the current/previous retention applies to the
-labelled-image removal step, not this prune. Images still in use stay.
-Cleanup is best effort and never changes the release outcome; there is no timer or cron.
+Next publishes the OTA beta. Add `--store-track production` to an authorized
+promotion to submit native binaries when a pinned runtime differs from its
+store or the store cannot be read. The next command defaults attribution to
+the invoking user and the local `squire-release-<UTC timestamp>` command and
+audit IDs. Promotion requires explicit attribution.
 
-`npm run release` never uploads store beta builds: next is the OTA beta only. Latest submits production store builds when a pinned native runtime is not the newest one live in its store (or a store cannot be read); `--no-store` skips them.
-Full Checks start alongside the next release's helper and desktop builds.
-The existing release validation join waits for their exact-SHA verdict before
-any helper publication, server migration/rollout, OTA/channel promotion,
-website deployment, store upload or finalization. Latest reuses that same
-successful verdict. Checks stay on squire; Mac helper builds use the GitHub
-workflow described under [local recovery legs](#local-recovery-legs-during-an-actions-outage).
-Existing delivery proofs,
-canary, rollback and finalization stay with their release legs.
+The command prints redacted job outcomes and timings before cleaning up the
+private checkout and logs. It keeps the current and newest previous release's
+labelled Docker images, then prunes unused dangling images. Cleanup is best
+effort.
 
-The existing dispatched-by fields default to the invoking user (or `firstmate`),
-place `squire`, and local command/audit IDs `squire-release-<UTC timestamp>`.
-`--dispatched-by '<JSON>'` is an optional attribution override. These are local
-execution IDs; the local command does not request a server receipt.
+## Release checks on squire
 
-## Full checks on squire
+The three-job quick profile prepares and verifies one exact-SHA build, then
+runs TYPECHECK, DEAD CODE and the committed network codec check. Helper builds
+can overlap Checks. The existing validation join holds server, OTA and other
+publication jobs until the exact-SHA verdict passes. The published record
+identifies the profile and links `release-checks.json`, `records.json` and
+`release-checks-timing.json`. Latest links the evidence from the published
+next. `delivery.live` records dispatch-to-live time from the component
+completion outputs, with the quick-check and delivery intervals and the live
+legs' per-step timings.
 
-Every release uses full Checks by default with `npm run release`. The
-checks-only `release-local --leg release_checks` path runs against the same
-immutable SHA, under the release lock, concurrently with pure build jobs.
-A failed suite blocks every promotion and release completion; the command
-waits for both check and build siblings before releasing its lock or pruning
-private sources. There is no additional nightly check dispatch in this local
-workflow.
-Both published `release.json` records include `checks.sourceSha`, `checks.result`,
-`checks.wallSeconds`, `checks.completedAt` and `checks.resultsPath`. A release
-with full checks uploads `release-checks.json` as a release asset beside its
-`release.json`, and `checks.resultsPath` is that asset's download URL. It also
-uploads the per-job check records (`records.json`, with each job's attempts,
-times and per-step seconds) and `release-checks-timing.json`; `checks.recordsPath`
-and `checks.timingPath` name them. Either file is withheld, with a log line, when
-it contains a release secret or a credential-shaped value, and a failed upload of
-either only logs a warning.
-`delivery.live` splits its `elapsedSeconds` into `checksSeconds` (waiting for
-full checks within that release leg) and `deploySeconds` (the remaining time
-to the last live component). When the checks verdict predates the leg, as on
-latest promotion, `checksSeconds` is zero. `delivery.live.profile` lists the
-per-step seconds of the server and OTA legs, including the wait for the checks
-verdict. `release-checks-timing.json` also records the suite wall-clock, host
-load and per-job placement.
-For an owner-authorized urgent fix only, pass
-`--skip-full-checks "<owner message id>"`. This explicit exception records
-`checks.result: skipped` and `checks.ownerMessageId` in both release records;
-it never becomes the default. A missing or blank owner message is rejected.
-Before the checks, `npm run prompt-audit` writes the rendered agent prompts and
-advisory findings to `prompt-audit/`; it never fails the run.
-
-The checks-only leg runs the complete Checks workflow with `suite: all` and
-`pinned_sha`, leaving `release_sha` empty so the mobile, corpus and latency suites
-are included. It uses all four existing queue slots (at most 48 GiB), retaining the
-private CI jails, shared build and per-job logs. It never dispatches Actions or
-reserves a release identity. The obsolete agent schedule for dispatching
-`nightly-checks.yml` is removed independently of the nightly release schedule.
+For an owner-authorized urgent fix, `--skip-full-checks "<owner message id>"`
+records the exception in `release.json`. PR Checks, hosted release coverage,
+nightly Checks, and the calibrated latency rig run their existing profiles.
+The `release-local --execute --leg release_checks` command runs full Checks on
+demand. `npm run prompt-audit` remains available on demand.
 
 ## Local recovery legs during an Actions outage
 
@@ -151,16 +114,10 @@ Docker build/run containers share their worker's existing parent slice, includin
 Fly local image builds; no daemon, listener, shard service or slice configuration changes.
 Metro uses two workers during local release exports.
 
-The server and OTA legs start alongside the checks. Before the verdict they only
-install, build, push release-labelled images no Machine uses yet and read
-production state (`preVerdictSteps` in `release-local-policy.mjs`). Their worker
-then waits for the verdict before the first step that may change production:
-migrations, the canary rollout, free-agent refresh and OTA publication. That wait
-does not count against the job's timeout.
-All real dependency joins remain: checks precede every production change, helper publication
-waits for both helper builds, proof-selected OTA waits for its proof, and release
-finalization waits for every selected leg.
-The helper's hosted capacity-only wait for `delivery_result` is removed locally.
+The server and OTA legs start after release validation. Helper publication waits
+for both helper builds, proof-selected OTA waits for its proof, and Android
+waits for the live delivery legs before store work. Finalization reads the
+existing completion outputs and waits for every selected leg.
 Canary, migration, rollback, helper download/update proofs, exact-SHA checks and
 dispatch attribution still run through the existing owners.
 Completed outputs, artifacts and failure logs keep the existing local handoff.
@@ -323,7 +280,8 @@ missing history fails closed locally. Keep tags current with a normal full
 | Authority | Used by |
 | --- | --- |
 | `FLY_FREE_AGENT_IMAGE_TOKEN`, `MIGRATION_DATABASE_URL` | Next server image publication and migration |
-| `SERVER_CANARY_REVIEW_SECRET` or legacy `SERVER_CANARY_PHONE_TOKEN`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary |
+| `SERVER_CANARY_REVIEW_SECRET`, `SERVER_CANARY_ROOM_ID` | Next authenticated server canary on squire |
+| `BEELINE_FREE_AGENT_MODEL_KEY`, optional `BEELINE_FREE_AGENT_MODEL_UPSTREAM` and `BEELINE_FREE_AGENT_MODEL` | Scoped provider credential and production model route for the isolated candidate reply proof |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Required only when the release plan selects a native Android store build; optional for OTA store-runtime reads |
 | `EXPO_ASC_KEY_ID`, `EXPO_ASC_ISSUER_ID`, `EXPO_ASC_API_KEY_P8` | Live App Store runtime reads for OTA |
 | `SENTRY_AUTH_TOKEN` | Optional OTA/web source maps; web exports strip private maps even when the token is absent |
@@ -374,7 +332,7 @@ checksum-verified Node 22.23.2 and installs Rust 1.95.0 into the task's remote
 temporary directory, without changing shared host tools or toolchain defaults.
 `--dry-run --leg mac-tools` proves that setup alone. The runner never
 shallow-fetches shared history. It checks for active hosted releases;
-`release.mjs` owns the local lock across both channels and clears dead owners.
+`release.mjs` holds the local lock for each invocation and clears dead owners.
 
 When available, fnm selects an installed Node version using a compatible
 `package.json` (`volta.node` or `engines.node`) preference. Older repository pins cannot lower the
@@ -854,16 +812,12 @@ two secrets must be configured. The self-protection pool snapshot (`size`, `inUs
 sample; missing or malformed metrics and any nonzero waiter count fail the
 canary before the second Machine can update.
 
-The server job has a fifteen-minute timeout. Free starter image publishing runs
-in its own `Free starter agent image` workflow after a successful release that
-shipped the server. It is best effort and never holds the release open.
-
-After the free-agent refresh, the server leg's last step tags the review
-identity's own free Beebee (`@beebee_26`, Play Review's team `#general`, never an
-owner Workspace) with `SERVER_CANARY_REVIEW_SECRET` and waits on the phone live
-socket for its reply. Its failed-turn line or a closed socket fails the release;
-there is no resend, poll or timer beyond the job timeout. A rerun repeats the
-proof. Coverage: `packages/scripts/unified-release.test.mjs`.
+Before migrations, squire runs the exact candidate server and bundled
+free-agent image against a disposable database with a fresh review Workspace.
+It uses a scoped real provider credential. A successful proof requires the
+committed reply for the tagged command and its provider receipt. Hosted
+releases continue to tag the production review Workspace's `@beebee_26` after
+refresh. Both paths use the same phone live socket assertion.
 
 Only a clean window permits the second Machine update. Each Machine must then
 answer `/readyz` and serve this exact `/version` before the job succeeds; no

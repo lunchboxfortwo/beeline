@@ -3,17 +3,17 @@
 // only plans, builds proofs or executes the checks-only leg. See docs/release-pipeline.md for the outage policy.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalActions } from './release-local-actions.mjs';
-import { Processes, privateWrite, appendSummary } from './release-local-process.mjs';
+import { Processes, loadEnvironment, privateWrite } from './release-local-process.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { downloadPagesChannel } from './pages-channel.mjs';
 import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
-import { LocalDelivery, writeChecksVerdict } from './release-local-delivery.mjs';
-import { droppedChecks, localWorkflow, preVerdictSteps, quickChecks, releasePlan } from './release-local-policy.mjs';
+import { LocalDelivery } from './release-local-delivery.mjs';
+import { localChecks, localWorkflow, quickChecks, releasePlan } from './release-local-policy.mjs';
 import { DesktopBuild, WINDOWS_DESKTOP, carryWindowsInstallers, desktopDryRun, desktopWorkflow } from './release-local-desktop.mjs';
 import { carryHelperPlatform } from './helper-carry.mjs';
 import { macSigningTools } from './release-local-desktop-worker.mjs';
@@ -49,28 +49,6 @@ export function parseArguments(argv) {
   return args;
 }
 
-export function loadEnvironment(file, repository = root) {
-  const real = realpathSync(file);
-  if (!outside(repository, real)) throw new Error('Release secrets must be outside the repository');
-  const info = statSync(real);
-  if (!info.isFile() || (info.mode & 0o777) !== 0o600 || info.uid !== process.getuid()) throw new Error('Release env file must be owned by the operator with mode 600');
-  // Parse data, never source shell code or expand shell variables/substitutions.
-  const result = {};
-  for (const line of readFileSync(real, 'utf8').split(/\r?\n/)) {
-    if (!line.trim() || line.trimStart().startsWith('#')) continue;
-    const match = line.match(/^(?:export )?([A-Z][A-Z0-9_]*)=(.*)$/);
-    if (!match) throw new Error('Invalid release env record; use KEY=value, one value per line');
-    let value = match[2];
-    if (value.startsWith('"')) {
-      try { value = JSON.parse(value); } catch { throw new Error('Invalid quoted release env value'); }
-      if (typeof value !== 'string') throw new Error('Release env values must be strings');
-    }
-    else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
-    result[match[1]] = value;
-  }
-  return result;
-}
-
 function outside(parent, path) { const rel = relative(parent, path); return rel === '..' || rel.startsWith('../'); }
 
 export function attribution(text) {
@@ -83,12 +61,16 @@ export function attribution(text) {
 
 export function missingReleaseCredentials(args, secrets, plan = {}) {
   const required = ['EXPO_TOKEN', 'EXPO_ASC_KEY_ID', 'EXPO_ASC_ISSUER_ID', 'EXPO_ASC_API_KEY_P8'];
-  if (args.channel === 'latest') required.push('CLOUDFLARE_PAGES_TOKEN', 'CLOUDFLARE_ACCOUNT_ID');
-  if (args.channel === 'next') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL', 'SERVER_CANARY_ROOM_ID');
+  if (plan.run_website === 'true') required.push('CLOUDFLARE_PAGES_TOKEN');
+  if (plan.run_helper === 'true' || (plan.channel === 'latest' && plan.no_op !== 'true'))
+    required.push('CLOUDFLARE_R2_TOKEN', 'CLOUDFLARE_ACCOUNT_ID');
+  if (plan.run_desktop === 'true' && args.desktopMode === 'build')
+    required.push('TAURI_UPDATER_PUBLIC_KEY', 'TAURI_UPDATER_PRIVATE_KEY');
+  if (plan.run_server === 'true') required.push('FLY_API_TOKEN', 'FLY_FREE_AGENT_IMAGE_TOKEN', 'MIGRATION_DATABASE_URL',
+    'SERVER_CANARY_ROOM_ID', 'SERVER_CANARY_REVIEW_SECRET', 'BEELINE_FREE_AGENT_MODEL_KEY');
   if (plan.run_mobile_native === 'true' && plan.native_android === 'true') required.push('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
   const missing = required.filter(name => !secrets[name]);
   if (!secrets.GITHUB_TOKEN && !secrets.GH_TOKEN) missing.push('GITHUB_TOKEN or GH_TOKEN');
-  if (args.channel === 'next' && !secrets.SERVER_CANARY_REVIEW_SECRET && !secrets.SERVER_CANARY_PHONE_TOKEN) missing.push('SERVER_CANARY_REVIEW_SECRET or SERVER_CANARY_PHONE_TOKEN');
   if (args.proof && !secrets.BEELINE_REVIEW_SECRET) missing.push('BEELINE_REVIEW_SECRET');
   return missing;
 }
@@ -240,37 +222,38 @@ export function publishableEvidence(text, secrets = []) {
   return !CREDENTIAL.test(text) && !secrets.some(secret => secret.length >= 8 && text.includes(secret));
 }
 
-export function localHooks(directory, processes, { fullChecks = false, checksGate } = {}) {
+export function localHooks(directory, processes, { fullChecks = false } = {}) {
   return {
     workflow: async ({ file, workflow, inputs, inherited, engine }) => {
       file = file.replace(/^\.\//, '');
       if (file === checksWorkflow) {
-        const checks = new LocalChecks(engine);
+        const checks = new LocalChecks(engine, fullChecks);
+        const selected = fullChecks ? workflow : quickChecks(workflow);
+        if (!fullChecks && inputs.release_sha !== inherited.github.sha) throw new Error('Quick checks require the exact release SHA');
         await checks.prepare(inherited);
-        return { workflow: fullChecks ? workflow : quickChecks(workflow), parallel: true, job: (...args) => checks.queue.run(...args), finish: () => checks.finish() };
+        return { workflow: selected, parallel: true, job: (...args) => checks.queue.run(...args), finish: results => {
+          checks.finish();
+          if (fullChecks) return;
+          const resultsPath = join(directory, 'release-checks.json');
+          privateWrite(resultsPath, JSON.stringify(results, null, 2));
+          const timing = JSON.parse(readFileSync(join(directory, 'release-checks-timing.json'), 'utf8'));
+          engine.variables.releaseChecks = { profile: 'quick', sourceSha: inputs.release_sha,
+            result: localChecks.every(id => results[id]?.result === 'success') ? 'success' : 'failure', resultsPath,
+            wallSeconds: timing.wallSeconds, completedAt: timing.completedAt };
+        } };
       }
       if (file === WORKFLOW) {
         const delivery = new LocalDelivery(engine);
         engine.localDelivery = delivery;
         process.once('SIGINT', delivery.cancel); process.once('SIGTERM', delivery.cancel);
-        const authorize = async () => {
-          await checksGate;
-          const checks = engine.variables.releaseChecks;
-          if (checks.sourceSha !== inherited.github.sha || !(checks.result === 'success' || (checks.result === 'skipped' && checks.ownerMessageId)))
-            throw new Error('Full checks do not authorize this release SHA');
-        };
-        return { workflow: localWorkflow(workflow, { ...inputs, parallelChecks: Boolean(checksGate) }), parallel: true, job: async (...args) => {
-          if (checksGate && args[1].github.job === 'release_validation') {
-            await authorize();
-            return { result: 'success', outputs: {} };
-          }
-          if (checksGate && Object.hasOwn(preVerdictSteps, args[1].github.job)) {
-            // Started before the verdict: the worker builds, then waits for this file.
-            const verdictFile = join(engine.directory, 'jobs', args[2].replaceAll('/', '-'), 'checks-verdict.json');
-            authorize().then(() => ({ authorized: true }), error => ({ authorized: false, reason: error.message }))
-              .then(verdict => writeChecksVerdict(verdictFile, verdict))
-              .catch(error => engine.processes.log(`Could not hand the checks verdict to ${args[2]}: ${error.message}`));
-            return delivery.run(...args, { verdictFile });
+        const skipFullChecks = engine.variables.releaseChecks?.ownerMessageId;
+        return { workflow: localWorkflow(workflow, { ...inputs, skipFullChecks }), parallel: true, job: async (...args) => {
+          if (args[1].github.job === 'release_validation') {
+            const checks = engine.variables.releaseChecks;
+            if (inputs.channel !== 'latest' && (checks?.sourceSha !== inherited.github.sha ||
+              !(checks.result === 'success' || (checks.result === 'skipped' && skipFullChecks))))
+              throw new Error('Quick checks do not authorize this release SHA');
+            return engine.job(...args);
           }
           if (args[1].github.job === 'helper_macos' && engine.variables?.macHelperMode === 'build') return githubMacHelper(engine, args[1]);
           return delivery.run(...args);
@@ -321,11 +304,9 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         // omit it, and tag-based outage discovery must see it before latest.
         await processes.run('git', ['fetch', '--tags', 'origin'], { cwd: env.GITHUB_WORKSPACE, env, quiet: true });
       }
-      if (context?.github?.job === 'nightly_checks' && step.name === 'Dispatch nightly checks for the released commit') {
-        const message = 'Nightly checks dispatch is not available during local recovery (GitHub Actions unavailable); release Checks run locally.';
-        processes.log(message);
-        appendSummary(env.GITHUB_STEP_SUMMARY, message);
-        return true;
+      if (step.id === 'candidate_reply' && context?.github?.job === 'server') {
+        for (const key of ['BEELINE_FREE_AGENT_MODEL_KEY', 'BEELINE_FREE_AGENT_MODEL', 'BEELINE_FREE_AGENT_MODEL_UPSTREAM'])
+          if (context.secrets[key]) env[key] = context.secrets[key];
       }
       if (step.id === 'app_token' && context?.github?.job === 'initialize') {
         const token = context.github.token;
@@ -371,10 +352,12 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         for (const [platform, bundle] of Object.entries(previous.components.helper.platforms || {}))
           if (platform.startsWith('darwin-')) carryHelperPlatform(platform, bundle);
       }
-      if (step.name === 'Produce the inspectable release plan' &&
-          result.outputs.run_mobile_native === 'true' && result.outputs.native_android === 'true' &&
-          !context.secrets?.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON) {
-        throw new Error('Native Android store delivery requires GOOGLE_PLAY_SERVICE_ACCOUNT_JSON');
+      if (step.id === 'plan' && context.github?.job === 'initialize' && context.inputs?.dispatched_by) {
+        const missing = missingReleaseCredentials({ proof: context.inputs.run_release_proof, desktopMode: engine.variables.desktopMode }, context.secrets, result.outputs);
+        if (missing.length) throw new Error(`Missing local release credentials: ${missing.join(', ')}`);
+        const publish = result.outputs.run_helper === 'true' && engine.read(WORKFLOW).jobs.npm_publish;
+        if (result.outputs.run_helper === 'true' && publish?.permissions?.['id-token'] !== 'write')
+          throw new Error('The helper requires the npm trusted-publishing job');
       }
       if (step.name === 'Produce the inspectable release plan' && result.outputs.run_desktop === 'true' && engine?.variables?.desktopMode !== 'build') {
         const previous = JSON.parse(readFileSync(join(context.runner.temp, 'previous/release.json'), 'utf8'));
@@ -391,16 +374,21 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
         const record = JSON.parse(readFileSync(path, 'utf8'));
         delete record.runId;
         record.execution = { kind: 'local', id: basename(directory), dispatchedBy: JSON.parse(context.inputs.dispatched_by) };
-        const checks = engine.variables.releaseChecks && { ...engine.variables.releaseChecks };
-        // The release keeps the full-check results; the private state directory does not last.
-        if (checks?.resultsPath && existsSync(checks.resultsPath)) {
+        const next = join(context.runner.temp, 'next-release.json');
+        const checks = context.inputs.channel === 'latest'
+          ? { ...(JSON.parse(readFileSync(next, 'utf8')).checks ?? {}), sourceSha: record.sourceSha, reusedFrom: 'next' }
+          : { ...engine.variables.releaseChecks };
+        if (context.inputs.channel === 'next' && checks.resultsPath && existsSync(checks.resultsPath)) {
           copyFileSync(checks.resultsPath, join(dirname(path), 'release-checks.json'));
           const releaseUrl = `https://github.com/${context.github.repository}/releases/download/${record.version}`;
           // Per-job attempts and timing let CI history work from release assets alone.
           for (const [name, key] of [['records.json', 'recordsPath'], ['release-checks-timing.json', 'timingPath']]) {
             const evidence = join(dirname(checks.resultsPath), name);
             if (!existsSync(evidence)) continue;
-            const text = readFileSync(evidence, 'utf8');
+            const saved = readFileSync(evidence, 'utf8');
+            const text = name === 'records.json'
+              ? JSON.stringify(JSON.parse(saved).filter(job => job.id.startsWith('release_checks/')), null, 2)
+              : saved;
             if (!publishableEvidence(text, [...(processes.masks ?? [])])) {
               (processes.log ?? console.warn)(`${name} is not published: it contains a credential-shaped value.`);
               continue;
@@ -410,16 +398,16 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
           }
           checks.resultsPath = `${releaseUrl}/release-checks.json`;
         }
-        if (checks) record.checks = checks;
-        // Live delivery time split into the wait for full checks and the deploy after them.
+        record.checks = checks;
+        // Live delivery time split into the quick checks and the deploy after them.
         const live = record.delivery.live;
         if (live) {
-          const checked = checks?.completedAt
+          const checked = checks.completedAt
             ? Math.round(Date.parse(checks.completedAt) / 1000) : live.triggerEpoch;
           const deployStart = Math.min(live.completedAt, Math.max(live.triggerEpoch, checked));
           live.checksSeconds = deployStart - live.triggerEpoch;
           live.deploySeconds = live.completedAt - deployStart;
-          // Per-step seconds of the live legs, including any wait for the checks verdict.
+          // Per-step seconds of the live legs.
           const records = join(directory, 'records.json');
           if (existsSync(records)) {
             const legs = { 'server-local': 'server', 'mobile_ota-local': 'mobile-ota' };
@@ -435,18 +423,18 @@ export function localHooks(directory, processes, { fullChecks = false, checksGat
           desktop: engine.variables.desktopMode !== 'build' ? 'published signed updater set carried unchanged, including Windows'
             : WINDOWS_DESKTOP === 'build' ? 'native signed updater builds on a GitHub-hosted macOS runner, squire and Windows VM'
               : 'native signed updater builds on a GitHub-hosted macOS runner and squire; Windows installers carried unchanged and omitted from the updater manifest' };
-        record.delivery.localExceptions.checks = checks ?? (context.inputs.channel === 'latest'
-          ? { retained: [], reusedFrom: 'successful next release of this commit', coverage: 'no checks run on promotion' }
-          : { retained: ['build', 'typecheck', 'dead-code', 'design grammar', 'codecs'], dropped: droppedChecks(engine.read(checksWorkflow)), coverage: 'not produced by quick release checks' });
-        const helperManifest = join(directory, 'jobs/helper-local/daemon-release/manifest.json');
-        if (existsSync(helperManifest)) record.components.helper.platforms = JSON.parse(readFileSync(helperManifest, 'utf8')).bundles;
+        record.delivery.localExceptions.checks = checks;
+        const helperJob = join(directory, 'jobs/helper-local');
+        const helperManifest = ['daemon-release/manifest.json', 'helper-linux/served-manifest.json']
+          .map(path => join(helperJob, path)).find(existsSync);
+        if (helperManifest) record.components.helper.platforms = JSON.parse(readFileSync(helperManifest, 'utf8')).bundles;
         const previousPath = join(context.runner.temp, 'previous/release.json');
         if (existsSync(previousPath)) {
           const previous = JSON.parse(readFileSync(previousPath, 'utf8'));
           record.components.website.staticSourceSha = previous.components.website.staticSourceSha || previous.components.website.sourceSha;
           // The release record also counts releases that carried the whole
           // helper without republishing its channel manifest.
-          if (existsSync(helperManifest)) for (const [platform, bundle] of Object.entries(record.components.helper.platforms)) {
+          if (helperManifest) for (const [platform, bundle] of Object.entries(record.components.helper.platforms)) {
             const prior = previous.components.helper.platforms?.[platform];
             if (bundle.carriedFrom && prior?.sha256 === bundle.sha256 && prior.commit === bundle.commit)
               record.components.helper.platforms[platform] = carryHelperPlatform(platform, prior);
@@ -560,7 +548,7 @@ export async function releaseChecks(engine, context) {
   return results;
 }
 
-export async function runLocalRelease(args, { repository = root, secrets: providedSecrets, checksGate } = {}) {
+export async function runLocalRelease(args, { repository = root, secrets: providedSecrets } = {}) {
   const root = repository;
   if (args.help) { console.log('node packages/scripts/release-local.mjs [--plan | --dry-run [--leg release|release_checks|initialize|server|helper|mobile-ota|pages|web-app|eas-cli|require-tools|mac-tools|mac-helpers|desktop] | --execute --leg release_checks] [--channel next|latest] [--release-sha <40-char SHA>] [--release-version vX.Y.Z] [--desktop-mode build|carry] [--mac-helpers build|carry] [--env-file ~/.config/beeline-release.env] [--run-release-proof] [--store-track none|beta|production] [--state-dir /outside/repo]'); return; }
   if (args['remote-job']) { await remoteJob(args['remote-job']); return; }
@@ -574,9 +562,9 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const secrets = providedSecrets ?? (args.mode === 'execute' || (args.mode === 'dry-run' && args['env-file']) ? loadEnvironment(envFile, root) : {});
   if (!secrets.GITHUB_TOKEN && secrets.GH_TOKEN) secrets.GITHUB_TOKEN = secrets.GH_TOKEN;
   const processes = new Processes(secrets);
-  const variables = { releaseChecks: args.checks, otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
+  const variables = { releaseChecks: args.skipFullChecks && { profile: 'quick', sourceSha: sha, result: 'skipped', ownerMessageId: args.skipFullChecks }, otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
     CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
-  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks', checksGate }) });
+  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
   engine.inspect(WORKFLOW);
   const context = { github: { repository: 'lunchboxfortwo/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
   if (args.mode === 'plan') {
@@ -584,7 +572,6 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
     console.log('Selected website delivery publishes static assets to Cloudflare Pages and deploys the EAS web app.');
     console.log(`Mac helper mode: ${variables.macHelperMode}; ARM and Intel helpers build on GitHub-hosted macos-15 and macos-15-intel runners. Desktop mode: ${variables.desktopMode}; builds use a GitHub-hosted macOS runner (mac-desktop.yml), squire${WINDOWS_DESKTOP === 'build' ? ' and the Windows VM' : '; Windows is skipped and its published installers carried'}; carry retains the entire published version.`);
-    console.log(`iOS store builds use SSH on ${MAC}. Canary, helper update proof, optional device proof, rollback and finalization stay enabled. ${args.channel === 'latest' ? 'Promotion reuses the successful next verdict; no checks run.' : 'Quick checks run before next delivery.'}`);
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
@@ -620,12 +607,15 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     if (!response.ok) throw new Error(`Cannot verify hosted release inactivity (HTTP ${response.status})`);
     const runs = await response.json();
     if (runs.workflow_runs.some(run => run.status !== 'completed')) throw new Error('A hosted production release is queued or active');
-    const inputs = { channel: args.channel, release_sha: sha, release_version: '', dispatched_by: args['dispatched-by'], selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: Boolean(args.proof), allow_pin_restore: false, mobile_store_minimum: '', publish_listing: false };
+    const inputs = { channel: args.channel, release_sha: sha, release_version: args['release-version'] || '', dispatched_by: args['dispatched-by'], selection: 'auto', store_track: args['store-track'] || 'none', run_release_proof: Boolean(args.proof), allow_pin_restore: false, mobile_store_minimum: '', publish_listing: false };
     const results = await engine.workflow(WORKFLOW, inputs, context);
-    if (results.release_result?.outputs.outcome !== 'success' || results.release_validation?.result !== 'success') throw new Error(`Release failed; inspect private results under ${directory}`);
-    console.log(`Local release completed; private results: ${directory}`);
+    if (results.release_result?.outputs.outcome !== 'success' || results.release_validation?.result !== 'success') throw new Error(`Local ${args.channel} release failed at ${sha}`);
     console.log('Platform carry and website delivery details are in the release record.');
   } finally {
+    const jobs = [...engine.records.values()].map(({ id, conclusion, started_at, completed_at, steps }) => ({
+      id, conclusion, seconds: (Date.parse(completed_at) - Date.parse(started_at)) / 1000, steps,
+    }));
+    if (jobs.length) processes.log(JSON.stringify({ channel: args.channel, sourceSha: sha, jobs }));
     process.removeListener('SIGINT', cancel); process.removeListener('SIGTERM', cancel);
   }
 }

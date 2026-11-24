@@ -177,15 +177,18 @@ esac
 
 // Beebee, 2026-11-18: a released server shipped while every free-agent turn
 // failed. The server leg now requires a real reply from the review Workspace.
-test('the server leg ends by requiring a real free-agent reply in the review proof Workspace', () => {
+test('squire proves the exact free-agent candidate before migration, and hosted keeps its live proof', () => {
   const steps = parse(readFileSync('.github/actions/server-leg/action.yml', 'utf8')).runs.steps;
-  const verify = steps.findIndex(step => step.name?.startsWith('Verify the free starter image'));
-  const reply = steps.findIndex(step => step.name?.startsWith('Require a real free-agent reply'));
-  assert.equal(reply, steps.length - 1);
-  assert.ok(verify < reply);
-  assert.equal(steps[reply].if, undefined, 'a shipped server rerun still proves a reply');
-  assert.match(readFileSync('packages/scripts/release-steps/server-leg.sh', 'utf8'),
-    /^free_agent_reply\)\n[\s\S]*?free-agent-reply-proof\.mjs[\s\S]*?^;;$/m);
+  const candidate = steps.findIndex(step => step.run?.endsWith(' candidate_reply'));
+  const build = steps.findIndex(step => step.run?.endsWith(' step8'));
+  const migrate = steps.findIndex(step => step.id === 'migrate');
+  const live = steps.at(-1);
+  assert.ok(build < candidate && candidate < migrate);
+  assert.equal(steps[candidate].if, "env.BEELINE_LOCAL_RELEASE == 'true'");
+  assert.equal(steps[candidate].env.IMAGE_REF, '${{ steps.free_agent_image.outputs.image_ref }}');
+  assert.equal(steps[candidate].env.SERVER_IMAGE_REF, '${{ steps.fleet.outputs.image_ref }}');
+  assert.equal(live.if, "env.BEELINE_LOCAL_RELEASE != 'true'");
+  assert.match(live.run, / free_agent_reply$/);
 });
 
 for (const [delivery, outcome] of [
@@ -200,8 +203,8 @@ for (const [delivery, outcome] of [
   const { createServer } = await import('node:http');
   const { WebSocketServer } = await import('ws');
   const { spawn } = await import('node:child_process');
-  const agent = 'bb35cda30e5bcda7bb15d78fe2def34ecc9e2a389f5c455fad8e657b2d0aa4a6';
-  const room = '79237f38-5214-47ef-b1ef-7bd8ad035d3a';
+  const agent = 'c'.repeat(64);
+  const room = '11a37f38-5214-47ef-b1ef-7bd8ad035d3a';
   const requestId = '1'.repeat(64); // The command ID, not its source message ID.
   let socket, tagged, message, roomReads = 0;
   const server = createServer(async (request, response) => {
@@ -256,9 +259,11 @@ for (const [delivery, outcome] of [
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    const child = spawn(process.execPath, ['packages/scripts/release-steps/free-agent-reply-proof.mjs'], {
-      env: { PATH: process.env.PATH, SERVER_CANARY_REVIEW_SECRET: 'synthetic-secret',
-        BEELINE_PROOF_ORIGIN: `http://127.0.0.1:${server.address().port}` }, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 });
+    const child = spawn(process.execPath, ['--input-type=module', '-e', `
+      import { proveReply } from './packages/scripts/release-steps/free-agent-reply-proof.mjs';
+      await proveReply(${JSON.stringify({ origin: `http://127.0.0.1:${server.address().port}`, roomId: room,
+        agentId: agent, handle: 'beebee_26', secret: 'synthetic-secret' })});
+    `], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 5000 });
     let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
     const code = await new Promise(resolve => child.once('exit', resolve));
     assert.equal(tagged.roomId, room);

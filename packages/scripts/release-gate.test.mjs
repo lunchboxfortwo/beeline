@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 import { LocalActions } from './release-local-actions.mjs';
+import { LocalChecks } from './release-local-checks.mjs';
 import { localHooks } from './release-local.mjs';
 import { Processes } from './release-local-process.mjs';
 
@@ -11,20 +12,33 @@ const root = resolve(import.meta.dirname, '../..'), sha = 'a'.repeat(40);
 for (const outcome of ['success', 'failure', 'wrong-sha', 'skipped']) test(`real release graph overlaps builds and gates promotion: ${outcome}`, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'release-gate-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  let resolveGate, rejectGate, built;
-  const checksGate = new Promise((yes, no) => { resolveGate = yes; rejectGate = no; });
-  const builds = new Promise(yes => { built = yes; });
-  const checks = { sourceSha: outcome === 'wrong-sha' ? 'b'.repeat(40) : sha, result: outcome === 'skipped' ? 'skipped' : 'success', ...(outcome === 'skipped' ? { ownerMessageId: 'owner-42' } : {}) };
-  const processes = new Processes({}, () => {}), started = new Set(), verdictFiles = {};
-  // Server and OTA start with the builds; their workers wait for the verdict file.
-  const early = ['helper_linux', 'helper_macos', 'server', 'mobile_ota'];
+  let releaseChecks, built;
+  const checksReady = new Promise(resolve => { releaseChecks = resolve; });
+  const builds = new Promise(resolve => { built = resolve; });
+  const releaseSha = outcome === 'wrong-sha' ? 'b'.repeat(40) : sha;
+  const skip = outcome === 'skipped' ? { profile: 'quick', sourceSha: sha, result: 'skipped', ownerMessageId: 'owner-42' } : undefined;
+  const processes = new Processes({}, () => {}), started = new Set(), jobs = [];
+  const early = ['helper_linux', 'helper_macos'];
+  t.mock.method(LocalChecks.prototype, 'prepare', () => checksReady);
+  t.mock.method(LocalChecks.prototype, 'finish', function () {
+    writeFileSync(join(directory, 'release-checks-timing.json'), JSON.stringify({
+      wallSeconds: 2, completedAt: '2026-11-23T00:00:00Z',
+    }));
+  });
+  t.mock.method(LocalChecks.prototype, 'execute', async (_slot, _job, context) => {
+    assert.deepEqual(context.inputs, { suite: 'all', release_sha: sha });
+    const id = context.github.job;
+    jobs.push(id);
+    return { result: outcome === 'failure' && id === 'codecs' ? 'failure' : 'success', outputs: {} };
+  });
   const markBuild = id => {
     started.add(id);
     if (early.every(build => started.has(build))) built();
   };
   let requestId;
   // Only the GitHub process boundary is substituted; execute the real Mac hook.
-  processes.run = async (command, args) => {
+  processes.run = async (command, args, options) => {
+    if (command === 'bash') return Processes.prototype.run.call(processes, command, args, options);
     assert.equal(command, 'gh');
     if (args[0] === 'workflow') {
       requestId = args.at(-1).slice('request_id='.length);
@@ -42,36 +56,44 @@ for (const outcome of ['success', 'failure', 'wrong-sha', 'skipped']) test(`real
       name: `HELPER BUILD (${platform})`, conclusion: 'success',
     })) });
   };
-  const hooks = localHooks(directory, processes, { checksGate }), original = hooks.workflow;
+  const hooks = localHooks(directory, processes), original = hooks.workflow;
   hooks.workflow = async args => {
     const execution = await original(args);
-    if (args.file.endsWith('unified-release.yml')) args.engine.localDelivery.execute = async (_slot, _job, context, _label, _env, options) => {
+    if (args.file.endsWith('unified-release.yml')) args.engine.localDelivery.execute = async (_slot, _job, context) => {
       const id = context.github.job;
-      if (options?.verdictFile) verdictFiles[id] = options.verdictFile;
       markBuild(id);
       return { result: 'success', outputs: id === 'initialize' ? {
-        run_helper: 'true', run_server: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true', release_sha: sha, release_version: 'v1.2.3-rc.1',
+        run_helper: 'true', run_server: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true', release_sha: releaseSha, release_version: 'v1.2.3-rc.1',
       } : {} };
     };
     return execution;
   };
-  const engine = new LocalActions({ root, directory, processes, variables: { releaseChecks: checks, macHelperMode: 'build' }, hooks });
+  const engine = new LocalActions({ root, directory, processes, variables: { releaseChecks: skip, macHelperMode: 'build' }, hooks });
   const run = engine.workflow('.github/workflows/unified-release.yml', { channel: 'next' }, {
-    github: { sha, repository: 'lunchboxfortwo/beeline', run_id: 'test' },
+    github: { sha, repository: 'lunchboxfortwo/beeline', run_id: 'test', event_name: 'workflow_dispatch' },
   });
-  await builds;
-  for (const id of ['helper', 'website', 'release_result']) assert.equal(started.has(id), false, id);
-  assert.deepEqual(Object.keys(verdictFiles).sort(), ['mobile_ota', 'server']);
-  for (const file of Object.values(verdictFiles)) assert.equal(existsSync(file), false);
-  if (outcome === 'failure') rejectGate(new Error('full suite failed')); else resolveGate();
+  await Promise.race([builds, run]);
+  for (const id of early) assert.ok(started.has(id), id);
+  const delivery = ['helper', 'server', 'mobile_ota', 'website'];
+  if (outcome !== 'skipped' && outcome !== 'wrong-sha') {
+    for (const id of delivery) assert.equal(started.has(id), false, id);
+  }
+  releaseChecks();
   const results = await run;
   assert.equal(results.helper_macos.result, 'success');
   for (const platform of ['darwin-arm64', 'darwin-x64'])
-    assert.ok(engine.artifacts.has(`daemon-${platform}-v1.2.3-rc.1-${sha}`));
-  assert.equal(results.release_validation.result, ['failure', 'wrong-sha'].includes(outcome) ? 'failure' : 'success');
-  for (const id of ['helper', 'website']) assert.equal(started.has(id), ['success', 'skipped'].includes(outcome), id);
-  for (const file of Object.values(verdictFiles))
-    assert.equal(JSON.parse(readFileSync(file, 'utf8')).authorized, ['success', 'skipped'].includes(outcome));
-  assert.equal(started.has('release_checks'), false);
+    assert.ok(engine.artifacts.has(`daemon-${platform}-v1.2.3-rc.1-${releaseSha}`));
+  const authorized = outcome === 'success' || outcome === 'skipped';
+  assert.equal(results.release_validation.result, authorized ? 'success' : 'failure');
+  for (const id of delivery) assert.equal(started.has(id), authorized, id);
+  if (outcome === 'success' || outcome === 'failure') {
+    assert.deepEqual(jobs.sort(), ['codecs', 'dead-code', 'typecheck']);
+    const { profile, sourceSha, result, resultsPath } = engine.variables.releaseChecks;
+    assert.deepEqual([profile, sourceSha, result], ['quick', sha, outcome]);
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(resultsPath, 'utf8'))).sort(), jobs);
+  } else {
+    assert.deepEqual(jobs, []);
+    assert.deepEqual(engine.variables.releaseChecks, skip);
+  }
   assert.equal(started.has('nightly_checks'), false);
 });

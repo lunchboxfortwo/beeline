@@ -68,14 +68,14 @@ test('a full staged set has one desktop version, four platform entries and verif
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('normal full release builds desktop while the explicit carry option survives both channels', async () => {
+test('promotion builds desktop unless explicitly told to carry', async () => {
   assert.deepEqual(releaseArguments(['--no-store', '--desktop-mode', 'carry']), { noStore: true, desktopMode: 'carry' });
   assert.equal(parseArguments(['--dry-run', '--leg', 'desktop', '--release-version', 'v1.2.3']).leg, 'desktop');
   assert.throws(() => parseArguments(['--desktop-mode', 'partial']), /desktop-mode/);
   for (const mode of [undefined, 'carry']) {
     const calls = [];
-    await releaseSequence({ source: '/source', sha: 'a'.repeat(40), directory: '/state', desktopMode: mode }, async args => { if (!args.leg) calls.push(args); }, () => {}, () => {});
-    assert.deepEqual(calls.map(args => args['desktop-mode']), [mode || 'build', mode || 'build']);
+    await releaseSequence({ source: '/source', sha: 'a'.repeat(40), directory: '/state', version: 'v1.2.3', desktopMode: mode }, async args => { calls.push(args); });
+    assert.deepEqual(calls.map(args => args['desktop-mode']), [mode || 'build']);
   }
 });
 
@@ -110,14 +110,6 @@ test('a skipped Windows build carries the published installers and omits Windows
     assert.equal(readFileSync(join(directory, 'desktop-release/Beeline-x86_64.msi'), 'utf8'), 'published Beeline-x86_64.msi');
     await assert.rejects(carryWindowsInstallers(directory, async () => new Response('', { status: 404 })), /Beeline-x86_64-setup.exe: HTTP 404/);
   } finally { globalThis.fetch = original; rmSync(directory, { recursive: true, force: true }); }
-});
-
-test('both Mac helper architectures share the one Mac orchestration slot', async () => {
-  const delivery = new LocalDelivery({ variables: { macHelperMode: 'build' } }), placements = [];
-  delivery.execute = async (slot, _job, context) => { placements.push([context.matrix.platform, slot]); return { result: 'success' }; };
-  await delivery.run({}, { github: { job: 'helper_macos' }, matrix: { platform: 'darwin-x64' } });
-  await delivery.run({}, { github: { job: 'helper_macos' }, matrix: { platform: 'darwin-arm64' } });
-  assert.deepEqual(placements, [['darwin-x64', 4], ['darwin-arm64', 4]]);
 });
 
 test('release entrypoint executes through a symlink, including macOS /tmp aliases', () => {

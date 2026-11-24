@@ -30,7 +30,7 @@ if [ -f "$x64_dir/mac-helper-inputs.json" ]; then
 fi
 ;;
 step2)
-node packages/scripts/verify-pages-update.mjs --manifest-url "$MANIFEST_URL" --expected-manifest "${BEELINE_ACTION_VALUE_0}/daemon-release/manifest.json" --work-dir "$RUNNER_TEMP/helper-update-proof"
+node packages/scripts/verify-pages-update.mjs --manifest-url "$MANIFEST_URL" --expected-manifest "${SERVED_MANIFEST:-$EXPECTED_MANIFEST}" --work-dir "$RUNNER_TEMP/helper-update-proof"
 ;;
 step3)
 set -u

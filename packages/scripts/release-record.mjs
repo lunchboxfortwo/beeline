@@ -115,7 +115,7 @@ export function assignReleaseVersion({ releases, previous, sha, requestedVersion
   const reserved = new Set([...versioned.map(release => release.tag_name), ...occupiedVersions]);
   while (reserved.has(base)) base = `v${floor[1]}.${floor[2]}.${++patch}`;
   const candidates = versioned.filter(release => release.tag_name.startsWith(`${base}-rc.`));
-  const draft = candidates.find(release => release.draft && !occupiedVersions.includes(release.tag_name) && commitOf(release) === sha && compareVersions(release.tag_name, previous?.version ?? 'v0.0.0') > 0);
+  const draft = candidates.find(release => release.draft && commitOf(release) === sha && compareVersions(release.tag_name, previous?.version ?? 'v0.0.0') > 0);
   if (draft) return { version: draft.tag_name, reason: 'resume-draft' };
   const previousCounter = previous?.version.startsWith(`${base}-rc.`) ? Number(floor[4]) : 0;
   const counter = Math.max(previousCounter, ...candidates.map(release => Number(VERSION.exec(release.tag_name)[4])),

@@ -77,6 +77,20 @@ writeFileSync(process.argv[3], JSON.stringify(sourceTrees(process.argv[2])));
 NODE
 done < "$RUNNER_TEMP/server-release/previous-refs"
 ;;
+candidate_reply)
+if [ -z "$IMAGE_REF" ]; then
+  # A same-identity rerun still proves the exact embedded image before proceeding.
+  flyctl auth docker
+  docker pull "$SERVER_IMAGE_REF"
+  IMAGE_REF=$(docker run --rm --entrypoint node "$SERVER_IMAGE_REF" -p 'require("/app/apps/server/assets/free-agent-image.json").image')
+fi
+[[ "$IMAGE_REF" == "registry.fly.io/beeline-free-agents:${RELEASE_VERSION#v}-${RELEASE_SHA:0:12}@sha256:"* && "${IMAGE_REF##*@}" =~ ^sha256:[0-9a-f]{64}$ ]]
+FLY_API_TOKEN="$FREE_AGENT_IMAGE_TOKEN" flyctl auth docker
+docker pull "$IMAGE_REF"
+PROOF_SERVER_IMAGE="$(docker image inspect --format '{{.Id}}' "$SERVER_IMAGE_REF")" \
+  PROOF_IMAGE="$IMAGE_REF" node apps/infra/free-agent/cold-start-proof.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+;;
+
 migrate)
 set -euo pipefail
 test -n "${MIGRATION_DATABASE_URL:-}" || { echo 'MIGRATION_DATABASE_URL is required' >&2; exit 1; }

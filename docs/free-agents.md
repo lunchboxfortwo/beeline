@@ -305,12 +305,15 @@ Startup/recovery/release inventory visits every mapped machine regardless of the
 retired state, adopts known metadata mappings, leaves idle identities unprovisioned,
 and reports unmapped provider machines as preserved ownership discrepancies.
 A failed observation does not skip the rest of that finite inventory.
-The server leg then tags `@beebee_26` in the review identity's own Play Review's
-team `#general` and requires its real reply before the release succeeds
-(`packages/scripts/release-steps/free-agent-reply-proof.mjs`); a failed turn
-fails the release with its reason. Execution cancellation alone does not end
-the proof; it keeps waiting for the command’s answer, regardless of the Room’s
-oldest-pending-command summary. A successful signal or update POST alone is insufficient.
+On squire, the server leg proves the candidate before live migrations using
+the exact server image and its embedded free-agent digest. A disposable
+database, review Workspace and Docker Machine run the real mention-to-reply
+flow with a scoped credential for the server's model provider. The proof
+requires a committed reply on the phone live socket and a provider receipt for
+the same command. Hosted releases exercise that same reply assertion after
+refresh in Play Review's team `#general`. Execution cancellation leaves the
+proof waiting for the accepted command's reply or failure.
+
 `free-agent-refresh.test.ts` covers all retired state values, deferred claimed
 work, partial failures and preserved unmapped machines.
 `packages/scripts/build-free-agent-image.sh` builds the

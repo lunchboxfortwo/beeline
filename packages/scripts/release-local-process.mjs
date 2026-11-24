@@ -1,7 +1,30 @@
 import { spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { appendFileSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, relative } from 'node:path';
+
+export function loadEnvironment(file, repository) {
+  const real = realpathSync(file);
+  const rel = relative(repository, real);
+  if (rel !== '..' && !rel.startsWith('../')) throw new Error('Release secrets must be outside the repository');
+  const info = statSync(real);
+  if (!info.isFile() || (info.mode & 0o777) !== 0o600 || info.uid !== process.getuid()) throw new Error('Release env file must be owned by the operator with mode 600');
+  // Parse data, never source shell code or expand shell variables/substitutions.
+  const result = {};
+  for (const line of readFileSync(real, 'utf8').split(/\r?\n/)) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const match = line.match(/^(?:export )?([A-Z][A-Z0-9_]*)=(.*)$/);
+    if (!match) throw new Error('Invalid release env record; use KEY=value, one value per line');
+    let value = match[2];
+    if (value.startsWith('"')) {
+      try { value = JSON.parse(value); } catch { throw new Error('Invalid quoted release env value'); }
+      if (typeof value !== 'string') throw new Error('Release env values must be strings');
+    }
+    else if (value.startsWith("'") && value.endsWith("'")) value = value.slice(1, -1);
+    result[match[1]] = value;
+  }
+  return result;
+}
 
 export class Processes {
   constructor(secrets = {}, log = console.log) {

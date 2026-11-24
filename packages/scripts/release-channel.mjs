@@ -22,6 +22,8 @@ export function promotionSource(next, requestedSha = '') {
     throw new Error('latest requires a successfully published next release');
   if (!/^v\d+\.\d+\.\d+-rc\.[1-9]\d*$/.test(next.version ?? ''))
     throw new Error('latest requires a next rc version');
+  if (!/^[0-9a-f]{40}$/.test(next.sourceSha ?? '')) throw new Error('latest requires the full published next source SHA');
+  if (next.checks && next.checks.sourceSha !== next.sourceSha) throw new Error('next checks do not match the published source SHA');
   if (requestedSha && requestedSha !== next.sourceSha) throw new Error('latest must promote the current next source SHA');
   return { sourceSha: next.sourceSha, version: next.version.replace(/-rc\.\d+$/, '') };
 }

@@ -47,8 +47,9 @@ export class CheckQueue {
 }
 
 export class LocalChecks {
-  constructor(engine) {
+  constructor(engine, fullChecks = false) {
     this.engine = engine;
+    this.fullChecks = fullChecks;
     this.directory = join(engine.directory, 'checks');
     this.source = join(this.directory, 'source');
     this.active = new Map();
@@ -121,11 +122,12 @@ export class LocalChecks {
       await this.privileged(['cp', '-a', '--reflink=auto', this.source, source]);
       await this.privileged(['chown', '-R', owner, source]);
     }
-    const { secrets: _secrets, ...safeContext } = context;
+    const { secrets: _secrets, vars: _vars, ...safeContext } = context;
+    if (!this.fullChecks) safeContext.github = { ...safeContext.github, token: '' };
     // Body creates Unix sockets below tmpdir(); a long external state path
     // would exceed sockaddr_un even though ordinary files work there.
     const temporary = host ? mkdtempSync('/tmp/beeline-check-') : undefined;
-    const spec = { job, context: safeContext, label, workflowEnv, preparation, variables: this.engine.variables,
+    const spec = { job, context: safeContext, label, workflowEnv, preparation,
       root: host ? source : '/source', directory: host ? directory : '/state', temporary };
     privateWrite(join(directory, 'spec.json'), JSON.stringify(spec));
     const overlay = !preparation && source === this.source;
