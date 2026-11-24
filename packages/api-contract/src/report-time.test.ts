@@ -40,6 +40,18 @@ describe('reader report times', () => {
       );
     }
   });
+  it.each([
+    '[run](<../reports/archive(>)',
+    '[run](../report "Archive (old")',
+    "[run](../report 'Archive )old')",
+    `[run](  <../(archive)/${token}> "Archive )")`,
+    `[run](../report "Archive \\"(old\\" ${token}")`,
+    `[run](../it's(a)/${token} (Archive))`,
+  ])('preserves %s and localizes the prose after it', (link) => {
+    expect(localizeReportTimes(`${link} at ${token}`, 'America/New_York')).toBe(
+      `${link} at ${localizeReportTimes(token, 'America/New_York')}`,
+    );
+  });
   it.each(['~~~', '```'])('closes a %s fence only with enough matching markers', (opening) => {
     const literal = [
       opening,

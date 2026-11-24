@@ -33,14 +33,37 @@ function fenceEnd(text: string, start: number, opening: string): number {
 }
 
 function destinationEnd(text: string, start: number): number {
+  let i = start;
+  while (text[i] === ' ' || text[i] === '\t') i++;
+  const destinationStart = i;
   let depth = 1;
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === '\n') return i;
-    if (text[i] === '\\') i++;
-    else if (text[i] === '(') depth++;
-    else if (text[i] === ')' && --depth === 0) return i + 1;
+  // Parentheses are data inside <destinations> and quoted titles.
+  let delimiter: string | undefined;
+  let firstNewline = -1;
+  for (; i < text.length; i++) {
+    const char = text[i];
+    if (char === '\n') {
+      if (!delimiter || delimiter === '>') return i;
+      if (firstNewline === -1) firstNewline = i;
+    }
+    if (char === '\\') {
+      i++;
+      continue;
+    }
+    if (delimiter) {
+      if (char === delimiter) {
+        delimiter = undefined;
+        firstNewline = -1;
+      }
+      continue;
+    }
+    if (char === '<' && i === destinationStart) delimiter = '>';
+    else if ((char === '"' || char === "'") && depth === 1 && /\s/.test(text[i - 1]!)) {
+      delimiter = char;
+    } else if (char === '(') depth++;
+    else if (char === ')' && --depth === 0) return i + 1;
   }
-  return text.length;
+  return firstNewline < 0 ? text.length : firstNewline;
 }
 
 export function localizeReportTimes(
