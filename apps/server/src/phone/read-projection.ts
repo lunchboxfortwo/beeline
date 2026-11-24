@@ -10,7 +10,7 @@ import { mediaIdFromUrl } from '../media-ttl.js';
 import { readVaultSaveCard } from '@beeline/api-contract/phone';
 import { MemberRow, RoomHeaderRow, AttachmentFacts, MessageRow, RoomScheduleRow } from './types.js';
 import { unix } from './values.js';
-import { possiblyVisibleMessageSql } from '../read-cursor.js';
+import { visibleMessageSql } from '../read-cursor.js';
 
 
 /** A held presence belongs to a live helper connection and does not age out. */
@@ -422,7 +422,7 @@ function projectedReplyPreview(
  * The replied-to message's author and text for one message row, so a quote
  * shows even when the original is outside the page. One primary-key lookup
  * per reply. Only a same-Room original that is not deleted, not activity
- * without a durable fact, and passes `possiblyVisibleMessageSql` is read;
+ * without a durable fact, and shown by the transcript (`visibleMessageSql`) is read;
  * anything else stays NULL.
  */
 export function replyPreviewSql(messageAlias: string): string {
@@ -443,7 +443,7 @@ export function replyPreviewSql(messageAlias: string): string {
       AND original.room_id=${messageAlias}.room_id
       AND original.deleted_at IS NULL
       AND (original.presentation<>'activity' OR original.durable_fact IS NOT NULL)
-      AND ${possiblyVisibleMessageSql('original')})`;
+      AND ${visibleMessageSql('original')})`;
 }
 
 

@@ -39,23 +39,6 @@ export function visibleMessageSql(alias: string): string {
             AND completed_corner.parent_id=${alias}.room_id))`;
 }
 
-/**
- * `visibleMessageSql` without its subqueries, for a lookup inlined into every
- * page read (reply previews). Each clause drops the subquery that narrows the
- * matching clause above, so it hides at least every row that predicate hides
- * and costs nothing extra to plan. A few PR notes and corner cards that are
- * visible are also skipped. Keep the two in step.
- */
-export function possiblyVisibleMessageSql(alias: string): string {
-  return `${hiddenWakeCardSql(alias)}
-      AND NOT (${alias}.card_type IS NOT DISTINCT FROM 'github-corner-note'
-        AND COALESCE(${alias}.system_event->>'verb','') IN ('opened a pull request','merged'))
-      AND ${alias}.system_event->>'kind' IS DISTINCT FROM 'schedule-ran'
-      AND NOT (${alias}.card_type IS NOT DISTINCT FROM 'daemon-fact'
-        AND COALESCE(${alias}.card->>'type','') IN ('corner-open','corner-complete')
-        AND ${alias}.card->>'sourceMessageId' IS NULL)`;
-}
-
 /** A durable message that can represent activity in the Room list. */
 export function visibleChatMessageSql(alias: string): string {
   return `${alias}.presentation IN ('message','system','card')

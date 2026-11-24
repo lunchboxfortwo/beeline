@@ -2,7 +2,6 @@ import { afterEach, expect, it } from 'vitest';
 import { ROOM_VIEW_MESSAGE_LIMIT } from '@beeline/api-contract/phone';
 import { migratedDatabase, type PgliteDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
-import { possiblyVisibleMessageSql, visibleMessageSql } from './read-cursor.js';
 
 // Reproduction R1: a reply on the newest page quotes a message that is older
 // than the page. The read carries the original's author and first line.
@@ -115,34 +114,35 @@ it('a visible card outside the newest page is quoted with its first line', async
   }
 });
 
-it('the preview check hides every row the transcript hides', async () => {
+it('a visible PR note and corner card outside the page are quoted; hidden ones are not', async () => {
   const database = await seed();
   const THREAD = '44444444-4444-4444-8444-444444444444';
   await database.query("INSERT INTO rooms(id,workspace_id,name,created_by,parent_id) VALUES($1,$2,'Thread',$3,$4)",
     [THREAD, WORKSPACE, OWNER, ROOM]);
-  const at = new Date(Date.UTC(2026, 10, 20, 10, 0));
-  const rows: Array<[string, string, string, string | null, string | null, string | null]> = [
-    ['b1', ROOM, 'card', 'grant-decision', null, null],
-    ['b2', ROOM, 'card', 'connector-offer-decision', null, null],
-    ['b3', ROOM, 'card', 'corner-workflow-handoff', null, null],
-    ['b4', THREAD, 'card', 'github-corner-note', null, '{"verb":"merged"}'],
-    ['b5', ROOM, 'system', null, null, '{"kind":"schedule-ran"}'],
-    ['b6', ROOM, 'card', 'daemon-fact', `{"type":"corner-open","cornerId":"${THREAD}"}`, null],
-    ['b7', OTHER_ROOM, 'card', 'daemon-fact', `{"type":"corner-open","cornerId":"${THREAD}","sourceMessageId":"x"}`, null],
-    ['b8', ROOM, 'card', 'daemon-fact', `{"type":"corner-complete","cornerId":"${THREAD}"}`, null],
-    ['b9', ROOM, 'card', 'choice', '{}', null],
+  const at = (minute: number) => new Date(Date.UTC(2026, 10, 20, 10, minute));
+  // [original id, card type, card, system event, visible in the Room transcript]
+  const originals: Array<[string, string, string | null, string | null, boolean]> = [
+    ['c1', 'github-corner-note', null, '{"verb":"merged"}', true],
+    ['c2', 'daemon-fact', '{"type":"corner-open","cornerId":"55555555-5555-4555-8555-555555555555"}', null, true],
+    ['c3', 'daemon-fact', `{"type":"corner-complete","cornerId":"${THREAD}"}`, null, false],
+    ['c4', 'grant-decision', null, null, false],
   ];
-  for (const [id, room, presentation, cardType, card, systemEvent] of rows) {
+  for (const [index, [id, cardType, card, systemEvent]] of originals.entries()) {
     await database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event,created_at)
-      VALUES($1,$2,$3,'Sample',$4,$5,$6::jsonb,$7::jsonb,$8)`,
-      [id.padStart(64, 'f'), room, AGENT, presentation, cardType, card, systemEvent, at]);
+      VALUES($1,$2,$3,$4,'card',$5,$6::jsonb,$7::jsonb,$8)`,
+      [id.padStart(64, 'f'), ROOM, AGENT, `Card ${id}`, cardType, card, systemEvent, at(index)]);
+    await database.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id,created_at)
+      VALUES($1,$2,$3,'About the card',$4,$4,$5)`,
+      [`d${id}`.padStart(64, 'e'), ROOM, OWNER, id.padStart(64, 'f'), new Date(Date.UTC(2026, 10, 20, 15, index))]);
   }
-  const ids = rows.map(([id]) => id.padStart(64, 'f'));
-  const hidden = await database.query<{ id: string }>(
-    `SELECT id FROM messages original WHERE id=ANY($1::text[]) AND NOT (${visibleMessageSql('original')})`, [ids]);
-  expect(hidden.rows).toHaveLength(7);
-  const leaked = await database.query<{ id: string }>(
-    `SELECT id FROM messages original WHERE id=ANY($1::text[]) AND NOT (${visibleMessageSql('original')})
-      AND ${possiblyVisibleMessageSql('original')}`, [ids]);
-  expect(leaked.rows).toEqual([]);
+  const phone = new PhoneService(database, 'https://example.invalid');
+  for (const read of [() => phone.readRoom(ROOM, OWNER), () => phone.readHistory(ROOM, OWNER)]) {
+    const messages = (await read())?.messages ?? [];
+    for (const [id, , , , visible] of originals) {
+      expect(messages.some((message) => message.id === id.padStart(64, 'f'))).toBe(false);
+      const quoted = messages.find((message) => message.id === `d${id}`.padStart(64, 'e'));
+      expect(quoted).toBeDefined();
+      expect(quoted?.replyPreview?.text).toBe(visible ? `Card ${id}` : undefined);
+    }
+  }
 });
