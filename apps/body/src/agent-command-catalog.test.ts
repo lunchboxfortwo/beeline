@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { agentCommandCatalogPublisher } from './agent-command-catalog.js';
 import { beelineManagedSkills } from './beeline-skill.js';
 import { DRAW_AVATAR_COMMAND } from './draw-avatar-skill.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 
 describe('agent command catalog publication', () => {
+  it('matches the /draw-avatar row the composer offers before a catalog is published', () => {
+    // Mobile cannot import the body, so it keeps a copy for agents with no published row.
+    const mobile = readFileSync(new URL('../../mobile/sources/buzz/slash-verbs.ts', import.meta.url), 'utf8');
+    for (const value of Object.values(DRAW_AVATAR_COMMAND)) expect(mobile).toContain(`'${value}'`);
+  });
+
   it('publishes one Beeline draw-avatar command for harness skill aliases', () => {
     const execute = vi.fn().mockResolvedValue(undefined);
     const publish = agentCommandCatalogPublisher({ api: { execute } as unknown as DaemonApiClient, agentId: 'grunt', workspaceId: 'proof' });

@@ -150,7 +150,9 @@ describe('authorized institutional history search', () => {
       { query: ' \n"release marker"\t' }, { query: 42 },
     ];
     for (const args of cases) {
-      const advertised = Check(schema, { scope: 'history', ...args });
+      // NUL is refused in code, not by the advertised pattern (RE2 harnesses).
+      const hasNul = typeof args.query === 'string' && args.query.includes('\0');
+      const advertised = !hasNul && Check(schema, { scope: 'history', ...args });
       const search = searchInstitutionalHistory(database, {
         agentId: AGENT, roomId: OUTPUT, ...args,
       } as Parameters<typeof searchInstitutionalHistory>[1]);
@@ -159,6 +161,16 @@ describe('authorized institutional history search', () => {
     }
     await expect(callAgentTool('search', { scope: 'history', query: 'release', limit: 12 }, 'invalid'))
       .rejects.toThrow(/limit/);
+  });
+
+  it('still refuses NUL and whitespace-only history queries with an RE2-safe advertised pattern', async () => {
+    const schema = agentToolsFor(true, false).find(tool => tool.name === 'search')!.inputSchema;
+    expect(JSON.stringify(schema)).not.toMatch(/\(\?[=!<]|\\\\u/);
+    for (const query of ['release\0marker', '\0', ' \n\t']) {
+      await expect(searchInstitutionalHistory(database, { agentId: AGENT, roomId: OUTPUT, query } as Parameters<typeof searchInstitutionalHistory>[1]))
+        .rejects.toThrow(/query is invalid/);
+      await expect(callAgentTool('search', { scope: 'history', query }, 'invalid')).rejects.toThrow(/query/);
+    }
   });
 
   it('Reproduction RHS-1: finds the agreed workflow design with a natural-language query', async () => {

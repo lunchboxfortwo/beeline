@@ -6,6 +6,7 @@ import {
 } from '@beeline/api-contract/daemon';
 import {
   INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,
+  institutionalSearchQueryHasNul,
   REPOSITORY_SUBSCRIPTION_EVENTS,
   fixCornerText,
 } from '@beeline/api-contract/daemon';
@@ -273,6 +274,8 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
       `search: query: at most ${INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS} characters`,
     );
   }
+  if (tool.name === 'search' && typeof args.query === 'string' && institutionalSearchQueryHasNul(args.query))
+    throw new Error('search: query: expected a non-whitespace string of 1–500 characters without NUL');
   if (!Check(tool.inputSchema, args)) {
     if (tool.name === 'search') {
       const properties = asObject(tool.inputSchema.properties);

@@ -143,9 +143,16 @@ export const INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS = 500;
 /** JSON Schema string lengths count Unicode code points, not UTF-8 bytes. */
 export const INSTITUTIONAL_HISTORY_QUERY_SCHEMA = {
   type: 'string', minLength: 1, maxLength: INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,
-  // PostgreSQL text cannot contain NUL; a trimmed query must contain a term.
-  pattern: '^(?![\\s\\S]*\\u0000)[\\s\\S]*\\S[\\s\\S]*$',
+  // A trimmed query must contain a term. Keep this pattern valid in both
+  // ECMA-262 and RE2: some harnesses compile tool schemas with Go's regexp
+  // and reject the whole toolbox on lookarounds or \u escapes. NUL, which
+  // PostgreSQL text cannot hold, is refused in code instead.
+  pattern: '\\S',
 } as const;
+/** True when a search query holds NUL, which PostgreSQL text cannot store. */
+export function institutionalSearchQueryHasNul(query: string): boolean {
+  return query.includes('\u0000');
+}
 export const INSTITUTIONAL_MEMORY_SEARCH_RESULT_MAX = 10;
 /**
  * search_memory matches on the query's individual words (the same tokenizer
