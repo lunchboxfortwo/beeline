@@ -843,6 +843,11 @@ it('attributes helper reads and preserves separate reconnect allowances', async 
     expect(await refusal.json()).toEqual({ error: 'helper_read_rate_limited', retryAfter: delay });
     expect((await read('b', 0)).status).toBe(200);
     expect(daemon.execute).toHaveBeenCalledTimes(301);
+    for (const operation of ['authorizeSquireCall', 'authorizeResourceCall', 'postSquireApproval', 'postSquireLoginWall']) {
+      expect((await read('a', 0, operation)).status).toBe(200);
+      expect(logs).toHaveBeenCalledWith('[req]', 'POST', `/v1/daemon/operations/${operation}`,
+        `agent=${AGENT_A}`, `command=${commandId}`, 'status=200');
+    }
     const humanRead = await fetch(`http://127.0.0.1:${port}/v1/phone/rooms/00000000-0000-4000-8000-000000000001`,
       { headers: { authorization: `Bearer ${humanToken}` } });
     expect(await humanRead.json()).toEqual({ messages: [] });
