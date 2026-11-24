@@ -791,7 +791,6 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   outputFiles?: Attachment[];
   sharedReplyId?: string;
 }): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
-  if (typeof input.text !== 'string') input = { ...input, text: '' };
   if (input.harnessEnded && input.invocation && !input.explicitReply && !input.report) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
     db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {

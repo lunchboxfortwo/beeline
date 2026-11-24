@@ -21,6 +21,8 @@ describe('daemon request errors', () => {
     ['handoff', {}, 409, 'workflow handoff requires an active command'],
     ['archiveWorkflow', {}, 409, 'workflow archive requires an active command'],
     ['assignWorkflowRole', {}, 409, 'workflow role assignment requires an active command'],
+    ['postRoomMessage', { roomId: ROOM }, 400, 'reply text is required'],
+    ['reply', { roomId: ROOM }, 400, 'reply text is required'],
     ['postAgentThought', { roomId: ROOM }, 400, 'turnId is required'],
     ['postAgentModelCatalog', {}, 400, 'model options are required'],
     ['postAgentModelCatalog', { options: [] }, 400, 'model options are required'],
@@ -28,13 +30,6 @@ describe('daemon request errors', () => {
     const response = await fixture.daemonOperation(name, { agentId: AGENT, ...input });
     expect(response.status).toBe(status);
     expect(await response.json()).toEqual({ error: message });
-    expect(Sentry.captureException).not.toHaveBeenCalled();
-  });
-
-  it('leaves a queued reply unanswered when its text is missing', async () => {
-    const response = await fixture.daemonOperation('postRoomMessage', { agentId: AGENT, roomId: ROOM });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ answered: false });
     expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 
