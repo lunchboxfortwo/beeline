@@ -18,7 +18,7 @@ import { visibleMessageSql, visibleChatMessageSql, viewerReadCursorSql } from '.
 import { readStarPrompt } from '../github-star-prompt.js';
 import type { PhoneContext } from './context.js';
 import { phoneDecorateCornerOpenCards } from './message-decoration.js';
-import { projectedMessage, decorateAttachments, reactionIdentitiesSql, reviveDates } from './read-projection.js';
+import { projectedMessage, decorateAttachments, reactionIdentitiesSql, replyPreviewSql, reviveDates } from './read-projection.js';
 import { phoneAttachmentFacts, phoneProjectAgentTurns, phoneProjectPendingAgentCommands } from './message-enrichment.js';
 import { messageId, unix } from './values.js';
 import { AgentTurnRow, MessageRow, deckCornerSummary } from './types.js';
@@ -153,6 +153,7 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
          SELECT ${messageColumns('message')},author.kind author_kind,author.name author_name,
            beeline_room_handle(author.id,message.room_id) author_handle,author.avatar author_avatar,author.face_id author_face,
            ${reactionIdentitiesSql('message')} reaction_identities,
+           ${replyPreviewSql('message')} reply_preview,
            ${taggedIdentityIdsSql('message')} tagged_ids,
            ARRAY(SELECT identity_id FROM authorized) authorized_viewers,
            CASE WHEN latest.id IS NOT NULL THEN to_jsonb(latest) || jsonb_build_object(

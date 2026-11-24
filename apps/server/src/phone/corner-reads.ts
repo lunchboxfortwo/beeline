@@ -19,7 +19,7 @@ import { mediaIdFromUrl } from '../media-ttl.js';
 import type { PhoneContext } from './context.js';
 import { ArchivedCornerCursor, ARCHIVED_CORNER_PAGE, OPEN_CORNER_PAGE, unix } from './values.js';
 import { deckCornerSummary, DeckCornerFacts, RoomRow, CornerRow, RoomReadRow, MemberRow, AttachmentFacts, RoomReadEnrichment, mcpClientIdentitySql } from './types.js';
-import { reviveDates, roomHeader, reactionIdentitiesSql, projectedMessage } from './read-projection.js';
+import { reviveDates, roomHeader, reactionIdentitiesSql, replyPreviewSql, projectedMessage } from './read-projection.js';
 import { phoneOptionalEnrichment } from './optional-enrichment.js';
 
 
@@ -228,6 +228,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
+             ${replyPreviewSql('m')} reply_preview,
              (room.parent_id IS NULL AND EXISTS(SELECT 1 FROM message_bookmarks bookmark
                WHERE bookmark.identity_id=$2 AND bookmark.message_id=m.id)) bookmarked,
              (room.parent_id IS NULL AND EXISTS(SELECT 1 FROM feedback_items report

@@ -11,6 +11,23 @@ export type MessageReplyDisplayTarget = {
   preview: string;
 };
 
+/**
+ * The quote for a reply whose original is not loaded on screen, from the
+ * server's preview. A loaded original is preferred so its edits show.
+ */
+export function replyPreviewTarget(message: ChatDisplayMessage): MessageReplyDisplayTarget | undefined {
+  const preview = message.replyPreview;
+  if (!message.replyToId || !preview) return undefined;
+  return {
+    messageId: message.replyToId,
+    authorName: preview.author.name,
+    ...(preview.author.handle ? { authorHandle: preview.author.handle } : {}),
+    authorPubkey: preview.author.pubkey,
+    isAgent: preview.author.kind === 'agent',
+    preview: preview.text,
+  };
+}
+
 /** A message reply carries proof; live activity may borrow its turn's message. */
 export type MessageReplyTarget = MessageReplyDisplayTarget & {
   reference?: KnownMessageReference;

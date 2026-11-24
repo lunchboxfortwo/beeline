@@ -710,6 +710,40 @@ it.each([false, true])('QUOTE-CLAMP: the original stays within two lines while t
 });
 
 
+it('R1: a reply whose original is not loaded quotes the server preview, not "Message not loaded"', () => {
+  const row: ChatDisplayMessage = {
+    id: 'reply', text: 'Ship it', timestamp: 1, isUser: false, replyToId: 'original',
+    replyPreview: { author: { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Sample Agent', handle: 'sample.agent' }, text: 'Deploy plan ready' },
+  };
+  vi.mocked(LedgerSteer).mockImplementation((ledger: any) => React.createElement('LedgerSteer', ledger, ledger.replyReference));
+  function Fixture() {
+    const args: unknown[] = Array(68).fill(undefined);
+    Object.assign(args, {
+      0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
+      14: 'room', 15: VIEWER, 17: {}, 20: true, 28: true, 46: false, 47: false, 50: true,
+      51: new Set(), 52: new Set(), 53: new Set(),
+      54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(),
+      59: new Map([[row.id, row]]), 61: [row],
+    });
+    const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
+    return render({ item: row });
+  }
+  act(() => { renderer = create(<Fixture />); });
+  const referencedTarget = renderer.root.findAll((node: any) => node.props.referencedTarget !== undefined)[0]?.props.referencedTarget;
+  expect(referencedTarget).toEqual({
+    messageId: 'original', authorName: 'Sample Agent', authorHandle: 'sample.agent',
+    authorPubkey: 'b'.repeat(64), isAgent: true, preview: 'Deploy plan ready',
+  });
+  const props = ordinaryProps();
+  act(() => { renderer = create(<OrdinaryLedgerMessage {...props}
+    message={{ ...props.message, text: row.text, replyToId: 'original' }} referencedTarget={referencedTarget} />); });
+  const quote = renderer.root.findByType('Text').props.children.flat().join('');
+  expect(quote).toContain('Sample Agent');
+  expect(quote).toContain('Deploy plan ready');
+  expect(quote).not.toContain('Message not loaded');
+});
+
+
 it('removes desktop New thread when an ordinary message Room is archived', () => {
   const row: ChatDisplayMessage = { id: 'message', text: 'Start here', timestamp: 1, isUser: false };
   const forward = vi.fn();

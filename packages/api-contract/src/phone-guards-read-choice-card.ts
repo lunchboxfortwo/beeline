@@ -394,6 +394,12 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     reply && uuid(reply.channelId) && hex64(reply.eventId) && hex64(reply.rootId)
       ? { channelId: reply.channelId, eventId: reply.eventId, rootId: reply.rootId }
       : undefined;
+  const replyPreview = record(item.replyPreview);
+  const replyPreviewAuthor = readIdentity(replyPreview?.author);
+  const projectedReplyPreview =
+    projectedReply && replyPreviewAuthor && nonempty(replyPreview?.text)
+      ? { author: replyPreviewAuthor, text: replyPreview.text }
+      : undefined;
   return {
     id: item.id,
     text: typeof item.text === 'string' ? item.text : '',
@@ -410,6 +416,7 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     ),
     ...field('reference', projectedReference),
     ...field('reply', projectedReply),
+    ...field('replyPreview', projectedReplyPreview),
     ...field('liveTurnId', typeof item.liveTurnId === 'string' ? item.liveTurnId : undefined),
     ...field('requestId', typeof item.requestId === 'string' ? item.requestId : undefined),
     ...field('sourceClient', sourceClient && typeof sourceClient.id === 'string' && typeof sourceClient.name === 'string' && sourceClient.name.length <= 120 ? { id: sourceClient.id, name: sourceClient.name } : undefined),
@@ -487,8 +494,13 @@ export function readScopedMessage(value: unknown, roomId: string): RoomViewMessa
   const reference =
     message.reference && message.reference.channelId === roomId ? message.reference : undefined;
   const reply = message.reply && message.reply.channelId === roomId ? message.reply : undefined;
-  const { reference: _foreignReference, reply: _foreignReply, ...rest } = message;
-  return { ...rest, ...field('reference', reference), ...field('reply', reply) };
+  const { reference: _foreignReference, reply: _foreignReply, replyPreview, ...rest } = message;
+  return {
+    ...rest,
+    ...field('reference', reference),
+    ...field('reply', reply),
+    ...field('replyPreview', reply ? replyPreview : undefined),
+  };
 }
 
 

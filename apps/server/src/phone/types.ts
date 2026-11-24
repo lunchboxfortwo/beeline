@@ -61,6 +61,17 @@ export interface MessageRow {
   /** Derived on read from the row's text and the Room's membership, not stored. */
   tagged_ids: string[];
   reply_to_message_id: string | null;
+  /** The replied-to message's author and text, read with the row (`replyPreviewSql`). */
+  reply_preview?: {
+    id: string;
+    kind: 'human' | 'agent';
+    name: string;
+    handle: string | null;
+    avatar: string | null;
+    face_id: string | null;
+    text: string;
+    attachment_name: string | null;
+  } | null;
   root_message_id: string | null;
   request_id: string | null;
   turn_id: string | null;

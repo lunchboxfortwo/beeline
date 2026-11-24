@@ -15,7 +15,7 @@ import { AgentSignInCard } from '@/components/buzz/AgentSignInCard';
 import { ComputerSessionCard } from '@/components/buzz/ComputerSession';
 import { resolveAgentDisplayIdentity } from '@/buzz/agent-display';
 import { messageJumpHref } from '@/buzz/corner-navigation';
-import { canBeginReply, type MessageReplyDisplayTarget } from '@/buzz/message-reply';
+import { canBeginReply, replyPreviewTarget, type MessageReplyDisplayTarget } from '@/buzz/message-reply';
 import { archiveActionPresentation, liveCardPresentation, messageFailureGroups, messageRosterPresentation, useRoomMessageRenderItem } from '@/buzz/room-message-cell';
 import type { RoomMessagePresentation, RoomMessageRenderContext } from '@/buzz/room-message-cell';
 import { GitHubEventCard, NotificationLifecycleCard, DaemonFactCard, GrantRequestCard, SquireApprovalCard, ConnectorOfferCard, AppSignInCard, ChoiceCard, WalletCards, agentCommandTranscriptMessage, OrdinaryLedgerMessage, TargetBranchProposalCard, WritePermissionCard, SwipeToReply } from './RoomMessageVariants';
@@ -513,7 +513,7 @@ export function useChatTranscriptRenderer([
       const personName = profileName;
       const referencedTarget = referencedMessage
         ? replyTargetForMessage(referencedMessage)
-        : undefined;
+        : replyPreviewTarget(item);
       const ledgerMessage = (
         <OrdinaryLedgerMessage
           message={item}

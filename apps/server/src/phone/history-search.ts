@@ -4,7 +4,7 @@ import { messageSearchTerms } from '@beeline/api-contract/phone';
 import { visibleMessageSql } from '../read-cursor.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { PhoneContext } from './context.js';
-import { MESSAGE_SEARCH_STATEMENT_TIMEOUT, MESSAGE_SEARCH_PAGE, MESSAGE_SEARCH_HEADLINE_OPTIONS, MessageSearchTooBroadError, messageSearchSnippet, reactionIdentitiesSql, reviveDates, projectedMessage, decorateAttachments } from './read-projection.js';
+import { MESSAGE_SEARCH_STATEMENT_TIMEOUT, MESSAGE_SEARCH_PAGE, MESSAGE_SEARCH_HEADLINE_OPTIONS, MessageSearchTooBroadError, messageSearchSnippet, reactionIdentitiesSql, replyPreviewSql, reviveDates, projectedMessage, decorateAttachments } from './read-projection.js';
 import { messageId, unix } from './values.js';
 import { MessageRow } from './types.js';
 import { phoneEnrichHistoryRows } from './message-enrichment.js';
@@ -137,6 +137,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
        SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
          i.avatar author_avatar,i.face_id author_face,
          ${reactionIdentitiesSql('m')} reaction_identities,
+         ${replyPreviewSql('m')} reply_preview,
          '{}'::text[] tagged_ids
        FROM target_rows JOIN messages m ON m.id=target_rows.id
        JOIN identities i ON i.id=m.author_id
@@ -171,6 +172,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
          i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
          i.avatar author_avatar,i.face_id author_face,
          ${reactionIdentitiesSql('m')} reaction_identities,
+         ${replyPreviewSql('m')} reply_preview,
          '{}'::text[] tagged_ids
        FROM messages m JOIN identities i ON i.id=m.author_id
        WHERE m.room_id=$1 AND (m.presentation<>'activity' OR m.durable_fact IS NOT NULL)
@@ -214,6 +216,7 @@ import { phoneDecorateMessageCards } from './message-decoration.js';
         SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
           i.avatar author_avatar,i.face_id author_face,
           ${reactionIdentitiesSql('m')} reaction_identities,
+         ${replyPreviewSql('m')} reply_preview,
           '{}'::text[] tagged_ids
         FROM messages m JOIN identities i ON i.id=m.author_id
         WHERE m.room_id=$1 AND EXISTS(SELECT 1 FROM authorized)

@@ -272,6 +272,15 @@ export type RoomViewMessage = {
     readonly eventId: string;
     readonly rootId: string;
   };
+  /**
+   * The replied-to message's author and first line, read with the reply so a
+   * quote can show even when the original is outside the loaded page. Sent
+   * only when the original is in the same Room and not deleted.
+   */
+  readonly replyPreview?: {
+    readonly author: RoomViewIdentity;
+    readonly text: string;
+  };
   readonly activity?: readonly RoomViewActivity[];
   readonly durableFact?: 'failure' | 'merge' | 'action';
   readonly corner?: {

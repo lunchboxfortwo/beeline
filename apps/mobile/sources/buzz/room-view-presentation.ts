@@ -238,6 +238,8 @@ export type ChatDisplayMessage = {
   /** Someone reported this message to the Beeline feedback loop; shared, not private. */
   feedbackReported?: boolean;
   replyToId?: string;
+  /** The server's copy of the replied-to author and first line, for an original not loaded here. */
+  replyPreview?: RoomViewMessage['replyPreview'];
   isNew?: boolean;
   roomUpdate?: { digest?: string };
   reference?: RoomViewMessage['reference'];
@@ -401,6 +403,7 @@ export function displayRoomMessage(
       : {}),
     ...(message.feedbackReported ? { feedbackReported: true } : {}),
     ...(message.reply ? { replyToId: message.reply.eventId } : {}),
+    ...(message.reply && message.replyPreview ? { replyPreview: message.replyPreview } : {}),
     ...(message.durableFact ? { durableFact: { kind: message.durableFact } } : {}),
     ...(message.corner
       ? {
