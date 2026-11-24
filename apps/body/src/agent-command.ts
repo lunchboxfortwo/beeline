@@ -1,3 +1,4 @@
+import { AGENT_CONNECT_HARNESSES } from '@beeline/api-contract/phone';
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
@@ -346,16 +347,8 @@ export const API_KEY_STORES = [
   },
 ] as const;
 
-export const AUTO_DETECT_AGENT_KINDS = [
-  'codex',
-  'claude',
-  'goose',
-  'pi',
-  'grok',
-  'cursor',
-  'opencode',
-  'antigravity',
-] as const;
+// The connect contract's list, so the server accepts every harness the CLI offers.
+export const AUTO_DETECT_AGENT_KINDS = AGENT_CONNECT_HARNESSES satisfies readonly AgentKind[];
 
 export interface AgentCommand {
   kind: AgentKind;

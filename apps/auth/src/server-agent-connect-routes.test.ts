@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { AGENT_CONNECT_HARNESSES, AGENT_SIGN_IN_HARNESSES } from '@beeline/api-contract/phone';
 import { generateKeypair } from '@beeline/nostr';
 import { describe, expect, it } from 'vitest';
 import {
@@ -350,6 +351,42 @@ describe('app-authorized agent connect', () => {
       },
     });
     expect(deviceOverreach.statusCode).toBe(400);
+  });
+
+  // The CLI offers exactly this list (`AUTO_DETECT_AGENT_KINDS` is it), so a
+  // harness added there and refused here fails this test.
+  it.each(AGENT_CONNECT_HARNESSES)('accepts a %s connect on both connect routes', async (harness) => {
+    state.agentPairingClaim = async () => seeded;
+    const provider = harness === 'goose' || harness === 'pi' ? { provider: 'openrouter' } : {};
+    const connected = await app.inject({
+      method: 'POST',
+      url: '/auth/agent/connect',
+      headers: { host: alphaTenant.host },
+      payload: { ...payload, harness, ...provider, model: 'default' },
+    });
+    expect(connected.statusCode).toBe(200);
+    expect(connected.json<Record<string, string>>()).toMatchObject({ harness });
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/auth/device/connect',
+      headers: { host: alphaTenant.host },
+      payload: {
+        harness,
+        ...provider,
+        model: 'default',
+        soul: 'Warm, direct, and deeply practical.',
+        agent_name: 'Piper',
+        code_challenge: 'a'.repeat(64),
+      },
+    });
+    expect(started.statusCode).toBe(201);
+  });
+
+  it('keeps Antigravity off the Room /login list while it connects', () => {
+    expect(AGENT_CONNECT_HARNESSES).toContain('antigravity');
+    expect(AGENT_SIGN_IN_HARNESSES).not.toContain('antigravity');
+    expect([...AGENT_SIGN_IN_HARNESSES]).toEqual(['claude', 'codex', 'grok', 'cursor', 'opencode', 'pi', 'goose']);
   });
 
   it('passes the event kinds the CLI subscribed to into the finish call', async () => {

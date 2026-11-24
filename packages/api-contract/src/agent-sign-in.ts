@@ -29,6 +29,23 @@ export const AGENT_SIGN_IN_HARNESSES = [
 ] as const;
 export type AgentSignInHarness = (typeof AGENT_SIGN_IN_HARNESSES)[number];
 
+/**
+ * Harnesses `beeline connect` offers and the connect routes accept, in the
+ * CLI's auto-detect order. Wider than `AGENT_SIGN_IN_HARNESSES`: Antigravity
+ * connects with its own local sign-in and has no Room `/login` flow.
+ */
+export const AGENT_CONNECT_HARNESSES = [
+  'codex',
+  'claude',
+  'goose',
+  'pi',
+  'grok',
+  'cursor',
+  'opencode',
+  'antigravity',
+] as const;
+export type AgentConnectHarness = (typeof AGENT_CONNECT_HARNESSES)[number];
+
 /** API-key providers an agent can be connected with (`beeline connect`). */
 export const AGENT_SIGN_IN_KEY_PROVIDERS = [
   'openrouter',
