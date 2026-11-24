@@ -7,7 +7,6 @@ import {
   killChildProcessGroup,
   STDERR_TAIL_MAX_CHARS,
 } from './acp-stderr-tail-max-chars.js';
-import { maskCredentialResult } from './mask-credential-result.js';
 
 import { piStartupEnvironment } from './pi-startup.js';
 
@@ -72,7 +71,6 @@ import {
   AcpTextChunkHandler,
   McpServerWire,
   PromptResult,
-  SessionUpdate,
   SteerResult,
   ToolCallEntry,
 } from './acp-stderr-tail-max-chars.js';
@@ -97,6 +95,7 @@ export {
   meaningfulHarnessStderr,
   parseAvailableCommands,
   STDERR_TAIL_MAX_CHARS,
+  toolCallEntries,
   type AcpAvailableCommand,
   type AcpPermissionAllowlist,
   type AcpPermissionDecision,
@@ -114,48 +113,6 @@ export {
   type SteerResult,
   type ToolCallEntry,
 } from './acp-stderr-tail-max-chars.js';
-
-/** Collapse ACP's start/update/result notifications into one physical tool call. */
-export function toolCallEntries(updates: readonly SessionUpdate[]): ToolCallEntry[] {
-  const calls = new Map<string, ToolCallEntry>();
-  let anonymous = 0;
-  let activeAnonymous: string | undefined;
-  for (const { update } of updates) {
-    const sessionUpdate = update.sessionUpdate as string | undefined;
-    if (
-      sessionUpdate !== 'tool_call' &&
-      sessionUpdate !== 'tool_call_update' &&
-      sessionUpdate !== 'tool_result'
-    ) {
-      continue;
-    }
-    const id = typeof update.toolCallId === 'string' ? update.toolCallId : undefined;
-    if (id) activeAnonymous = undefined;
-    if (!id && (sessionUpdate === 'tool_call' || !activeAnonymous)) {
-      activeAnonymous = `anonymous-${anonymous++}`;
-    }
-    const key = id ?? activeAnonymous!;
-    const previous = calls.get(key);
-    calls.set(
-      key,
-      maskCredentialResult({
-        ...previous,
-        id: key,
-        ...(typeof update.name === 'string' ? { name: update.name } : {}),
-        ...(typeof update.title === 'string' ? { title: update.title } : {}),
-        ...(typeof update.kind === 'string' ? { kind: update.kind } : {}),
-        ...(typeof update.status === 'string' ? { status: update.status } : {}),
-        ...(sessionUpdate === 'tool_result' ? { resultReceived: true } : {}),
-        ...('rawInput' in update ? { rawInput: update.rawInput } : {}),
-        ...('content' in update ? { content: update.content } : {}),
-        ...('rawOutput' in update ? { rawOutput: update.rawOutput } : {}),
-        ...('locations' in update ? { locations: update.locations } : {}),
-      }),
-    );
-    if (!id && sessionUpdate === 'tool_result') activeAnonymous = undefined;
-  }
-  return [...calls.values()];
-}
 
 export interface Pending {
   resolve: (v: unknown) => void;

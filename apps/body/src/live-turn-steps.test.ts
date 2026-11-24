@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { toolCallEntries, asyncTaskCall } from './acp.js';
+import { agentTurnSteps, asyncTaskCall, finalAgentMessageText, toolCallEntries } from './acp.js';
 import { LiveTurnSteps } from './live-turn-steps.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 
@@ -99,4 +99,35 @@ it('publishes a result without terminal status as completed and deduplicates its
   stream.onToolCalls(done);
   expect(await stream.remaining(done.map(call => ({ kind: 'tool', call })))).toEqual([]);
   expect(execute).toHaveBeenCalledTimes(1);
+});
+
+it('keeps interleaved call openings and notes in order when a result follows the reply', () => {
+  const updates = [
+    { sessionUpdate: 'agent_message_chunk', content: 'Checking the inputs.' },
+    { sessionUpdate: 'tool_call', name: 'fetch_credential' },
+    { sessionUpdate: 'tool_result', content: 'synthetic credential output' },
+    { sessionUpdate: 'tool_call', toolCallId: 'read', title: 'Read' },
+    { sessionUpdate: 'agent_message_chunk', content: 'Checking the build.' },
+    { sessionUpdate: 'tool_call_update', title: 'Build', status: 'in_progress' },
+    { sessionUpdate: 'tool_result', content: 'Build passed' },
+    { sessionUpdate: 'agent_message_chunk', content: 'The build passed.' },
+    { sessionUpdate: 'tool_result', toolCallId: 'read', content: 'Inputs read' },
+  ].map(update => ({ sessionId: 'session', update }));
+
+  expect(finalAgentMessageText(updates)).toBe('The build passed.');
+  expect(agentTurnSteps(updates)).toEqual([
+    { kind: 'note', text: 'Checking the inputs.' },
+    { kind: 'tool', call: { id: 'anonymous-0', name: 'fetch_credential', content: '[REDACTED]', resultReceived: true } },
+    { kind: 'tool', call: { id: 'read', title: 'Read', content: 'Inputs read', resultReceived: true } },
+    { kind: 'note', text: 'Checking the build.' },
+    { kind: 'tool', call: { id: 'anonymous-1', title: 'Build', status: 'in_progress', content: 'Build passed', resultReceived: true } },
+  ]);
+
+  const readPayload = vi.fn(() => 'Unseen tool output');
+  expect(finalAgentMessageText([...updates, { sessionId: 'session', update: {
+    sessionUpdate: 'tool_result',
+    toolCallId: 'unseen',
+    get rawOutput() { return readPayload(); },
+  } }])).toBe('');
+  expect(readPayload).not.toHaveBeenCalled();
 });
