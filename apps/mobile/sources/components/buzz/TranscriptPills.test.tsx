@@ -2,21 +2,27 @@ import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
+import { readRoomViewMessage, type RoomViewMessage } from '@beeline/api-contract/phone';
+import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 
 vi.mock('react-native', () => ({ View: 'View', Text: 'Text', Pressable: 'Pressable' }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
-vi.mock('@/ui/grammar', () => ({ T: 'Text', TypedView: 'View', Inked: 'Pressable', HEIGHT: { control: 44, row: 44 } }));
+vi.mock('@/ui/grammar', () => ({
+  T: 'Text', Copy: 'Text', TypedView: 'View', Inked: 'Pressable', Btn: 'Button', Glyph: 'Glyph',
+  HEIGHT: { control: 44, row: 44 },
+}));
 vi.mock('react-native-unistyles', () => ({
   StyleSheet: { create: () => ({}) },
   useUnistyles: () => ({ theme: { buzz: {} } }),
 }));
-vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: function LedgerSystemLine() { return null; },
+vi.mock('./Ledger', () => ({ ledgerEntryRhythm: () => ({}), LedgerSystemLine: ({ id, text }: any) => React.createElement('Text', { testID: `system-line-${id}` }, text),
   LedgerEntryFrame: ({ children, testID }: any) => React.createElement('View', { testID }, children) }));
 vi.mock('./Ledger-styles', () => ({ settledAgentProseStyle: () => ({}) }));
 vi.mock('./MonoMarkdown', () => ({ MonoMarkdown: () => null }));
-vi.mock('@/ui/screens/transcript/PillRow', async (original) => ({ ...(await original<object>()), PillRow: () => <React.Fragment /> }));
+vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
+vi.mock('@/components/buzz/GitHubMark', () => ({ GitHubMark: () => null }));
 vi.mock('./ChevronGlyph', () => ({ ChevronGlyph: () => null, CHEVRON_ROW_SIZE: 14 }));
 vi.mock('./IndexRow', () => ({
   InlineRow: ({ children }: any) => <>{children}</>,
@@ -154,7 +160,7 @@ it('opens a thread event in its thread, and a check inside its own thread on Git
   expect(openUrl).toHaveBeenCalledWith('https://github.com/o/r/pull/9');
 });
 
-it('draws a lone GitHub event as one event pill, and leaves payments on their own card', () => {
+it('draws a lone GitHub event and payments as separate closed pills', () => {
   const merge: ChatDisplayMessage = { id: 'e1', text: '', isUser: false, timestamp: 1_800_000_000, isSystemNotice: true,
     systemEvent: { subject: { kind: 'github', name: 'GitHub' }, verb: 'merged pull request',
       object: { text: 'Change', url: 'https://github.com/o/r/pull/7' } } };
@@ -168,7 +174,7 @@ it('draws a lone GitHub event as one event pill, and leaves payments on their ow
   const [paid] = foldPrLifecycleRuns([payment]);
   let tree: any;
   act(() => { tree = create(<TranscriptPills run={[paid!]} resolve={() => ({ kind: 'system', name: 'Beeline' })} />); });
-  expect(tree.root.findAllByType(PillRow)).toHaveLength(0);
+  expect(tree.root.findAllByType(PillRow)).toHaveLength(1);
   act(() => tree.unmount());
 });
 
@@ -178,10 +184,12 @@ vi.mock('@/modal', () => ({ Modal: {} }));
 vi.mock('@/buzz/app-sign-in', () => ({ openAppSignIn: vi.fn() }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), phoneOperationFailureReason: vi.fn() }));
 vi.mock('@/components/buzz/VaultSaveCard', () => ({ VaultSaveCard: () => null }));
-vi.mock('@/components/buzz/AgentSignInCard', () => ({ AgentSignInCard: () => null }));
+vi.mock('@/components/buzz/AgentSignInCard', () => ({
+  AgentSignInCard: ({ testID, isOwner, onSubmit }: any) => React.createElement('Button', {
+    testID, onPress: isOwner ? () => onSubmit('synthetic-code') : undefined,
+  }),
+}));
 vi.mock('@/components/buzz/ComputerSession', () => ({ ComputerSessionCard: () => null }));
-vi.mock('@/components/buzz/CornerOpenedMarker', () => ({ CornerOpenedMarkers: () => null }));
-vi.mock('@/components/buzz/GrantRequestCard', () => ({ canDecideGrantRequest: () => false, GrantRequestPill: () => null }));
 vi.mock('@/app/(app)/beeline/chat/RepositoryOnboardingCard', () => ({ RepositoryOnboardingCard: () => null }));
 vi.mock('@/app/(app)/beeline/chat/chat-surface-values', () => ({
   knownAgentPubkeysFor: (agents: Map<string, unknown>) => new Set(agents.keys()),
@@ -200,12 +208,18 @@ vi.mock('@/app/(app)/beeline/chat/RoomMessageVariants', async () => {
     OrdinaryLedgerMessage: ({ message }: any) => <Text>{message.text}</Text>,
     SwipeToReply: ({ children }: any) => <>{children}</>,
     GitHubEventCard: () => null, NotificationLifecycleCard: () => null, DaemonFactCard: () => null,
-    GrantRequestCard: () => null, SquireApprovalCard: () => null, ConnectorOfferCard: () => null,
+    GrantRequestCard: () => null, SquireApprovalCard: ({ message, viewerPubkey }: any) =>
+      <Text testID={`approval-${message.id}`}>{viewerPubkey === message.squireApproval.owner?.pubkey
+        ? message.squireApproval.approvalUrl : message.squireApproval.title}</Text>,
+    ConnectorOfferCard: () => null,
     AppSignInCard: () => null, ChoiceCard: () => null, WalletCards: () => null,
     TargetBranchProposalCard: () => null, WritePermissionCard: () => null,
   };
 });
 import { useChatTranscriptRenderer } from '@/app/(app)/beeline/chat/useChatTranscriptRenderer';
+import { displayRoomMessage } from '@/buzz/room-view-presentation';
+import { foldTranscriptRows } from '@/buzz/room-message-store';
+import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 
 it.each([false, true])('UAR-1 chat renders person-facing report text immediately (desktop=%s)', desktop => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -235,27 +249,6 @@ it.each([false, true])('UAR-1 chat renders person-facing report text immediately
   act(() => tree.unmount());
 });
 
-it('draws a system line with LedgerSystemLine, never as a sender → recipient pill', () => {
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  const args: unknown[] = Array(68).fill(undefined);
-  args[10] = new Map(); args[11] = new Map(); args[12] = new Map([['grunt', {}]]);
-  args[13] = []; args[17] = {}; args[20] = false; args[51] = false;
-  args[52] = new Set(); args[53] = new Set(); args[54] = new Set();
-  args[55] = { states: new Map(), retry: vi.fn() }; args[62] = [];
-  const notice: ChatDisplayMessage = { id: 'joined', text: '@grunt joined', isUser: false, timestamp: 1_800_000_000,
-    isSystemNotice: true, systemEvent: { subject: { kind: 'agent', id: 'grunt', name: 'Grunt' }, verb: 'joined' } };
-  function Harness() {
-    const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
-    return render({ item: notice });
-  }
-  let tree: any;
-  act(() => { tree = create(<Harness />); });
-  expect(tree.root.findAllByType(TranscriptPills)).toHaveLength(0);
-  expect(tree.root.findAll((node: any) => node.type?.name === 'LedgerSystemLine').map((node: any) => node.props.text))
-    .toEqual(['@grunt joined']);
-  act(() => tree.unmount());
-});
-
 it('PR-CHAT-ONLY uses large PR cards and small failed-head lines with no PR title or number', async () => {
   const { RepositoryLifecycleRow } = await import('./PrLifecycleCard');
   const base = { id: 'copy', title: 'Setup: quiet defaults', kindLine: 'PR #112',
@@ -281,4 +274,156 @@ it('keeps a lone thread opening in a Room with no repository on the Beeline ring
   const items = pillItems(rows[0]!.pillRun ?? [rows[0]!], () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: vi.fn() });
   expect(items).toEqual([expect.objectContaining({ from: { kind: 'system', name: 'Beeline' },
     event: expect.objectContaining({ source: 'beeline', mark: 'thread' }) })]);
+});
+
+const ROOM = '33333333-3333-4333-8333-333333333333';
+const person = { kind: 'human', pubkey: 'a'.repeat(64), name: 'Ada' } as const;
+const agent = { kind: 'agent', pubkey: 'b'.repeat(64), name: 'Agent' } as const;
+const system = { kind: 'human', pubkey: SYSTEM_IDENTITY_PUBKEY, name: 'System' } as const;
+const idFor = (number: number) => number.toString(16).padStart(64, '0');
+const noticeId = idFor(7);
+const bodyId = `system-line-${noticeId}`;
+const mockHeading = 'Approval timed out for Morning card 24 Nov';
+
+function display(number: number, patch: Partial<RoomViewMessage> = {}) {
+  const value = readRoomViewMessage({
+    id: idFor(number), text: 'Member speech', createdAt: 1_800_000_000 + number,
+    author: person, presentation: 'message', ...patch,
+  });
+  expect(value).toBeTruthy();
+  return displayRoomMessage(value!, person.pubkey);
+}
+
+function TranscriptFixture({ rows, desktop, openCorner = vi.fn() }: {
+  rows: ChatDisplayMessage[]; desktop: boolean; openCorner?: (id: string) => void;
+}) {
+  const args: unknown[] = Array(68).fill(undefined);
+  Object.assign(args, {
+    0: false, 10: new Map(), 11: new Map(), 12: new Map(), 13: [],
+    14: ROOM, 15: person.pubkey, 17: {}, 18: openCorner, 20: desktop, 30: vi.fn(),
+    50: desktop, 51: new Set(), 52: new Set(), 53: new Set(),
+    54: { states: new Map(), retry: vi.fn() }, 55: {}, 56: new Map(), 61: rows,
+  });
+  const [render] = useChatTranscriptRenderer(args as Parameters<typeof useChatTranscriptRenderer>[0]);
+  return <>{(desktop ? rows : [...rows].reverse()).map(row => <React.Fragment key={row.id}>{render({ item: row })}</React.Fragment>)}</>;
+}
+
+const notice = { origin: 'system', visibility: 'notice' } as const;
+const card = { origin: 'system', visibility: 'card' } as const;
+const approvalUrl = 'https://approval.example/owner';
+const voice = { id: ROOM, roomId: ROOM, startedAt: 1_800_000_000, participants: [] };
+const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: string; copy?: string }[] = [
+  { name: 'plain workflow expiry', patch: { presentation: 'system', systemTranscript: notice, text: mockHeading },
+    opened: bodyId, copy: mockHeading },
+  { name: 'kinded workflow handoff', patch: { presentation: 'card', systemTranscript: card, author: agent,
+    systemEvent: { kind: 'workflow-handoff', subject: { kind: 'agent', name: 'Agent' }, verb: 'passed approval' } }, opened: bodyId },
+  { name: 'plain notice', patch: { presentation: 'system', text: 'Ada joined' }, opened: bodyId, copy: 'Ada joined' },
+  { name: 'ended call', patch: { presentation: 'system', voiceCall: { ...voice, endedAt: 1_800_000_003 },
+    text: 'Voice call ended' }, opened: bodyId, copy: 'Voice call ended' },
+  { name: 'deleted member row', patch: { presentation: 'system', deleted: true, text: 'Ada deleted a message' },
+    opened: bodyId, copy: 'Ada deleted a message' },
+  { name: 'legacy System DM', patch: { text: 'Operator notice', author: system }, opened: bodyId, copy: 'Operator notice' },
+  { name: 'approval', patch: { presentation: 'card', systemTranscript: card, squireApproval: {
+    agent, owner: person, title: 'Approve the request', detail: 'Example request', tool: 'operate_login',
+    linkKind: 'approval', approvalUrl,
+  } }, opened: `approval-${noticeId}`, copy: approvalUrl },
+  { name: 'sign-in', patch: { presentation: 'card', systemTranscript: card, agentSignIn: {
+    agentId: agent.pubkey, ownerId: person.pubkey, harness: 'pi', status: 'pending',
+    kind: 'api-key', provider: 'openrouter',
+  } }, opened: `agent-sign-in-${noticeId}` },
+  { name: 'wallet record', patch: { presentation: 'card', systemTranscript: card,
+    walletTx: { direction: 'out', amountText: '$1', counterparty: 'Example', chain: 'base', balanceAfterUsd: '$9' } },
+    opened: `notification-run-${noticeId}` },
+  { name: 'provider lifecycle', patch: { presentation: 'system', systemTranscript: { origin: 'github', visibility: 'notice' },
+    systemEvent: { kind: 'merged', subject: { kind: 'github', name: 'GitHub' }, verb: 'merged pull request',
+      object: { text: 'Fix labels', url: 'https://github.com/example/example/pull/7' } } },
+    opened: `pill-event-text-${noticeId}` },
+];
+
+it.each(systemCases.flatMap(entry => [false, true].map(desktop => ({ ...entry, desktop }))))(
+  'keeps $name inside a pill at each transcript position (desktop=$desktop)',
+  async ({ patch, opened, copy, desktop, name }) => {
+    for (const position of ['lone', 'first', 'middle', 'last']) {
+      const target = display(7, patch);
+      const members = [display(1), display(2)];
+      const input = position === 'lone' ? [target] : position === 'first' ? [target, ...members]
+        : position === 'middle' ? [members[0]!, target, members[1]!] : [...members, target];
+      const folded = foldTranscriptRows(input, noticeId);
+      expect(folded.hostIds.get(noticeId)).toBe(noticeId);
+      let tree: any;
+      act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={desktop} />); });
+      const body = () => tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === opened);
+      const pills = tree.root.findAllByType(PillRow);
+      expect(pills).toHaveLength(1);
+      expect(pills[0].props.items.map((item: { id: string }) => item.id)).toEqual([noticeId]);
+      expect(body()).toHaveLength(0);
+      act(() => pills[0].findByType('Button').props.onPress());
+      expect(body()).toHaveLength(1);
+      const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+      expect(open.findAll((node: any) => node.props.testID === opened)).not.toHaveLength(0);
+      if (copy) expect(body()[0].props.children).toBe(copy);
+      if (name === 'sign-in') {
+        await act(async () => body()[0].props.onPress());
+        expect(monolithPhoneOperation).toHaveBeenLastCalledWith('completeAgentSignIn', {
+          roomId: ROOM, messageId: noticeId, code: 'synthetic-code',
+        });
+      }
+      act(() => tree.unmount());
+    }
+  },
+);
+
+it.each([false, true])('preserves unread run boundaries, jumps and hidden records (desktop=%s)', desktop => {
+  const stop = display(3, {
+    presentation: 'system', text: 'Ada stopped Agent', systemEvent: {
+      kind: 'turn-cancelled', subject: { kind: 'person', id: person.pubkey, name: person.name },
+      verb: 'stopped', object: { text: agent.name, id: agent.pubkey },
+    },
+  });
+  const lifecycle = display(4, systemCases.at(-1)!.patch);
+  const hidden = display(5, { presentation: 'system', text: 'A private receipt', systemTranscript: {
+    origin: 'system', visibility: 'hidden',
+  } });
+  const active = display(6, { presentation: 'card', voiceCall: voice, text: 'Active call' });
+  const later = display(8, systemCases.at(-1)!.patch);
+  const folded = foldTranscriptRows([stop, lifecycle, hidden, active, later], later.id);
+  expect(folded.rows.map(row => row.id)).toEqual([stop.id, later.id]);
+  expect(folded.hostIds.get(lifecycle.id)).toBe(stop.id);
+  expect(folded.hostIds.has(hidden.id)).toBe(false);
+  expect(folded.hostIds.has(active.id)).toBe(false);
+  let tree: any;
+  act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={desktop} />); });
+  const pills = tree.root.findAllByType(PillRow);
+  expect(pills).toHaveLength(2);
+  const mixed = pills.find((pill: any) => pill.props.items[0].id === stop.id);
+  expect(mixed.props.items[0].run.map((entry: { id: string }) => entry.id)).toEqual([stop.id, lifecycle.id]);
+  act(() => mixed.findByType('Button').props.onPress());
+  const ids = tree.root.findAllByType('Text').map((node: any) => node.props.testID);
+  expect(ids).toContain(`system-line-${stop.id}`);
+  expect(ids).toContain(`pill-event-text-${lifecycle.id}`);
+  expect(ids).not.toContain(`system-line-${hidden.id}`);
+  expect(ids).not.toContain(`pill-event-text-${later.id}`);
+  act(() => tree.unmount());
+});
+
+it('keeps a thread opening pilled at its source message and opens the thread from the pill', () => {
+  const source = display(1);
+  const cornerId = '55555555-5555-4555-8555-555555555555';
+  const marker = display(3, { presentation: 'card', systemTranscript: card,
+    daemonFact: { type: 'corner-open', cornerId, name: 'sample-thread', objective: '', sourceMessageId: source.id },
+  });
+  const folded = foldTranscriptRows([source, display(2), marker], null);
+  expect(folded.hostIds.get(marker.id)).toBe(source.id);
+  expect(folded.rows.map(row => row.id)).toEqual([source.id, idFor(2)]);
+  const openCorner = vi.fn();
+  let tree: any;
+  act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop openCorner={openCorner} />); });
+  const pill = tree.root.findByType(PillRow);
+  expect(pill.props.items[0]).toMatchObject({ id: marker.id, event: { source: 'beeline', mark: 'thread' } });
+  expect(tree.root.findAllByProps({ testID: `pill-event-open-${marker.id}` })).toHaveLength(0);
+  act(() => pill.findByType('Button').props.onPress());
+  const action = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `pill-event-${marker.id}`);
+  act(() => action.props.onPress());
+  expect(openCorner).toHaveBeenCalledWith(cornerId);
+  act(() => tree.unmount());
 });

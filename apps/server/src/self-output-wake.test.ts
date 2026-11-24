@@ -1,12 +1,13 @@
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { randomBytes } from 'node:crypto';
 import { afterAll,beforeAll,expect,it } from 'vitest';
-import { createAgentCommand,type CommandRow } from './agent-command.js';
+import { createAgentCommand,queueMessage,type CommandRow } from './agent-command.js';
 import { setRoomEventSubscriptions } from './agent-subscriptions.js';
 import { reportToCommander } from './commander.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { systemLine } from './system-line.js';
+import { modelText, personText } from './message-origin.js';
 import { HelperDaemonService } from './test-fixtures/helper-daemon.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { describedWorkflow,migratedDatabase,type PgliteDatabase } from './test-support.js';
@@ -90,7 +91,7 @@ it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue 
 
 });
 
-it('SELF-OUTPUT: a different commander still receives explicit and System reports', async () => {
+it('SELF-OUTPUT: a different commander receives member reports and the queue rejects System posts', async () => {
   const source = randomBytes(32).toString('hex');
   await phone.execute(
     'sendRoomMessage',
@@ -117,23 +118,17 @@ it('SELF-OUTPUT: a different commander still receives explicit and System report
   expect(
     (await daemon.execute('getAgentCommands', { roomId: cornerId }, OTHER)).commands.map((c) => c.id),
   ).toContain('other-report-proof');
-  const systemReport = await reportToCommander(
-    db,
-    cornerId,
-    SYSTEM_IDENTITY_ID,
-    'blocked: worker needs attention',
-    undefined,
-    'other-system-report-proof',
-    { automatic: true, agentOnly: true },
-  );
-  expect(systemReport.delivered).toBe(true);
-  expect(
-    (
-      await db.query(
-        `SELECT state,private_payload->>'sourceAgentId' source_agent FROM agent_commands WHERE id='other-system-report-proof'`,
-      )
-    ).rows,
-  ).toEqual([{ state: 'pending', source_agent: AGENT }]);
+  await expect(queueMessage(db, {
+    kind: 'delivery', roomId: cornerId, sourceRoomId: cornerId, sourceItem: opening,
+    recipientId: OTHER, authorId: SYSTEM_IDENTITY_ID, text: modelText('Synthetic public report'),
+    id: 'other-system-report-proof',
+  })).rejects.toThrow('System transcript writes require systemLine');
+  await expect(queueMessage(db, {
+    kind: 'post', roomId: cornerId, authorId: SYSTEM_IDENTITY_ID,
+    text: personText('Synthetic public post'), id: 'other-system-post-proof',
+  })).rejects.toThrow('System transcript writes require systemLine');
+  expect((await db.query(`SELECT id FROM messages WHERE id IN ('other-system-report-proof','other-system-post-proof')
+    UNION ALL SELECT id FROM agent_commands WHERE id IN ('other-system-report-proof','other-system-post-proof')`)).rowCount).toBe(0);
 });
 
 it.each([false, true])(

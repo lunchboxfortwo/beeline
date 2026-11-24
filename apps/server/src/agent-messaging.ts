@@ -8,7 +8,7 @@ import { commandAddress } from './commander.js';
 import { cornerCommanderIdSql } from './corner-commander.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import type { SqlDatabase } from './database.js';
-import { modelText } from './message-origin.js';
+import { assertMemberTranscript, modelText } from './message-origin.js';
 import { postRoomChoice } from './room-choice.js';
 import { updateWorkItem } from './work-board.js';
 
@@ -42,6 +42,7 @@ export async function sendMessage(db: SqlDatabase, input: {
   route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
+  assertMemberTranscript(input.route.from.agent);
   const reportAsk = reportMessageAsk(input);
   input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);

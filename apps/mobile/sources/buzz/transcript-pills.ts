@@ -1,17 +1,7 @@
+import { SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { isGitHubLifecycleItem } from '@/buzz/pr-lifecycle';
-
-/**
- * Pills (build spec, decision 15): an agent's message() to another agent and a
- * stop render as avatar pills (from face → to face, or face ■ face); a tap
- * reads the message. A plain tag stays a message, and every other system line
- * keeps its own `LedgerSystemLine` row.
- * Consecutive pills share one wrapping row, so the transcript folds a run of
- * them into one host row. GitHub PR, issue, commit, check and thread-opened
- * events are pills too and fold with the agents' messages; payment and wallet
- * runs keep their own rows.
- */
 
 type PillFields = Pick<
   ChatDisplayMessage,
@@ -21,37 +11,55 @@ type PillFields = Pick<
   | 'voiceCall' | 'onboarding' | 'choice' | 'appSignIn' | 'agentSignIn' | 'connectorOffer'
   | 'notificationLifecycleRun' | 'walletTx' | 'walletInsufficient' | 'walletDelegation'
   | 'targetBranchProposal' | 'corner' | 'githubEvent' | 'daemonFact' | 'systemEvent'
+  | 'systemTranscript' | 'durableFact' | 'presentation'
 >;
 
-/** A row that the transcript draws as a card or nothing, never as a pill. */
-function ownsCard(message: PillFields): boolean {
-  return Boolean(
-    message.deleted || message.isArchivedNotice || message.awayWarning || message.cornerMarkers?.length ||
-    message.vaultSave || message.roomUpdate || message.writePermission || message.grantRequest ||
-    message.squireApproval || message.computerSession || (message.voiceCall && !message.voiceCall.endedAt) ||
+function hasCardBody(message: PillFields): boolean {
+  return !message.deleted && Boolean(
+    message.systemTranscript?.visibility === 'card' || message.vaultSave || message.roomUpdate ||
+    message.writePermission || message.grantRequest || message.squireApproval || message.computerSession ||
     message.onboarding || message.choice || message.appSignIn || message.agentSignIn || message.connectorOffer ||
     message.notificationLifecycleRun || message.walletTx || message.walletInsufficient ||
-    message.walletDelegation || message.targetBranchProposal || message.corner || message.githubEvent ||
-    message.daemonFact || message.isAgentActivity || message.isAgentDraft || message.isAgentLiveTurn ||
-    message.attachments?.length,
+    message.walletDelegation || message.targetBranchProposal || message.githubEvent || message.daemonFact ||
+    message.awayWarning,
   );
 }
 
-/** A server-phrased notice or a Beeline-account row: drawn by `LedgerSystemLine`, never as a pill. */
 export function isSystemLine(message: PillFields): boolean {
-  return Boolean(message.isSystemNotice) || (message.authorIdentity?.pubkey ?? message.pubkey) === SYSTEM_IDENTITY_PUBKEY;
+  const author = message.authorIdentity?.pubkey ?? message.pubkey;
+  if (message.systemTranscript || message.deleted || message.systemEvent || message.presentation === 'system' ||
+      author === SYSTEM_IDENTITY_PUBKEY || author === SCHEDULE_SCHEDULER_ID) return true;
+  // Legacy report records sometimes carry the notice flag. Their speech keeps
+  // the recorded agent and the recipient's ordinary reply affordances.
+  if (message.agentCommand?.kind === 'report') return false;
+  return Boolean(
+    message.isSystemNotice ||
+    message.durableFact || message.githubEvent || message.daemonFact || message.roomUpdate ||
+    message.awayWarning || message.grantRequest || message.squireApproval || message.agentSignIn ||
+    message.appSignIn || message.connectorOffer || message.writePermission || message.targetBranchProposal ||
+    message.computerSession || message.vaultSave || message.walletTx || message.walletInsufficient ||
+    message.walletDelegation || message.onboarding || message.voiceCall,
+  );
 }
 
-/**
- * A folded PR / thread lifecycle run (its rows read inside the opened card),
- * a stop of an agent's turn, or an agent's message to another agent.
- */
+/** Some retained records drive the header or agent context and have no transcript body. */
+export function isHiddenSystemLine(message: PillFields): boolean {
+  if (message.systemTranscript?.visibility === 'hidden') return true;
+  if (message.deleted) return false;
+  const kind = message.systemEvent?.kind;
+  return kind === 'schedule-ran' ||
+    kind === 'computer-session-activity' || kind === 'connector-offer-decided' ||
+    kind === 'squire-approval-decided' || kind === 'grant-decided' ||
+    Boolean(message.voiceCall && !message.voiceCall.endedAt);
+}
+
 export function isPillMessage(message: PillFields): boolean {
-  if (message.notificationLifecycleRun && !message.deleted) return true;
-  if (ownsCard(message)) return false;
-  if (stopNotice(message)) return true;
+  if (isHiddenSystemLine(message) || message.isArchivedNotice || message.corner) return false;
+  if (message.notificationLifecycleRun || isSystemLine(message)) return true;
+  if (hasCardBody(message) || message.cornerMarkers?.length || message.isAgentActivity ||
+      message.isAgentDraft || message.isAgentLiveTurn || message.attachments?.length) return false;
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
-  return message.agentCommand?.recipient.kind === 'agent' && Boolean(author) && author !== SYSTEM_IDENTITY_PUBKEY;
+  return message.agentCommand?.recipient.kind === 'agent' && Boolean(author);
 }
 
 /** A folded lifecycle run of GitHub and thread events only: it folds with agent pills. */
@@ -84,8 +92,10 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
     run = [];
   };
   for (const message of messages) {
-    // Payment and wallet runs keep their own row between pills.
-    if (isPillMessage(message) && (!message.notificationLifecycleRun || isGitHubEventRun(message))) {
+    // New notice bodies retain their own row, including any actions or markers.
+    if (isPillMessage(message) && !message.cornerMarkers?.length &&
+        (isGitHubEventRun(message) || Boolean(stopNotice(message)) ||
+          (!isSystemLine(message) && !message.notificationLifecycleRun))) {
       run.push(message);
       continue;
     }
@@ -97,10 +107,10 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
 }
 
 /** A stop of an agent's turn, with who stopped whom, when the line names both. */
-export function stopNotice(message: Pick<ChatDisplayMessage, 'systemEvent'>):
+export function stopNotice(message: Pick<ChatDisplayMessage, 'systemEvent' | 'deleted'>):
   { stopper: { id: string; name: string; kind: 'agent' | 'human' }; stopped: { id: string; name: string } } | undefined {
   const event = message.systemEvent;
-  if (event?.kind !== 'turn-cancelled' || !event.subject.id || !event.object?.id) return undefined;
+  if (message.deleted || event?.kind !== 'turn-cancelled' || !event.subject.id || !event.object?.id) return undefined;
   if (event.subject.kind !== 'person' && event.subject.kind !== 'agent') return undefined;
   return {
     stopper: { id: event.subject.id, name: event.subject.name, kind: event.subject.kind === 'agent' ? 'agent' : 'human' },

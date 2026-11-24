@@ -8,7 +8,7 @@ import { humanRoomAdmin, humanRoomMember, WorkflowAuthorizationError } from './w
 import { randomBytes } from 'node:crypto';
 import { shortRunId, type WorkflowReceiptInput, type WorkflowReadContract, type WorkflowGateState, type WorkflowHandoffState, type WorkflowReadState } from '@beeline/api-contract/daemon';
 import { FEEDBACK_TRIAGE_SLUG } from './feedback-triage-workflow.js';
-import type { SystemSubject } from '@beeline/api-contract/phone';
+import type { SystemObject, SystemSubject } from '@beeline/api-contract/phone';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { closeRunChoices, postRoomChoice } from './room-choice.js';
@@ -121,7 +121,7 @@ export type CardLine = {
   authorId: string;
   subject: SystemSubject;
   verb: string;
-  object?: string;
+  object?: string | SystemObject;
   consequence?: string;
 };
 
@@ -330,6 +330,7 @@ export async function closeRun(
       outcome: input.outcome,
       status: input.status,
       answers: run.seq,
+      ...(input.outcome === 'expired' && scope.state?.kind ? { expiredStepKind: scope.state.kind } : {}),
       ...(input.cancellation ? { cancellation: input.cancellation } : { closure: { reason: input.reason } }),
       contents: { reason: input.reason },
     },

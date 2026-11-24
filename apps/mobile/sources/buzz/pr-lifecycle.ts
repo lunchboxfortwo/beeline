@@ -124,7 +124,7 @@ export function lifecycleItem(message: SystemLineMessage): LifecycleItem | undef
       actor: event.actor,
     };
   }
-  const check = message.isSystemNotice ? message.systemEvent : undefined;
+  const check = message.systemEvent;
   if (check?.subject.kind !== 'github') return;
   const displayText = repositorySystemLine(check);
   if (displayText !== undefined) {
@@ -270,6 +270,11 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
   const result: T[] = [];
   let run: { anchor: T; ids: string[]; boundaries: { id: string; orderAtMs: number }[]; items: LifecycleItem[]; index: number; github: boolean } | undefined;
   for (const message of messages) {
+    if (message.cornerMarkers?.length) {
+      run = undefined;
+      result.push(message);
+      continue;
+    }
     const fact = message.deleted ? undefined : message.daemonFact;
     if (
       (fact?.type === 'corner-complete' &&

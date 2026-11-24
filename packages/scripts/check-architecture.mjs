@@ -11,10 +11,11 @@ import {
 } from './architecture-invariants.mjs';
 import { fileLineRelaxations } from './architecture-file-lines.mjs';
 import { judgeStorage, storageRelaxations } from './architecture-storage.mjs';
+import { checkSystemTranscript } from './system-transcript-boundary.mjs';
 import { checkMachineConnections } from './machine-connection-boundaries.mjs';
 
 /** CI executes the candidate guard; changes remain visible in the weekly review. */
-const RUNNER_FILES = ['packages/scripts/check-architecture.mjs', 'packages/scripts/corner-machine-boundary.mjs', 'packages/scripts/architecture-invariants.mjs', 'packages/scripts/architecture-storage.mjs', 'packages/scripts/architecture-file-lines.mjs', 'packages/scripts/machine-connection-boundaries.mjs', 'docs/architecture/machine-connection-sinks.json'];
+const RUNNER_FILES = ['packages/scripts/check-architecture.mjs', 'packages/scripts/system-transcript-boundary.mjs', 'packages/scripts/corner-machine-boundary.mjs', 'packages/scripts/architecture-invariants.mjs', 'packages/scripts/architecture-storage.mjs', 'packages/scripts/architecture-file-lines.mjs', 'packages/scripts/machine-connection-boundaries.mjs', 'docs/architecture/machine-connection-sinks.json'];
 
 function changedRunnerFiles(root, base) {
   return RUNNER_FILES.filter((file) => {
@@ -43,7 +44,7 @@ async function main() {
   const errors = validateRules(head);
   if (base) errors.push(...strictRelaxations(root, invariantsAtRef(root, base), head, base).map(item => `Strict architecture boundary: ${item}`));
   if (base) errors.push(...fileLineRelaxations(root, invariantsAtRef(root, base), head, base));
-  if (!errors.length) errors.push(...judgeTree(root, head), ...judgeStorage(root, head.storage), ...checkMachineConnections(root,base), ...checkCornerMachine(root));
+  if (!errors.length) errors.push(...judgeTree(root, head), ...judgeStorage(root, head.storage), ...checkMachineConnections(root,base), ...checkCornerMachine(root), ...checkSystemTranscript(root));
   const relaxed = base ? [
     ...relaxations(root, invariantsAtRef(root, base), head),
     ...storageRelaxations(invariantsAtRef(root, base), head),

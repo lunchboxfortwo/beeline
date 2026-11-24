@@ -629,7 +629,7 @@ async function recoverRecentLeaveFacts(db: SqlDatabase): Promise<void> {
       AND NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=subscription.agent_id AND command.source_message_id=line.id)
   `)).rows;
   for(const leave of leaves){
-    await db.query(`UPDATE messages SET system_event=system_event||'{"kind":"left"}'::jsonb WHERE id=$1`,[leave.id]);
+    await systemLine(db, { operation: 'update', rows: [{ id: leave.id, eventKind: 'left' }] });
     await routeSystemCommand(db,{roomId:leave.room_id,sourceMessageId:leave.id,kind:'left',targets:[leave.agent_id]});
   }
 }

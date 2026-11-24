@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { closeCornerPullRequestBestEffort, closeCornerState } from './corner-close.js';
@@ -72,7 +73,7 @@ export async function closeInactiveCorners(
         if (!result.archived) return false;
         await ensureSystemIdentity(db);
         await systemLine(db, {
-          id: `thread-idle-close:${corner.id}`,
+          id: createHash('sha256').update(`thread-idle-close:${corner.id}`).digest('hex'),
           roomId: corner.parent_id,
           authorId: SYSTEM_IDENTITY_ID,
           subject: { kind: 'system', name: corner.name },

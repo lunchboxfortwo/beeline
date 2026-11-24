@@ -1918,6 +1918,7 @@
           "legacy_event": "existing before the registry; weekly audit reviews",
           "agent_hop_count": "existing before the registry; weekly audit reviews",
           "system_event": "existing before the registry; weekly audit reviews",
+          "system_transcript": "systemLine commits the origin and visibility independently of the actor and presentation, which can also describe member rows.",
           "deleted_at": "existing before the registry; weekly audit reviews",
           "deleted_by": "existing before the registry; weekly audit reviews",
           "created_at": "existing before the registry; weekly audit reviews",
@@ -3838,6 +3839,10 @@
         "kind": "existing before the registry; weekly audit reviews",
         "subject": "existing before the registry; weekly audit reviews",
         "payload": "Committed provider event evidence (failed jobs and bounded follow-up provenance), preserved for recovery without a provider re-read."
+      },
+      "system_transcript": {
+        "origin": "The committed producer, independent of the actor credited on the message.",
+        "visibility": "The committed notice, card, or hidden transcript treatment."
       },
       "source_client": {},
       "recipients": {},

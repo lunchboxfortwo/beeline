@@ -463,6 +463,7 @@ jobs:
           BEELINE_VOICE_TEST_POSTGRES_URL="$BEELINE_COMMAND_TEST_POSTGRES_URL" npm test -w @beeline/server -- src/voice-budget.postgres.test.ts --maxWorkers=2 --minWorkers=1
           npm test -w @beeline/server -- src/helper-usage.postgres.test.ts --maxWorkers=2 --minWorkers=1
           npm test -w @beeline/server -- src/operator-system-dm-source.postgres.test.ts --maxWorkers=2 --minWorkers=1
+          npm test -w @beeline/server -- src/system-transcript.postgres.test.ts --maxWorkers=2 --minWorkers=1
         if: steps.changes.outputs.run == 'true'
       - uses: actions/upload-artifact@v4
         if: always() && inputs.release_sha != ''

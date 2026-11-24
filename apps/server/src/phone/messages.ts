@@ -8,7 +8,7 @@ import { tombstoneInstitutionalMemoryForMessage } from '../institutional-memory-
 import { messageColumns } from '../message-columns.js';
 import { unreadMessageSql,visibleChatMessageSql } from '../read-cursor.js';
 import { observeOnboardingMessage } from '../signin-funnel.js';
-import { deletedMessageEvent } from '../system-line.js';
+import { tombstoneSystemLine } from '../system-line.js';
 import { phoneRequireWorkspaceMember } from './access.js';
 import type { PhoneContext } from './context.js';
 import { phoneLiveStarPrompt,phoneReadLiveDelta } from './live-reads.js';
@@ -224,10 +224,9 @@ import { personText } from '../message-origin.js';
     if (!/^[0-9a-f]{64}$/.test(input.messageId)) throw new Error('messageId is invalid');
     await ctx.database.transaction(async (database) => {
       const deleted = await database.query<{ author_id: string; deleted_by: string }>(
-        `UPDATE messages message SET deleted_at=COALESCE(message.deleted_at,now()),
-           deleted_by=COALESCE(message.deleted_by,$3),text='',attachments='[]'::jsonb,reactions='{}'::jsonb
-         FROM rooms room
-         WHERE message.id=$1 AND message.room_id=$2 AND message.room_id=room.id
+        `SELECT message.author_id,COALESCE(message.deleted_by,$3) deleted_by
+         FROM messages message JOIN rooms room ON room.id=message.room_id
+         WHERE message.id=$1 AND message.room_id=$2
            AND message.presentation='message' AND EXISTS(
                SELECT 1 FROM memberships member
                WHERE member.room_id=COALESCE(room.parent_id,room.id) AND member.identity_id=$3
@@ -238,7 +237,7 @@ import { personText } from '../message-origin.js';
                  AND manager.identity_id=$3 AND manager.role IN ('owner','admin')
                  AND manager.removed_at IS NULL
              ))
-         RETURNING message.author_id,message.deleted_by`,
+         FOR UPDATE OF message`,
         [input.messageId, input.roomId, viewerId],
       );
       database = new CornerAccessDatabase(database);
@@ -246,13 +245,7 @@ import { personText } from '../message-origin.js';
       if (!row) throw new CommandRefusalError('message is not available for deletion', 404);
       // The deleted row keeps its place and time and reads as a system line
       // naming who deleted it; nothing new is posted to the Room.
-      await database.query(
-        `UPDATE messages message SET system_event=$2::jsonb WHERE message.id=$1`,
-        [
-          input.messageId,
-          JSON.stringify(await deletedMessageEvent(database, row.deleted_by, row.author_id,input.roomId)),
-        ],
-      );
+      await tombstoneSystemLine(database, input.messageId, row.deleted_by, row.author_id, input.roomId);
       await tombstoneInstitutionalMemoryForMessage(database, input.messageId);
 
     });

@@ -210,10 +210,6 @@
       "CornerOpenRow",
       "CornerOpenToast"
     ],
-    "components/buzz/CornerOpenedMarker.tsx": [
-      "CornerOpenedMarker",
-      "CornerOpenedMarkers"
-    ],
     "components/buzz/CreatePollSheet.tsx": [
       "CreatePollSheet"
     ],
@@ -271,8 +267,7 @@
       "GitHubMark"
     ],
     "components/buzz/GrantRequestCard.tsx": [
-      "GrantRequestCard",
-      "GrantRequestPill"
+      "GrantRequestCard"
     ],
     "components/buzz/HullActionSheet.tsx": [
       "HULL_SHEET_INSET",
@@ -544,6 +539,7 @@
       "titleLine"
     ],
     "components/buzz/TranscriptPills.tsx": [
+      "OpenedSystemBody",
       "TranscriptPills",
       "pillItem"
     ],

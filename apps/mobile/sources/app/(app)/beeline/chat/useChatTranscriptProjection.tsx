@@ -109,7 +109,7 @@ export function useChatTranscriptProjection([
     () => projectActiveTurnStream(messages, activeAgentTurns, isArchived).map((message) => {
       const id = message.relayId ?? message.id;
       if (optimisticDeletes[id])
-        return { ...message, text: 'Deleting message…', deleted: true, isSystemNotice: true };
+        return { ...message, text: 'Deleting message…', deleted: true, isSystemNotice: true, systemEvent: undefined };
       const reactions = optimisticReactions[id];
       return reactions ? { ...message, reactions } : message;
     }),

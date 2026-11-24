@@ -377,6 +377,9 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     item.presentation === 'card'
       ? item.presentation
       : 'message';
+  const systemTranscript = record(item.systemTranscript);
+  const origin = systemTranscript?.origin;
+  const visibility = systemTranscript?.visibility;
   const reference = record(item.reference);
   const reply = record(item.reply);
   const projectedReference =
@@ -406,6 +409,9 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     createdAt: item.createdAt,
     author,
     presentation,
+    ...((origin === 'system' || origin === 'github' || origin === 'scheduler') &&
+      (visibility === 'notice' || visibility === 'card' || visibility === 'hidden')
+      ? { systemTranscript: { origin, visibility } } : {}),
     ...field('deleted', typeof item.deleted === 'boolean' ? item.deleted : undefined),
     ...field('createdAtMs', integer(item.createdAtMs) ? item.createdAtMs : undefined),
     ...field('version', integer(item.version) ? item.version : undefined),

@@ -1,6 +1,6 @@
 import { repositoryMarkColumnsSql } from '../repository-mark.js';
 import { memberPresenceSql } from '../member-presence.js';
-import { messageColumns } from '../message-columns.js';
+import { messageColumns, phoneMessageColumns } from '../message-columns.js';
 import { assetUrl, phoneIdentity as identity, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { roomMessageTagsSql } from '../room-router-read.js';
 import { workingTurnFreshSql } from '../agent-turn-end.js';
@@ -225,7 +225,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
          ), active_turn_rows AS (
            SELECT agent_id,created_at FROM projected_turn_rows WHERE status='working'
          ), transcript_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
+           SELECT ${phoneMessageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              ${replyPreviewSql('m')} reply_preview,
@@ -243,7 +243,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ) m ON true
            JOIN identities i ON i.id=m.author_id
          ), activity_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
+           SELECT ${phoneMessageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              (room.parent_id IS NULL AND EXISTS(SELECT 1 FROM message_bookmarks bookmark
@@ -261,7 +261,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ) m ON true
            JOIN identities i ON i.id=m.author_id
          ), corner_tool_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
+           SELECT ${phoneMessageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              false bookmarked,false feedback_reported,'{}'::text[] tagged_ids
@@ -276,7 +276,7 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
            ) m ON true
            JOIN identities i ON i.id=m.author_id
          ), corner_briefing_rows AS (
-           SELECT ${messageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
+           SELECT ${phoneMessageColumns('m')},i.kind author_kind,i.name author_name,beeline_room_handle(i.id,m.room_id) author_handle,
              i.avatar author_avatar,i.face_id author_face,
              ${reactionIdentitiesSql('m')} reaction_identities,
              false bookmarked,false feedback_reported,'{}'::text[] tagged_ids

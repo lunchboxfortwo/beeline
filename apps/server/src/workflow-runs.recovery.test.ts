@@ -740,6 +740,9 @@ describe('Reproduction 8: recoverable workflow visits', () => {
     expect(await getWorkflowRun(database, ROOM, runId)).toMatchObject({ state: 'sign_off', status: 'failed' });
     expect(await liveWorkflowRun(database, ROOM, 'gated')).toBeUndefined();
     expect((await database.query(`SELECT 1 FROM room_choices WHERE workflow_run_id=$1 AND status='open'`, [runId])).rowCount).toBe(0);
+    const expired = (await runCards(runId)).find(row => row.card.outcome === 'expired')!;
+    expect(expired).toMatchObject({ text: 'Approval timed out for Gated', card: { expiredStepKind: 'gate' } });
+    expect((await database.query('SELECT 1 FROM agent_commands WHERE source_message_id=$1', [expired.id])).rowCount).toBe(0);
     expect(changed).toEqual([ROOM]);
     await assignWorkflowRole(database, await commandFor(WORKER_A, await rootMessage(OWNER)),
       { runId, role: 'approver', targetAgentId: APPROVER });

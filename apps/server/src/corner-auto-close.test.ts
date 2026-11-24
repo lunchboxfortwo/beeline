@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { closeInactiveCorners, nextCornerCloseDelay } from './corner-auto-close.js';
 import { migratedDatabase, insertCornerFacts, type PgliteDatabase } from './test-support.js';
@@ -176,7 +176,7 @@ describe('seven days without a human message', () => {
       const line = (
         await db.query(
           `SELECT room_id,author_id,presentation,text,system_event FROM messages WHERE id=$1`,
-          [`thread-idle-close:${id}`],
+          [createHash('sha256').update(`thread-idle-close:${id}`).digest('hex')],
         )
       ).rows;
       expect(line).toEqual([
@@ -191,7 +191,7 @@ describe('seven days without a human message', () => {
       expect(
         (
           await db.query('SELECT message_id FROM push_outbox WHERE message_id=$1', [
-            `thread-idle-close:${id}`,
+            createHash('sha256').update(`thread-idle-close:${id}`).digest('hex'),
           ])
         ).rowCount,
       ).toBe(0);

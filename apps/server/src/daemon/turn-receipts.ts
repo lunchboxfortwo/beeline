@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { assertMemberTranscript } from '../message-origin.js';
 import { beginAgentSignInCards } from '../agent-sign-in.js';
 import { noteAgentNeedsOwner } from '../agent-needs-owner.js';
 import { type CommittedTurnLiveRow } from '../live.js';
@@ -58,6 +59,7 @@ import { Input,id,seconds } from './values.js';
 
 
   export async function daemonActivity(ctx: DaemonContext, input: Input<'postAgentActivity'>, agentId: string) {
+    assertMemberTranscript(agentId);
     await daemonAccess(ctx, input.roomId, agentId);
     const key = input.cornerActivityKey;
     if (key !== undefined) {

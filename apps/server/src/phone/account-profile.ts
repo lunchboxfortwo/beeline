@@ -1,3 +1,4 @@
+import { anonymizeMessageAuthors } from '../message-origin.js';
 import { assetUrl, type PhoneIdentityRow as IdentityRow } from '../phone-identity.js';
 import { storePersonAvatar } from '../durable-avatar.js';
 import { withdrawMergeApprovalsBy } from '../corner-merge-approval.js';
@@ -190,10 +191,7 @@ export async function phoneDeleteAccount(ctx: PhoneContext, viewerId: string) {
          VALUES ($1,'human',$2,true,NULL) ON CONFLICT (id) DO NOTHING`,
         [DELETED_ACCOUNT_IDENTITY_ID, DELETED_ACCOUNT_NAME],
       );
-      await database.query(`UPDATE messages SET author_id=$2 WHERE author_id=ANY($1)`, [
-        gone,
-        DELETED_ACCOUNT_IDENTITY_ID,
-      ]);
+      await anonymizeMessageAuthors(database, gone, DELETED_ACCOUNT_IDENTITY_ID);
       // Workspace deletion audits outlive both the workspace and its actor.
       // Preserve the event while anonymising attribution like shared messages.
       await database.query(

@@ -26,12 +26,11 @@ import { messageArtifactGroup } from '@/buzz/artifact-group';
 import { TranscriptReference } from '@/components/buzz/TranscriptReference';
 import { ArtifactCard } from '@/components/buzz/ArtifactCard';
 import { CORNER_LABEL } from '@/buzz/vocabulary';
-import { openExternalUrl } from '@/utils/open-external-url';
 import { ActivityTimeline, TurnStepsLine } from '@/components/buzz/ActivityTimeline';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { MessageReactionRoster } from '@/components/buzz/MessageReactionRoster';
 import { parseCornerProposal } from '@/buzz/corner-proposal';
-import { LedgerEntry, LedgerGhostLine, LedgerSystemLine, LedgerSteer, type LedgerByline } from '@/components/buzz/Ledger';
+import { LedgerEntry, LedgerGhostLine, LedgerSteer, type LedgerByline } from '@/components/buzz/Ledger';
 import { NewMessageMaterialize } from '@/components/buzz/MonoHull';
 import { TranscriptCard } from '@/components/buzz/TranscriptCard';
 import { TranscriptLine } from '@/ui/screens/transcript/TranscriptLine';
@@ -483,18 +482,6 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
                 : undefined
             }
             footerNoteTestID={`corner-proposal-footer-${message.id}`}
-          />
-        ) : message.awayWarning ? (
-          <TranscriptCard tier="record" testID="away-warning-card" wrapTitle
-            title="Routines will pause in 1 day"
-            body={message.text} stamp={ledgerStamp(message.timestamp)} />
-        ) : (message.authorIdentity?.pubkey ?? message.pubkey) === SYSTEM_IDENTITY_PUBKEY ? (
-          <LedgerSystemLine
-            id={message.id}
-            text={renderedBody}
-            {...(message.systemEvent ? { event: message.systemEvent } : {})}
-            stamp={ledgerStamp(message.timestamp)}
-            onOpenUrl={(url) => void openExternalUrl(url).catch(() => undefined)}
           />
         ) : askingViewer ? (
           // A decision report to you reads as the agent's question (build spec, thread frame).

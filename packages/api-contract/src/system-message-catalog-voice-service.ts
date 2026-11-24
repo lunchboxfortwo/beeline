@@ -190,6 +190,11 @@ export const SYSTEM_MESSAGE_VOICE_SERVICE = {
     variables: ['target_replace_g'],
   },
 
+  'workflow-runs.workflow': { parts: ['Workflow'], variables: [] },
+  'workflow-runs.approval': { parts: ['Approval'], variables: [] },
+  'workflow-runs.timed-out-for': { parts: ['timed out for'], variables: [] },
+  'workflow-runs.timed-out': { parts: ['timed out'], variables: [] },
+
   'workflow-runs.the-workflow': {
     parts: ['the workflow'],
     variables: [],

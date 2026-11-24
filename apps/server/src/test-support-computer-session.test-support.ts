@@ -409,6 +409,7 @@ export { migrate } from './database.js';
 export { LiveHub } from './live.js';
 export { PhoneService } from './phone-service.js';
 export { createBeelineServer } from './server.js';
-export { backfillComputerObservations,systemLine } from './system-line.js';
+export { backfillComputerObservations } from './migrations/system-lines.js';
+export { systemLine } from './system-line.js';
 export { startQueuedTurn } from './test-fixtures/queued-turn.test-support.js';
 export { PgliteDatabase } from './test-support.js';

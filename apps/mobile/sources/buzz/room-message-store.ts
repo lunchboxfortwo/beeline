@@ -9,7 +9,7 @@ import {
 
 import { anchorCornerMarkers } from '@/buzz/corner-markers';
 import { foldPrLifecycleRuns } from '@/buzz/pr-lifecycle';
-import { foldPillRuns } from '@/buzz/transcript-pills';
+import { foldPillRuns, isHiddenSystemLine } from '@/buzz/transcript-pills';
 import {
   advanceRoomHistoryCursor,
   displacedTailRows,
@@ -690,7 +690,7 @@ export function foldTranscriptRows(
   messages: readonly ChatDisplayMessage[],
   firstNewMessageId: string | null | undefined,
 ): { rows: ChatDisplayMessage[]; hostIds: ReadonlyMap<string, string> } {
-  const anchored = anchorCornerMarkers([...messages]);
+  const anchored = anchorCornerMarkers(messages.filter(message => !isHiddenSystemLine(message)));
   const boundary = boundaryRowIndex(anchored, firstNewMessageId);
   const rows =
     boundary < 0
@@ -716,6 +716,7 @@ export function foldTranscriptRows(
   // shown row before it.
   let previousHost: string | undefined;
   for (const message of messages) {
+    if (isHiddenSystemLine(message)) continue;
     const host = hostIds.get(message.id);
     if (host) previousHost = host;
     else if (previousHost) {

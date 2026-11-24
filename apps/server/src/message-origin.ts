@@ -1,5 +1,7 @@
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
+import { SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
 import type { SqlDatabase } from './database.js';
+import { CommandRefusalError } from './command-refusal.js';
 
 declare const composedBy: unique symbol;
 declare const systemAuthor: unique symbol;
@@ -56,6 +58,13 @@ export function personText(text: string): Composed<'person'> {
   return text as Composed<'person'>;
 }
 
+/** Reserved transcript authors enter through systemLine. */
+export function assertMemberTranscript(authorId: string, presentation?: string): void {
+  if (authorId === SYSTEM_IDENTITY_ID || authorId === SCHEDULE_SCHEDULER_ID || presentation === 'system') {
+    throw new CommandRefusalError('System transcript writes require systemLine', 403);
+  }
+}
+
 /**
  * Insert one ordinary message under a member's name, outside the queue's
  * publication path. An agent's row type-checks only with onboarding or model text.
@@ -69,6 +78,7 @@ export async function insertMemberMessage(db: Pick<SqlDatabase, 'query'>, row: {
   readonly attachments?: unknown;
   readonly ignoreExisting?: boolean;
 }): Promise<boolean> {
+  assertMemberTranscript(row.authorId);
   const inserted = await db.query(
     `INSERT INTO messages(id,room_id,author_id,text,card,attachments,created_at)
      VALUES($1,$2,$3,$4,$5::jsonb,COALESCE($6::jsonb,'[]'::jsonb),clock_timestamp())
@@ -78,4 +88,10 @@ export async function insertMemberMessage(db: Pick<SqlDatabase, 'query'>, row: {
       row.attachments === undefined ? null : JSON.stringify(row.attachments)],
   );
   return Boolean(inserted.rowCount);
+}
+
+/** Account deletion changes attribution without altering the origin of the rows. */
+export async function anonymizeMessageAuthors(db: SqlDatabase, authorIds: string[], replacement: string): Promise<void> {
+  assertMemberTranscript(replacement);
+  await db.query('UPDATE messages SET author_id=$2 WHERE author_id=ANY($1)', [authorIds, replacement]);
 }

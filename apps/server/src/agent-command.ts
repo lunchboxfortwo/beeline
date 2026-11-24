@@ -33,7 +33,7 @@ import { hasSystemReportMention,isChannelMentionToken,typedMentionHandles } from
 import { mcpCommandWakeSql } from './rooms-mcp-events.js';
 import { recordMcpMemberWebhook,queuedMentionKind,recordQueuedMention,noteOfflineConnectors } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
-import { modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
+import { assertMemberTranscript,modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
 /** Sanitizing keeps the text's declared origin. */
 const pgText=<Text extends string>(value:Text)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD') as Text;
@@ -392,7 +392,7 @@ export type QueuedDelivery = {
   sourceRoomId: string; sourceItem: CommandRow; parent?: CommandRow; stopped?: boolean;
   attachments?: readonly Attachment[]; ask?: string; replyTo?: string;
   automatic?: boolean; idleSince?: string; reportStatus?: PrivateCommandPayload['reportStatus'];
-} & ({ authorId: string; text: AgentVoice } | { authorId: SystemAuthorId; text: Composed<'system'> });
+} & { authorId: string; text: AgentVoice };
 export type QueuedOrder = {
   /** Only an agent orders, in its model's words. */
   kind: 'order'; roomId: string; authorId: string; agent?: string; text: AgentVoice;
@@ -416,6 +416,9 @@ export function queueMessage(db: SqlDatabase, input: QueuedDelivery): Promise<{ 
 export function queueMessage(db: SqlDatabase, input: QueuedOrder): Promise<CommandRow | OrderFeedback>;
 export function queueMessage(db: SqlDatabase, input: DeliveryInput): Promise<CommandRow | undefined>;
 export async function queueMessage(database: SqlDatabase, raw: QueuedPost | QueuedOrder | QueuedDelivery | DeliveryInput): Promise<QueuedPostReceipt | CommandRow | OrderFeedback | { id: string; createdAt: number; delivered: boolean; receipt: string } | undefined> {
+  if ('kind' in raw && (raw.kind === 'post' || raw.kind === 'delivery')) {
+    assertMemberTranscript(raw.authorId, raw.kind === 'post' ? raw.presentation : undefined);
+  }
   // PostgreSQL text/jsonb cannot represent NUL or isolated UTF-16 surrogates.
   raw={...raw,roomId:raw.roomId.toLowerCase()};
   const input = 'text' in raw ? { ...raw, text: pgText<typeof raw.text>(raw.text) } as typeof raw : raw.privatePayload
@@ -486,7 +489,7 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
     if (!chat || !chat.source_member || order && named && !candidates.length || actor && actor !== SYSTEM_IDENTITY_ID && !audience.some(member => member.id === actor) ||
         recipient && !audience.some(member => member.id === recipient && member.kind === 'agent'))
       refuseMessageMembership(delivery ? 'commander is no longer a member of the return address' : undefined);
-    if (post && input.authorId !== SYSTEM_IDENTITY_ID && chat.direct_participants?.includes(SYSTEM_IDENTITY_ID))
+    if (post && chat.direct_participants?.includes(SYSTEM_IDENTITY_ID))
       throw wall('credentials', 'this is a read-only system thread; only @system may post here (access denied)');
     if (chat.archived || (delivery || origin) && chat.source_archived || 'stopped' in input && input.stopped)
       refuseStoppedMessage(Boolean(chat.archived || (delivery || origin) && chat.source_archived));
@@ -535,9 +538,8 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
     return insertAgentCommand(db, command!, chat);
   });
 }
-/** A System-authored report to a person posts here under the System identity. */
-type PublicPost = Omit<QueuedPost, 'text'> & { text: MemberText | Composed<'system'> };
-async function postMessage(db: SqlDatabase, input: PublicPost, chat: Chat): Promise<QueuedPostReceipt> {
+async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Promise<QueuedPostReceipt> {
+  assertMemberTranscript(input.authorId, input.presentation);
   const author = chat.members.find(member => member.id === input.authorId);
   input = author?.kind === 'agent' ? { ...input, text: modelText(repairAgentPost(input.text).text) } : input;
   if (author?.kind === 'agent' && !input.text.trim() && !input.attachments?.length) return {

@@ -332,8 +332,8 @@ export class VoiceService {
     await restateSystemLine(db, row.message_id, { subject: { kind: 'system', name: row.end_reason && row.end_reason !== 'silence' ? systemMessage("voice-service.call") : systemMessage("voice-service.voice-call") },
       verb: row.ended_at ? systemMessage("voice-service.ended") : systemMessage("voice-service.started"),
       ...(row.ended_at ? { consequence: voiceDuration((row.ended_at.getTime() - row.started_at.getTime()) / 1000) + (row.end_reason === 'silence' ? systemMessage("voice-service.no-one-spoke-for-60s") : row.end_reason ? systemMessage("voice-service.separator", row.end_reason) : '') } : {}) },
-      call as unknown as Record<string, unknown>);
-    if (row.ended_at) await db.query(`UPDATE messages SET presentation=$2,created_at=$3 WHERE id=$1`, [row.message_id, 'system', row.ended_at]);
+      call as unknown as Record<string, unknown>,
+      row.ended_at ? { presentation: 'system', createdAt: row.ended_at } : undefined);
   }
 
   async leave(callId: string, humanId: string, disconnected = false, sessionId?: string, inactivity?: { owner: string; stillInactive(): boolean; ended: boolean }, runtimeOwner?: string): Promise<void> {
@@ -444,7 +444,8 @@ export class VoiceService {
           AND c.id=$4 AND c.room_id=m.room_id AND c.ended_at IS NULL
           AND c.runtime_owner=$6 AND c.runtime_until>now()
           AND p.call_id=c.id AND p.identity_id=m.author_id AND p.left_at IS NULL
-          AND m.presentation='message' AND NOT EXISTS (SELECT 1 FROM voice_orders o WHERE o.source_message_id=m.id)`,
+          AND m.presentation='message' AND m.system_transcript IS NULL AND m.system_event IS NULL
+          AND NOT EXISTS (SELECT 1 FROM voice_orders o WHERE o.source_message_id=m.id)`,
         [sourceId, roomId, humanId, callId, `@${agent.handle} ${text.replace(/@/g, '')}`, leaseOwner]);
       if (!changed.rowCount) throw new Error('voice call access denied');
     });

@@ -1,3 +1,5 @@
+import { SCHEDULE_SCHEDULER_ID } from '@beeline/api-contract/scheduled-prompts';
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { IMPLEMENTER_BLOCKS_SCHEMA } from './implementer-blocks.js';
 import { agentReportSql, askingMessageSql, needsYouAnsweredSql, questionForSql, questionRecipientSql, settledMarkReasonSql, supersedesSql, viewerMemberSql } from './needs-you.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
@@ -176,6 +178,7 @@ DO $blocks$ BEGIN
           AND (newer.created_at,newer.id)>(command.created_at,command.id)) THEN 'superseded' END
       FROM agent_commands command JOIN rooms room ON room.id::text=command.private_payload->>'originCornerId'
       WHERE command.private_payload->>'kind'='report' AND command.private_payload->>'reportStatus' IN ('blocked','needs-decision')
+        AND command.private_payload->>'authorId' NOT IN ('${SYSTEM_IDENTITY_ID}','${SCHEDULE_SCHEDULER_ID}')
         AND command.private_payload->>'automatic' IS DISTINCT FROM 'true' AND room.archived_at IS NULL
       ON CONFLICT(id) DO NOTHING;
     UPDATE messages m SET block_corner_id=room.id FROM rooms room,corner_facts fact

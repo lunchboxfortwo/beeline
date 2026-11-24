@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { migrate, PostgresDatabase } from './database.js';
@@ -62,7 +62,7 @@ describe.skipIf(!url)('idle close across server machines', () => {
     ]);
     expect(results.reduce((a, b) => a + b, 0)).toBe(1);
     expect(
-      (await first.query('SELECT id FROM messages WHERE id=$1', [`thread-idle-close:${id}`]))
+      (await first.query('SELECT id FROM messages WHERE id=$1', [createHash('sha256').update(`thread-idle-close:${id}`).digest('hex')]))
         .rowCount,
     ).toBe(1);
     expect(cleanup.deleteCornerBranch).toHaveBeenCalledTimes(1);
@@ -144,7 +144,7 @@ describe.skipIf(!url)('idle close across server machines', () => {
   it('rolls back archival when the quiet notice cannot commit and retries exactly once', async () => {
     const id = await thread();
     await first.query(`CREATE FUNCTION reject_idle_notice() RETURNS trigger LANGUAGE plpgsql AS $$
-      BEGIN IF NEW.id LIKE 'thread-idle-close:%' THEN RAISE EXCEPTION 'notice unavailable'; END IF; RETURN NEW; END $$;
+      BEGIN IF NEW.card_type='thread-idle-close' THEN RAISE EXCEPTION 'notice unavailable'; END IF; RETURN NEW; END $$;
       CREATE TRIGGER reject_idle_notice BEFORE INSERT ON messages FOR EACH ROW EXECUTE FUNCTION reject_idle_notice();`);
     try {
       await expect(closeInactiveCorners(first, cleanup)).rejects.toThrow('notice unavailable');
@@ -152,7 +152,7 @@ describe.skipIf(!url)('idle close across server machines', () => {
         { archived_at: null },
       ]);
       expect(
-        (await first.query('SELECT id FROM messages WHERE id=$1', [`thread-idle-close:${id}`]))
+        (await first.query('SELECT id FROM messages WHERE id=$1', [createHash('sha256').update(`thread-idle-close:${id}`).digest('hex')]))
           .rowCount,
       ).toBe(0);
     } finally {

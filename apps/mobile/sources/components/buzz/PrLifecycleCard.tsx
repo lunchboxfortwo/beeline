@@ -1,32 +1,27 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { XStack } from 'tamagui';
 import { Inked, T } from '@/ui/grammar';
 import { CornerDownRight, type LucideProps } from 'lucide-react-native';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
-import { lifecycleSummary, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
+import { type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
 import { TranscriptNavigationRow } from './IndexRow';
-import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
+import { LedgerLogGroup } from './LedgerDisclosure';
 
 interface NotificationLifecycleCardProps {
   message: ChatDisplayMessage;
   testID?: string;
   cornerId?: string;
-  /** Hang corner rows beneath their source message. */
-  anchored?: boolean;
   onOpenCorner(cornerId: string): void;
   onOpenUrl(url: string): void;
 }
-/** One collapsed steps-style row; expansion preserves every posted event. */
+/** The records inside an opened lifecycle pill. */
 export const NotificationLifecycleCard = React.memo(function NotificationLifecycleCard({
   message,
   testID,
   cornerId,
-  anchored = false,
   onOpenCorner,
   onOpenUrl,
 }: NotificationLifecycleCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [showAll, setShowAll] = useState(false);
   // Inside a corner a check's corner target is the corner already open, so the
   // whole check row opens the check instead.
   const items = message.notificationLifecycleRun!.items.map((item) => ({
@@ -36,27 +31,12 @@ export const NotificationLifecycleCard = React.memo(function NotificationLifecyc
         ? item.cornerId === cornerId ? undefined : item.cornerId
         : item.cornerId ?? (item.kind === 'pull-request' ? cornerId : undefined),
   }));
-  const summary = lifecycleSummary(items);
   return (
-    <LedgerLogGroup
-      testID={testID ?? `notification-run-${message.id}`}>
-      {items.length > 1 ? <LedgerDisclosure expanded={expanded}
-        onPress={() => { if (expanded) setShowAll(false); setExpanded(value => !value); }} accessibilityLabel={summary}
-        accessibilityState={{ expanded }} rowTestID={`notification-run-expand-${message.id}`}>
-        {summary.split(' · ').map((part, index) => <T v="meta" key={index} color={/fail/i.test(part) ? 'needsYou' : 'secondary'}>
-          {index ? ' · ' : ''}{part}
-        </T>)}
-      </LedgerDisclosure> : null}
-      {items.length === 1 || expanded ? <>
-        {(showAll || items.length <= 3 ? items : items.slice(0, 2)).map((item, index) => (
-          <RepositoryLifecycleRow key={item.id} item={item} divider={index > 0}
-            testID={anchored ? `corner-opened-marker-${item.cornerId}` : undefined}
-            onOpenCorner={onOpenCorner} onOpenUrl={onOpenUrl} />
-        ))}
-        {!showAll && items.length > 3 ? <LedgerDisclosure expanded={false} accessibilityState={{ expanded: false }}
-          accessibilityLabel={`${items.length - 2} more events`} onPress={() => setShowAll(true)}
-          rowTestID={`notification-run-more-${message.id}`}>{items.length - 2} more</LedgerDisclosure> : null}
-      </> : null}
+    <LedgerLogGroup testID={testID ?? `notification-run-${message.id}`}>
+      {items.map((item, index) => (
+        <RepositoryLifecycleRow key={item.id} item={item} divider={index > 0}
+          onOpenCorner={onOpenCorner} onOpenUrl={onOpenUrl} />
+      ))}
     </LedgerLogGroup>
   );
 });
