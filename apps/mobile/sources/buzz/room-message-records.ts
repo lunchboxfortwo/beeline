@@ -116,7 +116,9 @@ export function roomTurns(scope: string | null, roomId: string): readonly RoomVi
     .slice(0, ROOM_VIEW_AGENT_LIMIT);
 }
 
-function accept(room: RoomRecords, incoming: RoomViewMessage, shared: boolean, complete = true): boolean {
+function accept(
+  room: RoomRecords, incoming: RoomViewMessage, shared: boolean, complete = true, listCopy = false,
+): boolean {
   const held = room.messages.get(incoming.id);
   const upgrading = complete && room.incomplete.delete(incoming.id);
   if (held === incoming || (held && (held.version ?? 0) > (incoming.version ?? 0))) return false;
@@ -125,8 +127,18 @@ function accept(room: RoomRecords, incoming: RoomViewMessage, shared: boolean, c
   if (held && !shared && !upgrading && (held.version ?? 0) === (incoming.version ?? 0) &&
     (readAt.get(held) ?? 0) > readAt.get(incoming)!) return false;
   const feedbackReported = Boolean(held?.feedbackReported || incoming.feedbackReported);
-  const next = feedbackReported === Boolean(incoming.feedbackReported)
-    ? incoming : { ...incoming, feedbackReported };
+  // Only the chat list's latest-message copy leaves the reply preview out; keep
+  // the one the Room read gave for the same original. Any other read is
+  // authoritative, so a missing preview there clears it (the original was deleted).
+  const replyPreview = listCopy && !incoming.replyPreview && held?.replyPreview && incoming.reply &&
+    incoming.reply.eventId === held.reply?.eventId ? held.replyPreview : undefined;
+  const next = feedbackReported === Boolean(incoming.feedbackReported) && !replyPreview
+    ? incoming
+    : {
+      ...incoming,
+      ...(feedbackReported ? { feedbackReported } : {}),
+      ...(replyPreview ? { replyPreview } : {}),
+    };
   // Identity selection can recreate an unchanged row when turn subscribers refresh.
   // Keep its record stable so the layout effect does not notify those subscribers again.
   if (held && equal(held, next)) return false;
@@ -291,7 +303,7 @@ export const roomSurfaceRecords = {
             room.gapBefore = latest.id;
             room.tailIds = [latest.id];
           }
-          changed = accept(room, message, false, complete);
+          changed = accept(room, message, false, complete, true);
           if (!complete) room.incomplete.add(message.id);
           selectLatest(room, message);
           if (indexedLatest) room.latestId = latest.id;

@@ -10,6 +10,7 @@ import { mediaIdFromUrl } from '../media-ttl.js';
 import { readVaultSaveCard } from '@beeline/api-contract/phone';
 import { MemberRow, RoomHeaderRow, AttachmentFacts, MessageRow, RoomScheduleRow } from './types.js';
 import { unix } from './values.js';
+import { visibleMessageSql } from '../read-cursor.js';
 
 
 /** A held presence belongs to a live helper connection and does not age out. */
@@ -210,6 +211,7 @@ export function projectedMessage(
   const reactionIdentityById = new Map(
     (row.reaction_identities ?? []).map((reactor) => [reactor.id, reactor]),
   );
+  const replyPreview = projectedReplyPreview(row.reply_preview, publicOrigin);
   const base: RoomViewMessage = {
     id: row.id,
     // A deleted message stays in its place as a system line (`deletedMessageEvent`).
@@ -289,6 +291,7 @@ export function projectedMessage(
           },
         }
       : {}),
+    ...(row.reply_to_message_id && replyPreview ? { replyPreview } : {}),
     ...(row.activity ? { activity: row.activity as NonNullable<RoomViewMessage['activity']> } : {}),
     ...(row.durable_fact ? { durableFact: row.durable_fact } : {}),
     ...(row.system_event ? { systemEvent: row.system_event } : {}),
@@ -395,6 +398,52 @@ export function projectedMessage(
     default:
       return base;
   }
+}
+
+
+const REPLY_PREVIEW_LIMIT = 280;
+/** Enough text to find the first line without sending a long message whole. */
+const REPLY_PREVIEW_READ_LIMIT = 2000;
+
+/** The first non-empty line of the original, else its first file's name. */
+function projectedReplyPreview(
+  preview: MessageRow['reply_preview'],
+  publicOrigin: string,
+): RoomViewMessage['replyPreview'] | undefined {
+  if (!preview) return undefined;
+  const line = preview.text.split('\n').map((part) => part.trim()).find(Boolean);
+  const text = line ?? preview.attachment_name?.trim();
+  if (!text) return undefined;
+  return { author: identity(preview, publicOrigin), text: text.slice(0, REPLY_PREVIEW_LIMIT) };
+}
+
+
+/**
+ * The replied-to message's author and text for one message row, so a quote
+ * shows even when the original is outside the page. One primary-key lookup
+ * per reply. Only a same-Room original that is not deleted, not activity
+ * without a durable fact, and shown by the transcript (`visibleMessageSql`) is read;
+ * anything else stays NULL.
+ */
+export function replyPreviewSql(messageAlias: string): string {
+  return `(SELECT jsonb_build_object(
+      'id',original_author.id,
+      'kind',original_author.kind,
+      'name',original_author.name,
+      'handle',beeline_room_handle(original_author.id,original.room_id),
+      'avatar',original_author.avatar,
+      'face_id',original_author.face_id,
+      'text',left(original.text,${REPLY_PREVIEW_READ_LIMIT}),
+      'attachment_name',original.attachments->0->>'name'
+    )
+    FROM messages original
+    JOIN identities original_author ON original_author.id=original.author_id
+    WHERE ${messageAlias}.reply_to_message_id IS NOT NULL
+      AND original.id=${messageAlias}.reply_to_message_id
+      AND original.room_id=${messageAlias}.room_id
+      AND original.deleted_at IS NULL
+      AND (original.presentation<>'activity' OR original.durable_fact IS NOT NULL)
+      AND ${visibleMessageSql('original')})`;
 }
 
 
