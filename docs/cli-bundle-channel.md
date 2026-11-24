@@ -32,29 +32,20 @@ alone does not change an already running service. Firstmate applies this host
 configuration after merge; this PR does not touch the host. Removing both
 settings returns to latest on the next ordinary update reconciliation.
 
-The R2 prefixes `dl/` (latest) and `dl/next/` retain independently validated
-helper bytes; the rolling GitHub prereleases `helper-update-channel` and
-`helper-update-channel-next` retain secondary copies.
-The route selects the channel from the path, independently of the static
-website deployment. A next release never republishes the stable website.
-Next bundles carry an rc version,
-for example `v0.1.184-rc.3`. Latest promotion
-rebuilds/stamps bundles from that rc commit with `v0.1.184` and publishes them
-to `/dl/manifest.json`; the next manifest keeps serving the rc. Ordinary helper
-notices merely trigger a manifest check; each helper resolves its own channel.
-The new helper rechecks even when latest promotes a build already announced
-for `next`. Helpers predating this change can suppress that second notice:
-reconnect or run `npx usebeeline@latest update` once after the first latest
-promotion if necessary.
-The CLI's `next` npm tag is separate from these authoritative bundle channels;
-`npx usebeeline@latest update` continues to recover using the configured bundle
-manifest, independently of npm processing. The rc npm package publishes with `--tag next`;
-the rebuilt final package uses npm's default latest tag through OIDC, without
-an npm token or a dist-tag operation.
+Next publishes verified rc bundles to R2 under `dl/next/` and an immutable
+`dl/releases/<rc>/` prefix. Latest promotion points `/dl/manifest.json` and
+its companion downloads at that same immutable prefix. Both channels serve
+the original rc version, for example `v0.1.184-rc.3`.
+The next and pre-rollout latest rolling GitHub prereleases retain their
+secondary copies. The public download route is independent of the website.
+
+The CLI's npm package publishes with `--tag next`. Promotion moves npm
+`latest` to the same package with OIDC. `npx usebeeline@latest update`
+continues to use the configured helper download channel.
 
 ## Release authority and durable storage
 
-For every new next rc and latest promotion,
+For every new next candidate,
 `.github/actions/daemon-leg/action.yml` combines install-verified native
 `linux-x64`, `darwin-arm64`, and `darwin-x64` bundles under the release's exact
 version and source SHA. Linux builds on the standard hosted `ubuntu-22.04` runner, alongside native
@@ -74,9 +65,9 @@ the public download URL. The legacy script names are retained. The helper job
 has no Pages permission, environment, artifact upload or deployment wait.
 
 Publication uploads every archive, checksum, recovery bootstrap, Mac build input
-and manifest to the `beeline-downloads` R2 bucket under `dl/` (latest) or
-`dl/next/` (next), using the same client and Cloudflare credentials as desktop
-publication. The Worker streams `https://downloads.usebeeline.app/dl/...`
+and manifest to the `beeline-downloads` R2 bucket under `dl/next/` and the
+immutable rc prefix, using the same client and Cloudflare credentials as desktop
+publication. Promotion updates the stable download pointer only. The Worker streams `https://downloads.usebeeline.app/dl/...`
 without credentials and bypasses caches for these mutable channel URLs.
 The rolling `helper-update-channel` and `helper-update-channel-next` GitHub
 prereleases retain secondary copies for authenticated build carry/downloads;
@@ -86,8 +77,7 @@ if publication is interrupted; rerunning the helper leg repairs a partial upload
 Each destination receives its manifest last, after all other channel files.
 
 The helper job serializes channel publication. The website job separately
-holds `usebeeline-pages` while deploying only static marketing files,
-associations and installers. It ignores checkout `apps/site/dl/` and never downloads
+holds `usebeeline-pages` while staging marketing files and associations. It ignores checkout `apps/site/dl/` and never downloads
 or republishes helper archives. Website deployment runs when selected even
 when the helper is also selected, since the helper no longer deploys the site.
 

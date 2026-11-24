@@ -87,7 +87,10 @@ test('invalid credentials or channel fail before any publication', async t => {
 
 test('preview deployment cannot install the canonical download route', async () => {
   const config = JSON.parse(await readFile('apps/infra/helper-downloads/wrangler.jsonc', 'utf8'));
-  assert.deepEqual(config.routes, [{ pattern: 'usebeeline.app/dl/*', zone_name: 'usebeeline.app' }]);
+  assert.deepEqual(config.routes, [
+    { pattern: 'usebeeline.app/dl/*', zone_name: 'usebeeline.app' },
+    { pattern: 'downloads.usebeeline.app/latest/*', zone_name: 'usebeeline.app' },
+  ]);
   assert.equal(config.workers_dev, false);
   assert.deepEqual(config.env.preview.routes, []);
   assert.equal(config.env.preview.workers_dev, true);
@@ -104,6 +107,7 @@ test('both existing channel paths stream R2 objects without forwarding credentia
       }), async (url, options) => {
         const target = new URL(url);
         assert.equal(target.origin, 'https://downloads.usebeeline.app');
+        if (target.pathname === '/latest-release.json') return new Response(null, { status: 404 });
         assert.equal(target.pathname, `/dl/${channel}${file}`);
         assert.ok(target.searchParams.has('channel_check'));
         assert.equal(options.redirect, 'follow');
@@ -125,7 +129,8 @@ test('both existing channel paths stream R2 objects without forwarding credentia
 });
 
 test('HEAD preserves metadata; upstream absence and failure never fall back to stale Pages', async () => {
-  const response = await serveDownloads(request('/dl/manifest.json', { method: 'HEAD' }), async (_url, options) => {
+  const response = await serveDownloads(request('/dl/manifest.json', { method: 'HEAD' }), async (url, options) => {
+    if (new URL(url).pathname === '/latest-release.json') return new Response(null, { status: 404 });
     assert.equal(options.method, 'HEAD');
     return new Response(null, { headers: { 'Content-Length': '100', ETag: 'current' } });
   });
@@ -195,7 +200,8 @@ test('helper promote dry run publishes and reads both exact channels through the
       });
       await run(github, {}, { repo: { owner: 'Beeline-Work', repo: 'beeline' } });
       const prefix = channel === 'next' ? 'dl/next/' : 'dl/';
-      assert.deepEqual(uploads.splice(0), files.map(file => `${prefix}${file}`));
+      const prefixes = channel === 'next' ? [`dl/releases/${version}/`, prefix] : [prefix];
+      assert.deepEqual(uploads.splice(0), prefixes.flatMap(path => files.map(file => `${path}${file}`)));
       const backup = releases.get(`helper-update-channel${channel === 'next' ? '-next' : ''}`);
       assert.deepEqual(backup.assets.map(asset => asset.name), files);
       for (const asset of backup.assets) assert.deepEqual(assets.get(asset.id), objects.get(`${prefix}${asset.name}`));
@@ -214,6 +220,12 @@ test('helper promote dry run publishes and reads both exact channels through the
         expectedManifest: expected, workDir: join(directory, 'proof') });
       assert.equal(result.version, expected.version);
     }
+    const [, promoted, bytes] = channelManifests.at(-1);
+    objects.set('latest-release.json', Buffer.from(JSON.stringify({ version: promoted.version })));
+    assert.deepEqual(await (await worker.fetch(request('/dl/manifest.json'))).json(), promoted);
+    assert.deepEqual(Buffer.from(await (await worker.fetch(request('/dl/beeline-linux-x64.tar.gz'))).arrayBuffer()), bytes);
+    objects.set(`${promoted.version}/Beeline-universal.dmg`, Buffer.from('already staged DMG'));
+    assert.equal(await (await worker.fetch(new Request('https://downloads.usebeeline.app/latest/Beeline-universal.dmg'))).text(), 'already staged DMG');
     const workflow = await yaml('.github/workflows/unified-release.yml');
     const promote = workflow.jobs.helper.steps.find(step => step.uses === './.github/actions/daemon-leg' && step.with?.manifest_url);
     assert.equal(promote.with.phase, "${{ needs.helper_linux.outputs.shipped == 'true' && 'prove' || 'promote' }}");

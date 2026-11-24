@@ -10,7 +10,7 @@ export function createR2Uploader({ token = process.env.CLOUDFLARE_R2_TOKEN,
   if (!token) throw new Error('CLOUDFLARE_R2_TOKEN is required for R2 publication');
   if (!/^[a-f0-9]{32}$/.test(accountId || '')) throw new Error('CLOUDFLARE_ACCOUNT_ID must be a Cloudflare account ID');
   return async (prefix, file, path) => {
-    const key = `${prefix}/${encodeURIComponent(file)}`;
+    const key = [prefix, encodeURIComponent(file)].filter(Boolean).join('/');
     const body = createReadStream(path);
     try {
       const response = await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${BUCKET}/objects/${key}`, {

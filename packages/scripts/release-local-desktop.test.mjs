@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ import { verifyDesktopUpdateManifest } from './desktop-update.mjs';
 import { localHooks, parseArguments } from './release-local.mjs';
 import { releaseArguments, releaseSequence } from './release.mjs';
 import { LocalDelivery } from './release-local-delivery.mjs';
-import { desktopBuildEnvironment, macSigningTools } from './release-local-desktop-worker.mjs';
+import { desktopBuildEnvironment } from './release-local-desktop-worker.mjs';
 import { WindowsGuest } from './release-local-windows.mjs';
 import { Processes } from './release-local-process.mjs';
 
@@ -68,31 +68,12 @@ test('a full staged set has one desktop version, four platform entries and verif
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('promotion builds desktop unless explicitly told to carry', async () => {
-  assert.deepEqual(releaseArguments(['--no-store', '--desktop-mode', 'carry']), { noStore: true, desktopMode: 'carry' });
+test('candidate delivery stages desktop and promotion accepts no desktop overrides', async () => {
+  assert.throws(() => releaseArguments(['--promote', '--dispatched-by', '{}', '--desktop-mode', 'build']), /Usage/);
   assert.equal(parseArguments(['--dry-run', '--leg', 'desktop', '--release-version', 'v1.2.3']).leg, 'desktop');
-  assert.throws(() => parseArguments(['--desktop-mode', 'partial']), /desktop-mode/);
-  for (const mode of [undefined, 'carry']) {
-    const calls = [];
-    await releaseSequence({ source: '/source', sha: 'a'.repeat(40), directory: '/state', version: 'v1.2.3', desktopMode: mode }, async args => { calls.push(args); });
-    assert.deepEqual(calls.map(args => args['desktop-mode']), [mode || 'build']);
-  }
-});
-
-test('build planning preserves the workflow-assigned desktop version; carry restores the whole published version', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'desktop-plan-'));
-  try {
-    const { mkdirSync } = await import('node:fs');
-    mkdirSync(join(directory, 'previous'));
-    writeFileSync(join(directory, 'previous/release.json'), JSON.stringify({ components: { desktop: { version: 'v1.2.3', desktopVersion: '0.2.165' } } }));
-    for (const mode of ['build', 'carry']) {
-      const result = { outputs: { run_desktop: 'true', desktop_version: '0.2.166' } };
-      await localHooks(directory, { log() {} }).afterStep({ step: { name: 'Produce the inspectable release plan' }, result,
-        context: { runner: { temp: directory } }, engine: { variables: { desktopMode: mode } } });
-      assert.equal(result.outputs.run_desktop, mode === 'build' ? 'true' : 'false');
-      assert.equal(result.outputs.desktop_version, mode === 'build' ? '0.2.166' : '0.2.165');
-    }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
+  const calls = [];
+  await releaseSequence({ source: '/source', sha: 'a'.repeat(40), directory: '/state' }, async args => calls.push(args));
+  assert.equal(calls[0]['desktop-mode'], 'build');
 });
 
 test('a skipped Windows build carries the published installers and omits Windows from the new manifest', async () => {
@@ -151,52 +132,9 @@ test('private-HOME native builds do not forward release authorities into their b
   assert.equal(mac.CLOUDFLARE_R2_TOKEN, undefined);
 });
 
-test('only Apple signing tools receive the operator HOME, preserving arguments and failures', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'desktop-signing-home-'));
-  try {
-    const fake = join(directory, 'os-tool');
-    writeFileSync(fake, `#!${process.execPath}\nconsole.log(JSON.stringify({home:process.env.HOME,xdg:process.env.XDG_CONFIG_HOME,args:process.argv.slice(2)}));process.exit(process.argv.includes('--fail')?7:0);\n`, { mode: 0o700 });
-    const bin = macSigningTools(join(directory, 'bin'), { security: fake, codesign: fake });
-    const env = { ...process.env, HOME: '/private-build-home', XDG_CONFIG_HOME: '/private-config', BEELINE_OPERATOR_HOME: '/operator-home' };
-    const result = JSON.parse(execFileSync(join(bin, 'codesign'), ['--sign', 'identity with spaces'], { env, encoding: 'utf8' }));
-    assert.deepEqual(result, { home: '/operator-home', xdg: '/private-config', args: ['--sign', 'identity with spaces'] });
-    assert.equal(env.HOME, '/private-build-home');
-    assert.throws(() => execFileSync(join(bin, 'security'), ['--fail'], { env, stdio: 'pipe' }), error => error.status === 7);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
 test('guest-agent failures report the provider reason without leaking release credentials', async () => {
   const processes = new Processes({ token: 'private-test-token' }, () => {});
   processes.run = async () => JSON.stringify({ transport_error: 'guest synchronization failed private-test-token' });
   const guest = new WindowsGuest(processes, '/task/windows');
   await assert.rejects(guest.request({ command: 'guest-ping' }), error => /guest synchronization failed \*\*\*/.test(error.message) && !error.message.includes('private-test-token'));
-});
-
-test('Apple build launchers share signing HOME with native children and avoid adapter recursion', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'apple-build-home-'));
-  try {
-    const bin = macSigningTools(join(directory, 'bin'));
-    for (const name of ['security', 'codesign', 'xcodebuild', 'xcrun', 'fastlane']) {
-      assert.ok(existsSync(join(bin, name)), `${name} must enter the operator signing environment`);
-    }
-    const native = join(directory, 'native');
-    mkdirSync(native);
-    const command = join(native, 'fastlane');
-    writeFileSync(command, `#!${process.execPath}
-const {execFileSync}=require('node:child_process');
-console.log(JSON.stringify({home:process.env.HOME,path:process.env.PATH,cache:process.env.NPM_CONFIG_CACHE,config:process.env.NPM_CONFIG_USERCONFIG,args:process.argv.slice(2),child:execFileSync(process.execPath,['-e','process.stdout.write(process.env.HOME)'],{encoding:'utf8'})}));
-`, { mode: 0o700 });
-    macSigningTools(bin, { fastlane: 'fastlane' });
-    const alias = join(directory, 'alias');
-    symlinkSync(bin, alias);
-    const env = { ...process.env, HOME: '/private-build-home', BEELINE_OPERATOR_HOME: '/operator-home', NPM_CONFIG_CACHE: '', NPM_CONFIG_USERCONFIG: '', PATH: `${alias}:${bin}:${native}:${process.env.PATH}` };
-    const result = JSON.parse(execFileSync(join(bin, 'fastlane'), ['gym', 'identity with spaces'], { env, encoding: 'utf8', timeout: 5000 }));
-    assert.equal(result.home, '/operator-home');
-    assert.equal(result.child, '/operator-home');
-    assert.equal(result.cache, '/private-build-home/.npm');
-    assert.equal(result.config, '/private-build-home/.npmrc');
-    assert.deepEqual(result.args, ['gym', 'identity with spaces']);
-    assert.equal(result.path, `${native}:${process.env.PATH}`);
-    assert.equal(env.HOME, '/private-build-home');
-  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

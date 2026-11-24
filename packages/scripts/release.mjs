@@ -5,40 +5,24 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { promotionSource } from './release-channel.mjs';
 import { loadEnvironment } from './release-local-process.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 export function releaseArguments(argv) {
   const options = {};
-  const usage = 'Usage: node packages/scripts/release.mjs [--promote --dispatched-by <JSON> [--store-track production]] [--no-store] [--skip-full-checks <owner message id>] [--desktop-mode build|carry] [--mac-helpers build|carry]';
+  const usage = 'Usage: node packages/scripts/release.mjs [--promote --dispatched-by <JSON>] [--skip-full-checks <owner message id>] [--desktop-mode build] [--mac-helpers build|carry]';
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--skip-full-checks' && argv[i + 1]?.trim() && !argv[i + 1].startsWith('--')) options.skipFullChecks = argv[++i].trim();
     else if (argv[i] === '--promote') options.promote = true;
-    else if (argv[i] === '--store-track' && argv[i + 1] === 'production') { options.store = true; i++; }
     else if (argv[i] === '--no-store') options.noStore = true;
-    else if (argv[i] === '--desktop-mode' && ['build', 'carry'].includes(argv[i + 1])) options.desktopMode = argv[++i];
+    else if (argv[i] === '--desktop-mode' && argv[i + 1] === 'build') options.desktopMode = argv[++i];
     else if (argv[i] === '--mac-helpers' && ['build', 'carry'].includes(argv[i + 1])) options.macHelpers = argv[++i];
     else if (argv[i] === '--dispatched-by' && i + 1 < argv.length) options.dispatchedBy = JSON.parse(argv[++i]);
     else throw new Error(usage);
   }
-  if ((options.promote && (!options.dispatchedBy || options.skipFullChecks)) ||
-      (options.store && (!options.promote || options.noStore))) throw new Error(usage);
+  if (options.promote && (!options.dispatchedBy || options.skipFullChecks || options.desktopMode || options.macHelpers)) throw new Error(usage);
   return options;
-}
-
-// Store binaries are needed when a platform's pinned native runtime is not the
-// newest one live in its production store: phones on the store build cannot
-// take an OTA for the new runtime. An unreadable store counts as needed.
-export function pinnedRuntimes(appConfig) {
-  const pin = platform => new RegExp(`\\b${platform}: \\{[^]*?runtimeVersion: runtimeVersionOverride \\|\\| "(\\d+)"`).exec(appConfig)?.[1];
-  return { android: pin('android'), ios: pin('ios') };
-}
-
-export function storeReleaseNeeded(pins, stores) {
-  return ['android', 'ios'].some(platform => stores[platform]?.status !== 'readable'
-    || stores[platform].latestRuntimeVersion !== pins[platform]);
 }
 
 export function localAttribution({ username = userInfo().username || 'firstmate', now = new Date() } = {}) {
@@ -60,19 +44,18 @@ export function acquireReleaseLock(lock, directory, { alive = pid => {
   return () => rmSync(lock, { recursive: true });
 }
 
-export function prepareReleaseSource(repository, directory, run = execFileSync, selectPromotion) {
+export function prepareReleaseSource(repository, directory, run = execFileSync) {
   const git = (args, cwd = repository) => run('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const source = join(directory, 'source');
   const origin = git(['remote', 'get-url', 'origin']);
   git(['clone', '--quiet', '--no-checkout', '--no-hardlinks', repository, source]);
   git(['remote', 'set-url', 'origin', origin], source);
   git(['fetch', '--tags', 'origin'], source);
-  const promotion = selectPromotion?.(source);
-  const sha = promotion?.sourceSha ?? git(['rev-parse', 'refs/remotes/origin/main'], source);
+  const sha = git(['rev-parse', 'refs/remotes/origin/main'], source);
   git(['merge-base', '--is-ancestor', sha, 'refs/remotes/origin/main'], source);
   git(['checkout', '--quiet', '--detach', sha], source);
   git(['branch', '--force', 'main', sha], source);
-  return { source, sha, version: promotion?.version };
+  return { source, sha };
 }
 
 export async function readOtaVersions(env, fetchImpl = fetch) {
@@ -91,23 +74,25 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
   }
 }
 
-function readPromotion(source, directory, secrets) {
-  const record = join(directory, 'next-release.json');
-  execFileSync(process.execPath, [join(root, 'packages/scripts/release-record.mjs'), 'previous',
-    '--channel', 'next', '--rc-only', 'true', '--output', record], {
-    cwd: source, env: { ...process.env, GH_TOKEN: secrets.GITHUB_TOKEN || secrets.GH_TOKEN,
-      GITHUB_REPOSITORY: 'lunchboxfortwo/beeline', BEELINE_LOCAL_RELEASE: 'true' }, stdio: 'inherit',
-  });
-  return promotionSource(JSON.parse(readFileSync(record, 'utf8')));
+export function dispatchPromotion(dispatchedBy, secrets, run = execFileSync) {
+  const started = performance.now();
+  const env = { ...process.env, GH_TOKEN: secrets.GITHUB_TOKEN || secrets.GH_TOKEN };
+  const repository = 'lunchboxfortwo/beeline';
+  const result = run('gh', ['workflow', 'run', 'unified-release.yml', '-R', repository, '--ref', 'main',
+    '-f', 'channel=latest', '-f', `dispatched_by=${JSON.stringify(dispatchedBy)}`],
+    { env, encoding: 'utf8', timeout: 60_000 }).trim();
+  const url = result.match(/https:\/\/github\.com\/lunchboxfortwo\/beeline\/actions\/runs\/(\d+)/);
+  if (!url) throw new Error(`Promotion dispatch returned no workflow URL: ${result}`);
+  console.log(`Promotion workflow: ${url[0]}`);
+  run('gh', ['run', 'watch', url[1], '-R', repository, '--exit-status'], { env, stdio: 'inherit' });
+  console.log(`Promotion wall time: ${Math.round((performance.now() - started) / 1000)}s`);
 }
 
-export async function releaseSequence({ source, sha, version, directory, secrets, dispatchedBy, otaVersions, store,
+export async function releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions,
   desktopMode = 'build', macHelpers = 'build', skipFullChecks }, runLocalRelease) {
-  const channel = version ? 'latest' : 'next';
-  await runLocalRelease({ mode: 'execute', channel, 'release-sha': sha, 'release-version': version,
-    'state-dir': join(directory, channel), 'dispatched-by': JSON.stringify(dispatchedBy),
-    'store-track': channel === 'latest' && store ? 'production' : 'none', otaVersions,
-    'desktop-mode': desktopMode, 'mac-helpers': macHelpers, skipFullChecks,
+  await runLocalRelease({ mode: 'execute', channel: 'next', 'release-sha': sha,
+    'state-dir': join(directory, 'next'), 'dispatched-by': JSON.stringify(dispatchedBy),
+    'store-track': 'none', otaVersions, 'desktop-mode': desktopMode, 'mac-helpers': macHelpers, skipFullChecks,
   }, { repository: source, secrets });
 }
 
@@ -150,28 +135,25 @@ async function main(argv) {
   let sha;
   try {
     const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), root);
-    const prepared = prepareReleaseSource(root, directory, execFileSync,
-      options.promote ? source => readPromotion(source, directory, secrets) : undefined);
-    const { source, version } = prepared;
-    sha = prepared.sha;
+    if (options.promote) {
+      dispatchPromotion(options.dispatchedBy, secrets);
+      return;
+    }
+    const { source, sha: releaseSha } = prepareReleaseSource(root, directory);
+    sha = releaseSha;
     execFileSync('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: source, stdio: 'inherit' });
     const { attribution, runLocalRelease } = await import(pathToFileURL(join(source, 'packages/scripts/release-local.mjs')));
     const dispatchedBy = attribution(JSON.stringify(options.dispatchedBy ?? localAttribution()));
     const otaVersions = await readOtaVersions(secrets);
-    let store = false;
-    if (options.store) {
-      const { readStores } = await import(pathToFileURL(join(source, 'packages/scripts/read-store-runtimes.mjs')));
-      const { easBuildInventory } = await import(pathToFileURL(join(source, 'packages/scripts/store-build-runtime.mjs')));
-      const stores = await readStores({ builds: await easBuildInventory(secrets).catch(() => []), env: secrets });
-      store = storeReleaseNeeded(pinnedRuntimes(readFileSync(join(source, 'apps/mobile/app.config.js'), 'utf8')), stores);
-    }
-    console.log(store ? 'Store release: production; a pinned native runtime is not live in its store.' : 'Store release: none.');
-    await releaseSequence({ source, sha, version, directory, secrets, dispatchedBy, otaVersions, store, desktopMode: options.desktopMode, macHelpers: options.macHelpers, skipFullChecks: options.skipFullChecks }, runLocalRelease);
-    console.log(`Released ${sha} to ${version ? 'latest' : 'next'}${store ? ' with production store builds' : ''}.`);
+    await releaseSequence({ source, sha, directory, secrets, dispatchedBy, otaVersions, desktopMode: options.desktopMode, macHelpers: options.macHelpers, skipFullChecks: options.skipFullChecks }, runLocalRelease);
+    console.log(`Released ${sha} to next.`);
   } finally {
     // Cleanup never changes the release outcome, whether it succeeded or failed.
     if (sha) try { removeStaleReleaseImages(sha); } catch { /* Docker unavailable */ }
-    try { removeReleaseDirectory(directory); } catch { /* not removable */ }
+    try {
+      if (options.promote) rmSync(directory, { recursive: true });
+      else removeReleaseDirectory(directory);
+    } catch { /* not removable */ }
     unlock();
   }
 }

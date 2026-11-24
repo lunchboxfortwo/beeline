@@ -1,8 +1,11 @@
 # The caller installs Node 22, the root `npm ci`, the @beeline/nostr,
 # api-contract and buzz-client builds Metro resolves, and the pinned eas-cli.
 name: Publish the Expo web app
-description: Export the release app, deploy it to EAS Hosting production, and verify the canonical custom domain
+description: Export and deploy the candidate to an immutable EAS Hosting preview
 inputs:
+  deployment_json:
+    description: File to receive the immutable preview deployment identity
+    required: true
   sentry_auth_token:
     description: Optional Sentry release upload token; private maps are stripped even without it
     required: false
@@ -47,12 +50,15 @@ runs:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
       run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step4
-    - name: Deploy and promote the export to EAS Hosting production
+    - name: Deploy the export to EAS Hosting
       shell: bash
       working-directory: apps/mobile
       env:
+        WEB_DEPLOYMENT_JSON: ${{ inputs.deployment_json }}
         EXPO_TOKEN: ${{ inputs.expo_token }}
       run: 'bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step5'
-    - name: Verify the canonical web origin serves this release
+    - name: Verify the web deployment serves this release
       shell: bash
+      env:
+        WEB_DEPLOYMENT_JSON: ${{ inputs.deployment_json }}
       run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/web-app-leg.sh" step6

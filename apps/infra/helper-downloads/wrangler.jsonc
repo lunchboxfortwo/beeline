@@ -5,7 +5,8 @@
   "account_id": "6e97e79c389234e4c8aa7837ee3e2a94",
   "workers_dev": false,
   "routes": [
-    { "pattern": "usebeeline.app/dl/*", "zone_name": "usebeeline.app" }
+    { "pattern": "usebeeline.app/dl/*", "zone_name": "usebeeline.app" },
+    { "pattern": "downloads.usebeeline.app/latest/*", "zone_name": "usebeeline.app" }
   ],
   "env": {
     "preview": {

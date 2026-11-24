@@ -12,7 +12,7 @@ import { localHooks } from './release-local.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const origin = 'https://downloads.usebeeline.app';
-const tag = 'v1.2.3';
+const tag = 'v1.2.3-rc.2';
 const accountId = 'a'.repeat(32);
 const installers = ['Beeline-universal.dmg', 'Beeline-universal.app.tar.gz',
   'Beeline-x86_64.AppImage', 'Beeline-x86_64-setup.exe', 'Beeline-x86_64.msi',
@@ -49,7 +49,7 @@ test('production build CLI preserves endpoint priority from the desktop workflow
   const script = workflow.jobs.build.steps.find(step => step.name === 'Prepare the signed production updater configuration').run;
   const endpoints = [...script.matchAll(/--endpoint '([^']+)'/g)].map(match => match[1]);
   assert.deepEqual(endpoints, [`${origin}/latest/Beeline-latest.json`,
-    'https://github.com/Beeline-Work/beeline/releases/latest/download/Beeline-latest.json']);
+    'https://github.com/lunchboxfortwo/beeline/releases/latest/download/Beeline-latest.json']);
   execFileSync(process.execPath, [join(root, 'packages/scripts/desktop-update.mjs'), 'config', '--version', '1.2.3',
     ...endpoints.flatMap(endpoint => ['--endpoint', endpoint]), '--output', output], {
     env: { ...process.env, TAURI_UPDATER_PUBLIC_KEY: 'fixture-public-key' },
@@ -57,7 +57,7 @@ test('production build CLI preserves endpoint priority from the desktop workflow
   assert.deepEqual(JSON.parse(await readFile(output, 'utf8')).plugins.updater.endpoints, endpoints);
 });
 
-test('R2 publishes all installers and signatures to both prefixes, with manifests last', async t => {
+test('R2 publishes all installers and signatures to the candidate prefix, with the manifest last', async t => {
   const args = await fixture(t), calls = [];
   for (const entry of Object.values(args.manifest.platforms)) {
     assert.ok(entry.url.startsWith(`${origin}/${tag}/`));
@@ -77,8 +77,7 @@ test('R2 publishes all installers and signatures to both prefixes, with manifest
     return Response.json({ success: true });
   } });
   const files = [...installers, ...signed.map(file => `${file}.sig`)].sort();
-  assert.deepEqual(calls.map(call => call.key), [tag, 'latest'].flatMap(prefix =>
-    [...files, 'Beeline-latest.json'].map(file => `${prefix}/${file}`)));
+  assert.deepEqual(calls.map(call => call.key), [...files, 'Beeline-latest.json'].map(file => `${tag}/${file}`));
   for (const call of calls) {
     const file = call.key.split('/')[1];
     assert.deepEqual(call.bytes, await readFile(join(args.directory, file)));
@@ -103,14 +102,13 @@ test('R2 upload failure stops immediately without retrying or advancing latest',
   }
 });
 
-test('unified publication invokes R2 for built and carried sets, and local recovery retains that step', async () => {
+test('next stages desktop artifacts through the same R2 step on both runners', async () => {
   const workflow = parse(await readFile(join(root, '.github/workflows/unified-release.yml'), 'utf8'));
   const step = Object.values(workflow.jobs).flatMap(job => job.steps || [])
-    .find(step => step.name === 'Publish the one GitHub release record with its release.json and stable desktop downloads');
+    .find(step => step.name === 'Publish the next record and staged artifacts');
   assert.equal(step.env.CLOUDFLARE_R2_TOKEN, '${{ secrets.CLOUDFLARE_R2_TOKEN }}');
   assert.equal(step.env.CLOUDFLARE_ACCOUNT_ID, '${{ vars.CLOUDFLARE_ACCOUNT_ID }}');
-  assert.ok(step.run.indexOf('gh release download') < step.run.indexOf('node packages/scripts/desktop-r2.mjs'));
-  assert.ok(step.run.indexOf('node packages/scripts/desktop-r2.mjs') < step.run.indexOf('ghr_publish "$RELEASE_VERSION"'));
+  assert.ok(step.run.indexOf('node packages/scripts/desktop-r2.mjs') < step.run.indexOf('gh release edit "$RELEASE_VERSION"'));
   const handled = await localHooks(tmpdir(), {}).step({ step, context: { github: { job: 'bookkeeping' } } });
   assert.equal(handled, undefined);
 });

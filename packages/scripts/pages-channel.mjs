@@ -87,6 +87,9 @@ export async function publishPagesChannel({
   const prefix = channel === 'next' ? 'dl/next' : 'dl';
   // Publish the public channel first, with its manifest after all payloads.
   // GitHub retains a secondary copy for authenticated build carry/downloads.
+  if (channel === 'next') {
+    for (const name of channelFiles) await put(`dl/releases/${manifest.version}`, name, join(directory, name));
+  }
   for (const name of channelFiles) await put(prefix, name, join(directory, name));
   let release;
   try {

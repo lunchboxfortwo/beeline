@@ -1,15 +1,9 @@
 # Store submission
 
-Operator runbook for Google Play production and the App Store. Store publishing
-uses `store_track=production` (or `beta` only by an explicit owner choice) in
-`.github/workflows/unified-release.yml`.
-Routine OTA releases keep `store_track=none` and do not build native binaries.
-Every release that builds a new Android binary, including explicit native
-recovery selection, publishes it to **production** with **completed** status
-(full rollout after approval) and sends it for review automatically. Only an
-explicit `store_track=beta` sends an Android build to Play beta instead; beta
-also uses completed status and automatic review submission. iOS
-`store_track=production` submits for App Review with automatic release after approval.
+Operator runbook for Google Play and the App Store. Unified release
+builds and submits Android to Play beta when an owner explicitly dispatches
+`next` with `store_track=beta`. Store production submissions are separate
+from RC promotion. Routine OTA releases use `store_track=none`.
 
 The Google Play developer account is Moon Rice Limited. Keep that account, its
 service account key and the App Store Connect API key outside this repository.
@@ -31,7 +25,7 @@ service account key and the App Store Connect API key outside this repository.
 2. **Play Console invite for that service account** — Play Console → Users and
    permissions → Invite new users → the service account's email address, with
    app-level permissions on Beeline (`app.usebeeline`):
-   *Release to production* (the default native release), *Release to testing
+   *Release to production* (production store operations), *Release to testing
    tracks* (explicit beta releases), and *Manage store presence* (the explicitly
    authorized listing sync).
 
@@ -120,9 +114,8 @@ npm run test:play
 PLAY_DRY_RUN=1 PACKAGE_NAME=app.usebeeline METADATA_DIR=apps/mobile/fastlane/metadata/android LANGUAGE=en-US \
   bash packages/scripts/play-publish-listing.sh
 
-# Production store publishing is requested through the audited dispatch_release
-# tool under an owner/admin release command, with store_track=production.
-# Keep the normal no-input release for OTA delivery.
+# Request a next Android beta build with store_track=beta through the audited
+# dispatch_release tool. Use the store consoles for production submissions.
 ```
 
 ## Recovering an already uploaded build
@@ -145,17 +138,11 @@ changed by this code change.
 
 ## What the store leg does
 
-`store_track` accepts `none` (the OTA default), `production` (explicit
-store submission), or `beta` (explicit owner choice for that release).
-Production selects the native jobs for the affected
-platforms. Explicit recovery selection (`all` or `mobile-native`) also builds
-native binaries; every newly built Android binary publishes to production,
-even with `store_track=none`; only an explicit `store_track=beta` changes
-that destination. The iOS store upload requires an explicit store track; beta
-stops at TestFlight and production also submits for App Review. Native job
-failures fail the selected native component.
+`store_track=none` is the OTA default. An explicit `store_track=beta` in
+the next workflow selects the Android native job. A beta build failure fails
+the selected component.
 
-**`mobile_native_android`** (Play production): checks the app version
+**`mobile_native_android`** (Play beta) checks the app version
 (`scripts/check-release-version.cjs`) and that the Play metadata is current, runs
 `eas build --local --profile production-ci --platform android --non-interactive`,
 produces the AAB locally, verifies package name, `versionName` and
@@ -197,58 +184,11 @@ it does not force re-uploading matching assets. That listing operation retains
 the same `ERROR_IF_IN_REVIEW` commit as the build, so an explicitly authorized
 listing publish cannot cancel a build already in review.
 
-**`mobile_native_ios`** (TestFlight): decodes the `.p8` secret to a
-runner-temp file and points `EXPO_ASC_API_KEY_PATH` at it **before** the build
-(eas-cli needs it to create or repair the App Store provisioning profile
-non-interactively), runs `eas build --local --profile production-ci --platform
-ios --non-interactive` on the `ios-builder` Mac runner. It inspects the IPA's
-embedded bundle, package version, build number, runtime pin and photo purpose
-string before `xcrun altool --upload-app`. The upload receipt's delivery UUID
-must finish processing successfully and a new matching `VALID` build must
-appear under app `6803948500` within 20 minutes. Apple processing errors,
-including missing purpose strings (90683), fail the job even when altool
-reported transport success. `ios-build.json` records the IPA identity,
-delivery UUID and App Store build ID for the native checkpoint.
-For `store_track=production`, initialization queries App Store Connect using the
-existing ASC key before either native build starts. It starts from the mobile
-package version at the release SHA. If that version is approved, in review,
-waiting, live, or otherwise not editable, it selects the next patch above the
-non-editable store versions (for example, `0.2.22` in
-`PENDING_DEVELOPER_RELEASE` becomes `0.2.23`). An editable next patch can be
-reused. The resolved version is applied automatically in both temporary build
-checkouts: iOS `CFBundleShortVersionString` and Android `versionName` match,
-without a human package edit or another workflow input. The committed package
-version and runtime pins stay unchanged; explicit native recovery builds with
-`store_track=none` use the package version.
-
-After the verified upload, production uses `reviewSubmissions` to create or
-reuse an editable App Store version, attach the verified build, set What's New
-from `store/listing/en-US/release-notes.txt` on its existing localizations, and
-submit for review with `releaseType=AFTER_APPROVAL`. Evidence includes the
-version and submission IDs and confirmed review state. If the exact version
-has already advanced beyond editing, the job records `version-already-submitted`
-and its Apple state and succeeds. If an older review is still active, it
-preserves that review, records `existing-review-active` with the active IDs and
-states in `ios-build.json`, and succeeds after the upload; this outcome does
-not claim the new build was submitted for review. Missing localizations,
-unresolved export compliance, and Apple API failures still fail the job.
-
-A manual unified release dispatch can resume the same identity after a cancelled
-or terminated attempt, including migration failures and touched Fly Machines.
-Those states suppress automatic self-redispatch only; no human cleanup is needed
-to dispatch the identity again.
-
-TestFlight groups and external-tester review remain separate operations. A missing distribution
-certificate fails the build with one printed command, because eas-cli 22.2.0
-never creates one non-interactively.
-
-`packages/scripts/play-promote-track.sh` remains available for explicitly commanded
-recovery from beta to production. It enforces completed status and the same
-listing lock and automatic review commit as a new build.
-
-Every Play script honours `PLAY_DRY_RUN=1`: it prints each API call (method,
-URL, curl arguments, never the bearer token) and answers with a canned body, so
-`npm run test:play` proves the sequences without credentials.
+For an explicitly authorized iOS store submission, use the `production-ci`
+profile in `apps/mobile/eas.json` to build the IPA and the `production`
+submit profile to upload it to TestFlight. Use App Store Connect to attach
+the processed build and submit it for App Review. The release owner's
+approved production runtime pin and store version must match the IPA.
 
 ## Listing source and derived metadata
 

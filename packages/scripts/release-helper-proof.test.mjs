@@ -90,13 +90,12 @@ test('finalization preserves carry age accumulated since the channel manifest la
   } }));
   writeFileSync(join(directory, 'jobs/helper-local/daemon-release/manifest.json'), JSON.stringify({ bundles: { 'darwin-arm64': carried(1) } }));
   const path = join(directory, 'release/release.json');
-  const sourceSha = 'a'.repeat(40), checks = { profile: 'quick', sourceSha, result: 'success', resultsPath: 'https://fixture/next/release-checks.json' };
-  writeFileSync(join(directory, 'next-release.json'), JSON.stringify({ sourceSha, checks }));
+  const sourceSha = 'a'.repeat(40), checks = { profile: 'quick', sourceSha, result: 'success' };
   writeFileSync(path, JSON.stringify({ sourceSha, components: { helper: {}, website: {} }, delivery: {} }));
   await localHooks(directory, {}).afterStep({ step: { name: 'Finalize the release record' }, context: {
-    runner: { temp: directory }, inputs: { channel: 'latest', dispatched_by: '{}' },
-  }, engine: { variables: { macHelperMode: 'carry' } } });
+    runner: { temp: directory }, inputs: { channel: 'next', dispatched_by: '{}' },
+  }, engine: { variables: { macHelperMode: 'carry', releaseChecks: checks } } });
   const record = JSON.parse(readFileSync(path, 'utf8'));
   assert.equal(record.components.helper.platforms['darwin-arm64'].carriedFrom.releases, 3);
-  assert.deepEqual(record.checks, { ...checks, reusedFrom: 'next' });
+  assert.deepEqual(record.checks, checks);
 });

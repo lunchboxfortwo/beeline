@@ -7,13 +7,14 @@
 // builds this pipeline uploaded. The next release reads the newest published
 // release; rollbacks read it to find where to return. No Actions artifact,
 // cache or run lookup carries state between jobs or runs.
-import { releaseChannel, promotionSource } from './release-channel.mjs';
+import { releaseChannel } from './release-channel.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const RELEASE_RECORD_ASSET = 'release.json';
+export const PROMOTION_RECORD_ASSET = 'promotion.json';
 export const LEGACY_OTA_BRANCH = 'production';
 const COMPONENTS = ['server', 'helper', 'mobile-ota', 'mobile-native', 'desktop', 'website'];
 const VERSION = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.([1-9]\d*))?$/;
@@ -80,9 +81,9 @@ export function migrationRecord({ version, sourceSha, desktopVersion }) {
   };
 }
 
-/** Reserve rc counters per unreleased final; promotion reserves that final at the rc's SHA. */
-export function assignReleaseVersion({ releases, previous, sha, requestedVersion = '', channel = 'next', next, occupiedVersions = [] }) {
-  releaseChannel(channel);
+/** Reserve rc counters for the next candidate. */
+export function assignReleaseVersion({ releases, previous, sha, requestedVersion = '', channel = 'next', occupiedVersions = [] }) {
+  if (channel !== 'next') fail('Only next builds allocate a version');
   if (!SHA.test(sha ?? '')) fail(`invalid release sha: ${sha}`);
   const versioned = versionedReleases(releases);
   const commitOf = (release) => release.sourceSha ?? (SHA.test(release.target_commitish ?? '') ? release.target_commitish : null);
@@ -92,11 +93,6 @@ export function assignReleaseVersion({ releases, previous, sha, requestedVersion
       fail(`${version} is a release of ${commitOf(existing) ?? 'another commit'}, not ${sha}`);
     return { version, reason: existing ? 'existing-identity' : reason };
   };
-  if (channel === 'latest') {
-    const promotion = promotionSource(next, sha);
-    if (requestedVersion && requestedVersion !== promotion.version) fail('latest must use the final version of the current next rc');
-    return reserve(promotion.version, 'promotion');
-  }
   if (requestedVersion) {
     if (!VERSION.exec(requestedVersion)?.[4]) fail(`next requires an rc release version: ${requestedVersion}`);
     const existing = versioned.find(release => release.tag_name === requestedVersion);
@@ -106,7 +102,7 @@ export function assignReleaseVersion({ releases, previous, sha, requestedVersion
   }
   const floor = VERSION.exec(previous?.version ?? 'v0.0.0');
   if (!floor) fail(`invalid previous release version: ${previous?.version}`);
-  let patch = Number(floor[3]) + (floor[4] ? 0 : 1);
+  let patch = Number(floor[3]) + (floor[4] && previous?.channel !== 'latest' ? 0 : 1);
   let base = `v${floor[1]}.${floor[2]}.${patch}`;
   if (previous?.sourceSha === sha && previous.channel === 'next' && previous.version.startsWith(`${base}-rc.`))
     return { version: previous.version, reason: 'already-published' };
@@ -198,7 +194,7 @@ function listReleases(repository) {
   return recoverLocalReleases(repository, JSON.parse(gh(['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`])).flat());
 }
 
-function listIdentityReleases(repository) {
+export function listIdentityReleases(repository) {
   return recoverLocalReleases(repository, listReleasePage(endpoint => JSON.parse(gh(['api', `repos/${repository}/${endpoint}`]))));
 }
 
@@ -231,7 +227,7 @@ function recoverLocalReleases(repository, releases) {
   return recovered;
 }
 
-function downloadAsset(repository, release, name) {
+export function downloadAsset(repository, release, name) {
   const asset = release.assets?.find((candidate) => candidate.name === name);
   if (!asset) return null;
   return gh(['api', '-H', 'Accept: application/octet-stream', `repos/${repository}/releases/assets/${asset.id}`], { binary: true });
@@ -242,10 +238,12 @@ function commitOfTag(repository, tag) {
 }
 
 /** The newest published release's record, or a migration record for it. */
-export function readPublishedRecord(repository, releases = listReleases(repository), channel = 'latest') {
+export function readPublishedRecord(repository, releases = listReleases(repository), channel = 'latest', { candidate = false } = {}) {
   const release = latestPublished(releases, channel);
   if (!release) return null;
-  const bytes = downloadAsset(repository, release, RELEASE_RECORD_ASSET);
+  const promotion = !candidate && !release.prerelease && VERSION.exec(release.tag_name)?.[4]
+    ? downloadAsset(repository, release, PROMOTION_RECORD_ASSET) : null;
+  const bytes = promotion || downloadAsset(repository, release, RELEASE_RECORD_ASSET);
   if (bytes) {
     const record = JSON.parse(bytes.toString('utf8'));
     if (record.version !== release.tag_name) fail(`${release.tag_name} carries a release.json for ${record.version}`);
@@ -289,18 +287,10 @@ function main(argv) {
       release.tag_name === args.requested && !release.draft && !release.prerelease))
       fail('next cannot reuse a published latest identity');
     const previous = readPublishedRecord(repository, releases, channel);
-    let sha = args.sha;
-    let next;
-    if (channel === 'latest') {
-      next = readPublishedRecord(repository, releases.filter(release => VERSION.exec(release.tag_name ?? '')?.[4]), 'next');
-      const promotion = promotionSource(next, sha);
-      if (args.requested && args.requested !== promotion.version) fail('latest must use the final version of the current next rc');
-      write(args.next, next);
-      sha = promotion.sourceSha;
-    }
+    const sha = args.sha;
     if (previous) write(args.previous, previous);
     const { version, reason } = assignReleaseVersion({ releases, previous, sha, requestedVersion: args.requested ?? '', channel,
-      next, occupiedVersions: JSON.parse(process.env.BEELINE_LOCAL_OTA_VERSIONS || '[]') });
+      occupiedVersions: JSON.parse(process.env.BEELINE_LOCAL_OTA_VERSIONS || '[]') });
     const draft = versionedReleases(releases).find((release) => release.tag_name === version);
     console.error(`release identity ${version}@${sha}: ${reason}${previous ? ` (previous ${previous.version}${previous.migrated ? ', migrated' : ''})` : ''}`);
     process.stdout.write(`version=${version}\nrelease_sha=${sha}\nreason=${reason}\nhas_release=${draft ? 'true' : 'false'}\n`);
@@ -308,7 +298,7 @@ function main(argv) {
   }
   if (command === 'previous') {
     const releases = args['rc-only'] === 'true' ? listReleases(repository).filter(release => VERSION.exec(release.tag_name ?? '')?.[4]) : undefined;
-    const record = readPublishedRecord(repository, releases, args.channel ?? 'latest');
+    const record = readPublishedRecord(repository, releases, args.channel ?? 'latest', { candidate: args['rc-only'] === 'true' });
     if (!record) fail('no published release exists');
     write(args.output, record);
     process.stdout.write(`version=${record.version}\n`);

@@ -58,7 +58,7 @@ function commandParts(args) {
 // Runs one eas-cli command and returns its parsed JSON. `missing` names a
 // stderr pattern that means "this does not exist yet"; that case returns
 // null, and every other failure stops the release.
-export function runEas(args, { dryRun = false, env = {}, missing } = {}) {
+export function runEas(args, { dryRun = false, env = {}, missing, cwd, timeout } = {}) {
   const parts = commandParts(args);
   if (dryRun) {
     const prefix = Object.entries(env).map(([key, value]) => `${key}=${shellQuote(value)}`);
@@ -66,7 +66,7 @@ export function runEas(args, { dryRun = false, env = {}, missing } = {}) {
     return null;
   }
   const result = spawnSync(parts[0], parts.slice(1), {
-    encoding: 'utf8',
+    encoding: 'utf8', cwd, timeout,
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
@@ -274,6 +274,31 @@ function pointChannel(channel, branch, { dryRun } = {}) {
   if (observed !== branch) fail(`${channel} reads back ${observed} after pointing it at ${branch}`);
   console.log(`${channel}: ${current ?? '(new channel)'} -> ${branch}`);
   return { channel, branch, previousBranch: current, changed: true };
+}
+
+export function republishOta({ version, sourceSha, components }, run) {
+  const list = branch => run(['update:list', '--branch', branch, '--limit', BRANCH_LOOKUP_LIMIT, '--json', '--non-interactive'],
+    { missing: /Could not find (?:a )?branch/i });
+  const ota = components['mobile-ota'];
+  const source = releaseBranchName(version);
+  if (ota.otaBranch !== source || !ota.otaTargets?.length) fail(`${version} has no published OTA targets`);
+  const targets = ota.otaTargets.map(key => {
+    const [platform, runtimeVersion] = key.split('@');
+    return { platform, runtimeVersion };
+  });
+  const updates = assertBranchCovers({ branch: source, targets, branchUpdates: branchState(list(source)), sha: sourceSha });
+  const branch = `release-promoted-${version}`;
+  const previousBranch = channelBranchName(run(['channel:view', 'production', '--json', '--non-interactive']));
+  const published = list(branch);
+  if (!published) run(['branch:create', branch, '--json', '--non-interactive']);
+  const present = new Map(branchState(published).map(update => [targetKey(update), update.message]));
+  for (const update of updates) {
+    const message = `${update.message} promoted from ${update.group}`;
+    if (present.get(targetKey(update)) === message) continue;
+    run(['update:republish', '--group', update.group, '--destination-branch', branch, '--platform', update.platform,
+      '--message', message, '--json', '--non-interactive']);
+  }
+  return { branch, previousBranch };
 }
 
 // Live store runtimes are read from Google Play and App Store Connect. The

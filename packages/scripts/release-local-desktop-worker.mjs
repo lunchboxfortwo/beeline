@@ -1,5 +1,5 @@
 // Runs the committed Desktop job on a source archive, with local-only artifacts.
-import { chmodSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { LocalActions } from './release-local-actions.mjs';
 import { Processes, privateWrite } from './release-local-process.mjs';
@@ -7,36 +7,6 @@ import { Processes, privateWrite } from './release-local-process.mjs';
 export function desktopBuildEnvironment({ directory, cargoHome, home }) {
   return { CARGO_BUILD_JOBS: '2', CI_TEST_WORKERS: '2', BEELINE_LOCAL_RELEASE: 'true', CARGO_HOME: cargoHome,
     RUSTUP_HOME: join(directory, 'tools/rustup'), NPM_CONFIG_USERCONFIG: join(home, '.npmrc') };
-}
-
-export function macSigningTools(directory, commands = {
-  security: '/usr/bin/security', codesign: '/usr/bin/codesign',
-  xcodebuild: '/usr/bin/xcodebuild', xcrun: '/usr/bin/xcrun', fastlane: 'fastlane',
-}) {
-  for (const [name, command] of Object.entries(commands)) {
-    const path = join(directory, name);
-    // Apple Security.framework resolves identities through the operator's HOME.
-    // Enter this environment at the launcher too: Xcode and its absolute-path
-    // codesign children read Security.framework themselves. npm/EAS stay private.
-    // Remove the adapters from the child PATH so a PATH-resolved launcher such
-    // as fastlane cannot recurse; all its descendants already inherit this HOME.
-    privateWrite(path, `#!${process.execPath}
-const {spawnSync}=require('node:child_process');
-const {delimiter,join}=require('node:path');
-const {realpathSync}=require('node:fs');
-const env={...process.env,HOME:process.env.BEELINE_OPERATOR_HOME};
-env.NPM_CONFIG_CACHE||=join(process.env.HOME,'.npm');
-env.NPM_CONFIG_USERCONFIG||=join(process.env.HOME,'.npmrc');
-env.PATH=(env.PATH||'').split(delimiter).filter(path=>{
-  try{return realpathSync(path||'.')!==__dirname;}catch{return true;}
-}).join(delimiter);
-const result=spawnSync(${JSON.stringify(command)},process.argv.slice(2),{env,stdio:'inherit'});
-if(result.error){console.error(result.error.message);process.exit(1);}
-process.exit(result.status??1);
-`);
-    chmodSync(path, 0o700);
-  }
-  return directory;
 }
 
 async function desktopWorker(spec) {

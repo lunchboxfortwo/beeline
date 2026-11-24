@@ -19,6 +19,8 @@ export function droppedChecks(workflow) {
 
 export function localWorkflow(workflow, { channel = 'next', skipFullChecks } = {}) {
   const local = structuredClone(workflow);
+  if (channel === 'latest') return { ...local, jobs: { promote: local.jobs.promote } };
+  delete local.jobs.promote;
   delete local.jobs.nightly_checks;
   // Android still waits for every live leg. Local finalization reads those
   // same completion outputs directly; hosted scheduling keeps its job.
@@ -33,7 +35,7 @@ export function localWorkflow(workflow, { channel = 'next', skipFullChecks } = {
     job.if = job.if.replace("needs.release_validation.result == 'success' && ", '');
   }
   const validation = local.jobs.release_validation;
-  if (channel === 'latest' || skipFullChecks) {
+  if (skipFullChecks) {
     delete local.jobs.release_checks;
     validation.needs = ['initialize'];
     validation.steps = [];
@@ -51,13 +53,13 @@ export function releasePlan(workflow, checks, options = {}) {
   return {
     targetSeconds: 1800,
     target: 'routine squire release; check budget ~5 min + concurrent delivery ~20 min + finalization',
-    localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job; iOS store compilation runs remotely',
+    localCapacity: '3 jobs on existing 3-CPU/12-GiB slices, plus 1 capped Mac orchestration job',
     checks: options.channel === 'latest' ? { retained: [], reusedFrom: 'successful same-SHA next release' }
       : { profile: 'quick', retained: localChecks, dropped: droppedChecks(checks) },
     jobs: Object.entries(local.jobs).map(([id, job]) => ({ id, needs: [job.needs ?? []].flat(), if: job.if ?? 'success()',
-      placement: id === 'mobile_native_ios' ? 'remote Mac, separate queue' : id === 'helper_macos' && !carryMac ? 'GitHub-hosted macOS runners; one dispatched run for both architectures' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
+      placement: id === 'helper_macos' && !carryMac ? 'GitHub-hosted macOS runners; one dispatched run for both architectures' : id === 'desktop_installers' ? 'native hosts through bounded delivery queues' : 'bounded local queue',
       policy: id === 'helper_macos' ? carryMac ? 'published Apple-silicon and Intel Mac helpers carried unchanged' : 'ARM and Intel helpers built natively on GitHub-hosted macos-15 and macos-15-intel; publication stays on squire'
-        : id === 'desktop_installers' ? carryDesktop ? 'published signed updater set carried unchanged under the existing local recovery policy' : WINDOWS_DESKTOP === 'build' ? 'complete native signed updater set, including Windows, built from the promoted commit' : 'macOS and Linux signed updater set built from the promoted commit; published Windows installers carried unchanged and omitted from the updater manifest' : undefined })),
+        : id === 'desktop_installers' ? carryDesktop ? 'installer proof plan requests the published desktop set' : WINDOWS_DESKTOP === 'build' ? 'complete native signed updater set, including Windows, signed and staged on next' : 'macOS and Linux signed updater set staged on next; published Windows installers carried unchanged and omitted from the updater manifest' : undefined })),
     coverage: 'no release coverage map is fabricated; PR Checks remain unchanged',
     safety: 'dispatch attribution, exact SHA, quick Checks verdict or explicit recorded owner skip, migrations, canary/rollback, helper proofs and final result joins retained',
     measurement: 'dry plan is not an end-to-end deployment timing; explicit native store/device proofs can extend the routine target',

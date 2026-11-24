@@ -3,6 +3,12 @@
 name: Publish the static website on Cloudflare Pages
 description: Deploy the static website without helper download bytes
 inputs:
+  branch:
+    description: Pages branch to deploy
+    required: true
+  deployment_json:
+    description: File to receive the staged Pages preview and asset manifest
+    required: true
   cloudflare_api_token:
     description: Cloudflare token with Pages Edit authority
     required: true
@@ -18,6 +24,8 @@ runs:
     - name: Deploy the existing usebeeline Cloudflare Pages project
       uses: actions/github-script@v7
       env:
+        PAGES_DEPLOYMENT_JSON: ${{ inputs.deployment_json }}
+        PAGES_BRANCH: ${{ inputs.branch }}
         CLOUDFLARE_PAGES_TOKEN: ${{ inputs.cloudflare_api_token }}
         CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare_account_id }}
       with:
