@@ -137,7 +137,8 @@
     ],
     "components/buzz/ChatLinks.tsx": [
       "ChatLinkContext",
-      "ChatLinkRun"
+      "ChatLinkRun",
+      "MessageLinkLabel"
     ],
     "components/buzz/ChatOpeningSurface.tsx": [
       "ChatOpeningSurface"
@@ -396,7 +397,8 @@
       "InlineMarkdown",
       "MarkdownTable",
       "MonoMarkdown",
-      "ViewerMention"
+      "ViewerMention",
+      "linkLabel"
     ],
     "components/buzz/NewRoomDialog.tsx": [
       "NewRoomDialog"
