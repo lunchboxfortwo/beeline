@@ -29,6 +29,7 @@ function isCancelledTurn(error: unknown): boolean {
 
 interface Place {
   session: PlaceSession;
+  retirement: AbortController;
   resetId?: string;
   waiting: AgentCommand[];
   running?: AgentCommand;
@@ -200,9 +201,11 @@ export class AgentRunner {
     if (place) return place;
     const placeId = item.roomId;
     const resetId = this.resetIds.get(placeId);
+    const retirement = new AbortController();
     const created: Place = {
       waiting: [],
       resetId,
+      retirement,
       session: new PlaceSession({
         agent: this.agent,
         runtime: this.runtime,
@@ -211,6 +214,7 @@ export class AgentRunner {
         grantRunnerFile: resolve(dirname(this.configPath), 'session-tools.json'),
         placeId,
         resetId,
+        retirement: retirement.signal,
         ...(item.parentRoomId ? { parentRoomId: item.parentRoomId } : {}),
         workspaceId: this.runtime.communityId,
         ...(this.endpoint ? { grantRunner: this.endpoint } : {}),
@@ -241,6 +245,7 @@ export class AgentRunner {
           clearTimeout(place.idleTimer);
           this.places.delete(roomId);
           this.grantRunner.unregister(roomId);
+          place.retirement.abort();
           place.session.retire();
         }
       }
@@ -344,7 +349,7 @@ export class AgentRunner {
     // acceptance does not prove the running answer covered that new request.
     const batch = turnBatch(item, place.waiting);
     const batched = new Set(batch.map((next) => next.id));
-    const { retirement } = place.session;
+    const retirement = place.retirement.signal;
     let started = false;
     const invocation = { id: randomUUID(), requestId: item.turnRequestId };
     try {

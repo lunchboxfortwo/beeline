@@ -86,6 +86,7 @@ export interface PlaceSessionOptions {
   api: DaemonApiClient;
   placeId: string;
   resetId?: string;
+  retirement?: AbortSignal;
   /** Set for a corner. */
   parentRoomId?: string;
   workspaceId: string;
@@ -136,7 +137,7 @@ export class PlaceSession {
   private attachmentDir?: string;
   private privateHomeRoot?: string;
   private stopping = false;
-  private readonly lifetime = new AbortController();
+  private readonly retirement: AbortSignal;
   private stream?: AgentTurnStream;
   readonly resources: SessionResources;
   private readonly running: RunningModelReporter;
@@ -145,11 +146,8 @@ export class PlaceSession {
   private operatorAgent = false;
   promptSectionIds: readonly string[] = [];
 
-  get retirement(): AbortSignal {
-    return this.lifetime.signal;
-  }
-
   constructor(readonly options: PlaceSessionOptions) {
+    this.retirement = options.retirement ?? new AbortController().signal;
     const root =
       options.config.workspaceRoot ??
       resolve(options.runtime.supervisorRoot, 'places', options.placeId);
@@ -358,7 +356,7 @@ export class PlaceSession {
 
   /** Make sure a live session serves this place; reuse the running one. */
   async start(item?: AgentCommand): Promise<void> {
-    const { signal } = this.lifetime;
+    const signal = this.retirement;
     signal.throwIfAborted();
     if (item) {
       this.queuedSelection(item);
@@ -390,7 +388,7 @@ export class PlaceSession {
     try {
       await this.activate(sandbox);
     } catch (error) {
-      if (this.lifetime.signal.aborted || !sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
+      if (this.retirement.aborted || !sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
       await this.stop();
       this.notes.push(
         `The OS sandbox could not start (${error instanceof Error ? error.message : String(error)}). ` +
@@ -586,7 +584,7 @@ export class PlaceSession {
     const hostServers = [...CODE_OWNED_HOST_MCP_NAMES];
     const plan = sandboxed ? sandboxMountPlan(sandboxSpec) : undefined;
     const editing = corner && sandboxed;
-    const { signal } = this.lifetime;
+    const signal = this.retirement;
     signal.throwIfAborted();
     const publishCommands = agentCommandCatalogPublisher({ api, agentId: agent.publicKey, workspaceId });
     const client = (this.options.createAcpClient ?? ((value) => new AcpClient(value)))({
@@ -804,7 +802,7 @@ export class PlaceSession {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
-    const { signal } = this.lifetime;
+    const signal = this.retirement;
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
@@ -952,9 +950,8 @@ export class PlaceSession {
     );
   }
 
-  /** Detach the old invocation synchronously. Process teardown owns its own wait. */
+  /** Release the detached session's resources. Process teardown owns its own wait. */
   retire(): void {
-    this.lifetime.abort();
     this.stream?.abandon();
     this.options.cancelGrantedCommands?.();
     this.squireRelay.close();
