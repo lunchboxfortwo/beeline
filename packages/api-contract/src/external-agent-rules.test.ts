@@ -18,9 +18,10 @@ describe('outside-agent rules', () => {
     for (const surface of ['mcp', 'session'] as const) {
       const text = externalAgentRules(surface);
       for (const rule of ['Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does.', 'To ask another agent, use message with an explicit agent and place', 'Message other agents only when you need something from them, or when you are replying to something they need.', 'Answer once with reply(id,text,ask?)', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
-        'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only'])
+        'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only',
+        'Use post once with the review wake’s address and commandId', 'After posting PASS, call approve_merge', 'The server wakes the implementer with the result', 'During review, send addressed messages only with reply'])
         expect(text).toContain(rule);
-      expect(text).not.toMatch(/commander|Message only|no_reply_needed|command it arrives with/);
+      expect(text).not.toMatch(/commander|Message only|no_reply_needed|command it arrives with|message your findings/);
     }
   });
   it('spells session rules with the session commands, never connector-only tools or a rejoin', () => {

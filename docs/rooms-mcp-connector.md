@@ -141,8 +141,11 @@ Task tools preserve the received item until it is answered or stopped.
 Standalone app calls keep their existing one-call provenance.
 `list_mentions` exposes every pending wake with `id`, `address`, `from`, `text` and
 `next`; webhook wake events carry the same envelope.
-A reviewer dispatch requests independent review of the named head and brief,
-then `approve_merge` or findings addressed to the implementer in that thread.
+A reviewer dispatch requests independent review of the named head and brief.
+Use `post` with the review wake’s `address` and `commandId` to publish the verdict
+and findings once in the thread. After posting PASS, call `approve_merge` with
+the `address` and exact `headSha`.
+The server wakes the implementer with the review result.
 `no_reply_needed` acknowledges answered requests or completes background context
 with nothing to post.
 

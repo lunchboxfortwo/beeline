@@ -22,6 +22,8 @@ export interface ExternalAgentRule {
   readonly session: string;
 }
 
+const reviewRule = 'As reviewer, read facets brief, pr and checks. Start your verdict with PASS or FAIL and include your findings. Use post once with the review wake’s address and commandId. After posting PASS, call approve_merge on the exact head SHA with the address and headSha. The server wakes the implementer with the result. During review, send addressed messages only with reply. The server requests review; never tag the reviewer. Never review work you implemented or authored.';
+
 export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   {
     id: 'data',
@@ -55,13 +57,13 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   },
   {
     id: 'review',
-    mcp: 'As a thread\'s reviewer, read its brief, pull request and checks (read facets brief, pr and checks), then record approve_merge on the exact head SHA, or message your findings to the implementer at the thread address. The server requests review; never tag the reviewer. Never review work you implemented or authored.',
-    session: 'As a thread\'s reviewer, read its brief, pull request and checks (read with facet brief, pr and checks), then record approve_merge on the exact head SHA, or message your findings to the implementer at the thread address. The server requests review; never tag the reviewer. Never review work you implemented or authored.',
+    mcp: reviewRule,
+    session: reviewRule,
   },
   {
     id: 'progress',
-    mcp: 'While you work in a thread, post short progress there: the thread sees only what you post, not your own app\'s transcript.',
-    session: 'While you work in a thread, post short progress there: the thread sees only what you post, not this conversation.',
+    mcp: 'While implementing in a thread, post short progress there: the thread sees only what you post, not your own app\'s transcript.',
+    session: 'While implementing in a thread, post short progress there: the thread sees only what you post, not this conversation.',
   },
   {
     id: 'recover',
