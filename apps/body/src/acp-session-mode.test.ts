@@ -1,7 +1,8 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { AcpClient } from './acp.js';
 import { startAgentProcess, stopAgentProcess } from './agent-process.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { roomPermissionDecision } from './room-permissions.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 
 // Model the adapter's documented INITIAL_AGENT_MODE policy across both open
@@ -18,6 +19,48 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
     ? {result} : {error:{code:-32601,message:'Unexpected startup RPC: '+request.method}};
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,...response})+'\\n');
 });`;
+
+it.each([
+  { label: 'a mounted Beeline tool', mounted: ['beeline-agent'], fields: {}, optionId: 'allow' },
+  { label: 'an unmounted tool', mounted: [], fields: { kind: 'execute' }, optionId: 'deny' },
+  { label: 'a host-classified tool', mounted: ['squire'], fields: { name: 'mcp_squire_read' }, optionId: 'deny' },
+  { label: 'a command payload', mounted: ['beeline-agent'], fields: { rawInput: { command: 'pwd' } }, optionId: 'deny' },
+  { label: 'a title without the tool name', mounted: ['beeline-agent'], fields: { name: undefined }, optionId: 'deny' },
+])('answers the Antigravity ACP permission request for $label with $optionId', async ({ mounted, fields, optionId }) => {
+  const client = new AcpClient({
+    agentCommand: 'agy',
+    agentEnv: {},
+    autoApprovePermissions: false,
+    permissionHandler: async (request) =>
+      roomPermissionDecision(request, { mountedServers: mounted, shellSandboxed: true }),
+  });
+  const write = vi.spyOn(client, 'write');
+  // Antigravity 1.5.17 sends the qualified identity separately from the title.
+  const args = { facet: 'messages', limit: 5, toolSummary: 'Read room messages' };
+  await client.handlePermission('1', {
+    sessionId: 'room',
+    toolCall: {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call_1',
+      name: 'mcp_beeline-agent_read',
+      args,
+      status: 'pending',
+      kind: 'other',
+      title: 'Run mcp_beeline-agent_read',
+      rawInput: args,
+      ...fields,
+    },
+    options: [
+      { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+    ],
+  });
+  expect(write.mock.calls).toEqual([[{
+    jsonrpc: '2.0',
+    id: '1',
+    result: { outcome: { outcome: 'selected', optionId } },
+  }]]);
+});
 
 it.each([
   { label: '/adapter/codex-acp', osSandbox: true, expected: 'agent-full-access' },

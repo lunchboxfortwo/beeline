@@ -131,6 +131,17 @@ function toolIdentityCandidates(toolCall: AcpPermissionRequest['toolCall']): str
   return candidates;
 }
 
+/** Antigravity uses a single underscore and puts the identity in `name`. */
+function antigravityMcpName(toolCall: AcpPermissionRequest['toolCall']): string | undefined {
+  const name = toolCall?.name;
+  return typeof name === 'string' && /^mcp_[^_]/.test(name) ? name : undefined;
+}
+
+function antigravityMcpNamesServer(name: string, server: string): boolean {
+  const prefix = `mcp_${server}_`;
+  return name.startsWith(prefix) && TOOL_NAME_PATTERN.test(name.slice(prefix.length));
+}
+
 /** Server names differ only in punctuation between adapters (`-` vs `_`). */
 function normalizedServerName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
@@ -246,6 +257,11 @@ export function isMountedMcpToolPermissionRequest(
   // Unwrap a dispatcher envelope before anything else: a wrapper must not be
   // able to carry a command line past a rule that only reads the wrapper.
   if (dispatchedPayloadIsShell(permissionRecord(rawInput))) return false;
+  const antigravityName = antigravityMcpName(toolCall);
+  if (antigravityName) {
+    return !shellPayload(toolCall) &&
+      mountedServers.some((server) => antigravityMcpNamesServer(antigravityName, server));
+  }
   if (rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)) {
     const call = rawInput as Record<string, unknown>;
     if (typeof call.server === 'string' && typeof call.tool === 'string') return true;
@@ -292,6 +308,9 @@ export function isHostMcpPermissionRequest(
   request: AcpPermissionRequest,
   hostServers: readonly string[] = CODE_OWNED_HOST_MCP_NAMES,
 ): boolean {
+  const antigravityName = antigravityMcpName(request.toolCall);
+  if (antigravityName && hostServers.some((server) => antigravityMcpNamesServer(antigravityName, server)))
+    return true;
   const rawInput = request.toolCall?.rawInput;
   if (rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)) {
     const server = (rawInput as Record<string, unknown>).server;
@@ -339,6 +358,7 @@ export function isMcpShapedPermissionRequest(
   request: AcpPermissionRequest,
   hostServers: readonly string[] = CODE_OWNED_HOST_MCP_NAMES,
 ): boolean {
+  if (antigravityMcpName(request.toolCall)) return true;
   if (isHostMcpPermissionRequest(request, hostServers)) return true;
   const record = permissionRecord(request.toolCall?.rawInput);
   if (typeof record?.server === 'string') return true;
