@@ -4,7 +4,7 @@ import { buildBwrapArgv, sandboxMountPlan } from './bwrap-sandbox.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { openCorner } from './read-only-mcp-open-corner.js';
+import { approveMerge, openCorner } from './read-only-mcp-open-corner.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const roots: string[] = [];
@@ -57,4 +57,22 @@ it('opens a fix thread from triage using the parent chat when room is omitted', 
   });
   expect(JSON.parse(await openCorner({implementer:'worker',brief:{spec:'Fix the triaged issue'}},'fix-call')).address).toBe('fix');
   expect(calls.at(-1)).toMatchObject({roomId:'triage',requestId:'triage-order',targetRoomId:'parent'});
+});
+
+it('submits native review text and exact-head approval through the active session', async () => {
+  vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'thread');
+  vi.stubEnv('BEELINE_GRANT_RUNNER_URL', 'http://runner.test');
+  const authority = { roomId: 'thread', requestId: 'review-request' };
+  vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ ...authority, itemId: 'review-item' });
+  const approved = { status: 'approved', messageId: 'review-post' };
+  const send = vi.spyOn(sessionTools, 'sessionToolRequest').mockResolvedValue(approved);
+  const headSha = 'f'.repeat(40);
+  const text = 'PASS: verified the reproduction.';
+
+  expect(JSON.parse(await approveMerge({ address: 'thread', headSha, text }))).toEqual(approved);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledWith('session', {
+    placeId: 'thread', action: 'operation', operation: 'approveCornerMerge', commandId: 'review-item',
+    input: { ...authority, cornerId: 'thread', headSha, text },
+  });
 });

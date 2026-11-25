@@ -32,7 +32,8 @@
       {
         "call": "approve_merge",
         "args": {
-          "headSha": "ffffffffffffffffffffffffffffffffffffffff"
+          "headSha": "ffffffffffffffffffffffffffffffffffffffff",
+          "text": { "matches": "^\\s*(?:\\*\\*)?PASS\\b" }
         }
       },
       {

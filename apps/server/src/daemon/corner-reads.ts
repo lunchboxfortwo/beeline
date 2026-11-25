@@ -1,4 +1,4 @@
-import { queueMessage } from '../agent-command.js';
+import { answerQueuedMessage, queueMessage } from '../agent-command.js';
 import { SYSTEM_AUTHOR_ID,systemText } from '../message-origin.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql } from '../corner-objective.js';
@@ -276,6 +276,18 @@ import { daemonIdentity, daemonAccess } from './access.js';
         );
       await assertIndependentCornerReviewer(db, input.cornerId, agentId,
         (id, reviewer) => daemonCheckReviewerAuthors(ctx, db, id, reviewer));
+      let messageId: string | undefined;
+      if (input.text !== undefined) {
+        const { roomId, requestId, text, invocation } = input;
+        if (typeof text !== 'string' || !text.trim()) throw new CommandRefusalError('reply text is required', 400);
+        if (roomId !== input.cornerId || !requestId || (invocation && invocation.requestId !== requestId))
+          throw new CommandRefusalError('command output authority rejected: no command row', 409);
+        // Close the review as a normal turn before its approval can archive the corner.
+        const verdict = await answerQueuedMessage(db, agentId, { roomId, requestId, text, invocation, harnessEnded: true });
+        if (!verdict.completed || !verdict.published || !verdict.messageId)
+          throw new CommandRefusalError(verdict.receipt ?? 'command output authority rejected: no command row', 409);
+        messageId = verdict.messageId;
+      }
       const recorded = await recordCornerMergeApproval(db, {
         cornerId: input.cornerId,
         approvedBy: agentId,
@@ -295,6 +307,7 @@ import { daemonIdentity, daemonAccess } from './access.js';
         pullRequestNumber: target.pull_request_number,
         headSha: target.head_sha,
         status: 'approved' as const,
+        ...(messageId ? { messageId } : {}),
       };
     });
     // A reviewer's PASS lands through the same path as the other gate events. Pending checks or a hold leave the PASS recorded until

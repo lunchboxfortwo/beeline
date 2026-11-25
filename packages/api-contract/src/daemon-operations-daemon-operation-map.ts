@@ -268,11 +268,17 @@ export type DaemonOperationMap = {
     }
   >;
   approveCornerMerge: Operation<
-    CornerInput & { readonly headSha: string },
+    CornerInput & TurnOutputAuthority & {
+      readonly headSha: string;
+      readonly roomId?: string;
+      readonly text?: string;
+      readonly invocation?: import('./daemon-operations.js').AgentInvocation;
+    },
     {
       readonly status: 'approved';
       readonly pullRequestNumber: number;
       readonly headSha: string;
+      readonly messageId?: string;
     }
   >;
   /**

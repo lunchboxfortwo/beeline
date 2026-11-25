@@ -396,7 +396,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
     ...(name === 'reportFeedback' && promptSectionIds ? { promptSectionIds } : {}),
   };
   try {
-    if (bridged && ['postRoomMessage', 'message', 'reply'].includes(name)) {
+    if (bridged && ['postRoomMessage', 'message', 'reply', 'approveCornerMerge'].includes(name)) {
       return (await sessionToolRequest('session', {
         placeId: payload.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
         action: 'operation',

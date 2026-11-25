@@ -362,7 +362,7 @@ Next: end the turn; the server owns merging
 FAIL: a removed chat member can still read its transcript
 Next: fix the membership guard and repeat the authenticated read proof
 
-On PASS, call approve_merge with the exact reviewed head SHA before ending the turn. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
+On PASS in a native turn, call approve_merge with the exact reviewed head SHA and your verdict as text, then end silently. The server saves your turn text before merging. Do not start a nested validation pipeline or push the implementer's branch.
 `;
 }
 

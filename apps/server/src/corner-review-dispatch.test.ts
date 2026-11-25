@@ -388,7 +388,7 @@ describe('thread message attribution', () => {
     try {
       if (approved) {
         await expect(daemon.execute('approveCornerMerge', {
-          cornerId: C, roomId: C, requestId: review!.turnRequestId, headSha,
+          cornerId: C, roomId: C, requestId: review!.turnRequestId, headSha, text: verdict,
         }, B)).resolves.toMatchObject({ status: 'approved', headSha });
       }
       await result(review!, verdict);
