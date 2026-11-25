@@ -38,7 +38,6 @@ it.each(['native','HTTP'] as const)('%s tool delivery to a different place leave
 });
 
 it('limits reply authority to the registered delivery, including batched messages',async()=>{
-  const {deliveredReplyCommand} = await import('./agent-invocation.js');
   const task = () => sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Task'});
   const first = await task(), second = await task();
   const start = async (batchedCommandIds:string[]) => {
@@ -47,10 +46,12 @@ it('limits reply authority to the registered delivery, including batched message
     return invocation;
   };
   const current = await start([]);
-  const allowed = (id:string,invocation:typeof current) => db.transaction(tx=>deliveredReplyCommand(tx,B,CHAT,id,id,invocation));
-  await expect(allowed(first.id,current)).resolves.toMatchObject({id:first.id});
-  await expect(allowed(second.id,current)).rejects.toThrow('woke this turn');
+  const reply = (id:string,invocation:typeof current) => daemon.execute('message',{
+    roomId:CHAT, requestId:id, type:'reply', quoteMsgId:id, text:'Answer', invocation,
+  },B);
+  await expect(reply(second.id,current)).rejects.toThrow('woke this turn');
+  await expect(reply(first.id,current)).resolves.toHaveProperty('id');
   const batch = await start([second.id]);
-  await expect(allowed(second.id,batch)).resolves.toMatchObject({id:second.id});
-  await expect(allowed(first.id,current)).rejects.toThrow('woke this turn');
+  await expect(reply(second.id,batch)).resolves.toHaveProperty('id');
+  await expect(reply(first.id,current)).rejects.toThrow('woke this turn');
 });

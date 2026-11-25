@@ -37,10 +37,11 @@ describe('corner message attribution', () => {
     const [review] = await commands(B, C);
     await claim(review!);
     await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:'FAIL: the waiver is not in the brief.'},B);
+    await result(review!,'');
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     const repairs=await commands(A,C);
     expect(repairs.map(item=>item.reason)).toEqual(['message']);
-    for(const repair of repairs) { await claim(repair); await result(repair,''); }
+    for(const repair of repairs) { await claim(repair); await result(repair,'Fixed the waiver.'); }
     // A CI re-run on the same head and the same brief revision.
     await verdict('rerun');
     const rerun = await commands(B, C);

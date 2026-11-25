@@ -307,10 +307,11 @@ async function laterBriefApproval(
  */
 export async function deliveredMessage(
   db: SqlDatabase, deliveryId: string, agentId: string, cornerId?: string,
-): Promise<{ id: string; room_id: string; from_commander: boolean | null } | undefined> {
-  return (await db.query<{ id: string; room_id: string; from_commander: boolean | null }>(
-    `SELECT message.id,message.room_id,message.author_id=${cornerCommanderIdSql('corner')} from_commander
+): Promise<{ id: string; room_id: string; from_commander: boolean | null; human_revision: boolean } | undefined> {
+  return (await db.query<{ id: string; room_id: string; from_commander: boolean | null; human_revision: boolean }>(
+    `SELECT message.id,message.room_id,(author.kind='human' AND message.created_at > corner.created_at) human_revision,message.author_id=${cornerCommanderIdSql('corner')} from_commander
      FROM agent_commands command JOIN messages message ON message.id=command.source_message_id
+     JOIN identities author ON author.id=message.author_id
      LEFT JOIN rooms corner ON corner.id=$3::uuid
      WHERE command.id=$1 AND command.agent_id=$2 AND command.private_payload IS NULL`,
     [deliveryId, agentId, cornerId ?? null],
@@ -342,8 +343,12 @@ export async function resolveCornerBriefApproval(
     `SELECT parent_id FROM rooms corner WHERE id=$1 AND ${cornerCommanderIdSql('corner')}=$2`,
     [revision.cornerId, revision.agentId],
   )).rows[0] : undefined;
+  let sourceMessageId = draft.approval?.sourceMessageId ?? revision?.command?.id ?? '';
+  const citingAgentId = revision?.agentId ?? humanCitation?.agentId;
+  const delivered = citingAgentId && sourceMessageId
+    ? await deliveredMessage(db, sourceMessageId, citingAgentId, revision?.cornerId) : undefined;
   if (revision && !draft.approval) {
-    if (commander) {
+    if (commander && !delivered?.human_revision) {
       const directDraft = { ...draft, approval: undefined };
       validateCornerBrief(directDraft);
       const revisionHash = cornerBriefRevisionHash(directDraft, attachments);
@@ -360,11 +365,7 @@ export async function resolveCornerBriefApproval(
   // A delivery addressed to the reviser stands for the human message that asked
   // for it. An uncited revision cites this turn's delivery when the thread's
   // human commander sent it; the commander may cite any chat it was addressed in.
-  let sourceMessageId = draft.approval?.sourceMessageId ?? revision?.command?.id ?? '';
-  const citingAgentId = revision?.agentId ?? humanCitation?.agentId;
-  const delivered = citingAgentId && sourceMessageId
-    ? await deliveredMessage(db, sourceMessageId, citingAgentId, revision?.cornerId) : undefined;
-  if (revision && !draft.approval && !delivered?.from_commander)
+  if (revision && !draft.approval && !delivered?.from_commander && !(commander && delivered?.human_revision))
     throw new CommandRefusalError('brief.approval.sourceMessageId is required; cite the approving human message or active private commander order ID', 403);
   if (delivered) sourceMessageId = delivered.id;
   const requestedId = sourceMessageId;

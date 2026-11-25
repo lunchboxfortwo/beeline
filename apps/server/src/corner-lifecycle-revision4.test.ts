@@ -1,6 +1,6 @@
 import {
   describe, expect, it, advanceCorner, createAgentCommand, reconcileConfiguredCornerReviewers,
-  H, A, B, W, R, C, commands, claim, result, greenHead, rootFixture,
+  H, A, B, W, R, C, commands, claim, result, findings, greenHead, rootFixture,
 } from './test-support-corner-review-dispatch.test-support.js';
 
 describe('revision 4 simple corner review model', () => {
@@ -63,7 +63,7 @@ describe('revision 4 simple corner review model', () => {
     await greenHead(107,head);
     const [first]=await commands(B,C);
     await claim(first!);
-    await rootFixture.daemon.execute('message',{roomId:first!.roomId,requestId:first!.turnRequestId,type:'normal',address:`${A}@${C}`,text:'FAIL: attach the required evidence.'},first!.agentId);
+    await findings(first!, 'FAIL: attach the required evidence.');
     await reconcileConfiguredCornerReviewers(rootFixture.db,R);
     const [repair]=(await commands(A,C)).filter(command=>command.reason==='message');
     expect(repair).toBeDefined();
@@ -72,7 +72,7 @@ describe('revision 4 simple corner review model', () => {
     await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
     await greenHead(107,head);
     expect(await commands(B,C)).toEqual([]);
-    await result(repair!,'');
+    await result(repair!,'Added the evidence.');
     for(let event=0;event<3;event++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
     expect((await commands(B,C)).filter(command=>command.reason==='corner_review_dispatch')).toHaveLength(1);
   });
@@ -84,8 +84,10 @@ it('Reproduction REVIEW-TARGET: a new head wake uses the newest brief and report
   await greenHead(104,'1'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('message',{ roomId:C, requestId:review!.turnRequestId, type:'normal',address:`${A}@${C}`, text:'FAIL: newest reported evidence' },B);
-  await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:'complete' },B);
+  await findings(review!, 'FAIL: newest reported evidence');
+  const [repair] = await commands(A,C);
+  await claim(repair!);
+  await result(repair!, 'Added the evidence.');
   await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
     VALUES($1,2,'New brief','New brief',$2,$3)`,[C,A,R]);
   await greenHead(104,'2'.repeat(40));

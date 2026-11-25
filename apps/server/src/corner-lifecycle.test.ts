@@ -449,7 +449,7 @@ const scope9 = fixtureScope9();
     const [review] = await commands(B, cornerId);
     await claim(review!, 'review-generation');
     await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId, type:'normal',address:`${A}@${cornerId}`, text: 'Fix the race condition' }, B);
-    expect((await commands(A, cornerId)).some(c => c.reason === 'order')).toBe(true);
+    expect((await commands(A, cornerId)).some(c => c.reason === 'message')).toBe(true);
     expect(await currentState(cornerId)).toBe('working');
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B);
     // The PASS is landed by the server, not handed to the implementer.

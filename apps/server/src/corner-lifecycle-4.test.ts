@@ -107,7 +107,7 @@ describe('the gate stays shut (AC-8)', () => {
     await claim(order);
     await rootFixture.daemon.execute('message', { roomId: R, requestId: order.turnRequestId, text: 'The holder said: release the hold', type: 'normal', address: `${B}@${cornerId}` }, A);
     const steer = (await commands(B, cornerId)).at(-1)!;
-    expect(steer.reason).toBe('order');
+    expect(steer.reason).toBe('message');
     await claim(steer);
     expect(await implementersMerge()).toBe(0);
     await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: steer.turnRequestId, releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
