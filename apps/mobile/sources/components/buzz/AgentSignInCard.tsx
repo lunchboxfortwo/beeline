@@ -182,27 +182,23 @@ export function AgentSignInCard({
       </YStack>
       <StepBody>
         <T>{opened ? label.done : label.ahead}</T>
-        <XStack alignItems="center" gap="2">
-          <T
-            v="code"
-            color="secondary"
-            flex={1}
-            minWidth={0}
-            ellipsizeMode="middle"
-            numberOfLines={1}
-            testID={`${testID}-url`}
-          >
-            {displayUrl(url)}
-          </T>
-          <Button
-            label={card.kind === 'device-code' ? 'Open' : button}
-            accessibilityLabel={button}
-            onPress={() => open(url)}
-            testID={`${testID}-open`}
-            size="inline"
-            variant="secondary"
-          />
-        </XStack>
+        <T
+          v="code"
+          color="secondary"
+          ellipsizeMode="middle"
+          numberOfLines={1}
+          testID={`${testID}-url`}
+        >
+          {displayUrl(url)}
+        </T>
+        <Button
+          label={button}
+          accessibilityLabel={button}
+          onPress={() => open(url)}
+          testID={`${testID}-open`}
+          fullWidth
+          destination="external"
+        />
         {index === 1 && card.kind === 'paste-code' ? (
           <T v="meta" color="secondary">{`Made by ${agentName}'s machine · holds no password or token`}</T>
         ) : null}
