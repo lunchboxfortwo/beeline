@@ -55,7 +55,8 @@ export function isHiddenSystemLine(message: PillFields): boolean {
 
 export function isPillMessage(message: PillFields): boolean {
   if (isHiddenSystemLine(message) || message.isArchivedNotice || message.corner) return false;
-  if (isGitHubEventRun(message)) return true;
+  // A populated lifecycle run is a receipt group with its own disclosure.
+  if (message.notificationLifecycleRun?.items?.length) return true;
   if (hasCardBody(message)) return false;
   if (message.notificationLifecycleRun || isSystemLine(message)) return true;
   if (message.cornerMarkers?.length || message.isAgentActivity ||

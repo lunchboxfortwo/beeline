@@ -312,10 +312,10 @@ const notice = { origin: 'system', visibility: 'notice' } as const;
 const card = { origin: 'system', visibility: 'card' } as const;
 const approvalUrl = 'https://approval.example/owner';
 const voice = { id: ROOM, roomId: ROOM, startedAt: 1_800_000_000, participants: [] };
-const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: string; copy?: string }[] = [
+const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: string; copy?: string; visibleOnArrival?: boolean }[] = [
   { name: 'plain workflow expiry', patch: { presentation: 'system', systemTranscript: notice, text: mockHeading },
     opened: bodyId, copy: mockHeading },
-  { name: 'kinded workflow handoff', patch: { presentation: 'card', systemTranscript: card, author: agent,
+  { name: 'kinded workflow handoff', visibleOnArrival: true, patch: { presentation: 'card', systemTranscript: card, author: agent,
     systemEvent: { kind: 'workflow-handoff', subject: { kind: 'agent', name: 'Agent' }, verb: 'passed approval' } }, opened: bodyId },
   { name: 'plain notice', patch: { presentation: 'system', text: 'Ada joined' }, opened: bodyId, copy: 'Ada joined' },
   { name: 'ended call', patch: { presentation: 'system', voiceCall: { ...voice, endedAt: 1_800_000_003 },
@@ -323,17 +323,19 @@ const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: stri
   { name: 'deleted member row', patch: { presentation: 'system', deleted: true, text: 'Ada deleted a message' },
     opened: bodyId, copy: 'Ada deleted a message' },
   { name: 'legacy System DM', patch: { text: 'Operator notice', author: system }, opened: bodyId, copy: 'Operator notice' },
-  { name: 'approval', patch: { presentation: 'card', systemTranscript: card, squireApproval: {
+  { name: 'approval', visibleOnArrival: true, patch: { presentation: 'card', systemTranscript: card, squireApproval: {
     agent, owner: person, title: 'Approve the request', detail: 'Example request', tool: 'operate_login',
     linkKind: 'approval', approvalUrl,
   } }, opened: `approval-${noticeId}`, copy: approvalUrl },
-  { name: 'sign-in', patch: { presentation: 'card', systemTranscript: card, agentSignIn: {
+  { name: 'sign-in', visibleOnArrival: true, patch: { presentation: 'card', systemTranscript: card, agentSignIn: {
     agentId: agent.pubkey, ownerId: person.pubkey, harness: 'pi', status: 'pending',
     kind: 'api-key', provider: 'openrouter',
   } }, opened: `agent-sign-in-${noticeId}` },
   { name: 'wallet record', patch: { presentation: 'card', systemTranscript: card,
     walletTx: { direction: 'out', amountText: '$1', counterparty: 'Example', chain: 'base', balanceAfterUsd: '$9' } },
     opened: `notification-run-${noticeId}` },
+  { name: 'wallet delegation record', patch: { presentation: 'card', systemTranscript: card,
+    walletDelegation: { standing: true } }, opened: `notification-run-${noticeId}` },
   { name: 'provider lifecycle', patch: { presentation: 'system', systemTranscript: { origin: 'github', visibility: 'notice' },
     systemEvent: { kind: 'merged', subject: { kind: 'github', name: 'GitHub' }, verb: 'merged pull request',
       object: { text: 'Fix labels', url: 'https://github.com/example/example/pull/7' } } },
@@ -342,7 +344,7 @@ const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: stri
 
 it.each(systemCases.flatMap(entry => [false, true].map(desktop => ({ ...entry, desktop }))))(
   'renders $name at each transcript position (desktop=$desktop)',
-  async ({ patch, opened, copy, desktop, name }) => {
+  async ({ patch, opened, copy, desktop, name, visibleOnArrival }) => {
     for (const position of ['lone', 'first', 'middle', 'last']) {
       const target = display(7, patch);
       if (name === 'approval') target.agentCommand = { kind: 'message', recipient: { id: 'emberus', name: 'Emberus', kind: 'agent' }, text: 'Review the request' };
@@ -355,7 +357,7 @@ it.each(systemCases.flatMap(entry => [false, true].map(desktop => ({ ...entry, d
       act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={desktop} />); });
       const body = () => tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === opened);
       const pills = tree.root.findAllByType(PillRow);
-      if (patch.systemTranscript?.visibility === 'card') {
+      if (visibleOnArrival) {
         expect(pills).toHaveLength(0);
       } else {
         expect(pills).toHaveLength(1);
