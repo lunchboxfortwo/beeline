@@ -400,7 +400,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "approve_merge",
-    "description": "Configured reviewer PASS on the exact headSha. The server lands when checks are green and no hold stands. This never releases a hold.",
+    "description": "Save the reviewer’s PASS turn text and approve the exact headSha. The server lands when checks are green and no hold stands. This never releases a hold.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -409,9 +409,10 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "pattern": "^[0-9a-fA-F]{40}$",
           "description": "The exact 40-character Git head SHA that passed review."
         },
-        "address": {"type": "string", "description": "Explicit target thread address."}
+        "address": {"type": "string", "description": "Explicit target thread address."},
+        "text": {"type": "string", "description": "Your final PASS verdict and findings as turn text."}
       },
-      "required": ["address", "headSha"],
+      "required": ["address", "headSha", "text"],
       "additionalProperties": false
     }
   },

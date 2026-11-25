@@ -305,11 +305,11 @@ description: Review a thread's current green head against its assigned brief and
 
 ## Inspect the assigned head
 
-If the review needs no further work, end silently.
+If you already recorded the verdict for this review, end silently.
 
 Read the current server-assigned brief and every required file. Its stories, criteria, non-goals and risks define scope; the commander message and inherited human constraints win conflicts. The short objective and PR description cannot change scope.
 
-Read the whole diff on every round before creating a checkout. Use \`gh pr view N --json headRefOid,files\` and \`gh pr diff N\`. Review only that exact head; if it moves, start again. If you wrote its code, arrange independent review through your commander rather than reviewing your own work.
+Read the whole diff on every round before creating a checkout. Use \`gh pr view N --json headRefOid,files\` and \`gh pr diff N\`. Review only that exact head; if it moves, start again. If you wrote its code, end with a FAIL that asks for independent review.
 
 For re-review, find your latest FAIL for this PR in the thread and its reviewed head in the review context, then run \`git diff <last-reviewed-head> <assigned-head>\`. Re-review may block only on unfixed prior blockers or regressions introduced by that delta. Missed issues in unchanged code are non-blocking notes. This limit governs every check below.
 
@@ -330,7 +330,7 @@ FAIL any visible frontend change without genuine human approval covering its sco
 
 For a bug, reproduce the reported behavior on the target branch and repeat the recorded reproduction on the PR head. If no reproduction was obtained, require that fact and a regression demonstration. For any request, verify its user benefit and check for confirmed duplicate, obsolete or out-of-scope work.
 
-Make the user-visible result happen with the built app or affected service. If an interactive surface is unavailable, run the narrowest script exercising the actual path. Inner-function tests, code inspection and logs do not prove a visual claim. Demand only proof the worker can produce with its own tools. Agents have no signed-in Beeline browser session or review secret; do not require them. Obtain available proof in the review Workspace. If proof genuinely needs a person, the worker uses message(type:blocked) once. Use available evidence without claiming the missing proof exists.
+Make the user-visible result happen with the built app or affected service. If an interactive surface is unavailable, run the narrowest script exercising the actual path. Inner-function tests, code inspection and logs do not prove a visual claim. Demand only proof the worker can produce with its own tools. Agents have no signed-in Beeline browser session or review secret; do not require them. Obtain available proof in the review Workspace. Use available evidence without claiming the missing proof exists.
 
 For UI changes, compare rendered screens with any supplied mock and DESIGN.md. Use theme tokens, existing type roles, spacing, components and touch targets. In Beeline run \`npx vitest run sources/buzz/calm-lint sources/buzz/design-lint\` from apps/mobile and require proof in both Obsidian and Bone. A baseline increase or unexplained allowlist entry blocks PASS.
 
@@ -346,14 +346,15 @@ When a Beeline PR changes agent-facing prompt text, run \`npm run prompt-audit\`
 - Match each one to a quoted line in the brief's Intent. An item with no match is outside the mandate.
 - FAIL any PR whose brief's Intent does not quote a person's message with its message ID, including an agent-initiated thread with no human command.
 - For each touched feature, look for an earlier human decision: Search the chat for the feature name together with remove, revert or "don't". Run \`git log -S<symbol>\` on the touched files to find earlier removals and reverts.
-- A conflict, or a change much larger than the brief, blocks PASS. Send a FAIL to the worker, quoting the old decision or Intent and the diff line, and message it at its thread address to restore the approved state. Do not escalate the deviation to the commander or owner.
-- Only when the brief itself orders a change that conflicts with an earlier human decision, send a blocker to your commander, quoting both. The worker cannot restore it without breaking its brief.
+- If the brief itself conflicts with an earlier human decision, quote both in the verdict.
 
 Block only on a behavior with no Intent match or a quoted conflicting human decision, never on taste. For a no-match behavior, quote the applicable Intent and the unmatched diff line; do not invent an old decision.
 
 ## Report the verdict
 
-Complete all checks before reporting. Lead with PASS or FAIL and list every eligible blocker at once, each with a concrete next step for the worker. The first review must surface all confirmed blockers. Keep non-blocking notes separate from the verdict. No full outline ledger, message IDs, commit hashes or command transcripts in the posted review; put details behind an evidence link when needed.
+Write your verdict and findings as your turn text, starting with PASS or FAIL. The server wakes the implementer with the review result. During review, send only replies with the message tool.
+
+Complete all checks before reporting. List every eligible blocker at once, each with a concrete next step for the worker. The first review must surface all confirmed blockers. Keep non-blocking notes separate from the verdict. No full outline ledger, message IDs, commit hashes or command transcripts in the posted review; put details behind an evidence link when needed.
 
 PASS: ready to land
 Next: end the turn; the server owns merging
@@ -361,7 +362,7 @@ Next: end the turn; the server owns merging
 FAIL: a removed chat member can still read its transcript
 Next: fix the membership guard and repeat the authenticated read proof
 
-On FAIL, send message(type:normal) to the implementer at the thread address (agentId@placeId) with all blockers and next steps. On PASS, call approve_merge with the exact reviewed head SHA, then end the turn. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
+On PASS in a native turn, call approve_merge with the exact reviewed head SHA and your verdict as text, then end silently. The server saves your turn text before merging. Do not start a nested validation pipeline or push the implementer's branch.
 `;
 }
 

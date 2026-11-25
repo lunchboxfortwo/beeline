@@ -1,6 +1,8 @@
 import { cornerRunStateSql, assembleTurnPrompt, cornerReviewerInstruction, describe, expect, it, vi, DaemonService, LiveHub, systemLine, createAgentCommand, reconcileConfiguredCornerReviewers, advanceCorner, H, A, B, W, R, C, db, phone, daemon, commands, claim, result, findings, greenHead, rootFixture, type AgentCommand } from './test-support-corner-review-dispatch.test-support.js';
 import { modelText } from './message-origin.js';
 import { recordCornerMergeApproval } from './corner-merge-approval.js';
+import { CornerMachineEvents } from './corner-attention.js';
+import { POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
 
 const reviewReport = findings;
 
@@ -362,15 +364,53 @@ describe('thread message attribution', () => {
   });
 
 
-  it('delivers one findings request at the implementer thread address', async () => {
-    await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
-    await greenHead(12, '1'.repeat(40));
+  it.each([
+    { verdict: 'FAIL: add the missing evidence.', approved: false, wake: 'corner_review_needed' },
+    { verdict: 'PASS: ready to land.', approved: true, wake: 'report' },
+  ])('REVIEW-TURN-TEXT: $verdict posts once and wakes only the implementer', async ({ verdict, approved, wake }) => {
+    const { db, daemon, phone } = rootFixture;
+    const headSha = '1'.repeat(40);
+    await phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
+    await greenHead(12, headSha);
     const [review] = await commands(B, C);
     await claim(review!);
-    await findings(review!, 'The reviewed implementation needs a repair.');
-    // The explicit message delivers one findings request at the thread address.
-    const handoff = await commands(A, C);
-    expect(handoff.map((command) => command.reason)).toEqual(['message']);
+    const beforeMessages = (await db.query<{ id: string }>('SELECT id FROM messages')).rows;
+    const beforeCommands = (await db.query<{ id: string }>('SELECT id FROM agent_commands')).rows;
+
+    const live = new LiveHub();
+    const errors: unknown[] = [];
+    const runtime = new CornerMachineEvents(db, live, error => errors.push(error));
+    const unlisten = await db.client.listen(POSTGRES_LIVE_CHANNEL, raw => {
+      const event = JSON.parse(raw);
+      if (event.table === 'corner_state' && event.roomId === C)
+        live.publish({ type: 'invalidate', roomId: C, reason: 'postgres:corner_state' });
+    });
+    try {
+      if (approved) {
+        await expect(daemon.execute('approveCornerMerge', {
+          cornerId: C, roomId: C, requestId: review!.turnRequestId, headSha, text: verdict,
+        }, B)).resolves.toMatchObject({ status: 'approved', headSha });
+      }
+      await result(review!, verdict);
+      await expect.poll(async () => (await commands(A, C))[0]?.source.body)
+        .toContain(approved ? 'PASS' : verdict);
+    } finally {
+      await unlisten();
+      await runtime.stop();
+    }
+    expect(errors).toEqual([]);
+
+    expect((await db.query(
+      `SELECT room_id,author_id,text,presentation,card_type FROM messages WHERE id<>ALL($1::text[])`,
+      [beforeMessages.map(({ id }) => id)],
+    )).rows).toEqual([{ room_id: C, author_id: B, text: verdict, presentation: 'message', card_type: null }]);
+    expect((await db.query(
+      `SELECT room_id,agent_id,reason FROM agent_commands WHERE id<>ALL($1::text[])`,
+      [beforeCommands.map(({ id }) => id)],
+    )).rows).toEqual([{ room_id: C, agent_id: A, reason: wake }]);
+    expect((await db.query(
+      'SELECT approved_by,head_sha FROM corner_merge_approvals WHERE corner_id=$1', [C],
+    )).rows).toEqual(approved ? [{ approved_by: B, head_sha: headSha }] : []);
   });
 
 

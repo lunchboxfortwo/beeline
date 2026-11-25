@@ -174,8 +174,10 @@ Bugfix briefs need a real-target Reproduction <id> or why infeasible and the clo
 Follow beeline-triage. Before PR, prove the user path in the built app/service or, if unavailable, the narrowest script for that path. Inner-function tests/logs/code reads prove no visible result. The PR body needs ## Reproduced and ## Demonstrated: steps, wrong/passing results, same Reproduction <id>, why real-target proof is unavailable and its stand-in. Features: "not a defect report".
 Non-repo work: post_artifact. End awaiting messages/checks/review; committed wakes resume. Landing archives this thread, cancels its work and abandons saved runs. The surviving commander owns follow-up at its address. Claim others' progress only from durable commands, this prompt or tool evidence. No unrequested features or refactors.`;
 
+const REVIEW_VERDICT_INSTRUCTION = 'Write your verdict and findings as your turn text, starting with PASS or FAIL. On PASS, call approve_merge with the exact reviewed head SHA and your verdict as text, then end silently. The server wakes the implementer with the review result. During review, send only replies with the message tool.';
+
 export const CORNER_REVIEWER_SESSION_INSTRUCTION =
-  'As configured reviewer, review the assigned green head. Demand available proof. Approve only the exact reviewed head with approve_merge. The server merges when its gate opens.';
+  `As configured reviewer, review the assigned green head with beeline-review. Demand available proof. ${REVIEW_VERDICT_INSTRUCTION} The server merges when its gate opens.`;
 
 export const CORNER_DELIVERY_NUDGE =
   'Only when you write code in this thread and the brief calls for repository changes, inspect the repository state and finish delivering the work unless a human hold stands: commit and push the intended changes and open the pull request if one does not exist. Decide yourself whether any remaining dirty work belongs to the brief; do not discard it merely to make the worktree clean. The pull request body must carry ## Reproduced and ## Demonstrated; if they are missing, add them before ending the turn. If you wrote no code, deliver with post_artifact.';
@@ -213,7 +215,7 @@ export function cornerReviewerInstruction(input: {
   // the head is named in the transcript, so it is described, not guessed.
   const number = input.pullRequestNumber ?? 'N';
   const headSha = input.headSha ?? '<head sha>';
-  return `Review PR ${number} at ${headSha}${input.briefRevision ? ` against brief revision ${input.briefRevision}` : ''} with beeline-review. Lead with PASS or FAIL; finish the review and list all blockers with concrete fixes, including every blocker on the first round. For later rounds, read the entire PR, find your last FAIL for this PR and its reviewed head in this thread, and use git diff from that head to the assigned head. Fail only for unresolved prior blockers or regressions introduced since that review; newly found issues in unchanged code are notes, not blockers. Keep notes separate; omit outline ledgers, message IDs and commit hashes from the posted verdict. Obtain live proof in the review Workspace. On FAIL, send message(type:normal) to the implementer at this thread's address with all findings. PASS: call approve_merge with the reviewed head SHA, then end the turn. The server owns merging.`;
+  return `Review PR ${number} at ${headSha}${input.briefRevision ? ` against brief revision ${input.briefRevision}` : ''} with beeline-review. ${REVIEW_VERDICT_INSTRUCTION} Finish the review and list all blockers with concrete fixes, including every blocker on the first round. For later rounds, read the entire PR, find your last FAIL for this PR and its reviewed head in this thread, and use git diff from that head to the assigned head. Fail only for unresolved prior blockers or regressions introduced since that review; newly found issues in unchanged code are notes, not blockers. Keep notes separate; omit outline ledgers, message IDs and commit hashes from the posted verdict. Obtain live proof in the review Workspace. The server owns merging.`;
 }
 
 /**
@@ -224,7 +226,7 @@ export function cornerReviewerInstruction(input: {
  * would tell a reviewer-author to wait for its own PASS, a permanent deadlock.
  */
 export const CORNER_REVIEWER_AUTHOR_MERGE =
-  "If you wrote this thread's code, never approve it. Use message(type:blocked) if independent review is unavailable. The server owns merging.";
+  "If you wrote this thread's code, never approve it. The server owns merging.";
 
 function shellLine(shell: RoomShellState | undefined): string {
   if (!shell) return '';
@@ -476,7 +478,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
           'When asked whether the reviewer was woken, call read(facet:checks) and quote reviewerWake; do not invent a cause. Never schedule polls of read(facet:checks) or the merge gate; the server wakes you when it changes.',
         repositoryWork && (reviewer ? CORNER_REVIEWER_AUTHOR_MERGE : cornerMergeInstruction(reviewerHandle)),
         reviewer &&
-          `Reviewer rules: ${CORNER_REVIEWER_SESSION_INSTRUCTION} Send findings with message(type:normal) to the implementer at this thread's address (agentId@placeId). Never push another agent's branch. This wins over the finished-fix rule. Assess actual coverage loss when tests or assertions are changed or deleted. Redundant or obsolete tests may be removed when surviving coverage or other adequate evidence supports the change; a seeded bug or mutation check is optional.`,
+          `Reviewer rules: ${CORNER_REVIEWER_SESSION_INSTRUCTION} Never push another agent's branch. This wins over the finished-fix rule. Assess actual coverage loss when tests or assertions are changed or deleted. Redundant or obsolete tests may be removed when surviving coverage or other adequate evidence supports the change; a seeded bug or mutation check is optional.`,
       );
     },
   },

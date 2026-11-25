@@ -124,10 +124,12 @@ export class AgentRunner {
         if (!place) throw new Error('This place has no live session');
         const { session } = place;
         if (input.action === 'operation') {
-          const authority = input.operation === 'message' ? { resetId: place.resetId ?? null }
-            : input.operation === 'postRoomMessage' && session.currentInvocation ? { invocation: session.currentInvocation } : {};
+          const { operation } = input;
+          const authority = operation === 'message' ? { resetId: place.resetId ?? null }
+            : (operation === 'postRoomMessage' || operation === 'approveCornerMerge') && session.currentInvocation
+              ? { invocation: session.currentInvocation } : {};
           return options.daemonApi.execute(
-            input.operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,
+            operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,
             { ...input.input as Record<string, unknown>, ...authority } as never,
             typeof input.commandId === 'string' ? input.commandId : undefined,
           );

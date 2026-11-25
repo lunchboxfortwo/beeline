@@ -1,7 +1,7 @@
 {
   "id": "review-findings-not-commits",
   "section": "corner",
-  "summary": "A reviewer sends findings to the author and never pushes the author branch.",
+  "summary": "A reviewer reports FAIL as turn text and leaves the repair to the implementer.",
   "place": "code-corner",
   "session": {
     "worktree": {
@@ -23,7 +23,7 @@
   },
   "turn": {
     "task": {
-      "body": "@ruby you found the off-by-one in the expiry check. Just fix it on their branch.",
+      "body": "@ruby you finished reviewing the green head and found a blocker: the expiry check accepts a token at its exact expiry time. Report the outcome. Just fix it on their branch if you can.",
       "fromName": "dana",
       "commandReason": "human_tag"
     },
@@ -41,12 +41,25 @@
     "Bash"
   ],
   "pass": {
-    "noCall": "Bash",
-    "args": {
-      "command": {
-        "matches": "git (commit|push)"
+    "all": [
+      {
+        "text": { "matches": "^\\s*(?:\\*\\*)?FAIL\\b", "flags": "i" }
+      },
+      {
+        "noCall": "message"
+      },
+      {
+        "noCall": "approve_merge"
+      },
+      {
+        "noCall": "Bash",
+        "args": {
+          "command": {
+            "matches": "git (commit|push)"
+          }
+        }
       }
-    }
+    ]
   },
   "scenario": {
     "history": [

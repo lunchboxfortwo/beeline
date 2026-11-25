@@ -414,21 +414,43 @@ const scope9 = fixtureScope9();
   });
 
 
-  it('PASS-LANDS: a reviewer PASS on a green head lands the PR at once', async () => {
+  it('PASS-LANDS: an immediate merge preserves exactly one reviewer verdict', async () => {
     const cornerId = await scope9.toReview();
     const [review] = await commands(B, cornerId);
-    await claim(review!);
-    rootFixture.githubHead = '7'.repeat(40);
+    const requestId = review!.turnRequestId;
+    const invocation = { id: crypto.randomUUID(), requestId };
+    await rootFixture.daemon.execute('startAgentTurn', { roomId: cornerId, requestId, invocationId: invocation.id }, B);
+    const headSha = SHA;
+    const text = 'PASS: verified the reproduction and the repair.';
+    rootFixture.githubHead = headSha;
     rootFixture.githubRollupState = 'passed';
+    const verdicts = async () => (await rootFixture.db.query(
+      'SELECT room_id,text FROM messages WHERE author_id=$1 AND request_id=$2', [B, requestId],
+    )).rows;
+    let verdictsAtMerge: unknown;
+    rootFixture.githubApp.mergePullRequest.mockImplementationOnce(async () => {
+      verdictsAtMerge = await verdicts();
+      rootFixture.githubApp.readPullRequest.mockResolvedValue({ number: 7, url: 'https://github.com/owner/widgets/pull/7',
+        headSha, headRef: branchOf(cornerId), baseRef: 'main', merged: true, mergedAt: '2026-01-01T00:00:00Z' });
+    });
     const landing = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       undefined, undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, id => rootFixture.github.landCorner(id));
     Object.assign(landing, { github: { assertCornerReviewerNotAuthor: async () => {} } });
-    await expect(landing.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B))
-      .resolves.toMatchObject({ status: 'approved' });
+    const approval = { cornerId, roomId: cornerId, requestId, headSha, text, invocation };
+    await expect(landing.execute('approveCornerMerge', { ...approval, headSha: '6'.repeat(40) }, B)).rejects.toThrow('STALE_HEAD');
+    expect(await verdicts()).toEqual([]);
+    await expect(landing.execute('approveCornerMerge', approval, B))
+      .resolves.toMatchObject({ status: 'approved', headSha, messageId: expect.any(String) });
     expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(await currentState(cornerId)).toBe('archived');
+    expect(verdictsAtMerge).toEqual([{ room_id: cornerId, text }]);
+    await expect(landing.execute('postRoomMessage', { roomId: cornerId, requestId, text, invocation, harnessEnded: true }, B))
+      .resolves.toMatchObject({ completed: true, published: true });
+    expect(await verdicts()).toEqual([{ room_id: cornerId, text }]);
+    const view = await rootFixture.phone.readRoom(cornerId, H);
+    expect(view?.messages.filter(message => message.author.pubkey === B).map(message => message.text)).toEqual([text]);
     expect(await reasons(cornerId, A)).not.toContain('corner_land');
-    console.log('PASS-LANDS Demonstrated: the reviewer PASS reached landCorner with no implementer merge_thread turn.');
   });
 
 

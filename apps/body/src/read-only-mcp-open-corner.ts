@@ -296,7 +296,8 @@ export async function approveMerge(args: JsonObject = {}): Promise<string> {
   const cornerId = targetCornerId(args);
   const headSha = typeof args.headSha === 'string' ? args.headSha.toLowerCase() : '';
   if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('headSha must be a full 40-character SHA');
-  return JSON.stringify(await daemonExecute('approveCornerMerge', { cornerId, headSha }));
+  if (typeof args.text !== 'string' || !args.text.trim()) throw new Error('reply text is required');
+  return JSON.stringify(await daemonExecute('approveCornerMerge', { cornerId, headSha, text: args.text }));
 }
 
 
