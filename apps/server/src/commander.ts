@@ -219,12 +219,11 @@ export function commanderChainSql(corner: string, asker: string, askedAt: string
 
 type ReportOptions = { orderIssuer?: boolean; automatic?: boolean; ask?: string; attachments?: PrivateCommandPayload['attachments']; idleSince?: string; afterCommit?: AfterCommit };
 
-type ReportReceipt = { id: string; createdAt: number; delivered?: boolean; receipt?: string };
 /** A worker reports in its model's words. */
 export async function reportToCommander(
   db: SqlDatabase, roomId: string, agentId: string, text: AgentVoice, command?: CommandRow,
   reportId = randomBytes(32).toString('hex'), options: ReportOptions = {},
-): Promise<ReportReceipt> {
+) {
   const resolved = command ? undefined : await commanderReportAddress(db, roomId);
   const address = !options.orderIssuer ? command?.report_address ??
     (command?.private_payload?.kind === 'order' ? command.private_payload.escalation : undefined) : undefined;

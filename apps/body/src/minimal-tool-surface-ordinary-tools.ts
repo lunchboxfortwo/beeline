@@ -1,3 +1,4 @@
+import { MESSAGE_ID_FIELD, MESSAGE_TEXT_FIELD, NATIVE_MESSAGE_ADDRESS_FIELD } from '@beeline/api-contract/daemon';
 import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-contract/phone';
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { ARTIFACT_MIME_TYPES,INSTITUTIONAL_HISTORY_QUERY_SCHEMA,INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_HISTORY_RESULT_MIN,INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS } from '@beeline/api-contract/daemon';
@@ -10,10 +11,10 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
   {
     name: 'message',
-    description: 'Send text. blocked goes to your commander. reply quotes a message that woke this turn. normal wakes the addressed agent session (agentId@placeId). From a thread, address a thread session.',
+    description: 'blocked goes to your commander. reply requires a pending message delivered to this turn. normal enqueues text for the addressed agent session (exact agentId@placeId). From a thread, address a thread agent session.',
     inputSchema: { type: 'object', required: ['type', 'text'], additionalProperties: false, properties: {
-      type: { enum: ['blocked', 'reply', 'normal'] }, text: { type: 'string' },
-      address: { type: 'string' }, quoteMsgId: { type: 'string' },
+      type: { enum: ['blocked', 'reply', 'normal'] }, text: MESSAGE_TEXT_FIELD,
+      address: NATIVE_MESSAGE_ADDRESS_FIELD, quoteMsgId: MESSAGE_ID_FIELD,
     } },
   },
   {
@@ -463,7 +464,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "post_artifact",
-    "description": "Upload a validated deliverable from a session path. Queues it for the final reply; uploading alone does not deliver a reply. Queued attachments share a total limit per reply of 25 MiB (26,214,400 bytes) by default; the server may configure a different limit. Use smaller files or deliver the queued batch before posting more. HTML must be self-contained with inline styles/images.",
+    "description": "Upload a validated deliverable from a session path. Returns objectId and queues the file for the final reply. Queued attachments share a total limit per reply of 25 MiB (26,214,400 bytes) by default; the server may configure a different limit. Use smaller files or deliver the queued batch before posting more. HTML must be self-contained with inline styles/images.",
     "inputSchema": {
       "type": "object",
       "required": ["path"],
@@ -477,7 +478,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
-          "description": "The artifact title, e.g. \"chat list mock\". Titles the card everywhere. Optional when posting by path (defaults to the file name); required for html/bytes content."
+          "description": "The artifact title, e.g. \"chat list mock\". Titles the card everywhere. Optional when posting by path (defaults to the file name)."
         },
         "mime": {
           "type": "string",

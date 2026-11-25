@@ -207,6 +207,7 @@ export type { DaemonBootstrapResult } from './daemon-operations-room-conversatio
 export type { WorkspaceRosterResult } from './daemon-operations-room-conversation-window.js';
 export type { RoomInboxResult } from './daemon-operations-room-conversation-window.js';
 export type { DaemonAttachment } from './daemon-operations-room-conversation-window.js';
+export type { RoomMessageResult, RoomAttachmentResult, MessageSendResult } from './daemon-operations-room-conversation-window.js';
 export type { RoomConversationResult } from './daemon-operations-room-conversation-window.js';
 export type { RoomAuthorityResult } from './daemon-operations-room-conversation-window.js';
 export type { AuthorityDecisionResult } from './daemon-operations-room-conversation-window.js';

@@ -385,7 +385,7 @@ const scope1 = fixtureScope1();
       })).toBe(1);
       expect(route === 'webhook' ? received[0] : received[0]!.data).toMatchObject({
         commandId:sent.id,address:ROOM,from:{agent:AGENT,place:ROOM},text:args.text,
-        next:expect.stringMatching(new RegExp(`^From: .+ in #.+\nid: ${sent.id}\nReply needed: true\ntext: [^]+\nReply\\(id: ${sent.id}, text: \\.\\.\\.\\) with your reply$`)),
+        next:expect.stringMatching(new RegExp(`^From: .+ in #.+\ncommandId: ${sent.id}\nReply needed: true\ntext: [^]+\nReply\\(id: ${sent.id}, text: \\.\\.\\.\\) with your reply$`)),
       });
       expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
         .not.toContainEqual(expect.objectContaining({ id:sent.id }));
@@ -479,7 +479,7 @@ const scope1 = fixtureScope1();
     expect(JSON.parse((await queued(cornerCommand.id))[0]!.body).data).toMatchObject({
       roomId: opened.cornerId, address: opened.cornerId, commandId: cornerCommand.id,
       text: 'Private thread assignment for the subscribed implementer',
-      next:expect.stringContaining(`id: ${cornerCommand.id}\nReply needed: true\ntext: Private thread assignment for the subscribed implementer\nReply(id: ${cornerCommand.id}, text: ...) with your reply`),
+      next:expect.stringContaining(`commandId: ${cornerCommand.id}\nReply needed: true\ntext: Private thread assignment for the subscribed implementer\nReply(id: ${cornerCommand.id}, text: ...) with your reply`),
     });
     const report = await createAgentCommand(scope1.db, {
       roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'report',
@@ -529,7 +529,7 @@ const scope1 = fixtureScope1();
       roomId: ROOM, agentId: member, sourceMessageId: null, reason: 'corner_review_dispatch',
       privatePayload: { text: `Current handoff target: PR #7 at ${'a'.repeat(40)}.`, authorId: AGENT, fromRoomId: ROOM, kind: 'lifecycle' },
     });
-    const reviewNext = `id: ${review!.id}\nReply needed: false\ntext: Current handoff target: PR #7 at ${'a'.repeat(40)}.`;
+    const reviewNext = `commandId: ${review!.id}\nReply needed: false\ntext: Current handoff target: PR #7 at ${'a'.repeat(40)}.`;
     const queuedNext = JSON.parse((await queued(review!.id))[0]!.body).data.next as string;
     const pendingNext = (await pendingMcpWakes(scope1.db, member)).find(item => item.id === review!.id)!.next;
     for (const next of [queuedNext, pendingNext]) {

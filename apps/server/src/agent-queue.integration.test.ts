@@ -166,6 +166,20 @@ it('retains the answer obligation when return membership is gone, with no public
   }
 });
 
+it('reports an obsolete invocation separately from command completion and publication', async () => {
+  const item = await ask(R1, 'Answer from the current invocation');
+  const invocation = {id:'obsolete-run', requestId:item.turn_request_id};
+  await daemon.execute('startAgentTurn',{roomId:R1,requestId:invocation.requestId,invocationId:invocation.id},A);
+  await daemon.execute('startAgentTurn',{roomId:R1,requestId:invocation.requestId,invocationId:'current-run'},A);
+  const result = await daemon.execute('postRoomMessage',{
+    roomId:R1,requestId:item.id,invocation,harnessEnded:true,text:'Stale answer',
+  },A);
+  expect(result).toMatchObject({commandId:item.id,completed:false,published:false,superseded:true});
+  expect(result).not.toHaveProperty('messageId');
+  expect((await queue()).map(entry=>entry.id)).toContain(item.id);
+  expect((await db.query("SELECT 1 FROM messages WHERE author_id=$1 AND text='Stale answer'",[A])).rowCount).toBe(0);
+});
+
 it('queues messages beyond the retired chain-depth cap', async () => {
   const parent = await ask(R1, 'root');
   await db.query('UPDATE agent_commands SET agent_depth=50 WHERE id=$1', [parent.id]);
@@ -417,8 +431,11 @@ it('a quiet reconnect batch completes its event wake while the schedule and huma
   const before = (await db.query(`SELECT count(*)::int n FROM messages WHERE author_id=$1`, [A])).rows[0];
   // Empty harness output does not answer the scheduled request or the person.
   expect(await answer(R1, schedule.id, '')).toMatchObject({ answered: false });
-  expect(await daemon.execute('postRoomMessage', { roomId:R1,requestId:event.id,text:'' }, A)).not.toMatchObject({ answered: false });
-  expect(await answer(R1, tag.id, '')).toMatchObject({ answered: false });
+  const quiet = await daemon.execute('postRoomMessage', { roomId:R1,requestId:event.id,text:'' }, A);
+  expect(quiet).toEqual({commandId:event.id, completed:true, published:false});
+  const owed = await answer(R1, tag.id, '');
+  expect(owed).toMatchObject({commandId:tag.id, answered:false, completed:false, published:false});
+  expect(owed).not.toHaveProperty('messageId');
   expect((await queue()).map(item => item.id)).toEqual([schedule.id,tag.id]);
   expect((await db.query(`SELECT id,state,result_message_id FROM agent_commands WHERE id=ANY($1::text[]) ORDER BY id`, [[schedule.id,event.id]])).rows)
     .toEqual([{id:schedule.id,state:'pending',result_message_id:null},{id:event.id,state:'complete',result_message_id:null}].sort((a,b)=>a.id.localeCompare(b.id)));

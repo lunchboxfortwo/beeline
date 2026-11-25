@@ -693,7 +693,7 @@ export async function resolveDownloadAttachment(
   if (deps.readAttachment) {
     try {
       const message = await deps.readAttachment(wanted);
-      const attachments = (Array.isArray(message.attachments) ? message.attachments : []) as DaemonAttachment[];
+      const attachments = (message.attachment ? [message.attachment] : Array.isArray(message.attachments) ? message.attachments : []) as DaemonAttachment[];
       const index = attachments.findIndex(item => attachmentId(item) === wanted);
       if (index >= 0) {
         const candidate = candidateFromMessage(String(message.messageId || wanted), attachments, index);

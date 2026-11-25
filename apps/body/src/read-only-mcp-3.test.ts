@@ -860,7 +860,9 @@ mergedDescribe34('resolve-attach-path.test.ts', () => {
           queued.push(attachment);
         },
       };
-      await m34_postArtifact({ path: '~/notes.txt' }, deps);
+      const receipt = JSON.parse(await m34_postArtifact({ path: '~/notes.txt' }, deps));
+      m34_expect(receipt).toEqual({objectId:'11111111-1111-4111-8111-111111111111',queued:true,published:false});
+      await m34_expect(m34_postArtifact({html:'<p>Unreachable inline content</p>'},deps)).rejects.toThrow('path is required');
       const brief = await m34_bindBriefFiles({ attachments: [{ path: '~/notes.txt' }] }, deps);
       m34_expect(uploaded.map((bytes) => bytes.toString())).toEqual([
         'File for delivery',

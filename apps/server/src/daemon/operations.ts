@@ -33,7 +33,6 @@ import { Input, Output, id } from './values.js';
 import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, startAgentTurnOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation } from './operation-effects.js';
 import { daemonAccess, daemonRoomMembers } from './access.js';
 import { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
-import { daemonRoomMessage } from './message-reads.js';
 import { daemonWatchCorner, daemonCornerRemote, daemonCornerPlan, daemonRenameCorner, daemonTargetProposal } from './corner-reports.js';
 import { daemonRoomAuthority, daemonPermissionAuthority, daemonMissionAuthority, daemonScheduleAuthority, daemonMandate, daemonTargetAuthority } from './authority.js';
 import { daemonCreateAgentSchedule, daemonSetEventSubscriptions, daemonListEventSubscriptions, daemonPostRoomEvent, daemonListAgentSchedules, daemonDeleteAgentSchedule, daemonUpdateAgentSchedule } from './schedules-events.js';
@@ -190,11 +189,12 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           input as Input<'getRoomConversation'>,
           authenticatedAgentId,
         )) as Output<Name>;
-      case 'getRoomMessage':
-        return (await daemonRoomMessage(ctx,
-          input as Input<'getRoomMessage'>,
-          authenticatedAgentId,
-        )) as Output<Name>;
+      case 'getRoomMessage': {
+        const addressed = input as Input<'getRoomMessage'>;
+        return (await (addressed.attachmentId === undefined
+          ? ctx.roomMessage(addressed, authenticatedAgentId)
+          : ctx.roomAttachment(addressed, authenticatedAgentId))) as Output<Name>;
+      }
       case 'stopAgentTurn':
         return await stopCommandedTurn(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,
           String(candidate.address),

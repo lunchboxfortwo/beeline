@@ -1,3 +1,4 @@
+import type { MessageSendResult, RoomMessageResult, RoomAttachmentResult } from './daemon-operations-room-conversation-window.js';
 import type { UsageAccountPublicationResult, UsageAccountReference, UsageWriteSource } from './helper-usage.js';
 import type { RepositoryOnboardingCard } from './repository-onboarding.js';
 import type { AgentUsage, UsageRefreshOutcome } from './agent-usage.js';
@@ -172,14 +173,9 @@ export type DaemonOperationMap = {
       readonly offset?: number;
       readonly requestId?: string;
     },
-    {
-      readonly messageId: string;
-      readonly body: string;
-      readonly nextOffset?: number;
-      readonly attachments: readonly DaemonAttachment[];
-    }
+    RoomMessageResult | RoomAttachmentResult
   >;
-  message: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, WriteResult>;
+  message: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, MessageSendResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;
   read: Operation<RoomInput & { readonly address: string; readonly limit?: number }, RoomConversationResult>;
   getRoomAuthority: Operation<RoomPrincipalInput, RoomAuthorityResult>;

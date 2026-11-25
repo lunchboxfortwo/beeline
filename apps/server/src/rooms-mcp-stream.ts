@@ -207,14 +207,16 @@ export async function serveMcpMemberStream(database: SqlDatabase, principal: Mcp
             const current = await page(db,after);
             for (const mention of current.mentions) {
               roomIds.add(mention.room_id);
-              frames.push({v:1,type:'delivery',deliveryId:`mention:${mention.id}:0`,mentions:[mention],wakes:[],mentionCursor:String(mention.deliveryCursor ?? after)});
+              const messageId = typeof mention.messageId === 'string' ? mention.messageId : mention.id;
+              frames.push({v:1,type:'delivery',deliveryId:`mention:${messageId}:0`,mentions:[mention],wakes:[],mentionCursor:String(mention.deliveryCursor ?? after)});
             }
             for (const wake of current.wakes) {
-              if (wakeIds.has(wake.id)) continue;
-              wakeIds.add(wake.id);
+              const commandId = typeof wake.commandId === 'string' ? wake.commandId : wake.id;
+              if (wakeIds.has(commandId)) continue;
+              wakeIds.add(commandId);
               // A join receipt contains no Room content or work authority. Its address is the host conversation.
               if(wake.kind!=='join_probe')roomIds.add(wake.address);
-              frames.push({v:1,type:'delivery',deliveryId:`wake:${wake.id}`,mentions:[],wakes:[wake],mentionCursor:current.nextCursor});
+              frames.push({v:1,type:'delivery',deliveryId:`wake:${commandId}`,mentions:[],wakes:[wake],mentionCursor:current.nextCursor});
             }
             after=current.nextCursor;
             if (!current.more) break;

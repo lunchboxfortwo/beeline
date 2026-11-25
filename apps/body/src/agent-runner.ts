@@ -522,7 +522,12 @@ export class AgentRunner {
               : {}),
             ...(answer.steps ? { steps: answer.steps } : {}),
           });
-      if (receipt.answered !== false) {
+      const completed = 'completed' in receipt && typeof receipt.completed === 'boolean'
+        ? receipt.completed
+        : receipt.answered !== false;
+      const superseded = 'superseded' in receipt && receipt.superseded === true;
+      if (completed || superseded) {
+        if (superseded && !completed) this.answered.delete(answer.itemId);
         this.stored.delete(answer.itemId);
         this.durable.delete(answer.itemId);
         void this.answers

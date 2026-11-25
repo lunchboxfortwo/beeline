@@ -319,7 +319,7 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
   }
   if (name === 'postRoomMessage') {
     const saved = await daemonPostRoomMessage(ctx,input as Input<'postRoomMessage'>,agentId);
-    if (!('answered' in saved) || saved.answered !== false) {
+    if (saved.completed || saved.published) {
       const refresh = () => ctx.reconcileZeroCheckWorkerCompletion(String(value.roomId),agentId)
         .catch(error => console.warn('[answer] optional lifecycle refresh omitted:',error));
       const background = CornerAccessDatabase.physical(ctx.database).backgroundWork;

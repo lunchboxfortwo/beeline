@@ -149,12 +149,12 @@ export async function renderAuditPrompts() {
       memoryMaxBytes: 32 * 1024 ** 3, squireAvailable: true,
     } as Parameters<typeof source.assembly.assembleSessionPrompt>[0]);
     const mention = { ...mentionRouting(command.agentId, situation.place, command.sourceMessageId, situation.author),
-      id: command.sourceMessageId, room_id: situation.place, room_name: command.roomName,
+      id: command.sourceMessageId, commandId:command.id, room_id: situation.place, room_name: command.roomName,
       author_handle: situation.author, author_name: names.get(situation.author), text: situation.text,
       institutionalContext: context, attachments: [], created_at: joined.joinedAt, deliveryCursor: '1', truncated: false };
     const named = { fromName: names.get(situation.author) ?? null, placeName: situation.from === thread ? 'widget' : 'Inventory' };
     const next = mcpWakeText({ id, from: command.from!, ...named, reason: situation.reason, ask: situation.ask, text: situation.text });
-    const wake = { id, address: situation.place, from: command.from!, ...named, reason: situation.reason,
+    const wake = { id, commandId:id, messageId:null, address: situation.place, from: command.from!, ...named, reason: situation.reason,
       ...(situation.kind ? { kind: situation.kind } : {}), ...(situation.ask ? { ask: situation.ask } : {}),
       text: situation.text, institutionalContext: context, attachments: [], createdAt: joined.joinedAt, next };
     const mcpDelivery = situation.reason === 'human_tag' ? mention : wake;

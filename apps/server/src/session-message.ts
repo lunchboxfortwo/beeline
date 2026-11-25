@@ -6,7 +6,7 @@ import { CommandRefusalError } from './command-refusal.js';
 import { assignmentBeforeBlock, commanderReportAddress } from './commander.js';
 import type { SqlDatabase } from './database.js';
 import { openBlocksSql } from './implementer-blocks.js';
-import { replyableWake } from './message-route.js';
+import { recordedMessageRoute, replyableWake } from './message-route.js';
 
 type SessionMessage = {
   type: 'normal' | 'blocked' | 'reply';
@@ -38,7 +38,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       const wake = replyableWake(parent);
       if (parent?.state !== 'pending' || input.quoteMsgId !== wake?.id)
         throw new CommandRefusalError('Quote a message that woke this turn.', 400);
-      to = wake.from;
+      to = (await recordedMessageRoute(db, parent)).from;
       quote = input.quoteMsgId;
     } else if (input.type === 'blocked' && input.address === undefined && input.quoteMsgId === undefined) {
       const room = (await db.query<{ parent_id: string | null; created_by: string }>(
@@ -72,8 +72,8 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
     }
     const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
-    if (parent && (quote || input.type === 'blocked')) await db.query(
-      'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.id]);
+    if (parent && saved.messageId && (quote || input.type === 'blocked')) await db.query(
+      'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.messageId]);
     return saved;
   });
 }

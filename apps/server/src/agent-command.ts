@@ -426,12 +426,16 @@ type Chat = { id: string; parent_id: string | null; archived: boolean; direct_pa
   review: {agentId:string;headSha:string;pullRequest:number;briefRevision:number;checks:unknown;cornerId:string} | null };
 export type QueuedPostReceipt = { id: string; createdAt: number; commands: CommandRow[]; woken: string[];
   notWoken: { handle: string; reason: string }[]; stopped: boolean; stored: boolean; visible: boolean; receipt: string };
+type DeliveryReceipt = {
+  commandId?: string; messageId?: string; createdAt?: number; queued: boolean; published: boolean;
+  receipt: string; woken?: string[]; notWoken?: {handle:string;reason:string}[];
+};
 type OrderFeedback = { id:string; createdAt:number; feedback:string };type DeliveryInput = AgentCommandInput & { audienceId?: string; stopped?: boolean };
 export function queueMessage(db: SqlDatabase, input: QueuedPost): Promise<QueuedPostReceipt>;
-export function queueMessage(db: SqlDatabase, input: QueuedDelivery): Promise<{ id: string; createdAt: number; delivered: boolean; receipt: string; woken?: string[]; notWoken?: {handle:string;reason:string}[] }>;
+export function queueMessage(db: SqlDatabase, input: QueuedDelivery): Promise<DeliveryReceipt>;
 export function queueMessage(db: SqlDatabase, input: QueuedOrder): Promise<CommandRow | OrderFeedback>;
 export function queueMessage(db: SqlDatabase, input: DeliveryInput): Promise<CommandRow | undefined>;
-export async function queueMessage(database: SqlDatabase, raw: QueuedPost | QueuedOrder | QueuedDelivery | DeliveryInput): Promise<QueuedPostReceipt | CommandRow | OrderFeedback | { id: string; createdAt: number; delivered: boolean; receipt: string } | undefined> {
+export async function queueMessage(database: SqlDatabase, raw: QueuedPost | QueuedOrder | QueuedDelivery | DeliveryInput): Promise<QueuedPostReceipt | CommandRow | OrderFeedback | DeliveryReceipt | undefined> {
   if ('kind' in raw && (raw.kind === 'post' || raw.kind === 'delivery')) {
     assertMemberTranscript(raw.authorId, raw.kind === 'post' ? raw.presentation : undefined);
   }
@@ -520,14 +524,15 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
             ask: input.ask, sourceAgentId:input.sourceItem.agent_id, automatic: input.automatic, idleSince: input.idleSince,
             originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
         }, chat);
-        return { id: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, delivered: true, receipt: 'Report queued privately; not confirmation of execution.' };
+        return { commandId: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, queued: true, published: false, receipt: 'Report queued privately.' };
       }
       const saved = await postMessage(db, { kind: 'post', roomId: chat.id, authorId: input.authorId,
         audienceId: input.recipientId, id: input.id, text: input.text, attachments: input.attachments,
         requestId: input.sourceItem.turn_request_id, parent: input.sourceItem, replyTo: input.replyTo,
         card: input.ask ? {ask:input.ask} : undefined,
       }, chat);
-      return { id: saved.id, createdAt: saved.createdAt, delivered: true, receipt: saved.receipt, woken:saved.woken, notWoken:saved.notWoken };
+      return { messageId: saved.stored ? saved.id : undefined, createdAt: saved.stored ? saved.createdAt : undefined,
+        queued: false, published: saved.stored, receipt: saved.receipt, woken:saved.woken, notWoken:saved.notWoken };
     }
     if (post) return postMessage(db, input, chat);
     if (order) {
@@ -790,19 +795,22 @@ function refuseStoppedMessage(archived: boolean): never {
 export function refuseMessageMembership(message='address requires current membership'):never {
   throw wall('membership',message);
 }
+type AnswerReceipt = Partial<Pick<QueuedPostReceipt, 'id' | 'createdAt' | 'receipt' | 'woken' | 'notWoken' | 'stored' | 'visible'>> & {
+  commandId?: string; messageId?: string; completed: boolean; published: boolean; superseded?: boolean;
+  delivered?: boolean; answered?: boolean; queued?: boolean; deliveryCommandId?: string; destination?: MessageRoute['to'];
+};
+
 /** The only queue-answer exit. Publication and completion share its transaction. */
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
   roomId: string; requestId?: string; text: string;
-  messageAsk?: MessageAsk; explicitReply?: boolean;
+  messageAsk?: MessageAsk; explicitReply?: boolean; publicPost?: boolean;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
   harnessEnded?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   outputFiles?: Attachment[];
   sharedReplyId?: string;
-}): Promise<Pick<QueuedPostReceipt, 'id' | 'createdAt'> &
-  Partial<Pick<QueuedPostReceipt, 'receipt' | 'woken' | 'notWoken' | 'stored' | 'visible'>> &
-  { delivered?: boolean; answered?: boolean }> {
+}): Promise<AnswerReceipt> {
   if (input.harnessEnded && input.invocation && !input.explicitReply) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
     db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
@@ -823,20 +831,20 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         outputFiles:files, messageId:outputId,
       });
       result ??= saved;
-      if (saved.answered === false) unanswered = true;
-      if (!input.explicitReply && saved.delivered && saved.id === outputId) {
+      if (!saved.completed) unanswered = true;
+      if (!input.explicitReply && saved.published && saved.messageId === outputId) {
         sharedReplyId = saved.id;
         result = saved;
       }
     }
     const saved = result ?? await answerQueuedMessage(db,agentId,{...input,queuedRequestIds:undefined});
-    return unanswered ? { ...saved, answered: false } : saved;
+    return unanswered ? { ...saved, completed: false, answered: false } : saved;
   });
   let completedNow = false;
-  const published = await database.transaction(async db => {
+  const published = await database.transaction<AnswerReceipt>(async db => {
     const item = (await db.query<CommandRow & { public_reply_id: string | null;
-      name: string; stop_requested_at: Date | null }>(
-      `SELECT item.*,identity.name,posted.id public_reply_id
+      name: string; stop_requested_at: Date | null; public_reply_at: Date | null }>(
+      `SELECT item.*,identity.name,posted.id public_reply_id,posted.created_at public_reply_at
        FROM agent_commands item JOIN identities identity ON identity.id=item.agent_id
        LEFT JOIN messages posted ON posted.id=COALESCE(item.result_message_id,item.posted_reply_id) AND posted.deleted_at IS NULL
          AND posted.author_id=item.agent_id
@@ -848,77 +856,87 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       && !(await db.query(`SELECT 1 FROM agent_commands item WHERE item.id=$1 AND ${currentIdleReportSql('item')}`, [item.id])).rowCount) {
       completedNow = true;
       await endAgentTurn(db, item, 'complete');
-      return { id: item.id, createdAt: Math.floor(Date.now() / 1000) };
+      return { commandId: item.id, completed: true, published: false };
     }
     const payload = item?.private_payload;
     const messageText = repairAgentPost(item?.reason === 'voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
     if (item?.state === 'cancelled') refuseStoppedMessage(false);
     if (item) {
-      const receipt = {id:item.result_message_id ?? item.posted_reply_id ?? item.id,createdAt:Math.floor(Date.now()/1000),delivered:true};
+      const receipt = {commandId: item.id, completed: item.state === 'complete', published: Boolean(item.public_reply_id),
+        ...(item.public_reply_id ? {id:item.public_reply_id,messageId:item.public_reply_id,createdAt:new Date(item.public_reply_at!).getTime()/1000,stored:true,visible:true} : {})};
       if (!input.explicitReply) {
         const files = input.outputFiles ?? item.answer_attachments ?? [];
         if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && (payload?.automatic || isBackgroundCommand(item.reason))) return receipt;
-        if (!messageText && !files.length && !input.sharedReplyId) {
+        if (!input.publicPost && !messageText && !files.length && !input.sharedReplyId) {
           if (item.state === 'complete') return receipt;
           if (!item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
             if (input.harnessEnded) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)',[agentId,item.room_id,item.turn_request_id]);
-            return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
+            return {...receipt, answered:false};
           }
           await endAgentTurn(db,item,'complete',null,item.public_reply_id ?? undefined);
           completedNow = true;
-          return receipt;
+          return {...receipt, completed: true};
         }
         const outputId = input.messageId ?? hash(`local-final:${item.id}`);
         const previous = !input.sharedReplyId && item.state === 'complete' ? (await db.query<{ id: string; created_at: Date; deleted_at: Date | null }>(
           'SELECT id,created_at,deleted_at FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3', [outputId,item.room_id,agentId])).rows[0] : undefined;
-        if (previous) return { id: previous.id, createdAt: Math.floor(new Date(previous.created_at).getTime() / 1000),
-          delivered: true, stored: true, visible: !previous.deleted_at };
+        if (previous) return { ...receipt, id: previous.id, messageId: previous.id, published: true,
+          createdAt: Math.floor(new Date(previous.created_at).getTime() / 1000), delivered: true, stored: true, visible: !previous.deleted_at };
         const existing = input.sharedReplyId;
-        const saved = existing ? {...receipt,id:existing} : await queueMessage(db,{
+        const saved = existing ? {id: existing, stored: true, visible: true} : await queueMessage(db,{
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
-          id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,replyTo:item.source_message_id ?? item.id,
+          id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,
+          replyTo:input.replyToMessageId ?? item.source_message_id ?? item.id,
         });
-        if (existing && item.state === 'complete') return {id:existing,createdAt:receipt.createdAt,delivered:true};
+        if (!saved.stored) {
+          const {receipt: warning, woken, notWoken} = saved as QueuedPostReceipt;
+          return {...receipt, stored: false, visible: false, answered: false, receipt:warning, woken, notWoken};
+        }
+        if (existing && item.state === 'complete')
+          return {...receipt, id:existing, messageId:existing, published:true, stored:true, visible:true, delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
         await endAgentTurn(db,item,'complete',null,saved.id);
         completedNow = true;
-        if ('stored' in saved) {
-          const { id, createdAt, stored, visible, receipt, woken, notWoken } = saved;
-          return { id, createdAt, stored, visible, receipt, woken, notWoken, delivered: true };
-        }
-        return {id:saved.id,createdAt:saved.createdAt,delivered:true};
+        return {...saved, commandId:item.id, messageId:saved.id, completed:true, published:true, delivered:true};
       }
-      if (!messageText) return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
       const scheduleReply = item.reason === 'schedule' ? replyableWake(item) : undefined;
-      const to = scheduleReply?.from ?? (item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item)).from;
+      const to = (await recordedMessageRoute(db,item)).from;
       if (to.agent === SYSTEM_IDENTITY_ID) refuseMessageMembership('Quote a message that woke this turn.');
       if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[to.place])).rowCount) {
         refuseMessageMembership('return address archived');
       }
+      if (!messageText && !input.messageAsk)
+        return {commandId:item.id,completed:false,published:false,answered:false,delivered:false,
+          queued:false,stored:false,visible:false,destination:to};
       const from = {agent:agentId,place:item.room_id};
       const id = hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
       const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:scheduleReply?.id ?? item.source_message_id ?? item.id});
-      if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.id]);
-      else await endAgentTurn(db,item,'complete',null,saved.id);
+      if (!saved.stored || !saved.messageId)
+        return {...saved, commandId:item.id, completed:false, published:false, answered:false, delivered:false};
+      if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.messageId]);
+      else await endAgentTurn(db,item,'complete',null,saved.messageId);
       completedNow = true;
-      return {...saved,delivered:true};
+      return {...saved, deliveryCommandId:'commandId' in saved ? saved.commandId : undefined, commandId:item.id, completed:true, published:true, delivered:true};
     }
     const saved = await queueMessage(db,{kind:'post',roomId:input.roomId,authorId:agentId,
       text:modelText(messageText),agentIds:[],id:input.messageId ?? hash(`local-final:${agentId}:${input.roomId}:${input.requestId ?? ''}`),
       requestId:input.requestId,replyTo:input.replyToMessageId,attachments:input.outputFiles});
-    completedNow = saved.stored !== false;
-    return {...saved,delivered:completedNow};
+    completedNow = saved.stored;
+    const {id,createdAt,stored,visible,receipt,woken,notWoken} = saved;
+    return { ...(stored ? {id,messageId:id,createdAt} : {}), stored, visible, receipt, woken, notWoken,
+      completed:false,published:stored,delivered:stored };
   });
   // Optional history and cleanup cannot hold the committed publication receipt.
-  if (completedNow) {
+  const messageId = published.messageId;
+  if (completedNow && messageId) {
     const after=()=>Promise.all([
-        observeQueuedAnswer(database,published.id,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
-        recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId:published.id})
+        observeQueuedAnswer(database,messageId,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
+        recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId})
           .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),
         database.query(`SELECT beeline_record_agent_answer(id,false,NULL) FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,[input.roomId,agentId,input.requestId ?? null])
           .catch(error=>console.warn('[answer] optional turn status omitted:',error)),
-        recordAnswerActivity(database,agentId,published.id,input).catch(error=>console.warn('[answer] optional activity omitted:',error)),
+        recordAnswerActivity(database,agentId,messageId,input).catch(error=>console.warn('[answer] optional activity omitted:',error)),
         database.query('DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3',
           [input.roomId,agentId,input.requestId ?? null]).catch(error=>console.warn('[answer] optional media cleanup omitted:',error)),
       ]).then(()=>undefined);

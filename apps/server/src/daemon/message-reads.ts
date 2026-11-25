@@ -1,4 +1,5 @@
-import type { DaemonAttachment } from '@beeline/api-contract/daemon';
+import { CommandRefusalError } from '../command-refusal.js';
+import type { DaemonAttachment, RoomAttachmentResult, RoomMessageResult } from '@beeline/api-contract/daemon';
 import { roomAudienceCanReadSourceSql } from '../institutional-history.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
 import type { DaemonContext } from './context.js';
@@ -16,8 +17,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
   WHERE source.id=message.room_id
     AND ${roomAudienceCanReadSourceSql('COALESCE(output.parent_id,output.id)', 'COALESCE(source.parent_id,source.id)')})))`;
 
-  export async function daemonRoomMessage(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<{ messageId: string; body: string; attachments: DaemonAttachment[] }> {
-    if (input.attachmentId !== undefined) return ctx.roomAttachment(input, agentId);
+  export async function daemonRoomMessage(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<RoomMessageResult> {
     let borrowedSource = false;
     await ctx.access(input.roomId, agentId).catch(async (error: unknown) => {
       if (!(error instanceof AccessDeniedError)) throw error;
@@ -29,10 +29,10 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
         await ctx.reach(input.roomId, agentId);
       }
     });
-    if (!input.messageId || input.messageId.length > 128) throw new Error('invalid message id');
+    if (!input.messageId || input.messageId.length > 128) throw new CommandRefusalError('invalid message id', 400);
     const offset = input.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000_000)
-      throw new Error('invalid message offset');
+      throw new CommandRefusalError('invalid message offset', 400);
     const delivered = await deliveredMessage(ctx.database, input.messageId, agentId);
     if (delivered) input = { ...input, messageId: delivered.id };
     // Private hand-offs expose the command id as their message id. Only the
@@ -56,7 +56,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
     )).rows[0];
     if (handoff && (borrowedSource || !handoff.accessible ||
         (handoff.agent_id !== agentId && handoff.author_id !== agentId)))
-      throw new Error('message access denied: private hand-off');
+      throw new CommandRefusalError('message access denied: private hand-off', 403);
     let row = handoff ?? (
       await ctx.database.query<{ body: string; attachments: DaemonAttachment[] }>(
         `SELECT CASE WHEN card_type='agent-command' THEN COALESCE(card->>'text',text) ELSE text END body,
@@ -103,7 +103,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
         [input.roomId, input.messageId, agentId, borrowedSource],
       );
       if (candidates.rows.length > 1)
-        throw new Error(`ambiguous message id: ${candidates.rows.slice(0, 20).map(candidate => candidate.id).join(', ')}${candidates.rows.length > 20 ? ' (more matches; use a longer id)' : ''}`);
+        throw new CommandRefusalError(`ambiguous message id: ${candidates.rows.slice(0, 20).map(candidate => candidate.id).join(', ')}${candidates.rows.length > 20 ? ' (more matches; use a longer id)' : ''}`, 400);
       if (candidates.rows.length === 1 && candidates.rows[0]!.id !== input.messageId)
         return ctx.roomMessage({ ...input, messageId: candidates.rows[0]!.id }, agentId);
       if (borrowedSource) throw new AccessDeniedError();
@@ -114,13 +114,13 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
          WHERE message.id=$1 AND ${readableMessage}`,
         [input.messageId],
       );
-      if (elsewhere.rowCount) throw new Error('message access denied from this chat');
-      throw new Error('message not found in this chat');
+      if (elsewhere.rowCount) throw new CommandRefusalError('message access denied from this chat', 403);
+      throw new CommandRefusalError('message not found in this chat', 404);
     }
     let body = row.body;
     if (offset) {
       const characters = [...body];
-      if (offset > characters.length) throw new Error('offset exceeds message body');
+      if (offset > characters.length) throw new CommandRefusalError('offset exceeds message body', 400);
       body = characters.slice(offset).join('');
     }
     const attachments = markExpiredAttachments(
@@ -136,13 +136,11 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
 
 
   /** Locate candidates only; the existing message/brief reads decide reach. */
-  export async function daemonRoomAttachment(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<{
-    messageId: string; body: string; attachments: DaemonAttachment[];
-  }> {
+  export async function daemonRoomAttachment(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<RoomAttachmentResult> {
     const wanted = input.attachmentId!.trim().toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(wanted))
-      return { messageId: '', body: '', attachments: [] };
-    const candidates = await ctx.database.query<{ id: string }>(
+      throw new CommandRefusalError('no attachment with this id is visible from this address', 404);
+    const candidates = input.messageId ? [{id:input.messageId}] : (await ctx.database.query<{ id: string }>(
       `SELECT message.id FROM messages message
        WHERE ${readableMessage} AND EXISTS (
          SELECT 1 FROM jsonb_array_elements(message.attachments) file
@@ -150,16 +148,21 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
        UNION
        SELECT command.id FROM agent_commands command WHERE EXISTS (
          SELECT 1 FROM jsonb_array_elements(command.private_payload->'attachments') file
-         WHERE file->>'mediaId'=$1 OR file->>'url' LIKE '%/v1/media/' || $1)`, [wanted]);
-    for (const candidate of candidates.rows) {
+         WHERE file->>'mediaId'=$1 OR file->>'url' LIKE '%/v1/media/' || $1)`, [wanted])).rows;
+    for (const candidate of candidates) {
       try {
         const message = await daemonRoomMessage(ctx, { ...input, attachmentId: undefined, messageId: candidate.id }, agentId);
-        if (message.attachments.some(file => mediaIdFromUrl(file.url) === wanted)) return message;
+        const attachment = message.attachments.find(file => file.attachmentId === wanted);
+        if (attachment) {
+          const source = await ctx.database.query('SELECT 1 FROM messages WHERE id=$1 AND deleted_at IS NULL', [message.messageId]);
+          return {attachmentId:wanted, messageId:source.rowCount ? message.messageId : null, attachment};
+        }
       } catch (error) {
         if (!(error instanceof AccessDeniedError) &&
-            !/message (access denied|not found)/.test(String(error))) throw error;
+            !(error instanceof CommandRefusalError && [403,404].includes(error.status))) throw error;
       }
     }
+    if (input.messageId) throw new CommandRefusalError('no attachment with this id is visible from this address', 404);
     const briefs = await ctx.database.query<{ corner_id: string; attachments: import('@beeline/api-contract/daemon').CornerBriefAttachment[] }>(
       `SELECT corner_id,attachments FROM corner_brief_revisions brief WHERE EXISTS (
          SELECT 1 FROM jsonb_array_elements(brief.attachments) file WHERE file->>'objectId'=$1)
@@ -168,12 +171,12 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
       try { await daemonReach(ctx, brief.corner_id, agentId); }
       catch (error) { if (error instanceof AccessDeniedError) continue; throw error; }
       const file = brief.attachments.find(file => file.objectId === wanted)!;
-      return { messageId: wanted, body: '', attachments: [{
-        url: `/v1/media/${wanted}`, name: file.title, mimeType: file.mime,
+      return { attachmentId:wanted, messageId:null, attachment: {
+        attachmentId:wanted, url: `/v1/media/${wanted}`, name: file.title, mimeType: file.mime,
         size: file.size, sha256: file.sha256,
-      }] };
+      } };
     }
-    return { messageId: '', body: '', attachments: [] };
+    throw new CommandRefusalError('no attachment with this id is visible from this address', 404);
   }
 
 
@@ -192,8 +195,10 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
       ).rows.map((object) => [object.id, object.sha256]),
     );
     return attachments.map((attachment) => {
-      const sha256 = digests.get(mediaIdFromUrl(attachment.url) ?? '');
-      return sha256 ? { ...attachment, sha256 } : attachment;
+      const attachmentId = mediaIdFromUrl(attachment.url);
+      if (!attachmentId) return attachment;
+      const sha256 = digests.get(attachmentId);
+      return {...attachment, attachmentId, ...(sha256 ? {sha256} : {})};
     });
   }
 

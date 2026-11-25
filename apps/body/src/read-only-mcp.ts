@@ -439,7 +439,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
   });
   try {
     if (
-      ['postRoomMessage', 'postCornerMessage', 'message', 'reply'].includes(name) &&
+      ['postRoomMessage', 'message', 'reply'].includes(name) &&
       (process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL)
     ) {
       const input = JSON.parse(body) as JsonObject;

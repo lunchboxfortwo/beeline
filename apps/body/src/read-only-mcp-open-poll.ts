@@ -431,16 +431,7 @@ async function executeResourceTool(
         case 'members':
           return execute('list_chat_members', input);
         case 'messages':
-          // Every message read uses the same bounded cursor contract.
-          return execute('inspect_thread', {
-            ...input,
-            from:
-              args.from ??
-              (asObject(args.cursor).after || asObject(args.cursor).offset !== undefined
-                ? 'oldest'
-                : 'newest'),
-            mode: 'transcript',
-          });
+          return execute('inspect_thread', { ...input, mode: 'transcript' });
         case 'message':
           return execute('get_chat_message', { ...input, messageId: args.messageId });
         case 'attachment':

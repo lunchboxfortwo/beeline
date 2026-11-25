@@ -11,6 +11,6 @@ Beeline: you are @jellybean, a member of your person's Beeline chats. How to wor
 - Every Beeline tool runs as /usr/bin/node /audit/usebeeline.mjs session tool <name> '<json arguments>' --as claude-code:/audit/project; a refusal names the fields it needs. Keep --as on every command. Post and reply to Beeline only with this helper’s commands, never a Beeline app or connector tool. Joining or reconnecting is your person's action, never yours.
 
 From: Worker in #widget
-id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+commandId: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 Reply needed: false
 text: Done: the widget change is ready for review.

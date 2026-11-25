@@ -60,7 +60,7 @@ export async function finalizeAgentInvocation<T>(database: SqlDatabase, agent: s
     // Only a recorded replacement proves that this final belongs to an obsolete session.
     const replacement = await db.query(`SELECT 1 FROM agent_turns WHERE agent_id=$1 AND room_id=$2
       AND request_id=$3 AND invocation_id IS NOT NULL AND invocation_id<>$4`, [agent,room,invocation.requestId,invocation.id]);
-    if (replacement.rowCount) return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000)};
+    if (replacement.rowCount) return {commandId:receipt.command_id,completed:receipt.state === 'complete',published:false,superseded:true,answered:false};
     const result = await publish(db);
     await db.query(`SELECT ended.* FROM agent_turns turn
         CROSS JOIN LATERAL beeline_interrupt_agent_turn($1,$2,$3,NULL,turn.started_at) ended

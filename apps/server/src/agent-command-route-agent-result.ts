@@ -1,7 +1,8 @@
 import { REQUEST_REASONS } from '@beeline/api-contract/daemon';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
 import { CommandRow } from './agent-command.js';
-import { ExpectedRefusalError } from './command-refusal.js';
+import { commandAddress } from './commander.js';
+import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
 
 
@@ -31,16 +32,16 @@ export const CORNER_AGENT_UNREACHABLE_CARD_TYPE = 'corner-agent-unreachable';
 export const CORNER_MERGE_YES_CARD_TYPE = 'corner-merge-yes';
 
 
-/** A connected app binds its tools to a received message in the queue. */
-export async function selectMcpMessage(db: SqlDatabase, agentId: string, target: string,
-  commandId?: string): Promise<CommandRow | undefined> {
-  const waiting = (await db.query<CommandRow>(
-    `SELECT * FROM agent_commands WHERE agent_id=$1 AND state='pending'
-       AND action='input' AND reason<>'mcp_call' AND ($3::text IS NULL OR id=$3)
-     ORDER BY (room_id::text=$2) DESC,created_at,id LIMIT 1`, [agentId,target,commandId ?? null])).rows;
-  return waiting[0];
+/** Connected tools can explicitly serve only a pending input owned by this member. */
+export async function selectMcpMessage(db: SqlDatabase, agentId: string,
+  commandId: string): Promise<CommandRow> {
+  const item = (await db.query<CommandRow>(
+    `SELECT * FROM agent_commands WHERE agent_id=$1 AND id=$2 AND state='pending'
+       AND action='input' AND reason<>'mcp_call' FOR UPDATE`, [agentId,commandId])).rows[0];
+  if (!item) throw new CommandRefusalError('commandId is not an available command for you', 404);
+  await commandAddress(db, item.room_id, agentId);
+  return item;
 }
-
 
 /** Acknowledging notifications never spends an unanswered queue item. */
 export async function dismissAgentCommandWakes(db: SqlDatabase, roomId: string, agentId: string,

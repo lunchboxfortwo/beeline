@@ -1,5 +1,5 @@
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
-import { authorizeCommandOutput,queueMessage,type QueuedPostReceipt } from '../agent-command.js';
+import { answerQueuedMessage,authorizeCommandOutput,queueMessage,selectMcpMessage,type CommandRow,type QueuedPostReceipt } from '../agent-command.js';
 import { CommandRefusalError } from '../commander.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { type SqlDatabase } from '../database.js';
@@ -10,24 +10,43 @@ import { modelText } from '../message-origin.js';
 
 
   /** A public message; agent-authored tags never wake an agent. */
-  export async function daemonPostCornerMessage(ctx: DaemonContext, input: {roomId:string; cornerId:string; text:string; requestId?:string; replyTo?:string}, agentId: string) {
-    const parent = input.requestId ? await authorizeCommandOutput(ctx.database,input.roomId,agentId,input.requestId) : undefined;
-    const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.cornerId,
-      authorId: agentId, text: modelText(input.text), replyTo: input.replyTo,
-      requestId: input.requestId, commandRoomId: input.roomId,
-      parent, attachments: parent?.answer_attachments,
+  export async function daemonPostCornerMessage(ctx: DaemonContext, input: {
+    roomId: string; cornerId: string; text: string; replyTo?: string; requestId?: string;
+    commandId?: string; attachments?: NonNullable<CommandRow['answer_attachments']>;
+  }, agentId: string) {
+    let completed = false;
+    const result = await ctx.database.transaction(async db => {
+      const parent = input.commandId ? await selectMcpMessage(db,agentId,input.commandId)
+        : input.requestId ? await authorizeCommandOutput(db,input.roomId,agentId,input.requestId) : undefined;
+      if (input.commandId && !input.attachments && parent?.room_id === input.cornerId &&
+          (parent.return_room_id ?? input.cornerId) === input.cornerId) {
+        const saved = await answerQueuedMessage(db,agentId,{
+          roomId:parent.room_id,requestId:parent.id,text:input.text,publicPost:true,replyToMessageId:input.replyTo,
+        });
+        completed = saved.completed && saved.published;
+        return publicPostReceipt(input.cornerId,saved);
+      }
+      const saved = await queueMessage(db, { kind: 'post', roomId: input.cornerId,
+        authorId: agentId, text: modelText(input.text), replyTo: input.replyTo,
+        requestId: input.attachments ? undefined : parent?.turn_request_id,
+        commandRoomId: parent?.room_id ?? input.roomId,
+        parent, attachments: input.attachments ?? parent?.answer_attachments,
+      });
+      if (saved.stored && !input.attachments && parent?.answer_attachments?.length)
+        await db.query('DELETE FROM agent_pending_attachments WHERE agent_id=$1 AND request_id=$2 AND url=ANY($3::text[])',
+          [agentId,parent.turn_request_id,parent.answer_attachments.map(file=>file.url)]);
+      return publicPostReceipt(input.cornerId,saved);
     });
-    if (saved.stored && parent?.answer_attachments?.length) void ctx.database.query(
-      'DELETE FROM agent_pending_attachments WHERE agent_id=$1 AND request_id=$2 AND url=ANY($3::text[])',
-      [agentId,input.requestId,parent.answer_attachments.map(file=>file.url)])
-      .catch(error=>console.warn('[post] optional media cleanup omitted:',error));
-    ctx.live.publish({ type: 'invalidate', roomId: input.cornerId, reason: 'message', agentId });
-    return publicPostReceipt(input.cornerId, saved);
+    if (result.stored) ctx.live.publish({type:'invalidate',roomId:input.cornerId,reason:'message',agentId});
+    if (completed) void ctx.reconcileZeroCheckWorkerCompletion(input.cornerId,agentId)
+      .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error));
+    return result;
   }
 
-  export function publicPostReceipt(address: string, saved: Pick<QueuedPostReceipt, 'id' | 'createdAt'> &
-    Partial<Pick<QueuedPostReceipt, 'woken' | 'notWoken' | 'stored' | 'visible' | 'receipt'>>) {
-    return { id: saved.id, createdAt: saved.createdAt, effect: 'conversation', address,
+  export function publicPostReceipt(address: string, saved: Partial<Pick<QueuedPostReceipt,
+    'id' | 'createdAt' | 'woken' | 'notWoken' | 'stored' | 'visible' | 'receipt'>> & {messageId?: string}) {
+    const messageId = saved.stored ? saved.messageId ?? saved.id ?? null : null;
+    return { id: messageId, messageId, createdAt: messageId ? saved.createdAt : null, effect: 'conversation', address,
       visibility: 'public', reportsAssignment: false, woken: saved.woken ?? [], notWoken: saved.notWoken ?? [],
       stored: saved.stored ?? false, visible: saved.visible ?? false, receipt: saved.receipt ?? null };
   }

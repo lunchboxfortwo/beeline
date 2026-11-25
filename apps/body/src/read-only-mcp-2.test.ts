@@ -734,6 +734,7 @@ const scope23 = fixtureScope23();
       Response.json({
         messageId: 'corner-transcript-id',
         body: 'The thread message the turn is asked to act on',
+        nextOffset: 12,
         attachments: [],
       });
     const result = JSON.parse(
@@ -743,6 +744,8 @@ const scope23 = fixtureScope23();
       ),
     );
     m25_expect(result.body).toBe('The thread message the turn is asked to act on');
+    m25_expect(result.next).toEqual({offset:12});
+    m25_expect(result).not.toHaveProperty('nextOffset');
     m25_expect(scope23.calls).toEqual([
       {
         name: 'getRoomMessage',

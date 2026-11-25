@@ -10,7 +10,7 @@ const scope3 = fixtureScope3(scope1);
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       expect(await scope3.ok(client, 'post', { address: corner, text: 'Read the brief; running the tests next.', progress: true }))
-        .toEqual({ recorded: true, address: corner });
+        .toEqual({ effect:'progress', recorded: true, address: corner });
       const rows = (await scope1.db.query<{ presentation: string; text: string; activity: { kind: string; title: string; text: string }[] | null }>(
         `SELECT presentation,text,activity FROM messages WHERE room_id=$1 AND author_id=$2 ORDER BY created_at`, [corner, member])).rows;
       expect(rows).toEqual([{ presentation: 'activity', text: '', activity: [{ kind: 'output', title: 'Update', text: 'Read the brief; running the tests next.' }] }]);

@@ -464,8 +464,17 @@ it('reconnect recovery keeps every private report, even when each was queued off
   const opened = await open(), turn = await worker(opened.cornerId);
   const {reportToCommander}=await import('./commander.js');
   const source=(await rootFixture.db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[turn.id])).rows[0]!;
-  for (const [index,text] of ['blocked: missing input', 'failed: build stopped', 'needs-decision: select scope'].entries())
-    await reportToCommander(rootFixture.db,opened.cornerId,WORKER,text,source,`offline-report-${index}`,{ask:'Which product scope should we use?'});
+  for (const [index,text] of ['blocked: missing input', 'failed: build stopped', 'needs-decision: select scope'].entries()) {
+    const commandId = `offline-report-${index}`;
+    const receipt = await reportToCommander(rootFixture.db,opened.cornerId,WORKER,text,source,commandId,{ask:'Which product scope should we use?'});
+    expect(receipt).toMatchObject({commandId,queued:true,published:false});
+    expect(receipt).not.toHaveProperty('messageId');
+  }
+  const publicReport = await reportToCommander(rootFixture.db,opened.cornerId,WORKER,'Build ready', {
+    ...source, report_address:{identityId:HUMAN,roomId:ROOM},
+  }, 'public-retained-report');
+  expect(publicReport).toMatchObject({messageId:'public-retained-report',queued:false,published:true});
+  expect(publicReport).not.toHaveProperty('commandId');
   await rootFixture.db.query(`UPDATE agent_commands SET created_offline=true,created_at=now()-interval '10 minutes' WHERE reason='report'`);
   // Preserve causal order: the assignment preceded these offline reports.
   await rootFixture.db.query(`UPDATE agent_commands SET created_at=now()-interval '11 minutes' WHERE id=$1`, [turn.id]);

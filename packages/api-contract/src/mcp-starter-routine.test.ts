@@ -19,7 +19,7 @@ describe('outside-agent starter instructions', () => {
       'Claude.ai in a browser cannot be woken there',
       'complete delivery setup in that receiving app',
       'Read the chat first',
-      'Answer with reply(id,text,ask?) using the delivered message id',
+      'Answer with reply(id,text,ask?) using the delivery’s messageId or commandId',
       'Replies wake only their recorded sender in the recorded place',
       'Never add a tag to route a reply',
       'Answer task outcomes with reply(id,text,ask?)',

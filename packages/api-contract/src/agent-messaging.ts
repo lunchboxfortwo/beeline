@@ -15,11 +15,16 @@ export type MessageRoute = {
   readonly to: MessageAddress;
 };
 
+export const MESSAGE_TEXT_FIELD = {type:'string'} as const;
+export const MESSAGE_ID_FIELD = {type:'string', minLength:1, maxLength:128} as const;
+export const MESSAGE_PLACE_FIELD = {type:'string', format:'uuid'} as const;
+export const NATIVE_MESSAGE_ADDRESS_FIELD = {type:'string', description:'Exact agentId@placeId.'} as const;
+
 export const MESSAGE_ADDRESS_SCHEMA = {
   type: 'object', required: ['agent', 'place'], additionalProperties: false,
   properties: {
-    agent: { type: 'string', description: 'Identity id or handle; implementer or reviewer selects that role at a thread.' },
-    place: { type: 'string', description: 'Chat, DM or thread id from read.' },
+    agent: { type: 'string', minLength: 1, description: 'Identity id or handle; implementer or reviewer selects that role at a thread.' },
+    place: { ...MESSAGE_PLACE_FIELD, description: 'Chat, DM or thread id from read.' },
   },
 } as const;
 /** A Needs you card shows only question, brief and option buttons; longer asks are refused, never truncated. */
@@ -64,11 +69,17 @@ export function replyNeeded(reason: string | null | undefined, ask: unknown): bo
 /** The one message format every agent surface shows. */
 export function agentMessageText(message: {
   readonly from: string; readonly place: string; readonly id: string; readonly replyNeeded?: boolean;
+  readonly messageId?: string | null; readonly commandId?: string | null;
   readonly text: string; readonly attachments?: readonly string[];
 }): string {
-  return [`From: ${message.from} in #${message.place}`, `id: ${message.id}`, ...(message.replyNeeded === undefined ? [] : [`Reply needed: ${message.replyNeeded}`]),
+  const ids = [
+    ...(message.messageId ? [`messageId: ${message.messageId}`] : []),
+    ...(message.commandId ? [`commandId: ${message.commandId}`] : []),
+  ];
+  return [`From: ${message.from} in #${message.place}`, ...(ids.length ? ids : [`id: ${message.id}`]),
+    ...(message.replyNeeded === undefined ? [] : [`Reply needed: ${message.replyNeeded}`]),
     `text: ${message.text}`, ...(message.attachments?.length ? [`attachment: ${message.attachments.join(', ')}`] : []),
-    ...(message.replyNeeded ? [`Reply(id: ${message.id}, text: ...) with your reply`] : [])].join('\n');
+    ...(message.replyNeeded ? [`Reply(id: ${message.messageId ?? message.commandId ?? message.id}, text: ...) with your reply`] : [])].join('\n');
 }
 
 /** The plain shortening error is shared by the tool validator and server. */

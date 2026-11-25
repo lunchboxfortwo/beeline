@@ -167,7 +167,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
     const newestPage = name === 'getRoomConversation' && !after && input.window !== 'earliest';
     const continuityPage =
       name === 'getRoomConversation' && !after && input.window === 'continuity';
-    const transcript = `${conversationColumns} FROM messages
+    const transcript = `${conversationColumns},beeline_room_handle(messages.author_id,messages.room_id) author_handle FROM messages
       WHERE room_id=$1 AND ${daemonTranscriptVisibilitySql('messages')}`;
     const rows = await ctx.database.query<{
       id: string;
@@ -176,6 +176,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       presentation: string;
       text: string;
       agent_author: boolean;
+      author_handle: string | null;
       reply_to_message_id: string | null;
       reply_to_author_id: string | null;
       reply_to_author_name: string | null;
@@ -245,6 +246,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
         id: row.id,
         cursor: `${row.cursor_ms},${row.id}`,
         authorId: row.author_id,
+        ...(row.author_handle ? {authorHandle: row.author_handle} : {}),
         createdAt: seconds(row.created_at),
         type: row.presentation,
         body: subscriptionPromptBody(row.text, row.system_event),

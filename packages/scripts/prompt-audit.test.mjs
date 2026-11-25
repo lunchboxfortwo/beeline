@@ -36,7 +36,11 @@ test('audit covers every situation in all three runtimes, without replay-control
 test('MCP wakes carry the one message format, with a reply line only when a reply is needed', () => {
   const wake = (reason, ask) => mcpWakeText({ id: 'wake-id', fromName: 'Ruby', placeName: 'beeline', from: { agent: 'ruby', place: 'room' },
     reason, ask, text: 'Are you still working?' });
-  assert.equal(wake('message'), 'From: Ruby in #beeline\nid: wake-id\nReply needed: true\ntext: Are you still working?\nReply(id: wake-id, text: ...) with your reply');
-  for (const reason of ['corner_check', 'reply']) assert.equal(wake(reason), 'From: Ruby in #beeline\nid: wake-id\nReply needed: false\ntext: Are you still working?');
+  assert.equal(wake('message'), 'From: Ruby in #beeline\ncommandId: wake-id\nReply needed: true\ntext: Are you still working?\nReply(id: wake-id, text: ...) with your reply');
+  for (const reason of ['corner_check', 'reply']) assert.equal(wake(reason), 'From: Ruby in #beeline\ncommandId: wake-id\nReply needed: false\ntext: Are you still working?');
   assert.match(wake('reply', { question: 'Continue?', options: ['Yes', 'No'] }), /\nReply\(id: wake-id, text: \.\.\.\) with your reply$/);
+  const tag = mcpWakeText({id:'wake-id', commandId:'wake-id', messageId:'message-id',
+    from:{agent:'ruby',place:'room'},reason:'human_tag',text:'Check the build.'});
+  assert.match(tag, /messageId: message-id\ncommandId: wake-id/);
+  assert.match(tag, /Reply\(id: message-id, text: \.\.\.\)/);
 });

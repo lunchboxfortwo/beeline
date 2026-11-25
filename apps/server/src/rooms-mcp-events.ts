@@ -16,7 +16,7 @@ const MENTION_EVENT = {
   name: 'mention', description: 'A chat message tags this connected Beeline member, or messages it directly.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
-    roomId: { type: 'string' }, messageId: { type: 'string' }, memberId: { type: 'string' },
+    roomId: { type: 'string' }, messageId: { type: 'string' }, commandId: {type:'string'}, memberId: { type: 'string' },
     replyRule: { type: 'string' }, idempotencyKey: { type: 'string' }, text: { type: 'string' },
     attachments: ATTACHMENTS, institutionalContext: { type: 'string' },
     author: { type: 'object', properties: { id: { type: 'string' }, handle: { type: ['string', 'null'] },
@@ -28,10 +28,10 @@ const WAKE_EVENT = {
   description: 'A message, reply, thread assignment, schedule, or lifecycle wake for this connected member.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
-    roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, id: { type: 'string' },
+    roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, messageId: {type:['string','null']}, id: { type: 'string' },
     from: {type:'object',properties:{agent:{type:'string'},place:{type:'string'}},required:['agent','place'],additionalProperties:false}, text: { type: ['string', 'null'] }, next: { type: 'string' },
     attachments: ATTACHMENTS, institutionalContext: { type: 'string' },
-  }, required: ['roomId', 'address', 'commandId', 'id', 'from', 'text', 'next'], additionalProperties: false },
+  }, required: ['roomId', 'address', 'commandId', 'messageId', 'id', 'from', 'text', 'next'], additionalProperties: false },
 };
 type Transport = typeof postMcpWebhook;
 interface Subscription {
@@ -160,12 +160,16 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
         'data',jsonb_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN beeline_room_handle(i.id,m.room_id) IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,beeline_room_handle(i.id,m.room_id)) END,
           'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),'attachments',m.attachments,
           'author',json_build_object('id',m.author_id,'handle',beeline_room_handle(i.id,m.room_id),'name',i.name)) ||
-          jsonb_strip_nulls(jsonb_build_object('institutionalContext',(SELECT ${queuedContextSql('command')} FROM agent_commands command
-            WHERE command.agent_id=s.member_id AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1))), 'cursor',NULL)::text
+          jsonb_strip_nulls(jsonb_build_object('commandId',queued.id,'institutionalContext',queued.context)), 'cursor',NULL)::text
     FROM rooms_mcp_event_subscriptions s
     JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
     JOIN messages m ON m.id=$3 AND m.room_id=$2 AND m.deleted_at IS NULL
     JOIN identities i ON i.id=m.author_id
+    LEFT JOIN LATERAL (
+      SELECT command.id,${queuedContextSql('command')} context FROM agent_commands command
+      WHERE command.agent_id=s.member_id AND command.source_message_id=m.id
+      ORDER BY (command.state='pending') DESC,command.created_at DESC,command.id DESC LIMIT 1
+    ) queued ON true
     WHERE s.member_id=$1 AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND s.event_name='mention'
     ON CONFLICT(subscription_id,message_id) WHERE message_id IS NOT NULL DO NOTHING
     RETURNING subscription_id`, [member, room, message, mentionReplyRule('%1$s', '%2$s'), mentionReplyRule('%s', null)]);
@@ -196,12 +200,12 @@ export function mcpCommandWakeSql(first: number, mentionDelivery: boolean): { ct
       SELECT s.id,command.id,command.room_id,'evt_'||s.id||'_cmd_'||command.id,
         jsonb_build_object('eventId','evt_'||s.id||'_cmd_'||command.id,'name','wake','timestamp',command.created_at,
           'data',jsonb_build_object(
-            'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'id',command.id,
+            'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'messageId',source.id,'id',command.id,
             'from',wake_data.origin,'text',wake_data.body,'attachments',wake_data.files,
             'next',concat_ws(E'\n','From: '||COALESCE(sender.name,wake_data.origin->>'agent')||' in #'||COALESCE(place.name,wake_data.origin->>'place'),
-              'id: '||command.id,'Reply needed: '||wake_data.needed::text,'text: '||COALESCE(wake_data.body,''),
+              'messageId: '||source.id,'commandId: '||command.id,'Reply needed: '||wake_data.needed::text,'text: '||COALESCE(wake_data.body,''),
               'attachment: '||(SELECT string_agg(COALESCE(file->>'name','attachment'),', ') FROM jsonb_array_elements(wake_data.files) file),
-              CASE WHEN wake_data.needed THEN 'Reply(id: '||command.id||', text: ...) with your reply' END)),
+              CASE WHEN wake_data.needed THEN 'Reply(id: '||COALESCE(source.id,command.id)||', text: ...) with your reply' END)),
           'cursor',NULL)::text
       FROM inserted command
       LEFT JOIN messages source ON source.id=command.source_message_id
@@ -320,8 +324,8 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
 }
 
 /** list_mentions and legacy webhooks render the same next as the event SQL above. */
-export function mcpWakeText(wake: { id: string; fromName?: string | null; placeName?: string | null; from: { agent: string; place: string };
+export function mcpWakeText(wake: { id: string; commandId?: string | null; messageId?: string | null; fromName?: string | null; placeName?: string | null; from: { agent: string; place: string };
   reason: string | null; ask: unknown; text: string | null; attachments?: readonly { name?: string }[] }): string {
-  return agentMessageText({ from: wake.fromName ?? wake.from.agent, place: wake.placeName ?? wake.from.place, id: wake.id,
+  return agentMessageText({ from: wake.fromName ?? wake.from.agent, place: wake.placeName ?? wake.from.place, id: wake.id, commandId: wake.commandId ?? wake.id, messageId: wake.messageId,
     replyNeeded: replyNeeded(wake.reason, wake.ask), text: wake.text ?? '', attachments: wake.attachments?.map(file => file.name ?? 'attachment') });
 }

@@ -15,11 +15,16 @@ export function replyableWake(item: CommandRow | undefined) {
   return { id: wake.id, from: wake.route.from };
 }
 
+export function deliveredMessageRoute(db: SqlDatabase, item: CommandRow) {
+  return item.message?.route ?? item.private_payload?.route ?? legacyMessageRoute(db,item);
+}
+
 /** Current messages carry their whole route. Only retained pre-cutover items need adaptation. */
 export async function recordedMessageRoute(db:SqlDatabase,item:CommandRow):Promise<MessageRoute> {
-  const route=item.message?.route ?? item.private_payload?.route;
-  if (route) return {...route,from:item.message?.replyAddress ?? item.private_payload?.replyAddress ?? route.from};
-  return legacyMessageRoute(db,item);
+  const route = await deliveredMessageRoute(db,item);
+  const replyAddress = item.message?.replyAddress ?? item.private_payload?.replyAddress ??
+    (item.reason === 'schedule' ? item.wake_context?.scheduleReplyFrom : undefined);
+  return replyAddress ? {...route,from:replyAddress} : route;
 }
 
 /** Reports follow the session's recorded chain of command. */

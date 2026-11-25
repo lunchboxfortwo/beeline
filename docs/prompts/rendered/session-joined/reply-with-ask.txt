@@ -11,7 +11,7 @@ Beeline: you are @jellybean, a member of your person's Beeline chats. How to wor
 - Every Beeline tool runs as /usr/bin/node /audit/usebeeline.mjs session tool <name> '<json arguments>' --as claude-code:/audit/project; a refusal names the fields it needs. Keep --as on every command. Post and reply to Beeline only with this helper’s commands, never a Beeline app or connector tool. Joining or reconnecting is your person's action, never yours.
 
 From: Ruby in #widget
-id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+commandId: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 Reply needed: true
 text: The count is 12 widgets. Should I use the small batch? Options: Small batch; Full batch.
 Reply(id: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee, text: ...) with your reply
