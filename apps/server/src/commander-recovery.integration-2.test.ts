@@ -235,7 +235,7 @@ it('Reproduction R-ID: an order card id returns the expanded text and archived s
   const opened = await open();
   const turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Build the widget from evidence' }, RUBY);
-  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='order' ORDER BY created_at DESC`, [opened.cornerId])).rows[0]!;
+  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='message' ORDER BY created_at DESC`, [opened.cornerId])).rows[0]!;
   expect(await rootFixture.daemon.execute('getRoomMessage', { ...authority(turn), messageId: card.id }, WORKER))
     .toMatchObject({ body: expect.stringContaining('Build the widget') });
   const sibling = await open();

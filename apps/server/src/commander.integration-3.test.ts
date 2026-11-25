@@ -240,7 +240,7 @@ it('queues explicit self-orders in both a Room and its own corner', async () => 
   const roomOrder = await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${RUBY}@${ROOM}`, text: 'Continue in the Room' }, RUBY);
   expect((await commands(ROOM, RUBY)).map(c => c.id)).toContain(roomOrder.id);
   const opened = await rootFixture.daemon.execute('createCorner', { ...authority(rootFixture.order), targetRoomId: ROOM, name: 'self-work', objective: 'Continue own work', implementer: 'ruby', brief: { spec: 'Continue own work', repositoryWork: false } }, RUBY);
-  const cornerOrder = await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Resume own corner' }, RUBY);
+  const cornerOrder = await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${RUBY}@${opened.cornerId}`, text: 'Resume own corner' }, RUBY);
   expect((await commands(opened.cornerId, RUBY)).map(c => c.id)).toContain(cornerOrder.id);
 });
 
@@ -496,9 +496,9 @@ it('Reproduction RETURN-ADDRESS: a report whose parent expired retains the recor
   // root_source_message_id still named the human's original Room order.
   await rootFixture.db.query('DELETE FROM agent_commands WHERE id=$1', [rootFixture.order.id]);
   await rootFixture.db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [rootFixture.order.sourceMessageId]);
-  await rootFixture.daemon.execute('message', { ...authority(returned), type: 'blocked', text: 'needs-decision: approve the next step?' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(returned), type: 'blocked', transportRequestId:'approve-step',text: 'needs-decision: approve the next step?' }, RUBY);
   await rootFixture.db.query('UPDATE messages SET deleted_at=NULL WHERE id=$1', [rootFixture.order.sourceMessageId]);
-  await rootFixture.daemon.execute('message', { ...authority(returned), type: 'blocked', text: 'needs-decision: approve the next step?' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(returned), type: 'blocked', transportRequestId:'approve-step',text: 'needs-decision: approve the next step?' }, RUBY);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.text === 'needs-decision: approve the next step?')).toHaveLength(1);
 });
 
@@ -507,10 +507,10 @@ it('Reproduction POST-ID: different explicit replies receive their own stored id
   const legacyId = randomBytes(32).toString('hex');
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id)
     VALUES($1,$2,$3,'Opened the fix.',$4,$4)`, [legacyId, DM, RUBY, rootFixture.order.sourceMessageId]);
-  const post = (text: string) => rootFixture.daemon.postCornerMessage({
-    ...authority(rootFixture.order), cornerId: DM, replyTo: rootFixture.order.sourceMessageId, text,
-    transportRequestId: text,
-  }, RUBY);
+  const invocation={id:'post-id',requestId:rootFixture.order.turnRequestId};
+  await rootFixture.daemon.execute('startAgentTurn',{...authority(rootFixture.order),invocationId:invocation.id},RUBY);
+  const post = (text:string) => rootFixture.daemon.execute('message',{...authority(rootFixture.order),
+    type:'reply',quoteMsgId:rootFixture.order.source.id,text,invocation,transportRequestId:text},RUBY);
   const first = await post('Opened the fix.');
   expect(first.id).not.toBe(legacyId);
   const second = await post('The fix is complete.');
@@ -544,7 +544,7 @@ it('Reproduction wake-7: review findings message reaches the implementer only at
   const receipt = await daemon.execute('message', { ...authority(order), type:'normal', address:`${WORKER}@${opened.cornerId}`,text:'Review the palette PR' }, RUBY);
   const review = (await commands(opened.cornerId, WORKER)).find(c => c.id === receipt.id)!;
   await claim(review);
-  await daemon.execute('message', { ...authority(review),type:'normal', address:`${WORKER}@${opened.cornerId}`, text: 'FAIL: the dark tray is missing.' }, WORKER);
+  await daemon.execute('message', { ...authority(review),type:'normal', address:`${RUBY}@${opened.cornerId}`, text: 'FAIL: the dark tray is missing.' }, WORKER);
   expect((await commands(opened.cornerId, RUBY)).filter(c => c.reason === 'message').map(c => c.source.body))
     .toEqual([expect.stringContaining('FAIL: the dark tray is missing.')]);
   expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
@@ -557,6 +557,7 @@ it('a stored report completes its item while later tools retain the same authori
   const opened = await open(), turn = await worker(opened.cornerId);
   await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Which proof account?' }, WORKER);
   await daemon.execute('message', { ...authority(turn), type: 'normal', address: `${RUBY}@${opened.cornerId}`, text: 'Add the Android screenshot on my head.' }, WORKER);
+  await daemon.execute('postRoomMessage',{...authority(turn),text:'',harnessEnded:true},WORKER);
   await daemon.execute('reportFeedback', { ...authority(turn), category: 'bug', summary: 'Follow-up after a report stays possible.' }, WORKER);
   expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'complete' });
   await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
@@ -569,6 +570,7 @@ it('Reproduction wake-14: a released Squire card wakes the asking corner worker 
   // waiting. The person released the card; checkout resumed only on a direct tag.
   const opened = await open(), turn = await worker(opened.cornerId);
   await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Waiting for the card release.' }, WORKER);
+  await daemon.execute('postRoomMessage',{...authority(turn),text:'',harnessEnded:true},WORKER);
   await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   await daemon.execute('postSquireApprovalDecision', { roomId: opened.cornerId, requestId: turn.turnRequestId,
     approvalId: 'card-release', status: 'approved', tool: 'inject_card', title: 'Card release', detail: 'Checkout' }, WORKER);

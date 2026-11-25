@@ -71,7 +71,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
     }
     const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
-    if (quote && parent) await db.query(
+    if (parent && (quote || input.type === 'blocked')) await db.query(
       'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.id]);
     return saved;
   });

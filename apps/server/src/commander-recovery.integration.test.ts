@@ -132,8 +132,8 @@ it('returns a later corner blocker to the session assigning that order', async (
     id: incoming.id,
   } as unknown as AgentCommand);
   await rootFixture.daemon.execute(
-    'order',
-    { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Other requests a follow-up' },
+    'message',
+    { roomId: ROOM, requestId: incoming.turn_request_id, type:'normal',address:`${WORKER}@${opened.cornerId}`, text: 'Other requests a follow-up' },
     OTHER,
   );
   const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'message')!;
@@ -397,11 +397,9 @@ it('maintains human follows through private orders', async () => {
     agentId: RUBY,
     id: incoming.id,
   } as unknown as AgentCommand);
-  await rootFixture.daemon.execute(
-    'order',
-    { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Update as the second person asked' },
-    RUBY,
-  );
+  // Retained orders from before typed messaging still identify the person who steered the thread.
+  await createAgentCommand(rootFixture.db,{roomId:opened.cornerId,agentId:WORKER,sourceMessageId:null,reason:'order',parent:incoming,
+    privatePayload:{kind:'order',authorId:RUBY,fromRoomId:ROOM,text:'Update as the second person asked'}});
   expect(
     (
       await rootFixture.db.query(`SELECT 1 FROM corner_follows WHERE corner_id=$1 AND identity_id=$2`, [
@@ -481,6 +479,7 @@ it('retains the failure answer obligation while its return membership is gone',a
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'pending'});
   await rootFixture.db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
   await rootFixture.daemon.execute('message',{...authority(turn),type: 'blocked',text:'The provider stopped.'},WORKER);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'',harnessEnded:true},WORKER);
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'complete'});
 });
 
@@ -678,8 +677,7 @@ it('accepts a file after a terminal report, posts it with the next message, and 
     },
     WORKER,
   )).resolves.toBeDefined();
-  await rootFixture.daemon.execute(
-    'postCornerMessage',
+  await rootFixture.daemon.postCornerMessage(
     { ...authority(turn),cornerId:opened.cornerId, text: 'The artifact is ready' },
     WORKER,
   );
@@ -699,8 +697,8 @@ it('accepts a file after a terminal report, posts it with the next message, and 
 
 it('keeps unrelated Room subscriptions independent of completed orders', async () => {
   await rootFixture.daemon.execute(
-    'order',
-    { ...authority(rootFixture.order), address: ROOM, agent: WORKER, text: 'One-off Room instruction' },
+    'message',
+    { ...authority(rootFixture.order), type:'normal',address:`${WORKER}@${ROOM}`, text: 'One-off Room instruction' },
     RUBY,
   );
   const prior = (await commands(ROOM, WORKER)).find((c) => c.reason === 'message')!;

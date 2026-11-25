@@ -75,7 +75,9 @@ it.each(['human', 'order', 'resume', 'ancestor'] as const)('Reproduction BRIEF-C
   await rootFixture.phone.execute('sendRoomMessage', { roomId: DM, messageId, text: 'Include the approved validation step' }, HUMAN);
   const incoming = (await commands(DM, RUBY)).find(c => c.rootSourceMessageId === messageId)!;
   await claim(incoming);
-  const delivered = await rootFixture.daemon.execute('message', { ...authority(incoming), type: 'normal', address: `${WORKER}@${ROOM}`, text: 'Revise the assigned brief with the approved validation step' }, RUBY);
+  const parent = (await rootFixture.db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[incoming.id])).rows[0]!;
+  const delivered = (await createAgentCommand(rootFixture.db,{roomId:ROOM,agentId:WORKER,sourceMessageId:null,reason:'order',parent,
+    privatePayload:{kind:'order',authorId:RUBY,fromRoomId:DM,text:'Revise the assigned brief with the approved validation step'}}))!;
   let turn = (await commands(ROOM, WORKER)).find(c => c.id === delivered.id)!;
   if (citation === 'resume' || citation === 'ancestor') {
     const parent = (await rootFixture.db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [turn.id])).rows[0]!;

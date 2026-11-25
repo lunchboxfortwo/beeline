@@ -49,8 +49,8 @@ const revise = (
   );
 
 // Reproduction BRIEF-APPROVAL-DELIVERY (github-event-pills, 23 Nov): Ruby opened
-// the thread from the owner's tag in its parent Room, so the owner is its
-// commander. Citing the owner's earlier delivery ID and revising without a
+// the thread from the owner's tag in its parent Room. Ruby's session there
+// commands the thread. Citing the owner's earlier delivery ID and revising without a
 // citation were both refused with 403.
 async function openThread() {
   await finishAll();
@@ -77,7 +77,7 @@ async function openThread() {
       [opened.cornerId],
     )
   ).rows[0]!.commander;
-  expect(commander).toBe(HUMAN);
+  expect(commander).toBe(RUBY);
   await finishAll();
   return opened.cornerId;
 }
