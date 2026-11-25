@@ -1,12 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { callAgentTool } from '../../body/src/read-only-mcp-open-poll.js';
 import { itemPrompt } from '../../body/src/place-prompt.js';
-import { writeTurnContext } from '../../body/src/place-session.js';
 import { TokenAuth, tokenHash } from './auth.js';
 import { DaemonService } from './daemon-service.js';
 import * as daemonWorkbench from './daemon/workbench.js';
@@ -15,10 +11,8 @@ import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
 import { migratedDatabase } from './test-support.js';
 
-it('reads an agent’s own long reply parent and searches history through the replying turn context', async () => {
+it('reads an agent’s own long reply parent and searches history through Room membership', async () => {
   const db = await migratedDatabase();
-  const scratch = await mkdtemp(join(tmpdir(), 'reply-command-authority-'));
-  const contextFile = join(scratch, 'turn.json');
   const owner = 'a'.repeat(64), agent = 'b'.repeat(64);
   const workspace = randomUUID(), room = randomUUID();
   const token = 'bdt_reply_command_authority_proof';
@@ -42,7 +36,7 @@ it('reads an agent’s own long reply parent and searches history through the re
     for (const [key, value] of Object.entries({
       BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
       BEELINE_DAEMON_TOKEN: token, BEELINE_DAEMON_AGENT_ID: agent,
-      BEELINE_DAEMON_ROOM_ID: room, BEELINE_TURN_CONTEXT_FILE: contextFile,
+      BEELINE_DAEMON_ROOM_ID: room,
     })) vi.stubEnv(key, value);
 
     const first = await phone.execute('sendRoomMessage', { roomId: room, text: '@ruby Check Sentry' }, owner);
@@ -65,7 +59,6 @@ it('reads an agent’s own long reply parent and searches history through the re
       .find(item => item.sourceMessageId === sent.messageId)!;
     expect(command.turnRequestId).toBe(command.id);
     expect(command.reason).toBe('human_tag');
-    await writeTurnContext(contextFile, command);
 
     const readParent = async (requestId?: string) => {
       const request = requestId ? { requestId } : {};
@@ -86,12 +79,6 @@ it('reads an agent’s own long reply parent and searches history through the re
       .toContain(`In reply to Ruby: ${parentText}`);
 
     // Reads belong to the current member even when the context has no queue row.
-    await writeTurnContext(contextFile, { ...command, turnRequestId: sent.messageId });
-    await readParent();
-    await writeTurnContext(contextFile, { ...command, roomId: randomUUID(), turnRequestId: 'missing-command' });
-    await readParent();
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', join(scratch, 'absent-context.json'));
-    await readParent();
     expect(await daemon.execute('getRoomMessage', {
       roomId: room, messageId: parent.id, requestId: 'missing-command',
     }, agent)).toMatchObject({ messageId: parent.id, body: parentText });
@@ -115,6 +102,5 @@ it('reads an agent’s own long reply parent and searches history through the re
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
     await db.close();
-    await rm(scratch, { recursive: true, force: true });
   }
 }, 60_000);

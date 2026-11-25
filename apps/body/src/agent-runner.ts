@@ -134,6 +134,13 @@ export class AgentRunner {
           );
         const session = this.places.get(placeId)?.session;
         if (!session) throw new Error('This place has no live session');
+        if (input.action === 'command') {
+          const item = session.command(typeof input.requestId === 'string' ? input.requestId : undefined);
+          return item ? {
+            roomId: item.roomId, requestId: item.turnRequestId, taskId: item.rootCommandId, itemId: item.id,
+            promptSectionIds: session.promptSectionIds,
+          } : null;
+        }
         if (input.action === 'context') {
           if (input.prepare === true) await session.resources.prepare();
           return session.resources.read();

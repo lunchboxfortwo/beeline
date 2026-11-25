@@ -3,9 +3,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { migratedDatabase } from '../../apps/server/src/test-support.ts';
 import { HelperDaemonService } from '../../apps/server/dist/test-fixtures/helper-daemon.js';
 import { PhoneService } from '../../apps/server/dist/phone-service.js';
@@ -15,8 +12,6 @@ import { callAgentTool } from '../../apps/body/dist/read-only-mcp.js';
 
 const db = await migratedDatabase();
 const owner = 'a'.repeat(64), agent = 'b'.repeat(64), workspace = randomUUID(), room = randomUUID();
-const scratch = mkdtempSync(join(tmpdir(), 'agent-tool-proof-'));
-const contextFile = join(scratch, 'turn.json');
 const daemon = new HelperDaemonService(db, new LiveHub());
 const phone = new PhoneService(db, 'http://proof');
 daemon.institutionalMemoryShadow.live = true;
@@ -43,7 +38,7 @@ try {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   Object.assign(process.env, { BEELINE_DAEMON_AGENT_ID: agent, BEELINE_DAEMON_ROOM_ID: room,
     BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${server.address().port}`, BEELINE_DAEMON_TOKEN: 'isolated-proof',
-    BEELINE_TURN_CONTEXT_FILE: '', BEELINE_LIB_DIR: '' });
+    BEELINE_LIB_DIR: '' });
   const send = text => phone.execute('sendRoomMessage', { roomId: room, text }, owner);
   const first = await send('oldest message');
   const tagged = await send('@worker answer this');
@@ -55,8 +50,6 @@ try {
   const [command] = (await daemon.execute('getAgentCommands', { roomId: room }, agent)).commands;
   await daemon.execute('startAgentTurn', { roomId: room, requestId: command.turnRequestId }, agent);
   const turn = { roomId: room, requestId: command.turnRequestId };
-  writeFileSync(contextFile, JSON.stringify({ ...turn, commandReason: command.reason }));
-  process.env.BEELINE_TURN_CONTEXT_FILE = contextFile;
   const procedure = JSON.parse(await callAgentTool('read', { facet: 'procedure', name: 'beeline-memory' }));
   assert.equal(procedure.slug, 'beeline-memory');
   await phone.execute('sendRoomReply', { roomId: room, text: 'answer', parentMessageId: tagged.messageId }, agent);
@@ -96,5 +89,4 @@ try {
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
   await db.close();
-  rmSync(scratch, { recursive: true, force: true });
 }

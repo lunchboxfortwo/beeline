@@ -220,7 +220,7 @@ it('delivers an 18-hour offline backlog as one prompt without requiring steering
     );
   expect(prompt.match(/scheduled run/g)).toHaveLength(1);
   expect(prompt).toContain('scheduled run 24');
-  expect(prompt).toContain('Answer each asker in one combined reply.');
+  expect(prompt).toContain('Follow the newest instructions when earlier discussion has moved on.');
   await f.session.dispose();
 });
 
@@ -670,4 +670,48 @@ it('reports the model that did switch when a later setting is refused', async ()
     }),
   );
   await f.session.dispose();
+});
+
+it('exposes command details only while their place prompt is active', async () => {
+  const f = await fixture();
+  const second = { ...f.item, id: 'second', turnRequestId: 'second' };
+  f.prompt.mockImplementationOnce(async () => {
+    expect(f.session.command()).toBe(f.item);
+    expect(f.session.command(second.turnRequestId)).toBe(second);
+    expect(f.session.command('earlier')).toBeUndefined();
+    return { agentText: 'Done', stopReason: 'end_turn', updates: [], toolCalls: [] };
+  });
+  try {
+    await f.session.start(f.item);
+    await f.session.deliver(f.item, [f.item, second]);
+    expect(f.session.command()).toBeUndefined();
+    expect(f.session.command(second.turnRequestId)).toBeUndefined();
+  } finally {
+    await f.session.dispose();
+  }
+});
+
+it('renders an offline plain join with the current starter persona', async () => {
+  const f = await fixture();
+  const retired = 'End every turn with the deliverable or a clear status explaining what is finished, what stopped, and the next step.';
+  f.config.agentEnv = { BEELINE_FREE_AGENT_ID: f.item.agentId };
+  f.session.resources.context.configuration = {
+    commands: [], yoloMode: false, isReviewer: false,
+    soul: { name: 'Starter', instructions: `Never greet an agent. ${retired} Keep allowance guidance.` },
+  };
+  const join: AgentCommand = { ...f.item, reason: 'system', offlineSeconds: 3600,
+    source: { ...f.item.source, type: 'system', body: '@neon joined · invited by @owner',
+      systemEvent: { kind: 'joined', verb: 'joined', subject: { kind: 'agent', name: 'Neon' } } } };
+  try {
+    await f.session.start(join);
+    await f.session.deliver(join, [join]);
+    const prompt = f.prompt.mock.calls[0]?.[1];
+    expect(prompt).toContain('Never greet an agent. Keep allowance guidance.');
+    expect(prompt).toContain('text: @neon joined · invited by @owner');
+    expect(prompt).not.toContain(retired);
+    expect(prompt).not.toContain('From:');
+    expect(prompt).not.toContain('id: message');
+  } finally {
+    await f.session.dispose();
+  }
 });

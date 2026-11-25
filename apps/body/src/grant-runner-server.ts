@@ -32,6 +32,7 @@ export class GrantRunnerServer {
         args?: unknown;
         operation?: unknown;
         commandId?: unknown;
+        requestId?: unknown;
         input?: unknown;
       },
     ) => Promise<unknown>,

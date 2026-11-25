@@ -412,6 +412,14 @@ const scope1 = fixtureScope1();
     expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: { cursor: page.nextCursor } })).mentions).toEqual([]);
     const third = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} third` }, USER);
     expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: { cursor: page.nextCursor } })).mentions.map((m: { id: string }) => m.id)).toEqual([third.messageId]);
+
+    const reply = scope1.data(await client.callTool({ name: 'reply', arguments: { id: page.mentions[1].id, text: 'Second answer' } }));
+    expect((await scope1.db.query(
+      "SELECT room_id,reply_to_message_id,card->'route'->'to' recipient FROM messages WHERE id=$1", [reply.id],
+    )).rows).toEqual([{ room_id: second, reply_to_message_id: next.messageId, recipient: { agent: USER, place: second } }]);
+    expect((await scope1.db.query(
+      'SELECT state FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2', [member, first.messageId],
+    )).rows).toEqual([{ state: 'pending' }]);
   });
 
 

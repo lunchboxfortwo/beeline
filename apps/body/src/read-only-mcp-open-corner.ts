@@ -5,7 +5,7 @@ import { isAbsolute, resolve, dirname, basename } from "node:path";
 import { assertScratchWriteBudget } from "./scratch-lifecycle.js";
 import type { DaemonAttachment } from "@beeline/api-contract/daemon";
 import { attachmentId, safeAttachmentNames } from "./attachment-delivery.js";
-import { JsonObject, cornerCallText, requiredEnv, daemonExecute, activeCommandContext, asObject, turnPromptSectionIds, stringArg, MAX_ATTACH_BYTES } from './read-only-mcp.js';
+import { JsonObject, cornerCallText, requiredEnv, daemonExecute, activeCommandContext, asObject, stringArg, MAX_ATTACH_BYTES } from './read-only-mcp.js';
 import { bindBriefFiles, withinRoot } from './read-only-mcp-download-attachment.js';
 
 
@@ -154,7 +154,7 @@ export async function closeCorner(args: JsonObject): Promise<string> {
 /**
  * `report_feedback`. A report is never worth failing the turn over: any
  * refusal (cap, a secret-shaped value, the store) comes back as a plain
- * result. The turn's prompt sections ride along from the context file.
+ * result.
  */
 export async function reportFeedback(args: JsonObject = {}): Promise<string> {
   try {
@@ -165,7 +165,6 @@ export async function reportFeedback(args: JsonObject = {}): Promise<string> {
       ...(typeof args.detail === 'string' ? { detail: args.detail } : {}),
       ...(typeof args.tool_name === 'string' ? { toolName: args.tool_name } : {}),
       ...(typeof args.error_excerpt === 'string' ? { errorExcerpt: args.error_excerpt } : {}),
-      promptSectionIds: await turnPromptSectionIds(),
     });
     return JSON.stringify(
       reported.duplicate

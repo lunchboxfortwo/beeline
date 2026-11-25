@@ -1,3 +1,4 @@
+import { removeRetiredStarterTurnRule } from '@beeline/api-contract/beeline-guides';
 import { wall, type AgentCommand, type DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
@@ -76,9 +77,6 @@ import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
 import { runOwnedFile } from './wait.js';
 import { githubGitEnv, prepareWorkspace, roomCheckoutPath } from './workspace-checkout.js';
 import { syncCornerBranch } from './corner-branch-sync.js';
-import { writeTurnContext } from './turn-context.js';
-
-export { writeTurnContext } from './turn-context.js';
 
 export interface PlaceSessionOptions {
   agent: { publicKey: string; name: string };
@@ -139,13 +137,16 @@ export class PlaceSession {
   private stopping = false;
   readonly resources: SessionResources;
   private readonly running: RunningModelReporter;
-  readonly contextPath: string;
+  private readonly resourceAuthPath: string;
+  private batchedCommands: readonly AgentCommand[] = [];
+  private operatorAgent = false;
+  promptSectionIds: readonly string[] = [];
 
   constructor(readonly options: PlaceSessionOptions) {
     const root =
       options.config.workspaceRoot ??
       resolve(options.runtime.supervisorRoot, 'places', options.placeId);
-    this.contextPath = resolve(root, 'turn-context.json');
+    this.resourceAuthPath = resolve(root, 'resource-auth.json');
     this.resources = new SessionResources({
       api: options.api,
       agentId: options.agent.publicKey,
@@ -176,7 +177,6 @@ export class PlaceSession {
     this.squireRelay = new SquireTaskRelay(
       options.agent.publicKey,
       roomId,
-      this.contextPath,
       async (call) =>
         (
           await api.execute('authorizeResourceCall', {
@@ -344,23 +344,17 @@ export class PlaceSession {
     }
   }
 
-  /** Bind the tools to the item this session is answering; host MCP routes
-   * authorize each call through the resource façade with this connection. */
-  async writeContext(
-    item: AgentCommand | undefined,
-    queued: readonly AgentCommand[],
-    invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
-  ): Promise<void> {
-    await writeTurnContext(this.contextPath, item, queued, invocation);
-    await writePrivateFileAtomically(
-      `${this.contextPath}.resource-auth.json`,
-      JSON.stringify({ ...this.options.api.connection(), turnContextPath: this.contextPath }),
-    );
+  command(requestId?: string): AgentCommand | undefined {
+    if (!requestId || this.current?.turnRequestId === requestId) return this.current;
+    return this.batchedCommands.find(item => item.turnRequestId === requestId);
   }
 
   /** Make sure a live session serves this place; reuse the running one. */
   async start(item?: AgentCommand): Promise<void> {
-    if (item) this.queuedSelection(item);
+    if (item) {
+      this.queuedSelection(item);
+      this.operatorAgent = item.operatorAgent === true;
+    }
     if (!this.alive || this.stale) await this.startFresh();
     await this.prepareGitHubLaunchers();
   }
@@ -427,7 +421,12 @@ export class PlaceSession {
       ...config.agentEnv,
       ...homeOverlay,
       ...(corner ? agentGitIdentityEnv(agent) : {}),
-      BEELINE_TURN_CONTEXT_FILE: this.contextPath,
+      BEELINE_DAEMON_ROOM_ID: placeId,
+      ...(this.options.grantRunnerFile ? { BEELINE_GRANT_RUNNER_FILE: this.options.grantRunnerFile } : {}),
+      ...(this.options.grantRunner ? {
+        BEELINE_GRANT_RUNNER_URL: this.options.grantRunner.url,
+        BEELINE_GRANT_RUNNER_TOKEN: this.options.grantRunner.token,
+      } : {}),
     };
     const featureBranch =
       restore?.featureBranch ?? `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`;
@@ -513,7 +512,7 @@ export class PlaceSession {
           attachRoot: folder,
           ...(attachScratchRoot ? { attachScratchRoot } : {}),
           ...(corner && !repositoryBacked ? { cornerScratchRoot: folder } : {}),
-          turnContextPath: this.contextPath,
+          operatorAgent: this.operatorAgent,
           ...(this.options.grantRunner ? { grantRunner: this.options.grantRunner } : {}),
           ...(this.options.grantRunnerFile
             ? { grantRunnerFile: this.options.grantRunnerFile }
@@ -544,15 +543,20 @@ export class PlaceSession {
       hostDeclarations,
     );
     const hostRoutes = Object.keys(hostDeclarations).filter((name) => !squireRoutes.includes(name));
-    if (hostRoutes.length)
+    if (hostRoutes.length) {
+      void writePrivateFileAtomically(
+        this.resourceAuthPath,
+        JSON.stringify({ ...api.connection(), placeId }),
+      ).catch(error => console.warn('[body] resource authorization file could not be written:', error));
       servers.push(
         ...grantedHostRouteWires(
           hostRoutes,
           operatorHome,
           hostDeclarations,
-          `${this.contextPath}.resource-auth.json`,
+          this.resourceAuthPath,
         ),
       );
+    }
     const sessionServers = sessionNewMcpServers<McpServerWire>(harnessLabel, servers, []);
     if (agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN) {
       agentEnv.BEELINE_MODEL_ROOM_ID = placeId;
@@ -614,17 +618,17 @@ export class PlaceSession {
       : repository?.directParticipants?.length === 2
         ? 'dm'
         : 'room';
+    const storedSoul = configuration?.soul ?? self?.soul;
+    const soul = storedSoul && (agentEnv.BEELINE_FREE_AGENT_ID || agentEnv.BEELINE_FREE_AGENT_MODEL_TOKEN)
+      ? { ...storedSoul, instructions: removeRetiredStarterTurnRule(storedSoul.instructions) }
+      : storedSoul;
     const session = assembleSessionPrompt({
       squireAvailable: true,
       surface: this.surface,
       repositoryPending,
       agentName: self?.name ?? agent.name,
       machineHost: { hostname: hostname() },
-      ...(configuration?.soul
-        ? { soul: configuration.soul }
-        : self?.soul
-          ? { soul: self.soul }
-          : {}),
+      ...(soul ? { soul } : {}),
       agentCommand: command,
       ...(brief ? { brief } : {}),
       ...(corner && repositoryBacked ? { worktree: { featureBranch, targetBranch } } : {}),
@@ -647,6 +651,7 @@ export class PlaceSession {
           : {}),
     });
     this.turnPrefix = session.turnPrefix;
+    this.promptSectionIds = session.report.map(section => section.id);
     if (corner && (repositoryBacked || repositoryPending))
       this.notes.push(
         `Your copy of the repository is made by the workspace tool; call it before repository work. It goes in ${folder}.`,
@@ -654,7 +659,7 @@ export class PlaceSession {
     // Native resume retains the old system instructions, including repository bans.
     const fingerprint = JSON.stringify([
       selection,
-      configuration?.soul ?? self?.soul,
+      soul,
       command,
       config.agentArgs,
       folder,
@@ -777,9 +782,6 @@ export class PlaceSession {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
-    this.current = item;
-    if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
-    await this.writeContext(item, batch.slice(1), invocation);
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
@@ -834,6 +836,9 @@ export class PlaceSession {
         })
       : undefined;
     let result: PromptResult;
+    this.current = item;
+    if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
+    this.batchedCommands = batch;
     try {
       const answering = client.sessionPrompt(
         sessionId,
@@ -854,6 +859,7 @@ export class PlaceSession {
       stream.close();
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
+      this.batchedCommands = [];
       this.resources.refreshThreads();
     }
     const text = durableReplyText(result.agentText);

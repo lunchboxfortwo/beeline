@@ -51,7 +51,7 @@ import {
 import { handleLine } from './read-only-mcp-tool-call-id.js';
 import { READ_ONLY_TOOL_NAMES } from './read-only-policy.js';
 import { assertScratchWriteBudget } from './scratch-lifecycle.js';
-import { sessionToolRequest, transportCause } from './session-tool-connection.js';
+import { sessionCommandContext, sessionToolRequest, transportCause, type SessionCommandContext } from './session-tool-connection.js';
 import { squireReachCause } from './squire-status.js';
 import { ask } from './wait.js';
 
@@ -97,15 +97,7 @@ export function memorySources(args: JsonObject): unknown[] {
 
 export const agentSurface = process.env.BEELINE_MCP_SURFACE === 'agent';
 export function operatorAgentTools(): boolean {
-  try {
-    return Boolean(
-      process.env.BEELINE_TURN_CONTEXT_FILE &&
-      JSON.parse(readFileSync(process.env.BEELINE_TURN_CONTEXT_FILE, 'utf8')).operatorAgent ===
-        true,
-    );
-  } catch {
-    return false;
-  }
+  return process.env.BEELINE_OPERATOR_AGENT === '1';
 }
 
 export const TOOLS = agentToolsFor(
@@ -319,45 +311,22 @@ export function requiredEnv(name: string): string {
   return value;
 }
 
-export const commandRequest = new AsyncLocalStorage<string | undefined>();
+export const commandRequest = new AsyncLocalStorage<{
+  requestId?: string;
+  command?: Promise<SessionCommandContext | undefined>;
+}>();
 
-export async function activeCommandContext(context?: Record<string, unknown>): Promise<{
-  roomId: string;
-  requestId: string;
-  taskId?: string;
-  invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
-}> {
-  const value = context ?? await readTurnContextFile();
-  const requestId = commandRequest.getStore() ?? value.requestId;
-  const commands = value.commands as
-    { requestId: string; commandReason: string; taskId: string }[] | undefined;
-  if (!value.roomId || !requestId) throw new Error('no item is being answered here');
-  const taskId =
-    commands?.find((command) => command.requestId === requestId)?.taskId ?? value.taskId;
-  return {
-    roomId: String(value.roomId),
-    requestId: String(requestId),
-    ...(value.invocation
-      ? { invocation: value.invocation as import('@beeline/api-contract/daemon').AgentInvocation }
-      : {}),
-    ...(typeof taskId === 'string' ? { taskId } : {}),
-  };
+function currentToolCommand(): Promise<SessionCommandContext | undefined> {
+  const call = commandRequest.getStore();
+  if (!call) return sessionCommandContext();
+  return call.command ??= sessionCommandContext(call.requestId);
 }
 
-export async function readTurnContextFile(): Promise<Record<string, unknown>> {
-  const { readFile } = await import('node:fs/promises');
-  return JSON.parse(await readFile(requiredEnv('BEELINE_TURN_CONTEXT_FILE'), 'utf8'));
-}
-
-/** This turn's assembled prompt section ids, written by the Body; never the agent's. */
-export async function turnPromptSectionIds(): Promise<string[]> {
-  if (!process.env.BEELINE_TURN_CONTEXT_FILE) return [];
-  try {
-    const ids = (await readTurnContextFile()).promptSectionIds;
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
+export async function activeCommandContext(): Promise<SessionCommandContext> {
+  const context = await currentToolCommand();
+  if (!context) throw new Error('no item is being answered here');
+  const { itemId: _itemId, promptSectionIds: _sections, ...authority } = context;
+  return authority;
 }
 
 /**
@@ -411,44 +380,29 @@ export function isDaemonNetworkFailure(error: unknown): boolean {
   return error instanceof Error && error.cause !== undefined && isDaemonNetworkFailure(error.cause);
 }
 
-function turnCommandId(turn: Record<string, unknown>): string | undefined {
-  const selected = commandRequest.getStore();
-  const itemId = selected && selected !== turn.requestId
-    ? (turn.commands as { requestId: string; itemId?: string }[] | undefined)?.find(command => command.requestId === selected)?.itemId
-    : turn.itemId;
-  return typeof itemId === 'string' ? itemId : undefined;
-}
-
-async function optionalTurnContext(): Promise<Record<string, unknown>> {
-  return process.env.BEELINE_TURN_CONTEXT_FILE ? readTurnContextFile().catch(() => ({})) : {};
-}
-
 // Conversational tools share the parent helper's bound native connection.
 // Optional resource tools and installed older helpers retain the HTTP adapter.
 export async function daemonExecute(name: string, input: JsonObject): Promise<JsonObject> {
-  const turn = await optionalTurnContext();
-  const commandId = turnCommandId(turn);
-  const body = JSON.stringify({
+  const placeId = process.env.BEELINE_DAEMON_CORNER_ID || process.env.BEELINE_DAEMON_ROOM_ID;
+  const bridged = process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL;
+  const usesCommand = name !== 'message' && (!name.startsWith('get') || name.startsWith('getWallet')) &&
+    !name.startsWith('list') && name !== 'searchInstitutionalHistory';
+  const turn = name === 'message' ? undefined : await currentToolCommand();
+  if (bridged && usesCommand && !turn) throw new Error('no item is being answered here');
+  const { itemId: commandId, promptSectionIds, ...authority } = turn ?? {};
+  const payload = {
     ...input,
-    ...(process.env.BEELINE_TURN_CONTEXT_FILE &&
-    (!name.startsWith('get') || name.startsWith('getWallet')) &&
-    !name.startsWith('list') &&
-    name !== 'searchInstitutionalHistory'
-      ? await activeCommandContext(turn)
-      : {}),
-  });
+    ...(name === 'message' ? { roomId: placeId } : usesCommand ? authority : {}),
+    ...(name === 'reportFeedback' && promptSectionIds ? { promptSectionIds } : {}),
+  };
   try {
-    if (
-      ['postRoomMessage', 'message', 'reply'].includes(name) &&
-      (process.env.BEELINE_GRANT_RUNNER_FILE || process.env.BEELINE_GRANT_RUNNER_URL)
-    ) {
-      const input = JSON.parse(body) as JsonObject;
+    if (bridged && ['postRoomMessage', 'message', 'reply'].includes(name)) {
       return (await sessionToolRequest('session', {
-        placeId: input.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
+        placeId: payload.roomId ?? process.env.BEELINE_DAEMON_ROOM_ID,
         action: 'operation',
         operation: name,
         ...(commandId ? { commandId } : {}),
-        input,
+        input: payload,
       })) as JsonObject;
     }
     const response = await ask(
@@ -463,7 +417,7 @@ export async function daemonExecute(name: string, input: JsonObject): Promise<Js
           ...(typeof commandId === 'string' ? { 'x-beeline-command-id': commandId } : {}),
           'x-beeline-helper-version': process.env.BEELINE_HELPER_VERSION || 'v0.0.0',
         },
-        body,
+        body: JSON.stringify(payload),
       },
     );
     if (!response.ok)
@@ -621,21 +575,19 @@ function sessionSquireCall(tool: string, args: Record<string, unknown>): Promise
   });
 }
 
-/** One Squire tool call through the turn's relay, carrying the active command context. */
+/** The Squire relay binds a call to its active command. */
 async function squireRelayCall(
   relayUrl: string,
   relayToken: string,
   tool: string,
   args: Record<string, unknown>,
 ): Promise<Response> {
-  const context = await activeCommandContext();
   return ask(
     { url: new URL('/mcp', relayUrl) },
     {
       method: 'POST',
       headers: { authorization: `Bearer ${relayToken}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        ...context,
         method: 'tools/call',
         params: { name: tool, arguments: args },
       }),
@@ -779,7 +731,7 @@ export async function daemonUploadArtifact(
   mime: string,
   title: string,
 ): Promise<DaemonArtifactUploadResult> {
-  const commandId = turnCommandId(await optionalTurnContext());
+  const commandId = (await currentToolCommand())?.itemId;
   const response = await ask(
     {
       url: new URL('/v1/daemon/artifacts', `${requiredEnv('BEELINE_DAEMON_BASE_URL')}/`),

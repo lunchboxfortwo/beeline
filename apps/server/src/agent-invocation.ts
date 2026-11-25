@@ -1,6 +1,6 @@
 import type { AgentInvocation } from '@beeline/api-contract/daemon';
 import type { CommandRow } from './agent-command.js';
-import { CommandRefusalError,ExpectedRefusalError } from './command-refusal.js';
+import { ExpectedRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
 
 /** Register before prompt delivery, never reset an existing attempt's receipt. */
@@ -31,9 +31,10 @@ export async function lockAgentInvocation(db: SqlDatabase, agent: string, room: 
   return row;
 }
 
-export async function deliveredReplyCommand(db: SqlDatabase, agent: string, room: string, request: string | undefined,
-  quote: string | undefined, invocation?: AgentInvocation): Promise<CommandRow> {
-  const row = (await db.query<CommandRow>(`WITH current_turn AS (
+/** Select the primary wake, or a quote match within the current delivery batch. */
+export async function currentInvocationCommand(db: SqlDatabase, agent: string, room: string,
+  reply?: { quote: string | undefined }): Promise<CommandRow | undefined> {
+  return (await db.query<CommandRow>(`WITH current_turn AS (
       SELECT request_id,invocation_id,status FROM agent_turns WHERE agent_id=$1 AND room_id=$2
       ORDER BY started_at DESC,version DESC LIMIT 1)
     SELECT wake.* FROM current_turn turn
@@ -41,12 +42,10 @@ export async function deliveredReplyCommand(db: SqlDatabase, agent: string, room
     JOIN agent_invocations receipt ON receipt.command_id=first.id AND receipt.invocation_id=turn.invocation_id
     JOIN agent_commands wake ON (wake.id=first.id OR wake.id=ANY(receipt.batched_command_ids))
     WHERE turn.status='working' AND NOT receipt.ended AND first.state<>'cancelled'
-      AND ($5::text IS NULL OR (receipt.invocation_id=$5 AND turn.request_id=$6))
-      AND wake.agent_id=$1 AND wake.room_id=$2 AND wake.turn_request_id=$3 AND wake.state='pending'
-      AND wake.message->>'id'=$4 FOR UPDATE OF receipt,wake`,
-    [agent,room,request ?? null,quote ?? null,invocation?.id ?? null,invocation?.requestId ?? null])).rows[0];
-  if (!row) throw new CommandRefusalError('Quote a message that woke this turn.',400);
-  return row;
+      AND wake.agent_id=$1 AND wake.room_id=$2 AND wake.action='input'
+      AND (NOT $3::boolean AND wake.id=first.id OR $3 AND wake.state='pending' AND wake.message->>'id'=$4)
+    ORDER BY (wake.id=first.id) DESC,wake.inbox_sequence LIMIT 1 FOR UPDATE OF receipt,wake`,
+    [agent,room,Boolean(reply),reply?.quote ?? null])).rows[0];
 }
 
 /** Close the recorded execution and publish only if it has not been replaced. */

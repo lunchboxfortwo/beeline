@@ -159,7 +159,7 @@ export async function squireBrokerSocketReady(socketPath: string): Promise<boole
 export type SquireAgentScope = {
   readonly agentId: string;
   readonly roomId: string;
-  readonly relay?: { readonly url: string; readonly token: string; readonly contextFile: string };
+  readonly relay?: { readonly url: string; readonly token: string };
 };
 
 export function squireFacadeLaunch(
@@ -175,7 +175,6 @@ export function squireFacadeLaunch(
     ? {
         BEELINE_SQUIRE_RELAY_URL: scope.relay.url,
         BEELINE_SQUIRE_RELAY_TOKEN: scope.relay.token,
-        BEELINE_TURN_CONTEXT_FILE: scope.relay.contextFile,
       }
     : squireHostRewriteEnv(home);
   const meta = import.meta.url;

@@ -1,8 +1,6 @@
 import { maskCredentialResult } from './mask-credential-result.js';
 import { CodexPromptDelivery } from './codex-prompt-delivery.js';
 
-import { readFileSync, writeFileSync } from 'node:fs';
-import { answer, watchChanges } from './wait.js';
 
 import { explainAgentProgramFailure } from './agent-command.js';
 import { harnessTurnTokens } from './harness-turn-tokens.js';
@@ -310,57 +308,9 @@ export async function acpClientSessionPrompt(
   const updates: SessionUpdate[] = [];
   let promptRunId: string | undefined;
   let completed = false;
-  let terminalReason: string | undefined;
-  let endTurn!: (result: { stopReason: string }) => void;
-  // A terminal stop for this turn; it races the correlated prompt result below.
-  const terminal = answer<{ stopReason: string }>('ACP turn terminal', [], ({ resolve }) => {
-    endTurn = resolve;
-  });
-  const contextPath = ctx.agentEnv.BEELINE_TURN_CONTEXT_FILE;
-  const stop = (reason: string) => {
-    if (terminalReason) return;
-    terminalReason = reason;
-    ctx.terminalSessions.add(sessionId);
-    if (contextPath) {
-      try {
-        const context = JSON.parse(readFileSync(contextPath, 'utf8'));
-        writeFileSync(contextPath, JSON.stringify({ ...context, terminalReason: reason }), {
-          mode: 0o600,
-        });
-      } catch (error) {
-        ctx.emit('terminal/context-error', error);
-      }
-    }
-    endTurn({ stopReason: reason });
-    ctx.sessionCancel(sessionId);
-  };
   const asyncTasks = new Map<string, ToolCallEntry>();
-  const invocationToolsPending = () =>
-    [...toolCallEntries(updates), ...asyncTasks.values()].some(
-      (call) => !call.resultReceived && !['completed', 'failed'].includes(call.status ?? ''),
-    );
-  const checkTerminalContext = () => {
-    if (!contextPath || terminalReason) return;
-    try {
-      const context = JSON.parse(readFileSync(contextPath, 'utf8'));
-      // Keep the originating authority until the MCP result has reached the
-      // harness. Cancelling earlier turns a successful silence into a failed
-      // background call, whose completion would otherwise wake another turn.
-      if (context.terminalReason === 'no-reply' && invocationToolsPending()) return;
-      if (context.terminalReason) stop(context.terminalReason);
-    } catch {
-      /* A context rewrite can briefly be empty. */
-    }
-  };
-  // A push subscription to the turn's context file, never awaited. If it fails,
-  // the turn still ends on its correlated prompt result.
-  const stopWatching = contextPath
-    ? watchChanges(contextPath, () => checkTerminalContext(), {
-        onError: (error) => ctx.emit('terminal/context-error', error),
-      })
-    : undefined;
   const onUpdate = (u: SessionUpdate) => {
-    if (u.sessionId !== sessionId || terminalReason) return;
+    if (u.sessionId !== sessionId) return;
     if (['tool_call', 'tool_call_update', 'tool_result'].includes(String(u.update.sessionUpdate))) {
       const calls = [...toolCallEntries(updates), ...asyncTasks.values()];
       const previous = u.update.toolCallId
@@ -374,8 +324,6 @@ export async function acpClientSessionPrompt(
     const asyncTask = asyncTaskCall(u.update);
     if (asyncTask?.id)
       asyncTasks.set(asyncTask.id, { ...asyncTasks.get(asyncTask.id), ...asyncTask });
-    checkTerminalContext();
-    if (terminalReason) return;
     promptRunId ??= ctx.activeRunIdFromUpdate(u.update);
     onActivity?.(agentStreamSnapshot(updates, ctx.agentLabel));
     const calls = [...toolCallEntries(updates), ...asyncTasks.values()];
@@ -390,25 +338,18 @@ export async function acpClientSessionPrompt(
   ctx.activePromptSessions.add(sessionId);
 
   try {
-    const result = (await Promise.race([
-      terminal,
-      ctx.request('session/prompt', {
-        sessionId,
-        prompt: typeof text === 'string' ? [{ type: 'text', text }] : [...text],
-      }),
-    ])) as { stopReason?: string };
-
-    // The correlated prompt result ends this invocation. Tool-status metadata
-    // can remain unfinished after end_turn and cannot hold the next command.
-    checkTerminalContext();
-    const agentText = terminalReason ? '' : finalAgentMessageText(updates, ctx.agentLabel);
+    const result = await ctx.request('session/prompt', {
+      sessionId,
+      prompt: typeof text === 'string' ? [{ type: 'text', text }] : [...text],
+    }) as { stopReason?: string };
+    const agentText = finalAgentMessageText(updates, ctx.agentLabel);
 
     const toolCalls = [...toolCallEntries(updates), ...asyncTasks.values()];
-    completed = !terminalReason;
+    completed = true;
     const tokenUsage = harnessTurnTokens(result, updates);
 
     return {
-      stopReason: terminalReason ?? result?.stopReason ?? 'end_turn',
+      stopReason: result?.stopReason ?? 'end_turn',
       updates,
       agentText,
       toolCalls,
@@ -416,13 +357,6 @@ export async function acpClientSessionPrompt(
     };
   } finally {
     ctx.promptDeliveries.get(sessionId)?.complete(completed);
-    stopWatching?.();
-    for (const [id, pending] of ctx.pending) {
-      if (terminalReason && pending.sessionId === sessionId) {
-        ctx.pending.delete(id);
-        pending.resolve({ stopReason: terminalReason });
-      }
-    }
     ctx.activePromptSessions.delete(sessionId);
     ctx.emit('prompt/end', { sessionId });
     if (promptRunId && ctx.activeRunIds.get(sessionId) === promptRunId) {

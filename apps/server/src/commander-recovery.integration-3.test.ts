@@ -44,7 +44,6 @@ it('ARTIFACT-READ-BY-ID reads sibling and parent artifacts without exposing priv
     vi.stubEnv('BEELINE_DAEMON_TOKEN', 'isolated-fixture-token');
     vi.stubEnv('BEELINE_DAEMON_CORNER_ID', '');
     vi.stubEnv('BEELINE_ATTACH_SCRATCH_ROOT', scratch);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
     for (const roomId of [sibling, ROOM]) {
       vi.stubEnv('BEELINE_DAEMON_ROOM_ID', roomId);
       const result = JSON.parse(await callAgentTool('read', {facet:'attachment',attachmentId:files[0]}, 'artifact-read-by-id'));

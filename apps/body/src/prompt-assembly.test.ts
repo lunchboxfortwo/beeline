@@ -1,28 +1,19 @@
-import { describe, expect, it, PROMPT_SURFACES, SESSION_SECTIONS, SESSION_BUDGET_BYTES, TURN_SECTIONS, assembleSessionPrompt, assembleTurnPrompt, sessionSections, CORNER_REVIEWER_SESSION_INSTRUCTION, CORNER_CHECKS_NUDGE, cornerMergeInstruction, cornerReviewerInstruction, cornerHasRepositoryWork, CORNER_REVIEWER_AUTHOR_MERGE, renderReplyContext, HOST_EMULATOR_RULE, beelineConnectSkillMarkdown, beelineManagedSkills, beelineReviewSkillMarkdown, soul, repositoryBrief, SESSION_VARIANTS, memory, TURN_VARIANTS, codexOf, sentences, repeatedTopics, fixtureScope1, fixtureScope4, fixtureScope5, fixtureScope6, fixtureScope9, fixtureScope10 } from './test-support-prompt-assembly.test-support.js';
+import { describe, expect, it, PROMPT_SURFACES, SESSION_SECTIONS, SESSION_BUDGET_BYTES, TURN_SECTIONS, assembleSessionPrompt, assembleTurnPrompt, sessionSections, CORNER_REVIEWER_SESSION_INSTRUCTION, CORNER_CHECKS_NUDGE, cornerMergeInstruction, cornerReviewerInstruction, cornerHasRepositoryWork, CORNER_REVIEWER_AUTHOR_MERGE, renderReplyContext, HOST_EMULATOR_RULE, beelineConnectSkillMarkdown, beelineManagedSkills, beelineReviewSkillMarkdown, soul, repositoryBrief, SESSION_VARIANTS, memory, TURN_VARIANTS, codexOf, sentences, repeatedTopics, fixtureScope4, fixtureScope5, fixtureScope6, fixtureScope9, fixtureScope10 } from './test-support-prompt-assembly.test-support.js';
 import * as promptRules from "./prompt-assembly.js";
 
-describe('capability routes before other behavior rules', () => {
-const scope1 = fixtureScope1();
+describe('native prompt tool guidance', () => {
 
-  it.each(PROMPT_SURFACES)('puts the complete rule immediately after identity on %s', (surface) => {
+  it.each(PROMPT_SURFACES)('keeps skill lookup guidance without exhaustive retry instructions on %s', (surface) => {
     const context = { surface, agentName: 'Bee', soul, agentCommand: 'claude-agent-acp' };
     const { systemPrompt } = assembleSessionPrompt(context);
-    const lines = systemPrompt.split('\n');
-    expect(lines[1]).toBe(scope1.rule);
-    expect(systemPrompt.split(scope1.rule)).toHaveLength(2);
-    expect(systemPrompt.indexOf(scope1.rule)).toBeLessThan(systemPrompt.indexOf('Soul ('));
-    for (const { section, text } of sessionSections(context)) {
-      if (section.id !== 'identity' && text) {
-        expect(systemPrompt.indexOf(scope1.rule)).toBeLessThan(systemPrompt.indexOf(text));
-      }
-    }
+    expect(systemPrompt).not.toContain('Never say you cannot act before trying every available tool');
+    expect(systemPrompt).toContain("If you don't know how to do something here, load the matching beeline-* skill before retrying.");
   });
 
   it.each(['room', 'dm'] as const)('keeps missing-shell guidance compatible on %s', (surface) => {
     const { systemPrompt } = assembleSessionPrompt({
       surface, agentName: 'Bee', shell: { available: false },
     });
-    expect(systemPrompt).toContain(scope1.rule);
     expect(systemPrompt).toContain('This session has no native shell tool');
     expect(systemPrompt).not.toContain('a request that needs one cannot be run');
   });
@@ -506,7 +497,7 @@ describe('prompt assembly guards', () => {
   it('gives agents one rule for messaging each other', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text.includes('Use message(type:normal) for work'), name).toBe(!context.surface.includes('corner'));
+      expect(text, name).not.toContain('Use message(type:normal) for work');
       expect(text, name).not.toContain('If human, tag them');
       expect(text, name).not.toContain('Message only your commander');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
@@ -570,7 +561,7 @@ describe('prompt assembly guards', () => {
   it('assigns follow-up to a surviving commander and preserves completion without a PR', () => {
     const room = assembleSessionPrompt(SESSION_VARIANTS.room!).systemPrompt;
     expect(room).toContain('Landing archives a repository thread and cancels its work');
-    expect(room).toContain('The surviving commander owns follow-up at its own address');
+    expect(room).toContain('The surviving commander owns follow-up.');
     expect(room).toContain('Repo-less and repositoryWork:false work delivers its artifact without a PR');
   });
 
@@ -673,11 +664,11 @@ describe('prompt assembly guards', () => {
   it.each(PROMPT_SURFACES)('has one coordination rule and no chain-skipping escalation on %s', (surface) => {
     const context = { surface, agentName: 'Bee', agentCommand: 'codex-acp' };
     const entries = sessionSections(context);
-    const coordination = entries.filter(({ text }) => text.includes('Use message(type:normal) for work'));
-    expect(coordination.map(({ section }) => section.id)).toEqual(surface.includes('corner') ? [] : ['talking']);
+    const coordination = entries.filter(({ text }) => text.includes('Ask an agent with message.'));
+    expect(coordination.length).toBeLessThanOrEqual(1);
     const session = assembleSessionPrompt(context);
     const turn = assembleTurnPrompt({ surface, sessionPrefix: session.turnPrefix, task: { body: 'Continue' } });
-    expect(turn.text.includes('Use message(type:normal) for work')).toBe(!surface.includes('corner'));
+    expect(turn.text).not.toContain('Use message(type:normal) for work');
     expect(turn.text).not.toContain('to the person who started the chain');
   });
 });

@@ -2,12 +2,11 @@ import { expect, it } from 'vitest';
 import { rewriteHostMcpDeclaration } from './host-mcp-route.js';
 
 const scope = { agentId: 'agent', roomId: 'room', relay: {
-  url: 'http://127.0.0.1:1234', token: 'private-relay-token', contextFile: '/private/turn.json',
+  url: 'http://127.0.0.1:1234', token: 'private-relay-token',
 } };
 it('mounts a granted Squire relay without another resource forwarding child', () => {
   const route = rewriteHostMcpDeclaration('squire', {}, '/operator', '/private/auth.json', scope);
-  expect(route.env).toMatchObject({ BEELINE_SQUIRE_RELAY_TOKEN: scope.relay.token,
-    BEELINE_TURN_CONTEXT_FILE: scope.relay.contextFile });
+  expect(route.env).toMatchObject({ BEELINE_SQUIRE_RELAY_TOKEN: scope.relay.token });
   expect(route.env).not.toHaveProperty('BEELINE_RESOURCE_LAUNCH');
 });
 it('keeps the resource boundary for other host servers and direct Squire routes', () => {

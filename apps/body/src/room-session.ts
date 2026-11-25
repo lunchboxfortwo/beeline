@@ -17,7 +17,7 @@ export function beelineAgentMcpServer(
   api: DaemonApiClient,
   context: {
     roomId: string;
-    turnContextPath?: string;
+    operatorAgent?: boolean;
     workspaceId: string;
     cornerId?: string;
     /** This corner session belongs to the parent Room's configured reviewer. */
@@ -58,8 +58,8 @@ export function beelineAgentMcpServer(
       ...(config.agentEnv?.BEELINE_FREE_AGENT_ID || config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
         ? [{ name: 'BEELINE_FREE_AGENT_ID', value: config.agentEnv.BEELINE_FREE_AGENT_ID ?? connection.agentId }] : []),
       { name: 'BEELINE_NATIVE_IO_PROVEN', value: context.nativeIoProven ? '1' : '0' },
-      ...(context.turnContextPath
-        ? [{ name: 'BEELINE_TURN_CONTEXT_FILE', value: context.turnContextPath }]
+      ...(context.operatorAgent
+        ? [{ name: 'BEELINE_OPERATOR_AGENT', value: '1' }]
         : []),
       ...(context.directMessage ? [{ name: 'BEELINE_AGENT_DM', value: '1' }] : []),
       ...(context.squireRelay

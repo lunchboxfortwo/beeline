@@ -1,37 +1,20 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { callAgentTool } from './read-only-mcp.js';
-let scratch:string;
-beforeEach(async()=>{
-  scratch=await mkdtemp(join(tmpdir(),'beeline-result-context-'));
-  const path=join(scratch,'turn.json');
-  await writeFile(path,JSON.stringify({roomId:'room',requestId:'first',itemId:'item',commandReason:'message',
-    commands:[{requestId:'first',sourceMessageId:'first',commandReason:'message'},{requestId:'second',sourceMessageId:'second',commandReason:'reply'}]}));
-  vi.stubEnv('BEELINE_TURN_CONTEXT_FILE',path);
-  vi.stubEnv('BEELINE_DAEMON_BASE_URL','http://127.0.0.1:1');
-  vi.stubEnv('BEELINE_DAEMON_TOKEN','test-token');
-});
-afterEach(async()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();await rm(scratch,{recursive:true,force:true});});
-it('concurrent replies carry their own requestId in the same place',async()=>{
-  const inputs:Record<string,unknown>[]=[];
-  vi.stubGlobal('fetch',vi.fn(async(_url:unknown,init:RequestInit)=>{
-    inputs.push(JSON.parse(String(init.body)));return new Response(JSON.stringify({id:'result',createdAt:1}),{status:200});
+
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+
+it('sends concurrent replies with only their quotes and the current place', async () => {
+  vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'parent');
+  vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'thread');
+  vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://127.0.0.1:1');
+  vi.stubEnv('BEELINE_DAEMON_TOKEN', 'fixture');
+  const inputs: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: URL, init: RequestInit) => {
+    inputs.push(JSON.parse(String(init.body)));
+    return Response.json({ id: 'result', createdAt: 1 });
   }));
-  await Promise.all(['first','second'].map(requestId=>callAgentTool('message',{type:'reply',quoteMsgId:requestId,text:'Completed'},requestId)));
-  expect(inputs.map(input=>input.requestId).sort()).toEqual(['first','second']);
-  expect(inputs.every(input=>input.roomId==='room')).toBe(true);
-  expect(inputs.map(input=>input.quoteMsgId).sort()).toEqual(['first','second']);
-});
-it('work tools can serve another item after the first answer',async()=>{
-  const inputs:Record<string,unknown>[]=[];
-  vi.stubEnv('BEELINE_DAEMON_ROOM_ID','room');
-  vi.stubGlobal('fetch',vi.fn(async(_url:unknown,init:RequestInit)=>{
-    inputs.push(JSON.parse(String(init.body)));return new Response(JSON.stringify({id:'result',createdAt:1}),{status:200});
-  }));
-  await callAgentTool('message',{type:'reply',quoteMsgId:'first',text:'Completed first'},'first-answer');
-  await callAgentTool('message',{type:'reply',quoteMsgId:'second',text:'Please implement the second request'},'second-work');
-  expect(inputs.map(input=>input.requestId)).toEqual(['first','second']);
-  expect(inputs[1]).toMatchObject({type:'reply',quoteMsgId:'second',text:'Please implement the second request'});
+  await Promise.all(['first', 'second'].map(quoteMsgId =>
+    callAgentTool('message', { type: 'reply', quoteMsgId, text: 'Completed' }, quoteMsgId)));
+  expect(inputs).toEqual(expect.arrayContaining(['first', 'second'].map(quoteMsgId =>
+    ({ roomId: 'thread', type: 'reply', quoteMsgId, text: 'Completed' }))));
 });

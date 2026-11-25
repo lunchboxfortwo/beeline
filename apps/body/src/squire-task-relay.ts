@@ -7,7 +7,6 @@ import { SquireOperationError, squireOutcome } from './squire-outcome.js';
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import type { AgentCommand } from '@beeline/api-contract/daemon';
@@ -135,7 +134,6 @@ export class SquireTaskRelay {
   constructor(
     private readonly agentId: string,
     private readonly roomId: string,
-    private readonly contextFile: string,
     private readonly authorize: (call: SquireTaskCall) => Promise<boolean>,
     home = homedir(),
     private readonly makeClient: (callbacks: {
@@ -184,7 +182,7 @@ export class SquireTaskRelay {
     }
   }
 
-  async listen(contextFile = this.contextFile): Promise<{ url: string; token: string; contextFile: string }> {
+  async listen(): Promise<{ url: string; token: string }> {
     if (this.closed) throw new Error('Squire task relay is closed');
     if (!this.listening) {
       const server = createServer(async (request, response) => {
@@ -207,7 +205,9 @@ export class SquireTaskRelay {
             body += chunk;
             if (body.length > 2_000_000) throw new Error('Squire request too large');
           }
-          const result = await this.requestMcp(JSON.parse(body) as RelayRequest);
+          const input = JSON.parse(body) as RelayRequest;
+          const suppliedTurn = ['roomId', 'requestId', 'taskId', 'itemId'].some(key => key in input);
+          const result = await this.requestMcp(suppliedTurn ? input : { ...input, ...this.active });
           response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ result }));
         } catch (error) {
           response.writeHead(400, { 'content-type': 'application/json' }).end(
@@ -220,7 +220,7 @@ export class SquireTaskRelay {
       if (!address || typeof address === 'string') throw new Error('Squire relay has no TCP port');
       this.url = `http://127.0.0.1:${address.port}`;
     }
-    return { url: this.url!, token: this.token, contextFile };
+    return { url: this.url!, token: this.token };
   }
 
   activate(command: AgentCommand, itemId: string): void {
@@ -689,8 +689,7 @@ export class SquireTaskRelay {
 export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
   const url = env.BEELINE_SQUIRE_RELAY_URL;
   const token = env.BEELINE_SQUIRE_RELAY_TOKEN;
-  const contextFile = env.BEELINE_TURN_CONTEXT_FILE;
-  if (!url || !token || !contextFile) throw new Error('Squire task relay is unavailable');
+  if (!url || !token) throw new Error('Squire task relay is unavailable');
   const lines = createInterface({ input: process.stdin });
   const notifications = new AbortController();
   let subscribed = false;
@@ -729,10 +728,6 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
       try { input = JSON.parse(line); } catch { return; }
       if (input.id === undefined) return;
       try {
-        // Pi and other ACP clients enumerate tools before a server command is
-        // claimed. Inventory is safe; calls still require the current turn file.
-        const inventory = input.method === 'initialize' || input.method === 'tools/list';
-        const context = inventory ? undefined : JSON.parse(await readFile(contextFile, 'utf8')) as TurnKey;
         const operationId = randomUUID();
         // The MCP client reads this process's stdout: the wait stays silent.
         const send = (read: boolean) =>
@@ -742,7 +737,6 @@ export function runSquireTaskProxy(env: NodeJS.ProcessEnv = process.env): void {
               method: 'POST',
               headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
               body: JSON.stringify({
-                ...context,
                 operationId,
                 method: read ? 'beeline/read_operation' : input.method,
                 params: input.params ?? {},

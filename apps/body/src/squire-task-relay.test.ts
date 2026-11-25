@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 it('closing the relay terminates an authenticated unfinished request', async () => {
-  const relay = new SquireTaskRelay('agent', 'room', '', async () => true);
+  const relay = new SquireTaskRelay('agent', 'room', async () => true);
   cleanups.push(() => relay.close());
   const { url, token } = await relay.listen();
   const pending = request(`${url}/mcp`, {
@@ -92,7 +92,6 @@ describe('Squire shared-session continuation', () => {
     const relay = new SquireTaskRelay(
       'agent',
       'room',
-      '',
       authorized,
       '',
       () => ({ requestMcp, close: vi.fn() }) as unknown as StdioSquireMcpClient,
@@ -202,7 +201,6 @@ describe('Squire approval pushes', () => {
       const relay = new SquireTaskRelay(
         'agent',
         'room',
-        '',
         async () => true,
         '',
         (callbacks) => {
@@ -304,7 +302,6 @@ describe('Squire approval pushes', () => {
     const relay = new SquireTaskRelay(
       'agent',
       'room',
-      '',
       async () => true,
       '',
       (callbacks) => {
@@ -356,7 +353,6 @@ describe('Squire approval pushes', () => {
     const relay = new SquireTaskRelay(
       'agent',
       'room',
-      '',
       async () => true,
       '',
       (callbacks) => {

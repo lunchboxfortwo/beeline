@@ -19,7 +19,6 @@ mergedDescribe43('wallet-tools.test.ts', () => {
       m43_vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'corner-1');
       m43_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost:1234');
       m43_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
-      m43_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
       const calls: Array<{ name: string; body: Record<string, unknown> }> = [];
       m43_vi.stubGlobal('fetch', async (url: URL, options: RequestInit) => {
         const body = JSON.parse(options.body as string);
@@ -115,7 +114,6 @@ mergedDescribe43('wallet-tools.test.ts', () => {
         m43_vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'corner-1');
         m43_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://localhost:1234');
         m43_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
-        m43_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
         const result = {
           outcome: 'pending',
           reason: 'Transaction submission is UNKNOWN. Do not resubmit this intent.',

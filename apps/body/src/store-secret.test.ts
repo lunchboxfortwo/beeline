@@ -33,7 +33,6 @@ it('stores an agent-supplied secret and injects it into the next granted command
     vi.stubEnv('XDG_CONFIG_HOME', root);
     vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room');
     vi.stubEnv('BEELINE_DAEMON_CORNER_ID', '');
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
     vi.stubEnv('BEELINE_GRANT_RUNNER_URL', endpoint.url);
     vi.stubEnv('BEELINE_GRANT_RUNNER_TOKEN', endpoint.token);
     const stored = await callAgentTool('store_secret', { name: 'FLY_TOKEN', value: secret }, 'store');

@@ -212,13 +212,6 @@ export function repeatedTopics(sections: readonly { readonly id: string; readonl
   for (const section of sections) owners.set(section.topic, [...(owners.get(section.topic) ?? []), section.id]);
   return [...owners].filter(([, ids]) => ids.length > 1).map(([topic, ids]) => `${topic}: ${ids.join(', ')}`);
 }
-export function fixtureScope1() {
-
-  const rule = 'Never say you cannot act before trying every available tool, connected app, vault key, host command and browser session. If one fails, try the next. Report gaps only with each route tried and its result. Proactivity and following commands matter most. This never overrides authority rules or approval steps.';
-return {
-rule,
-};
-}
 export function fixtureScope4() {
 
   const home = '/srv/beeline/agents/a/rooms/r/agent-home/user';

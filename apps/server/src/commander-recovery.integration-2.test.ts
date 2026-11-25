@@ -130,7 +130,6 @@ it('R1 carries a closed thread artifact into a successor brief and refuses priva
     vi.stubEnv('BEELINE_DAEMON_ROOM_ID', successor.cornerId);
     vi.stubEnv('BEELINE_DAEMON_CORNER_ID', successor.cornerId);
     vi.stubEnv('BEELINE_ATTACH_SCRATCH_ROOT', scratch);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
     const downloaded = JSON.parse(await callAgentTool('read', { facet: 'attachment', attachmentId: media }, 'r1'));
     expect(await readFile(downloaded.path)).toEqual(bytes);
     await expect(callAgentTool('read', { facet: 'attachment', attachmentId: privateMedia }, 'unattached')).rejects.toThrow('not_found');
@@ -310,7 +309,6 @@ it('Reproduction R-ID: the read tool downloads bytes from local thread output', 
     vi.stubEnv('BEELINE_DAEMON_ROOM_ID', opened.cornerId);
     vi.stubEnv('BEELINE_DAEMON_CORNER_ID', opened.cornerId);
     vi.stubEnv('BEELINE_ATTACH_SCRATCH_ROOT', scratch);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
     const message = JSON.parse(await callAgentTool('read', { facet: 'message', messageId: report.id }, 'read-report'));
     expect(message.body).toBe('Evidence attached');
     const downloaded = JSON.parse(await callAgentTool('read', { facet: 'attachment', messageId: report.id, attachmentId: media }, 'read-report-file'));
@@ -327,7 +325,7 @@ it('Reproduction R-ID: the read tool downloads bytes from local thread output', 
 
 it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: shipped MCP waits for upload %s before reporting', async (outcome) => {
   const scratch = await mkdtemp(join(tmpdir(), 'artifact-report-proof-'));
-  await writeFile(join(scratch, 'turn.json'), JSON.stringify(authority(rootFixture.order)));
+  const context = authority(rootFixture.order);
   await writeFile(join(scratch, 'evidence.txt'), 'Artifact report evidence');
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
@@ -341,7 +339,9 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const body = Buffer.concat(chunks);
       let result: unknown;
-      if (request.url === '/v1/daemon/artifacts') {
+      if (request.url === '/session') {
+        result = context;
+      } else if (request.url === '/v1/daemon/artifacts') {
         started(); await held;
         if (outcome === 'failure' || (outcome === 'replacement' && uploadAttempts++ === 0)) {
           response.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'storage_unavailable' }));
@@ -361,7 +361,7 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
   const child = spawn(process.execPath, [new URL('../../body/dist/read-only-mcp.js', import.meta.url).pathname], {
     env: { ...process.env, BEELINE_MCP_SURFACE: 'agent', BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${port}`,
       BEELINE_DAEMON_TOKEN: 'isolated-proof', BEELINE_DAEMON_ROOM_ID: DM, BEELINE_DAEMON_CORNER_ID: '',
-      BEELINE_ATTACH_ROOT: scratch, BEELINE_TURN_CONTEXT_FILE: join(scratch, 'turn.json') },
+      BEELINE_ATTACH_ROOT: scratch, BEELINE_GRANT_RUNNER_URL: `http://127.0.0.1:${port}`, BEELINE_GRANT_RUNNER_TOKEN: 'fixture' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   type ToolResult = { isError?: boolean; content: { text: string }[] };
