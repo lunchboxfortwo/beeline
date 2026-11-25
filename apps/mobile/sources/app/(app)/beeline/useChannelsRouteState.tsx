@@ -7,7 +7,7 @@ import { useIsDesktop } from '@/utils/responsive';
 import { isChatListView, isWorkspaceListView, type ChatListView } from '@beeline/buzz-client';
 import { useLocalSearchParams } from 'expo-router';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { afterFirstFrame, FirstContentDrawContext } from '@/navigation/initial-landing';
 import type { NewChatStep } from '@/ui/screens/chats/NewChatSheet';
@@ -40,12 +40,13 @@ export function useChannelsRouteState(session: DeckSession) {
     ? restoreStoredSurface(surfaceAddress(relayUrl, identity.publicKey, '/workspace/:id/chats', { workspaceId: selectedId }), isChatListView)
     : null);
   const notifyDraw = useContext(FirstContentDrawContext);
-  const [drawn, setDrawn] = useState(false);
+  // A cold browser deck has no saved rows to paint before its first read.
+  const [readsReady, setReadsReady] = useState(Platform.OS === 'web' && chatList === null);
   const firstLayout = useRef<(() => void) | null>(null);
   const onLayout = useCallback(() => {
     if (firstLayout.current) return;
     notifyDraw();
-    firstLayout.current = afterFirstFrame(() => setDrawn(true));
+    firstLayout.current = afterFirstFrame(() => setReadsReady(true));
   }, [notifyDraw]);
   useEffect(() => () => { firstLayout.current?.(); firstLayout.current = null; }, []);
   useLatencyRouteFrame('/beeline/channels', chatList !== null, true);
@@ -76,7 +77,7 @@ export function useChannelsRouteState(session: DeckSession) {
   return {
     workspaceList, requestedWorkspaceId, chatList, identity, relayUrl, isDesktop, requestedNewRoom,
     handledNewRoomRequest, newChatStep, setNewChatStep, readWorkspaceRef, chatStore, deckMissedRef,
-    transport, setError, drawn, setConfirmedWorkspaceCount, deckVisible, deckFocusedRef,
+    transport, setError, readsReady, setConfirmedWorkspaceCount, deckVisible, deckFocusedRef,
     setDeletedWorkspaceNotice, selectedId, setChatList, setRefreshing,
     retryGeneration, setAgeNow, githubScope, setRepoPickerError, setRepoAccessLoading,
     setRepoPickerNotice, creatingRoom, setCreatingRoom, confirmedWorkspaceCount, error,

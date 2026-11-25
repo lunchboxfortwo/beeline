@@ -3,7 +3,6 @@ import { DesktopArtifactPane } from '@/components/buzz/DesktopArtifactPane';
 import { DESKTOP_WORK_PANE_THRESHOLD } from '@/buzz/desktop-workbench-state';
 import { setDesktopPaneOpen, useDesktopLayout, setDesktopAvailableWidth } from '@/buzz/desktop-layout-state';
 import * as React from 'react';
-import { Drawer } from 'expo-router/drawer';
 import { useIsDesktop, useIsTablet, useHeaderHeight } from '@/utils/responsive';
 import { SidebarView } from './SidebarView';
 import { DesktopViewerPane } from './DesktopViewerPane';
@@ -45,10 +44,7 @@ const SETUP_SURFACES = ['/beeline/community', '/beeline/create-workspace'];
 
 export const SidebarNavigator = React.memo(function SidebarNavigator() {
   const isTablet = useIsTablet();
-  // A native phone has no drawer: it routes straight into its stack instead of
-  // reconciling a second navigator whose surface is always hidden. A web window
-  // can be resized across the breakpoint, so it keeps one navigator at every
-  // width (zero-width drawer when compact) and never remounts the open chat.
+  // Resizing a web window must preserve the active route and its draft.
   return isTablet || Platform.OS === 'web' ? <DesktopSidebarNavigator /> : <Slot />;
 });
 
@@ -168,50 +164,18 @@ const DesktopSidebarNavigator = React.memo(() => {
     [desktopPlatform, showSidebar],
   );
 
-  const drawerNavigationOptions = React.useMemo(() => {
-    // Tablet: always permanent, just collapse width in zen mode.
-    //
-    // We deliberately do NOT animate `width` on web. A CSS transition on
-    // the drawer width re-flowed the chat flex-1 sibling on every frame,
-    // re-measuring the entire FlatList tree at ~15fps. Snapping the
-    // width change makes the chat reflow exactly once. Native already
-    // snaps because RN doesn't honor CSS transition properties.
-    return {
-      lazy: false,
-      headerShown: false,
-      drawerType: 'permanent' as const,
-      drawerStyle: {
-        backgroundColor: drawerGround,
-        borderRightWidth: 0,
-        width: drawerWidth,
-        overflow: 'hidden' as const,
-      } as any,
-      swipeEnabled: false,
-      drawerActiveTintColor: 'transparent',
-      drawerInactiveTintColor: 'transparent',
-      drawerItemStyle: { display: 'none' as const },
-      drawerLabelStyle: { display: 'none' as const },
-    };
-  }, [isDesktopLayout, drawerWidth, drawerGround]);
-
-  const drawerContent = React.useCallback(() => <SidebarView />, []);
-  // This frame reads the pathname, which changes on every navigation. A new
-  // Drawer element would re-render every navigator and the screen just
-  // mounted for that navigation, so the element changes only with its options.
-  const drawer = React.useMemo(() => (
-    <Drawer
-      screenOptions={drawerNavigationOptions}
-      drawerContent={showSessionChrome ? drawerContent : undefined}
-    />
-  ), [drawerContent, drawerNavigationOptions, showSessionChrome]);
-
   return (
     <YStack flex={1}>
       {/* DOM order follows the desktop's spatial reading order. */}
       {showSessionChrome && <PersistentHeader />}
       <XStack flex={1} alignItems="stretch">
+        {showSessionChrome && (
+          <YStack width={drawerWidth} overflow="hidden" backgroundColor={drawerGround}>
+            <SidebarView />
+          </YStack>
+        )}
         <YStack flex={1} minWidth={0}>
-        {drawer}
+          <Slot />
         </YStack>
         {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
           <DesktopViewerPane initialShare={0.55}>

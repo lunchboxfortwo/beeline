@@ -18,7 +18,7 @@ import type { DeckState } from './useChannelsRouteState';
 /** The deck's live watch, covering reads and visit clock; the hook paints nothing itself. */
 export function useChannelsSubscriptions(
   {
-    drawn, setConfirmedWorkspaceCount, deckMissedRef, deckVisible, setError, identity, relayUrl,
+    readsReady, setConfirmedWorkspaceCount, deckMissedRef, deckVisible, setError, identity, relayUrl,
     deckFocusedRef, transport, setDeletedWorkspaceNotice, selectedId, chatStore, setChatList,
     setRefreshing, readWorkspaceRef, retryGeneration, setAgeNow,
   }: DeckState,
@@ -26,7 +26,7 @@ export function useChannelsSubscriptions(
   refreshMissed: () => void,
 ): void {
   useEffect(() => {
-    if (!drawn) return;
+    if (!readsReady) return;
     setConfirmedWorkspaceCount(null);
     let cancelled = false;
     const identityGeneration = clientResetGeneration();
@@ -206,7 +206,7 @@ export function useChannelsSubscriptions(
       readWorkspaceRef.current = null;
       chatStore.current = null;
     };
-  }, [drawn, identity, relayUrl, transport, selectedId, deckVisible, refreshMissed, retryGeneration]);
+  }, [readsReady, identity, relayUrl, transport, selectedId, deckVisible, refreshMissed, retryGeneration]);
 
 
   useRelativeTimeRefresh(setAgeNow, refreshMissed, useCallback(() => {
