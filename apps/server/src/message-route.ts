@@ -5,6 +5,14 @@ import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
 import { legacyMessageRoute } from './messaging-cutover.js';
 
+/** A recorded message that can supply the quote and return route for a reply. */
+export function replyableWake(item: CommandRow | undefined) {
+  const wake = item?.message;
+  if (!wake?.route || wake.systemEvent || wake.type === 'system' ||
+      wake.route.from.agent === SYSTEM_IDENTITY_ID || item?.private_payload?.kind === 'lifecycle') return undefined;
+  return { id: wake.id, route: wake.route, type: wake.type };
+}
+
 /** Current messages carry their whole route. Only retained pre-cutover items need adaptation. */
 export async function recordedMessageRoute(db:SqlDatabase,item:CommandRow):Promise<MessageRoute> {
   const route=item.message?.route ?? item.private_payload?.route;

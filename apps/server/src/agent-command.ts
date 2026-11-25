@@ -5,7 +5,7 @@ import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contr
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
-import { recordedMessageRoute } from './message-route.js';
+import { recordedMessageRoute, replyableWake } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
@@ -286,7 +286,7 @@ export type CommandRow = {
   result_message_id: string | null;
   lifecycle_before: string | null;
   review_context?: Record<string, unknown> | null;
-  wake_context?: { briefRevision: number } | null;
+  wake_context?: { briefRevision?: number; scheduleId?: string } | null;
   recovery_context: string | null;
 };
 /**
@@ -673,6 +673,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const scheduleOwner = (chat.source?.card as { ownerId?: unknown } | null)?.ownerId;
   const workflowOwner=chat.workflow_owner_id ?? (input.reason==='resume' && parent?.message?.systemEvent?.kind==='workflow-handoff'
     ? parent.message.route?.from.agent : undefined);
+  // The saved requester supplies delivery; the timer remains the command's source.
+  const scheduleReply = input.reason === 'schedule' && parent?.action === 'input' && parent.state !== 'cancelled'
+    && parent.reason !== 'schedule' && parent.reason !== 'mcp_call' ? replyableWake(parent) : undefined;
   const scheduledReturn = input.reason === 'schedule' ? {
     kind: 'lifecycle' as const, authorId: chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
     text: sourceText ?? input.reason, fromRoomId: chat.id,
@@ -681,7 +684,7 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
         ?? chat.members.find(member => member.id === input.agentId)?.owner_id ?? undefined,
   } : undefined;
   // Inherited payloads copy stored rows; their origin was declared when written.
-  let payload: PrivateCommandPayload | undefined = input.privatePayload ?? (scheduledReturn as PrivateCommandPayload | undefined) ?? (parent?.private_payload && input.inheritPrivatePayload !== false
+  let payload: PrivateCommandPayload | undefined = scheduleReply ? undefined : input.privatePayload ?? (scheduledReturn as PrivateCommandPayload | undefined) ?? (parent?.private_payload && input.inheritPrivatePayload !== false
     ? { ...parent.private_payload, kind: 'lifecycle', reported: undefined, text: sourceText ?? parent.private_payload.text } as PrivateCommandPayload
     : undefined);
   if (lifecycle && input.reason!=='corner_objective' && !workflowOwner) {
@@ -744,26 +747,27 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
       parent?.root_source_message_id ?? input.scheduledHumanCommandMessageId ?? input.sourceMessageId ?? id,
       parent ? input.retainDepth || lifecycle || input.resume ? parent.agent_depth : parent.agent_depth + 1 : 0,
       input.avatarJob ?? false, payload ? json(payload) : null, returnRoom, review ? json(review) : null, input.reason === 'corner_brief_revision' ?
-        json({briefRevision: chat.brief_revision ?? 0}) : null, reportAddress ? json(reportAddress) : null,
-      json({ id: privateMessage ? id : input.sourceMessageId ?? id,
+        json({briefRevision: chat.brief_revision ?? 0}) : scheduleReply ? json({scheduleId: chat.source?.system_event?.scheduleId}) : null,
+      reportAddress ? json(reportAddress) : null,
+      json({ id: scheduleReply?.id ?? (privateMessage ? id : input.sourceMessageId ?? id),
         // Cutover only: legacy helper writes keep their existing routing plumbing.
-        route:scheduleSender ? {from:scheduleSender,to:{agent:input.agentId,place:chat.id}} : workflowOwner ? {from:{agent:workflowOwner,place:chat.id},to:{agent:input.agentId,place:chat.id}} :
+        route:scheduleReply ? scheduleReply.route : scheduleSender ? {from:scheduleSender,to:{agent:input.agentId,place:chat.id}} : workflowOwner ? {from:{agent:workflowOwner,place:chat.id},to:{agent:input.agentId,place:chat.id}} :
           input.reason==='mcp_call' && parent?.agent_id===input.agentId && parent.message?.route ? parent.message.route :
           legacyCommandPayload(payload) ? undefined : payload?.route ??
           {from:{agent:workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
             place:payload?.fromRoomId ?? chat.source?.room_id ?? chat.id},to:{agent:input.agentId,place:chat.id}},
-        replyAddress:workflowOwner ? {agent:workflowOwner,place:chat.id} :
+        replyAddress:scheduleReply ? scheduleSender : workflowOwner ? {agent:workflowOwner,place:chat.id} :
           input.reason==='mcp_call' && parent?.agent_id===input.agentId && parent.message?.route ? parent.message.replyAddress :
           payload?.replyAddress ?? (!payload?.route && (payload?.authorId ?? chat.source?.author_id)===SYSTEM_IDENTITY_ID
             ? (payload?.returnIdentityId ? {agent:payload.returnIdentityId,place:returnRoom} : undefined) : undefined),
-        authorId: scheduleSender?.agent ?? workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
-        body: (payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
+        authorId: scheduleReply?.route.from.agent ?? scheduleSender?.agent ?? workflowOwner ?? payload?.authorId ?? chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
+        body: ((scheduleReply && chat.source?.system_event?.consequence) ?? payload?.text ?? subscriptionPromptBody(sourceText ?? input.reason, chat.source?.system_event ?? null)) +
           squireDecisionDetail(chat.source?.card_type ?? null,chat.source?.card ?? null) +
           workflowDetail +
           (!payload && input.wakeNote ? `\n${input.wakeNote}` : ''),
         attachments: payload?.attachments ?? chat.source?.attachments ?? [],
-        type: privateMessage ? 'private' : chat.source?.presentation ?? 'system',
-        systemEvent: chat.source?.system_event,replyToMessageId:chat.source?.reply_to_message_id ?? undefined,
+        type: scheduleReply?.type ?? (privateMessage ? 'private' : chat.source?.presentation ?? 'system'),
+        systemEvent: scheduleReply ? undefined : chat.source?.system_event,replyToMessageId:chat.source?.reply_to_message_id ?? undefined,
         ...(reply ? {replyToAuthorId:reply.author_id,replyToAuthorName:reply.name,replyToExcerpt:boundReplyExcerpt(reply.text)} : {}) }),...wake.params,
     ],
   )).rows[0] ?? (await db.query<CommandRow>(
@@ -883,7 +887,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       }
       const from = {agent:agentId,place:item.room_id};
       const id = hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
-      const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:item.source_message_id ?? item.id});
+      const quote = item.reason === 'schedule' ? item.message?.id : undefined;
+      const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:quote ?? item.source_message_id ?? item.id});
       if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.id]);
       else await endAgentTurn(db,item,'complete',null,saved.id);
       completedNow = true;

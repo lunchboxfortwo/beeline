@@ -6,6 +6,7 @@ import { CommandRefusalError } from './command-refusal.js';
 import { assignmentBeforeBlock, commanderReportAddress } from './commander.js';
 import type { SqlDatabase } from './database.js';
 import { openBlocksSql } from './implementer-blocks.js';
+import { replyableWake } from './message-route.js';
 
 type SessionMessage = {
   type: 'normal' | 'blocked' | 'reply';
@@ -34,8 +35,8 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       if (!target.allowed) throw new CommandRefusalError('A thread must address a thread agent session.', 400);
       to = {agent: target.agent, place: target.place};
     } else if (input.type === 'reply' && typeof input.quoteMsgId === 'string' && input.address === undefined) {
-      const wake = parent?.message;
-      if (parent?.state !== 'pending' || !wake || wake.systemEvent || !wake.route || wake.route.from.agent === SYSTEM_IDENTITY_ID || wake.type === 'system' || parent?.private_payload?.kind === 'lifecycle' || input.quoteMsgId !== wake.id)
+      const wake = replyableWake(parent);
+      if (parent?.state !== 'pending' || input.quoteMsgId !== wake?.id)
         throw new CommandRefusalError('Quote a message that woke this turn.', 400);
       to = wake.route.from;
       quote = input.quoteMsgId;
@@ -48,7 +49,9 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       let taskSender:MessageAddress | undefined;
       if (order?.kind === 'order' && order.fromRoomId) {
         taskSender = {agent:order.authorId,place:order.fromRoomId};
-      } else if (assignment?.reason === 'message' || assignment?.reason === 'schedule') {
+      } else if (assignment?.reason === 'schedule') {
+        taskSender = assignment.message?.replyAddress ?? assignment.message?.route?.from ?? order?.route?.from;
+      } else if (assignment?.reason === 'message') {
         taskSender = (assignment.message?.route ?? order?.route)?.from;
       } else if (!assignment && escalating && !room?.parent_id) {
         taskSender = (await db.query<MessageAddress>(`SELECT source.author_id agent,source.room_id place FROM messages source
