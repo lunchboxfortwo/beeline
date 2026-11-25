@@ -315,13 +315,15 @@ export async function callTool(
   );
   if (status === 401) throw new Error(DISCONNECTED);
   if (status !== 200) throw new Error(`Beeline answered HTTP ${status}`);
-  const result = value.result as { isError?: boolean; content?: { text?: string }[] } | undefined;
+  const result = value.result as { isError?: boolean; content?: { type?: string; text?: string }[] } | undefined;
   const text = result?.content?.[0]?.text ?? '';
   if (!result || result.isError)
     throw new Error(
       result?.content?.map((item) => item.text ?? '').join('\n') || 'Beeline refused the call',
     );
-  return (JSON.parse(text) as { data: Record<string, unknown> }).data;
+  const data = (JSON.parse(text) as {data: unknown}).data;
+  const binary = result.content?.filter(block => block.type === 'image' || block.type === 'resource');
+  return binary?.length ? {data, content:binary} : data;
 }
 
 /** One negotiated check per admitted stream connection, at the existing

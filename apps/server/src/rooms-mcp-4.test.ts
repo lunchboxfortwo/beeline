@@ -10,7 +10,7 @@ const scope3 = fixtureScope3(scope1);
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       expect(await scope3.ok(client, 'post', { address: corner, text: 'Read the brief; running the tests next.', progress: true }))
-        .toEqual({ recorded: true, address: corner });
+        .toEqual({ effect:'progress', recorded: true, address: corner });
       const rows = (await scope1.db.query<{ presentation: string; text: string; activity: { kind: string; title: string; text: string }[] | null }>(
         `SELECT presentation,text,activity FROM messages WHERE room_id=$1 AND author_id=$2 ORDER BY created_at`, [corner, member])).rows;
       expect(rows).toEqual([{ presentation: 'activity', text: '', activity: [{ kind: 'output', title: 'Update', text: 'Read the brief; running the tests next.' }] }]);
@@ -39,8 +39,8 @@ const scope3 = fixtureScope3(scope1);
       expect(hold.error).toBe(true);
       expect(hold.text).toContain('close the PR to stop it');
       // A person's tag makes that person the requester, as it does for an agent turn.
-      const handle0 = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
-      const request = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle0} hold the demo thread` }, USER);
+      const handle0 = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,PUBLIC_CORNER])).rows[0]!.handle;
+      const request = await scope1.phone.execute('sendRoomMessage', { roomId: PUBLIC_CORNER, text: `@${handle0} hold the demo thread` }, USER);
       const command=(await scope1.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,request.messageId])).rows[0]!;
       const held=await scope3.ok(client,'set_thread_hold',{address:PUBLIC_CORNER,commandId:command.id,sourceMessageId:request.messageId});
       expect(held.holdId).toMatch(/^[0-9a-f-]{36}$/);

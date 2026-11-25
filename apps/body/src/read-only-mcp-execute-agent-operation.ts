@@ -1,6 +1,7 @@
+import { readAgentMessagePage, readAgentMessageResult } from '@beeline/api-contract/daemon';
 import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
 import { normalizeAppContinuation } from "@beeline/api-contract/app-connections";
-import { fixCornerText,readAgentUsage,usageIsOld,usageSummary,type ConnectResult,type CornerRestoreResult,type DaemonAttachment,type RoomConversationResult } from "@beeline/api-contract/daemon";
+import { fixCornerText,readAgentUsage,usageIsOld,usageSummary,type ConnectResult,type CornerRestoreResult,type RoomConversationResult,type RoomMessageResult } from "@beeline/api-contract/daemon";
 import { createHash,randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { attachmentId,deliverAttachments,withoutImageData } from "./attachment-delivery.js";
@@ -45,12 +46,14 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     case 'close_ask':
       return JSON.stringify(await daemonExecute('closeAgentAsk', { messageId: args.id, reason: args.reason }));
     case 'get_chat_message': {
-      const message = await daemonExecute('getRoomMessage', {
+      const result = await daemonExecute('getRoomMessage', {
         roomId: typeof args.address === 'string' ? args.address : agentScheduleRoomId(),
         messageId: args.messageId,
         ...(typeof args.offset === 'number' ? { offset: args.offset } : {}),
       });
-      const attachments = (message.attachments ?? []) as DaemonAttachment[];
+      if ('attachmentId' in result) throw new Error('expected a message result');
+      const message = readAgentMessageResult(result as unknown as RoomMessageResult);
+      const attachments = message.attachments ?? [];
       if (!attachments.length) return JSON.stringify(message);
       const scratch = process.env.BEELINE_ATTACH_SCRATCH_ROOT?.trim();
       const delivered = scratch
@@ -72,7 +75,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...message,
         attachments: delivered.map(({ attachment, ...local }) => ({
           ...attachment,
-          ...(attachmentId(attachment) ? { id: attachmentId(attachment) } : {}),
+          ...(attachmentId(attachment) ? { attachmentId: attachmentId(attachment) } : {}),
           ...local,
         })),
       });
@@ -389,156 +392,17 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     case 'inspect_thread': {
       if (typeof args.cornerId !== 'string' || !args.cornerId)
         throw new Error('cornerId is required');
-      if (args.after !== undefined && (typeof args.after !== 'string' || !args.after))
-        throw new Error('after must be a nonempty cursor');
-      if (args.mode !== undefined && args.mode !== 'status' && args.mode !== 'transcript')
-        throw new Error('mode must be status or transcript');
-      if (args.after && args.mode !== 'transcript')
-        throw new Error('after requires transcript mode');
-      if (args.from !== undefined && args.from !== 'oldest' && args.from !== 'newest')
-        throw new Error('from must be oldest or newest');
-      if (args.from !== undefined && args.mode !== 'transcript')
-        throw new Error('from requires transcript mode');
-      if (args.before !== undefined && (typeof args.before !== 'string' || !args.before))
-        throw new Error('before must be a nonempty cursor');
-      if (args.before && args.from !== 'newest') throw new Error('before requires from newest');
-      if (args.from === 'newest' && (args.after || args.offset !== undefined))
-        throw new Error('from newest pages with before, not after or offset');
-      if (
-        args.offset !== undefined &&
-        (!Number.isSafeInteger(args.offset) ||
-          (args.offset as number) < 0 ||
-          args.mode !== 'transcript')
-      )
-        throw new Error('offset requires transcript mode and a nonnegative safe integer');
-      // The server authorizes each read against the target corner: a member of
-      // the corner or of its parent Room reaches it; anyone else is refused.
-      const itemLimit = Math.min(typeof args.limit === 'number' ? args.limit : 8, 8);
-      // Time-only cursors exclude the entire millisecond in either direction.
-      for (const direction of ['before', 'after'] as const) {
-        const value = args[direction];
-        if (typeof value === 'string' && /^\d+$/.test(value))
-          args[direction] = `${value},${(direction === 'before' ? '0' : 'f').repeat(64)}`;
-      }
-      const hasContent = (item: RoomConversationResult['items'][number]) =>
-        Boolean(item.body.trim() || item.attachments.length || item.systemEvent);
-      // Bound reads even when an entire stretch contains only activity. Keep
-      // the raw scan boundary so the next call can advance through that stretch.
-      const readMessagePage = async (newest: boolean) => {
-        const rows: RoomConversationResult['items'][number][] = [];
-        let boundary = (newest ? args.before : args.after) as string | undefined;
-        let more = false;
-        for (let scan = 0; scan < 16; scan++) {
-          const page = await daemonExecute('getRoomConversation', {
-            roomId: args.cornerId as string,
-            limit: itemLimit + 1,
-            ...(newest ? { window: 'recent' as const, ...(boundary ? { before: boundary } : {}) }
-              : boundary ? { after: boundary } : { window: 'earliest' as const }),
-          }) as unknown as RoomConversationResult;
-          const batch = page.items;
-          if (newest) rows.unshift(...batch);
-          else rows.push(...batch);
-          const nextBoundary = (newest ? batch[0] : batch.at(-1))?.cursor;
-          more = batch.length === itemLimit + 1;
-          if (!more || rows.filter(hasContent).length > itemLimit || !nextBoundary || nextBoundary === boundary) break;
-          boundary = nextBoundary;
-        }
-        return { items: rows.filter(hasContent).map(item => item.systemEvent && !item.body.trim()
-            ? { ...item, body: JSON.stringify(item.systemEvent) } : item), more,
-          boundary: (newest ? rows[0] : rows.at(-1))?.cursor };
-      };
-      if (args.mode === 'transcript' && args.from === 'newest') {
-        const page = await readMessagePage(true);
-        // Assemble the bounded page in transcript order, then return newest first.
-        const items: Record<string, unknown>[] = [];
-        for (const item of page.items.slice(-itemLimit).reverse()) {
-          let body = item.body.slice(0, 1000);
-          const row = {
-            id: item.id,
-            cursor: item.cursor,
-            authorId: item.authorId,
-            createdAt: item.createdAt,
-            type: item.type,
-            ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
-            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
-          };
-          while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
-            body = body.slice(0, Math.floor(body.length / 2));
-          if (!body && item.body) break;
-          items.unshift({
-            ...row,
-            body,
-            ...(body.length < item.body.length ? { bodyContinues: true } : {}),
-          });
-        }
-        const oldest = items[0]?.cursor as string | undefined;
-        items.reverse();
-        return JSON.stringify({
-          cornerId: args.cornerId,
-          items,
-          ...((page.items.length > items.length || page.more) && (oldest || page.boundary)
-            ? { next: { before: page.items.length > items.length ? oldest : page.boundary } } : {}),
-          limits: { items: itemLimit, bodyChars: 1000, responseChars: 12000 },
-        });
-      }
       if (args.mode === 'transcript') {
-        const page = await readMessagePage(false);
-        const items: Record<string, unknown>[] = [];
-        let nextAfter = args.after as string | undefined;
-        let nextOffset = args.offset as number | undefined;
-        let hasMore = false;
-        for (const item of page.items.slice(0, itemLimit)) {
-          const offset = nextOffset ?? 0;
-          if (offset > item.body.length) throw new Error('offset exceeds message body');
-          let body = item.body.slice(offset, offset + 1000);
-          const row = {
-            id: item.id,
-            cursor: item.cursor,
-            authorId: item.authorId,
-            createdAt: item.createdAt,
-            type: item.type,
-            ...(offset ? { bodyOffset: offset } : {}),
-            ...(item.attachments.length ? { attachmentCount: item.attachments.length } : {}),
-            ...(item.messageLink ? { messageLink: item.messageLink } : {}),
-          };
-          // Escaped control characters can occupy six JSON characters each.
-          while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
-            body = body.slice(0, Math.floor(body.length / 2));
-          if (!body && item.body.length > offset) {
-            hasMore = true;
-            break;
-          }
-          items.push({
-            ...row,
-            body,
-            ...(offset + body.length < item.body.length ? { bodyContinues: true } : {}),
-          });
-          if (offset + body.length < item.body.length) {
-            nextOffset = offset + body.length;
-            hasMore = true;
-            break;
-          }
-          nextAfter = item.cursor;
-          nextOffset = undefined;
-        }
-        if (!hasMore) {
-          hasMore = page.items.length > items.length || page.more;
-          if (page.items.length === items.length && nextOffset === undefined) nextAfter = page.boundary ?? nextAfter;
-        }
-        return JSON.stringify({
-          cornerId: args.cornerId,
-          items,
-          ...(hasMore
-            ? {
-                next: {
-                  ...(nextAfter ? { after: nextAfter } : {}),
-                  ...(nextOffset ? { offset: nextOffset } : {}),
-                },
-              }
-            : {}),
-          limits: { items: itemLimit, bodyChars: 1000, responseChars: 12000 },
-        });
+        const page = await readAgentMessagePage({
+          roomId: args.cornerId,
+          from: args.from as 'oldest' | 'newest' | undefined,
+          limit: args.limit as number | undefined,
+          cursor: {before: args.before as string | undefined, after: args.after as string | undefined, offset: args.offset as number | undefined},
+        }, async input => await daemonExecute('getRoomConversation', input) as unknown as RoomConversationResult);
+        return JSON.stringify(page);
       }
+      if (args.mode !== undefined && args.mode !== 'status')
+        throw new Error('mode must be status or transcript');
       const status = (await daemonExecute('getCornerRestoreState', {
         cornerId: args.cornerId,
       })) as unknown as CornerRestoreResult;

@@ -1,3 +1,4 @@
+import { ExpectedRefusalError } from '../command-refusal.js';
 import { commandGrantAction,connectionInstallName,interpreterScriptArgument,isCommandGrantScript,type AgentGrantKind,type CommandGrantRule,type CommandGrantScript } from '@beeline/api-contract/agent-grants';
 import type { DaemonAttachment,DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
@@ -90,7 +91,7 @@ export const DEFAULT_MEDIA_MAXIMUM_BYTES = 25 * 1024 * 1024;
  * translating an outage into a membership refusal hides the outage from the
  * caller and from the route's 503 default.
  */
-export class AccessDeniedError extends Error {
+export class AccessDeniedError extends ExpectedRefusalError {
   constructor() {
     super('daemon chat access denied');
   }

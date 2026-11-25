@@ -111,6 +111,7 @@ export type RoomInboxResult = {
     /** Opaque server ordering key for merging live and polled deliveries. */
     readonly cursor?: string;
     readonly authorId: string;
+    readonly authorHandle?: string;
     readonly createdAt: number;
     readonly type: string;
     readonly body: string;
@@ -143,6 +144,7 @@ export type RoomInboxResult = {
 };
 
 export type DaemonAttachment = {
+  readonly attachmentId?: string;
   readonly url: string;
   /** The bytes are past the media TTL; the download will answer 410 Gone. */
   readonly expired?: boolean;
@@ -152,6 +154,19 @@ export type DaemonAttachment = {
   readonly thumbnailUrl?: string;
   /** Hex sha256 of the stored bytes; set by getRoomMessage while the object is ready. */
   readonly sha256?: string;
+};
+
+export type RoomMessageResult = {
+  readonly messageId: string;
+  readonly body: string;
+  readonly attachments: readonly DaemonAttachment[];
+  /** Legacy servers can return an offset for a partial message. */
+  readonly nextOffset?: number;
+};
+export type RoomAttachmentResult = {
+  readonly attachmentId: string;
+  readonly messageId: string | null;
+  readonly attachment: DaemonAttachment;
 };
 
 export type RoomConversationResult = RoomInboxResult & {
@@ -421,10 +436,31 @@ export type WriteResult = {
   readonly failureReportDelivered?: boolean;
 };
 
-export type PostRoomMessageResult = WriteResult & {
-  /** False when the final does not answer the request; the queue item stays owed. */
+export type MessageSendResult = {
+  readonly id?: string;
+  readonly messageId?: string;
+  readonly commandId?: string;
+  readonly createdAt?: number;
+  readonly queued?: boolean;
+  readonly destination?: import('./agent-messaging.js').MessageAddress;
+  readonly stored?: boolean;
+  readonly visible?: boolean;
+  readonly receipt?: string;
+};
+
+export type PostRoomMessageResult = {
+  readonly id?: string;
+  readonly messageId?: string;
+  readonly commandId?: string;
+  readonly createdAt?: number;
+  /** Whether the closing receipt settled the command. Older servers omit this field. */
+  readonly completed?: boolean;
+  /** The final belongs to an invocation replaced by a newer execution. */
+  readonly superseded?: boolean;
+  readonly published?: boolean;
+  readonly stored?: boolean;
+  readonly visible?: boolean;
   readonly answered?: boolean;
-  /** Non-fatal delivery warnings after a public reply has already posted. */
   readonly receipt?: string;
 };
 

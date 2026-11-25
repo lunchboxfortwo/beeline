@@ -76,11 +76,10 @@ export function finishResolvedAttachPath(resolved: string): string {
   return resolved;
 }
 
-/** The daemon-facing artifacts pass-through's response: `postArtifact` only
- *  reads `url`, the rest of `UploadArtifactResult`
- *  (`apps/server/src/object-service.ts`) rides along unused. */
+/** The artifact upload response provides the object ID and its media URL. */
 export interface DaemonArtifactUploadResult {
   url: string;
+  objectId?: string;
   mimeType?: string;
   size?: number;
   title?: string;
@@ -103,11 +102,10 @@ export function isArtifactMime(value: unknown): value is ArtifactMimeType {
   return typeof value === 'string' && (ARTIFACT_MIME_TYPES as readonly string[]).includes(value);
 }
 
-/** The viewer cannot open `application/octet-stream`, so content that falls
- *  through to it (inline `html`/`bytes`, or an unknown or missing extension)
+/** The viewer cannot open `application/octet-stream`, so content that has an unknown or missing extension and falls through to it
  *  is sniffed for a format the viewer renders. Unrecognized content keeps
  *  the octet-stream type. */
-export function sniffArtifactMime(bytes: Buffer, fromHtml: boolean): ArtifactMimeType {
+export function sniffArtifactMime(bytes: Buffer): ArtifactMimeType {
   const startsWith = (signature: number[], offset = 0) =>
     signature.every((byte, index) => bytes[offset + index] === byte);
   if (startsWith([0x25, 0x50, 0x44, 0x46, 0x2d])) return 'application/pdf';
@@ -125,7 +123,7 @@ export function sniffArtifactMime(bytes: Buffer, fromHtml: boolean): ArtifactMim
     .toLowerCase();
   const prolog = head.replace(/^<\?xml[^>]*\?>\s*/, '').replace(/^(<!--[\s\S]*?-->\s*)+/, '');
   if (prolog.startsWith('<svg') || /^<!doctype\s+svg[\s>]/.test(prolog)) return 'image/svg+xml';
-  if (fromHtml || /^<(!doctype html|html)[\s>]/.test(prolog)) return 'text/html';
+  if (/<(!doctype html|html)[\s>]/.test(prolog)) return 'text/html';
   return 'application/octet-stream';
 }
 
@@ -149,83 +147,30 @@ export function postArtifactDepsFromEnv(): PostArtifactDeps {
   };
 }
 
-/** post_artifact: validate, upload through the artifacts pass-through, then
- *  queue the attachment on this turn's final reply. Content comes either
- *  from `path` (a file in the session checkout or writable home, with title
- *  and mime defaulted) or from `html`/`bytes` inline. The server refuses the
- *  attachment outside an active turn (postAgentAttachment is turn-authority
- *  bound), so there is no separate surface-side turn check here. */
+/** Validate a session file, upload it, and queue it on the current reply. */
 export async function postArtifact(
   args: JsonObject,
   deps: PostArtifactDeps = postArtifactDepsFromEnv(),
 ): Promise<string> {
-  const pathArg = stringArg(args, 'path');
-  const html = args.html;
-  const encoded = args.bytes;
-  const contentArgs = (html !== undefined ? 1 : 0) + (encoded !== undefined ? 1 : 0);
-  if (pathArg !== undefined && contentArgs > 0) {
-    throw new Error(
-      'pass either path (a file already in your session) or html/bytes content, not both',
-    );
-  }
-  if (contentArgs > 1) {
-    throw new Error('pass html (the document as text) or bytes (base64), not both');
-  }
-  if (pathArg === undefined && contentArgs === 0) {
-    throw new Error(
-      'pass a file path, or exactly one of html (the document as text) or bytes (base64)',
-    );
-  }
-  let bytes: Buffer;
-  let fileName: string;
-  if (pathArg !== undefined) {
-    const resolved = resolveAttachPath(deps.roots, pathArg);
-    const details = statSync(resolved);
-    if (details.size > MAX_ATTACH_BYTES) {
-      throw new Error(`file exceeds the ${MAX_ATTACH_BYTES}-byte artifact limit`);
-    }
-    bytes = readFileSync(resolved);
-    fileName = resolved.split(sep).pop() ?? 'artifact';
-  } else {
-    if (html !== undefined) {
-      if (typeof html !== 'string') throw new Error('html must be a string');
-      bytes = Buffer.from(html, 'utf8');
-    } else {
-      if (typeof encoded !== 'string') throw new Error('bytes must be a base64 string');
-      bytes = Buffer.from(encoded, 'base64');
-    }
-    fileName = 'artifact';
-  }
-  let mime = stringArg(args, 'mime');
-  if (mime === undefined) {
-    const extension = fileName.includes('.')
-      ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase()
-      : '';
-    mime = ARTIFACT_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
-  }
-  if (mime === 'application/octet-stream') mime = sniffArtifactMime(bytes, html !== undefined);
-  if (!isArtifactMime(mime)) {
-    throw new Error(`mime must be one of ${ARTIFACT_MIME_TYPES.join(', ')}`);
-  }
-  let title = stringArg(args, 'title')?.trim();
-  if (!title) {
-    if (pathArg === undefined) {
-      throw new Error(
-        'title must be a non-empty string (or post by path to default it to the file name)',
-      );
-    }
-    title = fileName;
-  }
+  const path = stringArg(args, 'path');
+  if (!path) throw new Error('path is required');
+  const resolved = resolveAttachPath(deps.roots, path);
+  if (statSync(resolved).size > MAX_ATTACH_BYTES)
+    throw new Error(`file exceeds the ${MAX_ATTACH_BYTES}-byte artifact limit`);
+  const bytes = readFileSync(resolved);
+  const fileName = basename(resolved);
+  const extension = fileName.includes('.') ? fileName.slice(fileName.lastIndexOf('.')).toLowerCase() : '';
+  let mime = stringArg(args, 'mime') ?? ARTIFACT_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
+  if (mime === 'application/octet-stream') mime = sniffArtifactMime(bytes);
+  if (!isArtifactMime(mime)) throw new Error(`mime must be one of ${ARTIFACT_MIME_TYPES.join(', ')}`);
+  const title = stringArg(args, 'title')?.trim() || fileName;
   if (title.length > 200) throw new Error('title must be at most 200 characters');
   validateArtifact(mime, bytes, title);
   const uploaded = await deps.upload(bytes, mime, title);
-  if (!uploaded.url) throw new Error('the artifact upload returned no url');
+  const objectId = uploaded.objectId ?? POSTED_MEDIA_ID.exec(uploaded.url ?? '')?.[1];
+  if (!uploaded.url || !objectId) throw new Error('the artifact upload returned no media reference');
   await deps.queue({ url: uploaded.url, name: title, mimeType: mime, size: bytes.length });
-  const objectId = POSTED_MEDIA_ID.exec(uploaded.url)?.[1];
-  return (
-    `Posted artifact "${title}" (${bytes.length} bytes, ${mime}); it is delivered with your ` +
-    `final reply, or on the existing post or a file-only message if you end silently.${objectId ? ` Object ${objectId} will be included automatically if this turn opens or revises a thread brief.` : ''} Ask for feedback here in the chat.`
-  );
+  return JSON.stringify({objectId, queued:true, published:false});
 }
 
 /** Rendered formats are validated as self-contained mocks; a working file

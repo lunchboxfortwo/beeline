@@ -1,10 +1,12 @@
 import { REQUEST_REASONS,agentMessageText,replyNeeded } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { recordDiagnostic } from './diagnostics.js';
 import { openSecrets,sealSecrets } from './free-agents.js';
+import { publicMentionCommandSql } from './owed-mentions.js';
 import { notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
 import { connectorHostAcceptedSql, connectorDeliveryChanged, noteConnectorPresence, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { postMcpWebhook } from './rooms-mcp-members.js';
@@ -16,7 +18,7 @@ const MENTION_EVENT = {
   name: 'mention', description: 'A chat message tags this connected Beeline member, or messages it directly.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
-    roomId: { type: 'string' }, messageId: { type: 'string' }, memberId: { type: 'string' },
+    roomId: { type: 'string' }, messageId: { type: 'string' }, commandId: {type:'string'}, memberId: { type: 'string' },
     replyRule: { type: 'string' }, idempotencyKey: { type: 'string' }, text: { type: 'string' },
     attachments: ATTACHMENTS, institutionalContext: { type: 'string' },
     author: { type: 'object', properties: { id: { type: 'string' }, handle: { type: ['string', 'null'] },
@@ -28,10 +30,10 @@ const WAKE_EVENT = {
   description: 'A message, reply, thread assignment, schedule, or lifecycle wake for this connected member.',
   delivery: ['webhook'], inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   payloadSchema: { type: 'object', properties: {
-    roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, id: { type: 'string' },
+    roomId: { type: 'string' }, address: { type: 'string' }, commandId: { type: 'string' }, messageId: {type:['string','null']}, id: { type: 'string' },
     from: {type:'object',properties:{agent:{type:'string'},place:{type:'string'}},required:['agent','place'],additionalProperties:false}, text: { type: ['string', 'null'] }, next: { type: 'string' },
     attachments: ATTACHMENTS, institutionalContext: { type: 'string' },
-  }, required: ['roomId', 'address', 'commandId', 'id', 'from', 'text', 'next'], additionalProperties: false },
+  }, required: ['roomId', 'address', 'commandId', 'messageId', 'id', 'from', 'text', 'next'], additionalProperties: false },
 };
 type Transport = typeof postMcpWebhook;
 interface Subscription {
@@ -160,12 +162,17 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
         'data',jsonb_build_object('roomId',m.room_id,'messageId',m.id,'memberId',s.member_id,'replyRule',CASE WHEN beeline_room_handle(i.id,m.room_id) IS NULL THEN format($5::text,m.id) ELSE format($4::text,m.id,beeline_room_handle(i.id,m.room_id)) END,
           'idempotencyKey','mention:'||s.member_id||':'||m.id,'text',left(m.text,16000),'attachments',m.attachments,
           'author',json_build_object('id',m.author_id,'handle',beeline_room_handle(i.id,m.room_id),'name',i.name)) ||
-          jsonb_strip_nulls(jsonb_build_object('institutionalContext',(SELECT ${queuedContextSql('command')} FROM agent_commands command
-            WHERE command.agent_id=s.member_id AND command.source_message_id=m.id ORDER BY command.created_at DESC LIMIT 1))), 'cursor',NULL)::text
+          jsonb_strip_nulls(jsonb_build_object('commandId',queued.id,'institutionalContext',queued.context)), 'cursor',NULL)::text
     FROM rooms_mcp_event_subscriptions s
     JOIN rooms_mcp_connections c ON c.client_id=s.client_id AND c.identity_id=s.owner_id AND c.revoked_at IS NULL
     JOIN messages m ON m.id=$3 AND m.room_id=$2 AND m.deleted_at IS NULL
     JOIN identities i ON i.id=m.author_id
+    LEFT JOIN LATERAL (
+      SELECT command.id,${queuedContextSql('command')} context FROM agent_commands command
+      WHERE command.agent_id=s.member_id AND command.room_id=m.room_id
+        AND command.source_message_id=m.id AND ${publicMentionCommandSql('command')}
+      ORDER BY (command.state='pending') DESC,command.created_at DESC,command.id DESC LIMIT 1
+    ) queued ON true
     WHERE s.member_id=$1 AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND s.event_name='mention'
     ON CONFLICT(subscription_id,message_id) WHERE message_id IS NOT NULL DO NOTHING
     RETURNING subscription_id`, [member, room, message, mentionReplyRule('%1$s', '%2$s'), mentionReplyRule('%s', null)]);
@@ -189,6 +196,7 @@ export function mcpCommandWakeSql(first: number, mentionDelivery: boolean): { ct
   const channel = `$${first}`;
   const requests = `$${first + 1}`;
   const mention = `$${first + 2}`;
+  const messageId = deliveredTranscriptIdSql('command');
   return {
     params: [POSTGRES_LIVE_CHANNEL, REQUEST_REASONS, mentionDelivery],
     cte: `queued_mcp_wakes AS (
@@ -196,12 +204,12 @@ export function mcpCommandWakeSql(first: number, mentionDelivery: boolean): { ct
       SELECT s.id,command.id,command.room_id,'evt_'||s.id||'_cmd_'||command.id,
         jsonb_build_object('eventId','evt_'||s.id||'_cmd_'||command.id,'name','wake','timestamp',command.created_at,
           'data',jsonb_build_object(
-            'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'id',command.id,
+            'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'messageId',${messageId},'id',command.id,
             'from',wake_data.origin,'text',wake_data.body,'attachments',wake_data.files,
             'next',concat_ws(E'\n','From: '||COALESCE(sender.name,wake_data.origin->>'agent')||' in #'||COALESCE(place.name,wake_data.origin->>'place'),
-              'id: '||command.id,'Reply needed: '||wake_data.needed::text,'text: '||COALESCE(wake_data.body,''),
+              'messageId: '||(${messageId}),'commandId: '||command.id,'Reply needed: '||wake_data.needed::text,'text: '||COALESCE(wake_data.body,''),
               'attachment: '||(SELECT string_agg(COALESCE(file->>'name','attachment'),', ') FROM jsonb_array_elements(wake_data.files) file),
-              CASE WHEN wake_data.needed THEN 'Reply(id: '||command.id||', text: ...) with your reply' END)),
+              CASE WHEN wake_data.needed THEN 'Reply(id: '||COALESCE(${messageId},command.id)||', text: ...) with your reply' END)),
           'cursor',NULL)::text
       FROM inserted command
       LEFT JOIN messages source ON source.id=command.source_message_id
@@ -250,15 +258,17 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
         WHERE delivery.delivered_at IS NULL AND delivery.claimed_at IS NULL
         ORDER BY delivery.event_id LIMIT 1 FOR UPDATE OF delivery SKIP LOCKED`)).rows[0];
       if (!candidate) return;
-      const commands = (await tx.query<{ state: string }>(`SELECT state FROM agent_commands WHERE agent_id=$1
-        AND (id=$2 OR source_message_id=$3) ORDER BY id FOR UPDATE`, [candidate.member_id,candidate.command_id,candidate.message_id])).rows;
+      const commands = (await tx.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.agent_id=$1
+        AND (command.id=$2 OR command.source_message_id=$3 AND ${publicMentionCommandSql('command')})
+        ORDER BY command.id FOR UPDATE`, [candidate.member_id,candidate.command_id,candidate.message_id])).rows;
       const row = (await tx.query<Subscription & { event_id: string; body: string; message_id: string | null; command_id: string | null; probe_generation: string | null; delivery_generation:string|null; deliverable: boolean }>(`
       WITH claimed AS (SELECT * FROM rooms_mcp_event_deliveries WHERE event_id=$1)
       SELECT s.*,d.event_id,d.body,d.message_id,d.command_id,d.probe_generation,selected.generation delivery_generation,
         ($2::boolean AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
          AND r.archived_at IS NULL AND r.id IS NOT NULL
          AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
-           WHERE accepted.agent_id=s.member_id AND (accepted.id=d.command_id OR accepted.source_message_id=d.message_id)
+           WHERE accepted.agent_id=s.member_id
+             AND (accepted.id=d.command_id OR accepted.source_message_id=d.message_id AND ${publicMentionCommandSql('accepted')})
              AND ${connectorHostAcceptedSql('accepted')})
          AND ((d.probe_generation IS NOT NULL AND EXISTS(SELECT 1 FROM rooms_mcp_delivery proof
              WHERE proof.member_id=s.member_id AND proof.generation=d.probe_generation AND proof.receipt_at IS NULL AND proof.failure IS NULL))
@@ -320,8 +330,8 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
 }
 
 /** list_mentions and legacy webhooks render the same next as the event SQL above. */
-export function mcpWakeText(wake: { id: string; fromName?: string | null; placeName?: string | null; from: { agent: string; place: string };
+export function mcpWakeText(wake: { id: string; commandId?: string | null; messageId?: string | null; fromName?: string | null; placeName?: string | null; from: { agent: string; place: string };
   reason: string | null; ask: unknown; text: string | null; attachments?: readonly { name?: string }[] }): string {
-  return agentMessageText({ from: wake.fromName ?? wake.from.agent, place: wake.placeName ?? wake.from.place, id: wake.id,
+  return agentMessageText({ from: wake.fromName ?? wake.from.agent, place: wake.placeName ?? wake.from.place, id: wake.id, commandId: wake.commandId ?? wake.id, messageId: wake.messageId,
     replyNeeded: replyNeeded(wake.reason, wake.ask), text: wake.text ?? '', attachments: wake.attachments?.map(file => file.name ?? 'attachment') });
 }

@@ -290,7 +290,7 @@ const scope1 = fixtureScope1();
       expect(posts).toHaveLength(1);
       expect(posts[0]).toMatchObject({ url: 'https://hooks.example/muse', authorization: 'Bearer tag-secret',
         body: { memberId: member, roomId: ROOM, messageId: sent.messageId, text: `@${handle} please answer` } });
-      expect(String(posts[0]!.body.instruction)).toMatch(new RegExp(`^From: .+ in #.+\nid: ${sent.messageId}\nReply needed: true\ntext: @${handle} please answer\nReply\\(id: ${sent.messageId}, text: \\.\\.\\.\\) with your reply$`));
+      expect(String(posts[0]!.body.instruction)).toMatch(new RegExp(`^From: .+ in #.+\nmessageId: ${sent.messageId}\ncommandId: [0-9a-f]{64}\nReply needed: true\ntext: @${handle} please answer\nReply\\(id: ${sent.messageId}, text: \\.\\.\\.\\) with your reply$`));
       // Removing the webhook stops the push.
       await client.callTool({ name: 'set_webhook', arguments: { url: '' } });
       const quiet = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${handle} again` }, USER);
@@ -660,7 +660,7 @@ const scope3 = fixtureScope3(scope1);
         .toEqual([{ question: standaloneQuestion }]);
       const refused = await scope3.call(client, 'update_work', { roomId: PRIVATE, id: created.id, state: 'done' });
       expect(refused.error).toBe(true);
-      expect(refused.text).toBe('Request refused: Access denied: you are not a member of that address.');
+      expect(refused.text).toBe('Request refused: address requires current membership.');
       expect((await scope1.db.query('SELECT state FROM work_items WHERE id=$1', [created.id])).rows)
         .toEqual([{ state: 'in-review' }]);
     });
@@ -697,20 +697,25 @@ const scope3 = fixtureScope3(scope1);
       const command = order ? { commandId: order.id } : {};
       const noCornerMemberships = async () => expect((await scope1.db.query(
         'SELECT 1 FROM memberships WHERE room_id=$1', [corner])).rowCount).toBe(0);
+      const queued = [{url:'/v1/media/11111111-1111-4111-8111-111111111111',name:'Already queued',mimeType:'text/plain',size:10}];
+      if (order) await scope1.db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',
+        [order.id,JSON.stringify(queued)]);
       await noCornerMemberships();
       const posted = await scope3.ok(client, 'post_artifact', { ...command, address: corner, title: 'mock.html',
         html: '<!doctype html><title>Mock</title><p>Thread mock</p>', text: 'Here is the mock.' });
       expect(posted).toMatchObject({ address: corner, stored: true, visible: true, receipt: 'Message stored and visible. No agents woken.' });
-      expect((await scope1.db.query('SELECT room_id,text,attachments FROM messages WHERE id=$1', [posted.id])).rows[0])
+      expect((await scope1.db.query('SELECT room_id,text,attachments FROM messages WHERE id=$1', [posted.messageId])).rows[0])
         .toMatchObject({ room_id: corner, text: 'Here is the mock.', attachments: [
           { name: 'mock.html', mimeType: 'text/html', url: expect.stringContaining('/media/') },
         ] });
       const second = await scope3.ok(client, 'post_artifact', { ...command, address: corner, title: 'mock.txt',
         mime: 'text/plain', bytes: Buffer.from('Mock notes').toString('base64') });
-      expect((await scope1.db.query('SELECT room_id,attachments FROM messages WHERE id=$1', [second.id])).rows[0])
+      expect((await scope1.db.query('SELECT room_id,attachments FROM messages WHERE id=$1', [second.messageId])).rows[0])
         .toMatchObject({ room_id: corner, attachments: [{ name: 'mock.txt', mimeType: 'text/plain' }] });
       expect((await scope1.db.query('SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2', [ROOM, member])).rowCount).toBe(0);
       expect((await scope1.db.query('SELECT 1 FROM agent_pending_attachments WHERE agent_id=$1', [member])).rowCount).toBe(0);
+      if (order) expect((await scope1.db.query('SELECT answer_attachments,state FROM agent_commands WHERE id=$1',[order.id])).rows)
+        .toEqual([{answer_attachments:queued,state:'pending'}]);
       await noCornerMemberships();
     });
 
@@ -718,12 +723,12 @@ const scope3 = fixtureScope3(scope1);
       const { client, member } = await scope1.connected();
       const corner = await scope3.reportCorner(member);
       const artifact = { title: 'private.html', html: '<p>Private mock</p>' };
-      expect((await scope3.call(client, 'post_artifact', { ...artifact, address: CORNER })).text).toContain('Access denied');
+      expect((await scope3.call(client, 'post_artifact', { ...artifact, address: CORNER })).text).toContain('address requires current membership');
       await scope1.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [corner]);
-      expect((await scope3.call(client, 'post_artifact', { ...artifact, address: corner })).text).toContain('Access denied');
+      expect((await scope3.call(client, 'post_artifact', { ...artifact, address: corner })).text).toContain('address is archived');
       await scope1.db.query('UPDATE rooms SET archived_at=NULL WHERE id=$1', [corner]);
       await scope1.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [ROOM, member]);
-      expect((await scope3.call(client, 'post_artifact', { ...artifact, address: corner })).text).toContain('Access denied');
+      expect((await scope3.call(client, 'post_artifact', { ...artifact, address: corner })).text).toContain('address requires current membership');
       expect((await scope1.db.query('SELECT 1 FROM objects WHERE owner_id=$1', [member])).rowCount).toBe(0);
       expect((await scope1.db.query('SELECT 1 FROM messages WHERE author_id=$1', [member])).rowCount).toBe(0);
     });

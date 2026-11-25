@@ -222,9 +222,9 @@ describe('owed chat tags', () => {
     expect(retry.id).toBe(first.id);
     const late=await call('reply',{id:message,text:'The later result is ready'});
     expect(late.id).not.toBe(first.id);
-    const transcript=(await call('read_messages',{room})).messages;
+    const transcript=(await call('read_messages',{room})).items;
     expect(transcript.map((m:any)=>m.id)).toEqual(expect.arrayContaining([first.id,late.id]));
-    expect(transcript.find((m:any)=>m.id===late.id)).toMatchObject({text:'The later result is ready'});
+    expect(transcript.find((m:any)=>m.id===late.id)).toMatchObject({body:'The later result is ready'});
   });
   it('an unanswered tag remains owed until its own reply is posted', async () => {
     await db.query("UPDATE agent_commands SET state='complete' WHERE agent_id=$1 AND state='pending'", [helper]);

@@ -2,6 +2,7 @@ import { mcpWebhookNeedsSecret } from './rooms-mcp-join-policy.js';
 import { agentMessageText } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { agentHandleFromName } from '@beeline/api-contract/phone';
 import { typedMentionHandles } from './message-mentions.js';
 import { createHash,randomUUID } from 'node:crypto';
@@ -20,7 +21,7 @@ joinRooms,
 removeIdentityMemberships,
 restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
-import { mentionRouting, recordOwedMention } from './owed-mentions.js';
+import { mentionRouting, publicMentionCommandSql, recordOwedMention } from './owed-mentions.js';
 import { notifyMcpWebhook } from './postgres-live.js';
 import { connectorHostAcceptedSql,connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
 import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
@@ -305,12 +306,12 @@ export async function recordMcpMemberWebhook(
  * to: its outbox row names the command. The body is the MCP Events `wake`
  * payload (`rooms-mcp-events.ts`), so a webhook, an event and list_mentions agree.
  */
-function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null },
+function wakeBody(row: { member_id: string; room_id: string; command_from:MessageAddress; command_id: string | null; source_message_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; command_attachments: DaemonAttachment[]; body: string; institutional_context: string | null },
   names: { from: string | null; place: string | null }) {
   const text = legacyMessageBody({reason:row.command_reason ?? ''},row.command_text ?? row.body,row.command_from.agent);
-  const next = mcpWakeText({id:row.command_id!,fromName:names.from,placeName:names.place,from:row.command_from,
+  const next = mcpWakeText({id:row.command_id!,commandId:row.command_id,messageId:row.source_message_id,fromName:names.from,placeName:names.place,from:row.command_from,
     reason:row.command_reason,ask:row.command_ask,text,attachments:row.command_attachments});
-  return { memberId: row.member_id, roomId: row.room_id, address: row.room_id, commandId: row.command_id, id: row.command_id,
+  return { memberId: row.member_id, roomId: row.room_id, address: row.room_id, commandId: row.command_id, messageId:row.source_message_id, id: row.command_id,
     from:row.command_from,text,attachments:row.command_attachments,next,cursor:null,
     ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}),
     instruction:next };
@@ -340,14 +341,15 @@ export async function deliverMcpMemberWebhooks(
         WHERE delivered_at IS NULL AND claimed_at IS NULL
         ORDER BY created_at,call_id LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
       if (!candidate) return;
-      const commands = (await tx.query<{ state: string }>(`SELECT state FROM agent_commands WHERE agent_id=$1
-        AND $2 IN (id,source_message_id) ORDER BY id FOR UPDATE`, [candidate.member_id,candidate.message_id])).rows;
+      const commands = (await tx.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.agent_id=$1
+        AND (command.id=$2 OR command.source_message_id=$2 AND ${publicMentionCommandSql('command')})
+        ORDER BY command.id FOR UPDATE`, [candidate.member_id,candidate.message_id])).rows;
       const claimed = await tx.query<{
         call_id: string; member_id: string; room_id: string; message_id: string;
         body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
         author_id: string | null; author_handle: string | null; author_name: string | null; author_kind: string | null; cursor: string | null;
-        command_from:MessageAddress; room_name: string | null; command_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
-        attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; institutional_context: string | null;
+        command_from:MessageAddress; room_name: string | null; command_id: string | null; source_message_id: string | null; command_reason: string | null; command_ask: unknown; command_text: string | null; probe: object | null; delivery_generation:string|null;
+        attachments: DaemonAttachment[]; command_attachments: DaemonAttachment[]; mention_command_id: string | null; institutional_context: string | null;
       }>(
         `WITH claimed AS (SELECT * FROM rooms_mcp_webhook_outbox WHERE call_id=$1)
          SELECT claimed.call_id,claimed.member_id,claimed.room_id,claimed.message_id,claimed.body,member.owner_id,
@@ -355,17 +357,18 @@ export async function deliverMcpMemberWebhooks(
            CASE WHEN member.callback_url IS NOT NULL THEN member.callback_secret END callback_secret,
            message.author_id,beeline_room_handle(author.id,message.room_id) author_handle,author.name author_name,room.name room_name,author.kind author_kind,mention.seq::text cursor,mention.cleared_at IS NOT NULL answered,
            message.attachments,COALESCE(command.message->'attachments',command.private_payload->'attachments',source.attachments,'[]'::jsonb) command_attachments,
-           COALESCE(${queuedContextSql('command')},(SELECT ${queuedContextSql('queued')} FROM agent_commands queued
-             WHERE queued.agent_id=claimed.member_id AND queued.source_message_id=claimed.message_id ORDER BY queued.created_at DESC LIMIT 1)) institutional_context,
+           COALESCE(${queuedContextSql('command')},queued.context) institutional_context,
            COALESCE(command.message->'route'->'from',command.private_payload->'route'->'from',
              jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
                'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
-           delivery.generation delivery_generation,probe.probe,command.id command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
+           delivery.generation delivery_generation,probe.probe,command.id command_id,
+           ${deliveredTranscriptIdSql('command')} source_message_id,queued.id mention_command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
            left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
              $2::boolean AND room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
              AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
              AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
-               WHERE accepted.agent_id=claimed.member_id AND claimed.message_id IN (accepted.id,accepted.source_message_id)
+               WHERE accepted.agent_id=claimed.member_id AND (accepted.id=claimed.message_id
+                 OR accepted.source_message_id=claimed.message_id AND ${publicMentionCommandSql('accepted')})
                  AND ${connectorHostAcceptedSql('accepted')})
              AND (probe.member_id IS NOT NULL OR message.id IS NOT NULL OR command.state='pending')
              AND EXISTS (SELECT 1 FROM room_access room_member
@@ -384,6 +387,12 @@ export async function deliverMcpMemberWebhooks(
          LEFT JOIN rooms_mcp_mentions mention ON mention.member_id=claimed.member_id AND mention.message_id=claimed.message_id
          LEFT JOIN agent_commands command ON message.id IS NULL AND command.id=claimed.message_id AND command.agent_id=claimed.member_id
          LEFT JOIN messages source ON source.id=command.source_message_id
+         LEFT JOIN LATERAL (
+           SELECT item.id,${queuedContextSql('item')} context FROM agent_commands item
+           WHERE item.agent_id=claimed.member_id AND item.room_id=message.room_id
+             AND item.source_message_id=message.id AND ${publicMentionCommandSql('item')}
+           ORDER BY (item.state='pending') DESC,item.created_at DESC,item.id DESC LIMIT 1
+         ) queued ON true
          LEFT JOIN rooms_mcp_delivery delivery ON delivery.member_id=claimed.member_id
          LEFT JOIN rooms_mcp_delivery probe ON probe.member_id=claimed.member_id AND probe.generation=claimed.message_id
            AND probe.mechanism='webhook' AND probe.receipt_at IS NULL AND probe.failure IS NULL`,
@@ -418,9 +427,10 @@ export async function deliverMcpMemberWebhooks(
         headers: { 'content-type': 'application/json',
           ...(row.callback_secret ? { authorization: `Bearer ${openSecrets<string>(webhookKey(), row.callback_secret)}` } : {}) },
         body: JSON.stringify(row.probe ?? (row.command_id ? wakeBody(row,names) : { ...mentionRouting(row.member_id, row.room_id, row.message_id, row.author_handle),
+          ...(row.mention_command_id ? {commandId:row.mention_command_id} : {}),
           author: row.author_id ? { id: row.author_id, handle: row.author_handle, name: row.author_name } : null,
           text: row.body, ...(row.institutional_context ? {institutionalContext:row.institutional_context} : {}), attachments: row.attachments, cursor: row.cursor,
-          instruction: agentMessageText({from:row.author_name ?? row.author_handle ?? 'Someone',place:row.room_name ?? row.room_id,id:row.message_id,replyNeeded:true,
+          instruction: agentMessageText({from:row.author_name ?? row.author_handle ?? 'Someone',place:row.room_name ?? row.room_id,id:row.message_id,messageId:row.message_id,commandId:row.mention_command_id,replyNeeded:true,
             text:row.body,attachments:(row.attachments ?? []).map(file=>file.name ?? 'attachment')}) })),
       });
       accepted = response.ok;

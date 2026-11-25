@@ -381,7 +381,7 @@ const scope1 = fixtureScope1();
     const { client } = await scope1.connected();
     const setup = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup;
     const send = (await client.listTools()).tools.find(tool => tool.name === 'reply')!;
-    expect(send.description).toContain('recorded sender and place');
+    expect(send.description).toContain('recorded return address');
     expect(setup).toContain(MCP_STARTER_ROUTINE);
     expect(client.getInstructions()).not.toMatch(/setup_delivery for this same member|first reply after connection/);
     for (const text of [client.getInstructions(), setup]) {
@@ -493,7 +493,7 @@ const scope1 = fixtureScope1();
     });
     // Agent-command transcript cards deliver command wakes, rather than tagged-message payloads.
     const instruction = [
-      'From: Demo Agent in #Demo', `id: ${result.id}`, 'Reply needed: true',
+      'From: Demo Agent in #Demo', `commandId: ${result.id}`, 'Reply needed: true',
       'text: the work is finished', `Reply(id: ${result.id}, text: ...) with your reply`,
     ].join('\n');
     expect(posts.filter(post => post.body.memberId === member)).toEqual(callback === 'none' ? [] : [
@@ -707,11 +707,11 @@ const scope1 = fixtureScope1();
     for (let i=0; i<3; i++) await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: `page ${i}` }, USER);
     const first = await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } });
     const data = JSON.parse((first.content as { text: string }[])[0]!.text).data;
-    expect(data.messages).toHaveLength(1); expect(data.nextCursor).toBeTruthy();
-    const next = await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1, cursor: data.nextCursor } });
-    expect(JSON.parse((next.content as { text: string }[])[0]!.text).data.messages[0].id).not.toBe(data.messages[0].id);
+    expect(data.items).toHaveLength(1); expect(data.next).toEqual({before:expect.any(String)});
+    const next = await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1, cursor: data.next } });
+    expect(JSON.parse((next.content as { text: string }[])[0]!.text).data.items[0].messageId).not.toBe(data.items[0].messageId);
     const foreignCursor = await client.callTool({ name: 'read_messages', arguments: { room: ROOM, cursor: 'd'.repeat(64) } });
-    expect(JSON.parse((foreignCursor.content as { text: string }[])[0]!.text).data.messages).toEqual([]);
+    expect(foreignCursor.isError).toBe(true);
     const long=scope1.data(await client.callTool({name:'message',arguments:{address:ROOM,to:{agent:USER,place:ROOM},text:'x'.repeat(16001)}}));
     expect((await scope1.db.query(`SELECT length(text) n FROM messages WHERE id=$1`,[long.id])).rows[0]!.n).toBe(16001);
   });

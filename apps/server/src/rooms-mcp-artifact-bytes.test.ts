@@ -18,7 +18,7 @@ describe('MCP byte artifact metadata', () => {
       address: ROOM, title: 'Frame', bytes: bytes.toString('base64'),
     });
     const message = (await scope.db.query<{ attachments: { url: string; mimeType: string; name: string }[] }>(
-      'SELECT attachments FROM messages WHERE id=$1', [posted.id],
+      'SELECT attachments FROM messages WHERE id=$1', [posted.messageId],
     )).rows[0]!;
     const attachment = message.attachments[0]!;
     expect(attachment).toMatchObject({ mimeType, name });
@@ -26,7 +26,7 @@ describe('MCP byte artifact metadata', () => {
     expect((await scope.db.query('SELECT mime,title FROM objects WHERE id=$1', [attachment.url.split('/').at(-1)])).rows)
       .toEqual([{ mime: mimeType, title: name }]);
     const room = await scope.phone.readRoom(ROOM, USER);
-    expect(room?.messages.find(message => message.id === posted.id)?.attachments?.[0])
+    expect(room?.messages.find(message => message.id === posted.messageId)?.attachments?.[0])
       .toMatchObject({ mimeType, name, kind: 'artifact' });
   });
 
@@ -35,7 +35,7 @@ describe('MCP byte artifact metadata', () => {
     const posted = await tools.ok(client, 'post_artifact', {
       address: ROOM, title: 'notes.txt', mime: 'text/plain', bytes: Buffer.from('Notes').toString('base64'),
     });
-    expect((await scope.db.query('SELECT attachments FROM messages WHERE id=$1', [posted.id])).rows[0])
+    expect((await scope.db.query('SELECT attachments FROM messages WHERE id=$1', [posted.messageId])).rows[0])
       .toMatchObject({ attachments: [{ mimeType: 'text/plain', name: 'notes.txt' }] });
   });
 
@@ -43,19 +43,21 @@ describe('MCP byte artifact metadata', () => {
   async function openPosted(args: Record<string, unknown>) {
     const { client } = await scope.connected();
     const posted = await tools.ok(client, 'post_artifact', { address: ROOM, ...args });
-    const message = await tools.ok(client, 'read', { facet: 'message', address: ROOM, messageId: posted.id });
-    const attachmentId = String(message.attachments[0].url).split('/').at(-1);
+    const message = await tools.ok(client, 'read', { facet: 'message', address: ROOM, messageId: posted.messageId });
+    const attachmentId = message.attachments[0].attachmentId;
+    expect(posted).toMatchObject({objectId:attachmentId,queued:false,published:true});
+    expect(posted).not.toHaveProperty('id');
     const opened = await client.callTool({ name: 'read', arguments: {
-      facet: 'attachment', address: ROOM, messageId: posted.id, attachmentId,
+      facet: 'attachment', address: ROOM, messageId: posted.messageId, attachmentId,
     } }) as { isError?: boolean; content: Record<string, any>[] };
     expect(opened.isError, JSON.stringify(opened.content)).toBeFalsy();
-    return { attachmentId, content: opened.content };
+    return { attachmentId, messageId:posted.messageId, content: opened.content };
   }
 
   it('returns an attached image as an image block with its bytes', async () => {
     const bytes = await sharp({ create: { width: 4, height: 3, channels: 3, background: '#556677' } }).png().toBuffer();
-    const { attachmentId, content } = await openPosted({ title: 'Shot', bytes: bytes.toString('base64') });
-    expect(JSON.parse(content[0]!.text).data).toEqual({ attachmentId, name: 'Shot.png', mimeType: 'image/png', size: bytes.length });
+    const { attachmentId, messageId, content } = await openPosted({ title: 'Shot', bytes: bytes.toString('base64') });
+    expect(JSON.parse(content[0]!.text).data).toEqual({ attachmentId, messageId, name: 'Shot.png', mimeType: 'image/png', size: bytes.length });
     expect(content[1]).toEqual({ type: 'image', mimeType: 'image/png', data: bytes.toString('base64') });
   });
 
@@ -73,4 +75,22 @@ describe('MCP byte artifact metadata', () => {
     const refused = await tools.call(client, 'read', { facet: 'attachment', address: ROOM, attachmentId: hidden });
     expect(refused).toEqual({ error: true, text: 'Request refused: no attachment with this id is visible from this address.' });
   });
+  it('refuses malformed attachment IDs and uses null for a brief-only source', async () => {
+    const {client,member} = await scope.connected();
+    const corner = await tools.reportCorner(member);
+    const brief = await tools.ok(client,'post_artifact',{
+      address:corner,title:'proof.txt',mime:'text/plain',bytes:Buffer.from('Brief proof').toString('base64'),
+    });
+    await scope.db.query('DELETE FROM messages WHERE id=$1',[brief.messageId]);
+    await scope.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,spec,objective,author_id,source_room_id,attachments)
+      VALUES($1,(SELECT COALESCE(max(revision),0)+1 FROM corner_brief_revisions WHERE corner_id=$1),'Brief evidence','Verify proof',$2,$3,$4::jsonb)`,
+      [corner,member,ROOM,JSON.stringify([{objectId:brief.objectId,title:'proof.txt',mime:'text/plain',size:11}])]);
+    const result = await client.callTool({name:'read', arguments:{facet:'attachment',address:corner,attachmentId:brief.objectId}});
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse((result.content as {text:string}[])[0]!.text).data)
+      .toMatchObject({attachmentId:brief.objectId,messageId:null});
+    expect(await tools.call(client,'read',{facet:'attachment',address:corner,attachmentId:'malformed'}))
+      .toEqual({error:true,text:'Request refused: no attachment with this id is visible from this address.'});
+  });
+
 });

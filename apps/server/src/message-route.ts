@@ -15,11 +15,24 @@ export function replyableWake(item: CommandRow | undefined) {
   return { id: wake.id, from: wake.route.from };
 }
 
+export function deliveredMessageRoute(db: SqlDatabase, item: CommandRow) {
+  return item.message?.route ?? item.private_payload?.route ?? legacyMessageRoute(db,item);
+}
+
+/** Private wakes carry their own payload even when a transcript message is their provenance. */
+export function deliveredTranscriptIdSql(command: 'item' | 'command' | 'agent_commands'): string {
+  return `CASE WHEN ${command}.message->>'type' IS DISTINCT FROM 'private'
+    AND (${command}.message->>'id'=${command}.source_message_id
+      OR ${command}.message IS NULL AND ${command}.private_payload IS NULL)
+    THEN ${command}.source_message_id END`;
+}
+
 /** Current messages carry their whole route. Only retained pre-cutover items need adaptation. */
 export async function recordedMessageRoute(db:SqlDatabase,item:CommandRow):Promise<MessageRoute> {
-  const route=item.message?.route ?? item.private_payload?.route;
-  if (route) return {...route,from:item.message?.replyAddress ?? item.private_payload?.replyAddress ?? route.from};
-  return legacyMessageRoute(db,item);
+  const route = await deliveredMessageRoute(db,item);
+  const replyAddress = item.message?.replyAddress ?? item.private_payload?.replyAddress ??
+    (item.reason === 'schedule' ? item.wake_context?.scheduleReplyFrom : undefined);
+  return replyAddress ? {...route,from:replyAddress} : route;
 }
 
 /** Reports follow the session's recorded chain of command. */

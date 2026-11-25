@@ -54,6 +54,8 @@ import {
 } from './store.js';
 
 export interface Mention {
+  messageId?: string;
+  commandId?: string | null;
   memberId?: string;
   replyRule?: string;
   id: string;
@@ -67,6 +69,8 @@ export interface Mention {
 }
 export interface Wake {
   id: string;
+  commandId?: string;
+  messageId?: string | null;
   address: string;
   from?: { agent: string; place: string };
   fromName?: string | null;
@@ -104,7 +108,7 @@ export function renderMention(m: Mention): string {
     agentMessageText({
       from: m.author_name ?? (m.author_handle ? `@${m.author_handle}` : 'Someone'),
       place: m.room_name ?? m.room_id,
-      id: m.id,
+      id: m.id, messageId: m.messageId ?? m.id, commandId: m.commandId,
       replyNeeded: true,
       text: m.text,
       attachments: m.attachments?.map((file) => JSON.stringify(file)),
@@ -136,7 +140,7 @@ export function renderWake(w: Wake, joined: JoinedSession, runner: Runner): stri
     agentMessageText({
       from: w.fromName ?? w.from?.agent ?? 'Beeline',
       place: w.placeName ?? w.from?.place ?? w.address,
-      id: w.id,
+      id: w.id, commandId: w.commandId ?? w.id, messageId: w.messageId,
       replyNeeded: replyNeeded(w.reason, w.ask),
       text: w.text ?? '',
       attachments: w.attachments?.map((file) => JSON.stringify(file)),
@@ -259,13 +263,13 @@ export async function acceptMemberDelivery(
       const parts = [
         ...frame.mentions.map((mention) => renderMention(mention)),
         ...frame.wakes
-          .filter((wake) => !joined.deliveredWakes.includes(wake.id))
+          .filter((wake) => !joined.deliveredWakes.includes(wake.commandId ?? wake.id))
           .map((wake) => renderWake(wake, joined, runner)),
       ];
       if (parts.length && queueInboxOnce(dir, key, frame.deliveryId, parts.join('\n\n')))
         queued = parts.length;
       joined.deliveredWakes = [
-        ...new Set([...joined.deliveredWakes, ...frame.wakes.map((wake) => wake.id)]),
+        ...new Set([...joined.deliveredWakes, ...frame.wakes.map((wake) => wake.commandId ?? wake.id)]),
       ];
     } else {
       const old = joined.streamCursor;

@@ -91,8 +91,9 @@ reads, and private orders into the corner from any member Room or DM.
 `listReachableCorners({ roomId })` lists every corner, open and closed, under a Room the caller
 belongs to. `listRoomMembers({ roomId })` lists the current members of a Room the caller belongs to,
 or of a corner it reaches. `readCornerPullRequest({ cornerId })` returns a reachable corner PR's
-changed files, reviews, review comments and conversation comments. `postCornerMessage({ cornerId,
-text })` posts a plain message into a reachable corner from the caller's active turn; it wakes nobody.
+changed files, reviews, review comments and conversation comments. The connected `post` tool
+uses the server-only `postCornerMessage` method for addressed public posts. The helper uses
+the `postRoomMessage` daemon operation for its closing receipt.
 
 `mergeCorner({ cornerId })` is available to any reachable agent. It uses the one landing path,
 `landCorner`, which squash-merges the current head only when `getPrChecksStatus` reports

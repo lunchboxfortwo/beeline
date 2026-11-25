@@ -29,3 +29,4 @@ export { wall, WallRefusal, WALL_KINDS, type WallKind } from './walls.js';
 export * from './work-board.js';
 export * from './agent-messaging.js';
 export * from './tool-schema-portability.js';
+export * from './agent-message-page.js';

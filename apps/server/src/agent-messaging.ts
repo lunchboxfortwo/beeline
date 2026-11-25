@@ -2,21 +2,35 @@ import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
 import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
-import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
+import { answerQueuedMessage, queueMessage, refuseMessageMembership, selectMcpMessage, type CommandRow } from './agent-command.js';
+import { CommandRefusalError } from './command-refusal.js';
 import { commandAddress } from './commander.js';
 import { cornerCommanderIdSql } from './corner-commander.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import type { SqlDatabase } from './database.js';
 import { assertMemberTranscript, modelText } from './message-origin.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { postRoomChoice } from './room-choice.js';
 import { updateWorkItem } from './work-board.js';
 
 /** Validate the advertised ask schema before any lookup or publication. */
-function validateAskInput(ask: MessageAsk): void {
+export function validateAskInput(ask: MessageAsk): void {
   // Named limit refusals come first, so an over-long ask reports its counts.
-  validateMessageAsk(ask);
+  if (!ask || typeof ask !== 'object') throw new CommandRefusalError('ask must be an object',400);
+  try { validateMessageAsk(ask); }
+  catch (error) { throw new CommandRefusalError((error as Error).message, 400); }
   if (!Check(MESSAGE_ASK_SCHEMA, ask))
-    throw new Error(Errors(MESSAGE_ASK_SCHEMA, ask).map(error => error.message).join('; '));
+    throw new CommandRefusalError(Errors(MESSAGE_ASK_SCHEMA, ask).map(error => error.message).join('; '), 400);
+}
+
+/** Use the same ask validation for connected and helper sends. */
+export function messageAsk(input: Parameters<typeof reportMessageAsk>[0] & {ask?: MessageAsk}): MessageAsk | undefined {
+  let digest: MessageAsk | undefined;
+  try { digest = reportMessageAsk(input); }
+  catch (error) { throw new CommandRefusalError((error as Error).message,400); }
+  const ask = input.ask ?? digest;
+  if (ask) validateAskInput(ask);
+  return ask;
 }
 
 /** Resolve both coordinates together; a role is meaningful only at its thread. */
@@ -42,9 +56,7 @@ export async function sendMessage(db: SqlDatabase, input: {
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
   assertMemberTranscript(input.route.from.agent);
-  const reportAsk = reportMessageAsk(input);
-  input = { ...input, ask: input.ask ?? reportAsk };
-  if (input.ask) validateAskInput(input.ask);
+  input = { ...input, ask: messageAsk(input) };
   return db.transaction(async tx => {
     const reportStatus = input.type === 'blocked' ? 'blocked' : undefined;
     const to = input.replyTo || reportStatus ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
@@ -90,7 +102,7 @@ export async function sendMessage(db: SqlDatabase, input: {
       [command?.id ?? id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command?.created_at ?? null,to.agent,reportStatus ?? null,route.from.place,input.replyTo ?? (reportStatus ? input.parent?.id : undefined) ?? null]);
       const saved = recorded.rows[0] ?? (await tx.query<{id:string;created_at:Date}>(
         'SELECT id,created_at FROM messages WHERE id=$1',[command?.id ?? id])).rows[0]!;
-      return { id:saved.id,createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
+      return { id:saved.id, messageId: saved.id, commandId: command?.id, destination: to, queued: Boolean(command), stored: true, visible: true, createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
         ...(transcriptOnly ? { receipt: notWokenReceipt(to.agent === route.from.agent ? 'You addressed yourself; do the work in this turn.'
           : 'An acknowledgement of an informational reply wakes no one; add ask or use message() to reach them.') } : {}) };
     }
@@ -112,7 +124,7 @@ export async function sendMessage(db: SqlDatabase, input: {
         [id,to.place,JSON.stringify(about),
           input.ask.question,input.ask.brief ?? null,options.find(option=>option.label===input.ask!.recommended)?.optionId ?? null]);
       await updateWorkItem(tx,{id,roomId:to.place,state:'needs-you',assigneeId:to.agent},route.from.agent,input.replyTo ? to.agent : undefined);
-      return { id, createdAt: Math.floor(Date.now()/1000) };
+      return { id, messageId: id, destination: to, queued: false, stored: true, visible: true, createdAt: Math.floor(Date.now()/1000) };
     }
     const sourceRoomId = reportStatus && input.parent?.private_payload?.reportStatus === 'blocked'
       ? (await tx.query<{origin:string}>("SELECT card->>'sourceRoomId' origin FROM messages WHERE id=$1",[input.parent.id])).rows[0]?.origin
@@ -121,33 +133,36 @@ export async function sendMessage(db: SqlDatabase, input: {
       origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:sourceRoomId ?? route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent}: {})},agentIds:[],audienceId:input.replyTo || reportStatus ? to.agent : undefined,
       attachments:input.attachments,parent:input.parent,replyTo:input.replyTo ?? input.parent?.source_message_id ?? (reportStatus ? input.parent?.id : undefined),
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
-    return { id:saved.id,createdAt:saved.createdAt };
+    const messageId = saved.stored ? saved.id : undefined;
+    return { id: messageId, messageId, destination: to, queued: false, stored: saved.stored, visible: saved.visible,
+      createdAt: saved.stored ? saved.createdAt : undefined, receipt: saved.receipt };
   });
 }
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; requestId?:string; queuedRequestIds?:readonly string[];
-} & ({ roomId: string; connected?: never } | { roomId?: never; connected: { commandId?: string } }),onAnswered?:(roomId:string)=>void) {
-  const reportAsk = reportMessageAsk(input);
-  input = { ...input, ask: input.ask ?? reportAsk };
-  if (input.ask) validateAskInput(input.ask);
-  return db.transaction(async db => {
+} & ({roomId: string; connected?: never} | {roomId?: never; connected: {commandId?: string}}),onAnswered?:(roomId:string)=>void) {
+  input = { ...input, ask: messageAsk(input) };
+  const result = await db.transaction(async db => {
   const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;
   if (invocation?.state === 'cancelled') refuseMessageMembership('command turn cancelled');
-  const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
+  const commandId = input.connected?.commandId;
+  if (commandId) await selectMcpMessage(db, agentId, commandId, undefined, true);
+  const item = (await db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE agent_id=$1 AND ($4::boolean OR room_id=$3)
-      AND (id=$2 OR source_message_id=$2 OR ($4 AND message->>'id'=$2))
+      AND (id=$2 OR (CASE WHEN $4 THEN ${deliveredTranscriptIdSql('agent_commands')} ELSE source_message_id END)=$2
+        OR ($4 AND message->>'id'=$2))
       AND (NOT $4::boolean OR action='input' AND reason<>'mcp_call')
       AND ($5::text IS NULL OR id=$5)
-    ORDER BY (id=$2) DESC,($4 AND state='pending') DESC,created_at DESC LIMIT 1 FOR UPDATE`,
-    [agentId,input.id,input.roomId ?? null,Boolean(input.connected),input.connected?.commandId ?? null])).rows[0];
+    ORDER BY (id=$2) DESC,($4 AND state='pending') DESC,created_at DESC,id DESC LIMIT 1 FOR UPDATE`,
+    [agentId,input.id,input.roomId ?? null,Boolean(input.connected),commandId ?? null])).rows[0];
   if (!item) refuseMessageMembership('Quote a message that woke this turn.');
-  const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
+  if (input.connected && !commandId) await commandAddress(db, item.room_id, agentId);
+  const saved = await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true});
-  if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);
   const owed = [...new Set(input.queuedRequestIds ?? [])];
-  const completed = !input.ask && saved.delivered && input.roomId === item.room_id && owed.includes(item.turn_request_id) && owed.length
+  const completed = !input.ask && saved.completed && saved.published && input.roomId === item.room_id && owed.includes(item.turn_request_id) && owed.length
     ? (await db.query(`SELECT DISTINCT item.turn_request_id FROM agent_commands item JOIN messages reply
         ON reply.id=COALESCE(item.result_message_id,item.posted_reply_id)
         AND reply.author_id=item.agent_id AND reply.room_id=item.return_room_id AND reply.deleted_at IS NULL
@@ -160,6 +175,9 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
         return {rows:[]};
       })).rows.length === owed.length
     : false;
-  return {...saved,...(completed ? {_meta:{beeline:{turnComplete:true}}} : {})};
+  return { receipt:{...saved,...(completed ? {_meta:{beeline:{turnComplete:true}}} : {})},
+    answeredRoom:saved.completed && saved.published ? item.room_id : undefined };
   });
+  if (result.answeredRoom) onAnswered?.(result.answeredRoom);
+  return result.receipt;
 }

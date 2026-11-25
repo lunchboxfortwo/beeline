@@ -11,6 +11,7 @@ import { advanceCorner } from './corner-lifecycle.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
 import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { savedScheduleCommand } from './scheduled-command-authority.js';
 
 type ReviewRollup = Pick<CornerLifecycleView, 'checks' | 'checksSummary'>;
@@ -44,7 +45,7 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: 
   return db.query<CommandRow & { parent_room_id: string | null; room_name: string | null;
     return_room_name: string | null; offline_seconds: number | null; operator_agent:boolean;
     selected_model: string | null; selected_effort: string | null; fast_mode: boolean | null;
-    review_rollup: ReviewRollup | null }>(
+    review_rollup: ReviewRollup | null; delivered_message_id: string | null }>(
     `WITH queued AS MATERIALIZED (
        SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
      ), obsolete AS MATERIALIZED (
@@ -69,7 +70,8 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: 
      ), retired AS MATERIALIZED (
        SELECT obsolete.id FROM obsolete LEFT JOIN LATERAL
          beeline_finish_agent_command(obsolete.id,obsolete.outcome,obsolete.reason,obsolete.result_id) ended ON true
-     ) SELECT item.*,room.parent_id parent_room_id,room.name room_name,return_room.name return_room_name,
+     ) SELECT item.*,${deliveredTranscriptIdSql('item')} delivered_message_id,
+       room.parent_id parent_room_id,room.name room_name,return_room.name return_room_name,
        agent.owner_id='${OPERATOR_OWNER_ID}' operator_agent,
        agent.selected_model,agent.selected_effort,agent.fast_mode,
        CASE WHEN review.corner_id IS NOT NULL THEN jsonb_build_object(

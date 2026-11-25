@@ -41,8 +41,8 @@ async function order() {
 
 it('selecting an MCP order preserves its durable pending item without a second ownership protocol',async()=>{
   const command=await order();
-  const first=await db.transaction(tx=>selectMcpMessage(tx,agent,room,command.id));
-  const second=await db.transaction(tx=>selectMcpMessage(tx,agent,room,command.id));
+  const first=await db.transaction(tx=>selectMcpMessage(tx,agent,command.id,room));
+  const second=await db.transaction(tx=>selectMcpMessage(tx,agent,command.id,room));
   expect(first?.id).toBe(command.id);expect(second?.id).toBe(command.id);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'pending'}]);
 });
@@ -54,6 +54,6 @@ it('dismissing notifications leaves an unanswered order in its queue',async()=>{
 it('Stop removes the order from selection and refuses its late answer',async()=>{
   const command=await order();
   await new PhoneService(db,'http://test').execute('cancelAgentTurn',{roomId:room,agentId:agent,requestId:command.turn_request_id},human);
-  expect(await selectMcpMessage(db,agent,room,command.id)).toBeUndefined();
+  await expect(selectMcpMessage(db,agent,command.id,room)).rejects.toThrow('commandId is not an available command for you');
   await expect(db.transaction(tx=>authorizeCommandOutput(tx,room,agent,command.turn_request_id))).rejects.toThrow('command turn cancelled');
 });

@@ -21,14 +21,20 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
-  it('returns the same stored-message receipt with or without a pending request', async () => {
+  it('requires explicit binding to settle a pending request and honors the supplied quote', async () => {
     const { member, token } = await scope.connected();
     const session = { server: scope.origin };
     const args = { address: ROOM, text: '@missing_member Widget inspected.' };
     const standalone = await callSessionTool(session, token, 'post', args);
     const task = await humanTask(member);
-    const answered = await callSessionTool(session, token, 'post', args);
-    expect(answered).toEqual({ ...standalone, id: expect.any(String), createdAt: expect.any(Number) });
+    const unbound = await callSessionTool(session, token, 'post', args);
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1', [task.id])).rows).toEqual([{state:'pending'}]);
+    expect((await scope.db.query('SELECT reply_to_message_id FROM messages WHERE id=$1', [unbound.messageId])).rows)
+      .toEqual([{reply_to_message_id:null}]);
+    const answered = await callSessionTool(session, token, 'post', {...args, commandId:task.id, replyTo:standalone.messageId});
+    expect(answered).toEqual({ ...standalone, id: expect.any(String), messageId:expect.any(String), createdAt: expect.any(Number) });
+    expect((await scope.db.query('SELECT reply_to_message_id FROM messages WHERE id=$1', [answered.messageId])).rows)
+      .toEqual([{reply_to_message_id:standalone.messageId}]);
     expect(answered.id).not.toBe(standalone.id);
     for (const post of [standalone, answered]) {
       expect(post).toMatchObject({ address: ROOM, stored: true, visible: true });
@@ -43,7 +49,7 @@ describe('connected agent message protocol',()=>{
     const args = { address: ROOM, text: '<think>private reasoning</think>' };
     const standalone = await tools.ok(client, 'post', args);
     const task = await humanTask(member);
-    const answered = await tools.ok(client, 'post', args);
+    const answered = await tools.ok(client, 'post', {...args, commandId:task.id});
     for (const post of [standalone, answered]) {
       expect(post).toMatchObject({ id: null, createdAt: null, address: ROOM, stored: false, visible: false });
       expect(Object.keys(post).sort()).toEqual(Object.keys(standalone).sort());
@@ -146,7 +152,7 @@ describe('connected agent message protocol',()=>{
       expect(tagCheckpoint).toBe(true);
       expect(rendered).toBe(1);
       const inbox = takeInbox(dir, joined.key);
-      expect(inbox).toContain(`id: ${messageId}\n`);
+      expect(inbox).toContain(`messageId: ${messageId}\n`);
       expect(inbox).toContain(instruction);
       expect(inbox).toContain(procedure);
       expect(inbox).toContain(brief);
@@ -166,9 +172,12 @@ describe('connected agent message protocol',()=>{
     expect(direct.attachments).toEqual([image]);
     expect(command.source.attachments).toEqual([image]);
     expect(itemPrompt(command,{names:new Map()})).toContain('📎 browser-screen.jpg (image/jpeg, 173 KB)');
-    expect(page.messages.find((item:{id:string})=>item.id===messageId)).toMatchObject({attachments:[image]});
+    expect(page.items.find((item:{id:string})=>item.id===messageId))
+      .toMatchObject({attachments:[image],body:text.slice(0,16_000),bodyContinues:true});
+    const connectorPage = await tools.ok(client,'read',{address:PUBLIC_CORNER,facet:'messages'});
+    expect(connectorPage.items.find((item:{id:string})=>item.id===messageId)?.body).toBe(text);
     expect(delivery.mentions).toEqual([expect.objectContaining({
-      id: messageId, text: text.slice(0, 16_000), truncated: true, attachments: [image],
+      id: messageId, messageId, commandId: command.id, text: text.slice(0, 16_000), truncated: true, attachments: [image],
     })]);
     expect(delivery.wakes).toEqual([]);
     const reply = await tools.ok(client, 'reply', { id: messageId, text: 'I checked the image.' });
@@ -184,14 +193,17 @@ describe('connected agent message protocol',()=>{
   it('the SDK sends privately to one tuple and receives a reply at its sending place',async()=>{
     const {client,member}=await scope.connected();
     const sent=await tools.ok(client,'message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Check the widget'});
+    expect(sent).toMatchObject({commandId: sent.id, messageId: sent.id, queued:true,
+      destination:{agent:AGENT,place:ROOM},stored:true});
     expect(sent.id).toMatch(/^[0-9a-f]{64}$/);
     expect((await scope.db.query('SELECT agent_id,room_id,message FROM agent_commands WHERE id=$1',[sent.id])).rows)
       .toMatchObject([{agent_id:AGENT,room_id:ROOM,message:{route:{from:{agent:member,place:ROOM},to:{agent:AGENT,place:ROOM}},body:'Check the widget'}}]);
     await scope.daemon.execute('startAgentTurn',{roomId:ROOM,requestId:sent.id,invocationId:crypto.randomUUID()},AGENT);
-    await scope.daemon.execute('message',{type:'reply',roomId:ROOM,requestId:sent.id,quoteMsgId:sent.id,text:'Checked'},AGENT);
+    const response = await scope.daemon.execute('message',{type:'reply',roomId:ROOM,requestId:sent.id,quoteMsgId:sent.id,text:'Checked'},AGENT);
+    expect(response).toMatchObject({queued:true,commandId:response.id,messageId:response.id,destination:{agent:member,place:ROOM}});
     await scope.daemon.execute('postRoomMessage',{roomId:ROOM,requestId:sent.id,text:''},AGENT);
     const page=await tools.ok(client,'list_mentions',{});
-    expect(page.wakes).toEqual([expect.objectContaining({address:ROOM,from:{agent:AGENT,place:ROOM},text:'Checked'})]);
+    expect(page.wakes).toEqual([expect.objectContaining({commandId:response.commandId,messageId:null,address:ROOM,from:{agent:AGENT,place:ROOM},text:'Checked'})]);
     // The session helper rejects a wake frame without a string reason.
     expect(typeof page.wakes[0]!.reason).toBe('string');
     expect(page.wakes[0].next).toContain('Reply needed: false\ntext: Checked');
@@ -308,10 +320,146 @@ describe('connected agent message protocol',()=>{
     await scope.db.query(`CREATE FUNCTION reject_message() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'append failed'; END $$;
       CREATE TRIGGER reject_message BEFORE INSERT ON agent_commands FOR EACH ROW EXECUTE FUNCTION reject_message()`);
     try {
-      expect((await tools.call(client,'message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Atomic request'})).error).toBe(true);
+      expect(await tools.call(client,'message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Atomic request'}))
+        .toEqual({error:true,text:'The request failed.'});
     } finally {await scope.db.query('DROP TRIGGER reject_message ON agent_commands; DROP FUNCTION reject_message()');}
     expect((await scope.db.query("SELECT 1 FROM agent_commands WHERE private_payload->'route'->'from'->>'agent'=$1",[member])).rowCount).toBe(0);
     const sent=await tools.ok(client,'message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Atomic request'});
     expect((await scope.db.query('SELECT 1 FROM agent_commands WHERE id=$1',[sent.id])).rowCount).toBe(1);
   });
+  it('refuses unavailable bindings before either send writes', async () => {
+    const {client,member} = await scope.connected();
+    const task = await humanTask(member);
+    for (const commandId of [task.messageId,'0'.repeat(64)]) {
+      expect((await tools.call(client,'post',{address:ROOM,commandId,text:'Invalid binding'})).text)
+        .toContain('commandId is not an available command');
+      expect((await tools.call(client,'message',{address:ROOM,commandId,to:{agent:USER,place:ROOM},text:'Invalid binding'})).error).toBe(true);
+    }
+    expect(await tools.call(client,'post',{address:PUBLIC_CORNER,commandId:task.id,text:'Invalid binding'}))
+      .toEqual({error:true,text:'Request refused: commandId is not an available message for you at this address.'});
+    expect((await scope.db.query("SELECT 1 FROM messages WHERE author_id=$1 AND text='Invalid binding'",[member])).rowCount).toBe(0);
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
+  });
+
+  it('MCP-CLAIM-BINDING: refuses a claim bound to another thread before touching either thread', async () => {
+    const {client,member} = await scope.connected();
+    const addressed = await tools.reportCorner(AGENT);
+    const commandRoom = await tools.reportCorner(AGENT);
+    const source = await scope.phone.execute('sendRoomMessage', {
+      roomId:commandRoom, text:`@${await handle(member)} Check this thread`,
+    },USER);
+    const {id:commandId} = (await scope.db.query<{id:string}>(
+      'SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2', [member,source.messageId],
+    )).rows[0]!;
+    const implementers = async () => (await scope.db.query(
+      'SELECT corner_id,implementer_agent_id FROM corner_facts WHERE corner_id=ANY($1::uuid[]) ORDER BY corner_id',
+      [[addressed,commandRoom]],
+    )).rows;
+    const before = await implementers();
+    expect(before).toHaveLength(2);
+    const refused = await tools.call(client,'claim_thread',{address:addressed,commandId});
+    expect({refused,implementers:await implementers()}).toEqual({
+      refused:{error:true,text:'Request refused: commandId is not an available message for you at this address.'},
+      implementers:before,
+    });
+    expect((await scope.db.query('SELECT 1 FROM agent_invocations WHERE command_id=$1',[commandId])).rowCount).toBe(0);
+    await tools.ok(client,'claim_thread',{address:commandRoom,commandId});
+    expect(await implementers()).toEqual(before.map(row =>
+      row.corner_id === commandRoom ? {...row,implementer_agent_id:member} : row));
+  });
+
+  it('selects a public source across places even while another local request is pending', async () => {
+    const {client,member} = await scope.connected();
+    const other = await humanTask(member);
+    const source = await scope.phone.execute('sendRoomMessage', {
+      roomId:PUBLIC_CORNER, text:`@${await handle(member)} Check this thread`,
+    }, USER);
+    const reply = await tools.ok(client,'reply',{id:source.messageId,text:'Thread checked'});
+    expect(reply).toMatchObject({completed:true,published:true,destination:{agent:USER,place:PUBLIC_CORNER}});
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[other.id])).rows).toEqual([{state:'pending'}]);
+    const again = await tools.ok(client,'reply',{id:source.messageId,text:'Thread follow-up'});
+    expect(again.messageId).not.toBe(reply.messageId);
+  });
+
+  it('uses the recorded reply address in both writers while delivery shows the sender', async () => {
+    const {client,member} = await scope.connected();
+    for (const agent of [member,AGENT]) {
+      const wake = await sendMessage(scope.db,{route:{from:{agent:USER,place:ROOM},to:{agent,place:ROOM}},text:'Use my return place'});
+      await scope.db.query("UPDATE agent_commands SET message=message || jsonb_build_object('replyAddress',$2::jsonb) WHERE id=$1",
+        [wake.commandId, JSON.stringify({agent:USER,place:PUBLIC_CORNER})]);
+      const saved = agent === member
+        ? await tools.ok(client,'reply',{id:wake.commandId,text:'Connected reply'})
+        : await (async () => {
+          await scope.daemon.execute('startAgentTurn',{roomId:ROOM,requestId:wake.commandId!,invocationId:crypto.randomUUID()},agent);
+          return scope.daemon.execute('message',{roomId:ROOM,requestId:wake.commandId,type:'reply',quoteMsgId:wake.commandId,text:'Native reply'},agent);
+        })();
+      expect(saved.destination).toEqual({agent:USER,place:PUBLIC_CORNER});
+      const route = (await scope.db.query("SELECT message->'route' route FROM agent_commands WHERE id=$1",[wake.commandId])).rows[0]!;
+      expect(route).toMatchObject({route:{from:{agent:USER,place:ROOM}}});
+    }
+  });
+
+  it('keeps a reply owed when no public text survives and completes a committed question', async () => {
+    const {client,member} = await scope.connected();
+    const task = await humanTask(member);
+    const empty = await tools.ok(client,'reply',{id:task.messageId,text:'<think>private reasoning</think>'});
+    expect(empty).toMatchObject({answered:false,completed:false,published:false,commandId:task.id});
+    expect(empty.messageId).toBeUndefined();
+    expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
+    const question = await tools.ok(client,'reply',{id:task.messageId,text:'Which build?',ask:{question:'Which build?',options:['Stable','Next']}});
+    expect(question).toMatchObject({completed:true,published:true,queued:false,commandId:task.id,messageId:expect.any(String)});
+    expect((await scope.db.query('SELECT message_id FROM work_questions WHERE message_id=$1',[question.messageId])).rowCount).toBe(1);
+  });
+
+  it('discriminates progress from transcript publication', async () => {
+    const {client} = await scope.connected();
+    const receipt = await tools.ok(client,'post',{address:PUBLIC_CORNER,text:'Measuring',progress:true});
+    expect(receipt).toEqual({effect:'progress',address:PUBLIC_CORNER,recorded:true});
+    expect((await scope.db.query("SELECT 1 FROM messages WHERE presentation='message' AND text='Measuring'")).rowCount).toBe(0);
+  });
+
+  it('returns the shared newest-first page and accepts its continuation unchanged', async () => {
+    const {client} = await scope.connected();
+    const sent = Array.from({length:3}, () => crypto.randomUUID().replaceAll('-','').repeat(2));
+    await scope.db.query(`INSERT INTO messages(id,room_id,author_id,text,created_at)
+      SELECT message.id,$1,$2,message.body,(SELECT COALESCE(max(created_at),now()) FROM messages WHERE room_id=$1)
+        + message.ordinal * interval '1 second'
+      FROM unnest($3::text[],ARRAY['First','Second','Third']) WITH ORDINALITY message(id,body,ordinal)`,
+      [ROOM,USER,sent]);
+    const options = {address:ROOM,facet:'messages',limit:2};
+    const newest = await tools.ok(client,'read',options);
+    expect(newest.items.map((item:{messageId:string}) => item.messageId)).toEqual([sent[2],sent[1]]);
+    expect(newest.next).toEqual({before:expect.any(String)});
+    const next = await tools.ok(client,'read',{...options,cursor:newest.next});
+    expect(next.items[0].messageId).toEqual(sent[0]);
+    const legacy = await tools.ok(client,'read_messages',{room:ROOM,limit:2,cursor:newest.next});
+    expect(legacy.items).toEqual(next.items);
+    expect((await tools.ok(client,'read',{address:ROOM,facet:'message',messageId:sent[0],cursor:{offset:2}})).body).toBe('rst');
+  });
+
+  it('rejects advertised input violations before lookup and formats safe refusals once', async () => {
+    const {client} = await scope.connected();
+    for (const [name,args] of [
+      ['post',{address:PRIVATE,text:123}],
+      ['post',{address:PRIVATE,text:'x'.repeat(16_001)}],
+      ['post',{address:PRIVATE,text:'Content',replyTo:123}],
+      ['reply',{id:'not-a-delivery',text:{bad:'value'}}],
+      ['read',{address:PRIVATE,facet:'messages',cursor:{offset:-1}}],
+      ['read',{address:PRIVATE,facet:'messages',cursor:{before:'bad-cursor'}}],
+    ] as const) {
+      const refused = await tools.call(client,name,args);
+      expect(refused.error).toBe(true);
+      expect(refused.text).not.toMatch(/membership|woke this turn/);
+    }
+    expect((await tools.call(client,'reply',{id:'0'.repeat(64),text:'Unknown quote'})).text)
+      .toBe('Request refused: Quote a message that woke this turn.');
+    await scope.db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[PUBLIC_CORNER]);
+    try {
+      expect((await tools.call(client,'post',{address:PUBLIC_CORNER,text:'Archived'})).text)
+        .toBe('Request refused: address is archived.');
+      expect((await tools.call(client,'post',{address:PRIVATE,text:'Private'})).text)
+        .toBe('Request refused: address requires current membership.');
+    } finally { await scope.db.query('UPDATE rooms SET archived_at=NULL WHERE id=$1',[PUBLIC_CORNER]); }
+  });
+
 });

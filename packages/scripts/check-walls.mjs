@@ -112,7 +112,7 @@ export function judgeMergeContract(root) {
   return errors;
 }
 // Owner-approved destinations: messages use their tuple, replies use the recorded
-// sender tuple, repairs use the implementer, review uses the reviewer, and System
+// return address, repairs use the implementer, review uses the reviewer, and System
 // work replies in the thread. No last-tag or ancestor destination exists.
 export const WAKE_DESTINATIONS = {
   'merge-conflict': 'corner.worker_agent_id',
@@ -162,7 +162,7 @@ export function judgeWakeDestinations(root) {
   if(!normalize(messaging).includes(normalize('roomId: to.place, agentId: to.agent')))
     errors.push('message delivery must wake its agent and place tuple');
   const queue=readFileSync(resolve(root,'apps/server/src/agent-command.ts'),'utf8');
-  if(!normalize(queue).includes(normalize('item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item)')) ||
+  if(!normalize(queue).includes(normalize('const to = (await recordedMessageRoute(db,item)).from')) ||
       !normalize(queue).includes(normalize('sendMessage(db,{route:{from,to},text:messageText')))
     errors.push('explicit replies must use the received message route');
   if(normalize(queue).includes(normalize('replyAddress:chat.commander')) ||
