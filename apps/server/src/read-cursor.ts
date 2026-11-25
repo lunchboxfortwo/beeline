@@ -47,6 +47,12 @@ export function visibleChatMessageSql(alias: string): string {
       AND ${visibleMessageSql(alias)}`;
 }
 
+/** Older blocks to an agent stored the recipient but omitted the command card type. */
+export function retainedAgentBlockSql(alias: string): string {
+  return `(${alias}.card->>'reportStatus' IS NOT DISTINCT FROM 'blocked'
+      AND ${alias}.card->'recipient'->>'kind' IS NOT DISTINCT FROM 'agent')`;
+}
+
 /**
  * WHAT COUNTS AS UNREAD. One definition, and the only one.
  *
@@ -69,6 +75,7 @@ export function unreadMessageSql(alias: string): string {
   // An agent's order or report record is reference, not news: it never counts.
   return `${visibleChatMessageSql(alias)}
       AND ${column('card_type')} IS DISTINCT FROM 'agent-command'
+      AND NOT ${retainedAgentBlockSql(alias)}
       AND ${column('author_id')} IS DISTINCT FROM $2`;
 }
 

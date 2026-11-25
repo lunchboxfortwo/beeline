@@ -18,6 +18,7 @@ import { apnsReadClearBatch } from './apns-push.js';
 import { firebaseReadClearBatch } from './firebase-push.js';
 import { cornerFactsSql, cornerRowState, type CornerStateRow } from './chat-corner-counts.js';
 import { pushDirectAttentionSql } from './push-attention.js';
+import { retainedAgentBlockSql } from './read-cursor.js';
 import { SERVER_LEASE_EXPIRY_MS } from './connection-presence.js';
 
 /** What a person can do from the notification itself; see `push-actions.ts`. */
@@ -319,6 +320,7 @@ export class PushDeliveryLoop {
           AND m.card_type IS DISTINCT FROM 'workspace-member-joined'
           -- An agent's order or report record is reference for corner readers.
           AND m.card_type IS DISTINCT FROM 'agent-command'
+          AND NOT ${retainedAgentBlockSql('m')}
           AND m.deleted_at IS NULL
           AND btrim(m.text)<>''
           -- A closed corner is done: nothing posted there may push anyone.

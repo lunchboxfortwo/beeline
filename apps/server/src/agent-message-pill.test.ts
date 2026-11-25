@@ -45,6 +45,24 @@ describe('addressed agent message transcript pills', () => {
     expect((await db.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [C])).rowCount).toBe(0);
   });
 
+  it.each([false, true])('keeps an agent block quiet in the transcript (older record: %s)', async olderRecord => {
+    const assignment = await daemon.execute('message', {
+      roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Build the widget',
+    }, A);
+    const block = await daemon.execute('message', {
+      roomId: THREAD, requestId: assignment.id, type: 'blocked', text: 'Choose the scope',
+    }, B);
+    if (olderRecord) await db.query('UPDATE messages SET card_type=NULL WHERE id=$1', [block.id]);
+    expect((await queued()).filter(([agent]) => agent !== B)).toEqual([[A, CHAT]]);
+    const phone = new PhoneService(db, 'http://local.test');
+    const view = readRoomView(await phone.readRoom(CHAT, H))!;
+    expect(view.messages.find(row => row.id === block.id)).toMatchObject({
+      author: { pubkey: B },
+      agentCommand: { kind: 'message', text: 'Choose the scope', recipient: { id: A, kind: 'agent' } },
+    });
+    expect(view.viewer.readCursor?.unreadCount).toBe(0);
+  });
+
   it('replayed sends retain one command and one pill; refused sends leave neither', async () => {
     const input = { id: 'e'.repeat(64), route: { from: { agent: A, place: OTHER }, to: { agent: B, place: THREAD } }, text: 'Review this' };
     await sendMessage(db, input);
