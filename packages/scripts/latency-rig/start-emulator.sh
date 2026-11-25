@@ -39,7 +39,7 @@ if ! [[ "$cpu_quota" =~ ^[0-9]+$ ]] || (( cpu_quota < 10 || cpu_quota > 1000 ));
 fi
 scratch="$(mktemp -d "${LATENCY_RIG_SCRATCH_ROOT:-${TMPDIR:-/tmp}}/beeline-emulator.XXXXXX")"
 emulator_pid=""
-# shellcheck disable=SC2317 # Invoked indirectly by the EXIT trap.
+# shellcheck disable=SC2317,SC2329 # Invoked indirectly by the EXIT trap.
 cleanup() {
   if [[ -n "$emulator_pid" ]]; then
     kill "$emulator_pid" 2>/dev/null || true
