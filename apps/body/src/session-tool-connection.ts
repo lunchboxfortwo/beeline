@@ -74,12 +74,17 @@ export async function sessionToolRequest(
   const endpoint = await sessionToolConnection(env);
   let status: number;
   let body: { error?: string };
+  const resetId = env.BEELINE_PLACE_RESET_ID;
   try {
     const response = await ask(
       { url: new URL(route, `${endpoint.url}/`) },
       {
         method: 'POST',
-        headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
+        headers: {
+          authorization: `Bearer ${endpoint.token}`,
+          'content-type': 'application/json',
+          ...(resetId ? { 'x-beeline-place-reset': resetId } : {}),
+        },
         body: JSON.stringify(input),
       },
     );

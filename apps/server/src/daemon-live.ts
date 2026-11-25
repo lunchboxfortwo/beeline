@@ -451,6 +451,7 @@ export class DaemonAgentSession {
           }
         }
         this.transport.send({ type: 'commands', commandProtocol: page.commandProtocol, commands: page.commands, completedCommandIds,
+          ...(page.resets?.length ? { resets: page.resets } : {}),
           ...(stoppedCommandIds.length ? { stoppedCommandIds } : {}) });
         this.#queueCommandIds = current;
       } while (this.#queueRequested);

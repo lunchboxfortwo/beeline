@@ -1,7 +1,8 @@
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { createHash,randomBytes } from 'node:crypto';
-import { currentInvocationCommand } from '../agent-invocation.js';
+import { currentAgentInvocation, currentInvocationCommand } from '../agent-invocation.js';
+import { assertAgentPlaceReset } from '../agent-place-reset.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
@@ -205,6 +206,11 @@ import { sendSessionMessage } from '../session-message.js';
       const output = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
         if (name === 'createCorner' || name === 'reviseCornerBrief') await lockCornerLifecycle(db, scopedRoom);
         const requestId = candidate.requestId ?? candidate.turnId;
+        if (name === 'postAgentDraft' || name === 'postAgentThought' || name === 'retractAgentLiveOutput' || name === 'postAgentActivity') {
+          const { invocation } = input as Input<'postAgentActivity'>;
+          if (invocation && !await currentAgentInvocation(db, authenticatedAgentId, scopedRoom, invocation))
+            return daemonWriteResult(ctx) as Output<Name>;
+        }
         const command = await authorizeCommandOutput(db, scopedRoom, authenticatedAgentId, requestId);
         if (command.state === 'complete' && name === 'markAgentTurnSilent')
           return daemonWriteResult(ctx) as Output<Name>;
@@ -311,6 +317,13 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
     const messageId = typeof value.transportRequestId === 'string'
       ? createHash('sha256').update(`message:${agentId}:${value.transportRequestId}`).digest('hex') : undefined;
     return ctx.database.transaction(async db => {
+      if (request.resetId !== undefined) {
+        // Blocked reports lock the Room. Take that lock before the place reset
+        // lock, in the same order as a person's restart message.
+        if (request.type === 'blocked')
+          await db.query('SELECT id FROM rooms WHERE id=$1 FOR UPDATE', [request.roomId]);
+        await assertAgentPlaceReset(db, agentId, request.roomId, request.resetId);
+      }
       const reply = request.type === 'reply';
       const parent = await currentInvocationCommand(db,agentId,request.roomId,
         reply ? { quote: request.quoteMsgId } : undefined)

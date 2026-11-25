@@ -567,6 +567,31 @@ it('keeps corner discovery for installed helpers without a whole-queue subscript
   expect(vi.mocked(daemon.execute).mock.calls.filter(([name])=>name==='getAgentCommands')).toEqual([]);
 });
 
+it('pushes resets with an empty queue and includes them again after registration', async () => {
+  const live = new LiveHub(), daemon = daemonStub();
+  const reset = { roomId: 'room-a', id: 'f'.repeat(64) };
+  let resets: typeof reset[] = [];
+  vi.mocked(daemon.execute).mockImplementation(async () => ({ commandProtocol: 2, commands: [], resets }) as never);
+  const { port } = await start({ live, daemon });
+  const subscribe = async () => {
+    const client = await machine(port);
+    await register(client, AGENT_A, 'bdt_a');
+    client.send({ type: 'subscribe-queue', agentId: AGENT_A });
+    return client;
+  };
+
+  const client = await subscribe();
+  expect(await client.next(frame => frame.type === 'commands')).toMatchObject({ commands: [] });
+  resets = [reset];
+  live.publish({ type: 'invalidate', roomId: reset.roomId, reason: 'postgres:agent_commands', targetAgentId: AGENT_A });
+  expect(await client.next(frame => frame.type === 'commands' && Array.isArray(frame.resets)))
+    .toMatchObject({ commands: [], resets: [reset] });
+
+  client.socket.terminate();
+  const reconnected = await subscribe();
+  expect(await reconnected.next(frame => frame.type === 'commands')).toMatchObject({ commands: [], resets: [reset] });
+});
+
 const QUEUE_TABLES=`CREATE TABLE agent_commands(id text PRIMARY KEY,agent_id text,state text,stop_requested_at timestamptz);
   CREATE TABLE agent_invocations(command_id text,invocation_id text,ended boolean NOT NULL DEFAULT false)`;
 

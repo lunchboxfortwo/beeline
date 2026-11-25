@@ -6,6 +6,7 @@ import type { SqlDatabase } from './database.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { ensureSystemIdentity, systemLine } from './system-line.js';
 import type { AgentCommandInput, CommandRow } from './agent-command.js';
+import { commitAgentPlaceReset, lockAgentPlace } from './agent-place-reset.js';
 
 
 
@@ -156,12 +157,14 @@ export async function routeTaggedLifecycleCommand(
     return true;
   }
 
-  await append({
+  await lockAgentPlace(db, target.agent_id, source.room_id);
+  const reset = await append({
     roomId: source.room_id,
     agentId: target.agent_id,
     sourceMessageId: sourceId,
     action: 'restart',
     reason: 'tagged_lifecycle_restart',
   });
+  if (reset) await commitAgentPlaceReset(db, reset);
   return true;
 }

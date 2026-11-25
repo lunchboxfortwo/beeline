@@ -13,6 +13,7 @@ export interface HelperOverlayTransport {
 export class HelperOverlayOwner {
   private text='';private acknowledged='';private revision=0;private runGeneration=0;
   private demand:HelperOverlayDemand;private baseline=false;private stopped=false;
+  private abandoned=false;
   private inFlight:Promise<void>|undefined;private dirty=false;private release:()=>void;
   constructor(private readonly identity:Omit<HelperOverlayIdentity,'runGeneration'>,
     private readonly transport:HelperOverlayTransport){
@@ -51,9 +52,10 @@ export class HelperOverlayOwner {
       this.inFlight=undefined;if(this.dirty)this.flush();
     });
   }
+  abandon():void{this.abandoned=true;if(!this.stopped){this.stopped=true;this.release();}}
   async close(type:'retract'|'end'='end'):Promise<void>{
     if(this.stopped)return;this.stopped=true;this.release();await this.inFlight;
-    if(!this.transport.enabled()||!this.demand.viewing||!this.baseline)return;
+    if(this.abandoned||!this.transport.enabled()||!this.demand.viewing||!this.baseline)return;
     await this.transport.send({...this.identity,v:1,runGeneration:this.runGeneration,type,
       revision:++this.revision,offset:0,text:'',viewingRevision:this.demand.viewingRevision}).catch(()=>undefined);
   }

@@ -1,5 +1,5 @@
 import { removeRetiredStarterTurnRule } from '@beeline/api-contract/beeline-guides';
-import { wall, type AgentCommand, type DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { wall, type AgentCommand, type AgentInvocation, type DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
@@ -85,6 +85,8 @@ export interface PlaceSessionOptions {
   config: BodyConfig;
   api: DaemonApiClient;
   placeId: string;
+  resetId?: string;
+  retirement?: AbortSignal;
   /** Set for a corner. */
   parentRoomId?: string;
   workspaceId: string;
@@ -130,11 +132,14 @@ export class PlaceSession {
   private readonly squireRelay: SquireTaskRelay;
   /** The item being answered, for run_granted_command. */
   current?: AgentCommand;
+  currentInvocation?: AgentInvocation;
   private scratch?: string;
   /** Where received pictures are downloaded for an image-capable harness. */
   private attachmentDir?: string;
   private privateHomeRoot?: string;
   private stopping = false;
+  private readonly retirement: AbortSignal;
+  private stream?: AgentTurnStream;
   readonly resources: SessionResources;
   private readonly running: RunningModelReporter;
   private readonly resourceAuthPath: string;
@@ -143,10 +148,11 @@ export class PlaceSession {
   promptSectionIds: readonly string[] = [];
 
   constructor(readonly options: PlaceSessionOptions) {
+    this.retirement = options.retirement ?? new AbortController().signal;
     const root =
       options.config.workspaceRoot ??
       resolve(options.runtime.supervisorRoot, 'places', options.placeId);
-    this.resourceAuthPath = resolve(root, 'resource-auth.json');
+    this.resourceAuthPath = resolve(root, options.resetId ? `resource-auth-${options.resetId}.json` : 'resource-auth.json');
     this.resources = new SessionResources({
       api: options.api,
       agentId: options.agent.publicKey,
@@ -351,12 +357,20 @@ export class PlaceSession {
 
   /** Make sure a live session serves this place; reuse the running one. */
   async start(item?: AgentCommand): Promise<void> {
+    const signal = this.retirement;
+    signal.throwIfAborted();
     if (item) {
       this.queuedSelection(item);
       this.operatorAgent = item.operatorAgent === true;
     }
-    if (!this.alive || this.stale) await this.startFresh();
-    await this.prepareGitHubLaunchers();
+    try {
+      if (!this.alive || this.stale) await this.startFresh();
+      signal.throwIfAborted();
+      await this.prepareGitHubLaunchers();
+    } catch (error) {
+      if (signal.aborted) void this.stop().catch(console.warn);
+      throw error;
+    }
   }
 
   private async startFresh(): Promise<void> {
@@ -375,7 +389,7 @@ export class PlaceSession {
     try {
       await this.activate(sandbox);
     } catch (error) {
-      if (!sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
+      if (this.retirement.aborted || !sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
       await this.stop();
       this.notes.push(
         `The OS sandbox could not start (${error instanceof Error ? error.message : String(error)}). ` +
@@ -422,6 +436,7 @@ export class PlaceSession {
       ...homeOverlay,
       ...(corner ? agentGitIdentityEnv(agent) : {}),
       BEELINE_DAEMON_ROOM_ID: placeId,
+      BEELINE_PLACE_RESET_ID: this.options.resetId ?? '',
       ...(this.options.grantRunnerFile ? { BEELINE_GRANT_RUNNER_FILE: this.options.grantRunnerFile } : {}),
       ...(this.options.grantRunner ? {
         BEELINE_GRANT_RUNNER_URL: this.options.grantRunner.url,
@@ -513,6 +528,7 @@ export class PlaceSession {
           ...(attachScratchRoot ? { attachScratchRoot } : {}),
           ...(corner && !repositoryBacked ? { cornerScratchRoot: folder } : {}),
           operatorAgent: this.operatorAgent,
+          resetId: this.options.resetId,
           ...(this.options.grantRunner ? { grantRunner: this.options.grantRunner } : {}),
           ...(this.options.grantRunnerFile
             ? { grantRunnerFile: this.options.grantRunnerFile }
@@ -546,7 +562,7 @@ export class PlaceSession {
     if (hostRoutes.length) {
       void writePrivateFileAtomically(
         this.resourceAuthPath,
-        JSON.stringify({ ...api.connection(), placeId }),
+        JSON.stringify({ ...api.connection(), placeId, resetId: this.options.resetId }),
       ).catch(error => console.warn('[body] resource authorization file could not be written:', error));
       servers.push(
         ...grantedHostRouteWires(
@@ -571,6 +587,9 @@ export class PlaceSession {
     const hostServers = [...CODE_OWNED_HOST_MCP_NAMES];
     const plan = sandboxed ? sandboxMountPlan(sandboxSpec) : undefined;
     const editing = corner && sandboxed;
+    const signal = this.retirement;
+    signal.throwIfAborted();
+    const publishCommands = agentCommandCatalogPublisher({ api, agentId: agent.publicKey, workspaceId });
     const client = (this.options.createAcpClient ?? ((value) => new AcpClient(value)))({
       agentCommand: spawnCommand.command,
       harnessCommand: command,
@@ -598,18 +617,20 @@ export class PlaceSession {
           : async (request) =>
               unsandboxedPermissionDecision(request, folder, { mountedServers, hostServers }),
       onUsage: (usage) => {
-        void postChangedAgentUsage(api, agent.publicKey, usage).catch((error) =>
-          console.error('[agent-usage] publish failed', error),
-        );
+        if (!signal.aborted)
+          void postChangedAgentUsage(api, agent.publicKey, usage).catch((error) =>
+            console.error('[agent-usage] publish failed', error),
+          );
       },
-      onCommands: agentCommandCatalogPublisher({ api, agentId: agent.publicKey, workspaceId }),
+      onCommands: (...args) => { if (!signal.aborted) publishCommands(...args); },
     });
     this.client = client;
     HostPlaces.enter(placeId);
     client.on('exit', () => {
       if (this.client === client && !this.stopping) this.options.onExit();
     });
-    await startAgentProcess(client);
+    await startAgentProcess(client, signal);
+    signal.throwIfAborted();
     const brief = restore?.brief;
     this.surface = corner
       ? repository?.resolution === 'none'
@@ -665,6 +686,7 @@ export class PlaceSession {
       folder,
       sandboxed,
       session.systemPrompt,
+      ...(this.options.resetId ? [this.options.resetId] : []),
     ]);
     const mode = editing ? 'edit' : 'readonly';
     const opened = await openAcpConversation({
@@ -684,6 +706,7 @@ export class PlaceSession {
       onResumeFailure: (error) =>
         console.warn('[body] native conversation unavailable; starting cold:', error),
     });
+    signal.throwIfAborted();
     this.warm.rememberSession(opened.sessionId, fingerprint);
     this.sessionId = opened.sessionId;
     // The owner asked that a commanded model switch simply take effect
@@ -777,11 +800,12 @@ export class PlaceSession {
   async deliver(
     item: AgentCommand,
     batch: readonly AgentCommand[] = [],
-    invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
+    invocation?: AgentInvocation,
   ): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
+    const signal = this.retirement;
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
@@ -819,24 +843,30 @@ export class PlaceSession {
               : [],
           )
         : [];
-    const stream = new AgentTurnStream({
+    signal.throwIfAborted();
+    const stream = this.stream = new AgentTurnStream({
       api: this.options.api,
       agentId: this.options.agent.publicKey,
       roomId: item.roomId,
       requestId: item.turnRequestId,
       commandId: item.id,
       label: `place ${item.roomId}`,
+      current: () => !signal.aborted,
+      invocation,
+      resetId: this.options.resetId,
     });
     const liveSteps = this.options.parentRoomId
       ? new LiveTurnSteps(this.options.api, {
           agentId: this.options.agent.publicKey,
           roomId: item.roomId,
           requestId: item.turnRequestId,
-          invocationId: invocation?.id ?? item.id,
+          invocation,
+          current: () => !signal.aborted,
         })
       : undefined;
     let result: PromptResult;
     this.current = item;
+    this.currentInvocation = invocation;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
     this.batchedCommands = batch;
     try {
@@ -859,8 +889,9 @@ export class PlaceSession {
       stream.close();
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
+      this.currentInvocation = undefined;
       this.batchedCommands = [];
-      this.resources.refreshThreads();
+      if (!signal.aborted) this.resources.refreshThreads();
     }
     const text = durableReplyText(result.agentText);
     let steps: Answer['steps'] = [];
@@ -922,6 +953,14 @@ export class PlaceSession {
     void this.stop().catch((error) =>
       console.error('[body] stopped session cleanup failed:', error),
     );
+  }
+
+  /** Release the detached session's resources. Process teardown owns its own wait. */
+  retire(): void {
+    this.stream?.abandon();
+    this.options.cancelGrantedCommands?.();
+    this.squireRelay.close();
+    void this.stop().catch((error) => console.warn('[body] retired session cleanup failed:', error));
   }
 
   /** The helper is stopping: end the session and its Squire relay. */

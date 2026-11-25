@@ -1,3 +1,4 @@
+import type { AgentInvocation } from '@beeline/api-contract/daemon';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { HelperOverlayOwner } from './helper-overlay.js';
 import { sanitizeAgentReply } from './reply-sanitizer.js';
@@ -17,6 +18,9 @@ export interface AgentTurnStreamOptions {
   commandId: string;
   /** Log prefix naming the surface, e.g. `monolith Room <id>` or `corner <id>`. */
   label: string;
+  current?: () => boolean;
+  invocation?: AgentInvocation;
+  resetId?: string;
 }
 
 /** Sanitize the closing message selected by ACP for the durable reply. */
@@ -51,7 +55,7 @@ export class AgentTurnStream {
       // this command is still bound to the negotiated overlay protocol.
       this.overlay=new HelperOverlayOwner({
         agentId:options.agentId,roomId:options.roomId,commandId:options.commandId,turnId:options.requestId,
-        turnGeneration:options.commandId,kind:'draft'},transport);
+        turnGeneration:options.resetId && options.invocation ? options.invocation.id : options.commandId,kind:'draft'},transport);
     }
   }
 
@@ -84,9 +88,9 @@ export class AgentTurnStream {
       return;
     }
     this.pending = undefined;
-    const { api, agentId, roomId, requestId, label } = this.options;
+    const { api, agentId, roomId, requestId, label, invocation } = this.options;
     this.inFlight = api
-      .execute('postAgentDraft', { agentId, roomId, turnId: requestId, text, latestChunk: text })
+      .execute('postAgentDraft', { agentId, roomId, turnId: requestId, text, latestChunk: text, ...(invocation ? { invocation } : {}) })
       .then(() => undefined)
       .catch((error) => console.error(`[thin-core] ${label} draft publish failed:`, error))
       .then(() => {
@@ -102,6 +106,11 @@ export class AgentTurnStream {
   close(): void {
     this.closed = true;
     this.pending = undefined;
+  }
+
+  abandon(): void {
+    this.close();
+    this.overlay?.abandon();
   }
 
   /**
@@ -120,14 +129,16 @@ export class AgentTurnStream {
       // to be the last word on this lane, or that late write puts an obsolete
       // draft back after the lane was supposed to be empty.
       await this.inFlight;
+      if (this.options.current?.() === false) return;
       if(this.overlay){await this.overlay.close('retract');return;}
-      const { api, agentId, roomId, requestId, label } = this.options;
+      const { api, agentId, roomId, requestId, label, invocation } = this.options;
       await api
         .execute('retractAgentLiveOutput', {
           agentId,
           roomId,
           turnId: requestId,
           kind: 'draft',
+          ...(invocation ? { invocation } : {}),
         })
         .catch((error) => console.error(`[thin-core] ${label} draft retract failed:`, error));
     })();

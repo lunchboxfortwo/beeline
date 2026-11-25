@@ -36,6 +36,7 @@ export class GrantRunnerServer {
         input?: unknown;
       },
     ) => Promise<unknown>,
+    private readonly currentSession?: (placeId: string, resetId: string | string[] | undefined) => boolean,
   ) {}
 
   async start(): Promise<GrantRunnerEndpoint> {
@@ -93,6 +94,10 @@ export class GrantRunnerServer {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk as Buffer);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const placeId = request.url === '/run' ? body.roomId : body.placeId;
+      if (typeof placeId === 'string' && this.currentSession &&
+          !this.currentSession(placeId, request.headers['x-beeline-place-reset']))
+        throw new Error('this daemon is not serving that chat');
       if (request.url === '/session') {
         if (!this.session || typeof body.placeId !== 'string')
           throw new Error('Session tools unavailable');

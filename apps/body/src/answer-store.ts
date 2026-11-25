@@ -10,6 +10,7 @@ export interface StoredAnswer {
   readonly queuedRequestIds?: readonly string[];
   readonly roomId: string;
   readonly requestId: string;
+  readonly resetId?: string;
   /** Empty text alone does not acknowledge an unanswered queue item. */
   readonly text: string;
   readonly failureReason?: string;
@@ -28,16 +29,18 @@ export interface StoredAnswer {
 export class AnswerStore {
   constructor(private readonly directory: string) {}
 
-  private path(itemId: string): string {
-    return resolve(this.directory, `${itemId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`);
+  private path(answer: Pick<StoredAnswer, 'itemId' | 'resetId'>): string {
+    const id = answer.itemId.replace(/[^A-Za-z0-9_-]/g, '_');
+    const suffix = answer.resetId ? `.${answer.resetId.replace(/[^A-Za-z0-9_-]/g, '_')}` : '';
+    return resolve(this.directory, `${id}${suffix}.json`);
   }
 
   async save(answer: StoredAnswer): Promise<void> {
-    await writePrivateFileAtomically(this.path(answer.itemId), JSON.stringify(answer));
+    await writePrivateFileAtomically(this.path(answer), JSON.stringify(answer));
   }
 
-  async remove(itemId: string): Promise<void> {
-    await rm(this.path(itemId), { force: true });
+  async remove(answer: Pick<StoredAnswer, 'itemId' | 'resetId'>): Promise<void> {
+    await rm(this.path(answer), { force: true });
   }
 
   async all(): Promise<StoredAnswer[]> {

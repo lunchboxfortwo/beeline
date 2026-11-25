@@ -4,6 +4,7 @@ import {
   type HelperOverlayDemand, type HelperOverlayFrame,
 } from '@beeline/api-contract/helper-overlay';
 import { authorizeCommandOutput, type CommandRow } from './agent-command.js';
+import { lockAgentPlace, readAgentPlaceResets } from './agent-place-reset.js';
 import { subscribeCommandCompletion } from './command-completion.js';
 import type { SqlDatabase } from './database.js';
 import type { LiveEvent } from './live.js';
@@ -92,9 +93,18 @@ async function currentOwner(db:SqlDatabase,metadata:HelperOverlayMetadata):Promi
     WHERE connection.agent_id=$1 AND connection.connection_id=$2 AND connection.epoch=$3
     AND connection.released_at IS NULL FOR SHARE OF connection`,[metadata.agentId,metadata.connectionId,metadata.connectionEpoch]);
   if(!row.rowCount)return;
-  // The draft lane belongs to one queue item: its id is both commandId and turnGeneration.
+  await lockAgentPlace(db, metadata.agentId, metadata.roomId);
   const command=await authorizeCommandOutput(db,metadata.roomId,metadata.agentId,metadata.turnId);
-  if(command.id!==metadata.commandId||command.id!==metadata.turnGeneration)return;
+  if(command.id!==metadata.commandId)return;
+  const [reset] = await readAgentPlaceResets(db, metadata.agentId, metadata.roomId);
+  // After a reset the same queue item can have a different producer.
+  if (reset) {
+    if (!(await db.query(`SELECT 1 FROM agent_turns turn JOIN agent_invocations invocation
+      ON invocation.command_id=$1 AND invocation.invocation_id=turn.invocation_id
+      WHERE turn.agent_id=$2 AND turn.room_id=$3 AND turn.request_id=$4
+        AND invocation.invocation_id=$5 AND invocation.reset_id=$6`,
+      [command.id, metadata.agentId, metadata.roomId, metadata.turnId, metadata.turnGeneration, reset.id])).rowCount) return;
+  } else if (command.id !== metadata.turnGeneration) return;
   if(command.state!=='pending'&&metadata.type!=='end'&&metadata.type!=='retract')return;
   return command;
 }
@@ -163,7 +173,7 @@ export async function fenceHelperOverlayEnqueue(db:SqlDatabase,event:LiveEvent,e
       WHERE room_id=$1 AND agent_id=$2 AND turn_id=$3 AND kind=$4`,
       [metadata.roomId,metadata.agentId,metadata.turnId,metadata.kind])).rows[0]?.body;
     const current=helperOverlayMetadata(latest?.overlayV1);
-    if(!current||current.runGeneration!==metadata.runGeneration||current.revision<metadata.revision||
+    if(!current||current.turnGeneration!==metadata.turnGeneration||current.runGeneration!==metadata.runGeneration||current.revision<metadata.revision||
       ((current.type==='end'||current.type==='retract')&&metadata.type!=='end'&&metadata.type!=='retract'))return;
     enqueue();
   });}catch{/* A stale/unavailable overlay stays hidden. */}

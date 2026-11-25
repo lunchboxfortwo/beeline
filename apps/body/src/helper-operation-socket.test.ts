@@ -125,7 +125,7 @@ it('delivers committed reply ids and carries the last queue into a reconnect sub
     commands: [item],
     completedCommandIds: [],
   });
-  expect(listener).toHaveBeenLastCalledWith([item], [], []);
+  expect(listener).toHaveBeenLastCalledWith([item], [], [], []);
   sockets[0]!.close();
   await flush();
   sockets[1]!.open();
@@ -136,13 +136,15 @@ it('delivers committed reply ids and carries the last queue into a reconnect sub
     agentId,
     knownCommandIds: ['command'],
   });
+  const reset = { roomId: item.roomId, id: 'a'.repeat(64) };
   sockets[1]!.receive({
     type: 'commands',
     commandProtocol: 2,
     commands: [],
     completedCommandIds: ['command'],
+    resets: [reset],
   });
-  expect(listener).toHaveBeenLastCalledWith([], ['command'], []);
+  expect(listener).toHaveBeenLastCalledWith([], ['command'], [], [reset]);
   sockets[1]!.receive({
     type: 'commands',
     commandProtocol: 2,
@@ -150,7 +152,7 @@ it('delivers committed reply ids and carries the last queue into a reconnect sub
     completedCommandIds: [],
     stoppedCommandIds: ['command', 7],
   });
-  expect(listener).toHaveBeenLastCalledWith([], [], ['command']);
+  expect(listener).toHaveBeenLastCalledWith([], [], ['command'], []);
 });
 it('registration refusal ends waiting requests with its code without another socket or a timer', async () => {
   const { api, sockets, machine } = fixture();

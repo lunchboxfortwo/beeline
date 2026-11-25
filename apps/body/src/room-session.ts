@@ -17,6 +17,7 @@ export function beelineAgentMcpServer(
   api: DaemonApiClient,
   context: {
     roomId: string;
+    resetId?: string;
     operatorAgent?: boolean;
     workspaceId: string;
     cornerId?: string;
@@ -77,6 +78,7 @@ export function beelineAgentMcpServer(
         : []),
       { name: 'BEELINE_OPERATOR_HOME', value: config.operatorHome ?? homedir() },
       { name: 'BEELINE_DAEMON_ROOM_ID', value: context.roomId },
+      ...(context.resetId ? [{ name: 'BEELINE_PLACE_RESET_ID', value: context.resetId }] : []),
       { name: 'BEELINE_DAEMON_WORKSPACE_ID', value: context.workspaceId },
       ...(context.cornerId ? [{ name: 'BEELINE_DAEMON_CORNER_ID', value: context.cornerId }] : []),
       ...(context.reviewer ? [{ name: 'BEELINE_CORNER_REVIEWER', value: '1' }] : []),

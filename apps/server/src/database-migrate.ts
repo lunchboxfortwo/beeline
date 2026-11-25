@@ -28,6 +28,7 @@ import { SERVER_LEASE_DEADLINE_SCHEMA } from './server-lease-deadlines.js';
 import { commandCompletionSchema } from './command-completion.js';
 import { ROUTER_COMMAND_SCHEMA } from './router-command-ledger.js';
 import { AGENT_TURN_END_SCHEMA,RETIRED_STOP_CONTROLS } from './agent-turn-end.js';
+import { migratePendingAgentPlaceResets } from './agent-place-reset.js';
 import { AGENT_CORNER_HOLDS_SCHEMA } from './migrations/agent-corner-holds.js';
 import { MOBILE_MINIMUM_SCHEMA } from './mobile-minimum.js';
 import { STARTER_ONBOARDING_SCHEMA } from './starter-onboarding-run.js';
@@ -166,12 +167,14 @@ export async function migrate(
   await ddlScript('agent command schema', AGENT_COMMAND_SCHEMA);
   await runMigrationStep('record thread implementers', () => backfillThreadImplementers(database));
   await ddlScript('diagnostic command observations', DIAGNOSTIC_COMMAND_SCHEMA);
-  await runMigrationStep('one active helper restart', () => createIndexConcurrently(
-    database,'agent_commands_one_restart',
-    `CREATE UNIQUE INDEX CONCURRENTLY agent_commands_one_restart ON agent_commands(agent_id)
-      WHERE action='restart' AND state='pending'`,
-  ));
+  await ddl('remove pending restart uniqueness', 'DROP INDEX CONCURRENTLY IF EXISTS agent_commands_one_restart');
   await ddlScript('agent turn ending', AGENT_TURN_END_SCHEMA);
+  await runMigrationStep('completed helper restart markers', () => createIndexConcurrently(
+    database, 'agent_commands_place_resets',
+    `CREATE INDEX CONCURRENTLY agent_commands_place_resets ON agent_commands(agent_id,room_id,inbox_sequence DESC)
+      WHERE action='restart' AND state='complete'`,
+  ));
+  await runMigrationStep('complete legacy helper restart requests', () => migratePendingAgentPlaceResets(database));
   await ddlScript('retired stop controls', RETIRED_STOP_CONTROLS);
   // The previous serving/rollback image still owns its notification capture
   // triggers. Retire them together with their storage in a later contract release.

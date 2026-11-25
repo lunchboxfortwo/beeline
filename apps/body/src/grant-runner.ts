@@ -622,6 +622,7 @@ export class GrantCommandRunner {
     // A once grant is spent before the command starts, so a second call in the
     // same instant cannot ride the same approval.
     for (const spent of [grant, ...secretGrants]) {
+      if (this.rooms.get(input.roomId) !== room) throw new Error('this daemon is not serving that chat');
       if (spent.status === 'once')
         await this.options.api.execute('consumeAgentGrant', { grantId: spent.grantId });
     }
@@ -665,6 +666,7 @@ export class GrantCommandRunner {
         );
     // Re-check after secret resolution and Once consumption, immediately before exec.
     if (match) await this.checkScriptBinding(grant, room.cwd, env, argv, stdin);
+    if (this.rooms.get(input.roomId) !== room) throw new Error('this daemon is not serving that chat');
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let failure: Error | undefined;
@@ -779,7 +781,7 @@ export class GrantCommandRunner {
         : outcome.exitCode === null
           ? 'error'
           : `exit ${outcome.exitCode}`;
-    await this.options.api.execute('postAgentActivity', {
+    if (this.rooms.get(input.roomId) === room) await this.options.api.execute('postAgentActivity', {
       agentId: this.options.agentId,
       roomId: input.roomId,
       requestId: turn?.requestId ?? `grant:${grant.grantId}`,
