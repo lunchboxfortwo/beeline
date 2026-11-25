@@ -3,6 +3,7 @@ import { Check, Errors } from 'typebox/value';
 import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
 import { randomBytes } from 'node:crypto';
 import { answerQueuedMessage, queueMessage, refuseMessageMembership, type CommandRow } from './agent-command.js';
+import { CommandRefusalError } from './command-refusal.js';
 import { commandAddress } from './commander.js';
 import { cornerCommanderIdSql } from './corner-commander.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
@@ -138,12 +139,7 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE agent_id=$1 AND room_id=$3 AND (id=$2 OR source_message_id=$2)
     ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id,input.roomId])).rows[0];
-  if (!item) {
-    if (!input.roomId) refuseMessageMembership();
-    const post = await queueMessage(db,{kind:'post',roomId:input.roomId,authorId:agentId,text:modelText(input.text),
-      id:input.messageId,agentIds:[],requestId:input.requestId,commandRoomId:input.roomId});
-    return {id:post.id,createdAt:post.createdAt,receipt:'Task outside this session. Text posted in this place.'};
-  }
+  if (!item) throw new CommandRefusalError('Quote a message that woke this turn.',400);
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true});
   if (!('answered' in saved) || saved.answered!==false) onAnswered?.(item.room_id);
