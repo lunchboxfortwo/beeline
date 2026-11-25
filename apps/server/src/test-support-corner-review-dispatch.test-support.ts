@@ -60,7 +60,7 @@ export const result = async(c:AgentCommand,text:string,_generationId='g1',extra=
 /** Explicit findings request at the implementer's thread address, then end the review turn. */
 export async function findings(c:AgentCommand,text:string) {
   const saved=await daemon.execute('message',{roomId:c.roomId,requestId:c.turnRequestId,
-    to:{agent:'implementer',place:c.roomId},text},c.agentId);
+    type:'normal',address:`${A}@${c.roomId}`,text},c.agentId);
   await result(c,'');
   return saved;
 }

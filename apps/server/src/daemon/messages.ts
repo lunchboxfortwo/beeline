@@ -33,7 +33,8 @@ import { modelText } from '../message-origin.js';
       });
       return { id: saved.id, createdAt: saved.createdAt };
     }
-    return answerQueuedMessage(ctx.database, agentId, input);
+    const { roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,replyToMessageId } = input;
+    return answerQueuedMessage(ctx.database,agentId,{roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,replyToMessageId});
   }
 
   export async function daemonPostAgentAttachment(ctx: DaemonContext, input: Input<'postAgentAttachment'>, agentId: string) {

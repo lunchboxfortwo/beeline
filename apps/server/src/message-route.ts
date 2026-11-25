@@ -1,6 +1,5 @@
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { threadCommanderAddressSql } from './corner-commander.js';
-import { cornerReviewerSql } from './corner-reviewer.js';
 import type { MessageAddress, MessageRoute } from '@beeline/api-contract/daemon';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
@@ -20,13 +19,11 @@ export async function reportRecipient(db:SqlDatabase,item:CommandRow):Promise<Me
   // A system wake (a Sentry alert) records who it answers; that is the issuer, not the System.
   const issuer = sender.agent === SYSTEM_IDENTITY_ID ? address : sender;
   const thread = (await db.query<{address:MessageAddress|null}>(`SELECT CASE
-    WHEN ${cornerReviewerSql('room','parent')}=$2 AND fact.implementer_agent_id IS NOT NULL AND fact.implementer_agent_id<>$2
-      THEN jsonb_build_object('agent',fact.implementer_agent_id,'place',room.id)
-    WHEN room.id::text=$4 AND $3<>'${SYSTEM_IDENTITY_ID}' AND EXISTS(SELECT 1 FROM identities WHERE id=$3 AND kind='human')
-      THEN jsonb_build_object('agent',$3::text,'place',room.id)
-    ELSE ${threadCommanderAddressSql('room.id')} END address
-    FROM rooms room JOIN rooms parent ON parent.id=room.parent_id LEFT JOIN corner_facts fact ON fact.corner_id=room.id
-    WHERE room.id=$1`,[item.room_id,item.agent_id,issuer.agent,issuer.place])).rows[0];
+    WHEN room.id::text=$3 AND $2<>'${SYSTEM_IDENTITY_ID}' AND EXISTS(SELECT 1 FROM identities WHERE id=$2 AND kind='human')
+      THEN jsonb_build_object('agent',$2::text,'place',room.id)
+    ELSE COALESCE(${threadCommanderAddressSql('room.id')},jsonb_build_object('agent',room.created_by,'place',room.parent_id)) END address
+    FROM rooms room JOIN rooms parent ON parent.id=room.parent_id
+    WHERE room.id=$1`,[item.room_id,issuer.agent,issuer.place])).rows[0];
   return thread?.address ?? (address.agent === SYSTEM_IDENTITY_ID ? {...address,place:item.room_id} : address);
 }
 

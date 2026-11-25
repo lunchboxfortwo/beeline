@@ -1,4 +1,4 @@
-import { it,expect,B,H,SHA,rootFixture,inReview,branchOf,approve } from './test-support-corner-lifecycle.test-support.js';
+import { it,expect,A,B,H,SHA,rootFixture,inReview,branchOf,approve } from './test-support-corner-lifecycle.test-support.js';
 import { DaemonService } from './daemon-service.js';
 import { PhoneService } from './phone-service.js';
 import { LiveHub } from './live.js';
@@ -9,7 +9,7 @@ const wired=()=>{ const daemon=new DaemonService(rootFixture.db,new LiveHub(),un
   (input,confirm)=>rootFixture.github.prChecksStatus(input,confirm),undefined,undefined,undefined,undefined,undefined,undefined,
   undefined,undefined,undefined,(id,blocked)=>rootFixture.github.landCornerOutcome(id,blocked));
   Object.assign(daemon,{github:rootFixture.github});return daemon;};
-it('S2: reviewer yes and green merge without a brief or an agent wake; a hold release opens the same gate',async()=>{
+it('S2: reviewer approval wakes the implementer once and releasing the hold merges quietly',async()=>{
   // https://github.com/Beeline-Work/beeline/pull/72: reviewer yes was stranded without a brief.
   const thread=await inReview();
   await rootFixture.db.query('DELETE FROM corner_brief_revisions WHERE corner_id=$1',[thread]);
@@ -18,10 +18,10 @@ it('S2: reviewer yes and green merge without a brief or an agent wake; a hold re
   const before=await queueIds();
   await wired().execute('approveCornerMerge',{cornerId:thread,headSha:SHA},B);
   expect(rootFixture.githubApp.mergePullRequest).not.toHaveBeenCalled();
-  expect(await added(before)).toEqual([]);
+  expect(await added(before)).toEqual([{agent_id:A,room_id:thread}]);
   await phone.execute('setCornerHold',{cornerId:thread,releaseHoldId:hold.holdId},H);
   expect(rootFixture.githubApp.mergePullRequest).toHaveBeenCalledTimes(1);
-  expect(await added(before)).toEqual([]);
+  expect(await added(before)).toEqual([{agent_id:A,room_id:thread}]);
 });
 it('S2: green after yes merges without an agent wake',async()=>{
   const thread=await inReview();

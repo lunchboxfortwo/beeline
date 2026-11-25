@@ -81,7 +81,7 @@ function reviewVerdictSql(command: string, pattern: string): string {
 }
 
 /** FAIL findings as `loadCornerReviewState` recognizes them. */
-const REVIEW_FINDINGS_PATTERN = String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?((done|failed|blocked):[[:space:]]*)?(verdict:[[:space:]]*)?FAIL([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`;
+const REVIEW_FINDINGS_PATTERN = String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?(verdict:[[:space:]]*)?FAIL([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`;
 
 
 export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, headSha: string | undefined) {

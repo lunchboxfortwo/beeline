@@ -23,9 +23,9 @@ it('S3: thread and chat tuples select exactly the recorded target and place; rep
 it('S3: a closed recorded destination ends the turn without rerouting to its parent',async()=>{
   const task=await sendMessage(db,{route:{from:{agent:A,place:THREAD},to:{agent:B,place:CHAT}},text:'Work'});
   await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[THREAD]);
-  await replyToMessage(db,B,{roomId:CHAT,id:task.id,text:'Done'});
-  expect(await queued()).toEqual([]);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows[0]).toEqual({state:'cancelled'});
+  await expect(replyToMessage(db,B,{roomId:CHAT,id:task.id,text:'Done'})).rejects.toThrow('archived');
+  expect(await queued()).toEqual([[B,CHAT]]);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows[0]).toEqual({state:'pending'});
 });
 
 it('S3: replying to a recorded sender can return to its private chat without joining the worker there',async()=>{
@@ -36,9 +36,10 @@ it('S3: replying to a recorded sender can return to its private chat without joi
 });
 
 it('S3: native message and reply operations deliver the same immutable tuple envelope',async()=>{
-  const sent=await daemon.execute('message',{roomId:CHAT,to:{agent:'implementer',place:THREAD},text:'Build widget'},A);
+  const sent=await daemon.execute('message',{roomId:CHAT,type:'normal',address:`${B}@${THREAD}`,text:'Build widget'},A);
   expect(await queued()).toEqual([[B,THREAD]]);
-  await daemon.execute('reply',{roomId:THREAD,id:sent.id,text:'Done'},B);
+  await daemon.execute('message',{type:'reply',roomId:THREAD,requestId:sent.id,quoteMsgId:sent.id,text:'Done'},B);
+  await daemon.execute('postRoomMessage',{roomId:THREAD,requestId:sent.id,text:''},B);
   expect(await queued()).toEqual([[A,CHAT]]);
 });
 it('S3: an MCP message keeps its explicit sending place when another place has pending work',async()=>{

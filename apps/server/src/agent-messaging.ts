@@ -38,7 +38,7 @@ export const notWokenReceipt = (reason: string) => `Message stored and visible. 
 
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
-  type?: 'normal' | 'blocked' | 'reply'; legacyAsk?:string; route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
+  type?: 'normal' | 'blocked' | 'reply'; route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
   assertMemberTranscript(input.route.from.agent);
@@ -98,7 +98,7 @@ export async function sendMessage(db: SqlDatabase, input: {
       const choice = await postRoomChoice(tx, {
         roomId: to.place, agentId: route.from.agent, requesterId: to.agent, mode: 'question',
         messageId: id, messageText: modelText(input.text), messageCard: { route, sourceRoomId: route.from.place, ...(reportStatus ? {reportStatus,reportToId:to.agent}: {}) },
-        messageAttachments:input.attachments,messageOrigin:route.from,messageAudienceId:input.replyTo ? to.agent : undefined,
+        replyTo:input.replyTo,parentCommand:input.parent,messageAttachments:input.attachments,messageOrigin:route.from,messageAudienceId:input.replyTo ? to.agent : undefined,
         prompt: input.ask.question, ask: input.ask.question, requestId: input.parent?.turn_request_id,
         options: input.ask.options.map(label => ({ label })),
       });
@@ -118,7 +118,7 @@ export async function sendMessage(db: SqlDatabase, input: {
       ? (await tx.query<{origin:string}>("SELECT card->>'sourceRoomId' origin FROM messages WHERE id=$1",[input.parent.id])).rows[0]?.origin
       : undefined;
     const saved = await queueMessage(tx,{kind:'post',id,roomId:to.place,authorId:route.from.agent,
-      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:sourceRoomId ?? route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent,...(input.legacyAsk ? {ask:input.legacyAsk}: {})}: {})},agentIds:[],audienceId:input.replyTo || reportStatus ? to.agent : undefined,
+      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:sourceRoomId ?? route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent}: {})},agentIds:[],audienceId:input.replyTo || reportStatus ? to.agent : undefined,
       attachments:input.attachments,parent:input.parent,replyTo:input.replyTo ?? input.parent?.source_message_id ?? (reportStatus ? input.parent?.id : undefined),
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
     return { id:saved.id,createdAt:saved.createdAt };
@@ -137,7 +137,7 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   if (invocation?.state === 'cancelled') refuseMessageMembership('command turn cancelled');
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE agent_id=$1 AND room_id=$3 AND (id=$2 OR source_message_id=$2)
-    ORDER BY (id=$2) DESC,created_at DESC LIMIT 1`,[agentId,input.id,input.roomId])).rows[0];
+    ORDER BY (id=$2) DESC,created_at DESC LIMIT 1 FOR UPDATE`,[agentId,input.id,input.roomId])).rows[0];
   if (!item) refuseMessageMembership('Quote a message that woke this turn.');
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true});

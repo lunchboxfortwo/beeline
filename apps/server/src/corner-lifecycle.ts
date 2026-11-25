@@ -786,7 +786,8 @@ export async function queueReviewerCommand(
              SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
          UNION ALL
          SELECT report.private_payload->>'text',report.created_at FROM agent_commands report
-         WHERE (report.id=command.result_message_id OR report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb))))
+         WHERE (report.id=command.result_message_id OR report.id IN (SELECT jsonb_array_elements_text(COALESCE(command.review_context->'reportIds','[]'::jsonb)))
+           OR report.parent_command_id=command.id AND report.review_context->>'purpose'='repair')
            AND report.private_payload->>'authorId'=command.agent_id
        ) evidence
        WHERE command.room_id=$1 AND command.agent_id=$2 AND command.review_context IS NOT NULL

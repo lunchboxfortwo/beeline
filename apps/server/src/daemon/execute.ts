@@ -2,8 +2,6 @@ import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { createHash,randomBytes } from 'node:crypto';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
-import { answerQueuedMessage } from '../agent-command.js';
-import { sendOrder } from '../commander.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
 import { createDaemonCommandService } from '../daemon-service.js';
@@ -14,17 +12,14 @@ import { LiveHub,type LiveEvent } from '../live.js';
 import { cleanVoiceReply } from '../voice-reply.js';
 import { daemonAccess,daemonReviewSourceAccess } from './access.js';
 import type { DaemonContext } from './context.js';
-import { daemonPostCornerMessage,daemonReach,daemonWriteResult } from './corner-messages.js';
+import { daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonAuthorizeScopedGrant } from './grants.js';
-import { recordReportedReviewApproval } from './corner-reads.js';
 import { daemonPostRoomMessage } from './messages.js';
 import { daemonExecuteOperation } from './operations.js';
 import { daemonTurnReceipt } from './turn-receipts.js';
 import { normalizePlaceAddresses } from './place-address.js';
 import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output } from './values.js';
-import { modelText } from '../message-origin.js';
 import { sendSessionMessage } from '../session-message.js';
-import { sendMessage,replyToMessage } from '../agent-messaging.js';
 
 
   /** One request from an agent: the membership wall, then the queue item the
@@ -310,54 +305,24 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
 ): Promise<Output<Name>> {
   input = normalizePlaceAddresses(name, input);
   const value = input as Record<string, unknown>;
-  if (name==='message' || name==='reply') {
-    const messageId=typeof value.transportRequestId==='string'
+  if (name === 'message') {
+    const request = input as Input<'message'>;
+    const messageId = typeof value.transportRequestId === 'string'
       ? createHash('sha256').update(`message:${agentId}:${value.transportRequestId}`).digest('hex') : undefined;
-    if (name==='reply') {
-      const request=input as Input<'reply'>;
-      return replyToMessage(ctx.database,agentId,{...request,messageId},roomId=>{
-        const refresh=()=>ctx.reconcileZeroCheckWorkerCompletion(roomId,agentId)
-          .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error));
-        const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
-        if (background) background.run(refresh); else void refresh();
-      }) as Promise<Output<Name>>;
-    }
-    const request=input as Input<'message'>;
-    const parent=request.requestId ? await authorizeCommandOutput(ctx.database,request.roomId,agentId,request.requestId) : undefined;
-    if ('type' in request || !('to' in request)) return sendSessionMessage(ctx.database,agentId,request,parent,messageId) as Promise<Output<Name>>;
-    return sendMessage(ctx.database,{route:{from:{agent:agentId,place:request.roomId},to:request.to},
-      text:request.text,ask:request.ask,question:request.question,brief:request.brief,options:request.options,id:messageId,parent}) as Promise<Output<Name>>;
+    return ctx.database.transaction(async db => {
+      const parent = request.requestId ? await authorizeCommandOutput(db,request.roomId,agentId,request.requestId) : undefined;
+      return sendSessionMessage(db,agentId,request,parent,messageId);
+    }) as Promise<Output<Name>>;
   }
-  if (name === 'postRoomMessage' || name === 'report') {
-    const saved=name==='postRoomMessage' ? await daemonPostRoomMessage(ctx,input as Input<'postRoomMessage'>,agentId) : await answerQueuedMessage(ctx.database, agentId, { roomId: String(value.roomId),
-      requestId: typeof value.requestId === 'string' ? value.requestId : undefined,
-      text: String(value.text ?? ''), report: true, status: value.status,
-      ask: typeof value.ask === 'string' ? value.ask : undefined,
-    });
-    if (!('answered' in saved) || saved.answered!==false) {
-      const refresh=async()=>{
-        await Promise.all([
-          ctx.reconcileZeroCheckWorkerCompletion(String(value.roomId),agentId)
-            .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error)),
-          name==='report' && value.status==='done' && /^\s*PASS\b/.test(String(value.text ?? '')) && typeof value.requestId==='string'
-            ? recordReportedReviewApproval(ctx,agentId,value.requestId)
-              .catch(error=>console.warn('[answer] optional reviewer approval omitted:',error)) : Promise.resolve(),
-        ]);
-      };
-      const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
+  if (name === 'postRoomMessage') {
+    const saved = await daemonPostRoomMessage(ctx,input as Input<'postRoomMessage'>,agentId);
+    if (!('answered' in saved) || saved.answered !== false) {
+      const refresh = () => ctx.reconcileZeroCheckWorkerCompletion(String(value.roomId),agentId)
+        .catch(error => console.warn('[answer] optional lifecycle refresh omitted:',error));
+      const background = CornerAccessDatabase.physical(ctx.database).backgroundWork;
       if (background) background.run(refresh); else void refresh();
     }
     return saved as Output<Name>;
-  }
-  if (name === 'postCornerMessage' || name === 'order') {
-    const parent = typeof value.requestId === 'string' ? (await ctx.database.query<import('../agent-command.js').CommandRow>(
-      `SELECT * FROM agent_commands WHERE room_id::text=$1 AND agent_id=$2 AND turn_request_id=$3
-       ORDER BY created_at DESC,id DESC LIMIT 1`, [String(value.roomId), agentId, value.requestId])).rows[0] : undefined;
-    if (name === 'postCornerMessage')
-      return daemonPostCornerMessage({ ...ctx, authorizedCommand: parent }, input as Input<'postCornerMessage'>, agentId) as Promise<Output<Name>>;
-    return sendOrder(ctx.database, parent!, agentId, String(value.address), modelText(String(value.text ?? '')),
-      typeof value.agent === 'string' ? value.agent : undefined, undefined,
-      typeof value.transportRequestId === 'string' ? createHash('sha256').update(`order:${agentId}:${value.transportRequestId}`).digest('hex') : undefined) as Promise<Output<Name>>;
   }
   return daemonExecuteTool(helperConnection ? {...ctx,helperConnection} : ctx, name, input, agentId);
 }

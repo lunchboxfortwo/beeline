@@ -14,7 +14,7 @@ import { sendOperatorSystemDm, readOperatorSystemDm } from '../operator-system-d
 import { productionReleaseDispatch } from '../production-release-dispatch.js';
 import { agentUsage, notifyUsageRefreshResult, postedRefreshOutcome, saveAgentUsage } from '../agent-usage.js';
 import { queueDatabaseWork } from '../database-work-queue.js';
-import { commandAddress, sendOrder, stopCommandedTurn, CommandRefusalError } from '../commander.js';
+import { commandAddress, stopCommandedTurn, CommandRefusalError } from '../commander.js';
 import { createAgentSubscription, listAgentSubscriptions, deleteAgentSubscription, listServiceSubscriptionEvents } from '../agent-subscriptions.js';
 import { completeProviderWebhookAssignment } from '../provider-webhooks.js';
 import { reportAgentSignIn } from '../agent-sign-in.js';
@@ -34,10 +34,10 @@ import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, sea
 import { daemonAccess, daemonRoomMembers } from './access.js';
 import { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
 import { daemonRoomMessage } from './message-reads.js';
-import { daemonReport, daemonWatchCorner, daemonCornerRemote, daemonCornerPlan, daemonRenameCorner, daemonTargetProposal } from './corner-reports.js';
+import { daemonWatchCorner, daemonCornerRemote, daemonCornerPlan, daemonRenameCorner, daemonTargetProposal } from './corner-reports.js';
 import { daemonRoomAuthority, daemonPermissionAuthority, daemonMissionAuthority, daemonScheduleAuthority, daemonMandate, daemonTargetAuthority } from './authority.js';
 import { daemonCreateAgentSchedule, daemonSetEventSubscriptions, daemonListEventSubscriptions, daemonPostRoomEvent, daemonListAgentSchedules, daemonDeleteAgentSchedule, daemonUpdateAgentSchedule } from './schedules-events.js';
-import { daemonWriteResult, daemonReach, daemonPostCornerMessage, daemonReactToRoomMessage } from './corner-messages.js';
+import { daemonWriteResult, daemonReach, daemonReactToRoomMessage } from './corner-messages.js';
 import { daemonCorners, daemonApproveCornerMerge, daemonMergeCorner, daemonCornerRestore, daemonListCornerBriefRevisions, daemonRepository, daemonTargetBranch } from './corner-reads.js';
 import { daemonReviseCornerBrief, daemonCreateCorner, daemonArchiveCorner, daemonEnsureMembership } from './corner-writes.js';
 import { daemonRepositoryOnboardingRequester, daemonRequestAgentGrant, daemonGrantRequester, daemonAskRoomChoice, daemonOpenRoomPoll, daemonListAgentGrants, daemonConsumeAgentGrant, daemonListAgentGrantRequests, daemonAuthorizeSquireCall } from './grants.js';
@@ -50,7 +50,6 @@ import { daemonConnectorAssignments, daemonConnectorInstall, daemonConnectorStat
 import { daemonAuthorizeResource, daemonConnectMcpServer, daemonOfferConnector } from './connector-offers.js';
 import { daemonAgentWorkbench, daemonSearchMcpRegistry } from './workbench.js';
 import { daemonConnectAppFrontDoor, daemonConnectService, daemonListAppTools, daemonExecuteAppTool } from './apps.js';
-import { modelText } from '../message-origin.js';
 
 export async function daemonExecuteOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
     switch (name) {
@@ -196,18 +195,10 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           input as Input<'getRoomMessage'>,
           authenticatedAgentId,
         )) as Output<Name>;
-      case 'order':
-        return await sendOrder(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,
-          String(candidate.address), modelText(String(candidate.text)),
-          candidate.agent === undefined ? undefined : String(candidate.agent), ctx.afterCommit) as Output<Name>;
       case 'stopAgentTurn':
         return await stopCommandedTurn(ctx.database, ctx.authorizedCommand!, authenticatedAgentId,
           String(candidate.address),
           candidate.agent === undefined ? undefined : String(candidate.agent)) as Output<Name>;
-      case 'report': {
-        const ask = typeof candidate.ask === 'string' ? candidate.ask : undefined;
-        return await daemonReport(ctx, typeof candidate.text === 'string' ? candidate.text : '', authenticatedAgentId, ctx.authorizedCommand!, ctx.database, false, candidate.status, ask) as Output<Name>;
-      }
       case 'read': {
         const target = await commandAddress(ctx.database, String(candidate.address), authenticatedAgentId, true);
         return await daemonInbox(ctx, 'getRoomConversation', { roomId: target.id, limit: candidate.limit as number | undefined }, authenticatedAgentId) as Output<Name>;
@@ -339,11 +330,6 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           return { status: 'blocked', blocker: 'GitHub is not configured on this server' } as Output<Name>;
         return (await ctx.readPullRequest(cornerId)) as Output<Name>;
       }
-      case 'postCornerMessage':
-        return (await daemonPostCornerMessage(ctx,
-          input as Input<'postCornerMessage'>,
-          authenticatedAgentId,
-        )) as Output<Name>;
       case 'getPrChecksStatus':
         if (!ctx.prChecksStatus) throw new Error('GitHub PR checks service unavailable');
         return (await ctx.prChecksStatus(input as Input<'getPrChecksStatus'>)) as Output<Name>;
@@ -894,6 +880,6 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           ctx.afterCommit,
         )) as Output<Name>;
       default:
-        throw new CommandRefusalError(`unsupported daemon operation: ${String(name)}; use message and reply`, 410);
+        throw new CommandRefusalError(`unsupported daemon operation: ${String(name)}; use message`, 410);
     }
 }

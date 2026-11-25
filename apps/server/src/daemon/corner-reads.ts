@@ -1,3 +1,5 @@
+import { queueMessage } from '../agent-command.js';
+import { SYSTEM_AUTHOR_ID,systemText } from '../message-origin.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { cornerObjectiveSql } from '../corner-objective.js';
 import { cornerFeatureBranch } from '../corner-branch.js';
@@ -274,12 +276,20 @@ import { daemonIdentity, daemonAccess } from './access.js';
         );
       await assertIndependentCornerReviewer(db, input.cornerId, agentId,
         (id, reviewer) => daemonCheckReviewerAuthors(ctx, db, id, reviewer));
-      await recordCornerMergeApproval(db, {
+      const recorded = await recordCornerMergeApproval(db, {
         cornerId: input.cornerId,
         approvedBy: agentId,
         pullRequestNumber: target.pull_request_number,
         headSha: target.head_sha,
       });
+      if (recorded) {
+        const worker = (await db.query<{implementer_agent_id:string}>(
+          'SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[input.cornerId])).rows[0]?.implementer_agent_id;
+        if (worker && worker !== agentId) await queueMessage(db,{
+          roomId:input.cornerId,agentId:worker,sourceMessageId:null,reason:'report',
+          privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:input.cornerId,text:systemText('PASS')},
+        });
+      }
       await advanceCorner(db, input.cornerId, { kind: 'approval', headSha: target.head_sha, by: 'reviewer' });
       return {
         pullRequestNumber: target.pull_request_number,
@@ -344,17 +354,3 @@ import { daemonIdentity, daemonAccess } from './access.js';
     if (!row) throw new Error('chat not found');
     return { targetBranch: row.repository_target_branch, updatedAt: seconds(row.updated_at) };
   }
-
-/** A committed explicit reviewer report can record its verdict independently
- * of answer delivery. The approval owner retains all exact-head/merge policy. */
-export async function recordReportedReviewApproval(ctx: DaemonContext, agentId: string, requestId: string): Promise<void> {
-  const review=(await ctx.database.query<{corner_id:string;head_sha:string}>(
-    `SELECT review.* FROM (SELECT COALESCE(review_context->>'cornerId',room_id::text) corner_id,
-       review_context->>'headSha' head_sha FROM agent_commands
-       WHERE agent_id=$1 AND turn_request_id=$2 AND review_context->>'headSha' IS NOT NULL
-       ORDER BY created_at DESC LIMIT 1) review
-     WHERE NOT EXISTS(SELECT 1 FROM corner_merge_approvals approval WHERE approval.corner_id::text=review.corner_id
-       AND approval.head_sha=review.head_sha AND approval.approved_by=$1)`,[agentId,requestId])).rows[0];
-  if (review && await isCornerReviewer(ctx.database,review.corner_id,agentId))
-    await daemonApproveCornerMerge(ctx,{cornerId:review.corner_id,headSha:review.head_sha},agentId);
-}

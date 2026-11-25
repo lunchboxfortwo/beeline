@@ -1,3 +1,4 @@
+import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { MessageAddress } from '@beeline/api-contract/daemon';
 import type { CommandRow } from './agent-command.js';
 import { sendMessage } from './agent-messaging.js';
@@ -14,7 +15,7 @@ type SessionMessage = {
   text: string;
 };
 
-export async function sendSessionMessage(database: SqlDatabase, agent: string, input: SessionMessage, parent?: CommandRow, id?: string, legacyAsk?:string) {
+export async function sendSessionMessage(database: SqlDatabase, agent: string, input: SessionMessage, parent?: CommandRow, id?: string) {
   const from = { agent, place: input.roomId };
   return database.transaction(async db => {
     if (typeof input.text !== 'string' || ['to','ask','question','brief','options'].some(field => field in input))
@@ -34,7 +35,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       to = {agent: target.agent, place: target.place};
     } else if (input.type === 'reply' && typeof input.quoteMsgId === 'string' && input.address === undefined) {
       const wake = parent?.message;
-      if (!wake || wake.systemEvent || !wake.route || wake.type === 'system' || parent?.private_payload?.kind === 'lifecycle' || input.quoteMsgId !== wake.id)
+      if (parent?.state !== 'pending' || !wake || wake.systemEvent || !wake.route || wake.route.from.agent === SYSTEM_IDENTITY_ID || wake.type === 'system' || parent?.private_payload?.kind === 'lifecycle' || input.quoteMsgId !== wake.id)
         throw new CommandRefusalError('Quote a message that woke this turn.', 400);
       to = wake.route.from;
       quote = input.quoteMsgId;
@@ -69,6 +70,9 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     } else {
       throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
     }
-    return sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id,legacyAsk});
+    const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
+    if (quote && parent) await db.query(
+      'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.id]);
+    return saved;
   });
 }

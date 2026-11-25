@@ -20,7 +20,7 @@ import type { daemonConnectionDetail,daemonConnectionGrantRevoke,daemonConnectio
 import type { daemonReconcileZeroCheckWorkerCompletion } from './corner-completion.js';
 import type { daemonPostCornerMessage,daemonReach,daemonReactToRoomMessage,daemonWriteResult } from './corner-messages.js';
 import type { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './corner-reads.js';
-import type { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonReport,daemonTargetProposal,daemonWatchCorner } from './corner-reports.js';
+import type { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonTargetProposal,daemonWatchCorner } from './corner-reports.js';
 import type { daemonArchiveCorner,daemonCreateCorner,daemonEnsureMembership,daemonReviseCornerBrief } from './corner-writes.js';
 import type { daemonAskRoomChoice,daemonAuthorizeScopedGrant,daemonAuthorizeSquireCall,daemonConsumeAgentGrant,daemonFindGrantRequester,daemonGrantRequester,daemonListAgentGrantRequests,daemonListAgentGrants,daemonOpenRoomPoll,daemonRepositoryOnboardingRequester,daemonRequestAgentGrant,daemonWriteRoomChoice } from './grants.js';
 import type { daemonBootstrap,daemonInbox,daemonWorkspaceRoster } from './inbox-roster.js';
@@ -147,7 +147,6 @@ export interface DaemonContext extends DaemonDependencies {
   commands: (...args: CommandArguments<typeof daemonCommands>) => ReturnType<typeof daemonCommands>;
   modelCatalog: (...args: CommandArguments<typeof daemonModelCatalog>) => ReturnType<typeof daemonModelCatalog>;
   machineReport: (...args: CommandArguments<typeof daemonMachineReport>) => ReturnType<typeof daemonMachineReport>;
-  report: (...args: CommandArguments<typeof daemonReport>) => ReturnType<typeof daemonReport>;
   watchCorner: (...args: CommandArguments<typeof daemonWatchCorner>) => ReturnType<typeof daemonWatchCorner>;
   cornerRemote: (...args: CommandArguments<typeof daemonCornerRemote>) => ReturnType<typeof daemonCornerRemote>;
   cornerPlan: (...args: CommandArguments<typeof daemonCornerPlan>) => ReturnType<typeof daemonCornerPlan>;

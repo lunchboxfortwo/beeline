@@ -91,8 +91,8 @@ const scope5 = fixtureScope5();
   it.each(['report', 'order', 'resume', 'watched_corner', 'corner_check', 'schedule', 'subscribed_event', 'system', 'corner_background_tool', 'corner_brief_revision'])('makes a %s wake quiet without a progress nudge', (commandReason) => {
     const text = assembleTurnPrompt({ surface: 'room', task: { body: 'Handle this wake', commandReason } }).text;
     expect(text).toContain('Do not post an update merely because time has passed');
-    expect(text).toContain('call the no_reply_needed tool');
-    expect(text).not.toContain('end silently');
+    expect(text).not.toContain('no_reply_needed');
+    expect(text).toContain('end silently');
     expect(text).not.toContain("The user hasn't heard from you in a while");
   });
 
@@ -506,7 +506,7 @@ describe('prompt assembly guards', () => {
   it('gives agents one rule for messaging each other', () => {
     for (const [name, context] of Object.entries(SESSION_VARIANTS)) {
       const text = assembleSessionPrompt(context).systemPrompt;
-      expect(text.includes('Message other agents only when'), name).toBe(!context.surface.includes('corner'));
+      expect(text.includes('Use message(type:normal) for work'), name).toBe(!context.surface.includes('corner'));
       expect(text, name).not.toContain('If human, tag them');
       expect(text, name).not.toContain('Message only your commander');
       const corner = ['code-corner', 'repo-less-corner'].includes(context.surface);
@@ -673,11 +673,11 @@ describe('prompt assembly guards', () => {
   it.each(PROMPT_SURFACES)('has one coordination rule and no chain-skipping escalation on %s', (surface) => {
     const context = { surface, agentName: 'Bee', agentCommand: 'codex-acp' };
     const entries = sessionSections(context);
-    const coordination = entries.filter(({ text }) => text.includes('Message other agents only when'));
+    const coordination = entries.filter(({ text }) => text.includes('Use message(type:normal) for work'));
     expect(coordination.map(({ section }) => section.id)).toEqual(surface.includes('corner') ? [] : ['talking']);
     const session = assembleSessionPrompt(context);
     const turn = assembleTurnPrompt({ surface, sessionPrefix: session.turnPrefix, task: { body: 'Continue' } });
-    expect(turn.text.includes('Message other agents only when')).toBe(!surface.includes('corner'));
+    expect(turn.text.includes('Use message(type:normal) for work')).toBe(!surface.includes('corner'));
     expect(turn.text).not.toContain('to the person who started the chain');
   });
 });
@@ -802,7 +802,7 @@ const scope9 = fixtureScope9();
       }).text;
     const failed = turn('check-failed');
     expect(failed).toContain('After two failed CI runs on the same suite, run that suite locally before pushing again');
-    expect(failed).toContain('after a third, reply to the task message naming the failing tests');
+    expect(failed).toContain('after a third, send the failing tests with message(type:blocked)');
     expect(turn('check-passed')).not.toContain('run that suite locally');
   });
 

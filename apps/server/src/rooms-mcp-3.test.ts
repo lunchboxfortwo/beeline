@@ -596,7 +596,7 @@ const scope3 = fixtureScope3(scope1);
     it('R-MCP-PARITY: exposes every agent tool except the documented exclusions', async () => {
       const surface = await import('../../body/src/minimal-tool-surface.js');
       const agentTools = new Set([
-        ...surface.minimalTools(true), ...surface.minimalTools(false), surface.RUNNER_TOOL, surface.SILENT_TOOL,
+        ...surface.minimalTools(true), ...surface.minimalTools(false), surface.RUNNER_TOOL,
         ...surface.scratchTools(true), ...surface.repositoryTools(),
       ].map(definition => definition.name));
       for (const name of [...Object.values(surface.REPOSITORY_ROUTES), ...Object.values(surface.SCRATCH_ROUTES),

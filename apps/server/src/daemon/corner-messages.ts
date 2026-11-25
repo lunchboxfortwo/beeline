@@ -1,6 +1,5 @@
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
-import { createHash } from 'node:crypto';
-import { queueMessage } from '../agent-command.js';
+import { authorizeCommandOutput,queueMessage } from '../agent-command.js';
 import { CommandRefusalError } from '../commander.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { type SqlDatabase } from '../database.js';
@@ -11,17 +10,16 @@ import { modelText } from '../message-origin.js';
 
 
   /** A public message; agent-authored tags never wake an agent. */
-  export async function daemonPostCornerMessage(ctx: DaemonContext, input: Input<'postCornerMessage'>, agentId: string) {
+  export async function daemonPostCornerMessage(ctx: DaemonContext, input: {roomId:string; cornerId:string; text:string; requestId?:string; replyTo?:string}, agentId: string) {
+    const parent = input.requestId ? await authorizeCommandOutput(ctx.database,input.roomId,agentId,input.requestId) : undefined;
     const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.cornerId,
       authorId: agentId, text: modelText(input.text), replyTo: input.replyTo,
-      id: typeof (input as Record<string,unknown>).transportRequestId === 'string' ? createHash('sha256')
-        .update(`post:${agentId}:${(input as Record<string,unknown>).transportRequestId}`).digest('hex') : undefined,
       requestId: input.requestId, commandRoomId: input.roomId,
-      parent: ctx.authorizedCommand, attachments: ctx.authorizedCommand?.answer_attachments,
+      parent, attachments: parent?.answer_attachments,
     });
-    if (saved.stored && ctx.authorizedCommand?.answer_attachments?.length) void ctx.database.query(
+    if (saved.stored && parent?.answer_attachments?.length) void ctx.database.query(
       'DELETE FROM agent_pending_attachments WHERE agent_id=$1 AND request_id=$2 AND url=ANY($3::text[])',
-      [agentId,input.requestId,ctx.authorizedCommand.answer_attachments.map(file=>file.url)])
+      [agentId,input.requestId,parent.answer_attachments.map(file=>file.url)])
       .catch(error=>console.warn('[post] optional media cleanup omitted:',error));
     ctx.live.publish({ type: 'invalidate', roomId: input.cornerId, reason: 'message', agentId });
     return { id: saved.id, createdAt: saved.createdAt, effect: 'conversation', address: input.cornerId,
