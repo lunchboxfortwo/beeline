@@ -350,6 +350,7 @@ export async function readWorkThread(
       `WITH work_refs AS (SELECT thread.id::text id,thread.id room_id FROM rooms thread WHERE thread.id=$1)
       SELECT ref.id,${workColumnsSql('$2')} WHERE r.parent_id IS NOT NULL`,
       [roomId, viewerId],
+      'read-work-thread',
     )
   ).rows;
   return rows.map((row) => projectWorkRow(row, publicOrigin, viewerId));

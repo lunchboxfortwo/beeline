@@ -388,6 +388,27 @@ export class PostgresDatabase implements ClosableDatabase {
     };
   }
 
+  async warmPool(size: number): Promise<void> {
+    const releases: Array<() => void> = [];
+    try {
+      // Keep every checkout until the whole batch settles so pg cannot hand
+      // the same connection to two warmups.
+      const results = await Promise.allSettled(
+        Array.from({ length: size }, async () => {
+          const { client, release } = await this.#connectCheckedOut();
+          releases.push(release);
+          if (await this.#backendPids.get(client)) return;
+          const pid = await this.#readBackendPid(client);
+          this.#backendPids.set(client, Promise.resolve(pid));
+        }),
+      );
+      const failed = results.find((result) => result.status === 'rejected');
+      if (failed) throw failed.reason;
+    } finally {
+      for (const release of releases) release();
+    }
+  }
+
   #checkoutFailed(error: unknown, waiters: number): void {
     this.#telemetry.checkoutFailures++;
     if (error instanceof Error && /timeout exceeded when trying to connect|Connection terminated due to connection timeout/i.test(error.message)) {
@@ -399,14 +420,17 @@ export class PostgresDatabase implements ClosableDatabase {
     }
   }
 
-  async #statement<T>(client: PoolClient, sql: string, work: () => Promise<T>): Promise<T> {
-    if (!this.#lockDiagnostics) return work();
+  async #readBackendPid(client: PoolClient): Promise<number | undefined> {
     // Neon supplies a proxy cancellation PID in BackendKeyData, even on its
     // direct endpoint. Only pg_backend_pid() names the pg_stat_activity row.
+    return (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]?.pid;
+  }
+
+  async #statement<T>(client: PoolClient, sql: string, work: () => Promise<T>): Promise<T> {
+    if (!this.#lockDiagnostics) return work();
     let identity = this.#backendPids.get(client);
     if (!identity) {
-      identity = client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
-        .then(result => result.rows[0]?.pid, () => undefined);
+      identity = this.#readBackendPid(client).catch(() => undefined);
       this.#backendPids.set(client, identity);
     }
     return this.#lockDiagnostics.statement(await identity, sql, work);

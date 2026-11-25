@@ -84,28 +84,32 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
     const id = input.cornerId ?? randomUUID();
     const messageId = await ctx.database.transaction(async (database) => {
       const parent = (
-        await database.query<{ workspace_id: string; viewer_name: string }>(
-          `SELECT room.workspace_id,viewer.name viewer_name FROM rooms room
-           JOIN memberships room_member ON room_member.room_id=room.id
-             AND room_member.identity_id=$2 AND room_member.removed_at IS NULL
-           JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
-             AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
-             AND workspace_member.removed_at IS NULL
-           JOIN identities viewer ON viewer.id=$2 AND viewer.kind='human'
-           WHERE room.id=$1 AND room.parent_id IS NULL AND room.archived_at IS NULL
-           FOR SHARE OF room,room_member,workspace_member,viewer`,
-          [input.roomId, viewerId],
+        await database.query<{ viewer_name: string; source_present: boolean; inserted: boolean }>(
+          `WITH parent AS MATERIALIZED (
+             SELECT room.workspace_id,viewer.name viewer_name,
+               EXISTS(SELECT 1 FROM messages WHERE id=$5 AND room_id=room.id) source_present
+             FROM rooms room
+             JOIN memberships room_member ON room_member.room_id=room.id
+               AND room_member.identity_id=$2 AND room_member.removed_at IS NULL
+             JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
+               AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
+               AND workspace_member.removed_at IS NULL
+             JOIN identities viewer ON viewer.id=$2 AND viewer.kind='human'
+             WHERE room.id=$1 AND room.parent_id IS NULL AND room.archived_at IS NULL
+             FOR SHARE OF room,room_member,workspace_member,viewer
+           ), inserted AS (
+             INSERT INTO rooms(id,workspace_id,parent_id,created_by,name)
+             SELECT $3,workspace_id,$1,$2,$4 FROM parent ON CONFLICT(id) DO NOTHING
+             RETURNING id
+           )
+           SELECT viewer_name, source_present, EXISTS(SELECT 1 FROM inserted) inserted FROM parent`,
+          [input.roomId, viewerId, id, title, input.sourceMessageId ?? null],
         )
       ).rows[0];
       if (!parent) throw new Error('room access denied');
       // A retried open names the same id: the first attempt's corner is the
       // answer, and nothing below runs twice.
-      const inserted = await database.query(
-        `INSERT INTO rooms(id,workspace_id,parent_id,created_by,name)
-         VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING`,
-        [id, parent.workspace_id, input.roomId, viewerId, title],
-      );
-      if (!inserted.rowCount) {
+      if (!parent.inserted) {
         const replay = await database.query(
           `SELECT 1 FROM rooms WHERE id=$1 AND parent_id=$2 AND created_by=$3`,
           [id, input.roomId, viewerId],
@@ -117,12 +121,6 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
       // Every new corner leaves a static opening in its Room. A resident
       // requesting message anchors it; scratch openings stay at their open time.
       // No kind: a person opening a scratch corner wakes no subscriber.
-      const source = input.sourceMessageId
-        ? await database.query(`SELECT 1 FROM messages WHERE id=$1 AND room_id=$2`, [
-            input.sourceMessageId,
-            input.roomId,
-          ])
-        : undefined;
       const opening = await systemLine(database, {
         roomId: input.roomId,
         subject: identitySubject({ id: viewerId, kind: 'human', name: parent.viewer_name }),
@@ -135,7 +133,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
           cornerId: id,
           name: title,
           objective: title,
-          ...(source?.rowCount ? { sourceMessageId: input.sourceMessageId } : {}),
+          ...(parent.source_present ? { sourceMessageId: input.sourceMessageId } : {}),
         },
       });
 
