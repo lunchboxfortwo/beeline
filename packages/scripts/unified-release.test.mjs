@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parse } from 'yaml';
 import {
@@ -91,6 +91,15 @@ test('explicit recovery selection still controls which components rebuild', () =
   assert.deepEqual(selectReleaseComponentsFromPublishedInputs(componentPaths(), { selection: 'desktop' }), ['desktop']);
 });
 
+test('both hosted OTA routes fetch historical commits at the planned release SHA', () => {
+  const { jobs } = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8'));
+  for (const job of [jobs.mobile_ota, jobs.mobile_ota_after_proof]) {
+    const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    assert.equal(checkout.with.ref, '${{ needs.initialize.outputs.release_sha }}');
+    assert.equal(checkout.with['fetch-depth'], 0);
+  }
+});
+
 // The free-agent image must use the release's existing rollout; publishing
 // after completion used to restart every server a second time and drop phones.
 test('free-agent image publication bakes its digest into the sole server rollout', () => {
@@ -148,6 +157,13 @@ esac
     mkdirSync(join(root, 'server-release'));
     execFileSync('bash', ['-c', steps[verify].run], { cwd: root, env });
     const calls = readFileSync(env.CALLS, 'utf8');
+    const config = 'apps/infra/fly.beeline-free-agents.toml';
+    assert.ok(calls.split('\n').some(call => call.startsWith(`deploy . --local-only --config ${config} `) && !call.includes('--dockerfile')));
+    const dockerfile = readFileSync(config, 'utf8').match(/^\s*dockerfile = "([^"]+)"$/m)?.[1];
+    assert.ok(dockerfile);
+    const resolvedDockerfile = join(dirname(config), dockerfile);
+    assert.equal(resolvedDockerfile, 'apps/infra/free-agent/Dockerfile');
+    assert.ok(existsSync(resolvedDockerfile));
     assert.equal(calls.includes('secrets set'), false);
     assert.equal(calls.includes('machine update'), false);
     assert.match(calls, /machine exec one --app beeline-server node -p.*free-agent-image\.json/);

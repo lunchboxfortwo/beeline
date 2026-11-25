@@ -834,6 +834,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.initialize.outputs.release_sha }}
+          # ASC release markers can point to older commits for published builds.
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -876,6 +879,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.initialize.outputs.release_sha }}
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@v4
         with:
           node-version: 22

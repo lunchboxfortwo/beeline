@@ -23,6 +23,7 @@ async function fixture(run, pins = { android: { runtimeVersion: '53' }, ios: { r
     const sourceSha = git(['rev-parse', 'HEAD']);
     // A later checkout's pin must never stand in for the uploaded binary's pin.
     writeFileSync(join(repository, 'apps/mobile/native-fingerprint.json'), JSON.stringify({ runtimeVersion: '999' }));
+    git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', '-c', 'core.hooksPath=/dev/null', 'commit', '--quiet', '-am', 'later release source']);
     const marker = `v0.1.230@${sourceSha.slice(0, 12)}`;
     // Shape observed live: READY build 115 is included under a UUID. Local
     // uploads have no EAS entry, and this release has no release.json asset.

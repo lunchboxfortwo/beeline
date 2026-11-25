@@ -43,7 +43,7 @@ BEELINE_RELEASE_SHA="$RELEASE_SHA" BEELINE_RELEASE_VERSION="$RELEASE_VERSION" \
   bash packages/scripts/stage-free-agent-helper.sh
 flyctl deploy . \
   --local-only --config apps/infra/fly.beeline-free-agents.toml \
-  --dockerfile apps/infra/free-agent/Dockerfile --app beeline-free-agents \
+  --app beeline-free-agents \
   --build-arg "BEELINE_RELEASE_SHA=$RELEASE_SHA" \
   --build-arg "BEELINE_RELEASE_VERSION=$RELEASE_VERSION" \
   --image-label "$image_label" --build-only --push --yes
