@@ -61,13 +61,13 @@ runs:
     # Publish before the existing server rollout: staging a secret must never
     # cause a second restart after the release has already completed.
     - name: Install the free starter agent image build dependencies
-      if: steps.fleet.outputs.shipped != 'true'
+      if: steps.fleet.outputs.shipped != 'true' && env.BEELINE_RELEASE_LINUX_BUNDLE == ''
       shell: bash
       run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step3
     - uses: dtolnay/rust-toolchain@1.95.0
-      if: steps.fleet.outputs.shipped != 'true'
+      if: steps.fleet.outputs.shipped != 'true' && env.BEELINE_RELEASE_LINUX_BUNDLE == ''
     - uses: ./.github/actions/buzz-agent-cache
-      if: steps.fleet.outputs.shipped != 'true'
+      if: steps.fleet.outputs.shipped != 'true' && env.BEELINE_RELEASE_LINUX_BUNDLE == ''
       with:
         platform: linux-x64
     - name: Publish the matching free starter agent image
@@ -87,6 +87,14 @@ runs:
         bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" step8
       env:
         IMAGE_REF: ${{ steps.free_agent_image.outputs.image_ref }}
+        RELEASE_SHA: ${{ inputs.release_sha }}
+        RELEASE_VERSION: ${{ inputs.release_version }}
+
+    - name: Push the exact Fly image
+      if: steps.fleet.outputs.shipped != 'true' && env.BEELINE_LOCAL_RELEASE == 'true'
+      shell: bash
+      run: bash "$GITHUB_WORKSPACE/packages/scripts/release-steps/server-leg.sh" push_image
+      env:
         RELEASE_SHA: ${{ inputs.release_sha }}
         RELEASE_VERSION: ${{ inputs.release_version }}
 

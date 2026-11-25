@@ -6,9 +6,12 @@ export BEELINE_BUNDLE_COMMIT=${BEELINE_RELEASE_SHA:-$(git -C "$root" rev-parse H
 export BEELINE_BUNDLE_VERSION=${BEELINE_RELEASE_VERSION:?release version is required}
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-2}
 cd "$root"
-npm run bundle:beeline -- --platform linux-x64
+source=${BEELINE_RELEASE_LINUX_BUNDLE:-apps/site/dl}
+if [ -z "${BEELINE_RELEASE_LINUX_BUNDLE:-}" ]; then
+  npm run bundle:beeline -- --platform linux-x64
+fi
 target=apps/infra/free-agent/helper-bundle
 mkdir -p "$target"
 for file in manifest.json beeline-linux-x64.tar.gz beeline-linux-x64.tar.gz.sha256 beeline-bootstrap.mjs; do
-  cp "apps/site/dl/$file" "$target/$file"
+  cp "$source/$file" "$target/$file"
 done
