@@ -88,7 +88,8 @@ export async function prepareWorkspaceDependencies(input: {
     packages: Record<string, { link?: boolean; resolved?: string }>;
   };
   for (const [name, entry] of Object.entries(packages)) {
-    if (!entry.link || !entry.resolved || !name.startsWith('node_modules/')) continue;
+    const workspaceLink = entry.link === true;
+    if (!workspaceLink || !entry.resolved || !name.startsWith('node_modules/')) continue;
     const link = resolve(placementRoot, name);
     const source = resolve(worktreePath, entry.resolved);
     const parent = await realpath(dirname(link));
