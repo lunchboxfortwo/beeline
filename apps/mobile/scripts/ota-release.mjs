@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
 import { readPinnedRuntimeVersion } from './native-fingerprint.mjs';
-import { queueSentrySourcemaps } from './upload-sentry-sourcemaps.mjs';
+import { uploadSentrySourcemaps } from './upload-sentry-sourcemaps.mjs';
 import { storeRuntimeTargets, runtimeKey } from './store-runtime-targets.mjs';
 
 export const RELEASE_PLATFORMS = ['android', 'ios'];
@@ -427,7 +427,7 @@ function publish(options) {
     if (published.length !== 1 || targetKey(published[0]) !== targetKey(target)) {
       fail(`publish of ${targetKey(target)} returned ${published.map(targetKey).join(', ') || 'no update'}`);
     }
-    if (!reuse) queueSentrySourcemaps(join(exportRoot, target.platform), options.sha);
+    if (!reuse) uploadSentrySourcemaps(join(exportRoot, target.platform), options.sha);
   }
   if (options.dryRun) return null;
   const after = listBranch(branch);

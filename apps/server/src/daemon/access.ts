@@ -5,6 +5,12 @@ import { cornerReviewerSql } from '../corner-reviewer.js';
 import type { DaemonContext } from './context.js';
 import { AccessDeniedError } from './values.js';
 
+export function agentRoomMembershipJoins(room: string, agent: string): string {
+  return `JOIN memberships parent_member ON parent_member.room_id=COALESCE(${room}.parent_id,${room}.id)
+         AND parent_member.identity_id=${agent} AND parent_member.removed_at IS NULL
+       JOIN memberships workspace_member ON workspace_member.workspace_id=${room}.workspace_id
+         AND workspace_member.room_id IS NULL AND workspace_member.identity_id=${agent} AND workspace_member.removed_at IS NULL`;
+}
 
   export async function daemonIdentity(ctx: DaemonContext, agentId: string) {
     const row = (
@@ -73,10 +79,7 @@ import { AccessDeniedError } from './values.js';
          WHERE command.room_id=$1 AND command.agent_id=$2 AND command.turn_request_id=$3
          ORDER BY command.created_at DESC,command.id DESC LIMIT 1) voice_agent_name
        FROM rooms addressed
-       JOIN memberships parent_member ON parent_member.room_id=COALESCE(addressed.parent_id,addressed.id)
-         AND parent_member.identity_id=$2 AND parent_member.removed_at IS NULL
-       JOIN memberships workspace_member ON workspace_member.workspace_id=addressed.workspace_id
-         AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2 AND workspace_member.removed_at IS NULL
+       ${agentRoomMembershipJoins('addressed', '$2')}
        WHERE addressed.id=$1`,
       [roomId, agentId, typeof requestId === 'string' ? requestId : null],
     );

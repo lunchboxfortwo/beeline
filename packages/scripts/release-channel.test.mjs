@@ -653,19 +653,29 @@ test('targets CLI reports store failures in Actions and the summary while preser
   assert.throws(() => readFileSync(blockedOutput), /ENOENT/);
 }));
 
-test('next OTA exports once per platform and skips the existing groups on a retry', () => fixture(directory => {
+test('next OTA uploads each platform export to Sentry before moving the channel and skips existing groups on a retry', () => fixture(directory => {
   const eas = join(directory, 'eas-stub.mjs');
+  const sentry = join(directory, 'sentry-stub.mjs');
   const calls = join(directory, 'eas-calls.jsonl');
   const store = join(directory, 'eas-state.json');
   writeFileSync(store, JSON.stringify({ branches: {}, channels: { next: 'release-v0.1.1', production: 'release-v0.1.1' } }));
   writeFileSync(eas, `#!${process.execPath}
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 const args = process.argv.slice(2), value = flag => args[args.indexOf(flag) + 1];
 const state = JSON.parse(readFileSync(process.env.STUB_STATE, 'utf8'));
 appendFileSync(process.env.STUB_CALLS, JSON.stringify({ args, version: process.env.EXPO_PUBLIC_BEELINE_RELEASE_VERSION, sha: process.env.EXPO_PUBLIC_BEELINE_RELEASE_SHA }) + '\\n');
 const branch = value('--branch');
 if (args[0] === 'update:list') console.log(JSON.stringify(state.branches[branch] ?? []));
 else if (args[0] === 'update') {
+  if (!args.includes('--skip-bundler') && args.includes('--source-maps')) {
+    const output = value('--input-dir');
+    mkdirSync(output, { recursive: true });
+    writeFileSync(join(output, 'app.hbc'), 'bundle');
+    writeFileSync(join(output, 'app.hbc.map'), JSON.stringify({
+      debugId: value('--platform'), sources: ['app.ts'], mappings: 'AAAA',
+    }));
+  }
   const update = { platform: value('--platform'), runtimeVersion: process.env.EXPO_RUNTIME_OVERRIDE,
     group: branch + '-' + value('--platform'), message: value('--message') };
   (state.branches[branch] ??= []).push(update);
@@ -678,21 +688,36 @@ else { console.error('unexpected EAS command: ' + args[0]); process.exit(1); }
 writeFileSync(process.env.STUB_STATE, JSON.stringify(state));
 `);
   chmodSync(eas, 0o755);
+  writeFileSync(sentry, `#!${process.execPath}
+import { appendFileSync, readFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+const map = JSON.parse(readFileSync(args.at(-1), 'utf8'));
+appendFileSync(process.env.STUB_CALLS, JSON.stringify({ args, debugId: map.debug_id }) + '\\n');
+`);
+  chmodSync(sentry, 0o755);
   const targets = join(directory, 'targets.json');
   writeFileSync(targets, JSON.stringify({ targets: [{ platform: 'android', runtimeVersion: '1' }, { platform: 'ios', runtimeVersion: '2' }] }));
   const publish = (version, channel) => execFileSync(process.execPath, ['scripts/ota-release.mjs', 'publish',
     '--sha', sha, '--release-version', version, '--channel', channel, '--targets', targets,
     '--output', join(directory, `${channel}-facts.json`)], { cwd: 'apps/mobile', encoding: 'utf8',
-    env: { ...process.env, TMPDIR: directory, EAS_CLI_PATH: eas, STUB_STATE: store, STUB_CALLS: calls, SENTRY_AUTH_TOKEN: '' } });
+    env: { ...process.env, TMPDIR: directory, EAS_CLI_PATH: eas, STUB_STATE: store, STUB_CALLS: calls,
+      SENTRY_AUTH_TOKEN: 'fixture-token', SENTRY_BINARY_PATH: sentry } });
   publish('v0.1.2-rc.3', 'next');
-  const updates = () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse).filter(c => c.args[0] === 'update');
+  const recorded = () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
+  const updates = () => recorded().filter(c => c.args[0] === 'update');
+  const uploads = () => recorded().filter(c => c.args[0] === 'sourcemaps');
   assert.deepEqual(updates().map(c => c.version), ['v0.1.2-rc.3', 'v0.1.2-rc.3']);
   assert.ok(updates().every(c => c.sha === sha && c.args.includes('--clear-cache')));
+  assert.deepEqual(recorded().filter(c => ['sourcemaps', 'channel:edit'].includes(c.args[0])).map(c => c.debugId ?? c.args[0]),
+    ['android', 'ios', 'channel:edit']);
+  assert.ok(uploads().every(c => c.args[c.args.indexOf('--release') + 1] === sha));
+  assert.ok(uploads().every(c => c.args.includes('--wait')));
   const state = JSON.parse(readFileSync(store, 'utf8'));
   assert.equal(state.channels.next, 'release-v0.1.2-rc.3');
   assert.equal(state.channels.production, 'release-v0.1.1');
   publish('v0.1.2-rc.3', 'next');
   assert.equal(updates().length, 2);
+  assert.equal(uploads().length, 2);
 }));
 
 

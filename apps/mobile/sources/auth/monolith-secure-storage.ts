@@ -47,5 +47,24 @@ export async function monolithSecureStorage(
   // sign-out removes it for every tab.
   const web = webRuntimeStorage();
   if (web) return browserMonolithStorage(web.storage);
-  return import('expo-secure-store');
+  const secureStore = await import('expo-secure-store');
+  if (process.env.EXPO_OS !== 'ios') return secureStore;
+  // Expo only sets accessibility when it creates an entry. Use a new service
+  // so a write can replace the legacy entry without first deleting the saved value.
+  const options = {
+    keychainService: 'beeline.session',
+    keychainAccessible: secureStore.AFTER_FIRST_UNLOCK,
+  };
+  return {
+    getItemAsync: async (key) =>
+      (await secureStore.getItemAsync(key, options)) ?? secureStore.getItemAsync(key),
+    setItemAsync: async (key, value) => {
+      await secureStore.setItemAsync(key, value, options);
+      await secureStore.deleteItemAsync(key);
+    },
+    deleteItemAsync: async (key) => {
+      await secureStore.deleteItemAsync(key);
+      await secureStore.deleteItemAsync(key, options);
+    },
+  };
 }

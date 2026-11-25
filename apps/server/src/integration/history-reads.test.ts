@@ -265,7 +265,7 @@ const fixture = monolithFixture();
   });
 
 
-  it('fetches an exact Room message in bounded pages under Room membership', async () => {
+  it('fetches the entire exact Room message and accepts an older character offset', async () => {
     const messageId = createHash('sha256').update('long-room-message').digest('hex');
     const body = 'A'.repeat(4_000) + '😀' + 'B'.repeat(4_000);
     await fixture.database.query(
@@ -279,33 +279,19 @@ const fixture = monolithFixture();
         JSON.stringify([{ url: 'https://media.example/image.png', mimeType: 'image/png' }]),
       ],
     );
-    const first = (await (
+    const complete = (await (
       await fixture.daemonOperation('getRoomMessage', {
         roomId: ROOM,
         messageId,
       })
     ).json()) as { body: string; nextOffset?: number; attachments: Array<{ url: string }> };
-    expect(first.body).toBe(body.slice(0, 4_000));
-    expect(first.nextOffset).toBe(4_000);
-    expect(first.attachments).toEqual([
+    expect(complete.body).toBe(body);
+    expect(complete.nextOffset).toBeUndefined();
+    expect(complete.attachments).toEqual([
       { url: 'https://media.example/image.png', mimeType: 'image/png' },
     ]);
-    let assembled = first.body;
-    let offset = first.nextOffset;
-    while (offset !== undefined) {
-      const page = (await (
-        await fixture.daemonOperation('getRoomMessage', {
-          roomId: ROOM,
-          messageId,
-          offset,
-        })
-      ).json()) as { body: string; nextOffset?: number };
-      assembled += page.body;
-      offset = page.nextOffset;
-    }
-    expect(assembled.length).toBe(body.length);
-    expect(assembled).toContain('😀');
-    expect(assembled === body).toBe(true);
+    const suffix = await fixture.daemonOperation('getRoomMessage', { roomId: ROOM, messageId, offset: 4_001 });
+    expect(await suffix.json()).toMatchObject({ body: 'B'.repeat(4_000) });
     const otherRoom = await fixture.daemonOperation('getRoomMessage', {
       roomId: '99999999-9999-4999-8999-999999999999',
       messageId,

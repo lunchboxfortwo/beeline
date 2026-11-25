@@ -21,6 +21,22 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
+  it('opens a message by ID from another chat the agent can list', async () => {
+    const { client, member } = await scope.connected();
+    const messageId = 'd'.repeat(64);
+    const read = (id: string) => ({ address: ROOM, facet: 'message', messageId: id });
+    expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+    await scope.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member')`, [WORKSPACE, PRIVATE, member]);
+    const listed = await tools.ok(client, 'read', { address: PRIVATE, facet: 'messages' });
+    expect(listed.items).toContainEqual(expect.objectContaining({ id: messageId, body: 'private nebula' }));
+    for (const id of [messageId, messageId.slice(0, 25)]) {
+      expect(await tools.ok(client, 'read', read(id))).toMatchObject({ messageId, body: 'private nebula' });
+    }
+    await scope.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [PRIVATE, member]);
+    expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+  });
+
   it('renders one person tag with its context and attachment and replies by message id in a joined Claude session', async () => {
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { client, member, token, grant } = await scope.connected();
@@ -83,6 +99,9 @@ describe('connected agent message protocol',()=>{
     const page=await tools.ok(client,'read_messages',{room:PUBLIC_CORNER});
     const delivery=await tools.ok(client,'list_mentions',{});
     const command=(await readAgentCommands(scope.db,member)).commands.find(item=>item.sourceMessageId===messageId)!;
+    expect((await scope.db.query('SELECT text FROM messages WHERE id=$1', [messageId])).rows).toEqual([{ text }]);
+    expect(direct.body).toBe(text);
+    expect(direct).not.toHaveProperty('nextOffset');
     expect(direct.attachments).toEqual([image]);
     expect(command.source.attachments).toEqual([image]);
     expect(itemPrompt(command,{names:new Map()})).toContain('📎 browser-screen.jpg (image/jpeg, 173 KB)');
