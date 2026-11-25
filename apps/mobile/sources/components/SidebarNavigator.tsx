@@ -49,7 +49,6 @@ export const SidebarNavigator = React.memo(function SidebarNavigator() {
 });
 
 const DesktopSidebarNavigator = React.memo(() => {
-  const drawerGround = useTheme().canvas?.val;
   const isTablet = useIsTablet();
   const inDesktopShell = isTauri();
   const desktopPlatform = isDesktopPlatform();
@@ -170,7 +169,7 @@ const DesktopSidebarNavigator = React.memo(() => {
       {showSessionChrome && <PersistentHeader />}
       <XStack flex={1} alignItems="stretch">
         {showSessionChrome && (
-          <YStack width={drawerWidth} overflow="hidden" backgroundColor={drawerGround}>
+          <YStack width={drawerWidth} overflow="hidden" backgroundColor="canvas">
             <SidebarView />
           </YStack>
         )}
