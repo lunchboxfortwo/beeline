@@ -41,7 +41,7 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
       to,
       time,
       body: (
-        <TranscriptSystemBody message={message} time={time} handlers={handlers} />
+        <TranscriptSystemBody message={message} time={time} {...handlers} />
       ),
     };
   }
@@ -67,11 +67,10 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
   };
 }
 
-export function TranscriptSystemBody({ message, time, handlers }: {
+export function TranscriptSystemBody({ message, time, ...handlers }: {
   message: ChatDisplayMessage;
   time: string;
-  handlers: PillHandlers;
-}) {
+} & PillHandlers) {
   if (!message.deleted && message.notificationLifecycleRun) {
     return <NotificationLifecycleCard message={message} cornerId={handlers.cornerId}
       onOpenCorner={handlers.onOpenCorner ?? (() => {})} onOpenUrl={handlers.onOpenUrl ?? (() => {})} />;

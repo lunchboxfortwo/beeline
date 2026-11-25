@@ -182,13 +182,31 @@ export function inspectSystemRenders(file, code) {
     return false;
   };
 
+  function guardedCardBody(node) {
+    if (file !== RENDERER || !node || !element(node) || component(node) !== 'TranscriptSystemBody') return false;
+    const message = node.attributes.properties.find(attribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(source) === 'message')?.initializer?.expression;
+    if (!message || !ts.isIdentifier(message)) return false;
+    for (let child = node; child.parent; child = child.parent) {
+      const parent = child.parent;
+      if (ts.isFunctionLike(parent)) break;
+      if (!ts.isIfStatement(parent) || parent.thenStatement !== child) continue;
+      let condition = parent.expression;
+      while (ts.isBinaryExpression(condition) && condition.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken)
+        condition = condition.left;
+      if (ts.isCallExpression(condition) && unqualified(condition.expression) === 'hasCardBody' &&
+          condition.arguments.length === 1 && condition.arguments[0].getText(source) === message.text) return true;
+    }
+    return false;
+  }
+
   function visit(node) {
     const owner = scope(node, source).name;
     const jsx = element(node);
     const name = component(node);
     const buildsOpenedBody = file === PILLS && owner === 'pillItem';
-    if (name === 'OpenedSystemBody' && !buildsOpenedBody)
-      deny(node, 'OpenedSystemBody may only be created for the pill to open');
+    if (name === 'TranscriptSystemBody' && !buildsOpenedBody && !guardedCardBody(node))
+      deny(node, 'TranscriptSystemBody requires an opened pill or a guarded card row');
     if (name === 'TranscriptPills') {
       calls++;
       if (file !== RENDERER || owner !== 'renderPills' || !jsx ||
@@ -198,18 +216,19 @@ export function inspectSystemRenders(file, code) {
       }
     }
     if (['LedgerSystemLine', 'NotificationLifecycleCard'].includes(name) &&
-        (file !== PILLS || owner !== 'OpenedSystemBody')) deny(node, `${name} must render inside the opened pill`);
+        (file !== PILLS || owner !== 'TranscriptSystemBody')) deny(node, `${name} must render inside the opened pill`);
     if ((BODY_COMPONENTS.has(name) || ['CornerOpenedMarkers', 'GrantRequestPill'].includes(name)) &&
         (file !== RENDERER || owner !== 'renderSystemBody')) deny(node, `${name} must render inside the opened pill`);
     if (ts.isIdentifier(node) && node.text === 'renderSystemBody' && file === RENDERER &&
         !(ts.isVariableDeclaration(node.parent) && node.parent.name === node)) {
       const attribute = ts.isJsxExpression(node.parent) && ts.isJsxAttribute(node.parent.parent) ? node.parent.parent : undefined;
-      if (!attribute || attribute.name.getText(source) !== 'renderBody' ||
-          owner !== 'renderPills' || component(attribute.parent.parent) !== 'TranscriptPills') {
-        deny(node, 'the system body renderer may only be passed to TranscriptPills');
+      const target = attribute?.parent.parent;
+      const pill = owner === 'renderPills' && target && component(target) === 'TranscriptPills';
+      if (attribute?.name.getText(source) !== 'renderBody' || !(pill || guardedCardBody(target))) {
+        deny(node, 'the system body renderer requires TranscriptPills or a guarded card row');
       }
     }
-    const openedBody = (file === RENDERER && owner === 'renderSystemBody') || (file === PILLS && owner === 'OpenedSystemBody');
+    const openedBody = (file === RENDERER && owner === 'renderSystemBody') || (file === PILLS && owner === 'TranscriptSystemBody');
     if (!openedBody) {
       // System-specific render branches must go through the pill even when the
       // branch uses generic text, a fragment, or a React element factory.
@@ -222,7 +241,7 @@ export function inspectSystemRenders(file, code) {
           : ts.isConditionalExpression(node) ? [node.whenTrue, node.whenFalse] : [node.right];
         const bareBody = child => {
           if (ts.isJsxFragment(child)) return true;
-          return (element(child) || factory(child)) && !(buildsOpenedBody && component(child) === 'OpenedSystemBody');
+          return (element(child) || factory(child)) && !(buildsOpenedBody && component(child) === 'TranscriptSystemBody');
         };
         if (inlineBody || branches.some(branch => contains(branch, bareBody)))
           deny(node, 'system notice text or elements must render inside the opened pill');

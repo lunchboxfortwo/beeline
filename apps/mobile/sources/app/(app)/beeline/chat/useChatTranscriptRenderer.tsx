@@ -480,8 +480,8 @@ export function useChatTranscriptRenderer([
 
       if (hasCardBody(item) && (!item.choice || item.choice.mode === 'poll' || item.choice.runId)) {
         return withMarkers(<TranscriptSystemBody message={item} time={ledgerStamp(item.timestamp)}
-          handlers={{ renderBody: renderSystemBody, onOpenIdentity: handleOpenSystemIdentity, onOpenUrl: handleOpenGitHubEvent,
-            onOpenBrief: openCurrentBrief, onOpenCorner: openCorner, cornerId: isCorner ? decodedId : undefined }} />);
+          renderBody={renderSystemBody} onOpenIdentity={handleOpenSystemIdentity} onOpenUrl={handleOpenGitHubEvent}
+          onOpenBrief={openCurrentBrief} onOpenCorner={openCorner} cornerId={isCorner ? decodedId : undefined} />);
       }
 
       // Member orders and reports keep their own byline.
