@@ -3,7 +3,7 @@
 // This transport creates only task-owned transient units, never changes a
 // listener, Docker daemon, slice limit, registration or production lock.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,58 +112,74 @@ export class LocalChecks {
     const owner = host ? `${process.getuid()}:${process.getgid()}` : shard.name;
     const directory = join(this.engine.directory, 'jobs', label.replaceAll('/', '-'));
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    let source = this.source, hostSource;
-    if (!preparation && checkWorkspace(context.github.job) === 'private copy of build') {
-      // Body's own sandbox replaces /tmp with an empty tmpfs, so its sandbox
-      // proofs cannot load a checkout below /tmp. CI checks out outside /tmp;
-      // the host copy does too (release state usually lives in /tmp).
-      if (host) hostSource = mkdtempSync('/var/tmp/beeline-check-source-');
-      source = join(hostSource ?? directory, 'source');
-      await this.privileged(['cp', '-a', '--reflink=auto', this.source, source]);
-      await this.privileged(['chown', '-R', owner, source]);
-    }
-    const { secrets: _secrets, vars: _vars, ...safeContext } = context;
-    if (!this.fullChecks) safeContext.github = { ...safeContext.github, token: '' };
-    // Body creates Unix sockets below tmpdir(); a long external state path
-    // would exceed sockaddr_un even though ordinary files work there.
-    const temporary = host ? mkdtempSync('/tmp/beeline-check-') : undefined;
-    const spec = { job, context: safeContext, label, workflowEnv, preparation,
-      root: host ? source : '/source', directory: host ? directory : '/state', temporary };
-    privateWrite(join(directory, 'spec.json'), JSON.stringify(spec));
-    const overlay = !preparation && source === this.source;
-    if (overlay) for (const path of ['merged', 'upper', 'overlay-work']) mkdirSync(join(directory, path), { mode: 0o700 });
-    await this.privileged(['chown', '-R', owner, directory]);
-    const unit = `beeline-release-check-${createHash('sha256').update(directory).digest('hex').slice(0, 24)}.${host ? 'scope' : 'service'}`;
-    const node = dirname(dirname(realpathSync(process.execPath)));
-    const args = ['systemd-run', '--quiet', '--wait', '--pipe', '--collect', `--unit=${unit}`, `--slice=${shard.slice}`,
-      '-p', `RootDirectory=/var/lib/${shard.name}/root`, '-p', 'ProtectSystem=strict', '-p', 'ProtectHome=yes', '-p', 'PrivateTmp=yes',
-      '-p', 'KillMode=mixed', '-p', 'NoNewPrivileges=yes',
-      '-p', 'BindReadOnlyPaths=/usr /etc/ssl/certs /etc/ld.so.cache /etc/alternatives -/etc/fonts -/opt/google/chrome',
-      '-p', `BindReadOnlyPaths=${runnerRoot}:/runner ${node}:/tool/node`,
-      '-p', `BindPaths=${directory}:/state /var/lib/${shard.name}/state/run/docker.sock:/ci/run/docker.sock`,
-      ...overlay ? ['-p', `BindReadOnlyPaths=${source}:/build`, '-p', `BindPaths=${directory}/merged:/source`,
-        '/usr/bin/bash', '-ec', 'mount -t overlay overlay -o lowerdir=/build,upperdir=/state/upper,workdir=/state/overlay-work /source; exec "$@"', 'check-overlay'] : ['-p', `BindPaths=${source}:/source`],
-      '/usr/bin/nsenter', `--target=${shard.pid}`, '--user', '--net', '--setuid=0', '--setgid=0', '--',
-      '/usr/bin/setpriv', '--bounding-set=-all', '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs', '--',
-      '/usr/bin/env', '-i', 'PATH=/tool/node/bin:/usr/bin:/bin', 'HOME=/state/home', 'LANG=C.UTF-8', 'DOCKER_HOST=unix:///ci/run/docker.sock',
-      '/tool/node/bin/node', '/runner/packages/scripts/release-local-check-worker.mjs'];
+    const cleanup = [];
+    const workerDirectory = host ? directory : '/state';
     const placement = host ? `bounded host user (queue slot ${slot})` : shard.name;
-    this.engine.processes.log(`Check ${label}: ${placement}; ${preparation ? 'shared workspace preparation' : checkWorkspace(context.github.job)}`);
     const startedAt = new Date().toISOString();
-    let transportFailure;
-    this.active.set(unit, host);
-    const options = { quiet: false, timeout: (job['timeout-minutes'] ?? 60) * 60_000 };
+    let temporary, restoreOwnership, transportFailure;
     try {
-      if (host) await this.command('systemd-run', ['--user', '--scope', '--quiet', '--collect', `--unit=${unit}`, '-p', 'CPUQuota=300%', '-p', 'MemoryMax=12G',
-        process.execPath, join(runnerRoot, 'packages/scripts/release-local-check-worker.mjs'), join(directory, 'spec.json')], options);
-      else await this.privileged(args, options);
-    }
-    catch (error) { transportFailure = error; await this.stop(unit, host).catch(() => {}); }
-    finally {
-      this.active.delete(unit);
-      if (temporary) rmSync(temporary, { recursive: true, force: true });
-      if (hostSource) await this.privileged(['rm', '-rf', hostSource]);
-      await this.privileged(['chown', '-R', `${process.getuid()}:${process.getgid()}`, directory]);
+      let source = this.source;
+      if (!preparation && checkWorkspace(context.github.job) === 'private copy of build') {
+        // Body's sandbox hides /tmp, so its private checkout must live elsewhere.
+        const hostSource = host ? mkdtempSync('/var/tmp/beeline-check-source-') : undefined;
+        source = join(hostSource ?? directory, 'source');
+        cleanup.push(hostSource ?? source);
+        await this.privileged(['cp', '-a', '--reflink=auto', this.source, source]);
+        await this.privileged(['chown', '-R', owner, source]);
+      }
+      const { secrets: _secrets, vars: _vars, ...safeContext } = context;
+      if (!this.fullChecks) safeContext.github = { ...safeContext.github, token: '' };
+      // Keep Body's Unix socket paths below the sockaddr_un length limit.
+      temporary = host ? mkdtempSync('/tmp/beeline-check-') : undefined;
+      const spec = { job, context: safeContext, label, workflowEnv, preparation,
+        root: host ? source : '/source', directory: workerDirectory, temporary };
+      privateWrite(join(directory, 'spec.json'), JSON.stringify(spec));
+      const overlay = !preparation && source === this.source;
+      if (overlay) {
+        cleanup.push(...['merged', 'upper', 'overlay-work'].map(path => join(directory, path)));
+        for (const path of cleanup) mkdirSync(path, { mode: 0o700 });
+      }
+      restoreOwnership = true;
+      await this.privileged(['chown', '-R', owner, directory]);
+      const unit = `beeline-release-check-${createHash('sha256').update(directory).digest('hex').slice(0, 24)}.${host ? 'scope' : 'service'}`;
+      const node = dirname(dirname(realpathSync(process.execPath)));
+      const args = ['systemd-run', '--quiet', '--wait', '--pipe', '--collect', `--unit=${unit}`, `--slice=${shard.slice}`,
+        '-p', `RootDirectory=/var/lib/${shard.name}/root`, '-p', 'ProtectSystem=strict', '-p', 'ProtectHome=yes', '-p', 'PrivateTmp=yes',
+        '-p', 'KillMode=mixed', '-p', 'NoNewPrivileges=yes',
+        '-p', 'BindReadOnlyPaths=/usr /etc/ssl/certs /etc/ld.so.cache /etc/alternatives -/etc/fonts -/opt/google/chrome',
+        '-p', `BindReadOnlyPaths=${runnerRoot}:/runner ${node}:/tool/node`,
+        '-p', `BindPaths=${directory}:/state /var/lib/${shard.name}/state/run/docker.sock:/ci/run/docker.sock`,
+        ...overlay ? ['-p', `BindReadOnlyPaths=${source}:/build`, '-p', `BindPaths=${directory}/merged:/source`,
+          '/usr/bin/bash', '-ec', 'mount -t overlay overlay -o lowerdir=/build,upperdir=/state/upper,workdir=/state/overlay-work /source; exec "$@"', 'check-overlay'] : ['-p', `BindPaths=${source}:/source`],
+        '/usr/bin/nsenter', `--target=${shard.pid}`, '--user', '--net', '--setuid=0', '--setgid=0', '--',
+        '/usr/bin/setpriv', '--bounding-set=-all', '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs', '--',
+        '/usr/bin/env', '-i', 'PATH=/tool/node/bin:/usr/bin:/bin', 'HOME=/state/home', 'LANG=C.UTF-8', 'DOCKER_HOST=unix:///ci/run/docker.sock',
+        '/tool/node/bin/node', '/runner/packages/scripts/release-local-check-worker.mjs'];
+      this.engine.processes.log(`Check ${label}: ${placement}; ${preparation ? 'shared workspace preparation' : checkWorkspace(context.github.job)}`);
+      const options = { quiet: false, timeout: (job['timeout-minutes'] ?? 60) * 60_000 };
+      this.active.set(unit, host);
+      try {
+        if (host) await this.command('systemd-run', ['--user', '--scope', '--quiet', '--collect', `--unit=${unit}`, '-p', 'CPUQuota=300%', '-p', 'MemoryMax=12G',
+          process.execPath, join(runnerRoot, 'packages/scripts/release-local-check-worker.mjs'), join(directory, 'spec.json')], options);
+        else await this.privileged(args, options);
+      } catch (error) {
+        transportFailure = error;
+        await this.stop(unit, host).catch(() => {});
+      } finally {
+        this.active.delete(unit);
+      }
+    } catch (error) {
+      transportFailure = error;
+    } finally {
+      if (temporary) cleanup.push(temporary);
+      if (cleanup.length) {
+        try { await this.privileged(['rm', '-rf', ...cleanup]); }
+        catch (error) { this.engine.processes.log(`${label}: workspace cleanup failed for ${cleanup.join(', ')}. ${error.message}`); }
+      }
+      if (restoreOwnership) {
+        try { await this.privileged(['chown', '-R', `${process.getuid()}:${process.getgid()}`, directory]); }
+        catch (error) { this.engine.processes.log(`${label}: could not restore job state ownership. ${error.message}`); }
+      }
     }
     const resultPath = join(directory, 'result.json');
     if (!existsSync(resultPath)) {
@@ -177,8 +193,8 @@ export class LocalChecks {
     const result = JSON.parse(readFileSync(resultPath, 'utf8'));
     for (const record of result.records) this.engine.records.set(record.id, { ...record, conclusion: transportFailure ? 'failure' : record.conclusion, shard: placement, logFile: join(directory, 'output.log') });
     for (const [name, path] of result.artifacts) {
-      if (!path.startsWith(`${spec.directory}/artifacts/`)) throw new Error('Check artifact escaped its private directory');
-      this.engine.artifacts.set(name, join(directory, path.slice(spec.directory.length + 1)));
+      if (!path.startsWith(`${workerDirectory}/artifacts/`)) throw new Error('Check artifact escaped its private directory');
+      this.engine.artifacts.set(name, join(directory, path.slice(workerDirectory.length + 1)));
     }
     privateWrite(join(this.engine.directory, 'records.json'), JSON.stringify([...this.engine.records.values()], null, 2));
     return transportFailure ? { ...result.job, result: 'failure' } : result.job;

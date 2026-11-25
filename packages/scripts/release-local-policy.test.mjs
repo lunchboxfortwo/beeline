@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -231,6 +231,7 @@ test('delivery worker round trip has private source, environment, logs, outputs 
     delivery.command = async (tool, args, options) => {
       if (tool === 'bash') return '/usr/bin/true\n';
       if (tool !== 'sudo') return command(tool, args, options);
+      if (args[1] === 'rm') return command('rm', args.slice(2), options);
       units.push(args);
       const spec = args.at(-1);
       const { stdout } = await run(process.execPath, [join(root, 'packages/scripts/release-local-check-worker.mjs'), spec], { env: process.env });
@@ -256,7 +257,7 @@ test('delivery worker round trip has private source, environment, logs, outputs 
     // Override the real Docker binary in the otherwise-real worker transport.
     const originalCommand = delivery.command;
     delivery.command = async (tool, args, options) => {
-      if (tool === 'sudo') {
+      if (tool === 'sudo' && args[1] === 'systemd-run') {
         const specPath = args.at(-1), spec = JSON.parse(readFileSync(specPath, 'utf8'));
         spec.tools.docker = '/usr/bin/true';
         writeFileSync(specPath, JSON.stringify(spec));
@@ -273,7 +274,7 @@ test('delivery worker round trip has private source, environment, logs, outputs 
     assert.match(log, /\*\*\*/);
     assert.equal(readFileSync(join(engine.artifacts.get('fixture-artifact'), 'artifact.txt'), 'utf8'), 'artifact');
     assert.equal(readFileSync(join(source, 'tracked'), 'utf8'), 'immutable source');
-    assert.equal(readFileSync(join(state, 'jobs/fixture-local/source/tracked'), 'utf8'), 'immutable source');
+    assert.equal(existsSync(join(state, 'jobs/fixture-local/source')), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -283,12 +284,20 @@ test('delivery setup failures retain an inspectable redacted job record', async 
   try {
     const engine = new LocalActions({ root, directory, secrets: { TOKEN: 'fixture-private-token' }, processes: new Processes({ TOKEN: 'fixture-private-token' }, () => {}) });
     const delivery = new LocalDelivery(engine);
-    delivery.source = async () => { throw new Error('fixture-private-token: clone failed'); };
+    delivery.source = async jobDirectory => {
+      mkdirSync(join(jobDirectory, 'source'));
+      throw new Error('fixture-private-token: clone failed');
+    };
+    delivery.command = async (tool, args) => {
+      assert.deepEqual([tool, ...args], ['sudo', '-n', 'rm', '-rf', join(directory, 'jobs/server-local/source')]);
+      rmSync(args.at(-1), { recursive: true });
+    };
     const result = await delivery.execute(1, {}, { github: { job: 'server' }, matrix: {} }, 'server-local');
     assert.equal(result.result, 'failure');
     const [record] = JSON.parse(readFileSync(join(directory, 'records.json'), 'utf8'));
     assert.equal(record.conclusion, 'failure');
     assert.match(readFileSync(record.logFile, 'utf8'), /\*\*\*: clone failed/);
+    assert.equal(existsSync(join(directory, 'jobs/server-local/source')), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

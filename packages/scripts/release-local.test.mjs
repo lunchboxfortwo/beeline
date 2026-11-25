@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { LocalActions, matrixRows } from './release-local-actions.mjs';
-import { attribution, dryInitializeJob, dryRun, localHooks, missingReleaseCredentials, parseArguments, releaseChecks } from './release-local.mjs';
+import { attribution, dryInitializeJob, dryRun, localHooks, missingReleaseCredentials, parseArguments, releaseChecks, runLocalRelease } from './release-local.mjs';
 import { setupJava } from './release-local-java.mjs';
 import { condition, evaluate, readCommandFile, render } from './release-local-expressions.mjs';
 import { loadEnvironment, Processes } from './release-local-process.mjs';
@@ -308,6 +308,42 @@ test('checks-only execution uses the complete reusable release gate without init
     await assert.rejects(releaseChecks(engine, { github: { sha } }), /Release checks failed/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+test('direct checks export failure records and remove only their workspace', async t => {
+  const directory = temporary(), state = join(directory, 'results'), bin = join(directory, 'bin');
+  const oldPath = process.env.PATH;
+  try {
+    mkdirSync(bin);
+    mkdirSync(state);
+    writeFileSync(join(state, 'fixture'), 'operator file');
+    writeFileSync(join(bin, 'sudo'), `#!${process.execPath}
+const assert = require('node:assert/strict');
+const { existsSync, rmSync } = require('node:fs');
+const { join } = require('node:path');
+const [flag, tool, options, path] = process.argv.slice(2);
+const state = ${JSON.stringify(state)};
+assert.deepEqual([flag, tool, options], ['-n', 'rm', '-rf']);
+assert.ok(path.startsWith(join(state, 'workspace-')));
+assert.ok(existsSync(join(state, 'release-checks.json')));
+rmSync(path, { recursive: true });
+`, { mode: 0o700 });
+    process.env.PATH = `${bin}:${oldPath}`;
+    t.mock.method(LocalActions.prototype, 'workflow', async function () {
+      writeFileSync(join(this.directory, 'records.json'), '[{"conclusion":"failure"}]');
+      writeFileSync(join(this.directory, 'release-checks-timing.json'), '{"wallSeconds":1}');
+      return { build: { result: 'failure' } };
+    });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim();
+    const args = parseArguments(['--execute', '--leg', 'release_checks', '--release-sha', head, '--state-dir', state]);
+    await assert.rejects(runLocalRelease(args, { repository, secrets: {} }), { message: `Release checks failed; inspect private results under ${state}` });
+    assert.deepEqual(readdirSync(state).sort(), ['fixture', 'records.json', 'release-checks-timing.json', 'release-checks.json']);
+    assert.equal(readFileSync(join(state, 'fixture'), 'utf8'), 'operator file');
+    assert.equal(JSON.parse(readFileSync(join(state, 'release-checks.json'), 'utf8')).build.result, 'failure');
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('checks-only hooks retain the full workflow and use the four existing slots', async () => {
   const workflow = parse(readFileSync(join(repository, '.github/workflows/checks.yml'), 'utf8'));
   const prepare = LocalChecks.prototype.prepare;
@@ -451,12 +487,15 @@ test('shard transport inherits existing slices and jails without changing their 
       calls.push(args);
       if (args[0] === 'systemd-run') {
         const jobDirectory = join(directory, 'jobs/release_checks-server-suite-shard-1');
+        writeFileSync(join(jobDirectory, 'upper/generated'), 'private overlay content');
         writeFileSync(join(jobDirectory, 'result.json'), JSON.stringify({ job: { result: 'success', outputs: {} }, records: [], artifacts: [] }));
       }
+      if (args[0] === 'rm') for (const path of args.slice(2)) rmSync(path, { recursive: true });
       return '';
     };
     const result = await checks.execute(1, { steps: [] }, { github: { sha, job: 'server-suite-shard' }, matrix: { shard: 1 } }, 'release_checks/server-suite-shard-1');
     assert.equal(result.result, 'success');
+    for (const path of ['merged', 'upper', 'overlay-work']) assert.equal(existsSync(join(directory, 'jobs/release_checks-server-suite-shard-1', path)), false);
     const command = calls.find(args => args[0] === 'systemd-run');
     assert.ok(command.includes('--slice=beeline-ci1.slice'));
     assert.ok(command.includes('--user') && command.includes('--net'));
@@ -478,6 +517,66 @@ test('shard transport inherits existing slices and jails without changing their 
     assert.equal(engine.records.get('release_checks/server-suite-shard-2').conclusion, 'failure');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+test('private check copies are removed after execution and after partial setup', async () => {
+  const directory = temporary();
+  try {
+    const messages = [];
+    const engine = new LocalActions({ root: repository, directory, secrets: {}, processes: new Processes({}, message => messages.push(message)) });
+    for (const scenario of ['success', 'setup failure', 'cleanup failure']) {
+      const label = `release_checks/typecheck-${scenario.replaceAll(' ', '-')}`;
+      const jobDirectory = join(directory, 'jobs', label.replaceAll('/', '-'));
+      const privateSource = join(jobDirectory, 'source');
+      const checks = new LocalChecks(engine);
+      checks.shards.set(1, { name: 'beeline-ci-shard-1', slice: 'beeline-ci1.slice', pid: '123' });
+      checks.privileged = async args => {
+        switch (args[0]) {
+          case 'cp':
+            mkdirSync(args.at(-1));
+            writeFileSync(join(privateSource, 'copy'), 'private source content');
+            if (scenario === 'setup failure') throw new Error('copy interrupted');
+            break;
+          case 'systemd-run':
+            assert.equal(scenario === 'setup failure', false);
+            assert.ok(existsSync(join(privateSource, 'copy')));
+            writeFileSync(join(jobDirectory, 'result.json'), JSON.stringify({ job: { result: 'success', outputs: {} }, records: [], artifacts: [] }));
+            break;
+          case 'rm':
+            assert.deepEqual(args, ['rm', '-rf', privateSource]);
+            if (scenario === 'cleanup failure') throw new Error('removal failed');
+            rmSync(privateSource, { recursive: true });
+            break;
+        }
+      };
+      const result = await checks.execute(1, { steps: [] }, { github: { sha, job: 'typecheck' } }, label);
+      assert.equal(result.result, scenario === 'setup failure' ? 'failure' : 'success');
+      assert.equal(existsSync(privateSource), scenario === 'cleanup failure');
+    }
+    assert.match(messages.join('\n'), /workspace cleanup failed .*removal failed/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('local PostgreSQL teardown removes its anonymous volume even if setup fails', async () => {
+  const directory = temporary();
+  try {
+    for (const validPort of [true, false]) {
+      const calls = [];
+      const processes = new Processes({}, () => {});
+      processes.run = async (command, args) => {
+        calls.push([command, ...args]);
+        if (args[0] === 'port') return validPort ? '127.0.0.1:54321' : 'no port';
+        return '';
+      };
+      const engine = new LocalActions({ root: repository, directory, secrets: {}, processes });
+      const job = { services: { postgres: { image: 'pgvector/pgvector:pg16' } }, steps: [] };
+      const context = { github: { sha, job: 'postgres' }, job: { status: 'success', services: {} }, steps: {} };
+      const result = await engine.job(job, context, `postgres-${validPort}`);
+      assert.equal(result.result, validPort ? 'success' : 'failure');
+      const service = calls[0][calls[0].indexOf('--name') + 1];
+      assert.deepEqual(calls.at(-1), ['docker', 'rm', '--force', '--volumes', service]);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('private HOME GitHub fetches use ephemeral credentials and redact their encoded form', async () => {
   const directory = temporary(), messages = [], token = 'fixture-private-home-token';
   const encoded = Buffer.from(`x-access-token:${token}`).toString('base64');
@@ -494,12 +593,16 @@ test('private HOME GitHub fetches use ephemeral credentials and redact their enc
 });
 test('Body occupies a queue slot through a bounded host-user scope with private source and HOME', async () => {
   const directory = temporary(), calls = [];
-  let hostSource;
+  let hostSource, hostTemporary;
   try {
     const engine = new LocalActions({ root: repository, directory, secrets: {}, processes: new Processes({}, () => {}) });
     const checks = new LocalChecks(engine);
     checks.shards.set(4, { name: 'beeline-ci-shard-4', slice: 'beeline-ci4.slice', pid: '456' });
-    checks.privileged = async args => { calls.push(args); return ''; };
+    checks.privileged = async args => {
+      calls.push(args);
+      if (args[0] === 'rm') for (const path of args.slice(2)) rmSync(path, { recursive: true });
+      return '';
+    };
     checks.command = async (command, args) => {
       assert.equal(command, 'systemd-run');
       assert.ok(args.includes('--user') && args.includes('--scope'));
@@ -513,6 +616,7 @@ test('Body occupies a queue slot through a bounded host-user scope with private 
       assert.equal(spec.directory, jobDirectory);
       assert.match(spec.temporary, /^\/tmp\/beeline-check-[\w-]+$/);
       assert.ok(spec.temporary.length < 40);
+      hostTemporary = spec.temporary;
       assert.equal(spec.context.secrets, undefined);
       writeFileSync(join(jobDirectory, 'result.json'), JSON.stringify({ job: { result: 'success', outputs: {} }, records: [], artifacts: [] }));
       return '';
@@ -520,7 +624,9 @@ test('Body occupies a queue slot through a bounded host-user scope with private 
     const result = await checks.execute(4, { steps: [] }, { github: { sha, job: 'body-suite' }, secrets: { PRIVATE: 'never-forward' } }, 'release_checks/body-suite-local');
     assert.equal(result.result, 'success');
     assert.ok(calls.some(args => args[0] === 'cp' && args.at(-1) === join(hostSource, 'source')));
-    assert.ok(calls.some(args => args.join(' ') === `rm -rf ${hostSource}`));
+    assert.deepEqual(calls.find(args => args[0] === 'rm'), ['rm', '-rf', hostSource, hostTemporary]);
+    assert.equal(existsSync(hostSource), false);
+    assert.equal(existsSync(hostTemporary), false);
     assert.ok(calls.some(args => args[0] === 'chown' && args[2] === `${process.getuid()}:${process.getgid()}`));
   } finally { rmSync(directory, { recursive: true, force: true }); if (hostSource) rmSync(hostSource, { recursive: true, force: true }); }
 });

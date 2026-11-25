@@ -65,6 +65,13 @@ export class LocalDelivery {
         completed_at: new Date().toISOString(), logFile, slice: `beeline-ci${slot}.slice` });
       privateWrite(join(this.engine.directory, 'records.json'), JSON.stringify([...this.engine.records.values()], null, 2));
       return { result: 'failure', outputs: {} };
+    } finally {
+      // Artifacts and records live beside this private source, in the job state.
+      const source = join(directory, 'source');
+      if (existsSync(source)) {
+        try { await this.command('sudo', ['-n', 'rm', '-rf', source]); }
+        catch (error) { this.engine.processes.log(`${label}: source cleanup failed for ${source}. ${error.message}`); }
+      }
     }
   }
   async worker(slot, job, context, label, workflowEnv, directory) {

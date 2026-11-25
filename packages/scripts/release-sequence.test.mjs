@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { dispatchPromotion, releaseArguments, releaseSequence, removeReleaseDirectory, removeStaleReleaseImages, staleReleaseImages } from './release.mjs';
+import { finishReleaseWorkspace } from './release-local-process.mjs';
+import { dispatchPromotion, releaseArguments, releaseSequence, removeStaleReleaseImages, staleReleaseImages } from './release.mjs';
 
 const sha = 'a'.repeat(40);
 const spec = { source: '/source', sha, directory: '/state', dispatchedBy: { humanCommandMessageId: 'owner-message-42' } };
@@ -37,10 +41,25 @@ test('promotion accepts owner attribution and rejects build and test options', a
   assert.equal(calls[0].skipFullChecks, 'owner-message-42');
   assert.equal(calls[0]['release-sha'], sha);
 });
-test('a finished release removes its whole working directory', () => {
-  const calls = [];
-  removeReleaseDirectory('/tmp/beeline-release-427CG5', (command, args) => calls.push([command, ...args]));
-  assert.deepEqual(calls, [['sudo', '-n', 'rm', '-rf', '/tmp/beeline-release-427CG5']]);
+test('a finished release exports its records before removing the working directory', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'beeline-release-sequence-test-'));
+  const workspace = join(directory, 'workspace'), records = join(directory, 'records');
+  try {
+    const next = join(workspace, 'next');
+    mkdirSync(next, { recursive: true });
+    writeFileSync(join(next, 'records.json'), '[{"conclusion":"failure"}]');
+    writeFileSync(join(next, 'spec.json'), 'private worker spec');
+    let removed = false;
+    finishReleaseWorkspace(workspace, next, () => records, (command, args) => {
+      assert.deepEqual([command, ...args], ['sudo', '-n', 'rm', '-rf', workspace]);
+      assert.equal(readFileSync(join(records, 'records.json'), 'utf8'), '[{"conclusion":"failure"}]');
+      assert.equal(existsSync(join(records, 'spec.json')), false);
+      rmSync(workspace, { recursive: true });
+      removed = true;
+    });
+    assert.equal(removed, true);
+    assert.equal(existsSync(workspace), false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('release image cleanup retains current and previous tags, then prunes dangling images', () => {
   const [current, previous, older, oldest] = ['95eae3e06540', '90e4770917fe', '8a75d2ee5b27', 'a8dc3a6492d0'].map(short => short.padEnd(40, '0'));
