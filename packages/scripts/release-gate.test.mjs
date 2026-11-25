@@ -74,7 +74,7 @@ for (const outcome of ['success', 'failure', 'wrong-sha', 'skipped']) test(`real
   });
   await Promise.race([builds, run]);
   for (const id of early) assert.ok(started.has(id), id);
-  const delivery = ['helper', 'server', 'mobile_ota', 'website'];
+  const delivery = ['helper', 'server', 'mobile_ota', 'website', 'desktop_build'];
   if (outcome !== 'skipped' && outcome !== 'wrong-sha') {
     for (const id of delivery) assert.equal(started.has(id), false, id);
   }
@@ -85,6 +85,7 @@ for (const outcome of ['success', 'failure', 'wrong-sha', 'skipped']) test(`real
     assert.ok(engine.artifacts.has(`daemon-${platform}-v1.2.3-rc.1-${releaseSha}`));
   const authorized = outcome === 'success' || outcome === 'skipped';
   assert.equal(results.release_validation.result, authorized ? 'success' : 'failure');
+  assert.equal(results.desktop_installers.result, authorized ? 'success' : 'skipped');
   for (const id of delivery) assert.equal(started.has(id), authorized, id);
   if (outcome === 'success' || outcome === 'failure') {
     assert.deepEqual(jobs.sort(), ['codecs', 'dead-code', 'typecheck']);

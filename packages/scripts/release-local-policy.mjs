@@ -59,7 +59,7 @@ export function localWorkflow(workflow, { channel = 'next', skipFullChecks } = {
   // needed by rollout or either of the other live legs.
   const desktop = local.jobs.desktop_installers;
   desktop.needs.push('server_prebuild');
-  desktop.if = `always() && !cancelled() && needs.initialize.result == 'success' && ${desktop.if.replace("needs.release_validation.result == 'success' && ", '')}`;
+  desktop.if = `always() && !cancelled() && ${desktop.if}`;
   delete local.jobs.desktop_installers;
   local.jobs.desktop_installers = desktop;
   const validation = local.jobs.release_validation;
