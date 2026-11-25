@@ -479,7 +479,7 @@ describe('prompt assembly guards', () => {
     expect(skill).toContain('only on unfixed prior blockers or regressions introduced by that delta');
     expect(skill).toContain('Missed issues in unchanged code are non-blocking notes.');
     expect(skill).toContain('The first review must surface all confirmed blockers.');
-    expect(skill).toContain('with all blockers and next steps');
+    expect(skill).toContain('List every eligible blocker at once, each with a concrete next step for the worker.');
 
     const instruction = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
     expect(instruction).toContain('list all blockers with concrete fixes, including every blocker on the first round');
@@ -765,8 +765,8 @@ const scope9 = fixtureScope9();
 
   it('gives the review handback priority over the finished-fix rule', () => {
     const reviewer = scope9.prompt('code-corner-reviewer');
-    expect(reviewer).toContain("message(type:normal) to the implementer at this thread's address");
-    expect(reviewer).not.toContain('report a blocker if capability is missing');
+    expect(reviewer).toContain('Write your verdict and findings as your turn text');
+    expect(reviewer).not.toMatch(/message\(type:(normal|blocked)\)/);
     expect(reviewer).toContain('This wins over the finished-fix rule.');
   });
 
@@ -799,12 +799,17 @@ const scope9 = fixtureScope9();
   });
 
 
-  it('routes review findings to the thread implementer as an addressed message', () => {
-    const text = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
-    expect(text).toContain("message(type:normal) to the implementer at this thread's address");
-    expect(text).not.toContain('report a blocker');
-    expect(text).not.toContain('@author');
-    expect(beelineReviewSkillMarkdown('test')).toContain('On FAIL, send message(type:normal) to the implementer at the thread address');
+  it('uses turn text for the verdict and approves the exact head through approve_merge', () => {
+    for (const text of [
+      cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!,
+      beelineReviewSkillMarkdown('test'),
+    ]) {
+      expect(text).toContain('Write your verdict and findings as your turn text');
+      expect(text).toContain('send only replies with the message tool');
+      expect(text).toContain('The server wakes the implementer with the review result');
+      expect(text).toContain('approve_merge');
+      expect(text).not.toMatch(/message\(type:(normal|blocked)\)/);
+    }
   });
 });
 describe('assigned thread brief', () => {

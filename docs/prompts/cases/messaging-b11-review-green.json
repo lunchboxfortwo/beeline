@@ -36,6 +36,9 @@
         }
       },
       {
+        "noCall": "message"
+      },
+      {
         "noCall": "merge_thread"
       },
       {
