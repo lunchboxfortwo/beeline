@@ -3,7 +3,7 @@ import React,{useEffect} from 'react';
 import {act,create} from 'react-test-renderer';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 
-const f=vi.hoisted(()=>({path:'/beeline/people',desktop:false,titleRenders:0,identity:vi.fn(),read:vi.fn(),replace:vi.fn()}));
+const f=vi.hoisted(()=>({path:'/beeline/people',desktop:false,titleRenders:0,workspaceRenders:0,identity:vi.fn(),read:vi.fn(),replace:vi.fn()}));
 vi.mock('react-native',()=>({Platform:{OS:'ios',select:(choices:any)=>choices.ios??choices.default}}));
 vi.mock('tamagui',async()=> (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native',async()=> (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
@@ -14,7 +14,10 @@ vi.mock('@/buzz/use-active-community',()=>({useActiveCommunityId:()=> 'ws'}));
 vi.mock('@/buzz/work-board-store',()=>({useWorkBoardNeedsYouCount:()=>0}));
 vi.mock('@/auth/buzz-identity-storage',()=>({loadBuzzIdentity:f.identity,getEffectiveRelayUrl:async()=> 'https://test.invalid'}));
 vi.mock('@/buzz/surface-storage',()=>({mobileSurfaceCache:{read:f.read},surfaceAddress:()=> 'workspaces'}));
-vi.mock('@/buzz/use-shared-surface',()=>({useSurfaceSnapshot:()=>({workspaces:[{id:'ws',name:'Tubing Crew'}]})}));
+vi.mock('@/buzz/use-shared-surface',()=>({useSurfaceSnapshot:()=>{
+    f.workspaceRenders++;
+    return {workspaces:[{id:'ws',name:'Tubing Crew'}]};
+}}));
 vi.mock('@/ui/grammar',async()=>{
     const actual=await vi.importActual<any>('@/ui/grammar');
     return {...actual,T:(props:any)=>{if(props.children==='Tubing Crew')f.titleRenders++;return React.createElement('Text',props,props.children);}};
@@ -126,6 +129,23 @@ it('keeps the navigation stack mounted while hiding its header on a chat route',
     f.path='/beeline/chat/room';await act(async()=>tree.update(render()));
     f.path='/beeline/people';await act(async()=>tree.update(render()));
     expect(mounts).toBe(1);
+});
+
+it('leaves the workspace shell alone when a profile opens a chat or a chat opens a thread',async()=>{
+    const stack=<span>Stack</span>;
+    const render=()=><WorkspaceTabShell>{stack}</WorkspaceTabShell>;
+    f.path='/beeline/agent-profile';
+    await act(async()=>{tree=create(render());});
+    const renders=f.workspaceRenders;
+    for(const path of ['/beeline/chat/room','/beeline/chat/thread']){
+        f.path=path;
+        await act(async()=>tree.update(render()));
+        expect(f.workspaceRenders).toBe(renders);
+    }
+    f.path='/beeline/channels';
+    await act(async()=>tree.update(render()));
+    expect(headerDisplay()).toBe('flex');
+    expect(f.workspaceRenders).toBeGreaterThan(renders);
 });
 
 it('keeps the route and draft mounted when the viewport changes between phone and desktop',async()=>{

@@ -428,3 +428,14 @@ it('returns the new thread with its creation when asked, read as the opening scr
   const without = await phone.execute('createHumanCorner', { roomId: R, title: 'opened-alone', cornerId: randomUUID() }, H);
   expect(without).not.toHaveProperty('roomView');
 });
+
+it('opens an empty direct chat without looking up message tags', async () => {
+  const query = vi.spyOn(db, 'query');
+  try {
+    const view = await phone.readRoom(DM, H);
+    expect(view).toMatchObject({ room: { id: DM }, messages: [] });
+    expect(query.mock.calls.some(([sql]) => /FROM messages m WHERE m\.id=ANY\(\$1::text\[\]\)/.test(sql))).toBe(false);
+  } finally {
+    query.mockRestore();
+  }
+});

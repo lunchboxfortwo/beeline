@@ -104,6 +104,7 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
            )
            SELECT viewer_name, source_present, EXISTS(SELECT 1 FROM inserted) inserted FROM parent`,
           [input.roomId, viewerId, id, title, input.sourceMessageId ?? null],
+          'create-human-corner',
         )
       ).rows[0];
       if (!parent) throw new Error('room access denied');

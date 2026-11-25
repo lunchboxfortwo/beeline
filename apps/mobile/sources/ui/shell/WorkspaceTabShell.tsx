@@ -12,18 +12,21 @@ import {clientResetGeneration,subscribeClientReset} from '@/sync/client-reset';
 import {BuzzCommunityShell} from '@/components/buzz/CommunityRail';
 import {useIsDesktop} from '@/utils/responsive';
 import {TabHeaderHost} from './TabHeader';
-import {TAB_ROUTES,isTabRootPath,tabForPath} from './tab-routes';
+import {TAB_ROUTES,isTabRootPath,tabForPath,type Tab} from './tab-routes';
 import {PhoneTabBar,SharedTabBarHeight} from './PhoneTabScreen';
 
 /** Mounted above the phone stack, so changing tabs cannot reload its name. */
 export function WorkspaceTabShell({children}:{children:React.ReactNode}) {
     const desktop=useIsDesktop();
+    const pathname=usePathname();
     // One tree at every width: a window resized across the breakpoint keeps its open route and draft.
-    return <PhoneWorkspaceShell phone={!desktop}>{children}</PhoneWorkspaceShell>;
+    return <PhoneWorkspaceShell phone={!desktop} root={isTabRootPath(pathname)} tab={tabForPath(pathname)??'chats'}>{children}</PhoneWorkspaceShell>;
 }
 
-function PhoneWorkspaceShell({children,phone}:{children:React.ReactNode;phone:boolean}) {
-    const pathname=usePathname();
+// Switching between routes with the same chrome leaves the shell's tree alone.
+const PhoneWorkspaceShell=React.memo(function PhoneWorkspaceShell({children,phone,root,tab}: {
+    children:React.ReactNode;phone:boolean;root:boolean;tab:Tab;
+}) {
     const active=useActiveCommunityId();
     const reset=useSyncExternalStore(subscribeClientReset,clientResetGeneration);
     const [scope,setScope]=useState<{relay:string;viewer:string;reset:number}|null>(null);
@@ -43,10 +46,8 @@ function PhoneWorkspaceShell({children,phone}:{children:React.ReactNode;phone:bo
     const select=useCallback((id:string|null)=>{
         if(!id||!scope)return;
         void saveActiveCommunityId(scope.viewer,id);
-        const tab=tabForPath(pathname)??'chats';
         router.replace({pathname:TAB_ROUTES[tab],params:tab==='settings'?{workspaceId:id}:{communityId:id}} as never);
-    },[scope,pathname]);
-    const root=isTabRootPath(pathname);
+    },[scope,tab]);
     // A hidden bar measures zero; the roots under a pushed page keep their space.
     const [bar,setBar]=useState(0);
     return <BuzzCommunityShell communities={communities} activeCommunityId={active??null} onSelect={select}
@@ -58,8 +59,8 @@ function PhoneWorkspaceShell({children,phone}:{children:React.ReactNode;phone:bo
             {/* One bar over the four tab roots: switching tabs never remounts it. */}
             {phone ? <YStack position="absolute" left={0} right={0} bottom={0} display={root?'flex':'none'}
                 onLayout={event=>{const height=event.nativeEvent.layout.height;if(height>0)setBar(height);}} testID="shared-tab-bar">
-                <PhoneTabBar active={tabForPath(pathname)??'chats'}/>
+                <PhoneTabBar active={tab}/>
             </YStack> : null}
         </YStack>
     </BuzzCommunityShell>;
-}
+});
