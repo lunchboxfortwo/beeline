@@ -256,6 +256,34 @@ export function updateStatePath(layout: BeelineInstallLayout): string {
   return join(layout.releasesRoot, '.state', 'update-state.json');
 }
 
+function releaseChannelPath(layout: BeelineInstallLayout): string {
+  return join(dirname(updateStatePath(layout)), 'release-channel');
+}
+
+export async function installedReleaseChannel(
+  layout: BeelineInstallLayout,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const recorded = (await readFile(releaseChannelPath(layout), 'utf8').catch(() => '')).trim();
+  if (recorded === 'next' || recorded === 'latest') return recorded;
+  return env.BEELINE_RELEASE_CHANNEL?.trim() || 'latest';
+}
+
+export async function updateCommandManifestUrl(
+  layout: BeelineInstallLayout,
+  override: string | undefined,
+  rememberChannel: boolean,
+): Promise<string> {
+  const explicit = process.env.BEELINE_RELEASE_CHANNEL?.trim();
+  if (rememberChannel && (explicit === 'next' || explicit === 'latest')) {
+    // Keep the preference independent of the update worker's staging and check results.
+    const path = releaseChannelPath(layout);
+    await mkdir(dirname(path), { recursive: true });
+    await replaceFile(path, `${explicit}\n`, 0o600);
+  }
+  return override ?? resolveManifestUrl(process.env, explicit || await installedReleaseChannel(layout));
+}
+
 export async function readUpdateState(layout: BeelineInstallLayout): Promise<UpdateStateFile> {
   try {
     return JSON.parse(await readFile(updateStatePath(layout), 'utf8')) as UpdateStateFile;
@@ -660,7 +688,9 @@ export async function prepareLatestRelease(
       ...(options.signal ? { signal: options.signal } : {}),
     });
   try {
-    const manifestUrl = options.manifest?.url ?? resolveManifestUrl(options.env ?? process.env);
+    const env = options.env ?? process.env;
+    const manifestUrl =
+      options.manifest?.url ?? resolveManifestUrl(env, await installedReleaseChannel(layout, env));
     const bundle =
       options.manifest?.bundle ??
       parseUpdateManifest(await fetchText(manifestUrl, fetchImpl), hostPlatformKey()).bundle;

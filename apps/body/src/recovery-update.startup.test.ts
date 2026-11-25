@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { askMachine } from './machine-control.js';
 import { prepareMachineRelease } from './recovery.js';
+import { anchorLayout, installedReleaseChannel } from './self-update.js';
 
 vi.mock('./recovery-dependencies.js', () => ({ convergeDependencies: vi.fn(async () => {}) }));
 
@@ -14,6 +15,7 @@ vi.mock('./machine-control.js', async (original) => ({
 vi.mock('./native-helper.js', async (original) => ({
   ...(await original<typeof import('./native-helper.js')>()),
   convergeNativeHelper: vi.fn(async () => process.pid),
+  nativeHelperStatus: vi.fn(async () => ({})),
 }));
 vi.mock('./recovery.js', async (original) => ({
   ...(await original<typeof import('./recovery.js')>()),
@@ -30,9 +32,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-it.each([false, true])(
-  'carries CLI force=%s through convergence to the live helper request',
-  async (force) => {
+it.each([[false, undefined], [true, 'next']] as const)(
+  'carries CLI force=%s to the live helper and remembers channel %s',
+  async (force, channel) => {
     vi.resetModules();
     const home = await mkdtemp(join(tmpdir(), 'beeline-update-entry-'));
     const lib = join(home, 'lib/beeline');
@@ -44,6 +46,8 @@ it.each([false, true])(
     vi.stubEnv('XDG_CONFIG_HOME', join(home, 'config'));
     vi.stubEnv('XDG_STATE_HOME', join(home, 'state'));
     vi.stubEnv('BEELINE_LIB_DIR', lib);
+    vi.stubEnv('BEELINE_RELEASE_CHANNEL', channel);
+    vi.stubEnv('BEELINE_UPDATE_MANIFEST_URL', undefined);
     vi.mocked(askMachine).mockImplementation(async (_root, request) => ({
       pid: process.pid,
       generation: 'current',
@@ -76,6 +80,15 @@ it.each([false, true])(
         sourceGeneration: 'current',
         ...(force ? { force: true } : {}),
       });
+      vi.stubEnv('BEELINE_RELEASE_CHANNEL', undefined);
+      expect(await installedReleaseChannel(anchorLayout(lib), {})).toBe(channel ?? 'latest');
+
+      log.mockClear();
+      vi.resetModules();
+      process.argv = [process.execPath, 'recovery.mjs', 'update', '--status'];
+      await import('./recovery-cli.js');
+      await vi.waitFor(() => expect(log).toHaveBeenCalledOnce());
+      expect(JSON.parse(log.mock.calls[0]![0]).releaseChannel).toBe(channel ?? 'latest');
     } finally {
       process.argv = previousArgs;
       process.exitCode = previousExit;
