@@ -22,3 +22,9 @@ export class PhoneSocketDisconnectedError extends Error {
     this.name = 'PhoneSocketDisconnectedError';
   }
 }
+
+/** Socket disconnects and local deadlines carry this marker through Room reads. */
+export function isPhoneSocketTransportError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null &&
+    'socketRequest' in error && error.socketRequest === true;
+}
