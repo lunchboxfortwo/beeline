@@ -2,6 +2,7 @@
 // resource slice as their release worker. No daemon configuration is changed.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 export function localToolPlan(tool, args, config) {
   const docker = values => {
@@ -23,6 +24,9 @@ export function localToolPlan(tool, args, config) {
     if (arg === '--build-arg') values.buildArgs.push('--build-arg', value);
     else values[arg.slice(2)] = value;
   }
+  // Fly resolves a config's dockerfile relative to that config.
+  const configured = values.config && readFileSync(values.config, 'utf8').match(/^\s*dockerfile = "([^"]+)"$/m)?.[1];
+  values.dockerfile ??= configured && join(dirname(values.config), configured);
   const files = { 'beeline-server': 'apps/server/Dockerfile', 'beeline-free-agents': 'apps/infra/free-agent/Dockerfile' };
   if (files[values.app] !== values.dockerfile || !values['image-label'] || !args.includes('--push')) throw new Error('Local Fly build requires the known image, explicit Dockerfile, label and push');
   const image = `registry.fly.io/${values.app}:${values['image-label']}`;

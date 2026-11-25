@@ -203,11 +203,12 @@ test('executable tool shims stop after a failed build and keep caps on build con
     const docker = join(directory, 'docker'), flyctl = join(directory, 'flyctl');
     for (const [file, code] of [[docker, 7], [flyctl, 0]]) writeFileSync(file, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit ${code}\n`, { mode: 0o700 });
     const env = writeToolAdapters(directory, { slice: 'beeline-ci3.slice', docker, flyctl });
-    await assert.rejects(run(join(env.PATH, 'flyctl'), ['deploy', '.', '--app', 'beeline-free-agents', '--dockerfile', 'apps/infra/free-agent/Dockerfile', '--local-only', '--build-only', '--push', '--image-label', 'fixture'], { env: { ...process.env, ...env } }), error => error.code === 7);
+    // The release leg passes the Fly config, whose dockerfile is relative to apps/infra.
+    await assert.rejects(run(join(env.PATH, 'flyctl'), ['deploy', '.', '--config', 'apps/infra/fly.beeline-free-agents.toml', '--app', 'beeline-free-agents', '--local-only', '--build-only', '--push', '--image-label', 'fixture'], { env: { ...process.env, ...env } }), error => error.code === 7);
     const calls = readFileSync(log, 'utf8').trim().split('\n');
     assert.equal(calls.length, 2);
     assert.equal(calls[0], 'auth docker');
-    assert.match(calls[1], /build --cgroup-parent=beeline-ci3.slice/);
+    assert.match(calls[1], /build --cgroup-parent=beeline-ci3.slice --file apps\/infra\/free-agent\/Dockerfile /);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
