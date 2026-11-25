@@ -8,6 +8,7 @@ import {
 } from '@beeline/api-contract/chat-links';
 import type { PhoneContext } from './context.js';
 import { phoneCanReadRooms } from './access.js';
+import { readMessageLinkRooms } from './room-read.js';
 import { unix } from './values.js';
 
 type ThreadToken = Extract<ChatLinkToken, { kind: 'thread' }>;
@@ -70,16 +71,22 @@ export async function phoneResolveChatLinks(
   if (!context) return null;
 
   const parsed = new Map<string, ChatLinkToken>();
+  const messageIds = new Set<string>();
   for (const raw of tokens.slice(0, CHAT_LINK_TOKEN_LIMIT)) {
+    if (typeof raw === 'string' && /^[0-9a-f]{64}$/.test(raw)) {
+      messageIds.add(raw);
+      continue;
+    }
     const token = typeof raw === 'string' ? parseChatLinkToken(raw) : null;
     if (token && !parsed.has(token.key)) parsed.set(token.key, token);
   }
   const threads = [...parsed.values()].filter((token): token is ThreadToken => token.kind === 'thread');
   const messages = [...parsed.values()].filter((token): token is MessageToken => token.kind === 'message');
 
-  const [threadRows, messageRows] = await Promise.all([
+  const [threadRows, messageRows, destinations] = await Promise.all([
     threads.length ? readThreadCandidates(ctx, context.workspace_id, threads) : [],
     messages.length ? readMessageCandidates(ctx, context.workspace_id, messages) : [],
+    messageIds.size ? readMessageLinkRooms(ctx, [...messageIds], viewerId) : [],
   ]);
 
   const chosen: Array<{ key: string; rootId: string; view: ChatLinkView }> = [];
@@ -125,11 +132,16 @@ export async function phoneResolveChatLinks(
   }
 
   const readable = await phoneCanReadRooms(ctx, [...new Set(chosen.map((item) => item.rootId))], viewerId);
-  return {
-    links: chosen.map((item) => readable.has(item.rootId)
-      ? item.view
-      : { key: item.key, kind: 'private' as const }),
-  };
+  const links: ChatLinkView[] = chosen.map((item) => readable.has(item.rootId)
+    ? item.view
+    : { key: item.key, kind: 'private' });
+  // Markdown labels only need to know whether their readable message belongs to a thread.
+  for (const row of destinations) {
+    if (row.parent_id) links.push({
+      key: row.id, kind: 'thread', roomId: row.room_id, parentRoomId: row.parent_id, name: row.name,
+    });
+  }
+  return { links };
 }
 
 /** Threads in this Workspace whose name matches, with each thread's opening message. */

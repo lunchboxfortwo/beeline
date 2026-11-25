@@ -101,6 +101,16 @@ describe('chat message numbers', () => {
 });
 
 describe('resolveChatLinks', () => {
+  it('identifies readable thread destinations by message id for Markdown labels', async () => {
+    const thread = await message(SENDING, 'Art pass');
+    const room = await message(BEELINE, 'Chat message');
+    const hidden = await message(SECRET_THREAD, 'Private message');
+    const view = await phone.resolveChatLinks(TRIAGE, [thread.id, room.id, hidden.id], VIEWER);
+    expect(view?.links).toEqual([{
+      key: thread.id, kind: 'thread', roomId: SENDING, parentRoomId: BEELINE, name: 'sending-new-message',
+    }]);
+  });
+
   it('opens a thread in this chat, and names the chat of a thread elsewhere', async () => {
     await message(SENDING, 'Send button stays grey after the first message on Android.');
     await message(TRIAGE_FIX, 'Fix is ready');

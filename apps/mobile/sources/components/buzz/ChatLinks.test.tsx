@@ -15,6 +15,13 @@ vi.mock('@/components/buzz/HullDialog', () => ({
   HullFloatingSurface: (props: Record<string, unknown>) => React.createElement('HullFloatingSurface', props),
 }));
 vi.mock('@/components/buzz/Button', () => ({ Button: (props: Record<string, unknown>) => React.createElement('Button', props) }));
+const { navigate, resolveMessageLink } = vi.hoisted(() => ({ navigate: vi.fn(), resolveMessageLink: vi.fn() }));
+vi.mock('expo-router', () => ({ router: { navigate } }));
+vi.mock('@/auth/buzz-identity-storage', () => ({
+  loadBuzzIdentity: async () => ({}), getEffectiveRelayUrl: async () => 'http://local.test',
+}));
+vi.mock('@/sync/transport/room-view-client', () => ({ RoomViewClient: class { resolveMessageLink = resolveMessageLink; } }));
+import { openExternalUrl } from '@/utils/open-external-url';
 import { createChatLinkStore } from '@/buzz/chat-link-store';
 import { ChatLinkProvider } from './ChatLinkProvider';
 import { MonoMarkdown } from './MonoMarkdown';
@@ -22,7 +29,9 @@ import { MonoMarkdown } from './MonoMarkdown';
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
 const preview = { author: 'Candy', createdAt: Date.UTC(2026, 10, 12, 8, 15) / 1000, firstLine: 'Send button stays grey after the first message on Android.' };
+const skirmishId = 'c3f4dbe8978a21bd63d7b7c23bf939e76317e019c5eb8996975f293ab661cbe5';
 const LINKS: Record<string, ChatLinkView> = {
+  [skirmishId]: { key: skirmishId, kind: 'thread', roomId: 'skirmish', parentRoomId: 'apm', name: 'siege-up-skirmish' },
   '↳sending-new-message': { key: '↳sending-new-message', kind: 'thread', roomId: 'thread-1', parentRoomId: 'room-1', name: 'sending-new-message' },
   '¶candy-2773': { key: '¶candy-2773', kind: 'message', messageId: 'f'.repeat(64), roomId: 'thread-1', workspaceId: 'w1', threadName: 'sending-new-message', preview },
   '¶bbc-118': { key: '¶bbc-118', kind: 'message', messageId: 'e'.repeat(64), roomId: 'room-2', workspaceId: 'w1', chatName: 'issues-triage', preview },
@@ -101,5 +110,32 @@ it('keeps tokens as plain text outside a chat', () => {
   let tree: any;
   act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown="See ↳notes" />); });
   expect(tree.root.findAllByProps({ testID: 'chat-link-thread' })).toHaveLength(0);
+  act(() => tree.unmount());
+});
+
+it('prefixes labeled thread destinations once and presses each label through its normal route', async () => {
+  const roomId = 'a'.repeat(64);
+  const url = `#beeline/siege-up-skirmish/${skirmishId}`;
+  const { tree, onOpenThread } = await renderMessage([
+    `[siege-up-skirmish](${url}) [Art pass](${url}) [↳Art pass](${url})`,
+    `[Room](#beeline/siege-up-skirmish/${roomId}) [Site](https://example.com) ↳sending-new-message`,
+  ].join(' '));
+  const links = tree.root.findAll((node: any) => node.type === 'Text' && node.props.accessibilityRole === 'link');
+  const words = (node: any): string => typeof node === 'string' ? node : node.children.map(words).join('');
+  expect(links.map(words)).toEqual(['↳siege-up-skirmish', '↳Art pass', '↳Art pass', 'Room', 'Site', '↳sending-new-message']);
+  for (const [index, id, channelId] of [[0, skirmishId, 'skirmish'], [1, skirmishId, 'skirmish'], [3, roomId, 'apm']] as const) {
+    resolveMessageLink.mockResolvedValueOnce({ messageId: id, roomId: channelId, workspaceId: 'w1' });
+    act(() => links[index].props.onPress());
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({
+      pathname: '/beeline/chat/[channelId]', params: { channelId, communityId: 'w1', notificationMessageId: id, notificationResponseId: expect.any(String) },
+    }));
+    expect(resolveMessageLink).toHaveBeenLastCalledWith(id);
+    navigate.mockClear();
+  }
+  vi.mocked(openExternalUrl).mockResolvedValueOnce(undefined);
+  act(() => links[4].props.onPress());
+  expect(openExternalUrl).toHaveBeenCalledWith('https://example.com');
+  act(() => links[5].props.onPress());
+  expect(onOpenThread).toHaveBeenCalledWith(LINKS['↳sending-new-message']);
   act(() => tree.unmount());
 });

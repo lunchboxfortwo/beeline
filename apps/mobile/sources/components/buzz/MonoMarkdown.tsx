@@ -14,7 +14,7 @@ import {
 } from '@/buzz/channel-reference';
 import { messageLinkId, openMessageLink } from '@/buzz/message-link';
 import { findChatLinkTokens, type ChatLinkToken } from '@beeline/api-contract/phone';
-import { ChatLinkRun } from '@/components/buzz/ChatLinks';
+import { ChatLinkRun, MessageLinkLabel } from '@/components/buzz/ChatLinks';
 import { openExternalUrl } from '@/utils/open-external-url';
 
 /** The viewer's own normalized handle; a mention of it is highlighted. */
@@ -33,6 +33,7 @@ type MentionSpan = MarkdownSpan & {
   chatLink?: ChatLinkToken;
   /** The just-arrived region of a streaming draft (`tail`, C98). */
   tail?: boolean;
+  skipLinkPrefix?: boolean;
 };
 
 /**
@@ -223,8 +224,8 @@ export function markTailSpans(spans: MentionSpan[], length: number): MentionSpan
     const cut = span.text.length - remaining;
     // A link token split by the arriving tail is not whole; draw its words.
     const { chatLink: _split, ...whole } = span;
-    out.unshift({ ...whole, text: span.text.slice(cut), tail: true });
-    out.unshift({ ...whole, text: span.text.slice(0, cut) });
+    out.unshift({ ...whole, text: span.text.slice(cut), tail: true, ...(span.url && { skipLinkPrefix: true }) });
+    out.unshift({ ...whole, text: span.text.slice(0, cut), ...(span.url === span.text && { skipLinkPrefix: true }) });
     remaining = 0;
   }
   return out;
@@ -271,6 +272,11 @@ function spanMarks(span: MentionSpan, viewerHandle?: string): ProseMark[] {
   if (span.mention && viewerHandle !== undefined &&
     span.text.slice(1).normalize('NFKC').toLocaleLowerCase() === viewerHandle) marks.push('viewer');
   return marks;
+}
+
+function linkLabel(span: MarkdownSpan, text: string) {
+  const id = span.url && span.url !== span.text && messageLinkId(span.url);
+  return id ? <MessageLinkLabel id={id} label={text} /> : text;
 }
 
 function InlineMarkdown({
@@ -351,7 +357,7 @@ function InlineMarkdown({
             // Last, so the arriving tail's tone wins over the settled body's.
             fade={span.tail ? tail?.style : undefined}
           >
-            {text}
+            {span.skipLinkPrefix ? text : linkLabel(span, text)}
           </ProseRun>
         );
       })}
@@ -448,7 +454,7 @@ function MarkdownTable({ headers, rows, onLink }: { headers: MarkdownSpan[][]; r
                     accessibilityRole={span.url ? 'link' : undefined}
                     onPress={span.url ? () => onLink(span.url!) : undefined}
                     marks={[span.styles.includes('bold') && 'strong', span.styles.includes('italic') && 'emphasis', Boolean(span.url) && 'link']}
-                  >{span.text}</ProseRun>
+                  >{linkLabel(span, span.text)}</ProseRun>
                 ))}
               </T>
             </YStack>
