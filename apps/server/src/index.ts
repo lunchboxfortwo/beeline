@@ -134,12 +134,12 @@ async function main() {
   const database = new PostgresDatabase(connectionString, budget.app, { lockDiagnostics });
   try {
     await assertSchemaCurrent(database);
-    await database.warmPool(budget.app);
   } catch (error) {
     await database.close();
     await healthDatabase.close();
     throw error;
   }
+  await database.warmPool(budget.app);
   const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, {
     mode: 'enrichment',
     lockDiagnostics,

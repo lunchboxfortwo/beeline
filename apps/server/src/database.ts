@@ -391,19 +391,22 @@ export class PostgresDatabase implements ClosableDatabase {
   async warmPool(size: number): Promise<void> {
     const releases: Array<() => void> = [];
     try {
-      // Keep every checkout until the whole batch settles so pg cannot hand
-      // the same connection to two warmups.
+      // Hold warmed connections until the batch settles so pg cannot hand
+      // the same healthy connection to two warmups.
       const results = await Promise.allSettled(
         Array.from({ length: size }, async () => {
           const { client, release } = await this.#connectCheckedOut();
           releases.push(release);
           if (await this.#backendPids.get(client)) return;
-          const pid = await this.#readBackendPid(client);
+          const pid = await this.#readBackendPid(client).catch((error: unknown) => {
+            release(error instanceof Error ? error : new Error('pool warmup query failed'));
+            throw error;
+          });
           this.#backendPids.set(client, Promise.resolve(pid));
         }),
       );
       const failed = results.find((result) => result.status === 'rejected');
-      if (failed) throw failed.reason;
+      if (failed) console.warn('[startup] application pool warmup incomplete; continuing', failed.reason);
     } finally {
       for (const release of releases) release();
     }
