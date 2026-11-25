@@ -7,6 +7,7 @@ import { finishRestoredRoom } from '@/navigation/restored-page';
 import { KIND_AGENT_DRAFT, LiveOverlayDecoder, isRoomView, type LiveOverlay, type RoomView, type RoomViewMessage } from '@beeline/buzz-client';
 import { RoomViewClient, RoomViewHttpError } from '@/sync/transport/room-view-client';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
+import { isPhoneSocketTransportError } from '@/sync/transport/phone-socket-error';
 import { loadBuzzIdentity, loadBuzzViewerPubkey, peekBuzzViewerContext, getEffectiveRelayUrl } from '@/auth/buzz-identity-storage';
 import { markRoomOpen, markRoomOpenWeight } from '@/buzz/room-open-trace';
 import { displayRoomMessages, reconcileRoomView, reconcileRoomMessageDelta } from '@/buzz/room-view-presentation';
@@ -88,7 +89,7 @@ export function useRoomSurfaceSubscription([
     let cancelled = false;
     let stopOutbox: (() => void) | undefined;
     let unsubscribe: (() => void) | undefined;
-    let readRoom: (() => Promise<void>) | undefined;
+    let readRoom: ((opening?: boolean) => Promise<void>) | undefined;
     const readVisibleRoom = () => {
       if (
         !isFocusedRef.current ||
@@ -112,6 +113,7 @@ export function useRoomSurfaceSubscription([
     let watchGeneration = 0;
     let subscribedGeneration: number | undefined;
     let hasPainted = false;
+    let openingReadTransportFailed = false;
     let reopenedChat = false;
     let pendingReadTraces: ReceivedLiveTrace[] = [];
     let capturedUnreadBoundary = false;
@@ -343,11 +345,14 @@ export function useRoomSurfaceSubscription([
             if (live.type === 'sync-ok') return;
             if (live.type === 'subscribed') {
               markRoomOpen('subscribed', live.roomId);
-              // The open already owns one (possibly prefetched) read. Later
-              // admissions cover updates missed while push was disconnected.
+              // First admission covers a cold open whose read already failed
+              // on the socket. Later admissions cover missed push updates.
               const generation = sharedLiveConnection().diagnostics().generation;
-              if (subscribedGeneration !== undefined && generation !== subscribedGeneration) readVisibleRoom();
+              const needsCoveringRead = subscribedGeneration === undefined
+                ? openingReadTransportFailed && !hasPainted
+                : generation !== subscribedGeneration;
               subscribedGeneration = generation;
+              if (needsCoveringRead) readVisibleRoom();
               return;
             }
             if (live.type === 'sidebar-preview') {
@@ -653,7 +658,7 @@ export function useRoomSurfaceSubscription([
         if (cancelled) return;
 
         let openingPrefetch = takePrefetchedPushRoom(notificationResponseId ?? `room-open:${channelId}`, channelId);
-        readRoom = async () => {
+        readRoom = async (opening = false) => {
           if (cancelled) return;
 
           const traces = pendingReadTraces;
@@ -711,6 +716,7 @@ export function useRoomSurfaceSubscription([
             reading = false;
 
             if (cancelled) return;
+            if (opening) openingReadTransportFailed = isPhoneSocketTransportError(error);
             setPresenceResolved(false);
             const terminal =
               error instanceof RoomViewHttpError &&
@@ -743,7 +749,7 @@ export function useRoomSurfaceSubscription([
         markRoomOpen('watch-install');
         await installWatch();
         if (cancelled) return;
-        await readRoom();
+        await readRoom(true);
         markRoomOpen('watch-ready');
       } catch (error) {
         if (cancelled) return;

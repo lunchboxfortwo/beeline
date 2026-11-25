@@ -3,7 +3,56 @@ import * as React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it } from 'vitest';
+import { MonolithRequestTimeoutError } from '@/auth/monolith-session';
+import { PhoneSocketDisconnectedError } from '@/sync/transport/phone-socket-error';
 import type { UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
+
+it.each([
+  ['disconnect', new PhoneSocketDisconnectedError()],
+  ['deadline', Object.assign(new MonolithRequestTimeoutError(), { socketRequest: true })],
+])('mounts a cold transcript on first subscription after an opening %s', async (_kind, error) => {
+  controls.connectionReady = false;
+  controls.roomError = error;
+  let current!: UseRoomSurfaceSessionResult;
+  let renderer!: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(React.createElement(Harness, {
+      channelId: 'room-a', capture: (value: UseRoomSurfaceSessionResult) => { current = value; },
+    }));
+  });
+  await flushEffects();
+  try {
+    expect(controls.roomReads).toBe(1);
+    expect(current.roomSurface).toBeNull();
+    expect(current.hydrationError).toBeNull();
+    expect(renderer.root.findAllByType('message-row')).toHaveLength(0);
+
+    const view = roomView('room-a');
+    const text = 'Message from before the connection returned';
+    controls.roomError = null;
+    controls.roomResponse = {
+      ...view,
+      messages: [{
+        id: 'opening-message', text, createdAt: 10, author: view.viewer.identity, presentation: 'message',
+      }],
+    };
+    controls.connectionReady = true;
+    controls.connectionGeneration++;
+    const subscribed = () => controls.subscriptions[0]!.emit({
+      monolithLive: { type: 'subscribed', roomId: 'room-a' },
+    });
+    await act(async () => {
+      subscribed();
+      subscribed();
+    });
+
+    expect(renderer.root.findAllByType('message-row')[0]?.props.children).toBe(text);
+    expect(current.roomSurface?.room.id).toBe('room-a');
+    expect(controls.roomReads).toBe(2);
+  } finally {
+    await act(async () => renderer.unmount());
+  }
+});
 
 it('reads once on open and once per reconnect, including recovery after a failed reconcile', async () => {
   const working = {
