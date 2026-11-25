@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { appendFileSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, relative } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 
 export function loadEnvironment(file, repository) {
   const real = realpathSync(file);
@@ -95,6 +95,24 @@ export function privateWrite(path, body) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, body, { mode: 0o600 });
 }
+
+export function finishReleaseWorkspace(workspace, recordsSource, recordsDestination, run = execFileSync) {
+  try {
+    const records = ['records.json', 'release-checks.json', 'release-checks-timing.json']
+      .filter(name => existsSync(join(recordsSource, name)));
+    if (records.length) {
+      const destination = recordsDestination();
+      for (const name of records) privateWrite(join(destination, name), readFileSync(join(recordsSource, name)));
+      console.log(`Release records saved in ${destination}`);
+    }
+  } catch (error) {
+    console.error(`Release record export failed. Workspace retained at ${workspace}. ${error.message}`);
+    return;
+  }
+  try { run('sudo', ['-n', 'rm', '-rf', workspace], { stdio: 'ignore' }); }
+  catch (error) { console.error(`Release workspace cleanup failed for ${workspace}. ${error.message}`); }
+}
+
 export function readOptional(path) {
   try { return readFileSync(path, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return ''; throw error; }
 }

@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadEnvironment } from './release-local-process.mjs';
+import { finishReleaseWorkspace, loadEnvironment } from './release-local-process.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -96,13 +96,6 @@ export async function releaseSequence({ source, sha, directory, secrets, dispatc
   }, { repository: source, secrets });
 }
 
-// A finished release keeps only what it published (release.json,
-// release-checks.json and the check evidence on its GitHub release). Its working directory holds full
-// source copies, overlays, node_modules and logs (tens of GB per release).
-export function removeReleaseDirectory(directory, run = execFileSync) {
-  run('sudo', ['-n', 'rm', '-rf', directory], { stdio: 'ignore' });
-}
-
 // Docker image ownership and retention: docs/release-pipeline.md.
 const RELEASE_IMAGES = ['registry.fly.io/beeline-server', 'registry.fly.io/beeline-free-agents'];
 const releaseTag = tag => RELEASE_IMAGES.some(repository => tag.startsWith(`${repository}:`));
@@ -131,9 +124,9 @@ export function removeStaleReleaseImages(sha, run = execFileSync) {
 async function main(argv) {
   const options = releaseArguments(argv);
   const directory = mkdtempSync(join(tmpdir(), 'beeline-release-'));
-  const unlock = acquireReleaseLock(join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`), directory);
-  let sha;
+  let unlock, sha;
   try {
+    unlock = acquireReleaseLock(join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`), directory);
     const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), root);
     if (options.promote) {
       dispatchPromotion(options.dispatchedBy, secrets);
@@ -152,9 +145,10 @@ async function main(argv) {
     if (sha) try { removeStaleReleaseImages(sha); } catch { /* Docker unavailable */ }
     try {
       if (options.promote) rmSync(directory, { recursive: true });
-      else removeReleaseDirectory(directory);
-    } catch { /* not removable */ }
-    unlock();
+      else finishReleaseWorkspace(directory, join(directory, 'next'), () => mkdtempSync(join(tmpdir(), 'beeline-release-records-')));
+    } catch (error) { console.error(`Release workspace cleanup failed for ${directory}. ${error.message}`); }
+    try { unlock?.(); }
+    catch (error) { console.error(`Release lock cleanup failed. ${error.message}`); }
   }
 }
 

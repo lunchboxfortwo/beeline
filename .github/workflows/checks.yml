@@ -83,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - uses: ./.github/actions/ci-workspace
@@ -113,6 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - uses: ./.github/actions/ci-workspace
@@ -164,6 +165,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - name: Decide in this checkout
@@ -173,7 +175,9 @@ jobs:
           CI_PATHS: ^apps/(server|body|mobile)/|^packages/
         run: |-
           run=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             { git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$CI_BASE_SHA"; } &&
+             git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
             run=false
             while IFS= read -r file; do
               if [[ "$file" =~ $CI_PATHS ]]; then run=true; break; fi
@@ -488,6 +492,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - name: Decide in this checkout
@@ -497,7 +502,9 @@ jobs:
           CI_PATHS: ^apps/|^packages/
         run: |-
           run=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             { git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$CI_BASE_SHA"; } &&
+             git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
             run=false
             while IFS= read -r file; do
               if [[ "$file" =~ $CI_PATHS ]]; then run=true; break; fi
@@ -543,6 +550,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - name: Decide in this checkout
@@ -552,7 +560,9 @@ jobs:
           CI_PATHS: ^apps/mobile/|^packages/
         run: |-
           run=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             { git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$CI_BASE_SHA"; } &&
+             git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
             run=false
             while IFS= read -r file; do
               if [[ "$file" =~ $CI_PATHS ]]; then run=true; break; fi
@@ -711,6 +721,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - name: Decide in this checkout
@@ -720,7 +731,9 @@ jobs:
           CI_PATHS: ^apps/mobile/|^packages/
         run: |-
           run=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             { git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$CI_BASE_SHA"; } &&
+             git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
             run=false
             while IFS= read -r file; do
               if [[ "$file" =~ $CI_PATHS ]]; then run=true; break; fi
@@ -740,7 +753,7 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+          git cat-file -e "${PR_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$PR_BASE_SHA"
           node packages/scripts/pr-store-build.mjs "$PR_BASE_SHA"
       - uses: actions/setup-java@v4
         with:
@@ -765,6 +778,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || inputs.pinned_sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - name: Decide in this checkout
@@ -774,7 +788,9 @@ jobs:
           CI_PATHS: ^apps/api/|^apps/site/|^packages/
         run: |-
           run=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             { git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$CI_BASE_SHA"; } &&
+             git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
             run=false
             while IFS= read -r file; do
               if [[ "$file" =~ $CI_PATHS ]]; then run=true; break; fi

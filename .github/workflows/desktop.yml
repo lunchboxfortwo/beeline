@@ -83,6 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha || github.event.pull_request.head.sha || github.sha }}
           clean: ${{ !startsWith(runner.name, 'beeline-ci-squire-') }}
       - name: Decide in this checkout
@@ -92,7 +93,9 @@ jobs:
           CI_PATHS: ^apps/mobile/src-tauri/|^apps/mobile/(package|app\.config)|^apps/mobile/scripts/generate-tauri-icons|^apps/mobile/sources/assets/images/icon\.png$|^packages/
         run: |-
           run=true
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git fetch --no-tags --depth=1 origin "$CI_BASE_SHA" && git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             { git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$CI_BASE_SHA"; } &&
+             git diff --name-only "$CI_BASE_SHA" HEAD > "$RUNNER_TEMP/changed-files"; then
             run=false
             while IFS= read -r file; do
               if [[ "$file" =~ $CI_PATHS ]]; then run=true; break; fi

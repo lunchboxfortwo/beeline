@@ -224,7 +224,7 @@ export class LocalActions {
       this.processes.log(this.processes.redact(`${label}: ${error.message}`));
     } finally {
       for (const service of services) {
-        try { await this.processes.run('docker', ['rm', '--force', service], { env: context.env, quiet: true }); }
+        try { await this.processes.run('docker', ['rm', '--force', '--volumes', service], { env: context.env, quiet: true }); }
         catch (error) { context.job.status = 'failure'; this.processes.log(`Service cleanup failed: ${error.message}`); }
       }
     }

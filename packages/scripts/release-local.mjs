@@ -3,12 +3,12 @@
 // only plans, builds proofs or executes the checks-only leg. See docs/release-pipeline.md for the outage policy.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LocalActions } from './release-local-actions.mjs';
-import { Processes, loadEnvironment, privateWrite } from './release-local-process.mjs';
+import { Processes, finishReleaseWorkspace, loadEnvironment, privateWrite } from './release-local-process.mjs';
 import { localGithub } from './release-local-github.mjs';
 import { downloadPagesChannel } from './pages-channel.mjs';
 import { checksWorkflow, checkPlan, LocalChecks } from './release-local-checks.mjs';
@@ -379,13 +379,13 @@ export async function dryRun(args, engine, context) {
   engine.processes.log('Build proofs complete. Canary, migrations, live update proof and rollback were not exercised against production.');
 }
 
-export async function releaseChecks(engine, context) {
+export async function releaseChecks(engine, context, recordsDirectory = engine.directory) {
   const call = engine.read(WORKFLOW).jobs.release_checks;
   // A nightly run must include suites excluded from the pre-delivery release gate.
   const inputs = { suite: 'all', release_sha: '', pinned_sha: context.github.sha };
   const results = await engine.workflow(call.uses, inputs, context, 'release_checks/');
   privateWrite(join(engine.directory, 'release-checks.json'), JSON.stringify(results, null, 2));
-  if (Object.values(results).some(result => ['failure', 'cancelled'].includes(result.result))) throw new Error(`Release checks failed; inspect private results under ${engine.directory}`);
+  if (Object.values(results).some(result => ['failure', 'cancelled'].includes(result.result))) throw new Error(`Release checks failed; inspect private results under ${recordsDirectory}`);
   engine.processes.log('Release checks complete; no release identity reserved or delivery attempted.');
   return results;
 }
@@ -412,9 +412,21 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
   const processes = new Processes(secrets);
   const variables = { releaseChecks: args.skipFullChecks && { profile: 'quick', sourceSha: sha, result: 'skipped', ownerMessageId: args.skipFullChecks }, otaVersions: args.otaVersions ?? [], desktopMode: args['desktop-mode'] || 'build', desktopReleaseVersion: args['release-version'], macHelperMode: args['mac-helpers'] || 'build',
     CLOUDFLARE_ACCOUNT_ID: secrets.CLOUDFLARE_ACCOUNT_ID || '', BEELINE_HELPER_SENTRY_DSN: secrets.BEELINE_HELPER_SENTRY_DSN || '', BEELINE_MOBILE_SENTRY_DSN: secrets.BEELINE_MOBILE_SENTRY_DSN || '' };
-  const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
-  engine.inspect(WORKFLOW);
+  const createEngine = directory => {
+    const engine = new LocalActions({ root, directory, secrets, variables, processes, github: localGithub, hooks: localHooks(directory, processes, { fullChecks: args.leg === 'release_checks' }) });
+    engine.inspect(WORKFLOW);
+    return engine;
+  };
   const context = { github: { repository: 'lunchboxfortwo/beeline', sha, run_id: String(Math.floor(Date.now() / 1000)), run_attempt: '1', event_name: 'workflow_dispatch', event: {}, actor: 'local-release', token: secrets.GITHUB_TOKEN || secrets.GH_TOKEN || '' }, runner: {}, job: { status: 'success' } };
+  if (args.mode === 'execute' && args.leg === 'release_checks') {
+    if (!args['release-sha']) throw new Error('Release checks require an explicit immutable --release-sha');
+    if (execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() !== sha) throw new Error('Checkout HEAD must equal release-sha');
+    const workspace = mkdtempSync(join(directory, 'workspace-'));
+    try { await releaseChecks(createEngine(workspace), context, directory); }
+    finally { finishReleaseWorkspace(workspace, workspace, () => directory); }
+    return;
+  }
+  const engine = createEngine(directory);
   if (args.mode === 'plan') {
     console.log(`Local ${args.channel} release at ${sha}; no release commands executed.`);
     console.log(JSON.stringify(releasePlan(engine.read(WORKFLOW), engine.read(checksWorkflow), args), null, 2));
@@ -423,12 +435,6 @@ export async function runLocalRelease(args, { repository = root, secrets: provid
     return;
   }
   if (args.mode === 'dry-run') { await dryRun(args, engine, context); return; }
-  if (args.leg === 'release_checks') {
-    if (!args['release-sha']) throw new Error('Release checks require an explicit immutable --release-sha');
-    if (execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim() !== sha) throw new Error('Checkout HEAD must equal release-sha');
-    await releaseChecks(engine, context);
-    return;
-  }
   if (variables.desktopMode !== 'build') throw new Error('A promotable next release requires staging its signed desktop artifacts');
   console.log('Desktop artifacts are built and staged on next.');
   attribution(args['dispatched-by']);
