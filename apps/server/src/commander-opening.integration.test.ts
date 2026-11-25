@@ -29,9 +29,9 @@ it.each((['Room', 'DM'] as const).flatMap(surface => (['blocked', 'needs_decisio
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'An endpoint decision is needed' }, WORKER);
   const sourceRoom = surface === 'Room' ? ROOM : DM;
-  const handback = (await commands(sourceRoom, RUBY)).find(command => command.reason === 'report')!;
+  const handback = (await commands(sourceRoom, RUBY)).find(command => command.reason === 'message')!;
   expect(handback).toMatchObject({ private: true, source: { authorId: WORKER } });
-  expect((await commands(opened.cornerId,RUBY)).filter(command => command.reason === 'report')).toEqual([]);
+  expect((await commands(opened.cornerId,RUBY)).filter(command => command.reason === 'message')).toEqual([]);
 
   await closeBlock(rootFixture.db,WORKER,handback.id,'The commander answered');
   const messageId = randomBytes(32).toString('hex');
@@ -54,12 +54,12 @@ it('later human orders get ordinary replies here while escalations still go to t
   const reply = await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn),
     text: '@captain The endpoint requires a decision from the opening commander.' }, WORKER);
   expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE id=$1`, [reply.id])).rows).toEqual([{ room_id: opened.cornerId }]);
-  expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(command => command.reason === 'message')).toEqual([]);
   const wake = await createAgentCommand(rootFixture.db, { roomId: opened.cornerId, agentId: WORKER, sourceMessageId: null, reason: 'corner_check' });
   const resumed = (await commands(opened.cornerId, WORKER)).find(command => command.id === wake!.id)!;
   await claim(resumed);
   await rootFixture.daemon.execute('report', { ...authority(resumed), status: 'blocked', text: 'Choose the endpoint' }, WORKER);
-  expect((await commands(DM, RUBY)).filter(command => command.reason === 'report'))
+  expect((await commands(DM, RUBY)).filter(command => command.reason === 'message'))
     .toEqual([expect.objectContaining({ source: expect.objectContaining({ authorId: WORKER, body: 'Choose the endpoint' }) })]);
   const saved = (await rootFixture.db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [turn.id])).rows[0];
   expect(await commanderReportAddress(rootFixture.db, opened.cornerId, saved))
@@ -79,7 +79,7 @@ it('preserves public post text while the report keeps its recorded escalation ad
   expect(posted.receipt).toContain('Message stored and visible.');
   expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
     .toBe('@captain Choose the endpoint');
-  expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(command => command.reason === 'message')).toEqual([]);
 });
 
 it.each([false, true])('nested corners report one step up even with opening parent removed=%s', async removed => {
@@ -95,13 +95,13 @@ it.each([false, true])('nested corners report one step up even with opening pare
   await claim(assignment);
   await rootFixture.daemon.execute('report', { ...authority(assignment), status: 'blocked', text: 'Nested decision needed' }, RUBY);
   // The outer worker commands the nested corner, so the nested report wakes it there.
-  const report = (await commands(outer.cornerId, WORKER)).find(command => command.reason === 'report')!;
+  const report = (await commands(outer.cornerId, WORKER)).find(command => command.reason === 'message')!;
   expect(report).toMatchObject({ private: true, source: { authorId: RUBY, body: 'Nested decision needed' } });
-  expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(command => command.reason === 'message')).toEqual([]);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(parentTurn), agentId: WORKER, status: 'complete' }, WORKER);
   await claim(report);
   await rootFixture.daemon.execute('report', { ...authority(report), status: 'needs_decision', text: 'Nested decision needed' }, WORKER);
-  expect((await commands(DM, RUBY)).find(command => command.reason === 'report'))
+  expect((await commands(DM, RUBY)).find(command => command.reason === 'message'))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'Nested decision needed' } });
 });
 
@@ -189,7 +189,7 @@ it.each(['blocked','done','question','legacy'])('an agent-issued order survives 
   const result=kind==='legacy' ? await rootFixture.daemon.execute('report',{...context,status:'done',text:'Checked'},WORKER)
     : await rootFixture.daemon.execute('reply',{...context,id:objective.id,text:kind==='question'?'needs-decision: Which stockroom?':`${kind}: checked`,
       ...(kind==='question'?{ask:{question:'Which stockroom?',options:['East','West']}}:{})},WORKER);
-  expect((await commands(DM,RUBY)).find(command=>command.id===result.id)?.from).toEqual({agent:WORKER,place:child.cornerId});
+  expect((await commands(DM,RUBY)).find(command=>command.id===result.id)?.from).toEqual(kind === 'legacy' ? undefined : {agent:WORKER,place:child.cornerId});
   expect((await rootFixture.db.query('SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2',[child.cornerId,RUBY])).rows).toEqual([]);
   const local=await rootFixture.daemon.execute('postRoomMessage',{...context,text:'Inventory notes',harnessEnded:true},WORKER);
   expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1',[local.id])).rows).toEqual([{room_id:child.cornerId}]);

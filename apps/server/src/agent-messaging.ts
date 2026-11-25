@@ -38,7 +38,7 @@ export const notWokenReceipt = (reason: string) => `Message stored and visible. 
 
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
-  type?: 'normal' | 'blocked' | 'reply'; route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
+  type?: 'normal' | 'blocked' | 'reply'; legacyAsk?:string; route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
   assertMemberTranscript(input.route.from.agent);
@@ -114,8 +114,11 @@ export async function sendMessage(db: SqlDatabase, input: {
       await updateWorkItem(tx,{id,roomId:to.place,state:'needs-you',assigneeId:to.agent},route.from.agent,input.replyTo ? to.agent : undefined);
       return { id, createdAt: Math.floor(Date.now()/1000) };
     }
+    const sourceRoomId = reportStatus && input.parent?.private_payload?.reportStatus === 'blocked'
+      ? (await tx.query<{origin:string}>("SELECT card->>'sourceRoomId' origin FROM messages WHERE id=$1",[input.parent.id])).rows[0]?.origin
+      : undefined;
     const saved = await queueMessage(tx,{kind:'post',id,roomId:to.place,authorId:route.from.agent,
-      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent}: {})},agentIds:[],audienceId:input.replyTo || reportStatus ? to.agent : undefined,
+      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:sourceRoomId ?? route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent,...(input.legacyAsk ? {ask:input.legacyAsk}: {})}: {})},agentIds:[],audienceId:input.replyTo || reportStatus ? to.agent : undefined,
       attachments:input.attachments,parent:input.parent,replyTo:input.replyTo ?? input.parent?.source_message_id ?? (reportStatus ? input.parent?.id : undefined),
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
     return { id:saved.id,createdAt:saved.createdAt };

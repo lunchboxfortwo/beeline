@@ -16,13 +16,11 @@ it('RUBY-16: an explicit report leaves queued files in the working thread', asyn
   await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [reviewer, HUMAN]);
   await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WS, ROOM, reviewer]);
-  const privateReport=(await commands(DM, RUBY)).find(command=>command.reason==='report')!;
-  expect(privateReport.source.attachments ?? []).toEqual([]);
+  expect((await commands(DM,RUBY)).filter(command=>command.reason==='report')).toEqual([]);
   const final=await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:''},WORKER);
   expect((await rootFixture.db.query('SELECT room_id,attachments FROM messages WHERE id=$1',[final.id])).rows).toEqual([{room_id:opened.cornerId,attachments:[attachment]}]);
-  await expect(rootFixture.daemon.execute('getRoomMessage', {
-    roomId: opened.cornerId, messageId: privateReport.id,
-  }, reviewer)).rejects.toThrow('message access denied');
+  expect((await rootFixture.daemon.execute('getRoomMessage',{roomId:opened.cornerId,messageId:final.id},reviewer)).attachments)
+    .toEqual([expect.objectContaining({name:attachment.name})]);
 });
 
 it('RUBY-19: a member reading a chat without a brief gets an empty revision list', async () => {
@@ -53,18 +51,11 @@ it.each(['report', 'postRoomMessage'] as const)('Reproduction FILE-HANDOFF: inde
     turns.push(turn);
   }
   for (const [index, turn] of turns.entries()) {
-    await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: `done: attached ${attachments[index]!.name}` }, WORKER);
+    const text = `Attached ${attachments[index]!.name}`;
+    if (delivery === 'report') await rootFixture.daemon.execute('report',{...authority(turn),status:'done',text},WORKER);
+    else await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text},WORKER);
   }
-  for (const turn of turns) await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:''},WORKER);
-  const reports = (await commands(DM,RUBY)).filter(c=>c.reason==='report');
-  expect(reports).toHaveLength(2);
-  for (const [index, report] of reports.entries()) {
-    expect(report.source.attachments ?? []).toEqual([]);
-    await claim(report);
-    if (delivery === 'report')
-      await rootFixture.daemon.execute('report', { ...authority(report), status: 'done', text: `done: attached ${attachments[index]!.name}` }, RUBY);
-    else await rootFixture.daemon.execute('postRoomMessage', { ...authority(report), text: `Attached ${attachments[index]!.name}` }, RUBY);
-  }
+  expect((await commands(DM,RUBY)).filter(c=>c.reason==='report')).toEqual([]);
   expect((await rootFixture.phone.readRoom(DM,HUMAN))!.messages.filter(m=>m.attachments?.length)).toEqual([]);
   for (const [index,corner] of corners.entries()) {
     const visible=(await rootFixture.phone.readRoom(corner,HUMAN))!.messages.filter(m=>m.attachments?.length);
@@ -109,19 +100,12 @@ it.each(['report', 'postRoomMessage'] as const)('Reproduction FILE-HANDOFF: %s k
       await rootFixture.daemon.execute('report', { ...authority(report), status: 'done', text: 'done: file attached' }, RUBY);
     else await rootFixture.daemon.execute('postRoomMessage', { ...authority(report), text: 'File attached' }, RUBY);
   }
-  for (const [index, commander] of commanders.entries()) {
-    const delivered = (await commands(ROOM, commander)).find(command => command.reason === 'report')!;
-    if (delivery==='postRoomMessage') {expect(delivered).toBeUndefined();continue;}
-    expect(delivered.source.attachments ?? []).toEqual([]);
-    const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: delivered.id }, commander);
-    expect(read.attachments ?? []).toEqual([]);
-    await expect(rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: delivered.id }, commanders[1 - index]!))
-      .rejects.toThrow('message access denied');
-  }
+  for (const commander of commanders)
+    expect((await commands(ROOM,commander)).filter(command=>command.reason==='report')).toEqual([]);
 });
 
 
-it('reports a later corner order to the opening commander', async () => {
+it('returns a later corner blocker to the session assigning that order', async () => {
   const opened = await open();
   const OTHER = 'd'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Other','other')`, [OTHER]);
@@ -154,11 +138,11 @@ it('reports a later corner order to the opening commander', async () => {
   );
   const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'order')!;
   await claim(turn);
-  await rootFixture.daemon.execute('report', { status: 'done', ...authority(turn), text: 'done: Other follow-up' }, WORKER);
-  expect((await commands(DM, RUBY)).some((c) => c.source.body === 'done: Other follow-up')).toBe(
-    true,
+  await rootFixture.daemon.execute('report', { status: 'blocked', ...authority(turn), text: 'Which follow-up?' }, WORKER);
+  expect((await commands(DM, RUBY)).some((c) => c.source.body === 'Which follow-up?')).toBe(
+    false,
   );
-  expect((await commands(ROOM, OTHER)).some((c) => c.reason === 'report')).toBe(false);
+  expect((await commands(ROOM, OTHER)).some((c) => c.source.body === 'Which follow-up?')).toBe(true);
 });
 
 it('keeps approval resume provenance and the request’s recorded private return route', async () => {
@@ -310,10 +294,7 @@ it('keeps private report artifacts in the queue and forwards them with human ans
   expect(
     (await rootFixture.db.query(`SELECT room_id,card_type FROM messages WHERE attachments::text LIKE $1`, ['%' + media + '%'])).rows,
   ).toEqual([{room_id:opened.cornerId,card_type:null}]);
-  const report = (await commands(DM, RUBY)).find((c) => c.reason === 'report')!;
-  expect(report.source.attachments ?? []).toEqual([]);
-  await claim(report);
-  await rootFixture.daemon.execute('report', { status: 'done', ...authority(report), text: 'done: report is attached' }, RUBY);
+  expect((await commands(DM,RUBY)).filter(c=>c.reason==='report')).toEqual([]);
   expect(
     (await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$2 AND attachments::text LIKE $1`, ['%' + media + '%', DM]))
       .rowCount,
@@ -385,7 +366,7 @@ it('a provider diagnostic leaves work pending until its failure answer is posted
   expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
   await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped before the work finished.'},WORKER);
   expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(false);
-  expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(1);
+  expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
 });
 
 
@@ -496,10 +477,10 @@ it('retains the failure answer obligation while its return membership is gone',a
   const opened=await open(),turn=await worker(opened.cornerId);
   await rootFixture.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'provider outage'},WORKER);
-  await expect(rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped.'},WORKER)).rejects.toThrow('return address');
+  await expect(rootFixture.daemon.execute('report',{...authority(turn),status:'blocked',text:'The provider stopped.'},WORKER)).rejects.toThrow('membership');
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'pending'});
   await rootFixture.db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
-  await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped.'},WORKER);
+  await rootFixture.daemon.execute('report',{...authority(turn),status:'blocked',text:'The provider stopped.'},WORKER);
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'complete'});
 });
 
@@ -632,7 +613,7 @@ it('acknowledges explicit reports so final prose does not send a second report',
     { ...authority(turn), text: 'The widget is tested' },
     WORKER,
   );
-  expect((await commands(DM, RUBY)).filter((c) => c.reason === 'report')).toHaveLength(1);
+  expect((await commands(DM, RUBY)).filter((c) => c.reason === 'report')).toHaveLength(0);
 });
 
 
@@ -703,7 +684,7 @@ it('accepts a file after a terminal report, posts it with the next message, and 
     WORKER,
   );
   const reports = (await commands(DM, RUBY)).filter((c) => c.reason === 'report');
-  expect(reports).toHaveLength(1);
+  expect(reports).toHaveLength(0);
   expect((await rootFixture.phone.readRoom(opened.cornerId, HUMAN))?.messages.some(message =>
     message.attachments?.some(attachment => attachment.name === 'late.txt'))).toBe(true);
   expect(

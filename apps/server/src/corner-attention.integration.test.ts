@@ -219,8 +219,8 @@ it('a pre-claim failure cannot end queued work; its owner can report a plain fai
   await daemon.execute('report',{roomId:C,requestId:command.turn_request_id,status:'failed',text:'failed: git fetch failed: cannot lock ref'},WORKER);
   expect(await state()).toBe('idle');
   const failures=(await readAgentCommands(db, COMMANDER)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
-  expect(failures).toHaveLength(1);
-  expect(failures[0]!.source.body).toContain('cannot lock ref');
+  expect(failures).toHaveLength(0);
+  expect((await db.query('SELECT text FROM messages WHERE request_id=$1 AND author_id=$2',[command.turn_request_id,WORKER])).rows).toContainEqual({text:'failed: git fetch failed: cannot lock ref'});
 });
 
 async function turn(agent = WORKER) {

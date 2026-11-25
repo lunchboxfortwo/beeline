@@ -1,3 +1,4 @@
+import { closeAgentAsk } from '../agent-open-asks.js';
 import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { advanceCorner } from '.././corner-lifecycle.js';
 import { createHash } from 'node:crypto';
@@ -561,6 +562,7 @@ const fixture = monolithFixture();
        VALUES('crowded-answer',$1,$2,'Hinged.',now()+$3::interval)`,
       [cornerId, HUMAN, `${updates} seconds`],
     );
+    await closeAgentAsk(fixture.database,AGENT,{messageId:'crowded-tag',reason:'answered'});
     expect(await state()).toBe('idle');
 
     updates += 1;

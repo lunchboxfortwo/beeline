@@ -330,7 +330,7 @@ describe('owed chat tags', () => {
     const second=await call('reply',{id:source.messageId,text:'Additional explicit message'});
     expect(second.id).not.toBe(first.id);
     expect((await call('reply',{id:source.messageId,text:'Additional explicit message'})).id).toBe(second.id);
-    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:1});
+    expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[member,source.messageId])).rows[0]).toEqual({n:2});
     expect((await db.query('SELECT count(*)::int n FROM messages WHERE author_id=$1 AND room_id=$2 AND text=$3',[member,room,'Additional explicit message'])).rows[0]).toEqual({n:1});
     expect((await db.query('SELECT state FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]).toEqual({state:'complete'});
   });

@@ -834,7 +834,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     if (input.report && (input.status === 'blocked' || input.status === 'needs_decision')) {
       if (!messageText) return {id:item?.id ?? '',createdAt:Math.floor(Date.now()/1000),answered:false};
       const id = input.messageId ?? hash(`legacy-block:${agentId}:${input.roomId}:${input.requestId ?? ''}:${messageText}`);
-      const saved = await sendSessionMessage(db,agentId,{type:'blocked',roomId:input.roomId,text:messageText},item,id);
+      const saved = await sendSessionMessage(db,agentId,{type:'blocked',roomId:input.roomId,text:messageText},item,id,input.ask);
       if (item) await endAgentTurn(db,item,'complete',null,saved.id);
       completedNow = true;
       return {...saved,delivered:true};
@@ -861,7 +861,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,replyTo:item.source_message_id ?? item.id,
         });
-        if (!existing && item.reason === 'corner_review_dispatch') {
+        if (!existing && (item.reason === 'corner_review_dispatch' || item.review_context && !item.review_context.purpose)) {
           const worker = (await db.query<{implementer_agent_id:string}>(
             'SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[item.room_id])).rows[0]?.implementer_agent_id;
           if (worker && worker !== agentId) await queueMessage(db,{
@@ -882,7 +882,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         return {id:item.id,createdAt:receipt.createdAt};
       }
       const from = {agent:agentId,place:item.room_id};
-      const id = input.messageId ?? hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
+      const id = hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
       const saved = to.agent === SYSTEM_IDENTITY_ID ? await queueMessage(db,{
         kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],card:{route:{from,to}},
         id,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,

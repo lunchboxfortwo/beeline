@@ -150,9 +150,9 @@ BEGIN
       RETURN NEW;
     END IF;
     IF NEW.card->>'reportStatus' IN ('blocked','needs-decision') THEN
-      IF EXISTS(WITH RECURSIVE sources AS (SELECT id,author_id,block_parent_id FROM messages WHERE id=source_block
-        UNION SELECT b.id,b.author_id,b.block_parent_id FROM messages b JOIN sources s ON b.id=s.block_parent_id)
-        SELECT 1 FROM sources WHERE author_id=NEW.card->>'reportToId') THEN
+      IF EXISTS(WITH RECURSIVE sources AS (SELECT id,author_id,block_parent_id,COALESCE(block_corner_id::text,card->>'sourceRoomId',room_id::text) place FROM messages WHERE id=source_block
+        UNION SELECT b.id,b.author_id,b.block_parent_id,COALESCE(b.block_corner_id::text,b.card->>'sourceRoomId',b.room_id::text) FROM messages b JOIN sources s ON b.id=s.block_parent_id)
+        SELECT 1 FROM sources WHERE author_id=NEW.card->>'reportToId' AND place=NEW.room_id::text) THEN
         RAISE EXCEPTION 'A linked block cannot target its source implementer';
       END IF;
       NEW.block_parent_id := source_block;
@@ -160,7 +160,7 @@ BEGIN
   END IF;
   IF NEW.card->>'reportStatus' IN ('blocked','needs-decision') AND NEW.card->>'reportToId' IS NOT NULL AND NEW.block_corner_id IS NULL THEN
     SELECT room.id INTO NEW.block_corner_id FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id
-      WHERE room.id::text=COALESCE(NEW.card->>'sourceRoomId',NEW.room_id::text) AND room.parent_id IS NOT NULL;
+      WHERE room.id::text=COALESCE(NEW.card->'route'->'from'->>'place',NEW.card->>'sourceRoomId',NEW.room_id::text) AND room.parent_id IS NOT NULL;
   END IF;
   RETURN NEW;
 END $$;

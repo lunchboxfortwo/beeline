@@ -2,7 +2,7 @@ import type { MessageAddress } from '@beeline/api-contract/daemon';
 import type { CommandRow } from './agent-command.js';
 import { sendMessage } from './agent-messaging.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { commanderReportAddress } from './commander.js';
+import { assignmentBeforeBlock, commanderReportAddress } from './commander.js';
 import type { SqlDatabase } from './database.js';
 import { openBlocksSql } from './implementer-blocks.js';
 
@@ -14,7 +14,7 @@ type SessionMessage = {
   text: string;
 };
 
-export async function sendSessionMessage(database: SqlDatabase, agent: string, input: SessionMessage, parent?: CommandRow, id?: string) {
+export async function sendSessionMessage(database: SqlDatabase, agent: string, input: SessionMessage, parent?: CommandRow, id?: string, legacyAsk?:string) {
   const from = { agent, place: input.roomId };
   return database.transaction(async db => {
     if (typeof input.text !== 'string' || ['to','ask','question','brief','options'].some(field => field in input))
@@ -41,20 +41,19 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     } else if (input.type === 'blocked' && input.address === undefined && input.quoteMsgId === undefined) {
       const room = (await db.query<{ parent_id: string | null; created_by: string }>(
         'SELECT parent_id,created_by FROM rooms WHERE id=$1 FOR UPDATE', [input.roomId])).rows[0];
-      let assignment = parent;
-      if (parent?.private_payload?.reportStatus === 'blocked') {
-        assignment = (await db.query<CommandRow>(`WITH RECURSIVE chain AS (
-          SELECT command.*, 0 depth FROM agent_commands command WHERE command.id=$1
-          UNION ALL SELECT issuer.*, child.depth+1 FROM agent_commands issuer
-          JOIN chain child ON issuer.id=child.parent_command_id
-        ) SELECT * FROM chain WHERE room_id=$2 AND agent_id=$3 ORDER BY depth LIMIT 1`,
-          [parent.parent_command_id,input.roomId,agent])).rows[0];
-      }
+      const escalating = parent?.private_payload?.reportStatus === 'blocked';
+      const assignment = escalating ? await assignmentBeforeBlock(db,parent) : parent;
       const order = assignment?.private_payload;
-      const taskSender = order?.kind === 'order' && order.authorId && order.fromRoomId
-        ? {agent:order.authorId,place:order.fromRoomId}
-        : assignment?.reason === 'message' && !assignment.private_payload?.reportStatus
-        ? (assignment.message?.route ?? assignment.private_payload?.route)?.from : undefined;
+      let taskSender:MessageAddress | undefined;
+      if (order?.kind === 'order' && order.fromRoomId) {
+        taskSender = {agent:order.authorId,place:order.fromRoomId};
+      } else if (assignment?.reason === 'message' || assignment?.reason === 'schedule') {
+        taskSender = (assignment.message?.route ?? order?.route)?.from;
+      } else if (!assignment && escalating && !room?.parent_id) {
+        taskSender = (await db.query<MessageAddress>(`SELECT source.author_id agent,source.room_id place FROM messages source
+          JOIN identities author ON author.id=source.author_id AND author.kind='human'
+          WHERE source.id=$1 AND source.room_id=$2 AND source.system_event IS NULL`,[parent.root_source_message_id,input.roomId])).rows[0];
+      }
       const route = taskSender && (taskSender.agent !== agent || taskSender.place !== input.roomId)
         ? {recipient:taskSender.agent, returnRoom:taskSender.place}
         : await commanderReportAddress(db,input.roomId,assignment);
@@ -70,6 +69,6 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     } else {
       throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
     }
-    return sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
+    return sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id,legacyAsk});
   });
 }

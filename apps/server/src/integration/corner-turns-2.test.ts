@@ -1,3 +1,4 @@
+import { closeAgentAsk } from '../agent-open-asks.js';
 import { cornerObjectiveSql } from '.././corner-objective.js';
 import { cornerCommissionerSql } from '.././corner-opening.js';
 import { advanceCorner } from '.././corner-lifecycle.js';
@@ -560,6 +561,7 @@ const fixture = monolithFixture();
        VALUES('corner-answered',$1,$2,'Large.',now()+interval '11 seconds')`,
       [cornerId, HUMAN],
     );
+    await closeAgentAsk(fixture.database,AGENT,{messageId:'corner-hands-back',reason:'answered'});
     expect(await order()).toEqual([busy, ROOM]);
   });
 
@@ -624,6 +626,7 @@ const fixture = monolithFixture();
 
     // The viewer answers: nothing is owed, the corner is idle.
     await say('owed-answer', HUMAN, 'Matte.', '3 seconds');
+    await closeAgentAsk(fixture.database,AGENT,{messageId:'owed-tag',reason:'answered'});
     expect(await listed()).toEqual(expect.objectContaining({ state: 'idle' }));
     expect(await owed()).toBe(false);
   });

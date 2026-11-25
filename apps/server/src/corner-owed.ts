@@ -262,10 +262,7 @@ export function cornerOwedAnswerTimesSql(corner: string, externalOnly = false): 
 function refreshReportedCornersSql(room: string, person: string): string {
   return `PERFORM corner_owed_refresh(origin.id, ${person})
     FROM (SELECT DISTINCT source_origin.id FROM messages question
-      JOIN agent_commands report ON report.id=question.request_id AND report.agent_id=question.author_id
-      JOIN rooms source_origin ON source_origin.id=CASE
-        WHEN report.private_payload->>'originCornerId' ~ '${CANONICAL_UUID}'
-          THEN (report.private_payload->>'originCornerId')::uuid ELSE report.room_id END
+      JOIN rooms source_origin ON source_origin.id::text=${humanReportCornerSql('question')}
         AND source_origin.parent_id IS NOT NULL
       WHERE question.room_id=${room} AND question.presentation='message' AND question.deleted_at IS NULL
         AND question.card->>'reportStatus' IN ('blocked','needs-decision')

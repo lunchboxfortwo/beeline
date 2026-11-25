@@ -30,12 +30,17 @@ it.each(['blocked', 'failed', 'done', 'done-unregistered'] as const)('Reproducti
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'pr' WHERE corner_id=$1`, [opened.cornerId]);
       await rootFixture.db.query(`UPDATE corner_brief_revisions SET approval_basis=approval_basis || '{"repositoryWork":true}'::jsonb WHERE corner_id=$1`, [opened.cornerId]);
     }
-    await execute('report', { ...authority(turn), status, text: `${status}: GitHub is unavailable` }, WORKER);
-    const report = (await commands(DM, RUBY)).find(command => command.reason === 'report')!;
-    expect(report.source.body).toBe(`${status}: GitHub is unavailable`);
-    await claim(report);
-    await execute('order', { ...authority(report), address: opened.cornerId, text: 'Continue with local proof' }, RUBY);
-    expect((await commands(opened.cornerId, WORKER)).find(command => command.reason === 'order')?.source.body).toBe('Continue with local proof');
+    const saved = await execute('report', { ...authority(turn), status, text: `${status}: GitHub is unavailable` }, WORKER);
+    const recipient = (await commands(DM,RUBY)).find(command=>command.id===saved.id);
+    if (status === 'blocked') {
+      expect(recipient?.source.body).toBe(`${status}: GitHub is unavailable`);
+      await claim(recipient!);
+      await execute('order',{...authority(recipient!),address:opened.cornerId,text:'Continue with local proof'},RUBY);
+      expect((await commands(opened.cornerId,WORKER)).some(c=>c.source.body==='Continue with local proof')).toBe(true);
+    } else {
+      expect(recipient).toBeUndefined();
+      expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE id=$1',[saved.id])).rows).toEqual([{room_id:opened.cornerId}]);
+    }
     expect(unavailable).not.toHaveBeenCalled();
     expect(warning).not.toHaveBeenCalled();
   } finally {

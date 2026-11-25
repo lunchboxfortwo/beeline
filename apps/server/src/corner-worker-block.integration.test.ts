@@ -264,7 +264,7 @@ it('BLOCK-LINK: commander passes a block to a person without looping back to its
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('source',$1,$2,'blocked: Need input',
     jsonb_build_object('reportToId',$3::text,'reportStatus','blocked','sourceRoomId',$4::text))`,[ROOM,WORKER,COMMANDER,C]);
   await expect(db.query(`INSERT INTO messages(id,room_id,author_id,text,card,reply_to_message_id)
-    VALUES('loop',$1,$2,'blocked: Answer me',jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'),'source')`,[ROOM,COMMANDER,WORKER])).rejects.toThrow('cannot target');
+    VALUES('loop',$1,$2,'blocked: Answer me',jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'),'source')`,[C,COMMANDER,WORKER])).rejects.toThrow('cannot target');
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,reply_to_message_id)
     VALUES('passed-up',$1,$2,'blocked: Need your input',jsonb_build_object('reportToId',$3::text,'reportStatus','blocked','sourceRoomId',$4::text),'source')`,[ROOM,COMMANDER,HUMAN,ROOM]);
   expect((await db.query("SELECT block_parent_id FROM messages WHERE id='passed-up'")).rows[0]).toEqual({block_parent_id:'source'});
@@ -274,8 +274,8 @@ it('BLOCK-LINK: commander passes a block to a person without looping back to its
 });
 
 it('BLOCK-MIGRATION: legacy private report becomes a closeable block once',async()=>{
-  const report=await daemon.execute('report',{...await input(),status:'blocked',text:'Legacy access needed'},WORKER);
-  await db.query('DELETE FROM messages WHERE id=$1',[report.id]);
+  const report=(await createAgentCommand(db,{roomId:ROOM,agentId:COMMANDER,sourceMessageId:null,reason:'report',
+    privatePayload:{kind:'report',authorId:WORKER,text:'Legacy access needed',originCornerId:C,fromRoomId:C,reportStatus:'blocked'}}))!;
   await db.query("DELETE FROM workflow_backfills WHERE name='implementer-blocks-v1'");
   await db.query(needsYouMarksSchema());
   expect(await blockReminder(db,WORKER,C)).toContain(report.id);

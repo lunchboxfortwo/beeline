@@ -14,8 +14,18 @@ import { systemIdentityMention,systemLine } from './system-line.js';
 import type { AgentVoice,Composed,SystemAuthorId } from './message-origin.js';
 export { CommandRefusalError } from './command-refusal.js';
 
+/** A received block continues the recipient's work at the place where it was assigned. */
+export async function assignmentBeforeBlock(db:SqlDatabase, block:CommandRow) {
+  return (await db.query<CommandRow>(`WITH RECURSIVE chain AS (
+    SELECT task.*,0 depth FROM agent_commands task WHERE task.id=$1
+    UNION ALL SELECT task.*,child.depth+1 FROM agent_commands task JOIN chain child ON task.id=child.parent_command_id
+  ) SELECT * FROM chain WHERE room_id=$2 AND agent_id=$3 AND private_payload->>'reportStatus' IS DISTINCT FROM 'blocked'
+    ORDER BY depth LIMIT 1`,[block.parent_command_id,block.room_id,block.agent_id])).rows[0];
+}
+
 /** Follow provenance to the order that selects this command's return route. */
 export async function commandOrder(db: SqlDatabase, command: CommandRow): Promise<CommandRow> {
+  if (command.private_payload?.reportStatus === 'blocked') command = await assignmentBeforeBlock(db,command) ?? command;
   if (command.private_payload?.route || command.private_payload?.kind === 'order') return command;
   return (
     (

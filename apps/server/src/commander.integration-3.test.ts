@@ -5,8 +5,8 @@ import { DM,DaemonService,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,a
 it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction R1 missing attachments: report wake delivers files once (%s)', async mode => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: 'Work started.' }, RUBY);
-  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: files ready' }, WORKER);
-  const wake = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
+  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Which files?' }, WORKER);
+  const wake = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   await claim(wake);
   const objectId = randomUUID();
   await rootFixture.db.query(`INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
@@ -225,7 +225,7 @@ it('WAKE-STORM: a later delegate report publishes its reply without re-answering
   const turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: coordination finished'}, RUBY);
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: reviewer requires authentication'}, WORKER);
-  const returned = (await commands(DM, RUBY)).find(c=>c.reason==='report')!;
+  const returned = (await commands(DM, RUBY)).find(c=>c.reason==='message')!;
   await claim(returned);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(returned),text:'The reviewer still needs to sign in.'}, RUBY);
   // The reply to a corner report publishes in that corner; the chat keeps only the earlier result.
@@ -480,7 +480,7 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=private_payload-'fromRoomId' WHERE id=$1`, [turn.id]);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: need a decision' }, WORKER);
-  const returned = (await commands(DM, RUBY)).filter(c => c.reason === 'report');
+  const returned = (await commands(DM, RUBY)).filter(c => c.reason === 'message');
   expect(returned).toHaveLength(1);
   expect(returned[0]!.source.body).toBe('blocked: need a decision');
   await claim(returned[0]!);
@@ -490,7 +490,7 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
 it('Reproduction RETURN-ADDRESS: a report whose parent expired retains the recorded human source route', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: decision needed' }, WORKER);
-  const returned = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
+  const returned = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   await claim(returned);
   // Production feedback fb_135f018e: the report parent was gone, but its
   // root_source_message_id still named the human's original Room order.

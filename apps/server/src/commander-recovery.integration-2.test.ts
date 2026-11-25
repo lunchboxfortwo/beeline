@@ -14,7 +14,7 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
     { ...authority(turn), text: 'Reported the decision' },
     WORKER,
   );
-  const returned = (await commands(DM, RUBY)).find((c) => c.reason === 'report')!;
+  const returned = (await commands(DM, RUBY)).find((c) => c.reason === 'message')!;
   await claim(returned);
   await rootFixture.daemon.execute(
     'report',
@@ -176,8 +176,7 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
     await rootFixture.daemon.execute('report', {
       ...authority(turn), status: 'done', text: 'done: design ready',
     }, WORKER);
-    const report = (await commands(DM, RUBY)).find(c => c.reason === 'report')!;
-    await claim(report);
+    const report = rootFixture.order;
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(report), attachment: attachment(copy, 'design for approval'),
     }, RUBY);
@@ -214,12 +213,12 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
     .uploadArtifact(WORKER, Buffer.from('Synthetic handoff'), 'text/plain', 'handoff.txt');
   const attachment = { url: uploaded.url, name: 'handoff.txt', mimeType: 'text/plain', size: Buffer.byteLength('Synthetic handoff') };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
-  const report = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: evidence ready' }, WORKER);
-  expect(await read(report.id, RUBY)).toMatchObject({ body: 'done: evidence ready', attachments: [] });
-  expect(await read(report.id)).toMatchObject({ body: 'done: evidence ready' });
+  const report = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Evidence needs review' }, WORKER);
+  expect(await read(report.id, RUBY)).toMatchObject({ body: 'Evidence needs review', attachments: [] });
+  expect(await read(report.id)).toMatchObject({ body: 'Evidence needs review' });
   // Continuations retain private payloads and expose their own command ids.
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{kind}','\"lifecycle\"'::jsonb) WHERE id=$1`, [report.id]);
-  expect(await read(report.id, RUBY)).toMatchObject({ body: 'done: evidence ready' });
+  expect(await read(report.id, RUBY)).toMatchObject({ body: 'Evidence needs review' });
   // A current Room member who is neither sender nor recipient cannot see it.
   const outsider = 'e'.repeat(64);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Observer') ON CONFLICT DO NOTHING`, [outsider]);
@@ -335,7 +334,6 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
   let started!: () => void;
   const uploading = new Promise<void>(resolve => { started = resolve; });
   const objects = new ObjectService(rootFixture.db, new MemoryObjectStorage(), 'http://test');
-  let reportCalls = 0;
   let uploadAttempts = 0;
   const bridge = createServer(async (request, response) => {
     try {
@@ -352,9 +350,6 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
         result = await objects.uploadArtifact(RUBY, body, 'text/plain', 'evidence.txt');
       } else if (request.url === '/v1/daemon/operations/postAgentAttachment') {
         result = await rootFixture.daemon.execute('postAgentAttachment', JSON.parse(body.toString()), RUBY);
-      } else if (request.url === '/v1/daemon/operations/reply') {
-        reportCalls++;
-        result = await rootFixture.daemon.execute('reply', JSON.parse(body.toString()), RUBY);
       } else throw new Error('unexpected proof route');
       response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(result));
     } catch (error) {
@@ -383,34 +378,19 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
   try {
     const upload = call(1, 'post_artifact', { path: join(scratch, 'evidence.txt') });
     await uploading;
-    const report = call(2, 'reply', { id:rootFixture.order.id,text: 'done: evidence attached' });
-    await new Promise(resolve => setTimeout(resolve, 30));
-    const sentEarly = reportCalls > 0;
+    expect((await rootFixture.db.query('SELECT id FROM messages WHERE attachments @> $1::jsonb',
+      [JSON.stringify([{name:'evidence.txt'}])])).rows).toEqual([]);
     release();
-    const [uploaded, reported] = await Promise.all([upload, report]);
-    expect(sentEarly).toBe(false);
-    if (outcome === 'failure') {
+    const uploaded = await upload;
+    if (outcome !== 'success') {
       expect(uploaded.isError).toBe(true);
-      expect(reported).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('storage_unavailable') }] });
-      expect(reportCalls).toBe(0);
-    } else if (outcome === 'replacement') {
-      expect(uploaded.isError).toBe(true);
-      expect(reported.isError).toBe(true);
-      expect(reportCalls).toBe(0);
-      const replacement = await call(3, 'post_artifact', { path: join(scratch, 'evidence.txt') });
-      expect(replacement.isError).not.toBe(true);
-      const retried = await call(4, 'reply', { id:rootFixture.order.id,text: 'done: replacement evidence attached' });
-      expect(retried.isError).not.toBe(true);
-      const result = JSON.parse(retried.content[0]!.text);
-      const message = await rootFixture.daemon.execute('getRoomMessage', { roomId:rootFixture.order.roomId, messageId: result.id }, RUBY);
-      expect(message).toMatchObject({ body: 'done: replacement evidence attached', attachments: [] });
-    } else {
-      expect(uploaded.isError).not.toBe(true);
-      expect(reported.isError).not.toBe(true);
-      const result = JSON.parse(reported.content[0]!.text);
-      const message = await rootFixture.daemon.execute('getRoomMessage', { roomId:rootFixture.order.roomId, messageId: result.id }, RUBY);
-      expect(message).toMatchObject({ body: 'done: evidence attached', attachments: [] });
-    }
+      expect(uploaded.content[0]?.text).toContain('storage_unavailable');
+      if (outcome === 'failure') return;
+      expect((await call(2,'post_artifact',{path:join(scratch,'evidence.txt')})).isError).not.toBe(true);
+    } else expect(uploaded.isError).not.toBe(true);
+    const final = await rootFixture.daemon.execute('postRoomMessage',{...authority(rootFixture.order),text:'Evidence attached'},RUBY);
+    const saved = await rootFixture.daemon.execute('getRoomMessage',{roomId:DM,messageId:final.id},RUBY);
+    expect(saved).toMatchObject({body:'Evidence attached',attachments:[expect.objectContaining({name:'evidence.txt'})]});
   } finally {
     release(); child.kill(); lines.close();
     bridge.closeAllConnections();
