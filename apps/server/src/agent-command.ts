@@ -906,13 +906,13 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         refuseMessageMembership('return address archived');
       }
       if (!messageText && !input.messageAsk)
-        return {commandId:item.id,completed:false,published:false,answered:false,delivered:false,
+        return {commandId:item.id,completed:false,published:false,answered:false,
           queued:false,stored:false,visible:false,destination:to};
       const from = {agent:agentId,place:item.room_id};
       const id = hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
       const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:scheduleReply?.id ?? item.source_message_id ?? item.id});
       if (!saved.stored || !saved.messageId)
-        return {...saved, commandId:item.id, completed:false, published:false, answered:false, delivered:false};
+        return {...saved, commandId:item.id, completed:false, published:false, answered:false};
       if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.messageId]);
       else await endAgentTurn(db,item,'complete',null,saved.messageId);
       completedNow = true;

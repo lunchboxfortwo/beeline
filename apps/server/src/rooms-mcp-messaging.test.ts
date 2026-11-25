@@ -339,6 +339,33 @@ describe('connected agent message protocol',()=>{
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
   });
 
+  it('refuses a claim bound to another thread before touching either thread', async () => {
+    const {client,member} = await scope.connected();
+    const addressed = await tools.reportCorner(AGENT);
+    const commandRoom = await tools.reportCorner(AGENT);
+    const source = await scope.phone.execute('sendRoomMessage', {
+      roomId:commandRoom, text:`@${await handle(member)} Check this thread`,
+    },USER);
+    const {id:commandId} = (await scope.db.query<{id:string}>(
+      'SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2', [member,source.messageId],
+    )).rows[0]!;
+    const implementers = async () => (await scope.db.query(
+      'SELECT corner_id,implementer_agent_id FROM corner_facts WHERE corner_id=ANY($1::uuid[]) ORDER BY corner_id',
+      [[addressed,commandRoom]],
+    )).rows;
+    const before = await implementers();
+    expect(before).toHaveLength(2);
+    const refused = await tools.call(client,'claim_thread',{address:addressed,commandId});
+    expect({refused,implementers:await implementers()}).toEqual({
+      refused:{error:true,text:'Request refused: commandId is not an available message for you at this address.'},
+      implementers:before,
+    });
+    expect((await scope.db.query('SELECT 1 FROM agent_invocations WHERE command_id=$1',[commandId])).rowCount).toBe(0);
+    await tools.ok(client,'claim_thread',{address:commandRoom,commandId});
+    expect(await implementers()).toEqual(before.map(row =>
+      row.corner_id === commandRoom ? {...row,implementer_agent_id:member} : row));
+  });
+
   it('selects a public source across places even while another local request is pending', async () => {
     const {client,member} = await scope.connected();
     const other = await humanTask(member);

@@ -365,7 +365,7 @@ export class RoomsMcpAgentTools {
 
   private async inTurn<T>(member: string, target: string, run: (turn: McpTurn, context: Args) => Promise<T>): Promise<T> {
     const bound = this.boundTurn.getStore();
-    if (bound) return run(bound, { roomId: bound.roomId, requestId: bound.requestId });
+    if (bound) return run(bound, { roomId: target, requestId: bound.requestId });
     const turn = await this.begin(member, await this.place(member, target));
     try {
       return await run(turn, { roomId: turn.roomId, requestId: turn.requestId });
@@ -396,10 +396,8 @@ export class RoomsMcpAgentTools {
         },member);
       }
       return this.db.transaction(async db => {
-        const parent = commandId ? await selectMcpMessage(db,member,commandId) : undefined;
+        const parent = commandId ? await selectMcpMessage(db,member,commandId,args.address === undefined ? undefined : target) : undefined;
         await commandAddress(db,target,member);
-        if (parent && args.address !== undefined && parent.room_id !== target)
-          throw new CommandRefusalError('commandId is not an available message for you at this address',404);
         const roomId = parent?.room_id ?? target;
         const {to} = normalizePlaceAddresses('message',{roomId,to:args.to as MessageAddress});
         return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to}});
@@ -418,11 +416,10 @@ export class RoomsMcpAgentTools {
     if (args.commandId !== undefined && name !== 'no_reply_needed') {
       if (typeof args.commandId !== 'string' || !/^[0-9a-f]{64}$/.test(args.commandId)) throw new McpToolError('Invalid commandId');
       const target = addressArg(args.address ?? args.room ?? args.roomId ?? object(args.about).roomId);
-      await this.place(member, target);
       const turn = await this.db.transaction(async tx => {
-        const selected = await selectMcpMessage(tx, member, args.commandId as string);
-        await beginAgentInvocation(tx, member, selected.room_id, selected.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
-        return { roomId: selected.room_id, requestId: selected.turn_request_id, commandId: selected.id, received: true };
+        const selected = await selectMcpMessage(tx, member, args.commandId as string, target);
+        await beginAgentInvocation(tx, member, target, selected.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
+        return { roomId: target, requestId: selected.turn_request_id, commandId: selected.id, received: true };
       });
       const { commandId: _, ...input } = args;
       return this.boundTurn.run(turn, async () => {

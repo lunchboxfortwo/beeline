@@ -155,7 +155,7 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
       AND ($5::text IS NULL OR id=$5)
     ORDER BY (id=$2) DESC,($4 AND state='pending') DESC,created_at DESC,id DESC LIMIT 1 FOR UPDATE`,
     [agentId,input.id,input.roomId ?? null,Boolean(input.connected),commandId ?? null])).rows[0];
-  if (!item) throw new CommandRefusalError('Quote a message that woke this turn.', 400);
+  if (!item) refuseMessageMembership('Quote a message that woke this turn.');
   if (input.connected && !commandId) await commandAddress(db, item.room_id, agentId);
   const saved = await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true});

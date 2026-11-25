@@ -1,6 +1,6 @@
 import { REQUEST_REASONS } from '@beeline/api-contract/daemon';
 import { lockAgentCommandQueue } from './agent-command-queue.js';
-import { CommandRow } from './agent-command.js';
+import { refuseMessageMembership, type CommandRow } from './agent-command.js';
 import { commandAddress } from './commander.js';
 import { CommandRefusalError, ExpectedRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
@@ -34,11 +34,13 @@ export const CORNER_MERGE_YES_CARD_TYPE = 'corner-merge-yes';
 
 /** Connected tools can explicitly serve only a pending input owned by this member. */
 export async function selectMcpMessage(db: SqlDatabase, agentId: string,
-  commandId: string): Promise<CommandRow> {
+  commandId: string, target?: string): Promise<CommandRow> {
   const item = (await db.query<CommandRow>(
     `SELECT * FROM agent_commands WHERE agent_id=$1 AND id=$2 AND state='pending'
        AND action='input' AND reason<>'mcp_call' FOR UPDATE`, [agentId,commandId])).rows[0];
   if (!item) throw new CommandRefusalError('commandId is not an available command for you', 404);
+  if (target !== undefined && item.room_id !== target)
+    refuseMessageMembership('commandId is not an available message for you at this address');
   await commandAddress(db, item.room_id, agentId);
   return item;
 }
