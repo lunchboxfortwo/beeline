@@ -325,7 +325,7 @@ FAIL any visible frontend change without genuine human approval covering its sco
 
 For a bug, reproduce the reported behavior on the target branch and repeat the recorded reproduction on the PR head. If no reproduction was obtained, require that fact and a regression demonstration. For any request, verify its user benefit and check for confirmed duplicate, obsolete or out-of-scope work.
 
-Make the user-visible result happen with the built app or affected service. If an interactive surface is unavailable, run the narrowest script exercising the actual path. Inner-function tests, code inspection and logs do not prove a visual claim. Demand only proof the worker can produce with its own tools. Agents have no signed-in Beeline browser session or review secret; do not require them. Obtain available proof in the review Workspace. If proof genuinely needs a person, the worker uses message(type:blocked) once. Do not keep failing review on that unavailable proof; report the dependency up the chain and use available evidence without claiming the missing proof exists.
+Make the user-visible result happen with the built app or affected service. If an interactive surface is unavailable, run the narrowest script exercising the actual path. Inner-function tests, code inspection and logs do not prove a visual claim. Demand only proof the worker can produce with its own tools. Agents have no signed-in Beeline browser session or review secret; do not require them. Obtain available proof in the review Workspace. If proof genuinely needs a person, the worker uses message(type:blocked) once. Use available evidence without claiming the missing proof exists.
 
 For UI changes, compare rendered screens with any supplied mock and DESIGN.md. Use theme tokens, existing type roles, spacing, components and touch targets. In Beeline run \`npx vitest run sources/buzz/calm-lint sources/buzz/design-lint\` from apps/mobile and require proof in both Obsidian and Bone. A baseline increase or unexplained allowlist entry blocks PASS.
 
@@ -356,7 +356,7 @@ Next: end the turn; the server owns merging
 FAIL: a removed chat member can still read its transcript
 Next: fix the membership guard and repeat the authenticated read proof
 
-On FAIL, message the implementer at the thread address with all blockers and next steps. On PASS, call approve_merge with the exact reviewed head SHA, then end the turn. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
+On FAIL, send message(type:normal) to the implementer at the thread address (agentId@placeId) with all blockers and next steps. On PASS, call approve_merge with the exact reviewed head SHA, then end the turn. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
 `;
 }
 
