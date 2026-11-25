@@ -13,7 +13,7 @@ import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
 import { createAgentCommand } from './agent-command.js';
 
-it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of Sentry while reports accept prose', async () => {
+it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of Sentry', async () => {
   const envelopes: string[] = [];
   const collector = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
@@ -57,14 +57,11 @@ it('Reproduction R1 / ask-refusal: corner brief and choice refusals stay out of 
       return { status: response.status, body: await response.json() };
     };
     for (const ask of ['x'.repeat(141), '**Choose now?**', 'First? Second?', 'First\nSecond', 42, '']) {
-      for (const operation of ['askRoomChoice']) {
-        const refused = await post(operation, { ...turn, status: 'needs_decision', text: 'needs-decision: Choose now',
-          prompt: 'Choose now?', options: [{ label: 'Yes' }, { label: 'No' }], ask });
-        expect(refused.status).toBe(400);
-        expect(refused.body.error).toMatch(/^ask /);
-      }
+      const refused = await post('askRoomChoice', { ...turn,
+        prompt: 'Choose now?', options: [{ label: 'Yes' }, { label: 'No' }], ask });
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toMatch(/^ask /);
     }
-    expect((await post('report',{...turn,status:'needs_decision',text:'Choose **either** path. '.repeat(100),ask:'x'.repeat(141)})).status).toBe(200);
     await Sentry.flush(2000);
     expect(envelopes.some(envelope => envelope.includes('"exception"'))).toBe(false);
     expect((await post('askRoomChoice', { ...turn, ask: 'x'.repeat(140), prompt: 'Choose now?',

@@ -28,7 +28,7 @@ describe('daemon place addresses', () => {
   });
 
   it('covers every operation whose input takes a place in address', () => {
-    expect([...ADDRESS_OPERATIONS].sort()).toEqual(['order', 'read', 'stopAgentTurn']);
+    expect([...ADDRESS_OPERATIONS].sort()).toEqual(['read', 'stopAgentTurn']);
     for (const operation of ADDRESS_OPERATIONS) expect(DAEMON_OPERATION_NAMES.has(operation)).toBe(true);
   });
 

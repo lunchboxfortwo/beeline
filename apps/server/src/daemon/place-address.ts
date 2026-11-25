@@ -5,7 +5,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const UNKNOWN_PLACE = 'unknown place; use an id from read(facet:addresses)';
 
 /** Operations whose `address` field is a place id. Elsewhere `address` can mean something else, such as a wallet. */
-export const ADDRESS_OPERATIONS = new Set(['order', 'read', 'stopAgentTurn']);
+export const ADDRESS_OPERATIONS = new Set(['read', 'stopAgentTurn']);
 
 /** Input fields that name a chat, thread or DM by id. */
 const PLACE_FIELD = /^(roomId|cornerId|[a-z][A-Za-z]*(RoomId|CornerId))$/;
