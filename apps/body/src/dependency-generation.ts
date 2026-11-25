@@ -1,8 +1,8 @@
 import { ownedCommandModule, runOwnedFile } from './wait.js';
-import { createHash } from 'node:crypto';
-import { chmod, mkdir, readFile, readdir, realpath, lstat, rm, writeFile } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, delimiter } from 'node:path';
-import { tryWithKernelLock } from './kernel-lock.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, readdir, realpath, lstat, stat, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { dirname, resolve, relative, isAbsolute, delimiter, sep } from 'node:path';
+import { tryWithKernelLock, withKernelLockWhenFree } from './kernel-lock.js';
 import type { DependencyLayer } from './bwrap-sandbox.js';
 import {
   readWarmPlan,
@@ -15,6 +15,106 @@ import {
 
 const marker = '.beeline-generation';
 export const dependencyRequest = '.beeline-dependency-request';
+export const workspaceDependenciesDir = 'beeline-workspace-dependencies';
+
+/**
+ * Workspace setup runs while the harness is still live. Keep hardlinks in its
+ * sealed Git storage so a workspace tool call never exposes new shared inodes
+ * inside the harness's existing writable checkout mount.
+ */
+export async function prepareWorkspaceDependencies(input: {
+  root: string;
+  checkout: string;
+  storage: string;
+  storeRoot: string;
+  installIdentity: string;
+  install(): Promise<void>;
+}): Promise<boolean> {
+  const worktreePath = input.root;
+  const { storeRoot, installIdentity } = input;
+  const plan = await readWarmPlan(worktreePath, installIdentity);
+  const local = resolve(worktreePath, 'node_modules');
+  const previous = await readlink(local).catch(() => undefined);
+  const managed = previous && /^[a-f0-9]{32}\/node_modules$/.test(relative(input.storage, previous));
+  const info = await lstat(local).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (info && !managed) return false;
+  if (isPlanRefusal(plan) || plan.trees.length !== 1 || plan.trees[0] !== 'node_modules') {
+    if (managed) {
+      await rm(local);
+      await rm(dirname(previous), { recursive: true, force: true });
+    }
+    return false;
+  }
+  const placementRoot = resolve(input.storage, plan.key);
+  const target = resolve(placementRoot, 'node_modules');
+  if (previous === target && !(await missingInstalledPackages(worktreePath)).length) return true;
+  await mkdir(input.storage, { recursive: true });
+  if ((await stat(input.storage)).dev !== (await stat(worktreePath)).dev) {
+    if (managed) await rm(local);
+    return false;
+  }
+
+  const locked = <T>(work: () => Promise<T>) =>
+    withKernelLockWhenFree(`dependency-store:${resolve(storeRoot)}`, work);
+  const options = { worktreePath, storeRoot, installIdentity, placementRoot };
+  const seed = async () => {
+    await mkdir(placementRoot, { recursive: true });
+    const result = await seedWarmNodeModules(options);
+    if (['seeded', 'present'].includes(result.reason)) {
+      if (!(await missingInstalledPackages(worktreePath, placementRoot)).length) return true;
+      await rm(target, { recursive: true, force: true });
+    }
+    return false;
+  };
+  let privateInstall = false;
+  if (!(await locked(seed))) {
+    if (managed) await rm(local);
+    await input.install();
+    privateInstall = true;
+    if (!(await locked(async () => {
+      const harvested = await harvestWarmNodeModules(options);
+      return ['stored', 'already-warm'].includes(harvested.reason) && await seed();
+    }))) {
+      if (managed) await rm(dirname(previous), { recursive: true, force: true });
+      return true;
+    }
+  }
+  // Relative npm workspace links from the store now live below Git storage.
+  // Rebind their private symlinks to this checkout before publishing the alias.
+  const { packages } = JSON.parse(await readFile(resolve(worktreePath, 'package-lock.json'), 'utf8')) as {
+    packages: Record<string, { link?: boolean; resolved?: string }>;
+  };
+  for (const [name, entry] of Object.entries(packages)) {
+    const workspaceLink = entry.link === true;
+    if (!workspaceLink || !entry.resolved || !name.startsWith('node_modules/')) continue;
+    const link = resolve(placementRoot, name);
+    const source = resolve(worktreePath, entry.resolved);
+    const parent = await realpath(dirname(link));
+    if (
+      !link.startsWith(target + sep) ||
+      (parent !== target && !parent.startsWith(target + sep)) ||
+      !source.startsWith(input.checkout + sep)
+    )
+      throw new Error('Workspace dependency link leaves its checkout');
+    await rm(link, { force: true });
+    await symlink(source, link);
+  }
+  await writeFile(resolve(target, marker), JSON.stringify(plan));
+  const staging = resolve(input.storage, `.placing-${randomUUID()}`);
+  try {
+    await symlink(target, staging);
+    if (privateInstall) await rm(local, { recursive: true, force: true });
+    await rename(staging, local);
+  } finally {
+    await rm(staging, { force: true });
+  }
+  // The new generation is now visible. Release the old checkout reference.
+  if (managed && previous !== target) await rm(dirname(previous), { recursive: true, force: true });
+  return true;
+}
 
 /** Requests live in the corner, never in another agent's home or the host /tmp. */
 export async function extraDependencyRoots(root: string, home?: string): Promise<string[]> {

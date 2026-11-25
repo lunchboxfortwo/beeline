@@ -1,7 +1,5 @@
-import { accessSync, constants, mkdtempSync, mkdirSync } from 'node:fs';
+import { accessSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
-import { isolatedNativeProof } from '../../../apps/body/src/lifecycle-test-guard.js';
 
 /**
  * Where tests make their temporary roots. /tmp disappears inside the Room's
@@ -19,26 +17,6 @@ export function testTmpDir(): string {
   } catch {
     return tmpdir();
   }
-}
-
-// Every test and every child it launches inherits private paths and an unreachable
-// user bus. Native acceptance runs only in the separately supervised proof container.
-if (!isolatedNativeProof(process.env)) {
-  const home = mkdtempSync(resolve(testTmpDir(), 'beeline-test-'));
-  process.env.HOME = home;
-  process.env.XDG_CONFIG_HOME = resolve(home, '.config');
-  process.env.XDG_STATE_HOME = resolve(home, '.local/state');
-  process.env.XDG_RUNTIME_DIR = resolve(home, 'run');
-  for (const path of [
-    process.env.XDG_CONFIG_HOME,
-    process.env.XDG_STATE_HOME,
-    process.env.XDG_RUNTIME_DIR,
-  ])
-    mkdirSync(path, { recursive: true });
-  process.env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${home}/run/no-user-bus`;
-  process.env.BEELINE_LIB_DIR = '';
-  process.env.BEELINE_INSTALL_DIR = '';
-  process.env.BEELINE_INSTALL_LIB_DIR = '';
 }
 
 /**

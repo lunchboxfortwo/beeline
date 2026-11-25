@@ -258,6 +258,7 @@ export interface SandboxMountPlan {
    * the session must still reach there is restored here, read-only.
    */
   readOnly: string[];
+  sealed?: string[];
   /** Paths bind-mounted read-write, deduplicated and sorted. */
   writable: string[];
   /** Copy-on-write layers mounted over shared dependency trees; see {@link DependencyLayer}. */
@@ -307,6 +308,8 @@ export interface SandboxSessionSpec {
   gitCommonDir?: string;
   /** Shared dependency trees, each writable through this checkout's own layer. */
   dependencyLayers?: DependencyLayer[];
+  /** Helper-owned paths that stay read-only inside writable checkout storage. */
+  sealedPaths?: string[];
   /** Explicit capabilities restored writable after protected parent mounts. */
   additionalWritablePaths?: string[];
   /** Credential stores hidden from this session ({@link credentialMaskPaths}).
@@ -432,6 +435,7 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
     ownerPaths,
     ...(userBus ? { userBus } : {}),
     readOnly,
+    ...(spec.sealedPaths?.length ? { sealed: spec.sealedPaths } : {}),
     writable,
     ...(spec.dependencyLayers?.length ? { overlays: spec.dependencyLayers } : {}),
     masks: [...(spec.maskPaths ?? []),
@@ -491,6 +495,7 @@ export function sandboxAllowsWrite(plan: SandboxMountPlan, path: string): boolea
   for (const mask of plan.masks) if (covers(mask.path)) allowed = false;
   for (const root of plan.writable) if (covers(root)) allowed = true;
   for (const layer of plan.overlays ?? []) if (covers(layer.tree)) allowed = true;
+  for (const root of plan.sealed ?? []) if (covers(root)) allowed = false;
   return allowed;
 }
 
@@ -550,6 +555,7 @@ export function buildBwrapArgv(input: {
   }
   // Optional harness roots may be absent.
   for (const path of input.plan.writable) args.push('--bind-try', path, path);
+  for (const path of input.plan.sealed ?? []) args.push('--ro-bind', path, path);
   args.push('--chdir', input.cwd);
   // The sandbox must not outlive the daemon that owns the session.
   args.push('--die-with-parent');

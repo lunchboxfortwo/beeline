@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, access, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, lstat, mkdir, symlink, writeFile, access, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, delimiter, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -14,7 +14,7 @@ async function fixture(fn) {
     await writeFile(join(cwd, 'package.json'), JSON.stringify({
       name: 'preparation-proof', version: '1.0.0',
       scripts: {
-        'mobile:install': 'node -e "require(\'fs\').writeFileSync(\'mobile-ran\',\'yes\');require(\'fs\').mkdirSync(\'apps/mobile\',{recursive:true})"',
+        'mobile:install': 'node -e "require(\'fs\').writeFileSync(\'mobile-ran\',\'yes\');require(\'fs\').mkdirSync(\'apps/mobile/node_modules\',{recursive:true})"',
         build: 'node -e "require(\'fs\').writeFileSync(\'build-ran\',\'yes\')"',
       },
     }));
@@ -76,7 +76,7 @@ test('invalid options fail before installation', async () => fixture(async (cwd)
   assert.match(result.stderr, /Unknown preparation option/);
 }));
 
-test('managed preparation preserves mounted trees and requests mobile for the next turn', async () => fixture(async (cwd) => {
+test('managed preparation requests mobile through the workspace tool', async () => fixture(async (cwd) => {
   await rm(join(cwd, 'package-lock.json'));
   const result = spawnSync(process.execPath, [prepare, '--mobile', '--build'], {
     cwd, encoding: 'utf8', env: { ...environment(cwd), BEELINE_READONLY_DEPENDENCIES: '1' },
@@ -85,7 +85,35 @@ test('managed preparation preserves mounted trees and requests mobile for the ne
   assert.equal(await exists(join(cwd, 'mobile-ran')), false);
   assert.equal(await exists(join(cwd, '.beeline-dependency-request')), true);
   assert.equal(await exists(join(cwd, 'build-ran')), true);
-  assert.match(result.stdout, /this turn continues with them/);
-  // Mobile packages arrive after this turn, so only the root test runs now.
+  assert.match(result.stdout, /Call workspace to prepare them/);
   assert.doesNotMatch(await readFile(join(cwd, 'tests-ran'), 'utf8'), /apps\/mobile/);
+}));
+
+test('workspace preparation runs mobile tests with the ready generation', async () => fixture(async (cwd) => {
+  await rm(join(cwd, 'package-lock.json'));
+  await mkdir(join(cwd, 'apps/mobile'), { recursive: true });
+  const result = spawnSync(process.execPath, [prepare, '--mobile'], {
+    cwd, encoding: 'utf8', env: {
+      ...environment(cwd), BEELINE_READONLY_DEPENDENCIES: '1', BEELINE_MOBILE_DEPENDENCIES_READY: '1',
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(await exists(join(cwd, 'mobile-ran')), false);
+  assert.match(await readFile(join(cwd, 'tests-ran'), 'utf8'), /^apps\/mobile: exec -- vitest run /m);
+}));
+
+test('a full mobile build gets writable dependencies while preserving the shared generation', async () => fixture(async (cwd) => {
+  const shared = join(cwd, 'generation');
+  const mobile = join(cwd, 'apps/mobile');
+  await mkdir(shared);
+  await mkdir(mobile, { recursive: true });
+  await writeFile(join(shared, '.beeline-generation'), 'sealed');
+  await symlink(shared, join(mobile, 'node_modules'));
+  const result = spawnSync(process.execPath, [prepare, '--mobile', '--build'], {
+    cwd, encoding: 'utf8', env: { ...environment(cwd), BEELINE_READONLY_DEPENDENCIES: '1' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((await lstat(join(mobile, 'node_modules'))).isDirectory(), true);
+  assert.equal(await readFile(join(cwd, 'mobile-ran'), 'utf8'), 'yes');
+  assert.equal(await readFile(join(shared, '.beeline-generation'), 'utf8'), 'sealed');
 }));

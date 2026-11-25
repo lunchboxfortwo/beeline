@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Install dependencies and compile shared workspace exports before corner work.
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
@@ -30,12 +30,25 @@ if (flags.has('--help')) {
     if (result.error) throw result.error;
     if (result.status !== 0) process.exit(result.status ?? 1);
   };
-  if (process.env.BEELINE_READONLY_DEPENDENCIES !== '1') run(['ci']);
+  const managedRoot = existsSync('node_modules/.beeline-generation');
+  const managedMobile = existsSync('apps/mobile/node_modules/.beeline-generation');
+  if (!managedRoot && process.env.BEELINE_READONLY_DEPENDENCIES !== '1') run(['ci']);
   let mobileReady = false;
   if (flags.has('--mobile')) {
-    if (process.env.BEELINE_READONLY_DEPENDENCIES === '1') {
+    if (flags.has('--build') && managedMobile && lstatSync('apps/mobile/node_modules').isSymbolicLink()) {
+      // Native Gradle builds write under mobile dependency directories.
+      unlinkSync('apps/mobile/node_modules');
+      run(['run', 'mobile:install']);
+      mobileReady = true;
+    } else if (managedMobile || process.env.BEELINE_MOBILE_DEPENDENCIES_READY === '1') {
+      const skia = './node_modules/.bin/setup-skia-web';
+      if (existsSync(resolve('apps/mobile', skia))) {
+        spawnSync(skia, ['public'], { stdio: 'inherit', cwd: 'apps/mobile' });
+      }
+      mobileReady = true;
+    } else if (managedRoot || process.env.BEELINE_READONLY_DEPENDENCIES === '1') {
       writeFileSync('.beeline-dependency-request', 'mobile');
-      console.log('Mobile dependencies requested. Beeline prepares and mounts them when this reply ends, and this turn continues with them.');
+      console.log('Mobile dependencies requested. Call workspace to prepare them.');
     } else {
       run(['run', 'mobile:install']);
       mobileReady = true;

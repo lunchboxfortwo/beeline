@@ -1,7 +1,7 @@
 import { runOwnedFile } from './wait.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { constants, existsSync } from 'node:fs';
+import { mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { sessionCredentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } from './bwrap-sandbox.js';
@@ -14,6 +14,19 @@ import { rememberStorageOwner } from './storage-owners.js';
 import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
 import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
+import { dependencyRequest, prepareWorkspaceDependencies, workspaceDependenciesDir } from './dependency-generation.js';
+
+async function mobilePreparationRequested(path: string): Promise<boolean> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
+    .catch(() => undefined);
+  if (!file) return false;
+  try {
+    const stat = await file.stat();
+    return stat.isFile() && stat.size === 6 && await file.readFile('utf8') === 'mobile';
+  } finally {
+    await file.close();
+  }
+}
 
 export function githubHttpsRemote(remote: string): string {
   const normalized = remote
@@ -191,6 +204,7 @@ async function readyCheckout(input: {
   config: BodyConfig;
   supervisorRoot: string;
   agentId: string;
+  gitCommonDir?: string;
   brief?: string;
 }): Promise<string | undefined> {
   const { path, config } = input;
@@ -222,29 +236,48 @@ async function readyCheckout(input: {
     (await git(['rev-parse', '--git-path', 'beeline-prepared'])).stdout.trim(),
   );
   // A revised brief may touch other workspaces, so it is part of what was prepared.
+  const managed = input.gitCommonDir && scripts['corner:prepare'] === 'node packages/scripts/prepare-corner.mjs';
+  const request = resolve(path, dependencyRequest);
+  const requestedMobile = managed && await mobilePreparationRequested(request);
+  const mobile = resolve(path, 'apps/mobile');
+  const needsMobile = requestedMobile || /\bmobile\b/i.test(input.brief ?? '');
   const tree = [
     (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim(),
     createHash('sha256')
       .update(input.brief ?? '')
       .digest('hex'),
+    ...(managed ? [`shared-npm:${process.platform}:${process.arch}:${process.versions.modules}`] : []),
   ].join(' ');
   if (
     (await readFile(marker, 'utf8').catch(() => '')) === tree &&
+    !requestedMobile &&
+    (!managed || (existsSync(resolve(path, 'node_modules/.package-lock.json')) &&
+      (!needsMobile || existsSync(resolve(mobile, 'node_modules/.package-lock.json'))))) &&
     !(await git(['status', '--porcelain'])).stdout.trim()
   )
     return undefined;
   await rm(marker, { force: true });
-  const cache = resolve(input.supervisorRoot, 'beeline', 'npm-cache');
+  const state = resolve(input.supervisorRoot, 'beeline');
+  const cache = resolve(state, 'npm-cache');
   await mkdir(cache, { recursive: true, mode: 0o700 });
   // The sandbox keeps /tmp private and /var/tmp read-only; tests write here.
   const tmp = await mkdtemp('/var/tmp/beeline-prepare-');
   try {
-    for (const [executable, ...args] of steps) {
+    const environment: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH ?? '',
+      HOME: '/tmp',
+      TMPDIR: tmp,
+      BEELINE_BRIEF: input.brief ?? '',
+      npm_config_cache: cache,
+      TURBO_CACHE_DIR: resolve(path, '.turbo', 'cache'),
+    };
+    async function run(executable: string, args: string[], cwd = path) {
       const command = wrapAgentCommand({
         bwrapPath: config.bwrapPath,
         spec: {
           mode: 'readonly',
-          cwd: path,
+          cwd,
+          ...(input.gitCommonDir ? { gitCommonDir: input.gitCommonDir } : {}),
           additionalWritablePaths: [path, cache, tmp],
           maskPaths: [
             ...sessionCredentialMaskPaths(config, config.operatorHome ?? homedir()),
@@ -255,17 +288,10 @@ async function readyCheckout(input: {
         args,
       });
       await runOwnedFile(command.command, command.args, {
-        cwd: path,
+        cwd,
         maxBuffer: 64 * 1024 * 1024,
         // Turbo otherwise caches beside a linked worktree's Git storage, outside the checkout.
-        env: {
-          PATH: process.env.PATH ?? '',
-          HOME: '/tmp',
-          TMPDIR: tmp,
-          BEELINE_BRIEF: input.brief ?? '',
-          npm_config_cache: cache,
-          TURBO_CACHE_DIR: resolve(path, '.turbo', 'cache'),
-        },
+        env: environment,
       }).catch((error: { stderr?: string; stdout?: string; message?: string }) => {
         const output = (error.stderr || error.stdout || error.message || '').trim().slice(-1500);
         throw new Error(
@@ -273,11 +299,46 @@ async function readyCheckout(input: {
         );
       });
     }
+    if (managed && input.gitCommonDir) {
+      const storage = resolve(input.gitCommonDir, workspaceDependenciesDir);
+      await mkdir(storage, { recursive: true, mode: 0o700 });
+      if ((await realpath(storage)) !== storage) throw new Error('Invalid workspace dependency storage');
+      const install = async (root: string, mobile: boolean) =>
+        prepareWorkspaceDependencies({
+          root,
+          checkout: path,
+          storage: resolve(storage, mobile ? 'mobile' : 'root'),
+          storeRoot: resolve(state, mobile ? 'node-modules-mobile' : 'node-modules'),
+          installIdentity: await npmInstallIdentity(root, mobile),
+          install: () => run('npm', ['ci', '--no-audit', '--no-fund'], root),
+        });
+      if (await install(path, false)) environment.BEELINE_READONLY_DEPENDENCIES = '1';
+      if (needsMobile && await realpath(mobile).catch(() => undefined) === mobile) {
+        if (!(await install(mobile, true))) await run('npm', ['run', 'mobile:install']);
+        environment.BEELINE_MOBILE_DEPENDENCIES_READY = '1';
+      }
+    }
+    for (const [executable, ...args] of steps)
+      await run(executable, requestedMobile ? [...args, '--', '--mobile'] : args);
+    if (requestedMobile && environment.BEELINE_MOBILE_DEPENDENCIES_READY) await rm(request, { force: true });
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
   await writeFile(marker, tree);
   return undefined;
+}
+
+async function npmInstallIdentity(root: string, mobile = false): Promise<string> {
+  const files = ['package.json', '.npmrc'];
+  if (mobile) {
+    files.push('scripts/patch-livekit-abort.cjs', 'scripts/patch-livekit-owned.cjs');
+    for (const file of (await readdir(resolve(root, 'patches')).catch(() => [])).sort())
+      files.push(`patches/${file}`);
+  }
+  const contents = await Promise.all(files.map(async (file) => [
+    file, await readFile(resolve(root, file), 'base64').catch(() => undefined),
+  ]));
+  return createHash('sha256').update(JSON.stringify(contents)).digest('hex');
 }
 
 /**
@@ -303,6 +364,7 @@ export async function prepareWorkspace(input: {
     ? undefined
     : (await input.api.execute('getRoomGitHubToken', { roomId: repositoryRoom })).token;
   let path: string;
+  let gitCommonDir: string | undefined;
   let brief: string | undefined;
   let branch = targetBranch;
   if (input.parentRoomId) {
@@ -310,17 +372,15 @@ export async function prepareWorkspace(input: {
     brief = restore.brief?.spec;
     branch =
       restore.featureBranch ?? `feature/corner-${input.placeId.replaceAll('-', '').slice(0, 12)}`;
-    path = (
-      await materializeCornerWorktree({
-        cornerId: input.placeId,
-        remote: repository.remote,
-        targetBranch,
-        featureBranch: branch,
-        token: token ?? '',
-        supervisorRoot: input.supervisorRoot,
-        committer: input.agent,
-      })
-    ).path;
+    ({ path, gitCommonDir } = await materializeCornerWorktree({
+      cornerId: input.placeId,
+      remote: repository.remote,
+      targetBranch,
+      featureBranch: branch,
+      token: token ?? '',
+      supervisorRoot: input.supervisorRoot,
+      committer: input.agent,
+    }));
     // A checkout with no work of its own moves to the base just fetched.
     const base = `refs/remotes/origin/${targetBranch}`;
     if (
@@ -379,16 +439,15 @@ export async function prepareWorkspace(input: {
       config: input.config,
       supervisorRoot: input.supervisorRoot,
       agentId: input.agent.publicKey,
+      ...(gitCommonDir ? { gitCommonDir } : {}),
       ...(brief ? { brief } : {}),
     });
-  // Agents in one Room share its checkout; one prepares it at a time.
+  // The two workspace entry points can prepare the same checkout concurrently.
   let notReady: string | undefined;
   try {
-    notReady = input.parentRoomId
-      ? await ready()
-      : await withKernelLock(`room-checkout:${path}`, ready, {
-          step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the Room checkout`,
-        });
+    notReady = await withKernelLock(`${input.parentRoomId ? 'thread' : 'room'}-checkout:${path}`, ready, {
+      step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the checkout`,
+    });
   } catch (error) {
     if (error instanceof KernelLockBusyError) return checkoutBusy(path, error);
     throw error;

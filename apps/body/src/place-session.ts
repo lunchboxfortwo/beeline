@@ -77,6 +77,7 @@ import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
 import { runOwnedFile } from './wait.js';
 import { githubGitEnv, prepareWorkspace, roomCheckoutPath } from './workspace-checkout.js';
 import { syncCornerBranch } from './corner-branch-sync.js';
+import { workspaceDependenciesDir } from './dependency-generation.js';
 
 export interface PlaceSessionOptions {
   agent: { publicKey: string; name: string };
@@ -407,7 +408,8 @@ export class PlaceSession {
     const gitCommonDir = corner
       ? agentCornerCheckoutPaths(runtime.supervisorRoot, placeId, agent.publicKey).gitCommonDir
       : undefined;
-    if (gitCommonDir) await mkdir(gitCommonDir, { recursive: true, mode: 0o700 });
+    const sealedDependencies = gitCommonDir ? resolve(gitCommonDir, workspaceDependenciesDir) : undefined;
+    if (sealedDependencies) await mkdir(sealedDependencies, { recursive: true, mode: 0o700 });
     const { configuration, roster, repository, restore } = this.resources.context;
     this.names = new Map((roster?.members ?? []).map((member) => [member.identityId, member.name]));
     const self = roster?.members.find((member) => member.identityId === agent.publicKey);
@@ -483,6 +485,7 @@ export class PlaceSession {
       cwd: folder,
       ...(corner ? { worktreePath: folder } : {}),
       ...(gitCommonDir ? { gitCommonDir } : {}),
+      ...(sealedDependencies ? { sealedPaths: [sealedDependencies] } : {}),
       harnessStateDirs: stateDirs,
       harnessHomeStateDirs: homeStateDirs,
       ...(tmpDir ? { tmpDir } : {}),

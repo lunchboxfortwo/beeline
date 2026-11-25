@@ -38,6 +38,10 @@ if [[ "$device" == emulator-* ]]; then
   device_description="$device ($((quota * 100 / period))% host CPU quota)"
 fi
 mkdir -p "$output_dir"
+scratch="$(mktemp -d "${LATENCY_RIG_SCRATCH_ROOT:-${TMPDIR:-/tmp}}/beeline-room-capture.XXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 adb -s "$device" logcat -c
 for (( sample=1; sample<=count; sample++ )); do
   adb -s "$device" shell am start -W -a android.intent.action.VIEW \
@@ -47,16 +51,16 @@ for (( sample=1; sample<=count; sample++ )); do
     -d "beeline://beeline/chat/$room_id" app.usebeeline/.MainActivity >/dev/null
   sleep 2
 done
-adb -s "$device" logcat -d -v epoch >"$output_dir/logcat.txt"
+adb -s "$device" logcat -d -v epoch >"$scratch/logcat.txt"
 node "$repo_dir/packages/scripts/latency-rig/room-marks.mjs" \
-  "$output_dir/logcat.txt" "$output_dir/moments.ndjson" warm
-actual="$(wc -l <"$output_dir/moments.ndjson")"
+  "$scratch/logcat.txt" "$scratch/moments.ndjson" warm
+actual="$(wc -l <"$scratch/moments.ndjson")"
 if (( actual < minimum )); then
   echo "Only $actual of $count requested Room marks were captured (minimum $minimum)" >&2
   exit 1
 fi
 node "$repo_dir/packages/scripts/latency-rig/join.mjs" \
-  --moments "$output_dir/moments.ndjson" \
+  --moments "$scratch/moments.ndjson" \
   --proxy "${LATENCY_RIG_PROXY_LOG:-$repo_dir/packages/scripts/latency-rig/local-proxy.ndjson}" \
   --sql "${LATENCY_RIG_SQL_LOG:-$repo_dir/packages/scripts/latency-rig/local-sql.ndjson}" \
   --out "$output_dir/samples.ndjson"
@@ -66,12 +70,12 @@ node "$repo_dir/packages/scripts/latency-rig/analyze.mjs" \
   --note "Room-only smoke: $actual/$count attempts painted. CPU quota is an uncalibrated operating scenario; local HTTP excludes TLS and production RTT. This cannot establish the full launch budget." \
   --out "$output_dir/room-report.md"
 echo "Room-only report: $output_dir/room-report.md"
-if rg -q '\[LATENCY_FRAME\]' "$output_dir/logcat.txt"; then
+if rg -q '\[LATENCY_FRAME\]' "$scratch/logcat.txt"; then
   node "$repo_dir/packages/scripts/latency-rig/route-marks.mjs" \
-    "$output_dir/logcat.txt" "$output_dir/route-moments.ndjson" warm
-  if [[ -s "$output_dir/route-moments.ndjson" ]]; then
+    "$scratch/logcat.txt" "$scratch/route-moments.ndjson" warm
+  if [[ -s "$scratch/route-moments.ndjson" ]]; then
     node "$repo_dir/packages/scripts/latency-rig/join.mjs" \
-      --moments "$output_dir/route-moments.ndjson" \
+      --moments "$scratch/route-moments.ndjson" \
       --proxy "${LATENCY_RIG_PROXY_LOG:-$repo_dir/packages/scripts/latency-rig/local-proxy.ndjson}" \
       --sql "${LATENCY_RIG_SQL_LOG:-$repo_dir/packages/scripts/latency-rig/local-sql.ndjson}" \
       --out "$output_dir/route-samples.ndjson"

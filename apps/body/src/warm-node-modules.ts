@@ -147,7 +147,7 @@ export function isPlanRefusal(value: WarmPlan | PlanRefusal): value is PlanRefus
  * escape. Validating each key instead makes the tree safe by construction: a
  * prefix of a contained path is contained.
  */
-export async function readWarmPlan(worktreePath: string): Promise<WarmPlan | PlanRefusal> {
+export async function readWarmPlan(worktreePath: string, installIdentity = ''): Promise<WarmPlan | PlanRefusal> {
   const lockfile = await readFile(resolve(worktreePath, 'package-lock.json')).catch(
     () => undefined,
   );
@@ -167,6 +167,7 @@ export async function readWarmPlan(worktreePath: string): Promise<WarmPlan | Pla
   const key = createHash('sha256')
     .update(`${STORE_FORMAT}\0${process.platform}\0${process.arch}\0${process.versions.modules}\0`)
     .update(lockfile)
+    .update(installIdentity ? `\0${installIdentity}` : '')
     .digest('hex')
     .slice(0, 32);
   return { key, trees };
@@ -238,9 +239,12 @@ export interface HarvestOutcome {
 export async function seedWarmNodeModules(input: {
   worktreePath: string;
   storeRoot: string;
+  placementRoot?: string;
+  installIdentity?: string;
   now?: () => number;
 }): Promise<SeedOutcome> {
-  const plan = await readWarmPlan(input.worktreePath);
+  const plan = await readWarmPlan(input.worktreePath, input.installIdentity);
+  const placement = input.placementRoot ?? input.worktreePath;
   if (isPlanRefusal(plan)) {
     return { reason: plan.failure, ...(plan.detail ? { detail: plan.detail } : {}) };
   }
@@ -248,7 +252,7 @@ export async function seedWarmNodeModules(input: {
   // this function's business whether the store is warm or not, and `present`
   // is the answer that says so.
   for (const tree of plan.trees) {
-    if (await pathExists(resolve(input.worktreePath, tree))) {
+    if (await pathExists(resolve(placement, tree))) {
       return { reason: 'present', key: plan.key };
     }
   }
@@ -259,7 +263,7 @@ export async function seedWarmNodeModules(input: {
   // fails, on every new corner, forever.
   const [storeDevice, checkoutDevice] = await Promise.all([
     deviceOf(entry),
-    deviceOf(input.worktreePath),
+    deviceOf(placement),
   ]);
   if (storeDevice === undefined || storeDevice !== checkoutDevice) {
     return { reason: 'cross-device', key: plan.key };
@@ -280,7 +284,7 @@ export async function seedWarmNodeModules(input: {
       await cloneTree(resolve(entry, tree), resolve(staging, tree), seedFile);
     }
     for (const tree of plan.trees) {
-      const target = resolve(input.worktreePath, tree);
+      const target = resolve(placement, tree);
       await mkdir(dirname(target), { recursive: true });
       await rename(resolve(staging, tree), target);
       placed.push(target);
@@ -308,11 +312,12 @@ export async function seedWarmNodeModules(input: {
 export async function harvestWarmNodeModules(input: {
   worktreePath: string;
   storeRoot: string;
+  installIdentity?: string;
   now?: () => number;
   /** Seam for tests; the one moment a concurrent install would land. */
   onCopied?: () => Promise<void> | void;
 }): Promise<HarvestOutcome> {
-  const plan = await readWarmPlan(input.worktreePath);
+  const plan = await readWarmPlan(input.worktreePath, input.installIdentity);
   if (isPlanRefusal(plan)) {
     return { reason: plan.failure, ...(plan.detail ? { detail: plan.detail } : {}) };
   }
@@ -344,7 +349,7 @@ export async function harvestWarmNodeModules(input: {
     // completeness check before the tearing. npm rewrites the hidden lockfile
     // on every install, so a staged copy that no longer matches the checkout
     // was taken across a change and is not a tree to hand anyone.
-    if (!(await stagedTreeIsPublishable(input.worktreePath, staging, plan.key))) {
+    if (!(await stagedTreeIsPublishable(input.worktreePath, staging, plan.key, input.installIdentity))) {
       return { reason: 'changed', key: plan.key };
     }
     // First writer wins: `rename` onto a populated directory fails, which is
@@ -376,8 +381,9 @@ async function stagedTreeIsPublishable(
   worktreePath: string,
   staging: string,
   key: string,
+  installIdentity?: string,
 ): Promise<boolean> {
-  const settled = await readWarmPlan(worktreePath);
+  const settled = await readWarmPlan(worktreePath, installIdentity);
   if (isPlanRefusal(settled) || settled.key !== key) return false;
   const hidden = join('node_modules', '.package-lock.json');
   const [copied, current] = await Promise.all([
