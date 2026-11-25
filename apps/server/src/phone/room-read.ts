@@ -235,18 +235,22 @@ import { unix, roomFilters, SLOW_ROOM_READ_MS, messageId } from './values.js';
 
 
   /** Resolve only coordinates readable through current Room and Workspace membership. */
-  export async function phoneResolveMessageLink(ctx: PhoneContext, messageId: string, viewerId: string) {
-    const result = await ctx.database.query<{ room_id: string; workspace_id: string }>(
-      `SELECT room.id room_id,room.workspace_id FROM messages message
+  export async function readMessageLinkRooms(ctx: PhoneContext, messageIds: readonly string[], viewerId: string) {
+    const result = await ctx.database.query<{ id: string; room_id: string; workspace_id: string; parent_id: string | null; name: string }>(
+      `SELECT message.id,room.id room_id,room.workspace_id,room.parent_id,room.name FROM messages message
        JOIN rooms room ON room.id=message.room_id
        JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id)
          AND member.identity_id=$2 AND member.removed_at IS NULL
        JOIN memberships workspace_member ON workspace_member.workspace_id=room.workspace_id
          AND workspace_member.room_id IS NULL AND workspace_member.identity_id=$2
          AND workspace_member.removed_at IS NULL
-       WHERE message.id=$1 AND message.deleted_at IS NULL`,
-      [messageId, viewerId],
+       WHERE message.id=ANY($1::text[]) AND message.deleted_at IS NULL`,
+      [messageIds, viewerId],
     );
-    const row = result.rows[0];
+    return result.rows;
+  }
+
+  export async function phoneResolveMessageLink(ctx: PhoneContext, messageId: string, viewerId: string) {
+    const [row] = await readMessageLinkRooms(ctx, [messageId], viewerId);
     return row ? { roomId: row.room_id, messageId, workspaceId: row.workspace_id } : null;
   }

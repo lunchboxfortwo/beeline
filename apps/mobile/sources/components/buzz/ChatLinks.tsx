@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useSyncExternalStore } from 'react';
 import type { StyleProp, TextStyle } from 'react-native';
-import type { ChatLinkToken, ChatLinkView } from '@beeline/api-contract/phone';
+import { THREAD_LINK_MARK, type ChatLinkToken, type ChatLinkView } from '@beeline/api-contract/phone';
 import { ProseRun, type ProseMark } from '@/ui/grammar';
 import type { ChatLinkStore } from '@/buzz/chat-link-store';
 
@@ -30,6 +30,24 @@ const PRIVATE_LABEL = { thread: '↳ private thread', message: '¶ private messa
 
 type HoverEvent = { currentTarget?: { getBoundingClientRect?(): { left: number; bottom: number } } };
 
+function useChatLinkEntry(surface: ChatLinkSurface | null, text: string, key: string) {
+  const subscribe = useCallback(
+    (listener: () => void) => surface?.store.subscribe(listener) ?? (() => undefined),
+    [surface],
+  );
+  const entry = useSyncExternalStore(subscribe, () => surface?.store.read(surface.roomId, key));
+  useEffect(() => {
+    if (surface && entry === undefined) surface.store.request(surface.roomId, { text, key });
+  }, [entry, surface, text, key]);
+  return entry;
+}
+
+/** A Markdown link keeps its authored label and its own press handler. */
+export function MessageLinkLabel({ id, label }: { id: string; label: string }) {
+  const entry = useChatLinkEntry(useContext(ChatLinkContext), id, id);
+  return <>{entry?.kind === 'thread' ? THREAD_LINK_MARK + label.replace(/^↳+/, '') : label}</>;
+}
+
 /**
  * One `↳thread` or `¶author-N` token inside prose, drawn like an @mention.
  * Until the server answers, and when it answers nothing, the token is the
@@ -48,14 +66,7 @@ export function ChatLinkRun({
   level?: 1 | 2 | 3 | 4 | 5 | 6;
 }) {
   const surface = useContext(ChatLinkContext);
-  const subscribe = useCallback(
-    (listener: () => void) => surface?.store.subscribe(listener) ?? (() => undefined),
-    [surface],
-  );
-  const entry = useSyncExternalStore(subscribe, () => surface?.store.read(surface.roomId, token.key));
-  useEffect(() => {
-    if (surface && entry === undefined) surface.store.request(surface.roomId, token);
-  }, [entry, surface, token]);
+  const entry = useChatLinkEntry(surface, token.text, token.key);
 
   if (!surface || !entry) {
     return marks.length ? <ProseRun body={body} marks={marks} level={level}>{token.text}</ProseRun> : <>{token.text}</>;
