@@ -69,7 +69,7 @@ it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue 
   expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, AGENT)).commands.map(c => c.id))
     .toContain(opening.id);
   await startQueuedCommand(daemon, { roomId: cornerId, commandId: opening.id }, AGENT);
-  await daemon.execute('postCornerMessage', { roomId: cornerId, cornerId, requestId: opening.turn_request_id, text: '@worker mock ready' }, AGENT);
+  await daemon.postCornerMessage({ roomId: cornerId, cornerId, requestId: opening.turn_request_id, text: '@worker mock ready' }, AGENT);
   await daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: opening.turn_request_id, status: 'complete' }, AGENT);
   expect(
     await reportToCommander(db, cornerId, AGENT, 'done: mock ready', opening, 'self-report-proof'),

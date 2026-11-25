@@ -68,7 +68,7 @@ async function fixture() {
   return database;
 }
 
-it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: scheduled report reaches owner %s once', async (owner) => {
+it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: schedule with owner %s posts one local final', async (owner) => {
   const database = await fixture();
   try {
     await database.query('INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)', [AGENT, OWNER]);
@@ -83,7 +83,6 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
     expect(command!.from).toEqual({agent:owner===OTHER_AGENT?OTHER_AGENT:OWNER,place:ROOM});
     await database.query("UPDATE messages SET card=jsonb_set(card,'{ownerId}',to_jsonb($2::text)) WHERE id=$1",[command!.sourceMessageId,MEMBER]);
     const authority = { roomId: ROOM, requestId: command!.turnRequestId };
-    await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
     await expect(daemon.execute('postRoomMessage', { ...authority, harnessEnded: true, text: 'Work complete' }, AGENT))
       .resolves.toMatchObject({ delivered: true });
     expect((await database.query("SELECT text FROM messages WHERE room_id=$1 AND request_id=$2 AND text='Work complete'",[ROOM,command!.id])).rows)

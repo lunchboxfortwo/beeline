@@ -121,7 +121,7 @@ it('Stop cancels the item: it leaves the queue and its answer is refused', async
 
 it('empty output and silence acknowledgements leave an unanswered request queued', async () => {
   const item = await ask(R1, 'anything?');
-  expect(await daemon.execute('postCornerMessage', {roomId:R1,cornerId:R1,requestId:item.turn_request_id,
+  expect(await daemon.postCornerMessage({roomId:R1,cornerId:R1,requestId:item.turn_request_id,
     text:'<thinking>private reasoning</thinking>'},A)).toMatchObject({stored:false,visible:false});
   await answer(R1, item.turn_request_id, '<thinking>nothing to say</thinking>');
   expect((await queue()).map(entry => entry.id)).toEqual([item.id]);
@@ -156,7 +156,9 @@ it('retains the answer obligation when return membership is gone, with no public
     privatePayload: { kind: 'order', text: 'private question', authorId: H, fromRoomId: R2 } });
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [R2, H]);
   try {
-    await expect(daemon.execute('reply',{roomId:R1,id:item!.id,text:'private answer'},A)).rejects.toThrow();
+    const invocation={id:'revoked-membership',requestId:item!.turn_request_id};
+    await daemon.execute('startAgentTurn',{roomId:R1,requestId:invocation.requestId,invocationId:invocation.id},A);
+    await expect(daemon.execute('message',{roomId:R1,requestId:invocation.requestId,type:'reply',quoteMsgId:item!.message!.id,invocation,text:'private answer'},A)).rejects.toThrow();
     expect((await queue()).map(entry => entry.id)).toContain(item!.id);
     expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND text=$2', [A, 'private answer'])).rows).toEqual([]);
   } finally {
@@ -288,7 +290,7 @@ it('normalizes unrepresentable text without refusing the message or truncating i
 
 it('publishes closing output locally after a mid-turn post', async () => {
   const item = await ask(R1, 'Publish one reply');
-  const posted = await daemon.execute('postCornerMessage', { roomId: R1, cornerId: R1,
+  const posted = await daemon.postCornerMessage({ roomId: R1, cornerId: R1,
     requestId: item.turn_request_id, text: 'The reply from the tool.' }, A);
   const settled = await answer(R1, item.turn_request_id, 'Closing details belong in activity.');
   expect((await db.query("SELECT id FROM messages WHERE request_id=$1 AND author_id=$2 AND presentation='message'",
@@ -323,7 +325,7 @@ it('distinct requests using the same source retain separate item and answer iden
 
 it('a late attachment must reach the existing reply before its item can finish',async()=>{
   const item=await ask(R1,'send the proof');
-  const posted=await daemon.execute('postCornerMessage',{roomId:R1,cornerId:R1,requestId:item.turn_request_id,text:'The proof is ready.'},A);
+  const posted=await daemon.postCornerMessage({roomId:R1,cornerId:R1,requestId:item.turn_request_id,text:'The proof is ready.'},A);
   const file={url:'https://example.test/late-proof',name:'proof.txt',mimeType:'text/plain',size:10};
   await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[item.id,JSON.stringify([file])]);
   await db.query(`CREATE FUNCTION refuse_late_proof() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
@@ -340,12 +342,11 @@ it('a late attachment must reach the existing reply before its item can finish',
 });
 
 
-it('optional question formatting cannot make PostgreSQL reject the answer',async()=>{
+it('refuses an extra ask on a native block before publishing',async()=>{
   const item=await ask(R1,'choose a scope');
-  const posted=await answerQueuedMessage(db,A,{roomId:R1,requestId:item.turn_request_id,
-    report:true,status:'needs_decision',text:'Choose the scope?',ask:'Which scope?\u0000\ud800'});
-  expect(await queue()).toEqual([]);
-  expect((await db.query('SELECT card FROM messages WHERE id=$1',[posted.id])).rows[0]).toMatchObject({card:{ask:'Which scope?\uFFFD\uFFFD'}});
+  await expect(daemon.execute('message',{roomId:R1,requestId:item.turn_request_id,type:'blocked',text:'Choose the scope?',ask:'Which scope?'} as never,A)).rejects.toThrow();
+  expect((await queue()).map(row=>row.id)).toContain(item.id);
+  expect((await db.query('SELECT id FROM messages WHERE request_id=$1 AND author_id=$2',[item.turn_request_id,A])).rows).toEqual([]);
 });
 
 it('gives same-source obligations distinct item-owned answer identities by default', async () => {
@@ -520,7 +521,7 @@ it.each([0, 1].flatMap(postedIndex => ['', 'Closing summary'].map(closing => ({p
   'reuses a mid-turn reply for batch item $postedIndex with closing "$closing" and carries every attachment', async ({ postedIndex, closing }) => {
   const first = await ask(R1,'first batch asker');
   const second = await ask(R1,'second batch asker');
-  const posted = await daemon.execute('postCornerMessage', { roomId:R1,cornerId:R1,requestId:[first,second][postedIndex]!.id,text:'Both answers from the tool.' }, A);
+  const posted = await daemon.postCornerMessage({ roomId:R1,cornerId:R1,requestId:[first,second][postedIndex]!.id,text:'Both answers from the tool.' }, A);
   const file = {url:'https://example.test/batch-proof',name:'batch-proof.txt',mimeType:'text/plain',size:12};
   await db.query('UPDATE agent_commands SET answer_attachments=$2::jsonb WHERE id=$1',[second.id,JSON.stringify([file])]);
   await daemon.execute('postRoomMessage',{roomId:R1,requestId:first.id,queuedRequestIds:[second.id],text:closing},A);

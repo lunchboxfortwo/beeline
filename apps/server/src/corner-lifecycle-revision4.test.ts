@@ -63,9 +63,9 @@ describe('revision 4 simple corner review model', () => {
     await greenHead(107,head);
     const [first]=await commands(B,C);
     await claim(first!);
-    await rootFixture.daemon.execute('reply',{roomId:first!.roomId,id:first!.id,text:'FAIL: attach the required evidence.'},first!.agentId);
+    await rootFixture.daemon.execute('message',{roomId:first!.roomId,requestId:first!.turnRequestId,type:'normal',address:`${A}@${C}`,text:'FAIL: attach the required evidence.'},first!.agentId);
     await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-    const [repair]=(await commands(A,C)).filter(command=>command.reason==='reply');
+    const [repair]=(await commands(A,C)).filter(command=>command.reason==='message');
     expect(repair).toBeDefined();
     await claim(repair!);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
@@ -84,7 +84,7 @@ it('Reproduction REVIEW-TARGET: a new head wake uses the newest brief and report
   await greenHead(104,'1'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('report',{ roomId:C, requestId:review!.turnRequestId, status:'failed', text:'FAIL: newest reported evidence' },B);
+  await rootFixture.daemon.execute('message',{ roomId:C, requestId:review!.turnRequestId, type:'normal',address:`${A}@${C}`, text:'FAIL: newest reported evidence' },B);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:'complete' },B);
   await rootFixture.db.query(`INSERT INTO corner_brief_revisions(corner_id,revision,content,spec,author_id,source_room_id)
     VALUES($1,2,'New brief','New brief',$2,$3)`,[C,A,R]);
@@ -102,14 +102,14 @@ it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archive
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Implement the fix'}});
   const worker=(await commands(A,C)).find(c=>c.id===current!.id)!;
   await claim(worker);
-  const args={ roomId:C, requestId:worker.turnRequestId, address:C, agent:'goosy', text:'Review this fix' };
-  await rootFixture.daemon.execute('order',args,A);
-  expect((await commands(B,C)).some(c=>c.reason==='order')).toBe(true);
+  const args={ roomId:C, requestId:worker.turnRequestId, type:'normal' as const,address:`${B}@${C}`, text:'Review this fix' };
+  await rootFixture.daemon.execute('message',args,A);
+  expect((await commands(B,C)).some(c=>c.reason==='message')).toBe(true);
   // Use a reachable archived sibling; the source turn remains live.
   const archived='44444444-4444-4444-8444-444444444444';
   await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,parent_id,name,archived_at)
     VALUES($1,$2,$3,'Archived corner',now())`,[archived,W,R]);
-  await expect(rootFixture.daemon.execute('order',{...args,address:archived},A)).rejects.toThrow('archived');
+  await expect(rootFixture.daemon.execute('message',{...args,address:`${B}@${archived}`},A)).rejects.toThrow('archived');
 });
 
 it.each(['decline','silent'])('Reproduction REVIEW-EMPTY: a %s review ends until the next green event', async ending => {
@@ -118,10 +118,8 @@ it.each(['decline','silent'])('Reproduction REVIEW-EMPTY: a %s review ends until
   const [review]=await commands(B,C);
   await claim(review!);
   if(ending==='decline') {
-    await rootFixture.daemon.execute('reply',{roomId:C,id:review!.id,text:'I already reviewed this item.'},B);
-    const [reply]=(await commands(A,C)).filter(command=>command.reason==='reply');
-    await claim(reply!);
-    await result(reply!,'');
+    await rootFixture.daemon.execute('postRoomMessage',{roomId:C,requestId:review!.turnRequestId,text:'I already reviewed this item.'},B);
+    expect((await commands(A,C)).filter(command=>command.reason==='message')).toEqual([]);
   } else await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
   for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
   expect((await commands(A,C)).filter(command=>command.reason==='corner_review_needed')).toEqual([]);

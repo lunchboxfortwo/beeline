@@ -44,34 +44,32 @@ beforeEach(async () => {
 });
 const authority = () => ({ roomId: order.roomId, requestId: order.turnRequestId });
 const orderWakes = async () => (await db.query<{ agent_id: string; room_id: string }>(
-  `SELECT agent_id,room_id FROM agent_commands WHERE reason='order' ORDER BY agent_id`)).rows;
+  `SELECT agent_id,room_id FROM agent_commands WHERE reason='message' ORDER BY agent_id`)).rows;
 
 it('an unnamed Room order gives target-selection feedback and leaves the issuer request queued', async () => {
   for (const text of ['Candy only: check the build','Baby only: rerun the proof','Candy only: post the URL','Baby only: stop']) {
-    const result=await daemon.execute('order',{...authority(),address:ROOM,text},JELLYBEAN) as {feedback?:string};
-    expect(result.feedback).toMatch(/^name which agent this order is for: /);
-    for (const handle of ['baby','candy','earth']) expect(result.feedback).toContain(`@${handle}`);
+    await expect(daemon.execute('message',{...authority(),type:'normal',address:ROOM,text},JELLYBEAN)).rejects.toThrow('Address an agent session');
   }
   expect(await orderWakes()).toEqual([]);
   expect((await daemon.execute('getAgentCommands',{},JELLYBEAN)).commands).toHaveLength(1);
 });
 
 it('wakes only the named agent at a Room address, by handle, @handle or id', async () => {
-  await daemon.execute('order', { ...authority(), address: ROOM, agent: '@candy', text: 'Candy only: check the build' }, JELLYBEAN);
+  await daemon.execute('message', { ...authority(), type: 'normal', address: `${CANDY}@${ROOM}`, text: 'Candy only: check the build' }, JELLYBEAN);
   expect(await orderWakes()).toEqual([{ agent_id: CANDY, room_id: ROOM }]);
-  await daemon.execute('order', { ...authority(), address: ROOM, agent: BABY, text: 'Baby only: rerun the proof' }, JELLYBEAN);
+  await daemon.execute('message', { ...authority(), type: 'normal', address: `${BABY}@${ROOM}`, text: 'Baby only: rerun the proof' }, JELLYBEAN);
   expect((await orderWakes()).map(row => row.agent_id).sort()).toEqual([BABY, CANDY].sort());
   console.info('Demonstrated room-broadcast: agent=@candy woke Candy only; agent=<Baby id> woke Baby only; Earth never woken');
 });
 
 it('refuses a Room order naming a non-member or a human', async () => {
-  for (const agent of ['nobody', 'owner'])
-    await expect(daemon.execute('order', { ...authority(), address: ROOM, agent, text: 'Do it' }, JELLYBEAN)).rejects.toMatchObject({kind:'membership'});
+  for (const agent of ['nobody', OWNER])
+    await expect(daemon.execute('message', { ...authority(), type: 'normal', address: `${agent}@${ROOM}`, text: 'Do it' }, JELLYBEAN)).rejects.toThrow();
   expect(await orderWakes()).toEqual([]);
 });
 
 it('queues an explicit self-order from the DM into the Room', async () => {
-  const result = await daemon.execute('order', { ...authority(), address: ROOM, agent: 'jellybean', text: 'Continue in the Room' }, JELLYBEAN);
+  const result = await daemon.execute('message', { ...authority(), type: 'normal', address: `${JELLYBEAN}@${ROOM}`, text: 'Continue in the Room' }, JELLYBEAN);
   expect(await orderWakes()).toEqual([{ agent_id: JELLYBEAN, room_id: ROOM }]);
   expect((await daemon.execute('getAgentCommands', { roomId: ROOM }, JELLYBEAN)).commands.find(c => c.id === result.id)).toMatchObject({ source: { body: 'Continue in the Room' } });
 });
@@ -82,15 +80,15 @@ it('allows named corner peers and preserves agent DM orders', async () => {
     brief: { spec: 'Build the widget', repositoryWork: false, approval: { sourceMessageId: order.sourceMessageId } } }, JELLYBEAN);
   // The opening order stays: it is what names Candy the corner's worker.
   await db.query(`DELETE FROM agent_commands WHERE room_id=$1 AND reason<>'corner_objective'`, [opened.cornerId]);
-  await daemon.execute('order', { ...authority(), address: opened.cornerId, text: 'Use the new endpoint' }, JELLYBEAN);
+  await daemon.execute('message', { ...authority(), type: 'normal', address: `${CANDY}@${opened.cornerId}`, text: 'Use the new endpoint' }, JELLYBEAN);
   expect(await orderWakes()).toEqual([{ agent_id: CANDY, room_id: opened.cornerId }]);
-  await daemon.execute('order', { ...authority(), address: opened.cornerId, agent: 'baby', text: 'Replay the path' }, JELLYBEAN);
+  await daemon.execute('message', { ...authority(), type: 'normal', address: `${BABY}@${opened.cornerId}`, text: 'Replay the path' }, JELLYBEAN);
   expect((await orderWakes()).some(row => row.agent_id === BABY)).toBe(true);
 
   const agentDM = randomUUID();
   await db.query(`INSERT INTO rooms(id,workspace_id,name,direct_participants) VALUES($1,$2,'Jellybean and Earth',jsonb_build_array($3::text,$4::text))`, [agentDM, WS, JELLYBEAN, EARTH]);
   for (const agent of [JELLYBEAN, EARTH]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')`, [WS, agentDM, agent]);
-  await daemon.execute('order', { ...authority(), address: agentDM, text: 'Research the endpoint' }, JELLYBEAN);
+  await daemon.execute('message', { ...authority(), type:'normal',address:`${EARTH}@${agentDM}`, text: 'Research the endpoint' }, JELLYBEAN);
   expect((await orderWakes()).filter(row => row.room_id === agentDM)).toEqual([{ agent_id: EARTH, room_id: agentDM }]);
   expect((await orderWakes()).filter(row => row.agent_id === BABY)).toEqual([{ agent_id: BABY, room_id: opened.cornerId }]);
 });
@@ -102,7 +100,11 @@ it.each(['corner', 'parent Room'])('Reproduction corner-peer-orders: %s order pr
   const incoming = (await daemon.execute('getAgentCommands', { roomId: opened.cornerId }, CANDY)).commands[0]!;
   await startQueuedCommand(daemon, { roomId: opened.cornerId, commandId: incoming.id }, CANDY);
   const address = target === 'corner' ? opened.cornerId : ROOM;
-  const receipt = await daemon.execute('order', { roomId: opened.cornerId, requestId: incoming.turnRequestId, address, agent: 'baby', text: 'Replay the user path' }, CANDY);
+  if (target === 'parent Room') {
+    await expect(daemon.execute('message',{roomId:opened.cornerId,requestId:incoming.turnRequestId,type:'normal',address:`${BABY}@${address}`,text:'Replay the user path'},CANDY)).rejects.toThrow('A thread must address a thread agent session');
+    return;
+  }
+  const receipt = await daemon.execute('message', { roomId: opened.cornerId, requestId: incoming.turnRequestId, type: 'normal', address: `${BABY}@${address}`, text: 'Replay the user path' }, CANDY);
   const assigned = (await daemon.execute('getAgentCommands', { roomId: address }, BABY)).commands.find(c => c.id === receipt.id)!;
   expect(assigned).toMatchObject({ private: true, source: { authorId: CANDY, body: 'Replay the user path' } });
   await startQueuedCommand(daemon, { roomId: address, commandId: assigned.id }, BABY);
@@ -131,22 +133,22 @@ it('RUBY-18: an explicit re-review reaches the configured reviewer at the chain 
   // The commander may be handling the reviewer's earlier verdict report.
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [incoming.id,
     JSON.stringify({ cornerId: incoming.roomId, headSha: 'a'.repeat(40), pullRequest: 42, briefRevision: 1, purpose: 'verdict' })]);
-  const result = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'baby', text: 'Re-review the restored PR body on the same head' }, CANDY);
+  const result = await daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${BABY}@${incoming.roomId}`, text: 'Re-review the restored PR body on the same head' }, CANDY);
   const review = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(command => command.id === result.id)!;
   expect(review.source.body).toContain('Re-review the restored PR body');
   expect((await db.query<{ agent_depth: number }>(`SELECT agent_depth FROM agent_commands WHERE id=$1`, [review.id])).rows[0]!.agent_depth).toBe(4);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [review.id]);
-  const tagged = await daemon.execute('postCornerMessage', { roomId: incoming.roomId, requestId: incoming.turnRequestId, cornerId: incoming.roomId, text: '@baby Re-review the restored evidence' }, CANDY);
+  const tagged = await daemon.postCornerMessage({ roomId: incoming.roomId, requestId: incoming.turnRequestId, cornerId: incoming.roomId, text: '@baby Re-review the restored evidence' }, CANDY);
   expect(tagged.woken).toEqual([]);
-  const message=await daemon.execute('message',{roomId:incoming.roomId,requestId:incoming.turnRequestId,to:{agent:'reviewer',place:incoming.roomId},text:'Re-review the restored evidence'},CANDY);
+  const message=await daemon.execute('message',{roomId:incoming.roomId,requestId:incoming.turnRequestId,type:'normal', address:`${BABY}@${incoming.roomId}`,text:'Re-review the restored evidence'},CANDY);
   expect((await daemon.execute('getAgentCommands',{roomId:incoming.roomId},BABY)).commands.some(command=>command.id===message.id && command.reason==='message')).toBe(true);
   await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2`, [incoming.roomId, BABY]);
   await db.query(`UPDATE agent_commands SET review_context=jsonb_set(review_context,'{purpose}','"repair"') WHERE id=$1`, [incoming.id]);
-  const rereview = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'baby', text: 'Re-review after the evidence-only repair' }, CANDY);
+  const rereview = await daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${BABY}@${incoming.roomId}`, text: 'Re-review after the evidence-only repair' }, CANDY);
   const delivered = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(command => command.id === rereview.id)!;
   expect(delivered).toBeDefined();
   await startQueuedCommand(daemon, { roomId: incoming.roomId, commandId: delivered.id }, BABY);
-  const peer = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'earth', text: 'Recruit a peer' }, CANDY);
+  const peer = await daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${EARTH}@${incoming.roomId}`, text: 'Recruit a peer' }, CANDY);
   expect((await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, EARTH)).commands.map(c => c.id)).toContain(peer.id);
 });
 
@@ -155,13 +157,15 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
   const context = { cornerId: incoming.roomId, headSha: 'old-head', pullRequest: 42, briefRevision: 1 };
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'headSha','old-head')) WHERE corner_id=$1`, [incoming.roomId]);
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [incoming.id, JSON.stringify(context)]);
-  const receipt = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'baby', text: 'Repair this head' }, CANDY);
+  const receipt = await daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${BABY}@${incoming.roomId}`, text: 'Repair this head' }, CANDY);
   const assigned = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(c => c.id === receipt.id)!;
   await startQueuedCommand(daemon, { roomId: assigned.roomId, commandId: assigned.id }, BABY);
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{pr,headSha}','"new-head"') WHERE corner_id=$1`, [incoming.roomId]);
   const text = `${status.replace('_', '-')}: repair result`;
-  const result=await daemon.execute('report',{roomId:assigned.roomId,requestId:assigned.turnRequestId,status,text},BABY);
   const blocking = status === 'blocked' || status === 'needs_decision';
+  const input = {roomId:assigned.roomId,requestId:assigned.turnRequestId,text};
+  const result = blocking ? await daemon.execute('message',{...input,type:'blocked'},BABY)
+    : await daemon.execute('postRoomMessage',input,BABY);
   const reply=(await daemon.execute('getAgentCommands',{roomId:incoming.roomId},CANDY)).commands.find(c=>c.id===result.id);
   if (blocking) {
     expect(reply).toMatchObject({private:true,source:{authorId:BABY,body:text}});
@@ -180,29 +184,27 @@ it('Reproduction report-commander-refused: a current reviewer report keeps its o
   await db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_build_object('pr',jsonb_build_object('number',42,'headSha','new-head')) WHERE corner_id=$1`, [incoming.roomId]);
   const context = { cornerId: incoming.roomId, headSha: 'new-head', pullRequest: 42, briefRevision: 1 };
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [incoming.id, JSON.stringify(context)]);
-  const receipt = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent: 'baby', text: 'Review the replacement head' }, CANDY);
+  const receipt = await daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${BABY}@${incoming.roomId}`, text: 'Review the replacement head' }, CANDY);
   // A fresh review can be resumed from an older repair order, as in the incident.
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [incoming.id, JSON.stringify({ ...context, headSha: 'old-head', purpose: 'repair' })]);
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [receipt.id, JSON.stringify(context)]);
   const assigned = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(c => c.id === receipt.id)!;
   await startQueuedCommand(daemon, { roomId: assigned.roomId, commandId: assigned.id }, BABY);
   await daemon.execute('postRoomMessage', { roomId: assigned.roomId, requestId: assigned.turnRequestId, harnessEnded: true, text: 'done: current review complete' }, BABY);
-  const reply = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, CANDY)).commands.find(c => c.reason === 'report')!;
-  expect(reply).toMatchObject({ source: { authorId: BABY, body: expect.stringContaining('done: current review complete') } });
-  expect((await db.query(`SELECT review_context FROM agent_commands WHERE id=$1`, [reply.id])).rows[0]?.review_context)
-    .toMatchObject({ ...context, purpose: 'verdict' });
-  await startQueuedCommand(daemon, { roomId: reply.roomId, commandId: reply.id }, CANDY);
+  expect((await daemon.execute('getAgentCommands',{roomId:incoming.roomId},CANDY)).commands.some(c=>c.source.body==='done: current review complete')).toBe(false);
+  expect((await db.query('SELECT review_context,state FROM agent_commands WHERE id=$1',[assigned.id])).rows[0])
+    .toMatchObject({review_context:context,state:'complete'});
 });
 
 it('keeps membership walls while allowing explicit corner self-orders', async () => {
   const incoming = await cornerTurn();
   await db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [ROOM, EARTH]);
   const before = await orderWakes();
-  for (const agent of ['owner', 'nobody', 'earth'])
-    await expect(daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: 'Do it' }, CANDY)).rejects.toMatchObject({kind:'membership'});
+  for (const agent of [OWNER,'nobody',EARTH])
+    await expect(daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${agent}@${incoming.roomId}`, text: 'Do it' }, CANDY)).rejects.toThrow();
   expect(await orderWakes()).toEqual(before);
-  for (const agent of ['candy', CANDY, undefined]) {
-    const result = await daemon.execute('order', { roomId: incoming.roomId, requestId: incoming.turnRequestId, address: incoming.roomId, agent, text: `Continue ${agent}` }, CANDY);
+  for (const agent of [CANDY]) {
+    const result = await daemon.execute('message', { roomId: incoming.roomId, requestId: incoming.turnRequestId, type: 'normal', address: `${agent}@${incoming.roomId}`, text: `Continue ${agent}` }, CANDY);
     expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [result.id])).rows).toEqual([{ state: 'pending' }]);
   }
 });
@@ -214,13 +216,17 @@ it.each(['corner', 'parent Room'])('retains every corner → %s → corner order
   for (let hop = 0; hop < 6; hop++) {
     const recipient = command.agentId === CANDY ? BABY : CANDY;
     const address = recipient === BABY && target === 'parent Room' ? ROOM : corner;
-    const result = await daemon.execute('order', { roomId: command.roomId, requestId: command.turnRequestId, address, agent: recipient, text: `Loop hop ${hop}` }, command.agentId);
+    if (address === ROOM) {
+      await expect(daemon.execute('message',{roomId:command.roomId,requestId:command.turnRequestId,type:'normal',address:`${recipient}@${address}`,text:'Loop hop'},command.agentId)).rejects.toThrow('A thread must address a thread agent session');
+      return;
+    }
+    const result = await daemon.execute('message', { roomId: command.roomId, requestId: command.turnRequestId, type: 'normal', address: `${recipient}@${address}`, text: `Loop hop ${hop}` }, command.agentId);
     depths.push((await db.query<{ agent_depth: number }>(`SELECT agent_depth FROM agent_commands WHERE id=$1`, [result.id])).rows[0]!.agent_depth);
     command = (await daemon.execute('getAgentCommands', { roomId: address }, recipient)).commands.find(c => c.id === result.id)!;
     await startQueuedCommand(daemon, { roomId: address, commandId: command.id }, recipient);
   }
   expect(depths).toEqual([1, 2, 3, 4, 5, 6]);
-  const result = await daemon.execute('order', { roomId: command.roomId, requestId: command.turnRequestId, address: target === 'corner' ? corner : ROOM, agent: BABY, text: 'Another hop' }, CANDY);
+  const result = await daemon.execute('message', { roomId: command.roomId, requestId: command.turnRequestId, type: 'normal', address: `${BABY}@${target === 'corner' ? corner : ROOM}`, text: 'Another hop' }, CANDY);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [result.id])).rows).toEqual([{ state: 'pending' }]);
 });
 
@@ -241,11 +247,12 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'].flatMap(status => [JELLY
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [review!.id, JSON.stringify(context)]);
   const reviewer = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(c => c.id === review!.id)!;
   await startQueuedCommand(daemon, { roomId: reviewer.roomId, commandId: reviewer.id }, BABY);
-  await daemon.execute('order', { roomId: reviewer.roomId, requestId: reviewer.turnRequestId, address: incoming.roomId, text: 'FAIL: repair the missing proof' }, BABY);
+  await daemon.execute('message', { roomId: reviewer.roomId, requestId: reviewer.turnRequestId, type:'normal',address:`${CANDY}@${incoming.roomId}`, text: 'FAIL: repair the missing proof' }, BABY);
   await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [incoming.id]);
-  const repair = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, CANDY)).commands.find(c => c.reason === 'order' && c.source.authorId === BABY)!;
+  const repair = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, CANDY)).commands.find(c => c.reason === 'message' && c.source.authorId === BABY)!;
   await startQueuedCommand(daemon, { roomId: repair.roomId, commandId: repair.id }, CANDY);
-  const saved=await daemon.execute('report',{roomId:repair.roomId,requestId:repair.turnRequestId,status,text:'Repair result'},CANDY);
+  const input = {roomId:repair.roomId,requestId:repair.turnRequestId,text:'Repair result'};
+  const saved = status==='blocked' || status==='needs_decision' ? await daemon.execute('message',{...input,type:'blocked'},CANDY) : await daemon.execute('postRoomMessage',input,CANDY);
   expect((await db.query('SELECT agent_id,room_id FROM agent_commands WHERE id=$1',[saved.id])).rows)
     .toEqual(status === 'blocked' || status === 'needs_decision' ? [{agent_id:BABY,room_id:reviewer.roomId}] : []);
   expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[saved.id])).rows).toEqual([{room_id:repair.roomId}]);

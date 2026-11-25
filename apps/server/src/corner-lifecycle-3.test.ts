@@ -339,15 +339,15 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     const turn = (await commands(B, R)).at(-1)!;
     await claim(turn);
     const authority = { roomId: R, requestId: turn.turnRequestId };
-    await wiredDaemon.execute('postCornerMessage', { ...authority, cornerId, text: 'A note from the Room' }, B);
+    await wiredDaemon.postCornerMessage({ ...authority, cornerId, text: 'A note from the Room' }, B);
     expect((await rootFixture.db.query(`SELECT author_id FROM messages WHERE room_id=$1 AND text='A note from the Room'`, [cornerId])).rows)
       .toEqual([{ author_id: B }]);
     await wiredDaemon.execute('renameCorner', { ...authority, cornerId, name: 'Renamed-widget' }, B);
     expect((await rootFixture.db.query(`SELECT name FROM rooms WHERE id=$1`, [cornerId])).rows[0]).toEqual({ name: 'Renamed-widget' });
-    await wiredDaemon.execute('order', {
-      ...authority, text: 'Pick this up', address: cornerId,
+    await wiredDaemon.execute('message', {
+      ...authority, text: 'Pick this up', type:'normal',address:`${A}@${cornerId}`,
     }, B);
-    expect((await commands(A, cornerId)).at(-1)?.reason).toBe('order');
+    expect((await commands(A, cornerId)).at(-1)?.reason).toBe('message');
     await expect(wiredDaemon.execute('reviseCornerBrief', {
       ...authority, cornerId, expectedRevision: 1,
       brief: { ...brief(turn.sourceMessageId), spec: 'Revised from the Room\n\n## Checklist\n- Ship it', change: 'Room revision' },

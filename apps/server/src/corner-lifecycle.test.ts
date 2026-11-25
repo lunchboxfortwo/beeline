@@ -448,7 +448,7 @@ const scope9 = fixtureScope9();
     const cornerId = await scope9.toReview();
     const [review] = await commands(B, cornerId);
     await claim(review!, 'review-generation');
-    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: review!.turnRequestId, address: cornerId, text: 'Fix the race condition' }, B);
+    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId, type:'normal',address:`${A}@${cornerId}`, text: 'Fix the race condition' }, B);
     expect((await commands(A, cornerId)).some(c => c.reason === 'order')).toBe(true);
     expect(await currentState(cornerId)).toBe('working');
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B);

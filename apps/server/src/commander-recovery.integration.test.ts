@@ -136,7 +136,7 @@ it('returns a later corner blocker to the session assigning that order', async (
     { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Other requests a follow-up' },
     OTHER,
   );
-  const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'order')!;
+  const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'message')!;
   await claim(turn);
   await rootFixture.daemon.execute('message', { type: 'blocked', ...authority(turn), text: 'Which follow-up?' }, WORKER);
   expect((await commands(DM, RUBY)).some((c) => c.source.body === 'Which follow-up?')).toBe(
@@ -364,7 +364,7 @@ it('a provider diagnostic leaves work pending until its failure answer is posted
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'provider outage'},WORKER);
   expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(true);
   expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
-  await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped before the work finished.'},WORKER);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),harnessEnded:true,text:'The provider stopped before the work finished.'},WORKER);
   expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(false);
   expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
 });
@@ -703,7 +703,7 @@ it('keeps unrelated Room subscriptions independent of completed orders', async (
     { ...authority(rootFixture.order), address: ROOM, agent: WORKER, text: 'One-off Room instruction' },
     RUBY,
   );
-  const prior = (await commands(ROOM, WORKER)).find((c) => c.reason === 'order')!;
+  const prior = (await commands(ROOM, WORKER)).find((c) => c.reason === 'message')!;
   await claim(prior);
   await rootFixture.daemon.execute(
     'postRoomMessage',

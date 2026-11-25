@@ -39,25 +39,13 @@ it('S8: an outstanding ask suppresses idle notices',async()=>{
   expect((await db.query("SELECT 1 FROM agent_commands WHERE private_payload->>'automatic'='true'")).rowCount).toBe(0);
 });
 
-it('S8: replying to a System idle notice reaches the receiving commander task sender, without a self-wake',async()=>{
-  await idleThread();
+it.each([true,false])('refuses a reply to a System idle notice with a parent task=%s',async withParent=>{
+  await idleThread(withParent);
   await refreshCornerAttention(db,THREAD);
-  const notice=(await db.query<{id:string}>("SELECT id FROM agent_commands WHERE private_payload->>'automatic'='true'")).rows[0]!;
-  await replyToMessage(db,A,{roomId:CHAT,id:notice.id,text:'I will resume widget work'});
-  expect(await queued()).toEqual([]);
-  expect((await db.query('SELECT room_id,author_id,text FROM messages WHERE author_id=$1',[A])).rows)
-    .toEqual([{room_id:CHAT,author_id:A,text:'I will resume widget work'}]);
-});
-
-it('S8: a notice without a parent task retains its actual System sender and never self-wakes',async()=>{
-  await idleThread(false);
-  await refreshCornerAttention(db,THREAD);
-  const notice=(await db.query<{id:string;message:{replyAddress?:unknown}}>("SELECT id,message FROM agent_commands WHERE private_payload->>'automatic'='true'")).rows[0]!;
-  expect(notice.message.replyAddress).toBeUndefined();
-  await replyToMessage(db,A,{roomId:CHAT,id:notice.id,text:'I will resume widget work'});
-  expect(await queued()).toEqual([]);
-  expect((await db.query('SELECT room_id,author_id,text FROM messages WHERE author_id=$1',[A])).rows)
-    .toEqual([{room_id:CHAT,author_id:A,text:'I will resume widget work'}]);
+  const [notice]=(await readAgentCommands(db,A,CHAT)).commands;
+  await expect(replyToMessage(db,A,{roomId:CHAT,id:notice!.id,text:'I will resume widget work'})).rejects.toThrow('woke this turn');
+  expect(await queued()).toEqual([[A,CHAT]]);
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1',[A])).rows).toEqual([]);
 });
 
 it('a brief revision under an idle notice replies to the reviser instead of the inherited requester',async()=>{

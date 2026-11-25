@@ -483,7 +483,7 @@ const scope1 = fixtureScope1();
       [source.messageId, AGENT])).rows[0]!;
     await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: command.id }, AGENT);
     await scope1.daemon.execute('postAgentTurnReceipt', { roomId: ROOM, agentId: AGENT, requestId: command.turn_request_id, status: 'working' }, AGENT);
-    const result = await scope1.daemon.execute('message', { roomId:ROOM,requestId:command.turn_request_id,to:{agent:handle,place:ROOM},text:'the work is finished' }, AGENT);
+    const result = await scope1.daemon.execute('message', { roomId:ROOM,requestId:command.turn_request_id,type:'normal',address:`${member}@${ROOM}`,text:'the work is finished' }, AGENT);
     expect((await scope1.db.query("SELECT agent_depth FROM agent_commands WHERE id=$1 AND agent_id=$2 AND reason='message'", [result.id,member])).rows[0]).toEqual({agent_depth:4});
     expect((await scope1.db.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [member])).rowCount).toBe(1);
     const posts: { url: string; body: { commandId: string; memberId: string } }[] = [];

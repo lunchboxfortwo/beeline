@@ -36,10 +36,10 @@ describe('corner message attribution', () => {
     await verdict('check-passed');
     const [review] = await commands(B, C);
     await claim(review!);
-    await rootFixture.daemon.execute('reply',{roomId:C,id:review!.id,text:'FAIL: the waiver is not in the brief.'},B);
+    await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:'FAIL: the waiver is not in the brief.'},B);
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     const repairs=await commands(A,C);
-    expect(repairs.map(item=>item.reason)).toEqual(['reply']);
+    expect(repairs.map(item=>item.reason)).toEqual(['message']);
     for(const repair of repairs) { await claim(repair); await result(repair,''); }
     // A CI re-run on the same head and the same brief revision.
     await verdict('rerun');
@@ -298,7 +298,7 @@ describe('corner message attribution', () => {
       await greenHead(95, head);
       const [review] = await commands(B, C);
       await claim(review!);
-      await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, status: verdict.startsWith('blocked:') ? 'blocked' : 'failed', text: verdict.startsWith('blocked:') ? verdict : `failed: ${verdict}` }, B);
+      await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,...(verdict.startsWith('blocked:') ? {type:'blocked' as const} : {type:'normal' as const,address:`${A}@${C}`}),text:verdict},B);
       await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId, status: 'failed', reasonKind: 'hiccup', reason: 'unreported_order: runtime failed after delivery' }, B);
       const sourceId = (await rootFixture.db.query<{ id: string }>(
         `SELECT id FROM messages WHERE room_id=$1 AND system_event->>'kind'='check-passed' ORDER BY created_at DESC LIMIT 1`, [C])).rows[0]!.id;
@@ -333,12 +333,12 @@ describe('corner message attribution', () => {
     const beforeEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
-    const echoed = await rootFixture.daemon.execute('report', { roomId: C, requestId: review!.turnRequestId, status: 'failed', text: 'failed: FAIL: the pull request is unchanged.' }, B);
+    const echoed = await rootFixture.daemon.execute('message', { roomId: C, requestId: review!.turnRequestId, type:'normal',address:`${A}@${C}`,text: 'failed: FAIL: the pull request is unchanged.' }, B);
     const afterEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
-    expect(echoed).toMatchObject({ delivered: true });
-    expect((await commands(A, C)).find(command => command.sourceMessageId === echoed.id))
+    expect(echoed.id).toBeTruthy();
+    expect((await commands(A, C)).find(command => command.id === echoed.id))
       .toMatchObject({ source: { authorId: B, body: expect.stringContaining('failed: FAIL: the pull request is unchanged.') } });
     expect(afterEcho).toEqual(beforeEcho);
     await result(review!, 'FAIL: the pull request is unchanged.');
@@ -541,7 +541,7 @@ it('Reproduction REVIEW-LOOP: a member messages a reviewer after an empty comple
   const [review]=await commands(B,C);
   await claim(review!);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:'complete' },B);
-  const sent=await rootFixture.daemon.execute('message',{roomId:C,to:{agent:B,place:C},text:'please review this head'},A);
+  const sent=await rootFixture.daemon.execute('message',{roomId:C,type:'normal', address:`${B}@${C}`,text:'please review this head'},A);
   expect((await commands(B,C)).find(item=>item.id===sent.id)).toMatchObject({reason:'message',from:{agent:A,place:C}});
 });
 
@@ -552,9 +552,9 @@ it.each(['complete','failed'] as const)('Reproduction review-1: a delivered repa
   await greenHead(3060,head);
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('order',{ roomId:C, requestId:review!.turnRequestId, address:C, agent:'@hoots', text:'FAIL: the sample endpoint accepts an invalid request. Add the required validation.' },B);
+  await rootFixture.daemon.execute('message',{ roomId:C, requestId:review!.turnRequestId, type: 'normal', address: `${A}@${C}`, text:'FAIL: the sample endpoint accepts an invalid request. Add the required validation.' },B);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status, ...(status==='complete'?{completionKind:'no-reply' as const}:{reason:'unreported_order: runtime failed after delivery',reasonKind:'hiccup' as const}) },B);
-  const repairs=(await commands(A,C)).filter(c=>c.reason==='order');
+  const repairs=(await commands(A,C)).filter(c=>c.reason==='message');
   expect(repairs.length).toBeGreaterThan(0);
   await rootFixture.db.query("UPDATE agent_commands SET state='complete',completed_at=now() WHERE room_id=$1 AND agent_id=$2",[C,A]);
   await reconcileConfiguredCornerReviewers(rootFixture.db,R);

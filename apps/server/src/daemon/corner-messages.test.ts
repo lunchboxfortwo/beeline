@@ -12,10 +12,10 @@ it('Reproduction files-15: an addressed post delivers the queued file once acros
   const attachment = { url: 'http://test/v1/media/' + media, name: 'evidence.txt', mimeType: 'text/plain', size: 2 };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(rootFixture.order), attachment }, RUBY);
   const input = { ...authority(rootFixture.order), cornerId: ROOM, text: 'evidence.txt attached' };
-  const posted = await rootFixture.daemon.execute('postCornerMessage', input, RUBY);
+  const posted = await rootFixture.daemon.postCornerMessage(input, RUBY);
   const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: posted.id }, WORKER);
   expect(read.attachments).toEqual([expect.objectContaining(attachment)]);
-  await rootFixture.daemon.execute('postCornerMessage', input, RUBY);
+  await rootFixture.daemon.postCornerMessage(input, RUBY);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: 'Delivery complete' }, RUBY);
   const target = (await rootFixture.phone.readRoom(ROOM, HUMAN))!.messages;
   const source = (await rootFixture.phone.readRoom(DM, HUMAN))!.messages;

@@ -36,8 +36,7 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   let historicalOrder: Awaited<ReturnType<typeof commands>>[number] | undefined;
   if (mode === 'same-issuer-in-flight') {
     await claim(revisionTurn);
-    const receipt = await daemon.execute('order', { ...authority(revisionTurn), address: opened.cornerId,
-      agent: 'worker', text: 'Finish the earlier assignment' }, BOSS);
+    const receipt = await daemon.execute('message', { ...authority(revisionTurn), type:'normal', address:`${WORKER}@${opened.cornerId}`, text: 'Finish the earlier assignment' }, BOSS);
     historicalOrder = (await commands(opened.cornerId, WORKER)).find(c => c.id === receipt.id)!;
     await claim(historicalOrder);
   }
@@ -59,8 +58,7 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
       expectedRevision: 1, brief: { spec: 'Take over', change: 'No human approval' } }, BOSS)).rejects.toThrow('approval');
   }
   if (mode === 'agent-order') {
-    const ordered = await daemon.execute('order', { ...authority(revisionTurn), address: opened.cornerId,
-      agent: 'ruby', text: 'Refine the brief without transferring command' }, BOSS);
+    const ordered = await daemon.execute('message', { ...authority(revisionTurn), type:'normal', address:`${RUBY}@${opened.cornerId}`, text: 'Refine the brief without transferring command' }, BOSS);
     const reviser = (await commands(opened.cornerId, RUBY)).find(c => c.id === ordered.id)!;
     await claim(reviser);
     await expect(daemon.execute('reviseCornerBrief', { ...authority(reviser), cornerId: opened.cornerId,
@@ -76,22 +74,23 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
       .toEqual([{room_id:opened.cornerId}]);
   }
   if (mode === 'in-flight') {
-    await daemon.execute('reply', { ...authority(initial), id:initial.id, text: 'done: Original order result' }, WORKER);
+    const invocation = {id:randomUUID(),requestId:initial.turnRequestId};
+    await daemon.execute('startAgentTurn',{...authority(initial),invocationId:invocation.id},WORKER);
+    await daemon.execute('message', { ...authority(initial), type:'reply',quoteMsgId:initial.source.id,invocation, text: 'done: Original order result' }, WORKER);
     expect((await commands(DM,RUBY)).filter(c => c.reason === 'reply')).toEqual([
       expect.objectContaining({source:expect.objectContaining({body:'done: Original order result'})})]);
   }
   const wake = await createAgentCommand(db, { roomId: opened.cornerId, agentId: WORKER, sourceMessageId: null, reason: 'corner_check' });
   const turn = (await commands(opened.cornerId, WORKER)).find(c => c.id === wake!.id)!;
   await claim(turn);
-  const posted = await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId,
-    text: '@captain Choose the endpoint' }, WORKER);
-  expect(posted.receipt).toContain('Message stored and visible.');
-  expect((await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
-    .toBe('@captain Choose the endpoint');
   const chain = (await db.query<{ id: string }>(`SELECT id FROM rooms corner WHERE corner.id=$1 AND EXISTS (
     SELECT 1 FROM (${commanderChainSql('corner', '$2', 'now()')}) commanders WHERE commanders.id=$3)`, [opened.cornerId, WORKER, BOSS])).rows;
-  expect(chain.length).toBe(historicalOrder ? 1 : 0);
+  expect(chain).toEqual([]);
   await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Endpoint decision required' }, WORKER);
+  const posted = await daemon.execute('postRoomMessage', { ...authority(turn), harnessEnded:true,
+    text: '@captain Choose the endpoint' }, WORKER);
+  expect((await db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
+    .toBe('@captain Choose the endpoint');
   const endpoint = async (agent: string) => (await commands(agent === RUBY ? DM : returnRoom, agent))
     .filter(c => c.reason === 'message' && c.source.body === 'Endpoint decision required');
   expect(await endpoint(RUBY)).toHaveLength(1);
@@ -102,15 +101,9 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   await expectThreadRouting(db);
 });
 
-it.each(['current', 'other', 'stale', 'none'] as const)('Reproduction R2: missing private-copy recipient with public post=%s', async mode => {
-  const posted = mode !== 'none';
+it('finishes locally after the assigning session loses access to its return place', async () => {
   const { turn } = await privateAssignment();
   const { db, daemon } = rootFixture;
-  const address = mode === 'other' ? DM : ROOM;
-  if (mode === 'other') await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
-    VALUES($1,$2,$3,'member')`, [WS, DM, WORKER]);
-  if (posted) await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: address,
-    text: 'The public reply is delivered.' }, WORKER);
   await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
   const final = await daemon.execute('postRoomMessage', { ...authority(turn), text: 'The public reply is delivered.' }, WORKER);
   expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[final.id])).rows).toEqual([{room_id:ROOM}]);

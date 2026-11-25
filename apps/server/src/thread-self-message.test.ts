@@ -1,7 +1,8 @@
+import { RoomsMcpAgentTools } from './rooms-mcp-agent.js';
 import { expect, it, A, B, R, C, rootFixture, commands, send, claim } from './test-support-agent-command.integration.test-support.js';
 
 const selfMessage = (agent: string, roomId: string, requestId: string, place: string, text: string) =>
-  rootFixture.daemon.execute('message', { roomId, requestId, to: { agent, place }, text }, agent);
+  new RoomsMcpAgentTools(rootFixture.db,rootFixture.daemon).call(agent,'message', {address:roomId,commandId:requestId,to:{agent,place},text}) as Promise<{id:string;receipt?:string}>;
 
 it('queues one self-addressed turn in a thread the sender implements, and that turn cannot queue another', async () => {
   await send('@goosy Start the work', C);

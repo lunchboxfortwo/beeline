@@ -8,7 +8,8 @@ import { refreshCornerAttention } from './corner-attention.js';
 
 async function blocked(text = 'Need a decision.', status: 'blocked' | 'needs_decision' = 'blocked') {
   const opened = await open(), turn = await worker(opened.cornerId);
-  const report = await rootFixture.daemon.execute('report', { ...authority(turn), status, text }, WORKER);
+  const report = await rootFixture.daemon.execute('message', { ...authority(turn), type:'blocked', text }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'',harnessEnded:true},WORKER);
   return { cornerId: opened.cornerId, report };
 }
 const blocker = async (cornerId: string) => (await rootFixture.db.query<{
@@ -65,7 +66,7 @@ it('REPORT-WAITING-DERIVED: commander orders and old answered markers cannot cle
   const { cornerId, report } = await blocked();
   const delivery = (await commands(DM, RUBY)).find(item => item.id === report.id)!;
   await claim(delivery);
-  await rootFixture.daemon.execute('order', { ...authority(delivery), address: cornerId, text: 'Use option one.' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(delivery), type:'normal',address:`${WORKER}@${cornerId}`, text: 'Use option one.' }, RUBY);
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=jsonb_set(private_payload,'{waitingAnswered}','true') WHERE id=$1`, [report.id]);
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id });
   const next = await worker(cornerId);
@@ -88,7 +89,7 @@ it('R1: holds rank behind a real private report, and retain their actual message
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id, kind: 'report' });
   const delivery = (await commands(DM, RUBY)).find(item => item.id === report.id)!;
   await claim(delivery);
-  await rootFixture.daemon.execute('order', { ...authority(delivery), address: cornerId, text: 'Finish.' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(delivery), type:'normal',address:`${WORKER}@${cornerId}`, text: 'Finish.' }, RUBY);
   const next = await worker(cornerId);
   await closeAgentAsk(rootFixture.db,WORKER,{messageId:report.id,reason:'answered'});
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(next), harnessEnded: true, text: 'Finished.' }, WORKER);

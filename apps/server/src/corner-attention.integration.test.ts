@@ -216,7 +216,7 @@ it('a pre-claim failure cannot end queued work; its owner can report a plain fai
   await daemon.execute('postAgentTurnReceipt',{roomId:C,requestId:command.turn_request_id,status:'failed',reason:'git fetch failed: cannot lock ref'},WORKER);
   expect((await readAgentCommands(db,WORKER,C)).commands.map(item=>item.id)).toContain(command.id);
   await startQueuedCommand(daemon,{roomId:C,commandId:command.id},WORKER);
-  await daemon.execute('report',{roomId:C,requestId:command.turn_request_id,status:'failed',text:'failed: git fetch failed: cannot lock ref'},WORKER);
+  await daemon.execute('postRoomMessage',{roomId:C,requestId:command.turn_request_id,harnessEnded:true,text:'failed: git fetch failed: cannot lock ref'},WORKER);
   expect(await state()).toBe('idle');
   const failures=(await readAgentCommands(db, COMMANDER)).commands.filter(item=>item.reason==='report'&&item.source.body.startsWith('failed:'));
   expect(failures).toHaveLength(0);
@@ -418,7 +418,7 @@ it('Reproduction IDLE-1: incidental orders cannot redirect an idle alert from it
   expect((await readAgentCommands(db, WORKER, C)).commands).toHaveLength(0);
 });
 
-it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts the one-notice person budget', async (status) => {
+it('Reproduction IDLE-STORM: a commander final exhausts the one-notice person budget', async () => {
   await ci('passing');
   await refreshCornerAttention(db, C);
   const idleSince = (await db.query(cornerIdleSql('$1'), [C])).rows[0]!.idle_since;
@@ -427,10 +427,9 @@ it.each(['failed', 'complete'])('Reproduction IDLE-STORM: commander %s exhausts 
     const [notice] = (await commanderFlags()).filter(command => command.source.body.includes(' is idle.'));
     expect(notice).toBeDefined();
     await startQueuedCommand(daemon, { roomId: C, commandId: notice!.id }, COMMANDER);
-    await daemon.execute('report', { roomId:notice!.roomId,requestId:notice!.turnRequestId,
-      status: status === 'failed' ? 'failed' : 'done', text: 'Still waiting on secrets.' }, COMMANDER);
+    await daemon.execute('postRoomMessage',{roomId:notice!.roomId,requestId:notice!.turnRequestId,text:'Still waiting on secrets.'},COMMANDER);
     expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1', [notice!.turnRequestId])).rows)
-      .toEqual([{ status }]);
+      .toEqual([{ status:'complete' }]);
     expect((await db.query(cornerIdleSql('$1'), [C])).rows[0]!.idle_since).toBe(idleSince);
   }
   for (let replay = 0; replay < 5; replay++) await refreshCornerAttention(db, C);

@@ -456,16 +456,16 @@ const fixture = monolithFixture();
     const peerExchange = await fixture.auth.createDaemonExchange(peer);
     const peerToken = (await fixture.auth.exchangeDaemonToken(peerExchange.exchangeToken))!.daemonToken;
     await fixture.database.query(`UPDATE identities SET handle='fuckface' WHERE id=$1`, [peer]);
-    const spoofed = await fixture.daemonOperation('postCornerMessage', {
-      roomId: ROOM,cornerId:ROOM,
+    const spoofed = await fixture.daemonOperation('postRoomMessage', {
+      roomId: ROOM,
       text: 'Peer should not receive this untagged message.',
     });
     expect(spoofed.status).toBe(200);
     const spoofedBody = (await spoofed.json()) as { id: string };
     // Untagged words name nobody, whatever the caller hoped.
     expect(await taggedBy(fixture.database, spoofedBody.id)).toEqual([]);
-    const reply = await fixture.daemonOperation('postCornerMessage', {
-      roomId: ROOM,cornerId:ROOM,
+    const reply = await fixture.daemonOperation('postRoomMessage', {
+      roomId: ROOM,
       text: '@bee cannot self-route. @retired-peer and @FUCKFACE are stale. @fuckface investigate the failed build.',
     });
     expect(reply.status).toBe(200);
@@ -521,8 +521,8 @@ const fixture = monolithFixture();
       mentions: [AGENT],
     });
     expect(sent.status).toBe(200);
-    const reply = await fixture.daemonOperation('postCornerMessage', {
-      roomId: ROOM,cornerId:ROOM,
+    const reply = await fixture.daemonOperation('postRoomMessage', {
+      roomId: ROOM,
       requestId: 'two-human-tags-turn',
       triggerMessageId: '5'.repeat(64),
       text: '@owner here is where things stand.\n@bananaman614305 you are up next.',
@@ -606,7 +606,10 @@ const fixture = monolithFixture();
       `SELECT id,turn_request_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [cornerId],
     )).rows[0]!;
     await startQueuedTurn(fixture.database, cornerId, AGENT, opening.id);
-    const reply = await fixture.daemonOperation('report', { roomId: cornerId, requestId: opening.turn_request_id, status: 'needs_decision', text: '@owner which release should I target?' });
+    const block = await fixture.daemonOperation('message',{roomId:cornerId,requestId:opening.turn_request_id,type:'blocked',text:'Which release should I target?'});
+    expect(block.status).toBe(200);
+    const delivery = (await block.json()) as {id:string};
+    const reply = await fixture.daemonOperation('message',{roomId:ROOM,requestId:delivery.id,type:'blocked',text:'@owner which release should I target?'});
     expect(reply.status).toBe(200);
     const stored = await fixture.database.query<{ tagged_ids: string[] }>(
       `SELECT ${taggedIdentityIdsSql('m')} tagged_ids FROM messages m

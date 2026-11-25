@@ -36,12 +36,12 @@ it('a reviewer report wakes the implementer with its findings in the thread', as
   expect(review).toMatchObject({ reason: 'corner_review_dispatch', returnRoomId: C });
   const findings = `Changes requested on ${head}: [P1] Keep the table anchored when quiet defaults change.`;
   const before = (await commands(A, C)).map(command => command.id);
-  await rootFixture.daemon.execute('reply',{roomId:C,id:review!.id,text:findings},B);
+  await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:findings,transportRequestId:review!.id},B);
   const replies = (await commands(A, C)).filter(command => !before.includes(command.id));
-  expect(replies).toEqual([expect.objectContaining({ roomId: C, agentId: A, reason: 'reply',
+  expect(replies).toEqual([expect.objectContaining({ roomId: C, agentId: A, reason: 'message',
     source: expect.objectContaining({ body: findings,
       route: { from: { agent: B, place: C }, to: { agent: A, place: C } } }) })]);
-  await rootFixture.daemon.execute('reply',{roomId:C,id:review!.id,text:findings},B);
+  await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:findings,transportRequestId:review!.id},B);
   expect((await commands(A, C)).filter(command => !before.includes(command.id)).map(command => command.id))
     .toEqual(replies.map(command => command.id));
   expect(await commands(A, R)).toEqual([]);

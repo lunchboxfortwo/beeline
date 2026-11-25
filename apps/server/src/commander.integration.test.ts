@@ -1,3 +1,4 @@
+import { replyDuringTurn } from './test-fixtures/queued-turn.test-support.js';
 import { closeAgentAsk } from './agent-open-asks.js';
 import { archiveCorner } from './corner-lifecycle.js';
 import { AgentScheduleLoop,DM,DaemonService,GITHUB_SUBJECT,GitHubOperations,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,advanceCorner,authority,claim,commands,createAgentCommand,describe,expect,fixtureScope1,insertCornerFacts,it,open,randomBytes,randomUUID,readCornerObjective,rootFixture,systemLine,unreadMessageSql,vi,worker,type CommandRow,type GitHubAppClient,type GitHubOAuthClient } from './test-support-commander.integration.test-support.js';
@@ -43,11 +44,11 @@ it('delivers blocked privately to Ruby and Ruby orders the current worker privat
   const report = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   expect(report).toMatchObject({ private: true, source: { authorId: WORKER, body: 'need an endpoint decision' } });
   await claim(report);
-  await rootFixture.daemon.execute('order', { ...authority(report), address: opened.cornerId, text: 'Use endpoint v2' }, RUBY);
-  expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order'))
+  await rootFixture.daemon.execute('message', { ...authority(report), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Use endpoint v2' }, RUBY);
+  expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'message'))
     .toMatchObject({ private: true, source: { authorId: RUBY, body: 'Use endpoint v2' } });
   expect((await rootFixture.db.query(`SELECT text FROM messages WHERE text IN ($1,$2)`,
-    ['need an endpoint decision', 'Use endpoint v2'])).rowCount).toBe(1);
+    ['need an endpoint decision', 'Use endpoint v2'])).rowCount).toBe(2);
 });
 
 it('stores orders privately and gives blocks a closeable message', async () => {
@@ -62,10 +63,10 @@ it('stores orders privately and gives blocks a closeable message', async () => {
   const report = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   expect(report).toMatchObject({ private: true, source: { authorId: WORKER, body: reportText } });
   await claim(report);
-  await rootFixture.daemon.execute('order', { ...authority(report), address: opened.cornerId, text: 'Use endpoint v2' }, RUBY);
-  expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order'))
+  await rootFixture.daemon.execute('message', { ...authority(report), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Use endpoint v2' }, RUBY);
+  expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'message'))
     .toMatchObject({ private: true, source: { authorId: RUBY, body: 'Use endpoint v2' } });
-  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-command'`,[opened.cornerId])).rowCount).toBe(0);
+  expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='agent-command'`,[opened.cornerId])).rowCount).toBe(1);
   await advanceCorner(rootFixture.db, opened.cornerId, { kind: 'reconcile' });
   // The commander's order is queued for the implementer: work outranks the still-open block.
   expect(await rootFixture.daemon.execute('getCornerRestoreState', { cornerId: opened.cornerId }, WORKER))
@@ -85,17 +86,17 @@ it.each(['needs_decision: choose the product scope', 'needs-decision: choose the
   await rootFixture.daemon.execute('message', { type: 'blocked', ...authority(report), text: inputText }, RUBY);
   const rows = (await rootFixture.db.query(`SELECT room_id,author_id,text,card FROM messages WHERE text=$1 AND author_id=$2`,
     [text,RUBY])).rows;
-  expect(rows).toEqual([{ room_id: DM, author_id: RUBY, text, card: { ask: 'Which product scope should we use?', reportToId: HUMAN,
+  expect(rows).toEqual([{ room_id: DM, author_id: RUBY, text, card: { reportToId: HUMAN,
     route:{from:{agent:RUBY,place:DM},to:{agent:HUMAN,place:DM}}, reportStatus: 'blocked', sourceRoomId: opened.cornerId } }]);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))?.messages.some(m => m.text === rows[0]!.text)).toBe(true);
 });
 
 /** The commander's report to the captain, relayed from the worker's thread. */
 async function relay(cornerId: string, turn: Parameters<typeof authority>[0], status: 'blocked' | 'needs_decision' | 'done', text: string) {
-  await rootFixture.daemon.execute('report', { status, ...authority(turn), text }, WORKER);
+  await rootFixture.daemon.execute('message', { type:'blocked', ...authority(turn), text }, WORKER);
   const report = (await commands(DM, RUBY)).filter(c => c.reason === 'message').at(-1)!;
   await claim(report);
-  const posted = await rootFixture.daemon.execute('report', { status, ...authority(report), text }, RUBY);
+  const posted = await rootFixture.daemon.execute('message', { type:'blocked', ...authority(report), text }, RUBY);
   return { report, id: posted.id };
 }
 const cleared = async () => (await rootFixture.db.query(`SELECT m.text,mark.cleared_reason reason FROM needs_you_marks mark
@@ -106,8 +107,8 @@ it('NEEDS-YOU-SUPERSEDED: the same agent\'s newer report from the thread replace
   const opened = await open(), turn = await worker(opened.cornerId);
   const first = await relay(opened.cornerId, turn, 'needs_decision', 'v1 or v2?');
   expect(await asks()).toEqual(['v1 or v2?']);
-  await rootFixture.daemon.execute('order', { ...authority(first.report), address: opened.cornerId, text: 'Use endpoint v2' }, RUBY);
-  const second = (await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order')!;
+  await rootFixture.daemon.execute('message', { ...authority(first.report), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Use endpoint v2' }, RUBY);
+  const second = (await commands(opened.cornerId, WORKER)).find(c => c.reason === 'message')!;
   await claim(second);
   await closeAgentAsk(rootFixture.db,WORKER,{messageId:first.report.id,reason:'answered'});
   await closeAgentAsk(rootFixture.db,RUBY,{messageId:first.id,reason:'answered'});
@@ -148,11 +149,11 @@ it('NEEDS-YOU-ANSWERED: a quote reply on the asking message retires it as answer
 it('preserves tags in public prose without changing the recorded report route', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const text = '@captain Approve the reviewer-link fetch here?';
-  const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text }, WORKER);
+  const posted = await rootFixture.daemon.postCornerMessage({ ...authority(turn), cornerId: opened.cornerId, text }, WORKER);
   expect(posted.stored).toBe(true);
   expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [posted.id])).rows[0]?.text)
     .toBe(text);
-  const channel = await rootFixture.daemon.execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text: '@channel approve?' }, WORKER);
+  const channel = await rootFixture.daemon.postCornerMessage({ ...authority(turn), cornerId: opened.cornerId, text: '@channel approve?' }, WORKER);
   expect(channel.stored).toBe(true);
   expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [channel.id])).rows[0]?.text).toBe('@channel approve?');
   // A room post completes the turn, so the report goes out while this turn is still claimed.
@@ -172,7 +173,7 @@ it('preserves tags in public prose without changing the recorded report route', 
 it('an ordered final reply follows its private return route without posting a human tag', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const text = '@captain Approve the reviewer-link fetch here?';
-  const room = await rootFixture.daemon.execute('reply', { ...authority(turn), id:turn.id, text }, WORKER);
+  const room = await replyDuringTurn(rootFixture.daemon,turn,text);
   expect(room.id).toMatch(/^[0-9a-f]{64}$/);
   expect((await commands(DM, RUBY)).find(c => c.reason === 'reply')?.source.body).toBe(text);
   expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text=$1`, [text])).rows).toEqual([{ room_id: DM }]);
@@ -181,10 +182,10 @@ it('an ordered final reply follows its private return route without posting a hu
 it('posts the rest when the thinking block is unclosed or the reply link is broken', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   const privateText = '<thinking>First private paragraph.\n\nSecond private paragraph.';
-  expect(await rootFixture.daemon.execute('postCornerMessage', {
+  expect(await rootFixture.daemon.postCornerMessage({
     ...authority(turn), cornerId: opened.cornerId, text: privateText,
   }, WORKER)).toMatchObject({stored:false,visible:false});
-  const thinking = await rootFixture.daemon.execute('postCornerMessage', {
+  const thinking = await rootFixture.daemon.postCornerMessage({
     ...authority(turn), cornerId: opened.cornerId,
     text: 'Ship the rest.\n\n<thinking>First private paragraph.\n\nSecond private paragraph.',
   }, WORKER);
@@ -195,14 +196,14 @@ it('posts the rest when the thinking block is unclosed or the reply link is brok
   const read = await rootFixture.phone.readRoom(opened.cornerId, HUMAN);
   expect(read?.messages.some((message) => message.id === thinking.id && message.text === 'Ship the rest.' && !message.text.includes('private paragraph'))).toBe(true);
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text LIKE '%Second private paragraph%'`)).rowCount).toBe(0);
-  const quoted = await rootFixture.daemon.execute('postCornerMessage', {
+  const quoted = await rootFixture.daemon.postCornerMessage({
     ...authority(turn), cornerId: opened.cornerId,
     text: '@captain Here is the exact quote: "@captain approved it".',
   }, WORKER);
   expect(quoted.stored).toBe(true);
   expect((await rootFixture.db.query<{ text: string }>(`SELECT text FROM messages WHERE id=$1`, [quoted.id])).rows[0]?.text)
     .toBe('@captain Here is the exact quote: "@captain approved it".');
-  const broken = await rootFixture.daemon.execute('postCornerMessage', {
+  const broken = await rootFixture.daemon.postCornerMessage({
     ...authority(turn), cornerId: opened.cornerId, text: 'Still here.', replyTo: 'not-a-message',
   }, WORKER);
   expect(broken.stored).toBe(true);
@@ -230,7 +231,7 @@ it('keeps terminal status separate from the original words', async () => {
 it('optional ask formatting cannot refuse a decision report', async () => {
   const first = await rootFixture.daemon.execute('message', { type: 'blocked', ...authority(rootFixture.order), text: 'needs-decision: pick scope' }, RUBY);
   expect((await rootFixture.db.query('SELECT text FROM messages WHERE id=$1', [first.id])).rows).toEqual([{ text: 'needs-decision: pick scope' }]);
-  expect((await rootFixture.phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items.find(item=>item.messageId===first.id)?.text).toBe('Which scope?');
+  expect((await rootFixture.phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items.find(item=>item.messageId===first.id)?.text).toBe('needs-decision: pick scope');
   const another=await rootFixture.phone.execute('sendRoomMessage',{roomId:DM,text:'@ruby choose the scope'},HUMAN);
   const next=(await commands(DM,RUBY)).find(item=>item.sourceMessageId===another.messageId)!;
   const reported = await rootFixture.daemon.execute('message', { type: 'blocked', ...authority(next), text: 'Which scope should we use? @captain' }, RUBY);
@@ -242,11 +243,11 @@ it('nested Room orders forward reports one commander at a time before reaching t
   await rootFixture.db.query(`INSERT INTO rooms(id,workspace_id,name,created_by) VALUES($1,$2,'Agent work',$3)`, [otherRoom, WS, HUMAN]);
   for (const agent of [RUBY, WORKER]) await rootFixture.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
     VALUES($1,$2,$3,'member')`, [WS, otherRoom, agent]);
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, agent: WORKER, text: 'Run the project' }, RUBY);
-  const managerOrder = (await commands(ROOM, WORKER)).find(c => c.reason === 'order')!;
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${ROOM}`, text: 'Run the project' }, RUBY);
+  const managerOrder = (await commands(ROOM, WORKER)).find(c => c.reason === 'message')!;
   await claim(managerOrder);
-  await rootFixture.daemon.execute('order', { ...authority(managerOrder), address: otherRoom, agent: RUBY, text: 'Decide the project scope' }, WORKER);
-  const childOrder = (await commands(otherRoom, RUBY)).find(c => c.reason === 'order')!;
+  await rootFixture.daemon.execute('message', { ...authority(managerOrder), type: 'normal', address: `${RUBY}@${otherRoom}`, text: 'Decide the project scope' }, WORKER);
+  const childOrder = (await commands(otherRoom, RUBY)).find(c => c.reason === 'message')!;
   await claim(childOrder);
   const text = 'needs-decision: select the final scope';
   await rootFixture.daemon.execute('message', { type: 'blocked', ...authority(childOrder), text }, RUBY);
@@ -307,8 +308,8 @@ it('a configured reviewer can record PASS from its DM without changing the revie
 it('a scheduled report goes to the recorded schedule owner in the schedule room', async () => {
   const opened = await open(), initial = await worker(opened.cornerId);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(initial), agentId: WORKER, status: 'complete' }, WORKER);
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Watch the release and report back' }, RUBY);
-  const assigned = (await commands(opened.cornerId, WORKER)).find(c => c.reason === 'order')!;
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Watch the release and report back' }, RUBY);
+  const assigned = (await commands(opened.cornerId, WORKER)).find(c => c.reason === 'message')!;
   await claim(assigned);
   const schedule = await rootFixture.daemon.execute('createAgentSchedule', { ...authority(assigned), title: 'Check release',
     prompt: 'Finish watching the release', cadence: { kind: 'interval', everyMinutes: 1 }, maxRuns: 1 }, WORKER);
@@ -404,8 +405,8 @@ it('an ordered corner turn keeps live work and progress in the corner', async ()
 });
 
 it('Reproduction quiet-final: private order prose stays in the working room without an invented status', async () => {
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, agent: WORKER, text: 'Check the widget' }, RUBY);
-  const turn = (await commands(ROOM, WORKER)).find(c => c.reason === 'order')!;
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${ROOM}`, text: 'Check the widget' }, RUBY);
+  const turn = (await commands(ROOM, WORKER)).find(c => c.reason === 'message')!;
   await claim(turn);
   const before = (await rootFixture.db.query(`SELECT id FROM messages`)).rows;
   await rootFixture.daemon.execute('postAgentDraft', { ...authority(turn), agentId: WORKER, turnId: turn.turnRequestId, text: 'private draft' }, WORKER);
@@ -482,7 +483,7 @@ it('cross-Room reads work from a DM, while nonmembers get no data or order', asy
       .rejects.toMatchObject({ message: 'unknown place; use an id from read(facet:addresses)', status: 400 });
   await rootFixture.db.query(`UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id=$2`, [RUBY, ROOM]);
   await expect(rootFixture.daemon.execute('read', { roomId: DM, address: ROOM }, RUBY)).rejects.toThrow('membership');
-  await expect(rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, text: 'Do this' }, RUBY)).rejects.toThrow('membership');
+  await expect(rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type:'normal',address:`${WORKER}@${ROOM}`, text: 'Do this' }, RUBY)).rejects.toThrow('membership');
 });
 
 it('R-REVISE revises and restores the cited approval without a false reproduction warning', async () => {
@@ -587,8 +588,8 @@ const scope1 = fixtureScope1();
 
   it('accepts an earlier private order from the corner\'s commander', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
-    await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Skip the proof.' }, RUBY);
-    const waiver = (await commands(opened.cornerId, WORKER)).find((command) => command.reason === 'order')!;
+    await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Skip the proof.' }, RUBY);
+    const waiver = (await commands(opened.cornerId, WORKER)).find((command) => command.reason === 'message')!;
     expect((await scope1.revise(turn, opened.cornerId, 1, waiver.sourceMessageId)).revision).toBe(2);
     expect(await scope1.approval(opened.cornerId)).toMatchObject({ kind: 'commander-order', approvedBy: RUBY,
       sourceMessageId: waiver.sourceMessageId, snapshot: 'Skip the proof.' });
@@ -597,8 +598,8 @@ const scope1 = fixtureScope1();
 
   it('APPROVAL-CITATIONS: accepts a historical commander order card', async () => {
     const opened = await open(), turn = await worker(opened.cornerId);
-    await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Use the revised endpoint.' }, RUBY);
-    const waiver=(await commands(opened.cornerId,WORKER)).find(item=>item.reason==='order')!;
+    await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Use the revised endpoint.' }, RUBY);
+    const waiver=(await commands(opened.cornerId,WORKER)).find(item=>item.reason==='message')!;
     const {createHash}=await import('node:crypto');
     const card={id:createHash('sha256').update(`agent-command-card:${waiver.id}`).digest('hex')};
     await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card)
@@ -776,9 +777,6 @@ it('Reproduction corner-subtree-175524: the reported named parent order succeeds
   await claim(turn);
   // Exact production payload retrieved read-only from the 17:55:24 order.
   const text = "Read-only adversarial implementation review for Jellybean's active truthful-corner-states corner f95aa673-2eb5-491a-930b-51dc1aa2d2ee, brief revision 1. Do not edit, commit, push, open a corner, change implementer, or report to Ruby. Read its brief via inspect_thread; report findings to me through this order. Step 0 file map is posted there. Need concrete smallest implementation plan for PR1 durable idle flags (commander only, once per span, worker schedule/subscription exclusions, excluding commander watch), WAITING blockers and persistent 24h reminders with human dismissal using existing approval/tray authority. Identify exact indexed writer/read paths and tests; avoid per-read messages scans. Also assess executing brief's two separate PRs when first merge archives this corner and only feature/corner-f95aa6732eb5 is authorized: propose compliant sequence. Current corner worktree has uncommitted draft state edits only in packages/api-contract/src/corner-state.ts and apps/server/src/chat-corner-counts.ts; do not treat them as finished. Include problems plus specific solutions. Report back once with findings, not progress.";
-  // A Room with one other agent has an unambiguous recipient.
-  await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, text }, WORKER);
-  await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, agent: RUBY, text }, WORKER);
-  expect((await commands(ROOM, RUBY)).find(c => c.reason === 'order')?.source.body).toBe(text);
-  console.log('[corner-subtree-175524] parent Room orders resolve the single agent and remain private');
+  await expect(rootFixture.daemon.execute('message',{...authority(turn),type:'normal',address:`${RUBY}@${ROOM}`,text},WORKER)).rejects.toThrow('A thread must address a thread agent session');
+  expect((await commands(ROOM,RUBY)).some(c=>c.source.body===text)).toBe(false);
 });

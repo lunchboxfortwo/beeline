@@ -205,8 +205,11 @@ describe('owed chat tags', () => {
     const message=await tag();
     await createAgentCommand(db,{roomId:room,agentId:other,sourceMessageId:message,reason:'human_tag'});
     for(const who of [member,other]) {
-      const input={roomId:room,id:message,text:'first',transportRequestId:'one-received-reply'};
-      const first=await daemon.execute('reply',input,who),again=await daemon.execute('reply',input,who);
+      const request=(await daemon.execute('getAgentCommands',{roomId:room},who)).commands.find(command=>command.source.id===message)!;
+      const invocation={id:'received-tag',requestId:request.turnRequestId};
+      await daemon.execute('startAgentTurn',{roomId:room,requestId:request.turnRequestId,invocationId:invocation.id},who);
+      const input={roomId:room,requestId:request.turnRequestId,type:'reply' as const,quoteMsgId:message,invocation,text:'first',transportRequestId:'one-received-reply'};
+      const first=await daemon.execute('message',input,who),again=await daemon.execute('message',input,who);
       expect(again.id).toBe(first.id);
       expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND reply_to_message_id=$2',[who,message])).rowCount).toBe(1);
     }
@@ -262,7 +265,7 @@ describe('owed chat tags', () => {
     await routeHumanMessage(db, source);
     const command = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.sourceMessageId === source)!;
     await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
-    const first = await daemon.execute('postCornerMessage', { roomId: room, cornerId: room, requestId: command.turnRequestId, text: 'first answer', replyTo: source }, helper);
+    const first = await daemon.postCornerMessage({ roomId: room, cornerId: room, requestId: command.turnRequestId, text: 'first answer', replyTo: source }, helper);
     await db.query(`UPDATE agent_commands SET state='pending',turn_request_id=$2 WHERE id=$1`, [command.id, id()]);
     const retry = (await daemon.execute('getAgentCommands', { roomId: room }, helper)).commands.find(c => c.id === command.id)!;
     await startQueuedCommand(daemon, { roomId: room, commandId: command.id }, helper);
