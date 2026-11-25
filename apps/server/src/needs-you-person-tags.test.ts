@@ -101,14 +101,14 @@ describe('person tags in Needs you', () => {
     await database.query("DELETE FROM workflow_backfills WHERE name='needs-you-open-items-v1'");
     const retitled = await post(CORNER, AGENT, 'done: no longer a report', 60);
     const answered = await post(ROOM, AGENT, 'blocked: answered report', 50);
-    await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=$2`, [VIEWER, answered]);
+    await database.query(`UPDATE messages SET card=jsonb_build_object('reportStatus','blocked','reportToId',$1::text) WHERE id=$2`, [VIEWER, answered]);
     const reply = await post(ROOM, VIEWER, 'Resolved.', 40);
     await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, answered]);
     const open = await post(ROOM, AGENT, 'needs-decision: choose a route', 30);
     const seen = await post(CORNER, AGENT, 'blocked: a seen report', 20);
     // In the chat, so this newer report does not supersede the thread's open one.
     const dismissed = await post(ROOM, AGENT, 'blocked: a dismissed report', 10);
-    await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=ANY($2::text[])`, [VIEWER, [open, seen, dismissed]]);
+    await database.query(`UPDATE messages SET card=jsonb_build_object('reportStatus','blocked','reportToId',$1::text) WHERE id=ANY($2::text[])`, [VIEWER, [open, seen, dismissed]]);
     await post(ROOM, PEER, '@ada an old personal tag', 5);
     await database.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at)
       VALUES($1,$2,$3,NULL),($1,$4,$3,now()),($1,$5,$3,NULL),($1,$6,$3,NULL)`, [VIEWER, seen, WORKSPACE, dismissed, answered, retitled]);
@@ -141,7 +141,7 @@ describe('person tags in Needs you', () => {
 
   it('keeps an open report after unrelated conversation in its updated origin', async () => {
     const id = await post(ROOM, AGENT, 'blocked: choose a route', 20);
-    await database.query(`UPDATE messages SET card=jsonb_build_object('reportToId',$1::text) WHERE id=$2`, [VIEWER, id]);
+    await database.query(`UPDATE messages SET card=jsonb_build_object('reportStatus','blocked','reportToId',$1::text) WHERE id=$2`, [VIEWER, id]);
     await post(CORNER, VIEWER, 'Use the first route.', 5);
     expect(await count()).toBe(1);
     await database.query(`UPDATE messages SET card=card||jsonb_build_object('sourceRoomId',$1::text) WHERE id=$2`, [CORNER, id]);

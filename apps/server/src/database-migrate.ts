@@ -514,12 +514,13 @@ export async function migrate(
   // Needs you reads only blocked and needs-decision reports. The broader
   // actionable index stays for rollout and rollback overlap.
   await runMigrationStep('needs-you report lookback index', () => createIndexConcurrently(
-    database, 'messages_needs_you_report_idx',
-    `CREATE INDEX CONCURRENTLY messages_needs_you_report_idx
+    database, 'messages_needs_you_report_status_idx',
+    `CREATE INDEX CONCURRENTLY messages_needs_you_report_status_idx
      ON messages(created_at) WHERE ${askingMessageSql()}`,
   ));
   await runMigrationStep('retire needs-you question-only index', async () => {
     await database.query('DROP INDEX CONCURRENTLY IF EXISTS messages_needs_you_question_idx');
+    await database.query('DROP INDEX CONCURRENTLY IF EXISTS messages_needs_you_report_idx');
   });
   await runMigrationStep('squire decision index', () => createIndexConcurrently(
     database, 'messages_squire_decision_idx',

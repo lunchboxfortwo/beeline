@@ -20,7 +20,7 @@ type CommandRow
 
 const BOSS = 'f'.repeat(64);
 
-it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer-in-flight', 'in-flight', 'unapproved'] as const)('Reproduction R1: %s handover selects commander for reports and human tags', async mode => {
+it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer-in-flight', 'in-flight', 'unapproved'] as const)('Reproduction R1: %s brief revision retains the assigning session', async mode => {
   const approved = mode !== 'unapproved';
   const { db, phone, daemon } = rootFixture;
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Boss','boss') ON CONFLICT DO NOTHING`, [BOSS]);
@@ -63,10 +63,10 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
       agent: 'ruby', text: 'Refine the brief without transferring command' }, BOSS);
     const reviser = (await commands(opened.cornerId, RUBY)).find(c => c.id === ordered.id)!;
     await claim(reviser);
-    await daemon.execute('reviseCornerBrief', { ...authority(reviser), cornerId: opened.cornerId,
+    await expect(daemon.execute('reviseCornerBrief', { ...authority(reviser), cornerId: opened.cornerId,
       expectedRevision: 2, brief: { spec: 'Build widget with refined details', repositoryWork: false,
-        change: 'Agent-only refinement', approval: { sourceMessageId: ordered.id } } }, RUBY);
-    expect(await commanderReportAddress(db,opened.cornerId)).toMatchObject({recipient:BOSS,returnRoom});
+        change: 'Agent-only refinement', approval: { sourceMessageId: ordered.id } } }, RUBY)).rejects.toThrow('commander');
+    expect(await commanderReportAddress(db,opened.cornerId)).toMatchObject({recipient:RUBY,returnRoom:DM});
   }
   if (mode === 'legacy') await db.query(`UPDATE corner_brief_revisions
     SET approval_basis=approval_basis-'commanderCommandId'-'commanderReturnRoomId' WHERE corner_id=$1 AND revision=2`, [opened.cornerId]);
@@ -77,7 +77,7 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
   }
   if (mode === 'in-flight') {
     await daemon.execute('reply', { ...authority(initial), id:initial.id, text: 'done: Original order result' }, WORKER);
-    expect((await commands(returnRoom,BOSS)).filter(c => c.reason === 'reply')).toEqual([
+    expect((await commands(DM,RUBY)).filter(c => c.reason === 'reply')).toEqual([
       expect.objectContaining({source:expect.objectContaining({body:'done: Original order result'})})]);
   }
   const wake = await createAgentCommand(db, { roomId: opened.cornerId, agentId: WORKER, sourceMessageId: null, reason: 'corner_check' });
@@ -90,15 +90,15 @@ it.each(['approved', 'legacy', 'agent-order', 'different-dispatch', 'same-issuer
     .toBe('@captain Choose the endpoint');
   const chain = (await db.query<{ id: string }>(`SELECT id FROM rooms corner WHERE corner.id=$1 AND EXISTS (
     SELECT 1 FROM (${commanderChainSql('corner', '$2', 'now()')}) commanders WHERE commanders.id=$3)`, [opened.cornerId, WORKER, BOSS])).rows;
-  expect(chain.length).toBe(approved ? 1 : 0);
-  await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Endpoint decision required' }, WORKER);
-  const endpoint = async (agent: string) => (await commands(approved ? returnRoom : DM, agent))
-    .filter(c => c.reason === 'report' && c.source.body === 'blocked: Endpoint decision required');
-  expect(await endpoint(approved ? BOSS : RUBY)).toHaveLength(1);
-  expect(await endpoint(approved ? RUBY : BOSS)).toEqual([]);
+  expect(chain.length).toBe(historicalOrder ? 1 : 0);
+  await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Endpoint decision required' }, WORKER);
+  const endpoint = async (agent: string) => (await commands(agent === RUBY ? DM : returnRoom, agent))
+    .filter(c => c.reason === 'message' && c.source.body === 'Endpoint decision required');
+  expect(await endpoint(RUBY)).toHaveLength(1);
+  expect(await endpoint(BOSS)).toEqual([]);
   expect((await commands(opened.cornerId, approved ? BOSS : RUBY)).filter(c => c.reason === 'report')).toEqual([]);
   const saved = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [initial.id])).rows[0]!;
-  expect(await commanderReportAddress(db, opened.cornerId, saved)).toMatchObject({ recipient: approved ? BOSS : RUBY, returnRoom: approved ? returnRoom : DM });
+  expect(await commanderReportAddress(db, opened.cornerId, saved)).toMatchObject({ recipient: RUBY, returnRoom: DM });
   await expectThreadRouting(db);
 });
 

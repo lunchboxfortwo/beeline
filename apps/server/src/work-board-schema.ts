@@ -133,7 +133,7 @@ BEGIN
   SELECT actor.id INTO asking_agent FROM messages asking
     JOIN identities actor ON actor.id=COALESCE(asking.card->'agent'->>'pubkey',asking.author_id) AND actor.kind='agent'
     WHERE asking.id=NEW.reply_to_message_id AND asking.room_id=NEW.room_id
-      AND (EXISTS(SELECT 1 FROM work_questions q WHERE q.message_id=asking.id) OR ${askSql('asking.text')})
+      AND (EXISTS(SELECT 1 FROM work_questions q WHERE q.message_id=asking.id) OR ${askSql('asking.card')})
       AND NOT EXISTS(SELECT 1 FROM messages answered JOIN identities human ON human.id=answered.author_id AND human.kind='human'
         WHERE answered.reply_to_message_id=asking.id AND answered.id<>NEW.id AND answered.deleted_at IS NULL);
   IF asking_agent IS NOT NULL THEN

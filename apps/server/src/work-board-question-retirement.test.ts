@@ -456,7 +456,7 @@ describe('question retirement', () => {
       if (event === 'superseded')
         await db.query(
           `INSERT INTO messages(id,room_id,author_id,text,card,created_at)
-      VALUES('new-report',$1,$2,'done: shipped',jsonb_build_object('reportToId',$3::text,'sourceRoomId',$4::text),now()+interval '1 second')`,
+      VALUES('new-report',$1,$2,'shipped',jsonb_build_object('reportStatus','done','reportToId',$3::text,'sourceRoomId',$4::text),now()+interval '1 second')`,
           [dm, agent, person, thread],
         );
       if (event === 'answered') {

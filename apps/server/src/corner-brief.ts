@@ -373,11 +373,11 @@ export async function resolveCornerBriefApproval(
   // Holds use this same message resolver, with live human/readability checks and
   // no stored-approval or commander-order fallback.
   const cited = (await db.query<ApprovingMessage & {
-    deleted_at: string | null; hidden_from_roster: boolean;
+    deleted_at: string | null; hidden_from_roster: boolean; blocked:boolean;
     presentation: string; system_event: unknown; readable: boolean;
   }>(
     `SELECT message.text,message.author_id,identity.kind,message.room_id,
-            message.deleted_at,identity.hidden_from_roster,message.presentation,message.system_event,
+            message.deleted_at,identity.hidden_from_roster,message.presentation,message.system_event,message.card->>'reportStatus'='blocked' blocked,
             EXISTS (SELECT 1 FROM room_access member
               WHERE member.room_id=message.room_id AND member.identity_id=$3
                 AND member.removed_at IS NULL) readable
@@ -430,14 +430,14 @@ export async function resolveCornerBriefApproval(
       }
     }
   }
-  if (!message && initiating && !revision) {
+  if ((!message || cited?.blocked) && initiating && !revision) {
     const active = (await db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [sourceMessageId])).rows[0];
     const order = active ? await commandOrder(db, active) : undefined;
     // A report wake reaches its commander inside the corner it concerns, so the
     // delivered command's recorded order room is a source alongside the turn's.
-    const orderRooms = active && order && active.private_payload?.kind === 'report'
+    const orderRooms = active && order && (active.private_payload?.kind === 'report' || active.private_payload?.reportStatus === 'blocked')
       ? [...sourceRoomIds, order.room_id] : sourceRoomIds;
-    if ((order?.private_payload?.kind === 'order' || order?.private_payload?.kind === 'message') && orderRooms.includes(order.room_id)) {
+    if ((order?.private_payload?.kind === 'order' || order?.private_payload?.kind === 'message' && !order.private_payload.reportStatus) && orderRooms.includes(order.room_id)) {
       sourceMessageId = order.id;
       message = { text: order.private_payload.text, author_id: order.private_payload.authorId, room_id: order.room_id, kind: 'agent' };
       commanderOrder = true;

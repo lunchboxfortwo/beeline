@@ -9,7 +9,7 @@ import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surfac
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
 const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp', 'grok', 'buzz-agent', 'cursor-acp-bridge'];
-const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_thread', 'create_work_item', 'update_work', 'message', 'reply'];
+const missingOnClaude = ['request_grant', 'connect', 'app_tool', 'wake', 'remember', 'revise_thread', 'create_work_item', 'update_work', 'message'];
 const rootCombinators = ['anyOf', 'oneOf', 'allOf'];
 const invalidInputs = [
   ['request_grant', { mode: 'request', action: 'Use the requested resource', kind: 'command' }],
@@ -29,13 +29,13 @@ describe('Beeline tool surface across harnesses', () => {
       // accepts the same schema: this was Ruby's exact 28 -> 22 discrepancy.
       const accepted = tools.filter(tool => rootCombinators.every(key => !(key in tool.inputSchema)));
       expect(accepted.map(tool => tool.name)).toEqual(tools.map(tool => tool.name));
-      expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude.filter(name => !corner || name !== 'message')));
+      expect(accepted.map(tool => tool.name)).toEqual(expect.arrayContaining(missingOnClaude));
+      expect(tools.map(tool => tool.name)).not.toContain('post');
+      expect(tools.map(tool => tool.name)).not.toContain('reply');
       if (corner) {
-        expect(tools.map(tool => tool.name)).not.toContain('message');
-        expect(tools.find(tool => tool.name === 'post')?.inputSchema.properties).not.toHaveProperty('address');
         const facets = tools.find(tool => tool.name === 'read')?.inputSchema.properties as {facet:{enum:string[]}};
-        expect(facets.facet.enum).not.toContain('threads');
-        expect(facets.facet.enum).not.toContain('addresses');
+        expect(facets.facet.enum).toContain('threads');
+        expect(facets.facet.enum).toContain('addresses');
         expect(tools.find(tool => tool.name === 'open_thread')?.inputSchema.required).not.toContain('room');
       }
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand }).systemPrompt;
@@ -108,10 +108,6 @@ describe('Beeline tool surface across harnesses', () => {
     expect(args.keywords).toEqual(['deploy', 'ci']);
     expect(() => validateAdvertisedToolInput(advertisedAgentTool('remember'), args)).not.toThrow();
     expect(institutionalMemoryKeywords(args.keywords)).toEqual(['deploy', 'ci']);
-    const reply = { text: 'Still here.', replyTo: 'not-a-message' };
-    expect(normalizeAgentToolArgs('post', reply)).toEqual(['reply link']);
-    expect(reply).toEqual({ text: 'Still here.' });
-    expect(() => validateAdvertisedToolInput(advertisedAgentTool('post'), reply)).not.toThrow();
   });
 
   it('folds fixed feedback certification without exposing its retired tool',()=>{

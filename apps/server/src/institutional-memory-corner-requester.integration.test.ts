@@ -13,7 +13,6 @@ import { GitHubOperations } from './github-operations.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { createBeelineServer } from './server.js';
-import { wakeLateCornerWatcher } from './system-line.js';
 import { seedCornerOpening, PgliteDatabase, migratedDatabase } from './test-support.js';
 
 // Reproduction 2026-10-08: save_memory on a turn woken by a child corner's
@@ -258,16 +257,7 @@ describe('save_memory requester authority on corner wakes', () => {
   });
 
   it('saves a workspace fact on a merge-watch wake whose corner lost its requester link', async () => {
-    expect(await wakeLateCornerWatcher(database, ROOM, AGENT, WATCHED)).toBe(true);
-
-
-    const command = (
-      await database.query<{ id: string; turn_request_id: string }>(
-        `SELECT id,turn_request_id FROM agent_commands WHERE room_id=$1 AND source_message_id=$2`,
-        [ROOM, MERGED_LINE],
-      )
-    ).rows[0]!;
-    const turn = await claim(ROOM, command.id, command.turn_request_id);
+    const turn = await wake(ROOM, MERGED_LINE, 'watched_corner');
     const saved = await operation(
       'saveInstitutionalMemory',
       turn,

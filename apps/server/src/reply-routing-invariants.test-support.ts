@@ -15,10 +15,9 @@ export async function expectThreadRouting(db: SqlDatabase) {
         AND m.card->'route'->'to' IS DISTINCT FROM ${commander}
         AND NOT EXISTS (SELECT 1 FROM agent_commands c WHERE c.agent_id=m.author_id AND c.room_id=t.id
           AND m.card->'route'->'to' IN (c.message->'route'->'from',c.message->'replyAddress'))`,
-    `SELECT q.id FROM agent_commands q JOIN rooms t ON t.id=q.room_id AND t.parent_id IS NOT NULL
-      WHERE q.agent_id=(${commander})->>'agent' AND (${commander})->>'place'<>t.id::text
-        AND q.reason IN ('message','reply','report','system','order')
-        AND COALESCE(q.message->'route'->'from'->>'agent','')<>q.agent_id`,
+    `SELECT m.id FROM messages m JOIN rooms t ON t.id=m.block_corner_id
+      WHERE m.card->>'reportStatus'='blocked' AND m.author_id=m.card->>'reportToId'
+        AND m.room_id=t.id`,
   ];
   for (const query of checks) expect((await db.query(query)).rows).toEqual([]);
 }

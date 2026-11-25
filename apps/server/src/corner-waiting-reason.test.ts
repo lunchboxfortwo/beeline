@@ -53,7 +53,7 @@ it.each(['done:', 'failed:', 'unreachable', 'addressed message'])(
 it.each(['blocked', 'needs_decision'] as const)('REPORT-WAITING-DERIVED: real %s delivery opens a closeable wait', async status => {
   const { cornerId, report } = await blocked('@captain choose a scope.', status);
   expect((await rootFixture.db.query(`SELECT private_payload->>'reportStatus' status FROM agent_commands WHERE id=$1`, [report.id])).rows)
-    .toEqual([{ status: status.replace('_', '-') }]);
+    .toEqual([{ status: 'blocked' }]);
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE card_type='agent-command'`)).rows).toEqual([]);
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id, kind: 'report' });
   const waiting = (await rootFixture.db.query<{ person_id: string }>(`SELECT waiting.* FROM rooms c
@@ -130,7 +130,7 @@ it.each(['corner', 'thread'] as const)('REPORT-REPLY: a forwarded human report c
   const { cornerId } = await open();
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,card,created_at)
     VALUES('forwarded-report',$1,$2,'needs-decision: Choose a scope.',
-      jsonb_build_object('reportToId',$3::text,'sourceRoomId',$4::text),now()-interval '1 minute')`, [ROOM, WORKER, HUMAN, cornerId]);
+      jsonb_build_object('reportStatus','blocked','reportToId',$3::text,'sourceRoomId',$4::text),now()-interval '1 minute')`, [ROOM, WORKER, HUMAN, cornerId]);
   expect(await waitingPeople(cornerId)).toEqual([HUMAN]);
   await rootFixture.db.query(`INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id)
     VALUES('forwarded-answer',$1,$2,'yes',$3)`, [surface === 'corner' ? cornerId : ROOM, HUMAN,

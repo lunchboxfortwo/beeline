@@ -20,7 +20,7 @@ export async function reportRecipient(db:SqlDatabase,item:CommandRow):Promise<Me
   // A system wake (a Sentry alert) records who it answers; that is the issuer, not the System.
   const issuer = sender.agent === SYSTEM_IDENTITY_ID ? address : sender;
   const thread = (await db.query<{address:MessageAddress|null}>(`SELECT CASE
-    WHEN ${cornerReviewerSql('room','parent')}=$2 AND fact.implementer_agent_id IS NOT NULL
+    WHEN ${cornerReviewerSql('room','parent')}=$2 AND fact.implementer_agent_id IS NOT NULL AND fact.implementer_agent_id<>$2
       THEN jsonb_build_object('agent',fact.implementer_agent_id,'place',room.id)
     WHEN room.id::text=$4 AND $3<>'${SYSTEM_IDENTITY_ID}' AND EXISTS(SELECT 1 FROM identities WHERE id=$3 AND kind='human')
       THEN jsonb_build_object('agent',$3::text,'place',room.id)

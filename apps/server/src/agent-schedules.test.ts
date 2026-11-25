@@ -86,16 +86,10 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
     await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
     await expect(daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, AGENT))
       .resolves.toMatchObject({ delivered: true });
-    if (owner !== OTHER_AGENT) {
-      expect((await database.query("SELECT text FROM messages WHERE request_id=$1 AND card->>'reportStatus'='done'",[command!.id])).rows).toEqual([{text:'done: Work complete'}]);
-      const phone = new PhoneService(database, new LiveHub());
-      expect((await phone.readRoom(ROOM, OWNER))!.messages.filter(row => row.text === 'Work posted'))
-        .toHaveLength(1);
-    } else {
-      expect((await database.query("SELECT agent_id FROM agent_commands WHERE reason='report'")).rows)
-        .toEqual([{ agent_id: OTHER_AGENT }]);
-      expect((await database.query("SELECT 1 FROM messages WHERE text='done: Work complete'")).rowCount).toBe(0);
-    }
+    expect((await database.query("SELECT text FROM messages WHERE room_id=$1 AND request_id=$2 AND text='Work complete'",[ROOM,command!.id])).rows)
+      .toEqual([{text:'Work complete'}]);
+    expect((await database.query("SELECT agent_id FROM agent_commands WHERE reason='report'")).rows).toEqual([]);
+
   } finally { await database.close(); }
 });
 

@@ -91,7 +91,8 @@ it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report st
   expect(await state()).toBe('waiting');
   expect(await idleReports()).toHaveLength(0);
   const finished = await input();
-  await expect(daemon.execute('report',{...finished,status:'done',text:'Complete.'},WORKER)).rejects.toThrow(report.id);
+  await daemon.execute('postRoomMessage',{...finished,text:'Complete.'},WORKER);
+  expect(await blockReminder(db,WORKER,C)).toContain(report.id);
   await closeAgentAsk(db,WORKER,{messageId:report.id,reason:'answered'});
   await daemon.execute('report', { ...finished, status: status === 'blocked' ? 'done' : 'failed', text: 'The task is complete.' }, WORKER);
   expect(await state()).toBe('idle');
@@ -210,7 +211,7 @@ it.each([false,true])('BLOCK-CHAIN: re-ask reopens one Tasks row and takeover ow
   await createAgentCommand(db,{roomId:C,agentId:WORKER,sourceMessageId:null,reason:'corner_objective',privatePayload:{kind:'order',authorId:choice?HUMAN:COMMANDER,fromRoomId:ROOM,...(choice?{route:{from:{agent:HUMAN,place:ROOM},to:{agent:WORKER,place:C}}}:{}),text:modelText('Build')}});
   if(choice) {
     const {sendMessage}=await import('./agent-messaging.js');
-    await sendMessage(db,{id:'block',route:{from:{agent:WORKER,place:C},to:{agent:HUMAN,place:ROOM}},
+    await sendMessage(db,{id:'block',type:'blocked',route:{from:{agent:WORKER,place:C},to:{agent:HUMAN,place:ROOM}},
       text:'blocked: Need access',ask:{question:'Which access?',options:['One','Two']}});
     const card=(await db.query<{id:string}>('SELECT id FROM room_choices WHERE message_id=$1',['block'])).rows[0]!;
     await phone.execute('answerChoice',{choiceId:card.id,optionId:'A'},HUMAN);
@@ -263,7 +264,7 @@ it('BLOCK-LINK: commander passes a block to a person without looping back to its
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('source',$1,$2,'blocked: Need input',
     jsonb_build_object('reportToId',$3::text,'reportStatus','blocked','sourceRoomId',$4::text))`,[ROOM,WORKER,COMMANDER,C]);
   await expect(db.query(`INSERT INTO messages(id,room_id,author_id,text,card,reply_to_message_id)
-    VALUES('loop',$1,$2,'blocked: Answer me',jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'),'source')`,[ROOM,COMMANDER,WORKER])).rejects.toThrow('cannot target');
+    VALUES('loop',$1,$2,'blocked: Answer me',jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'),'source')`,[C,COMMANDER,WORKER])).rejects.toThrow('cannot target');
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,card,reply_to_message_id)
     VALUES('passed-up',$1,$2,'blocked: Need your input',jsonb_build_object('reportToId',$3::text,'reportStatus','blocked','sourceRoomId',$4::text),'source')`,[ROOM,COMMANDER,HUMAN,ROOM]);
   expect((await db.query("SELECT block_parent_id FROM messages WHERE id='passed-up'")).rows[0]).toEqual({block_parent_id:'source'});
@@ -273,8 +274,8 @@ it('BLOCK-LINK: commander passes a block to a person without looping back to its
 });
 
 it('BLOCK-MIGRATION: legacy private report becomes a closeable block once',async()=>{
-  const report=await daemon.execute('report',{...await input(),status:'blocked',text:'Legacy access needed'},WORKER);
-  await db.query('DELETE FROM messages WHERE id=$1',[report.id]);
+  const report=(await createAgentCommand(db,{roomId:ROOM,agentId:COMMANDER,sourceMessageId:null,reason:'report',
+    privatePayload:{kind:'report',authorId:WORKER,text:'Legacy access needed',originCornerId:C,fromRoomId:C,reportStatus:'blocked'}}))!;
   await db.query("DELETE FROM workflow_backfills WHERE name='implementer-blocks-v1'");
   await db.query(needsYouMarksSchema());
   expect(await blockReminder(db,WORKER,C)).toContain(report.id);
@@ -287,16 +288,16 @@ it('BLOCK-MESSAGE: plain blocks route to commander, who can pass a linked questi
   const { sendMessage }=await import('./agent-messaging.js');
   const opening=(await createAgentCommand(db,{roomId:C,agentId:WORKER,sourceMessageId:null,reason:'corner_objective',
     privatePayload:{kind:'order',authorId:COMMANDER,fromRoomId:ROOM,text:modelText('Build')}}))!;
-  const block=await daemon.execute('reply',{roomId:C,id:opening.id,text:'blocked: Need the access code'},WORKER);
+  const block=await daemon.execute('message',{roomId:C,requestId:opening.id,type:'blocked',text:'Need the access code'},WORKER);
   const row=(await db.query(`SELECT presentation,card_type,block_corner_id,card->>'reportToId' recipient FROM messages WHERE id=$1`,[block.id])).rows[0];
   expect(row).toEqual({presentation:'message',card_type:null,block_corner_id:C,recipient:COMMANDER});
   const parent=(await db.query<import('./agent-command.js').CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[block.id])).rows[0]!;
-  expect(parent).toMatchObject({agent_id:COMMANDER,room_id:ROOM,reason:'message',state:'pending',private_payload:{kind:'reply'}});
+  expect(parent).toMatchObject({agent_id:COMMANDER,room_id:ROOM,reason:'message',state:'pending',private_payload:{kind:'message'}});
   const response=await sendMessage(db,{route:{from:{agent:COMMANDER,place:ROOM},to:{agent:WORKER,place:C}},text:'I am checking access',replyTo:block.id,parent});
   expect(await blockReminder(db,WORKER,C)).toContain('; answered');
   await sendMessage(db,{route:{from:{agent:WORKER,place:C},to:{agent:COMMANDER,place:ROOM}},text:'Still need access',replyTo:response.id});
   expect(await blockReminder(db,WORKER,C)).toContain('; unanswered');
-  const passed=await sendMessage(db,{route:{from:{agent:COMMANDER,place:ROOM},to:{agent:HUMAN,place:ROOM}},text:'blocked: Please provide access',parent});
+  const passed=await sendMessage(db,{type:'blocked',route:{from:{agent:COMMANDER,place:ROOM},to:{agent:HUMAN,place:ROOM}},text:'blocked: Please provide access',parent});
   expect((await db.query('SELECT block_parent_id FROM messages WHERE id=$1',[passed.id])).rows[0]).toEqual({block_parent_id:block.id});
   expect((await phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items.map(i=>i.messageId)).toEqual([passed.id]);
   await phone.execute('sendRoomReply',{roomId:ROOM,parentMessageId:passed.id,text:'Access is restored'},HUMAN);

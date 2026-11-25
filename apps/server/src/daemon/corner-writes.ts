@@ -1,4 +1,4 @@
-import { fixCornerText,type CornerWatchKind } from '@beeline/api-contract/daemon';
+import { fixCornerText } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { randomUUID } from 'node:crypto';
 import { authorizeCommandOutput } from '../agent-command.js';
@@ -289,12 +289,6 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
         retainDepth: true,
       },
       });
-      // Opening watches lifecycle events where the commander opened the corner.
-      await db.query(
-          `INSERT INTO corner_watches(watcher_room_id,agent_id,corner_id,kinds,incoming_command_id) VALUES($1,$2,$3,'["opened","merged"]'::jsonb,$4)
-           ON CONFLICT(watcher_room_id,agent_id,corner_id) DO NOTHING`,
-          [commandRoomId, agentId, cornerId, parentCommand.id],
-        );
       // Only a real message in the command's transcript is a call site. Private
       // orders/reports have no message row; automatic wakes must not borrow a root.
       const source = (
@@ -324,14 +318,8 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
 
 
     });
-    const watch = (
-      await ctx.database.query<{ kinds: CornerWatchKind[] }>(
-        `SELECT kinds FROM corner_watches WHERE watcher_room_id=$1 AND agent_id=$2 AND corner_id=$3`,
-        [commandRoomId, agentId, cornerId],
-      )
-    ).rows[0];
     const warnings = [...textNotes, ...(input.brief ? validateCornerBrief(input.brief, repositoryWork) : [])];
-    return { cornerId, ...(warnings.length ? { warnings } : {}), ...(watch ? { watch: { roomId: commandRoomId, kinds: watch.kinds } } : {}) };
+    return { cornerId, ...(warnings.length ? { warnings } : {}) };
   }
 
   export async function daemonReviseCornerBrief(ctx: DaemonContext, input: Input<'reviseCornerBrief'>, agentId: string) {
@@ -423,7 +411,7 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           input.cornerId,
           revision,
           draft.spec.trim(),
-          JSON.stringify({ ...authority.approvalBasis, commanderReturnRoomId: commandRoomId, commanderCommandId: command.id }),
+          JSON.stringify(authority.approvalBasis),
           authority.revisionHash,
           draft.change?.trim() ?? null,
           agentId,

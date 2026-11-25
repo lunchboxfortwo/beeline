@@ -50,7 +50,7 @@ describe.skipIf(!url)('Needs you report query workload', () => {
       await database.query('ANALYZE');
       await database.query(`INSERT INTO messages(id,room_id,author_id,text,card)
         SELECT 'report-'||n,$1,$2,'blocked: Choose an approach '||n,
-          jsonb_build_object('reportToId',$3::text)
+          jsonb_build_object('reportStatus','blocked','reportToId',$3::text)
         FROM generate_series(1,$4::int) n`, [room, agent, viewer, reports]);
       await database.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at)
         SELECT $1,'report-'||n,$2,now() FROM generate_series(1,$3::int) n
@@ -77,7 +77,7 @@ describe.skipIf(!url)('Needs you report query workload', () => {
       for (const { sql, values } of statements) {
         const result = await database.query(`EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${sql}`, values);
         const plan = result.rows[0]!['QUERY PLAN'][0];
-        const visits = nodes(plan.Plan).filter(node => node['Index Name'] === 'messages_needs_you_report_idx')
+        const visits = nodes(plan.Plan).filter(node => node['Index Name'] === 'messages_needs_you_report_status_idx')
           .reduce((sum, node) => sum + (node['Actual Rows'] + (node['Rows Removed by Filter'] ?? 0)) * node['Actual Loops'], 0);
         console.log(JSON.stringify({ reportVisits: visits, planningMs: plan['Planning Time'], executionMs: plan['Execution Time'] }));
         expect(visits, 'report candidates must not rescan the report index per candidate').toBeLessThanOrEqual(reports * 2);
@@ -119,7 +119,7 @@ describe.skipIf(!url)('Needs you report query workload', () => {
         SELECT 'human-'||n,md5('human-room-'||(1+n%5))::uuid,
           CASE WHEN n%2=0 THEN $1 ELSE $2 END,
           CASE WHEN n%2=0 THEN '@reader please review note ' ELSE 'blocked: choose route ' END||n,
-          CASE WHEN n%2=0 THEN NULL ELSE jsonb_build_object('reportToId',$3::text) END,
+          CASE WHEN n%2=0 THEN NULL ELSE jsonb_build_object('reportStatus','blocked','reportToId',$3::text) END,
           now()-interval '10 days' FROM generate_series(1,5000) n`, [peer, agent, viewer]);
       await database.query(`INSERT INTO messages(id,room_id,author_id,text,created_at)
         SELECT 'answered-'||n,md5('human-room-'||n)::uuid,$1,'Reviewed.',now()-interval '9 days'
@@ -128,7 +128,7 @@ describe.skipIf(!url)('Needs you report query workload', () => {
       await database.query('ANALYZE');
       await database.query(`INSERT INTO messages(id,room_id,author_id,text,card)
         SELECT 'report-'||n,$1,$2,'blocked: Choose an approach '||n,
-          jsonb_build_object('reportToId',$3::text) FROM generate_series(1,$4::int) n`, [room, agent, viewer, reports]);
+          jsonb_build_object('reportStatus','blocked','reportToId',$3::text) FROM generate_series(1,$4::int) n`, [room, agent, viewer, reports]);
       await database.query(`INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at)
         SELECT $1,'report-'||n,$2,now() FROM generate_series(1,$3::int) n
         ON CONFLICT(identity_id,message_id) DO UPDATE SET cleared_at=EXCLUDED.cleared_at`, [viewer, workspace, reports-4]);

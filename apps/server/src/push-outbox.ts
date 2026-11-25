@@ -83,7 +83,7 @@ BEGIN
       -- Prose stays queued for an Attention/Off -> Full preference change.
       -- Other kinds need direct attention under every possible push level.
       AND ((m.presentation='message' AND m.card_type IS NULL)
-        OR ${pushDirectAttentionSql('collected_turn_ids')})
+        OR ${pushDirectAttentionSql()})
     ON CONFLICT(message_id,device_token) DO NOTHING;
 END $$;
 CREATE OR REPLACE FUNCTION message_push_outbox_trigger() RETURNS trigger LANGUAGE plpgsql AS $$

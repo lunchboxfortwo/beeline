@@ -78,23 +78,13 @@ it('refuses a self-watch as a bad request', async () => {
   expect((await db.query('SELECT 1 FROM corner_watches')).rowCount).toBe(0);
 });
 
-it('Reproduction O-2: a watcher receives a named sibling merge in A', async () => {
+it('Reproduction O-2: a sibling merge leaves the watcher idle', async () => {
 
   await watch();
   // Production archives the watched corner before writing its merge line.
   await db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [B]);
   await emit();
-  const commands = await wakes();
-  console.info(`Reproduction O-2: watcher wakes in A = ${commands.length}, body names B`);
-  expect(commands).toHaveLength(1);
-  expect(commands[0]).toMatchObject({
-    roomId: A,
-    reason: 'watched_corner',
-    action: 'input',
-    private: true,
-  });
-  expect(commands[0]!.sourceMessageId).toBe(commands[0]!.id);
-  expect(commands[0]!.source.body).toContain(`Watched thread B (${B}): merged`);
+  expect(await wakes()).toEqual([]);
 });
 
 it.each(['non-member', 'room', 'invalid kind', 'closed kind'])(
@@ -164,7 +154,7 @@ it('lets a parent Room watch its child', async () => {
   );
   expect((await watch(['merged'], P)).snapshot.id).toBe(B);
   await emit();
-  expect((await readAgentCommands(db, W, P)).commands).toHaveLength(1);
+  expect((await readAgentCommands(db, W, P)).commands).toHaveLength(0);
 });
 
 it('filters kinds and replaces the earlier watch', async () => {
@@ -173,7 +163,7 @@ it('filters kinds and replaces the earlier watch', async () => {
   await systemLine(db, { roomId: B, authorId: H, subject: GITHUB_SUBJECT, verb: 'checked', kind: 'check-failed' });
   expect(await wakes()).toEqual([]);
   await emit();
-  expect(await wakes()).toHaveLength(1);
+  expect(await wakes()).toHaveLength(0);
 });
 
 it('Reproduction ST-closed: legacy closed watches receive no wake when the corner closes', async () => {
@@ -205,11 +195,11 @@ it('an empty list removes the watch', async () => {
   expect(await wakes()).toEqual([]);
 });
 
-it('a duplicate line wakes once', async () => {
+it('a duplicate merge line leaves the watcher idle', async () => {
   await watch();
   expect((await emit()).inserted).toBe(true);
   expect((await emit()).inserted).toBe(false);
-  expect(await wakes()).toHaveLength(1);
+  expect(await wakes()).toHaveLength(0);
 });
 
 it.each(['removed membership', 'archived watcher'])('%s stops wakes', async (reason) => {

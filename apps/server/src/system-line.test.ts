@@ -193,7 +193,7 @@ describe('who an event line mentions', () => {
       kind: 'corner-opened',
       wakes: [QUIET_AGENT],
     });
-    expect(await wokenBy(unsubscribed.id)).toEqual([QUIET_AGENT]);
+    expect(await wokenBy(unsubscribed.id)).toEqual([]);
     const plain = await systemLine(database, {
       roomId: ROOM,
       subject: { kind: 'person', id: HUMAN, name: 'Ada' },

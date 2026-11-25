@@ -23,6 +23,7 @@ import { daemonTurnReceipt } from './turn-receipts.js';
 import { normalizePlaceAddresses } from './place-address.js';
 import { AccessDeniedError,CORNER_CLEANUP_OPERATIONS,CORNER_REACH_OPERATIONS,Input,Output } from './values.js';
 import { modelText } from '../message-origin.js';
+import { sendSessionMessage } from '../session-message.js';
 import { sendMessage,replyToMessage } from '../agent-messaging.js';
 
 
@@ -323,6 +324,7 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
     }
     const request=input as Input<'message'>;
     const parent=request.requestId ? await authorizeCommandOutput(ctx.database,request.roomId,agentId,request.requestId) : undefined;
+    if ('type' in request || !('to' in request)) return sendSessionMessage(ctx.database,agentId,request,parent,messageId) as Promise<Output<Name>>;
     return sendMessage(ctx.database,{route:{from:{agent:agentId,place:request.roomId},to:request.to},
       text:request.text,ask:request.ask,question:request.question,brief:request.brief,options:request.options,id:messageId,parent}) as Promise<Output<Name>>;
   }

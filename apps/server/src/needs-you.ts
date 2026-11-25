@@ -55,24 +55,15 @@ export function expiringCardForSql(m: string, identity: string): string {
 /** Now, in the epoch milliseconds `cardExpiresAtSql` returns. */
 const NOW_MS = `(extract(epoch FROM now())*1000)::bigint`;
 
-/** A blocked or needs-decision report. */
-export function isNeedsYouAsk(text: string): boolean {
-  return /^(blocked|needs-decision):\s*\S/.test(text);
+export function askSql(cardExpr: string): string {
+  return `COALESCE((${cardExpr})->>'reportStatus' IN ('blocked','needs-decision'),false)`;
 }
 
-/**
- * `isNeedsYouAsk` in SQL. TypeScript report parsing and the write/backfill
- * SQL must agree (`needs-you.test.ts`).
- */
-export function askSql(textExpr: string): string {
-  return `(${textExpr} ~ '^(blocked|needs-decision):[[:space:]]*[^[:space:]]')`;
-}
-
-/** Message `m` (or the bare row) is a live report; `messages_needs_you_report_idx` indexes it. */
+/** Message `m` (or the bare row) is a live report; `messages_needs_you_report_status_idx` indexes it. */
 export function askingMessageSql(m?: string): string {
   const column = (name: string) => (m ? `${m}.${name}` : name);
   return `${column('presentation')}='message' AND ${column('deleted_at')} IS NULL
-    AND ${askSql(column('text'))}`;
+    AND ${askSql(column('card'))}`;
 }
 
 function sentences(text: string): string[] {
@@ -87,11 +78,9 @@ function sentences(text: string): string[] {
  * Prefer a complete question, then the first sentence of an actionable report.
  */
 export function needsYouSentence(text: string): string {
-  const all = sentences(text.replace(/^(?:blocked|needs-decision):\s*/, '')).map(plainAsk).filter(Boolean);
+  const all = sentences(text).map(plainAsk).filter(Boolean);
   const question = all.find(sentence => sentence.endsWith('?'));
   if (question) return question;
-  const report = text.match(/^(?:blocked|needs-decision):\s*(.*)/s);
-  if (report) return plainAsk(sentences(report[1]!)[0] ?? report[1]!);
   return all[0] ?? plainAsk(text);
 }
 
@@ -272,8 +261,7 @@ function sourceClosedSql(message: string): string {
 /** A report from an agent, whatever its status. */
 export function agentReportSql(message: string): string {
   return `(${message}.presentation='message' AND ${message}.deleted_at IS NULL AND ${message}.card->>'reportToId' IS NOT NULL
-    AND (${message}.card->>'reportStatus' IN ('blocked','needs-decision','done','failed')
-      OR ${message}.text ~ '^(blocked|needs-decision|done|failed):'))`;
+    AND ${message}.card->>'reportStatus' IN ('blocked','needs-decision','done','failed'))`;
 }
 
 /**

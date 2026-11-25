@@ -15,18 +15,33 @@ const output = (roomId:string,requestId:string,text:string) =>
   daemon.execute('postRoomMessage',{roomId,requestId,text,harnessEnded:true},B);
 const report = (roomId:string,id:string,text:string) => daemon.execute('reply',{roomId,id,text},B);
 
+it('refuses a reply from another chat to a human tag that woke only the tagged session', async () => {
+  const tag = await queueMessage(db, {kind:'post', roomId:OTHER, authorId:H, text:'@jellybean Please inspect'});
+  const commands = await db.query<{id:string;room_id:string}>(
+    'SELECT id,room_id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [tag.id,B]);
+  expect(commands.rows).toEqual([{id:expect.any(String),room_id:OTHER}]);
+  await expect(report(CHAT,tag.id,'Inspection complete')).rejects.toThrow('Quote a message that woke this turn.');
+  expect((await db.query('SELECT room_id FROM messages WHERE author_id=$1', [B])).rows).toEqual([]);
+  const app = new RoomsMcpAgentTools(db,daemon);
+  const local = await task(H,CHAT);
+  await expect(app.call(B,'reply',{commandId:local.id,id:tag.id,text:'Wrong chat'})).rejects.toThrow('Quote a message');
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1', [B])).rows).toEqual([]);
+  await app.call(B,'reply',{commandId:commands.rows[0]!.id,id:tag.id,text:'Inspection complete'});
+  expect((await db.query("SELECT room_id,reply_to_message_id,card->'route'->'to' recipient FROM messages WHERE author_id=$1", [B])).rows)
+    .toEqual([{room_id:OTHER,reply_to_message_id:tag.id,recipient:{agent:H,place:OTHER}}]);
+});
+
 it('interleaves two thread sessions without mixing their output or report recipients', async () => {
   await db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1',[OTHER,CHAT]);
   const first = await task(H,THREAD);
   const second = await task(C,OTHER);
   await output(THREAD,first.id,'12 widgets');
   await output(OTHER,second.id,'3 widgets');
-  const wrong = await report(OTHER,first.id,'Working note');
-  expect(wrong.receipt).toContain('posted');
+  await expect(report(OTHER,first.id,'Working note')).rejects.toThrow('Quote a message');
   const one = await report(THREAD,first.id,'done: counted twelve');
   const two = await report(OTHER,second.id,'done: counted three');
   expect((await db.query("SELECT room_id,text FROM messages WHERE author_id=$1 AND card IS NULL ORDER BY text",[B])).rows)
-    .toEqual([{room_id:THREAD,text:'12 widgets'},{room_id:OTHER,text:'3 widgets'},{room_id:OTHER,text:'Working note'}]);
+    .toEqual([{room_id:THREAD,text:'12 widgets'},{room_id:OTHER,text:'3 widgets'}]);
   expect((await db.query("SELECT room_id,card->'route'->'to' recipient FROM messages WHERE id=$1",[one.id])).rows)
     .toEqual([{room_id:CHAT,recipient:{agent:H,place:CHAT}}]);
   expect((await db.query("SELECT parent_command_id,message->'route' route FROM agent_commands WHERE id=$1",[two.id])).rows)
@@ -36,9 +51,9 @@ it('interleaves two thread sessions without mixing their output or report recipi
 it('binds connected-app writes to the received command when two tasks are pending', async () => {
   const one=await task(H,THREAD), two=await task(C,OTHER);
   const app=new RoomsMcpAgentTools(db,daemon);
-  await app.call(B,'reply',{commandId:two.id,id:one.id,text:'Local note'});
+  await expect(app.call(B,'reply',{commandId:two.id,id:one.id,text:'Local note'})).rejects.toThrow('Quote a message');
   await app.call(B,'message',{commandId:two.id,to:{agent:A,place:CHAT},text:'Inspect'});
-  expect((await db.query('SELECT room_id FROM messages WHERE text=$1',['Local note'])).rows).toEqual([{room_id:OTHER}]);
+  expect((await db.query('SELECT room_id FROM messages WHERE text=$1',['Local note'])).rows).toEqual([]);
   expect((await db.query("SELECT state FROM agent_commands WHERE id=$1",[one.id])).rows).toEqual([{state:'pending'}]);
   expect((await db.query("SELECT message->'route'->'from' sender,parent_command_id FROM agent_commands WHERE agent_id=$1",[A])).rows)
     .toEqual([{sender:{agent:B,place:OTHER},parent_command_id:two.id}]);
@@ -56,7 +71,7 @@ it.each([true,false])('keeps file-only output home with report first=%s', async 
     .toEqual([{room_id:THREAD,attachments:[file]}]);
   expect((await db.query('SELECT room_id,attachments FROM messages WHERE text=$1',['done: counted'])).rows)
     .toEqual([{room_id:CHAT,attachments:[]}]);
-  expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[late.id])).rows).toEqual([{room_id:THREAD}]);
+  expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[late.id])).rows).toEqual([{room_id:CHAT}]);
 });
 
 it('finishes a chat order silently when the worker only produces output', async () => {

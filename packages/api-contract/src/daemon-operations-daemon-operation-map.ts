@@ -178,7 +178,7 @@ export type DaemonOperationMap = {
       readonly attachments: readonly DaemonAttachment[];
     }
   >;
-  message: Operation<RoomInput & TurnOutputAuthority & { readonly to: import('./agent-messaging.js').MessageAddress; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk; readonly question?: string; readonly brief?: string; readonly options?: readonly string[] }, WriteResult>;
+  message: Operation<RoomInput & TurnOutputAuthority & ({ readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string } | { readonly to: import('./agent-messaging.js').MessageAddress; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk; readonly question?: string; readonly brief?: string; readonly options?: readonly string[] }), WriteResult>;
   reply: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly queuedRequestIds?: readonly string[]; readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk; readonly question?: string; readonly brief?: string; readonly options?: readonly string[] }, WriteResult & { readonly _meta?: { readonly beeline: { readonly turnComplete: true } } }>;
   /** Cutover only: calls serving queued legacy items. Remove with messaging-cutover.ts. */
   order: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly text: string; readonly agent?: string }, WriteResult>;

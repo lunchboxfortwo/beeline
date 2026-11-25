@@ -516,7 +516,7 @@ describe('Work board recorded sources and single assignee', () => {
     const text = `blocked: ${'z'.repeat(200)}. More report context.`;
     await db.query(
       'INSERT INTO messages(id,room_id,author_id,text,card) VALUES($1,$2,$3,$4,$5::jsonb)',
-      ['legacy-report', chat, agent, text, JSON.stringify({ reportToId: person })],
+      ['legacy-report', chat, agent, text, JSON.stringify({ reportToId: person, reportStatus:'blocked' })],
     );
     const item = (await read()).items.find((item) => item.messageId === 'legacy-report')!;
     expect(item).not.toHaveProperty('brief');
@@ -531,7 +531,7 @@ describe('Work board recorded sources and single assignee', () => {
     await db.query(
       `INSERT INTO messages(id,room_id,author_id,text,card) VALUES
         ($1,$2,$4,'@ada Can you verify phone latency? Please approve.',NULL),
-        ($3,$2,$4,'blocked: Phone latency needs a signed build.',jsonb_build_object('reportToId',$5::text))`,
+        ($3,$2,$4,'Phone latency needs a signed build.',jsonb_build_object('reportStatus','blocked','reportToId',$5::text))`,
       ['d'.repeat(64), thread, 'e'.repeat(64), agent, person],
     );
     const board = await read();

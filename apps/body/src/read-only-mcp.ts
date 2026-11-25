@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   BoundedSizeError,
@@ -38,7 +38,7 @@ import {
   resolveFetchedImageMime,
   resolveWriteScratchPath,
 } from './read-only-mcp-open-corner.js';
-import { executeAgentTool, GrantRunDeps, turnArtifacts } from './read-only-mcp-open-poll.js';
+import { GrantRunDeps } from './read-only-mcp-open-poll.js';
 import {
   gitDiff,
   gitLog,
@@ -807,62 +807,6 @@ export async function daemonUploadArtifact(
     size: typeof body.size === 'number' ? body.size : bytes.length,
     title: typeof body.title === 'string' ? body.title : title,
   };
-}
-
-// MCP requests may run concurrently. Register artifact work before the first
-// await so an immediately following report cannot overtake its upload/queue.
-export let artifactItem: unknown;
-
-export async function callCommandTool(
-  name: string,
-  args: JsonObject,
-  toolCallId: string,
-): Promise<string> {
-  if (name !== 'post_artifact' && name !== 'reply' && name !== 'message' && name !== 'post')
-    return executeAgentTool(name, args, toolCallId);
-  const contextFile = process.env.BEELINE_TURN_CONTEXT_FILE;
-  const context = contextFile
-    ? (JSON.parse(readFileSync(contextFile, 'utf8')) as Record<string, unknown>)
-    : {};
-  const key = JSON.stringify([
-    process.env.BEELINE_DAEMON_BASE_URL,
-    process.env.BEELINE_DAEMON_ROOM_ID,
-    context.roomId,
-    commandRequest.getStore() ?? context.requestId,
-    context.itemId,
-  ]);
-  if (artifactItem !== context.itemId) {
-    turnArtifacts.clear();
-    artifactItem = context.itemId;
-  }
-  const artifacts = turnArtifacts.get(key) ?? { uploads: [] };
-  turnArtifacts.set(key, artifacts);
-  if (name === 'post_artifact') {
-    const upload = executeAgentTool(name, args, toolCallId);
-    const artifactName =
-      typeof args.title === 'string' && args.title.trim()
-        ? args.title.trim()
-        : typeof args.path === 'string'
-          ? basename(args.path)
-          : '';
-    artifacts.uploads.push({ name: artifactName, result: upload });
-    // Retain failures until a later upload has successfully queued a replacement.
-    void upload.catch(() => {});
-    return upload;
-  }
-  const uploads = [...artifacts.uploads];
-  const results = await Promise.allSettled(uploads.map((upload) => upload.result));
-  for (const [index, result] of results.entries()) {
-    if (result.status !== 'rejected') continue;
-    const replaced = results.some(
-      (later, laterIndex) =>
-        laterIndex > index &&
-        later.status === 'fulfilled' &&
-        uploads[laterIndex]!.name === uploads[index]!.name,
-    );
-    if (!replaced) throw result.reason;
-  }
-  return executeAgentTool(name, args, toolCallId);
 }
 
 /** Keep concurrent calls isolated; footer metadata rides on their existing operation responses. */

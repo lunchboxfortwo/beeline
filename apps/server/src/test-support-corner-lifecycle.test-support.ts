@@ -208,7 +208,6 @@ beforeEach(async () => {
   await db.query(`DELETE FROM work_schedules`);
   await db.query(`DELETE FROM agent_commands`);
   await db.query(`DELETE FROM agent_turns`);
-  await db.query(`DELETE FROM messages WHERE room_id<>$1`, [R]);
   await db.query(`DELETE FROM messages`);
   await db.query(`DELETE FROM corner_facts`);
   await db.query(`DELETE FROM corner_brief_revisions`);

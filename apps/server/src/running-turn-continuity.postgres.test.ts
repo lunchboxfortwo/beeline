@@ -57,9 +57,9 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const opened = await daemon.execute('createCorner',{ roomId:room, requestId:parent.turn_request_id, targetRoomId:room, name:'Blocker', objective:'Publish the work', implementer:'worker', brief:{ spec:'Publish the work',repositoryWork:false,approval:{ sourceMessageId:source } } },agent);
     const assignment = (await readAgentCommands(db, worker, opened.cornerId)).commands[0]!;
     await startQueuedTurn(db, opened.cornerId, worker, assignment.id);
-    await daemon.execute('report',{ roomId:opened.cornerId, requestId:assignment.turnRequestId, status:'blocked', text:'blocked: publish is pending' },worker);
+    const block = await daemon.execute('report',{ roomId:opened.cornerId, requestId:assignment.turnRequestId, status:'blocked', text:'blocked: publish is pending' },worker);
     // Continue the report in the session that opened the room.
-    const report = (await readAgentCommands(db, agent, room)).commands.find(command => command.reason === 'report')!;
+    const report = (await readAgentCommands(db, agent, room)).commands.find(command => command.id === block.id)!;
     await startQueuedTurn(db, room, agent, report.id);
     await phone.execute('sendRoomMessage', { roomId:room,text:'Publish is unblocked now' },human);
     await phone.execute('sendRoomMessage', { roomId:room,text:'@ruby The blocker is resolved; check the next step' },human);

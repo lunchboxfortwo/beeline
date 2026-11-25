@@ -34,7 +34,7 @@ BEGIN
         'agentId', COALESCE(NEW.author_id, OLD.author_id),
         'needsYouCandidate', COALESCE(NEW.presentation,OLD.presentation) IN ('card','system')
           OR (COALESCE(NEW.presentation,OLD.presentation)='message' AND
-            ${askSql('COALESCE(NEW.text,OLD.text)')}),
+            ${askSql('COALESCE(NEW.card,OLD.card)')}),
         -- The newest chat message is a column of the parent's corner row, and
         -- a corner's newest handoff card is its run state.
         'cornerParentId', CASE WHEN ((NEW.presentation IN ('message','system')

@@ -167,16 +167,16 @@ export function cornerHasRepositoryWork(brief?: CornerBrief): boolean {
 
 /** The agent doing the work holds the implementer label; read-only and review turns never claim. */
 export const CORNER_CLAIM_RULE = 'Before your first edit or commit in this thread, call claim_thread. Do not claim on read-only or review turns.';
-export const CORNER_RUNTIME_AUTHOR_CONTRACT = `Everything you write stays in this thread. The current brief's spec, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story and criterion, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested. Deliver artifacts with post_artifact without requiring a PR. Claim another agent's progress only from durable commands, the current prompt or tool evidence. No unrequested features or refactors.`;
+export const CORNER_RUNTIME_AUTHOR_CONTRACT = `Your turn text and files post here. Report only blockers to your commander. The current brief's spec, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story and criterion, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested. Deliver artifacts with post_artifact without requiring a PR. Claim another agent's progress only from durable commands, the current prompt or tool evidence. No unrequested features or refactors.`;
 
-export const CORNER_AUTHOR_CONTRACT = `Everything you write stays in this thread. reply(id) reports to your commander: only when done, blocked or asking; add ask when an answer is needed. Worker done requires an opened PR or repositoryWork:false.
+export const CORNER_AUTHOR_CONTRACT = `Your turn text and files post here. Report only blockers to your commander. Worker done requires an opened PR or repositoryWork:false.
 The current brief's stories, criteria, approving message, non-goals and inherited human constraints bound the work; its objective is navigation only. Meet every story, respect risks and use the file manifest. Before code/build, read the current brief. Any human in the chat can direct you. Follow the newer instruction when humans conflict, revise the brief with that message as approval, and state in the thread what changed. Dispatch authorizes work without separate spec/mock approval; produce either first when requested.
 Bugfix briefs need a real-target Reproduction <id> or why infeasible and the closest stand-in; done requires that proof to pass.
 Follow beeline-triage. Before PR, prove the user path in the built app/service or, if unavailable, the narrowest script for that path. Inner-function tests/logs/code reads prove no visible result. The PR body needs ## Reproduced and ## Demonstrated: steps, wrong/passing results, same Reproduction <id>, why real-target proof is unavailable and its stand-in. Features: "not a defect report".
 Non-repo work: post_artifact. End awaiting messages/checks/review; committed wakes resume. Landing archives this thread, cancels its work and abandons saved runs. The surviving commander owns follow-up at its address. Claim others' progress only from durable commands, this prompt or tool evidence. No unrequested features or refactors.`;
 
 export const CORNER_REVIEWER_SESSION_INSTRUCTION =
-  "As configured reviewer, review the assigned green head with approve_merge. Demand available proof; reply to the task message if capability is missing. Approve only the exact reviewed head. The server merges when its gate opens.";
+  "As configured reviewer, review the assigned green head with approve_merge. Demand available proof; report a blocker if capability is missing. Approve only the exact reviewed head. The server merges when its gate opens.";
 
 export const CORNER_DELIVERY_NUDGE =
   'Only when you write code in this thread and the brief calls for repository changes, inspect the repository state and finish delivering the work unless a human hold stands: commit and push the intended changes and open the pull request if one does not exist. Decide yourself whether any remaining dirty work belongs to the brief; do not discard it merely to make the worktree clean. The pull request body must carry ## Reproduced and ## Demonstrated; if they are missing, add them before ending the turn. If you wrote no code, deliver with post_artifact.';
@@ -214,7 +214,7 @@ export function cornerReviewerInstruction(input: {
   // the head is named in the transcript, so it is described, not guessed.
   const number = input.pullRequestNumber ?? 'N';
   const headSha = input.headSha ?? '<head sha>';
-  return `Review PR ${number} at ${headSha}${input.briefRevision ? ` against brief revision ${input.briefRevision}` : ''} with beeline-review. Lead with PASS or FAIL; finish the review and list all blockers with concrete fixes, including every blocker on the first round. For later rounds, read the entire PR, find your last FAIL for this PR and its reviewed head in this thread, and use git diff from that head to the assigned head. Fail only for unresolved prior blockers or regressions introduced since that review; newly found issues in unchanged code are notes, not blockers. Keep notes separate; omit outline ledgers, message IDs and commit hashes from the posted verdict. Obtain live proof in the review Workspace; reply to the task message if capability is missing. FAIL: message the implementer at this thread's address with all findings. PASS: call approve_merge with the reviewed head SHA, then end the turn. The server owns merging.`;
+  return `Review PR ${number} at ${headSha}${input.briefRevision ? ` against brief revision ${input.briefRevision}` : ''} with beeline-review. Lead with PASS or FAIL; finish the review and list all blockers with concrete fixes, including every blocker on the first round. For later rounds, read the entire PR, find your last FAIL for this PR and its reviewed head in this thread, and use git diff from that head to the assigned head. Fail only for unresolved prior blockers or regressions introduced since that review; newly found issues in unchanged code are notes, not blockers. Keep notes separate; omit outline ledgers, message IDs and commit hashes from the posted verdict. Obtain live proof in the review Workspace; report a blocker if capability is missing. FAIL: message the implementer at this thread's address with all findings. PASS: call approve_merge with the reviewed head SHA, then end the turn. The server owns merging.`;
 }
 
 /**
@@ -343,10 +343,8 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     layer: 'session',
     surfaces: EVERYWHERE,
     render: ({ surface }) => paragraphs(
-      !CORNERS.includes(surface) && 'Send message(to:{agent,place},text) to one identity in one chat or thread. The same agent in different places has different addresses. Discover with read.',
       !CORNERS.includes(surface) && 'Message other agents only when you need something from them, or when you are replying to something they need.',
       !CORNERS.includes(surface) && 'A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
-      'Add ask for answers: question <=120 characters, one line ending ?; brief <=280 characters, <=2 sentences: why it matters, what each option means; 2–4 options <=3 words, optional recommended. Over-limit asks are refused with counts; rewrite. Needs you cards show only question, brief, buttons; connects/grants have their own.',
       !CORNERS.includes(surface) && 'After messaging another agent, end the turn; its reply wakes a new turn; do not sleep or poll.',
       CORNERS.includes(surface) && 'Outside this thread, tell people the original problem, blocker, and needed decision in plain words.',
       CORNERS.includes(surface) && 'The server requests review; never tag the reviewer.',
@@ -397,12 +395,12 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
           [
             'Code work happens only in a thread.',
             'Before opening one, consult beeline-triage and beeline-spec, then call open_thread with the target chat address, a name of at most three words joined by hyphens (no whitespace), an objective of at most 24 words, and the brief (a spec plus optional opening context). The objective only titles the work; the brief is its authority. Opening requires no human approval. Include a dispatching message when available; otherwise the server records the opening agent as agent-initiated. Revisions retain their approval rule. When open_thread succeeds the server posts the thread card: do not restate it.',
-            'Use read(facet:messages, address) across member chats. wake(action:create, trigger:lifecycle, address:cornerAddress) wakes only on opened or merged; open_thread watches automatically. Schedules and chatter never wake watchers.',
+            'Use read(facet:messages, address) across member chats.',
             'When the thread builds a backlog task, pass its id in open_thread workItems: the task moves to In progress, then Done when the thread lands, or back to Backlog if it closes unmerged.',
             'Landing archives a repository thread and cancels its work, including saved runs. The surviving commander owns follow-up at its own address. Repo-less and repositoryWork:false work delivers its artifact without a PR.',
           ].join(' '),
         surface === 'dm' &&
-          'Use read(facet:addresses) to discover addresses, then open_thread(chat, implementer, brief), message and read across member chats; wake watches only thread addresses. Do repository work in a thread.',
+          'Use read(facet:addresses) to discover addresses, then open_thread(chat, implementer, brief), message and read across member chats. Do repository work in a thread.',
       ),
   },
   {
@@ -693,7 +691,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
       brief
         ? `${renderAssignedCornerBrief(brief.brief)}${cornerHasRepositoryWork(brief.brief) ? `\n\nAssigned files:\n${brief.fileLines.join('\n') || '(none)'}` : brief.fileLines.length ? `\n\nBrief attachments:\n${brief.fileLines.join('\n')}` : ''}\n\nRead the current brief revision ${brief.brief.revision} before acting. It governs this turn. Replaced instructions: earlier delivered messages and review targets are historical wherever they conflict with this brief; do not act on their superseded scope.${brief.missingRequiredFile ? '\nRequired assignment files are unavailable. Pause work that depends on them and report the missing file precisely.' : ''}`
         : surface === 'code-corner'
-          ? generatedTitle ? '' : 'No assigned brief yet. Before any code, reply to the task message with ask for the first brief.'
+          ? generatedTitle ? '' : 'No assigned brief yet. Before any code, send your commander a blocker asking for the brief.'
           : 'No assigned brief: the human messages in this thread are the authority; skip steps that need a brief revision.',
   },
   {

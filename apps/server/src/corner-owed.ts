@@ -15,7 +15,7 @@ import { grantDecidedBySql } from './needs-you.js';
 
 /** A tag, a reply, or a deliverable stops keeping its corner waiting this long after it was posted. */
 const CORNER_OWED_EXPIRY_HOURS = 24;
-const BLOCKING_ITEM = `COALESCE((item.text ~ '^(needs-decision|blocked):[[:space:]]*[^[:space:]]'
+const BLOCKING_ITEM = `COALESCE((item.card->>'reportStatus' IN ('blocked','needs-decision')
   OR (item.card_type='${CHOICE_CARD_TYPE}' AND item.card->>'mode'='question')
   OR item.card_type IN ('grant-request','permission','connector-offer',
     'agent-sign-in','app-sign-in','squire-approval','vault-save')),false)`;
@@ -63,7 +63,7 @@ export function addressedToPersonSql(
     OR ${tagsKnownIdentitySql(m, personIdExpr, personHandleExpr, personKindExpr)}
     OR (${m}.card_type='vault-save' AND ${m}.card->>'ownerId'=${personIdExpr}
       AND ${m}.card->>'status' IN ('pending','saving'))
-    OR (${m}.text ~ '^(needs-decision|blocked):' AND COALESCE(${m}.card->>'reportToId',(
+    OR (${m}.card->>'reportStatus' IN ('blocked','needs-decision') AND COALESCE(${m}.card->>'reportToId',(
       SELECT source.author_id FROM agent_commands command JOIN messages source
         ON source.id=command.root_source_message_id AND source.room_id=${m}.room_id
       WHERE command.id=${m}.request_id AND command.agent_id=${m}.author_id
@@ -168,7 +168,7 @@ function cornerOwedRowsSql(where: string, bulk: boolean, corner?: string, parent
     JOIN rooms owed_corner ON owed_corner.id=CASE
       WHEN item.card->>'sourceRoomId' ~ '${CANONICAL_UUID}'
         THEN (item.card->>'sourceRoomId')::uuid
-      WHEN item.presentation='message' AND item.text ~ '^(blocked|needs-decision|failed):[[:space:]]*[^[:space:]]'
+      WHEN item.presentation='message' AND item.card->>'reportStatus' IN ('blocked','needs-decision')
         THEN COALESCE(origin.id,item.room_id) ELSE item.room_id END
       AND owed_corner.parent_id IS NOT NULL
     JOIN memberships person_member ON person_member.room_id=owed_corner.parent_id
@@ -262,14 +262,10 @@ export function cornerOwedAnswerTimesSql(corner: string, externalOnly = false): 
 function refreshReportedCornersSql(room: string, person: string): string {
   return `PERFORM corner_owed_refresh(origin.id, ${person})
     FROM (SELECT DISTINCT source_origin.id FROM messages question
-      JOIN agent_commands report ON report.id=question.request_id AND report.agent_id=question.author_id
-      JOIN rooms source_origin ON source_origin.id=CASE
-        WHEN report.private_payload->>'originCornerId' ~ '${CANONICAL_UUID}'
-          THEN (report.private_payload->>'originCornerId')::uuid ELSE report.room_id END
+      JOIN rooms source_origin ON source_origin.id::text=${humanReportCornerSql('question')}
         AND source_origin.parent_id IS NOT NULL
       WHERE question.room_id=${room} AND question.presentation='message' AND question.deleted_at IS NULL
-        AND (question.text ~ '^needs-decision:' OR question.created_at>now()-interval '${CORNER_OWED_EXPIRY_HOURS} hours')
-        AND question.text ~ '^(blocked|needs-decision|failed):[[:space:]]*[^[:space:]]'
+        AND question.card->>'reportStatus' IN ('blocked','needs-decision')
     ) origin;`;
 }
 
@@ -297,7 +293,7 @@ function cornerMessageCandidatesSql(corner?: string, parent?: string, externalOn
       SELECT item.id FROM agent_commands report
       JOIN messages item ON item.request_id=report.id
         AND item.author_id=report.agent_id AND item.presentation='message'
-        AND item.text ~ '^(blocked|needs-decision|failed):[[:space:]]*[^[:space:]]'
+        AND item.card->>'reportStatus' IN ('blocked','needs-decision')
         ${externalOnly ? `AND item.room_id<>${corner}` : ''}
       WHERE (CASE WHEN report.private_payload->>'originCornerId' ~ '${CANONICAL_UUID}'
         THEN (report.private_payload->>'originCornerId')::uuid ELSE report.room_id END)=${corner}

@@ -450,7 +450,7 @@ describe('prompt assembly guards', () => {
 
   it('keeps thread help requests with the commander', () => {
     for (const contract of [promptRules.CORNER_AUTHOR_CONTRACT, promptRules.CORNER_RUNTIME_AUTHOR_CONTRACT]) {
-      expect(contract).toContain('Everything you write stays in this thread.');
+      expect(contract).toContain('Your turn text and files post here. Report only blockers to your commander.');
       expect(contract).not.toContain('deliver task outcomes with reply(id)');
     }
   });
@@ -619,7 +619,7 @@ describe('prompt assembly guards', () => {
     expect(session).not.toContain('Open the pull request with gh');
     expect(session).not.toContain(cornerMergeInstruction('sol'));
     const turn = assembleTurnPrompt(TURN_VARIANTS['code-corner-turn']!).text;
-    expect(turn).toContain('Before any code, reply to the task message with ask for the first brief.');
+    expect(turn).toContain('Before any code, send your commander a blocker asking for the brief.');
     const generated = assembleTurnPrompt({
       ...TURN_VARIANTS['code-corner-turn']!,
       generatedTitle: 'still harbor thread',

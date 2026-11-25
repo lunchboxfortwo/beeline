@@ -1,3 +1,4 @@
+import { closeAgentAsk } from './agent-open-asks.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { phoneFetch, randomBytes, randomUUID, describe, expect, it, vi, migrate, assignCornerWorker, PhoneService, DaemonService, GitHubOperations, LiveHub, systemLine, advanceCorner, backfillCornerLifecycleRuns, cornerMergeGate, confirmCornerMergeAuthority, createAgentCommand, CORNER_LIFECYCLE_CARD_TYPE, H, A, B, W, R, db, phone, daemon, github, githubRollupState, githubHead, githubApp, implementersMerge, currentState, commissioned, brief, open, claim, pushToCorner, greenHead, redHead, resumeWorker, commands, result, SHA, branchOf, reasons, projected, inReview, approve, approved, mergedWebhook, say, rootFixture, type GitHubAppClient, type GitHubOAuthClient } from './test-support-corner-lifecycle.test-support.js';
 
@@ -355,12 +356,13 @@ describe('Reproduction IDLE-1: thread status says whether its agent runs or wait
       activity: 'running',
     });
     // The outline asks the human, so the corner owes them a reply.
+    const blockId = randomBytes(32).toString('hex');
     const outline = `needs-decision: @human Outline for approval. ${'x'.repeat(400)}`;
     await rootFixture.db.query(
-      `INSERT INTO messages(id,room_id,author_id,text,presentation,created_at)
-       VALUES($1,$2,$3,$4,'message',now()+interval '1 second'),
-             ($5,$2,$3,'thinking','activity',now()+interval '2 seconds')`,
-      [randomBytes(32).toString('hex'), cornerId, A, outline, randomBytes(32).toString('hex')],
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,created_at,card)
+       VALUES($1,$2,$3,$4,'message',now()+interval '1 second',jsonb_build_object('reportStatus','blocked','reportToId',$6::text)),
+             ($5,$2,$3,'thinking','activity',now()+interval '2 seconds',NULL)`,
+      [blockId, cornerId, A, outline, randomBytes(32).toString('hex'),H],
     );
     await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [cornerId]);
     await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1`, [cornerId]);
@@ -379,6 +381,7 @@ describe('Reproduction IDLE-1: thread status says whether its agent runs or wait
        VALUES($1,$2,$3,'approve','message',now()+interval '3 seconds')`,
       [randomBytes(32).toString('hex'), cornerId, H],
     );
+    await closeAgentAsk(rootFixture.db,A,{messageId:blockId,reason:'answered'});
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
     const replied = await rootFixture.daemon.execute('getCornerRestoreState', { cornerId }, A);
     // The answer clears Waiting and the completed turn's grace period.

@@ -4,7 +4,7 @@ import { createHash,randomBytes } from 'node:crypto';
 import { dropQueuedOrdersForStop,lockAgentCommandQueue } from './agent-command-queue.js';
 import { queueMessage,type CommandRow,type PrivateCommandPayload } from './agent-command.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { cornerCommanderBriefSql,cornerCommanderIdSql,threadCommanderAddressSql,threadTaskSql } from './corner-commander.js';
+import { cornerCommanderIdSql,threadCommanderAddressSql,threadTaskSql } from './corner-commander.js';
 import { recordedMessageRoute,reportRecipient } from './message-route.js';
 import { cornerOpenedFromSql,cornerOpeningSql } from './corner-opening.js';
 import { cornerImplementerSql } from './corner-worker.js';
@@ -14,8 +14,18 @@ import { systemIdentityMention,systemLine } from './system-line.js';
 import type { AgentVoice,Composed,SystemAuthorId } from './message-origin.js';
 export { CommandRefusalError } from './command-refusal.js';
 
+/** A received block continues the recipient's work at the place where it was assigned. */
+export async function assignmentBeforeBlock(db:SqlDatabase, block:CommandRow) {
+  return (await db.query<CommandRow>(`WITH RECURSIVE chain AS (
+    SELECT task.*,0 depth FROM agent_commands task WHERE task.id=$1
+    UNION ALL SELECT task.*,child.depth+1 FROM agent_commands task JOIN chain child ON task.id=child.parent_command_id
+  ) SELECT * FROM chain WHERE room_id=$2 AND agent_id=$3 AND private_payload->>'reportStatus' IS DISTINCT FROM 'blocked'
+    ORDER BY depth LIMIT 1`,[block.parent_command_id,block.room_id,block.agent_id])).rows[0];
+}
+
 /** Follow provenance to the order that selects this command's return route. */
 export async function commandOrder(db: SqlDatabase, command: CommandRow): Promise<CommandRow> {
+  if (command.private_payload?.reportStatus === 'blocked') command = await assignmentBeforeBlock(db,command) ?? command;
   if (command.private_payload?.route || command.private_payload?.kind === 'order') return command;
   return (
     (
@@ -179,23 +189,20 @@ export async function stopCommandedTurn(
  * Expressions refer to the caller's question row, not to later replacement orders.
  */
 export function commanderChainSql(corner: string, asker: string, askedAt: string): string {
-  return `WITH RECURSIVE approved_brief AS (${cornerCommanderBriefSql(`${corner}.id`, askedAt)}), assignment_chain AS (
+  return `WITH RECURSIVE assignment_chain AS (
     SELECT seed.* FROM agent_commands seed WHERE seed.id IN (
       (SELECT assigned.id FROM agent_commands assigned
         WHERE assigned.room_id=${corner}.id AND assigned.agent_id=${asker}
           AND assigned.created_at<=${askedAt}
-          AND (NOT EXISTS(SELECT 1 FROM approved_brief) OR assigned.created_at>=(SELECT created_at FROM approved_brief))
           AND (assigned.private_payload->>'kind'='order' OR assigned.reason='human_tag')
         ORDER BY assigned.created_at DESC,assigned.id DESC LIMIT 1),
-      COALESCE((SELECT approval_basis->>'commanderCommandId' FROM approved_brief),
         (SELECT opened.id FROM agent_commands opened WHERE opened.room_id=${corner}.id
-          AND opened.reason='corner_objective' AND NOT EXISTS(SELECT 1 FROM approved_brief)
-          ORDER BY opened.created_at,opened.id LIMIT 1)))
+          AND opened.reason='corner_objective'
+          ORDER BY opened.created_at,opened.id LIMIT 1))
     UNION
     SELECT parent.* FROM agent_commands parent JOIN assignment_chain child ON parent.id=child.parent_command_id
   ), commanders AS (
-    SELECT COALESCE((SELECT author_id FROM approved_brief),${corner}.created_by) id
-    UNION SELECT approval_basis->>'approvedBy' FROM approved_brief
+    SELECT ${cornerCommanderIdSql(corner)} id
     UNION SELECT assigned.private_payload->>'authorId' FROM assignment_chain assigned
       WHERE assigned.private_payload->>'kind'='order'
     UNION SELECT source.author_id FROM assignment_chain assigned
@@ -263,26 +270,11 @@ export async function reportAgentAttention(
   });
 }
 
-/** Approved revisions replace the opening route without changing its provenance. */
 async function cornerReportOpening(db: SqlDatabase, roomId: string) {
-  const corner = (await db.query<{ created_by: string; parent_id: string; opening: CommandRow | null;
-    handover: { revision: number; author_id: string; source_room_id: string; approval_basis: {
-      sourceMessageId: string; commanderReturnRoomId?: string; commanderCommandId?: string;
-    } } | null }>(
-    `SELECT room.created_by,room.parent_id,row_to_json(opening) opening,row_to_json(handover) handover FROM rooms room
-     LEFT JOIN LATERAL (${cornerOpeningSql('room.id')}) opening ON true
-     LEFT JOIN LATERAL (${cornerCommanderBriefSql('room.id')}) handover ON true
-     WHERE room.id=$1 AND room.parent_id IS NOT NULL`, [roomId])).rows[0];
-  if (corner?.handover) {
-    const revision = corner.handover;
-    corner.opening = { ...corner.opening, room_id: roomId, reason: 'corner_objective',
-      parent_command_id: revision.approval_basis.commanderCommandId ?? null,
-      root_source_message_id: revision.approval_basis.sourceMessageId,
-      private_payload: { kind: 'order', text: '', authorId: revision.author_id,
-        fromRoomId: revision.approval_basis.commanderReturnRoomId ?? revision.source_room_id },
-    } as CommandRow;
-  }
-  return corner;
+  return (await db.query<{created_by:string; parent_id:string; opening:CommandRow|null}>(`
+    SELECT room.created_by,room.parent_id,row_to_json(opening) opening FROM rooms room
+    LEFT JOIN LATERAL (${cornerOpeningSql('room.id')}) opening ON true
+    WHERE room.id=$1 AND room.parent_id IS NOT NULL`, [roomId])).rows[0];
 }
 
 /** The recorded return route shared by lifecycle reports and commander approvals. */
@@ -290,8 +282,8 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
   const task = command ?? (await db.query<CommandRow>(threadTaskSql('$1'),[roomId])).rows[0];
   const address = task?.room_id === roomId && command ? await reportRecipient(db,task)
     : (await db.query<{address:{agent:string;place:string}|null}>(`SELECT ${threadCommanderAddressSql('$1')} address`,[roomId])).rows[0]?.address;
-  if (address) return {recipient:address.agent,returnRoom:address.place,parent:task,origin:roomId,incoming:task};
-  const reporter = command?.agent_id;
+  if (address && (address.place !== roomId || address.agent !== task?.agent_id)) return {recipient:address.agent,returnRoom:address.place,parent:task,origin:roomId,incoming:task};
+  const reporter = task?.agent_id;
   const corner = await cornerReportOpening(db, roomId);
   const incoming = command ?? corner?.opening ?? undefined;
   const places = [
@@ -310,14 +302,7 @@ export async function commanderReportAddress(db: SqlDatabase, roomId: string, co
   let humanOpening = corner && !corner.opening ? corner : undefined;
   let openingRoot: string | undefined;
   if (corner && !(orderIssuer && command?.private_payload?.kind === 'order')) {
-    // Orders accepted before the handover keep their original issuer and return address. New
-    // lifecycle reports and assignments use the approved commander instead.
-    const beforeHandover = corner.handover && command?.private_payload?.kind === 'order' &&
-      (await db.query(`SELECT 1 FROM corner_brief_revisions revision JOIN agent_commands assigned ON assigned.id=$2
-        WHERE revision.corner_id=$1 AND revision.revision=$3 AND revision.created_at>assigned.created_at
-          AND revision.revision>1 ORDER BY revision.revision DESC LIMIT 1`,
-      [roomId, command.id, corner.handover.revision])).rowCount;
-    command = beforeHandover ? await commandOrder(db, command!) : corner.opening ?? undefined;
+    command = corner.opening ?? undefined;
     // The opener inspecting its own corner escalates through the order from
     // which it opened it. A nested worker still reports only one step up.
     if (command && reporter && command.private_payload?.authorId === reporter) {
