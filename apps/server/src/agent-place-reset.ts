@@ -1,5 +1,6 @@
 import type { AgentPlaceReset } from '@beeline/api-contract/daemon';
 import { endAgentTurn } from './agent-turn-end.js';
+import { CommandRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
 
 /** Order restart commits with invocation starts and output for the same place. */
@@ -13,6 +14,18 @@ export async function readAgentPlaceResets(db: SqlDatabase, agentId: string, roo
     FROM agent_commands WHERE agent_id=$1 AND ($2::uuid IS NULL OR room_id=$2)
       AND action='restart' AND state='complete'
     ORDER BY room_id,inbox_sequence DESC,id DESC`, [agentId, roomId ?? null])).rows;
+}
+
+/** Pin the helper's observed reset until its write commits. */
+export async function assertAgentPlaceReset(
+  db: SqlDatabase, agentId: string, roomId: string, observed?: string | null,
+): Promise<string | null> {
+  await lockAgentPlace(db, agentId, roomId);
+  const [reset] = await readAgentPlaceResets(db, agentId, roomId);
+  const id = reset?.id ?? null;
+  if (observed !== undefined && observed !== id)
+    throw new CommandRefusalError('command turn cancelled', 409);
+  return id;
 }
 
 /** The restart request is terminal at commit. Its predecessor's input stays owed. */

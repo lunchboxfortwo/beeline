@@ -1,5 +1,5 @@
 import { removeRetiredStarterTurnRule } from '@beeline/api-contract/beeline-guides';
-import { wall, type AgentCommand, type DaemonOperationMap } from '@beeline/api-contract/daemon';
+import { wall, type AgentCommand, type AgentInvocation, type DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
@@ -132,6 +132,7 @@ export class PlaceSession {
   private readonly squireRelay: SquireTaskRelay;
   /** The item being answered, for run_granted_command. */
   current?: AgentCommand;
+  currentInvocation?: AgentInvocation;
   private scratch?: string;
   /** Where received pictures are downloaded for an image-capable harness. */
   private attachmentDir?: string;
@@ -435,6 +436,7 @@ export class PlaceSession {
       ...homeOverlay,
       ...(corner ? agentGitIdentityEnv(agent) : {}),
       BEELINE_DAEMON_ROOM_ID: placeId,
+      BEELINE_PLACE_RESET_ID: this.options.resetId ?? '',
       ...(this.options.grantRunnerFile ? { BEELINE_GRANT_RUNNER_FILE: this.options.grantRunnerFile } : {}),
       ...(this.options.grantRunner ? {
         BEELINE_GRANT_RUNNER_URL: this.options.grantRunner.url,
@@ -526,6 +528,7 @@ export class PlaceSession {
           ...(attachScratchRoot ? { attachScratchRoot } : {}),
           ...(corner && !repositoryBacked ? { cornerScratchRoot: folder } : {}),
           operatorAgent: this.operatorAgent,
+          resetId: this.options.resetId,
           ...(this.options.grantRunner ? { grantRunner: this.options.grantRunner } : {}),
           ...(this.options.grantRunnerFile
             ? { grantRunnerFile: this.options.grantRunnerFile }
@@ -559,7 +562,7 @@ export class PlaceSession {
     if (hostRoutes.length) {
       void writePrivateFileAtomically(
         this.resourceAuthPath,
-        JSON.stringify({ ...api.connection(), placeId }),
+        JSON.stringify({ ...api.connection(), placeId, resetId: this.options.resetId }),
       ).catch(error => console.warn('[body] resource authorization file could not be written:', error));
       servers.push(
         ...grantedHostRouteWires(
@@ -797,7 +800,7 @@ export class PlaceSession {
   async deliver(
     item: AgentCommand,
     batch: readonly AgentCommand[] = [],
-    invocation?: import('@beeline/api-contract/daemon').AgentInvocation,
+    invocation?: AgentInvocation,
   ): Promise<Answer> {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
@@ -863,6 +866,7 @@ export class PlaceSession {
       : undefined;
     let result: PromptResult;
     this.current = item;
+    this.currentInvocation = invocation;
     if (item.roomId === this.options.placeId) this.squireRelay.activate(item, item.id);
     this.batchedCommands = batch;
     try {
@@ -885,6 +889,7 @@ export class PlaceSession {
       stream.close();
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
+      this.currentInvocation = undefined;
       this.batchedCommands = [];
       if (!signal.aborted) this.resources.refreshThreads();
     }

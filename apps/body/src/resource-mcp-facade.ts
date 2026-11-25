@@ -524,9 +524,12 @@ async function resourceCommand(authFile: string) {
     baseUrl: string;
     daemonToken: string;
     placeId: string;
+    resetId?: string;
     helperVersion?: string;
   };
-  const context = await sessionCommandContext(undefined, auth.placeId);
+  const context = await sessionCommandContext(undefined, auth.placeId, {
+    ...process.env, BEELINE_PLACE_RESET_ID: auth.resetId,
+  });
   return { auth, context };
 }
 

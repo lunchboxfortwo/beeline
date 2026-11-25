@@ -229,7 +229,8 @@ async function authorizeSquire(signal) {
   if (!endpoint.url || !endpoint.token) throw new Error('Squire authorization is unavailable.');
   const live = await ask({ url: new URL('/session', endpoint.url) }, {
     method: 'POST',
-    headers: { authorization: 'Bearer ' + endpoint.token, 'content-type': 'application/json' },
+    headers: { authorization: 'Bearer ' + endpoint.token, 'content-type': 'application/json',
+      ...(env.BEELINE_PLACE_RESET_ID ? { 'x-beeline-place-reset': env.BEELINE_PLACE_RESET_ID } : {}) },
     body: JSON.stringify({ action: 'command', placeId: env.BEELINE_DAEMON_CORNER_ID || env.BEELINE_DAEMON_ROOM_ID }),
     signal,
   });

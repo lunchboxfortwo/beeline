@@ -176,7 +176,7 @@ export type DaemonOperationMap = {
     RoomMessageResult | RoomAttachmentResult
   >;
   /** Optional authority fields remain readable for installed helpers. Replies use the server's active invocation. */
-  message: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, MessageSendResult>;
+  message: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly resetId?: string | null; readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, MessageSendResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;
   read: Operation<RoomInput & { readonly address: string; readonly limit?: number }, RoomConversationResult>;
   getRoomAuthority: Operation<RoomPrincipalInput, RoomAuthorityResult>;

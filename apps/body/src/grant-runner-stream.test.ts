@@ -5,10 +5,32 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
 import { GrantCommandRunner, GrantRunnerServer } from './grant-runner.js';
 import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
-import { sessionToolRequest } from './session-tool-connection.js';
+import { sessionCommandContext, sessionToolRequest } from './session-tool-connection.js';
 import type { GrantOutputLine } from './grant-runner-output.js';
 
 afterEach(() => vi.unstubAllEnvs());
+
+it('lets only the current reset generation read the live command for a place', async () => {
+  let resetId: string | undefined;
+  const context = { roomId: 'place', requestId: 'owed' };
+  const server = new GrantRunnerServer(
+    {} as GrantCommandRunner,
+    undefined,
+    async () => context,
+    (placeId, observedReset) => placeId === 'place' && observedReset === resetId,
+  );
+  const endpoint = await server.start();
+  const environment = { BEELINE_GRANT_RUNNER_URL: endpoint.url, BEELINE_GRANT_RUNNER_TOKEN: endpoint.token };
+  try {
+    await expect(sessionCommandContext(undefined, 'place', environment)).resolves.toEqual(context);
+    resetId = 'a'.repeat(64);
+    await expect(sessionCommandContext(undefined, 'place', environment)).rejects.toThrow('this daemon is not serving that chat');
+    await expect(sessionCommandContext(undefined, 'place', { ...environment, BEELINE_PLACE_RESET_ID: resetId }))
+      .resolves.toEqual(context);
+  } finally {
+    await server.close();
+  }
+});
 
 it.each(['single-line-secret', 'ABCD\nxy'])(
   'streams redacted command output before exit and preserves the result (%s)',

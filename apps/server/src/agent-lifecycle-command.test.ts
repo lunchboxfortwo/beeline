@@ -115,12 +115,15 @@ describe('tagged agent lifecycle commands', () => {
     await daemon.execute('postAgentThought', thought, AGENT);
     expect((await thoughts()).rowCount).toBe(0);
     expect(await daemon.execute('postRoomMessage', { ...address, invocation: old, text: 'Obsolete', harnessEnded: true }, AGENT))
-      .toMatchObject({ answered: false });
+      .toMatchObject({ completed: false, published: false, answered: false });
     expect((await daemon.execute('getAgentCommands', {}, AGENT)).commands.map(command => command.id)).toEqual([tag!.id]);
 
     const fresh = { id: 'fresh', requestId: address.requestId };
     await daemon.execute('startAgentTurn', { ...address, invocationId: fresh.id, resetId }, AGENT);
-    await daemon.execute('postRoomMessage', { ...address, invocation: fresh, text: 'Fresh answer', harnessEnded: true }, AGENT);
+    await expect(daemon.execute('message', { roomId: ROOM, type: 'reply',
+      quoteMsgId: tag!.sourceMessageId, text: 'Retired reply', resetId: null }, AGENT)).rejects.toThrow('command turn cancelled');
+    expect(await daemon.execute('postRoomMessage', { ...address, invocation: fresh, text: 'Fresh answer', harnessEnded: true }, AGENT))
+      .toMatchObject({ completed: true, published: true });
     expect((await daemon.execute('getAgentCommands', {}, AGENT)).commands).toEqual([]);
     expect((await database.query('SELECT restart_confirmed_at FROM agent_commands WHERE id=$1', [resetId])).rows)
       .toEqual([{ restart_confirmed_at: expect.any(Date) }]);

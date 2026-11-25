@@ -120,14 +120,18 @@ export class AgentRunner {
           ...(parentRoomId ? { parentRoomId } : {}),
         }),
       async (placeId, input) => {
-        if (input.action === 'operation')
+        const place = this.places.get(placeId);
+        if (!place) throw new Error('This place has no live session');
+        const { session } = place;
+        if (input.action === 'operation') {
+          const authority = input.operation === 'message' ? { resetId: place.resetId ?? null }
+            : input.operation === 'postRoomMessage' && session.currentInvocation ? { invocation: session.currentInvocation } : {};
           return options.daemonApi.execute(
             input.operation as keyof import('@beeline/api-contract/daemon').DaemonOperationMap,
-            input.input as never,
+            { ...input.input as Record<string, unknown>, ...authority } as never,
             typeof input.commandId === 'string' ? input.commandId : undefined,
           );
-        const session = this.places.get(placeId)?.session;
-        if (!session) throw new Error('This place has no live session');
+        }
         if (input.action === 'command') {
           const item = session.command(typeof input.requestId === 'string' ? input.requestId : undefined);
           return item ? {
@@ -145,9 +149,9 @@ export class AgentRunner {
           requestId: session.current.turnRequestId,
         });
       },
-      (placeId, contextPath) => {
-        const session = this.places.get(placeId)?.session;
-        return session !== undefined && contextPath === encodeURIComponent(session.contextPath);
+      (placeId, resetId) => {
+        const place = this.places.get(placeId);
+        return place !== undefined && place.resetId === resetId;
       },
     );
     this.storage = new PlaceStorage({
@@ -591,7 +595,10 @@ export class AgentRunner {
           ...(answer.steps ? { steps: answer.steps } : {}),
         });
         if (this.isCurrentAnswer(answer)) {
-          if (receipt.answered !== false) {
+          const completed = typeof receipt.completed === 'boolean' ? receipt.completed : receipt.answered !== false;
+          const superseded = receipt.superseded === true;
+          if (completed || superseded) {
+            if (superseded && !completed) this.answered.delete(answer.itemId);
             this.stored.delete(answer.itemId);
             this.durable.delete(answer);
             this.removeAnswer(answer);

@@ -67,7 +67,7 @@ export async function finalizeAgentInvocation<T>(database: SqlDatabase, agent: s
     const receipt = await lockAgentInvocation(db,agent,room,invocation);
     const [reset] = await readAgentPlaceResets(db, agent, room);
     if (receipt.reset_id !== (reset?.id ?? null))
-      return {id:receipt.command_id,createdAt:Math.floor(Date.now()/1000),answered:false};
+      return {commandId:receipt.command_id,completed:false,published:false,answered:false};
     await db.query(`UPDATE agent_invocations SET ended=true WHERE command_id=$1 AND invocation_id=$2`,
       [receipt.command_id,invocation.id]);
     // Older senders may register an invocation without publishing a turn projection.

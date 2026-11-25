@@ -32,7 +32,7 @@ import { currentAgentInvocation } from '../agent-invocation.js';
       const invocation = input.invocation;
       return ctx.database.transaction(async db => {
         if (!await currentAgentInvocation(db, agentId, input.roomId, invocation))
-          return { id: invocation.requestId, createdAt: Math.floor(Date.now() / 1000), answered: false };
+          return { commandId: invocation.requestId, completed: false, published: false, answered: false };
         return daemonPostRoomMessage({ ...ctx, database: db }, { ...input, invocation: undefined }, agentId, _atomicCommandWrite);
       });
     }

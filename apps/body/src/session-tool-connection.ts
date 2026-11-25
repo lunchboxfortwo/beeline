@@ -74,7 +74,7 @@ export async function sessionToolRequest(
   const endpoint = await sessionToolConnection(env);
   let status: number;
   let body: { error?: string };
-  const context = process.env.BEELINE_TURN_CONTEXT_FILE;
+  const resetId = env.BEELINE_PLACE_RESET_ID;
   try {
     const response = await ask(
       { url: new URL(route, `${endpoint.url}/`) },
@@ -83,7 +83,7 @@ export async function sessionToolRequest(
         headers: {
           authorization: `Bearer ${endpoint.token}`,
           'content-type': 'application/json',
-          ...(context ? { 'x-beeline-turn-context': encodeURIComponent(context) } : {}),
+          ...(resetId ? { 'x-beeline-place-reset': resetId } : {}),
         },
         body: JSON.stringify(input),
       },
