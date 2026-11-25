@@ -40,6 +40,7 @@ export class LocalDelivery {
     await this.command('git', ['clone', '--quiet', '--local', '--no-hardlinks', '--no-checkout', this.engine.root, target]);
     await this.command('git', ['-C', target, 'checkout', '--quiet', '--detach', context.github.sha]);
     await this.command('git', ['-C', target, 'remote', 'set-url', 'origin', `https://github.com/${context.github.repository}.git`]);
+    if (context.github.job === 'server_prebuild') return target;
     const mobile = ['website', 'mobile_ota', 'mobile_ota_after_proof', 'release_proof', 'mobile_native_android'].includes(context.github.job);
     const paths = globSync(['node_modules', 'apps/*/node_modules', 'packages/*/node_modules', 'apps/*/dist', 'packages/*/dist', '.turbo/cache', '.beeline-ci-build.json', 'apps/mobile/public/canvaskit.wasm'], { cwd: template });
     for (const path of paths) {

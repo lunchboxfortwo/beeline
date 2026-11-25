@@ -46,8 +46,11 @@ test('local delivery preserves real dependency joins and requires the quick verd
   assert.equal(local.jobs.delivery_result, undefined);
   for (const id of ['server', 'mobile_ota', 'helper', 'website', 'release_result'])
     assert.ok(local.jobs[id].needs.includes('release_validation'), id);
-  for (const id of ['helper_linux', 'helper_macos', 'desktop_installers'])
+  for (const id of ['helper_linux', 'helper_macos', 'server_prebuild'])
     assert.deepEqual(local.jobs[id].needs, ['initialize'], id);
+  assert.ok(local.jobs.server.needs.includes('server_prebuild'));
+  assert.ok(local.jobs.desktop_installers.needs.includes('server_prebuild'));
+  assert.ok(Object.keys(local.jobs).indexOf('website') < Object.keys(local.jobs).indexOf('desktop_installers'));
   for (const id of original.jobs.delivery_result.needs)
     assert.ok(local.jobs.mobile_native_android.needs.includes(id), id);
   assert.deepEqual(original, snapshot);
@@ -140,6 +143,10 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
       const id = context.github.job;
       started.add(id); active.add(id); peak = Math.max(peak, active.size);
       if (active.has('desktop_build') && ['server', 'mobile_ota', 'website'].every(name => active.has(name))) overlap = true;
+      if (id === 'server') {
+        assert.ok(finished.has('server_prebuild'));
+        assert.ok(finished.has('release_validation'));
+      }
       if (id === 'helper') {
         assert.ok(finished.has('helper_linux') && finished.has('helper_macos'));
         helperBeforeDelivery = !finished.has('website');
@@ -151,7 +158,7 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
       if (id === 'initialize') await new Promise(resolve => setTimeout(resolve, 1));
       else await new Promise(resolve => setTimeout(resolve, id === 'desktop_build' ? 200 : ['server', 'mobile_ota', 'website'].includes(id) ? 80 : 20));
       active.delete(id); finished.add(id);
-      return { result: 'success', outputs: id === 'initialize' ? {
+      return { result: id === 'server_prebuild' ? 'failure' : 'success', outputs: id === 'initialize' ? {
         run_mobile_native: 'true', native_android: 'true', release_sha: 'a'.repeat(40), run_server: 'true', run_helper: 'true', run_mobile_ota: 'true', run_website: 'true', run_desktop: 'true',
       } : { marker: id } };
     };
@@ -167,6 +174,7 @@ test('the real release DAG overlaps three local legs with Mac work, carries outp
     const results = await controller.workflow('.github/workflows/unified-release.yml', { channel: 'next', run_release_proof: false, store_track: 'beta' }, {
       github: { repository: 'Beeline-Work/beeline', sha: 'a'.repeat(40), run_id: '1' },
     });
+    assert.equal(results.server_prebuild.result, 'failure');
     assert.equal(results.release_result.result, 'success');
     assert.equal(peak, 4);
     assert.ok(overlap);

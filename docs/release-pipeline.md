@@ -120,7 +120,14 @@ Docker build/run containers share their worker's existing parent slice, includin
 Fly local image builds; no daemon, listener, shard service or slice configuration changes.
 Metro uses two workers during local release exports.
 
-The server and OTA legs start after release validation. Helper publication waits
+Squire builds the selected server's exact-SHA source image alongside quick
+checks. After validation, the server leg binds the starter agent image digest
+and pushes the release tag from the same Docker daemon. A missing local source
+image falls back to the same Dockerfile. The free starter image uses the
+release's verified Linux helper archive when available.
+
+The server rollout and OTA legs start after release validation. The live legs
+queue ahead of the desktop installers. Helper publication waits
 for both helper builds, proof-selected OTA waits for its proof, and Android
 waits for the live delivery legs before store work. Finalization reads the
 existing completion outputs and waits for every selected leg.

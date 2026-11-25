@@ -57,12 +57,15 @@ step8)
 set -euo pipefail
 image_label="${RELEASE_VERSION#v}-${RELEASE_SHA:0:12}"
 image_ref="registry.fly.io/beeline-server:$image_label"
-build_started=$SECONDS
-bash packages/scripts/server-release-image.sh release "$RELEASE_SHA" "$RELEASE_VERSION"
-echo "Server image built and pushed in $((SECONDS - build_started))s"
+mode=release
+if [ "${BEELINE_LOCAL_RELEASE:-}" = true ]; then mode=build-local; fi
+bash packages/scripts/server-release-image.sh "$mode" "$RELEASE_SHA" "$RELEASE_VERSION"
 node packages/scripts/unified-release.mjs server-deploy-plan \
   --machines "$RUNNER_TEMP/server-release/machines-before.json" \
   --image "$image_ref" --output "$RUNNER_TEMP/server-release/server-deploy-plan.json"
+;;
+push_image)
+bash packages/scripts/server-release-image.sh push-local "$RELEASE_SHA" "$RELEASE_VERSION"
 ;;
 step9)
 set -euo pipefail

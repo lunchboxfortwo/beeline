@@ -171,9 +171,14 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
         context.env.BEELINE_LOCAL_RELEASE_RECORDS = join(directory, 'records.json');
         context.env.BEELINE_LOCAL_RELEASE_ID = basename(directory);
       }
-      if (context.github.job === 'server') {
+      if (['server', 'server_prebuild'].includes(context.github.job)) {
         context.env.FLY_API_TOKEN = engine.secrets.FLY_API_TOKEN || '';
         context.env.DOCKER_CONFIG = join(context.runner.temp, 'docker');
+      }
+      if (context.github.job === 'server') {
+        const artifact = engine.artifacts.get(`helper-linux-${context.needs.initialize.outputs.release_id}`);
+        if (artifact && existsSync(join(artifact, 'bundle/manifest.json')))
+          context.env.BEELINE_RELEASE_LINUX_BUNDLE = join(artifact, 'bundle');
       }
     },
     step: async ({ step, context, env, result }) => {
@@ -275,10 +280,11 @@ export function localHooks(directory, processes, { fullChecks = false } = {}) {
           // Per-step seconds of the live legs.
           const records = join(directory, 'records.json');
           if (existsSync(records)) {
-            const legs = { 'server-local': 'server', 'mobile_ota-local': 'mobile-ota' };
-            const profile = Object.fromEntries(JSON.parse(readFileSync(records, 'utf8'))
-              .filter(job => legs[job.id] && job.steps?.length)
-              .map(job => [legs[job.id], job.steps.map(({ name, seconds }) => ({ name, seconds }))]));
+            const legs = { 'server_prebuild-local': 'server', 'server-local': 'server', 'mobile_ota-local': 'mobile-ota', 'website-local': 'website' };
+            const profile = {};
+            for (const { id, steps } of JSON.parse(readFileSync(records, 'utf8'))) {
+              if (legs[id] && steps?.length) (profile[legs[id]] ??= []).push(...steps.map(({ name, seconds }) => ({ name, seconds })));
+            }
             if (Object.keys(profile).length) live.profile = profile;
           }
         }

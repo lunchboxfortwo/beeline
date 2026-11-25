@@ -29,11 +29,39 @@ export function localWorkflow(workflow, { channel = 'next', skipFullChecks } = {
   delete local.jobs.delivery_result;
   for (const id of ['helper', 'mobile_native_android', 'release_result'])
     local.jobs[id].needs = local.jobs[id].needs.filter(job => job !== 'delivery_result');
-  for (const id of ['helper_linux', 'helper_macos', 'desktop_installers']) {
+  for (const id of ['helper_linux', 'helper_macos']) {
     const job = local.jobs[id];
     job.needs = job.needs.filter(id => id !== 'release_validation');
     job.if = job.if.replace("needs.release_validation.result == 'success' && ", '');
   }
+  const server = local.jobs.server;
+  const imageEnv = {
+    RELEASE_SHA: '${{ needs.initialize.outputs.release_sha }}',
+    RELEASE_VERSION: '${{ needs.initialize.outputs.release_version }}',
+  };
+  const serverPrebuild = {
+    needs: ['initialize'],
+    if: "needs.initialize.outputs.run_server == 'true'",
+    'timeout-minutes': server['timeout-minutes'],
+    steps: [
+      ...server.steps.slice(0, server.steps.findIndex(step => step.id === 'leg')),
+      { id: 'fleet', env: imageEnv, run: 'bash packages/scripts/release-steps/server-leg.sh fleet' },
+      { name: 'Build the exact server source image', env: imageEnv, if: "steps.fleet.outputs.shipped != 'true'",
+        run: 'bash packages/scripts/server-release-image.sh prepare-local "$RELEASE_SHA"' },
+    ],
+  };
+  // Give the source image an early delivery slot. The existing verdict still
+  // owns rollout authority, and a missed prebuild uses the source fallback.
+  local.jobs = { server_prebuild: serverPrebuild, ...local.jobs };
+  server.needs.push('server_prebuild');
+  server.if = `always() && !cancelled() && ${server.if}`;
+  // Queue live work before desktop so its Linux build cannot occupy a slot
+  // needed by rollout or either of the other live legs.
+  const desktop = local.jobs.desktop_installers;
+  desktop.needs.push('server_prebuild');
+  desktop.if = `always() && !cancelled() && ${desktop.if}`;
+  delete local.jobs.desktop_installers;
+  local.jobs.desktop_installers = desktop;
   const validation = local.jobs.release_validation;
   if (skipFullChecks) {
     delete local.jobs.release_checks;
