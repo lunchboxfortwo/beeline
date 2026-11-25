@@ -6,7 +6,7 @@ import type { DaemonAttachment, SystemEvent } from '@beeline/api-contract/daemon
 import { boundReplyExcerpt } from '@beeline/api-contract/daemon';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import type { DaemonContext } from './context.js';
-import { Input, seconds, AccessDeniedError, id, conversationColumns, laterCursor, markExpiredAttachments } from './values.js';
+import { Input, seconds, AccessDeniedError, id, conversationColumns, daemonTranscriptVisibilitySql, laterCursor, markExpiredAttachments } from './values.js';
 import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { daemonExpiredMediaIds } from './message-reads.js';
@@ -167,6 +167,8 @@ import { daemonExpiredMediaIds } from './message-reads.js';
     const newestPage = name === 'getRoomConversation' && !after && input.window !== 'earliest';
     const continuityPage =
       name === 'getRoomConversation' && !after && input.window === 'continuity';
+    const transcript = `${conversationColumns} FROM messages
+      WHERE room_id=$1 AND ${daemonTranscriptVisibilitySql('messages')}`;
     const rows = await ctx.database.query<{
       id: string;
       author_id: string;
@@ -192,18 +194,15 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       // back in transcript order; the forward walk keeps its `limit + 1` probe
       // for whether another page exists.
       continuityPage
-        ? `SELECT continuity.* FROM (${conversationColumns}
-             FROM messages WHERE room_id=$1 AND presentation='message'
+        ? `SELECT continuity.* FROM (${transcript} AND presentation='message'
              ORDER BY cursor_ms DESC,id DESC LIMIT ${limit}) continuity
            ORDER BY cursor_ms,id`
         : newestPage
-          ? `SELECT newest.* FROM (${conversationColumns}
-             FROM messages WHERE room_id=$1
+          ? `SELECT newest.* FROM (${transcript}
                ${before ? `AND (${MESSAGE_CURSOR_MS_SQL},id) < ($2::bigint,$3)` : ''}
              ORDER BY cursor_ms DESC,id DESC LIMIT ${limit}) newest
            ORDER BY cursor_ms,id`
-          : `${conversationColumns}
-             FROM messages WHERE room_id=$1
+          : `${transcript}
                ${
                  after ? `AND (${MESSAGE_CURSOR_MS_SQL},id) > ($2::bigint,$3)` : ''
                }
@@ -224,7 +223,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
             await ctx.database.query<{ text: string }>(
               `SELECT item->>'text' text FROM messages message,
                       jsonb_array_elements(message.activity) item
-               WHERE message.room_id=$1 AND message.author_id=$2
+               WHERE message.room_id=$1 AND ${daemonTranscriptVisibilitySql('message')} AND message.author_id=$2
                  AND message.request_id=$3 AND message.presentation='activity'
                  AND item->>'kind'='output' AND item->>'text' IS NOT NULL
                ORDER BY message.created_at,message.id`,

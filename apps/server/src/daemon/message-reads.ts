@@ -1,15 +1,12 @@
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
 import { mediaIdFromUrl } from '../media-ttl.js';
-import { visibleChatMessageSql } from '../read-cursor.js';
 import type { DaemonContext } from './context.js';
-import { Input, AccessDeniedError, markExpiredAttachments } from './values.js';
+import { Input, AccessDeniedError, daemonTranscriptVisibilitySql, markExpiredAttachments } from './values.js';
 import { agentRoomMembershipJoins } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { deliveredMessage } from '../corner-brief.js';
 
-const readableMessage = `message.deleted_at IS NULL AND
-  (message.presentation IN ('message','activity','system') OR message.card_type='agent-command'
-   OR (${visibleChatMessageSql('message')}))`;
+const readableMessage = daemonTranscriptVisibilitySql('message');
 // A borrowed review source grants access only to the addressed transcript.
 const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::boolean AND EXISTS (
   SELECT 1 FROM rooms source ${agentRoomMembershipJoins('source', '$3')}
@@ -77,7 +74,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
          JOIN LATERAL (SELECT corner_brief_revisions.* FROM corner_brief_revisions
            WHERE corner_id=corner.id ORDER BY revision DESC LIMIT 1) brief
            ON brief.source_room_id=message.room_id
-         WHERE message.id=$3 AND message.deleted_at IS NULL AND message.presentation='message'
+         WHERE message.id=$3 AND ${readableMessage} AND message.presentation='message'
            AND (message.id=brief.source_message_id
              OR message.id=brief.approval_basis->>'sourceMessageId'
              OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(brief.intent_verbatim,'[]'::jsonb)) intent
@@ -143,7 +140,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
       return { messageId: '', body: '', attachments: [] };
     const candidates = await ctx.database.query<{ id: string }>(
       `SELECT message.id FROM messages message
-       WHERE message.deleted_at IS NULL AND EXISTS (
+       WHERE ${readableMessage} AND EXISTS (
          SELECT 1 FROM jsonb_array_elements(message.attachments) file
          WHERE file->>'mediaId'=$1 OR file->>'url' LIKE '%/v1/media/' || $1)
        UNION

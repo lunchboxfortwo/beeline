@@ -37,6 +37,27 @@ describe('connected agent message protocol',()=>{
     expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
   });
 
+  it('opens the same cards that the daemon transcript lists', async () => {
+    const { client } = await scope.connected();
+    const visibleId = '1'.repeat(64);
+    const hiddenId = '2'.repeat(64);
+    const deletedId = '3'.repeat(64);
+    await scope.db.query(`INSERT INTO messages(id,room_id,author_id,presentation,card_type,text,system_transcript,deleted_at)
+      VALUES ($1,$4,$5,'card','choice','Visible card',NULL,NULL),
+             ($2,$4,$5,'card','choice','Card hidden from the phone','{"origin":"system","visibility":"hidden"}',NULL),
+             ($3,$4,$5,'card','choice','Deleted card',NULL,now())`, [visibleId, hiddenId, deletedId, ROOM, USER]);
+
+    const listed = await tools.ok(client, 'read', { address: ROOM, facet: 'messages', from: 'newest' });
+    const cards = listed.items.filter((item: { type: string }) => item.type === 'card');
+    for (const [id, body] of [[visibleId, 'Visible card'], [hiddenId, 'Card hidden from the phone']]) {
+      expect(cards).toContainEqual(expect.objectContaining({ id, body }));
+      expect(await tools.ok(client, 'read', { address: ROOM, facet: 'message', messageId: id }))
+        .toMatchObject({ messageId: id, body });
+    }
+    expect(cards).not.toContainEqual(expect.objectContaining({ id: deletedId }));
+    expect((await tools.call(client, 'read', { address: ROOM, facet: 'message', messageId: deletedId })).error).toBe(true);
+  });
+
   it('renders one person tag with its context and attachment and replies by message id in a joined Claude session', async () => {
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { client, member, token, grant } = await scope.connected();
