@@ -1,5 +1,5 @@
 import { MESSAGE_REACTION_EMOJIS } from '@beeline/api-contract/phone';
-import { authorizeCommandOutput,queueMessage } from '../agent-command.js';
+import { authorizeCommandOutput,queueMessage,type QueuedPostReceipt } from '../agent-command.js';
 import { CommandRefusalError } from '../commander.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { type SqlDatabase } from '../database.js';
@@ -22,10 +22,14 @@ import { modelText } from '../message-origin.js';
       [agentId,input.requestId,parent.answer_attachments.map(file=>file.url)])
       .catch(error=>console.warn('[post] optional media cleanup omitted:',error));
     ctx.live.publish({ type: 'invalidate', roomId: input.cornerId, reason: 'message', agentId });
-    return { id: saved.id, createdAt: saved.createdAt, effect: 'conversation', address: input.cornerId,
-      visibility: 'public', reportsAssignment: false, woken: saved.woken, notWoken: saved.notWoken,
-      stored: saved.stored, visible: saved.visible, receipt: saved.receipt + (saved.stored && input.roomId === input.cornerId
-        ? '\nPosted to your current place. Queued files are attached to this post. Closing text is kept in turn activity.' : '') };
+    return publicPostReceipt(input.cornerId, saved);
+  }
+
+  export function publicPostReceipt(address: string, saved: Pick<QueuedPostReceipt, 'id' | 'createdAt'> &
+    Partial<Pick<QueuedPostReceipt, 'woken' | 'notWoken' | 'stored' | 'visible' | 'receipt'>>) {
+    return { id: saved.id, createdAt: saved.createdAt, effect: 'conversation', address,
+      visibility: 'public', reportsAssignment: false, woken: saved.woken ?? [], notWoken: saved.notWoken ?? [],
+      stored: saved.stored ?? false, visible: saved.visible ?? false, receipt: saved.receipt ?? null };
   }
 
 

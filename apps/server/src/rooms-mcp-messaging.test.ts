@@ -5,7 +5,7 @@ import { mkdtemp,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { vi } from 'vitest';
-import { memberStream } from '../../body/src/session-join/beeline-api.js';
+import { callTool as callSessionTool, memberStream } from '../../body/src/session-join/beeline-api.js';
 import { acceptMemberDelivery } from '../../body/src/session-join/bridge.js';
 import { takeInbox,updateState,type JoinedSession } from '../../body/src/session-join/store.js';
 import { memberStreamFrame } from '../../body/src/session-join/stream-frame.js';
@@ -21,6 +21,36 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
+  it('returns the same stored-message receipt with or without a pending request', async () => {
+    const { member, token } = await scope.connected();
+    const session = { server: scope.origin };
+    const args = { address: ROOM, text: '@missing_member Widget inspected.' };
+    const standalone = await callSessionTool(session, token, 'post', args);
+    const task = await humanTask(member);
+    const answered = await callSessionTool(session, token, 'post', args);
+    expect(answered).toEqual({ ...standalone, id: expect.any(String), createdAt: expect.any(Number) });
+    expect(answered.id).not.toBe(standalone.id);
+    for (const post of [standalone, answered]) {
+      expect(post).toMatchObject({ address: ROOM, stored: true, visible: true });
+      expect((await scope.db.query('SELECT room_id, text FROM messages WHERE id=$1', [post.id])).rows)
+        .toEqual([{ room_id: post.address, text: args.text }]);
+    }
+    expect((await scope.db.query('SELECT state, result_message_id FROM agent_commands WHERE id=$1', [task.id])).rows)
+      .toEqual([{ state: 'complete', result_message_id: answered.id }]);
+  });
+  it('returns no message id when a connected post has no public text to store', async () => {
+    const { client, member } = await scope.connected();
+    const args = { address: ROOM, text: '<think>private reasoning</think>' };
+    const standalone = await tools.ok(client, 'post', args);
+    const task = await humanTask(member);
+    const answered = await tools.ok(client, 'post', args);
+    for (const post of [standalone, answered]) {
+      expect(post).toMatchObject({ id: null, createdAt: null, address: ROOM, stored: false, visible: false });
+      expect(Object.keys(post).sort()).toEqual(Object.keys(standalone).sort());
+    }
+    expect((await scope.db.query('SELECT state, result_message_id FROM agent_commands WHERE id=$1', [task.id])).rows)
+      .toEqual([{ state: 'pending', result_message_id: null }]);
+  });
   it('renders one person tag with its context and attachment and replies by message id in a joined Claude session', async () => {
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { client, member, token, grant } = await scope.connected();

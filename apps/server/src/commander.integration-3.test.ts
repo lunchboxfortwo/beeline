@@ -1,4 +1,4 @@
-import { DM,DaemonService,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,activeCornerHolds,authority,claim,commands,cornerMergeGate,createAgentCommand,currentPlaceReminder,daemon,db,expect,it,open,order,randomBytes,randomUUID,readCornerObjective,rootFixture,vi,worker,type AgentCommand,type CommandRow } from './test-support-commander.integration.test-support.js';
+import { DM,DaemonService,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,activeCornerHolds,authority,claim,commands,cornerMergeGate,createAgentCommand,daemon,db,expect,it,open,order,randomBytes,randomUUID,readCornerObjective,rootFixture,vi,worker,type AgentCommand,type CommandRow } from './test-support-commander.integration.test-support.js';
 
 
 
@@ -123,7 +123,7 @@ it.each(['dm', 'room', 'corner', 'parent-room'] as const)('post receipt identifi
     target = place === 'corner' ? opened.cornerId : ROOM;
   }
   const posted = await rootFixture.daemon.postCornerMessage({ ...authority(command), cornerId: target, text: 'Receipt path proof' }, agent);
-  expect(posted.receipt).toBe('Message stored and visible. No agents woken.' + (place === 'parent-room' ? '' : '\n' + currentPlaceReminder));
+  expect(posted).toMatchObject({ address: target, receipt: 'Message stored and visible. No agents woken.' });
   expect((await rootFixture.phone.readRoom(target, HUMAN))?.messages.some(message => message.id === posted.id && message.text === 'Receipt path proof')).toBe(true);
 });
 

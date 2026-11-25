@@ -1,4 +1,5 @@
 import { normalizePlaceAddresses } from './daemon/place-address.js';
+import { publicPostReceipt } from './daemon/corner-messages.js';
 import { authorizeCommandOutput } from './agent-command-route-agent-result.js';
 import { sendMessage,replyToMessage } from './agent-messaging.js';
 import type { MessageAddress,MessageAsk } from '@beeline/api-contract/daemon';
@@ -387,7 +388,7 @@ export class RoomsMcpAgentTools {
     if (name === 'message' || name === 'reply' || name === 'post' && args.progress !== true) {
       validateToolArguments(MCP_AGENT_TOOLS.find(candidate => candidate.name === name)!, args);
       const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
-        : String(args.address ?? args.room ?? '');
+        : name === 'post' ? addressArg(args.address) : '';
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(
         `SELECT * FROM agent_commands WHERE agent_id=$1 AND reason<>'mcp_call'
            AND (state='pending' OR id=$2 OR ($4 AND id=$5))
@@ -398,9 +399,14 @@ export class RoomsMcpAgentTools {
       if (item?.state === 'pending' && typeof args.commandId === 'string')
         await beginAgentInvocation(this.db, member, item.room_id, item.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
       const context = {roomId:item?.room_id ?? target,requestId:item?.turn_request_id};
-      if (name === 'post' && item?.state==='pending' && item.room_id === target && (item.return_room_id ?? target) === target)
-        return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
-      if (name === 'post') return this.exec(member,'postCornerMessage',{...context,cornerId:target,text:args.text,replyTo:args.replyTo});
+      if (name === 'post') {
+        const text = args.text as string;
+        const replyTo = args.replyTo as string | undefined;
+        const posted = item?.state === 'pending' && item.room_id === target && (item.return_room_id ?? target) === target
+          ? publicPostReceipt(target, await this.daemon.execute('postRoomMessage', { ...context, text, replyToMessageId: replyTo }, member))
+          : await this.daemon.postCornerMessage({ ...context, cornerId: target, text: String(text), replyTo }, member);
+        return posted.stored ? posted : { ...posted, id: null, createdAt: null };
+      }
       const content = {text:String(args.text),ask:args.ask as MessageAsk | undefined,question:args.question as string | undefined,
         brief:args.brief as string | undefined,options:args.options as readonly string[] | undefined};
       if (name === 'message') {
@@ -487,9 +493,7 @@ export class RoomsMcpAgentTools {
       case 'send_operator_system_dm': return turn((_, context) => exec('sendOperatorSystemDm', { ...context, agentId: member, recipients: args.recipients, text: args.text }));
       case 'read_operator_system_dm': return turn((_, context) => exec('readOperatorSystemDm', { ...context, agentId: member, sendId: args.sendId }));
       case 'dispatch_release': return turn((_, context) => exec('dispatchRoomWorkflow', { ...context, inputs: args.inputs }));
-      case 'post':
-        if (args.progress === true) return this.progress(member, args, exec);
-        return turn((_, context) => exec('postCornerMessage', { ...context, cornerId: addressArg(args.address), text: args.text }));
+      case 'post': return this.progress(member, args, exec);
       case 'post_artifact': return this.postArtifact(member, args, exec);
       case 'connect': return turn((_, context) => {
         if (args.mode === 'status') return exec('readAgentWorkbench', { roomId: context.roomId });
