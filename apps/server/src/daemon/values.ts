@@ -173,6 +173,11 @@ export function grantCardPhrase(
 }
 
 
+/** Daemon transcripts include live cards even when the phone hides them. */
+export function daemonTranscriptVisibilitySql(alias: string): string {
+  return `${alias}.deleted_at IS NULL`;
+}
+
 /** The one projection an inbox or conversation row is read through. */
 export const conversationColumns = `SELECT id,author_id,created_at,presentation,text,
         EXISTS(SELECT 1 FROM identities author

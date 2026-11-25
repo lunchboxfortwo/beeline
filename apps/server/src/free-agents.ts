@@ -691,13 +691,13 @@ export class FreeAgentService {
         WHERE c.agent_id=f.agent_id AND c.state='pending')) needed FROM free_agents f`);
     const identities = new Set(rows.rows.map(row => row.agent_id));
     for (const machine of machines) {
-      const agent = (machine.config.metadata as {beeline_agent?:string}|undefined)?.beeline_agent;
+      const agent = (machine.config?.metadata as {beeline_agent?:string}|undefined)?.beeline_agent;
       if (!agent || !identities.has(agent)) this.log(`unmapped machine ${machine.id}: preserved; ownership reconciliation required`);
     }
     const failures: string[] = [];
     for (const row of rows.rows) {
       if (!row.fly_machine_id && !row.needed && !machines.some(machine =>
-        (machine.config.metadata as {beeline_agent?:string}|undefined)?.beeline_agent === row.agent_id)) continue;
+        (machine.config?.metadata as {beeline_agent?:string}|undefined)?.beeline_agent === row.agent_id)) continue;
       try { await this.reconcile(row.agent_id, true); }
       catch { failures.push(row.agent_id); }
     }
