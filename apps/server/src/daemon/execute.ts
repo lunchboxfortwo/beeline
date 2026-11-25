@@ -1,7 +1,7 @@
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { createHash,randomBytes } from 'node:crypto';
-import { currentInvocationCommand } from '../agent-invocation.js';
+import { currentAgentInvocation, currentInvocationCommand } from '../agent-invocation.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
@@ -205,6 +205,11 @@ import { sendSessionMessage } from '../session-message.js';
       const output = await queueDatabaseWork(ctx.database, `turn:${scopedRoom}:${authenticatedAgentId}`, () => ctx.database.transaction(async (db) => {
         if (name === 'createCorner' || name === 'reviseCornerBrief') await lockCornerLifecycle(db, scopedRoom);
         const requestId = candidate.requestId ?? candidate.turnId;
+        if (name === 'postAgentDraft' || name === 'postAgentThought' || name === 'retractAgentLiveOutput' || name === 'postAgentActivity') {
+          const { invocation } = input as Input<'postAgentActivity'>;
+          if (invocation && !await currentAgentInvocation(db, authenticatedAgentId, scopedRoom, invocation))
+            return daemonWriteResult(ctx) as Output<Name>;
+        }
         const command = await authorizeCommandOutput(db, scopedRoom, authenticatedAgentId, requestId);
         if (command.state === 'complete' && name === 'markAgentTurnSilent')
           return daemonWriteResult(ctx) as Output<Name>;

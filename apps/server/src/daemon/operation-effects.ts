@@ -1,4 +1,5 @@
 import { beginAgentInvocation } from '../agent-invocation.js';
+import { lockAgentPlace, readAgentPlaceResets } from '../agent-place-reset.js';
 import { normalizeAgentApprovalIntent } from '../tray-approval-ask.js';
 import { isBeelineGuideName } from '@beeline/api-contract/beeline-guides';
 import { workflowOutputBindingCtes } from '../workflow-step-output.js';
@@ -132,6 +133,14 @@ if (!ctx.commandTransaction || !ctx.authorizedCommand) {
 /** Compatibility read for older installed helpers; never issues or negotiates authority. */
 export async function startAgentTurnOperation<Name extends keyof DaemonOperationMap>(ctx: DaemonContext, name: Name, input: Input<Name>, authenticatedAgentId: string, candidate: Record<string, unknown>, scopedRoom: string | undefined): Promise<Output<Name>> {
         const request = input as Input<'startAgentTurn'>;
+        const currentReset = async (db: import('../database.js').SqlDatabase) => {
+          await lockAgentPlace(db, authenticatedAgentId, request.roomId);
+          const [reset] = await readAgentPlaceResets(db, authenticatedAgentId, request.roomId);
+          const id = reset?.id ?? null;
+          if (request.resetId !== undefined && request.resetId !== id)
+            throw new CommandRefusalError('command turn cancelled', 409);
+          return id;
+        };
         if (request.available === false) {
           const command = await authorizeCommandOutput(ctx.database, request.roomId, authenticatedAgentId, request.requestId);
           if ((await ctx.database.query('SELECT 1 FROM free_agents WHERE agent_id=$1', [authenticatedAgentId])).rowCount) {
@@ -140,6 +149,7 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
               const source = ctx.helperConnection;
               if (source && !(await db.query(`SELECT 1 FROM agent_connections WHERE agent_id=$1
                 AND connection_id=$2 AND epoch=$3 FOR SHARE`, [authenticatedAgentId, source.connectionId, source.epoch])).rowCount) return;
+              await currentReset(db);
               const current = await authorizeCommandOutput(db, request.roomId, authenticatedAgentId, request.requestId);
               if (current.state !== 'pending') return;
               await db.query(`INSERT INTO agent_turns(room_id,request_id,agent_id,status)
@@ -157,7 +167,12 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
           AND ($2::text IS NULL OR (connection_id=$2 AND epoch=$3)) FOR SHARE`,
           [authenticatedAgentId,source?.connectionId ?? null,source?.epoch ?? null]);
         if(source && !connection.rowCount) return;
-        if (request.invocationId) await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId,request.batchedCommandIds);
+        const resetId = await currentReset(db);
+        if (request.invocationId) {
+          await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId,request.batchedCommandIds,resetId);
+          if (resetId && request.resetId === resetId) await db.query(
+            'UPDATE agent_commands SET restart_confirmed_at=clock_timestamp() WHERE id=$1 AND restart_confirmed_at IS NULL', [resetId]);
+        }
         await db.query(`WITH delivered AS (SELECT * FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending' FOR SHARE),
           ${workflowOutputBindingCtes('delivered')}

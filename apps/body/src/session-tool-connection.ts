@@ -74,12 +74,17 @@ export async function sessionToolRequest(
   const endpoint = await sessionToolConnection(env);
   let status: number;
   let body: { error?: string };
+  const context = process.env.BEELINE_TURN_CONTEXT_FILE;
   try {
     const response = await ask(
       { url: new URL(route, `${endpoint.url}/`) },
       {
         method: 'POST',
-        headers: { authorization: `Bearer ${endpoint.token}`, 'content-type': 'application/json' },
+        headers: {
+          authorization: `Bearer ${endpoint.token}`,
+          'content-type': 'application/json',
+          ...(context ? { 'x-beeline-turn-context': encodeURIComponent(context) } : {}),
+        },
         body: JSON.stringify(input),
       },
     );

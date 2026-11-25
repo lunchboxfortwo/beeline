@@ -1,6 +1,7 @@
 import {
   isAgentCommand,
   type AgentCommand,
+  type AgentPlaceReset,
   type AgentSignInFrame,
   type DaemonOperationMap,
 } from '@beeline/api-contract/daemon';
@@ -176,6 +177,7 @@ export class DaemonApiClient {
     commands: readonly AgentCommand[],
     completedCommandIds: readonly string[],
     stoppedCommandIds: readonly string[],
+    resets: readonly AgentPlaceReset[],
   ) => void;
   private queueCommandIds: readonly string[] = [];
   private queueDemanded = false;
@@ -302,6 +304,7 @@ export class DaemonApiClient {
       commands: readonly AgentCommand[],
       completedCommandIds: readonly string[],
       stoppedCommandIds: readonly string[],
+      resets: readonly AgentPlaceReset[],
     ) => void,
   ): void {
     this.queueListener = listener;
@@ -567,8 +570,12 @@ export class DaemonApiClient {
       const stopped = Array.isArray(event.stoppedCommandIds)
         ? event.stoppedCommandIds.filter((id): id is string => typeof id === 'string')
         : [];
+      const resets = Array.isArray(event.resets)
+        ? event.resets.filter((reset): reset is AgentPlaceReset =>
+            typeof reset?.roomId === 'string' && typeof reset.id === 'string' && /^[a-f0-9]{64}$/.test(reset.id))
+        : [];
       this.queueCommandIds = commands.map((command) => command.id);
-      this.queueListener?.(commands, completed, stopped);
+      this.queueListener?.(commands, completed, stopped, resets);
       return;
     }
     if (!DAEMON_LIVE_EVENT_TYPES.has(event.type)) this.logUnknownLiveEvent(event.type);

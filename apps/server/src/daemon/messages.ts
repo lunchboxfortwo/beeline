@@ -7,8 +7,9 @@ import { visibleMessageSql } from '../read-cursor.js';
 import { daemonAccess } from './access.js';
 import type { DaemonContext } from './context.js';
 import { daemonWriteResult } from './corner-messages.js';
-import { Input,MEDIA_URL_PATTERN } from './values.js';
+import { Input,MEDIA_URL_PATTERN,Output } from './values.js';
 import { modelText } from '../message-origin.js';
+import { currentAgentInvocation } from '../agent-invocation.js';
 
   export async function daemonCompletion(ctx: DaemonContext, input: Input<'getRequestCompletion'>, agentId: string) {
     await daemonAccess(ctx, input.roomId, agentId);
@@ -26,7 +27,15 @@ import { modelText } from '../message-origin.js';
       ...(row.status ? { outcome: row.status, ...(row.failure_reason ? { failureReason: row.failure_reason } : {}) } : {}) };
   }
 
-  export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, _atomicCommandWrite = false) {
+  export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, _atomicCommandWrite = false): Promise<Output<'postRoomMessage'>> {
+    if (input.invocation && (!input.harnessEnded || input.presentation === 'card')) {
+      const invocation = input.invocation;
+      return ctx.database.transaction(async db => {
+        if (!await currentAgentInvocation(db, agentId, input.roomId, invocation))
+          return { id: invocation.requestId, createdAt: Math.floor(Date.now() / 1000), answered: false };
+        return daemonPostRoomMessage({ ...ctx, database: db }, { ...input, invocation: undefined }, agentId, _atomicCommandWrite);
+      });
+    }
     if (input.presentation === 'card') {
       const saved = await queueMessage(ctx.database, { kind: 'post', roomId: input.roomId,
         authorId: agentId, text: modelText(input.text), requestId: input.requestId, presentation: 'card', tags: input.tags,

@@ -1,15 +1,16 @@
-import type { AgentCommand } from '@beeline/api-contract/daemon';
+import type { AgentCommand, AgentPlaceReset } from '@beeline/api-contract/daemon';
 import { mkdtemp,readFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
 import { AgentRunner } from './agent-runner.js';
 import { AnswerStore } from './answer-store.js';
-import type { DaemonApiClient } from './daemon-api-client.js';
+import { DaemonApiError, type DaemonApiClient } from './daemon-api-client.js';
 import { identityFromKey,type AgentRuntimeRecord } from './runtime.js';
 
 const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn(), refresh: vi.fn(), refreshConfiguration: vi.fn(), configurationChanged: vi.fn() }));
 vi.mock('./place-session.js', () => ({ PlaceSession: class {
+  constructor(private readonly options: { cancelGrantedCommands(): void; resetId?: string }) {}
   alive = false;
   stale = false;
   start = harness.start;
@@ -21,6 +22,10 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   }
   followUp = harness.steer;
   stop = harness.stop;
+  retire() {
+    this.options.cancelGrantedCommands();
+    void this.stop();
+  }
   cancel = harness.cancel;
   resources={refresh:harness.refresh,refreshConfiguration:harness.refreshConfiguration,receiveCommand() {}};
   configurationChanged(){harness.configurationChanged(this);this.stale=true;void this.resources.refreshConfiguration();}
@@ -51,7 +56,7 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer, hosted 
   const identity = identityFromKey(secretKeyHex, 'Agent');
   const agent = { publicKey: identity.publicKey, secretKeyHex, name: identity.name };
   const runtime = { agent, communityId: 'workspace', rooms: [], supervisorRoot: root } as unknown as AgentRuntimeRecord;
-  let changed!: (commands: readonly AgentCommand[], completed: readonly string[], stopped: readonly string[]) => void;
+  let changed!: (commands: readonly AgentCommand[], completed: readonly string[], stopped: readonly string[], resets: readonly AgentPlaceReset[]) => void;
   let opened!: () => void;
   let configChanged!: () => void;
   const execute = vi.fn(async (_name: string, _input: Record<string, unknown>) => ({ id: 'posted', createdAt: 1 }));
@@ -69,7 +74,7 @@ async function fixture(saved?: import('./answer-store.js').StoredAnswer, hosted 
     rootSourceMessageId: id, sourceMessageId: id, agentDepth: 0,
     source: { id, authorId: 'human', body: id, attachments: [], createdAt: 1, type: 'message' },
   });
-  return { root, execute, opened: () => opened(), configChanged:()=>configChanged(), changed: (commands: AgentCommand[], completed: readonly string[] = [], stopped: readonly string[] = []) => changed(commands, completed, stopped), item };
+  return { root, execute, opened: () => opened(), configChanged:()=>configChanged(), changed: (commands: AgentCommand[], completed: readonly string[] = [], stopped: readonly string[] = [], resets: readonly AgentPlaceReset[] = []) => changed(commands, completed, stopped, resets), item };
 }
 
 it('a configuration change refreshes configuration without rereading every optional resource', async () => {
@@ -114,8 +119,8 @@ it('reannounces an active turn after registration without delivering its prompt 
   await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
   f.opened();
   expect(f.execute.mock.calls.filter(([name]) => name === 'startAgentTurn')).toEqual([
-    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,invocationId:expect.any(String)}],
-    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId}],
+    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,invocationId:expect.any(String),resetId:null}],
+    ['startAgentTurn',{roomId:item.roomId,requestId:item.turnRequestId,resetId:null}],
   ]);
   expect(harness.deliver).toHaveBeenCalledTimes(1);
   held.resolve({text:'answer',steps:[],toolCalls:[],cleanup:async()=>{}});
@@ -549,7 +554,7 @@ it('ends a hosted item with the real startup failure and does not replay it on r
   harness.start.mockRejectedValueOnce(new Error('ACP error -32000: Authentication required: Configure an API key or log in'));
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('startAgentTurn', {
-    roomId: item.roomId, requestId: item.id, available: false,
+    roomId: item.roomId, requestId: item.id, resetId: null, available: false,
     failureReason: expect.stringContaining('Authentication required'),
   }));
   f.changed([item]);
@@ -571,7 +576,7 @@ it.each([false, true])('ends an unanswered hosted tag visibly after empty end_tu
     ? { id: item.id, createdAt: 1, answered: false } : { id: item.id, createdAt: 1 });
   f.changed([item]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('startAgentTurn', {
-    roomId: item.roomId, requestId: item.turnRequestId, available: false,
+    roomId: item.roomId, requestId: item.turnRequestId, resetId: null, available: false,
     failureReason: 'Agent harness ended without a public answer',
   }));
   f.opened();
@@ -581,33 +586,82 @@ it.each([false, true])('ends an unanswered hosted tag visibly after empty end_tu
 });
 
 
-it('handles a restart control without starting the harness and acknowledges it silently', async () => {
-  const f = await fixture();
-  const restart = { ...f.item('restart'), action: 'restart' as const, reason: 'tagged_lifecycle_restart' };
-  f.changed([restart]);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('markAgentTurnSilent', {
-    roomId: 'room', requestId: 'restart',
-  }));
-  expect(harness.stop).toHaveBeenCalledTimes(1);
-  expect(harness.start).not.toHaveBeenCalled();
+it('answers the owed tag in a fresh session while the old startup and teardown are stuck', async () => {
+  const f = await fixture(), tag = f.item('owed');
+  const startup = deferred<void>(), teardown = deferred<void>();
+  harness.start.mockReturnValueOnce(startup.promise);
+  harness.stop.mockReturnValueOnce(teardown.promise);
+  f.changed([tag]);
+  await vi.waitFor(() => expect(harness.start).toHaveBeenCalledOnce());
   expect(harness.deliver).not.toHaveBeenCalled();
-  expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toEqual([]);
+
+  const reset = { roomId: tag.roomId, id: 'a'.repeat(64) };
+  f.changed([tag], [], [], [reset]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage',
+    expect.objectContaining({ requestId: tag.id, text: 'answer' })));
+  expect(harness.stop).toHaveBeenCalledOnce();
+  expect(harness.start.mock.instances[0]).not.toBe(harness.start.mock.instances[1]);
+  expect(harness.deliver.mock.calls).toEqual([[tag, [tag]]]);
+  expect(f.execute).toHaveBeenCalledWith('startAgentTurn',
+    expect.objectContaining({ requestId: tag.id, resetId: reset.id }));
+
+  startup.resolve();
+  teardown.resolve();
+  await startup.promise;
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
 });
 
-it('keeps restart out of input batches and delivers subsequent work after restarting', async () => {
-  const f = await fixture();
-  const running = f.item('running'), next = f.item('next');
-  const restart = { ...f.item('restart'), action: 'restart' as const, reason: 'tagged_lifecycle_restart' };
-  const held = deferred<Record<string, unknown>>();
-  harness.deliver.mockReturnValueOnce(held.promise);
-  f.changed([running, restart, next]);
-  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(1));
-  expect(harness.deliver.mock.calls[0]).toEqual([running, [running]]);
-  held.resolve({ text: 'done', steps: [], toolCalls: [], cleanup: async () => {} });
+it('ignores duplicate reset snapshots and drops output from the detached invocation', async () => {
+  const f = await fixture(), tag = f.item('owed');
+  const old = deferred<Record<string, unknown>>(), fresh = deferred<Record<string, unknown>>();
+  harness.deliver.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+  f.changed([tag]);
+  await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledOnce());
+  const reset = { roomId: tag.roomId, id: 'b'.repeat(64) };
+  f.changed([tag], [], [], [reset]);
   await vi.waitFor(() => expect(harness.deliver).toHaveBeenCalledTimes(2));
-  expect(harness.stop).toHaveBeenCalledTimes(1);
-  expect(harness.deliver.mock.calls[1]).toEqual([next, [next]]);
-  expect(f.execute).toHaveBeenCalledWith('markAgentTurnSilent', { roomId: 'room', requestId: 'restart' });
+  f.changed([tag], [], [], [reset]);
+  const late = { text: 'obsolete answer', steps: [], toolCalls: [], cleanup: vi.fn() };
+  old.resolve(late);
+  fresh.resolve({ ...late, text: 'fresh answer', cleanup: async () => {} });
+
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postAgentTurnReceipt',
+    expect.objectContaining({ requestId: tag.id })));
+  expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toEqual([
+    ['postRoomMessage', expect.objectContaining({ requestId: tag.id, text: 'fresh answer' })],
+  ]);
+  expect(harness.start).toHaveBeenCalledTimes(2);
+  expect(harness.stop).toHaveBeenCalledOnce();
+  expect(late.cleanup).not.toHaveBeenCalled();
+});
+
+it('keeps a hosted tag owed if the server fences its start before the reset snapshot arrives', async () => {
+  const f = await fixture(undefined, true), tag = f.item('owed');
+  f.execute.mockImplementation(async (name, input) => {
+    if (name === 'startAgentTurn' && input.resetId === null)
+      throw new DaemonApiError('command turn cancelled', 409, false, 'command turn cancelled');
+    return { id: 'posted', createdAt: 1 };
+  });
+  f.changed([tag]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('startAgentTurn',
+    expect.objectContaining({ resetId: null })));
+  expect(harness.deliver).not.toHaveBeenCalled();
+  expect(f.execute.mock.calls.some(([, input]) => input.available === false)).toBe(false);
+
+  f.changed([tag], [], [], [{ roomId: tag.roomId, id: 'd'.repeat(64) }]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage',
+    expect.objectContaining({ requestId: tag.id, text: 'answer' })));
+});
+
+it('uses the registration snapshot to discard a retired outbox entry', async () => {
+  const f = await fixture({ itemId: 'owed', roomId: 'room', requestId: 'owed', text: 'retired' });
+  const tag = f.item('owed');
+  const reset = { roomId: tag.roomId, id: 'c'.repeat(64) };
+  f.changed([tag], [], [], [reset]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage',
+    expect.objectContaining({ requestId: tag.id, text: 'answer' })));
+  expect(f.execute.mock.calls.filter(([name]) => name === 'postRoomMessage')).toHaveLength(1);
+  expect(harness.stop).not.toHaveBeenCalled();
 });
 
 it('the original invocation survives anchor completion while the final answers a pending sibling',async()=>{

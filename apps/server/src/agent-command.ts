@@ -622,7 +622,7 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
         text: source.body, author_id: source.authorId, room_id: chat.id,
         system_event: source.systemEvent, attachments: source.attachments, presentation: source.type,
       } : { text: input.text, author_id: input.authorId, room_id: chat.id, system_event: undefined } });
-      if (item) commands.push(item);
+      if (item && item.action !== 'restart') commands.push(item);
       return item;
     });
   const targets = (input.presentation === 'card' || stops.length || lifecycle ? [] : input.agentIds ? chat.members.filter(member => input.agentIds!.includes(member.id)) : [...new Map([

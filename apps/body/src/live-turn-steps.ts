@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { AgentInvocation } from '@beeline/api-contract/daemon';
 import type { ToolCallEntry, AgentTurnStep } from './acp.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { roomReplySteps } from './room-turn-steps.js';
@@ -14,7 +15,8 @@ export class LiveTurnSteps {
       agentId: string;
       roomId: string;
       requestId: string;
-      invocationId: string;
+      invocation?: AgentInvocation;
+      current?: () => boolean;
     },
   ) {}
 
@@ -25,16 +27,18 @@ export class LiveTurnSteps {
       if (this.seen.has(key)) return;
       this.seen.add(key);
       // ACP appends background tasks after ordinary calls; snapshot positions move.
-      const activityKey = createHash('sha256').update(JSON.stringify([this.turn.invocationId, key])).digest('hex');
+      const activityKey = createHash('sha256').update(JSON.stringify([this.turn.invocation?.id ?? this.turn.requestId, key])).digest('hex');
       // A result may retain the earlier in-progress status until another update.
       const finished = { ...call, status: call.status === 'failed' ? 'failed' : 'completed' };
       const activity = roomReplySteps([{ kind: 'tool', call: finished }]);
       this.pending = this.pending
         .then(async () => {
+          if (this.turn.current?.() === false) return;
           await this.api.execute('postAgentActivity', {
             agentId: this.turn.agentId,
             roomId: this.turn.roomId,
             requestId: this.turn.requestId,
+            ...(this.turn.invocation ? { invocation: this.turn.invocation } : {}),
             cornerActivityKey: activityKey,
             activity,
           });

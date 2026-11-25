@@ -98,6 +98,9 @@ export type PostRoomEventInput = TurnOutputAuthority &
 
 export type AgentCommandAction = 'input' | 'restart';
 
+/** The latest completed restart request for an agent's place. */
+export type AgentPlaceReset = { readonly roomId: string; readonly id: string };
+
 /** Background work no person is waiting on: event wakes. It may
  * finish without a reply, so a run with nothing to say posts nothing. */
 const BACKGROUND_COMMAND_REASONS: ReadonlySet<string> = new Set(['subscribed_event',

@@ -1,7 +1,9 @@
 import { afterEach,beforeEach,describe,expect,it } from 'vitest';
-import { parseTaggedAgentLifecycleCommand, type CommandRow } from './agent-command.js';
+import { createAgentCommand, parseTaggedAgentLifecycleCommand, type CommandRow } from './agent-command.js';
+import { migratePendingAgentPlaceResets } from './agent-place-reset.js';
 import { beginAgentSignInCards } from './agent-sign-in.js';
 import { announceAgentLifecycle } from './connection-presence.js';
+import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { routeHumanMessage } from './test-fixtures/queue-routing.test-support.js';
@@ -69,14 +71,77 @@ describe('tagged agent lifecycle commands', () => {
   });
 
 
-  it.each(['restart', '/restart'])('routes @bee %s as one active restart control despite resends', async command => {
+  it.each(['restart', '/restart'])('commits @bee %s immediately and returns only the latest reset on an empty queue', async command => {
     const phone = new PhoneService(database, 'http://test');
+    const daemon = new DaemonService(database, live);
     for (const id of ['1'.repeat(64), '1'.repeat(64), '2'.repeat(64)])
       await phone.execute('sendRoomMessage', { roomId: ROOM, messageId: id, text: `@bee ${command}` }, MEMBER);
-    expect((await database.query('SELECT action,state,reason FROM agent_commands')).rows).toEqual([
-      { action: 'restart', state: 'pending', reason: 'tagged_lifecycle_restart' },
+    const { rows } = await database.query<{ id: string }>(
+      'SELECT id,action,state,reason,restart_confirmed_at,completed_at FROM agent_commands ORDER BY inbox_sequence');
+    expect(rows).toEqual([
+      expect.objectContaining({ action: 'restart', state: 'complete', reason: 'tagged_lifecycle_restart',
+        restart_confirmed_at: null, completed_at: expect.any(Date) }),
+      expect.objectContaining({ action: 'restart', state: 'complete', reason: 'tagged_lifecycle_restart',
+        restart_confirmed_at: null, completed_at: expect.any(Date) }),
     ]);
+    expect(await daemon.execute('getAgentCommands', {}, AGENT)).toMatchObject({
+      commands: [], resets: [{ roomId: ROOM, id: rows[1]!.id }],
+    });
     expect((await database.query("SELECT 1 FROM messages WHERE presentation='system'")).rowCount).toBe(0);
+  });
+
+  it('completes a restart behind an unanswered tag and rejects the retired invocation before a fresh turn starts', async () => {
+    const phone = new PhoneService(database, 'http://test');
+    const daemon = new DaemonService(database, live);
+    await phone.execute('sendRoomMessage', { roomId: ROOM, text: '@bee Please answer' }, MEMBER);
+    const [tag] = (await daemon.execute('getAgentCommands', {}, AGENT)).commands;
+    const address = { roomId: ROOM, requestId: tag!.turnRequestId };
+    const old = { id: 'old', requestId: address.requestId };
+    await daemon.execute('startAgentTurn', { ...address, invocationId: old.id, resetId: null }, AGENT);
+    const thought = { agentId: AGENT, roomId: ROOM, turnId: address.requestId, invocation: old, text: 'Old thought' };
+    await daemon.execute('postAgentThought', thought, AGENT);
+    const thoughts = () => database.query("SELECT 1 FROM live_outputs WHERE agent_id=$1 AND room_id=$2 AND kind='thought'", [AGENT, ROOM]);
+    expect((await thoughts()).rowCount).toBe(1);
+    const requested = await phone.execute('sendRoomMessage', { roomId: ROOM, text: '@bee /restart' }, MEMBER);
+    expect(requested.pendingAgentCommands).toEqual([]);
+    const page = await daemon.execute('getAgentCommands', {}, AGENT);
+    expect(page.commands.map(command => command.id)).toEqual([tag!.id]);
+    expect(page.resets).toEqual([{ roomId: ROOM, id: expect.any(String) }]);
+    const resetId = page.resets![0]!.id;
+    expect((await database.query('SELECT state,restart_confirmed_at FROM agent_commands WHERE id=$1', [resetId])).rows)
+      .toEqual([{ state: 'complete', restart_confirmed_at: null }]);
+    await expect(daemon.execute('startAgentTurn', { ...address, invocationId: old.id, resetId: null }, AGENT))
+      .rejects.toThrow();
+    await daemon.execute('postAgentThought', thought, AGENT);
+    expect((await thoughts()).rowCount).toBe(0);
+    expect(await daemon.execute('postRoomMessage', { ...address, invocation: old, text: 'Obsolete', harnessEnded: true }, AGENT))
+      .toMatchObject({ answered: false });
+    expect((await daemon.execute('getAgentCommands', {}, AGENT)).commands.map(command => command.id)).toEqual([tag!.id]);
+
+    const fresh = { id: 'fresh', requestId: address.requestId };
+    await daemon.execute('startAgentTurn', { ...address, invocationId: fresh.id, resetId }, AGENT);
+    await daemon.execute('postRoomMessage', { ...address, invocation: fresh, text: 'Fresh answer', harnessEnded: true }, AGENT);
+    expect((await daemon.execute('getAgentCommands', {}, AGENT)).commands).toEqual([]);
+    expect((await database.query('SELECT restart_confirmed_at FROM agent_commands WHERE id=$1', [resetId])).rows)
+      .toEqual([{ restart_confirmed_at: expect.any(Date) }]);
+    expect((await database.query('SELECT text FROM messages WHERE author_id=$1 AND room_id=$2', [AGENT, ROOM])).rows)
+      .toEqual([{ text: 'Fresh answer' }]);
+  });
+
+  it('completes a pending restart left by an older server without consuming its tag', async () => {
+    await send('1'.repeat(64), MEMBER, '@bee Please answer');
+    const legacy = await createAgentCommand(database, {
+      roomId: ROOM, agentId: AGENT, sourceMessageId: null, action: 'restart', reason: 'tagged_lifecycle_restart',
+    });
+    const daemon = new DaemonService(database, live);
+    await migratePendingAgentPlaceResets(database);
+    await migratePendingAgentPlaceResets(database);
+    expect(await daemon.execute('getAgentCommands', {}, AGENT)).toMatchObject({
+      commands: [{ action: 'input', sourceMessageId: '1'.repeat(64) }],
+      resets: [{ roomId: ROOM, id: legacy!.id }],
+    });
+    expect((await database.query('SELECT state FROM agent_commands WHERE id=$1', [legacy!.id])).rows)
+      .toEqual([{ state: 'complete' }]);
   });
 
   it.each(['status', 'debug', 'help'])('leaves @bee %s as ordinary input without a retired System notice', async command => {

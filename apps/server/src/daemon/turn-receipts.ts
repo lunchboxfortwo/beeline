@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { currentAgentInvocation } from '../agent-invocation.js';
 import { assertMemberTranscript } from '../message-origin.js';
 import { beginAgentSignInCards } from '../agent-sign-in.js';
 import { noteAgentNeedsOwner } from '../agent-needs-owner.js';
@@ -29,7 +30,8 @@ import { Input,id,seconds } from './values.js';
     const outputTokens = recordedTokens(input.outputTokens);
     let committedTurn: CommittedTurnLiveRow | undefined;
     let signInCardId: string | undefined;
-    await ctx.database.transaction(async db => {
+    const accepted = await ctx.database.transaction(async db => {
+      if (input.invocation && !await currentAgentInvocation(db, agentId, input.roomId, input.invocation)) return false;
       await db.query(`SELECT beeline_record_agent_answer(id,$4,$5) FROM agent_commands
         WHERE room_id=$1 AND turn_request_id=$2 AND agent_id=$3`,
         [input.roomId,input.requestId,agentId,input.outcome === 'failed' || input.outcome === 'stopped',input.reason ?? null]);
@@ -42,7 +44,9 @@ import { Input,id,seconds } from './values.js';
          FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3`,
         [input.roomId,input.requestId,agentId])).rows[0];
       await daemonPersistTurnTrace(ctx, db, input, agentId);
+      return true;
     });
+    if (!accepted) return;
     // Only the owner can clear these: one sign-in card, or one limit line.
     const reasonKind = input.reasonKind;
     if (input.outcome === 'failed' && (reasonKind === 'not-signed-in' || reasonKind === 'allowance-spent'))

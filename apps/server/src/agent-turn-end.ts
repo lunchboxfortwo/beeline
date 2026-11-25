@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS agent_invocations (
 );
 ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS batched_command_ids text[] NOT NULL DEFAULT ARRAY[]::text[];
 ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS ended boolean NOT NULL DEFAULT false;
+ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS reset_id text;
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS connection_epoch bigint;
 -- Stop after the reply: the item is complete but its run is still open.
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS stop_requested_at timestamptz;

@@ -85,6 +85,7 @@ export interface PlaceSessionOptions {
   config: BodyConfig;
   api: DaemonApiClient;
   placeId: string;
+  resetId?: string;
   /** Set for a corner. */
   parentRoomId?: string;
   workspaceId: string;
@@ -135,6 +136,8 @@ export class PlaceSession {
   private attachmentDir?: string;
   private privateHomeRoot?: string;
   private stopping = false;
+  private readonly lifetime = new AbortController();
+  private stream?: AgentTurnStream;
   readonly resources: SessionResources;
   private readonly running: RunningModelReporter;
   private readonly resourceAuthPath: string;
@@ -146,7 +149,7 @@ export class PlaceSession {
     const root =
       options.config.workspaceRoot ??
       resolve(options.runtime.supervisorRoot, 'places', options.placeId);
-    this.resourceAuthPath = resolve(root, 'resource-auth.json');
+    this.resourceAuthPath = resolve(root, options.resetId ? `resource-auth-${options.resetId}.json` : 'resource-auth.json');
     this.resources = new SessionResources({
       api: options.api,
       agentId: options.agent.publicKey,
@@ -351,12 +354,20 @@ export class PlaceSession {
 
   /** Make sure a live session serves this place; reuse the running one. */
   async start(item?: AgentCommand): Promise<void> {
+    const { signal } = this.lifetime;
+    signal.throwIfAborted();
     if (item) {
       this.queuedSelection(item);
       this.operatorAgent = item.operatorAgent === true;
     }
-    if (!this.alive || this.stale) await this.startFresh();
-    await this.prepareGitHubLaunchers();
+    try {
+      if (!this.alive || this.stale) await this.startFresh();
+      signal.throwIfAborted();
+      await this.prepareGitHubLaunchers();
+    } catch (error) {
+      if (signal.aborted) void this.stop().catch(console.warn);
+      throw error;
+    }
   }
 
   private async startFresh(): Promise<void> {
@@ -375,7 +386,7 @@ export class PlaceSession {
     try {
       await this.activate(sandbox);
     } catch (error) {
-      if (!sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
+      if (this.lifetime.signal.aborted || !sandbox || this.options.config.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) throw error;
       await this.stop();
       this.notes.push(
         `The OS sandbox could not start (${error instanceof Error ? error.message : String(error)}). ` +
@@ -571,6 +582,9 @@ export class PlaceSession {
     const hostServers = [...CODE_OWNED_HOST_MCP_NAMES];
     const plan = sandboxed ? sandboxMountPlan(sandboxSpec) : undefined;
     const editing = corner && sandboxed;
+    const { signal } = this.lifetime;
+    signal.throwIfAborted();
+    const publishCommands = agentCommandCatalogPublisher({ api, agentId: agent.publicKey, workspaceId });
     const client = (this.options.createAcpClient ?? ((value) => new AcpClient(value)))({
       agentCommand: spawnCommand.command,
       harnessCommand: command,
@@ -598,18 +612,20 @@ export class PlaceSession {
           : async (request) =>
               unsandboxedPermissionDecision(request, folder, { mountedServers, hostServers }),
       onUsage: (usage) => {
+        if (signal.aborted) return;
         void postChangedAgentUsage(api, agent.publicKey, usage).catch((error) =>
           console.error('[agent-usage] publish failed', error),
         );
       },
-      onCommands: agentCommandCatalogPublisher({ api, agentId: agent.publicKey, workspaceId }),
+      onCommands: (...args) => { if (!signal.aborted) publishCommands(...args); },
     });
     this.client = client;
     HostPlaces.enter(placeId);
     client.on('exit', () => {
       if (this.client === client && !this.stopping) this.options.onExit();
     });
-    await startAgentProcess(client);
+    await startAgentProcess(client, signal);
+    signal.throwIfAborted();
     const brief = restore?.brief;
     this.surface = corner
       ? repository?.resolution === 'none'
@@ -665,6 +681,7 @@ export class PlaceSession {
       folder,
       sandboxed,
       session.systemPrompt,
+      ...(this.options.resetId ? [this.options.resetId] : []),
     ]);
     const mode = editing ? 'edit' : 'readonly';
     const opened = await openAcpConversation({
@@ -684,6 +701,7 @@ export class PlaceSession {
       onResumeFailure: (error) =>
         console.warn('[body] native conversation unavailable; starting cold:', error),
     });
+    signal.throwIfAborted();
     this.warm.rememberSession(opened.sessionId, fingerprint);
     this.sessionId = opened.sessionId;
     // The owner asked that a commanded model switch simply take effect
@@ -782,6 +800,7 @@ export class PlaceSession {
     // start() ran first; a session that died since fails its prompt.
     const client = this.client!;
     const sessionId = this.sessionId!;
+    const { signal } = this.lifetime;
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
@@ -819,20 +838,25 @@ export class PlaceSession {
               : [],
           )
         : [];
-    const stream = new AgentTurnStream({
+    signal.throwIfAborted();
+    const stream = this.stream = new AgentTurnStream({
       api: this.options.api,
       agentId: this.options.agent.publicKey,
       roomId: item.roomId,
       requestId: item.turnRequestId,
       commandId: item.id,
       label: `place ${item.roomId}`,
+      current: () => !signal.aborted,
+      invocation,
+      resetId: this.options.resetId,
     });
     const liveSteps = this.options.parentRoomId
       ? new LiveTurnSteps(this.options.api, {
           agentId: this.options.agent.publicKey,
           roomId: item.roomId,
           requestId: item.turnRequestId,
-          invocationId: invocation?.id ?? item.id,
+          invocation,
+          current: () => !signal.aborted,
         })
       : undefined;
     let result: PromptResult;
@@ -860,7 +884,7 @@ export class PlaceSession {
       this.squireRelay.deactivate(item.turnRequestId);
       this.current = undefined;
       this.batchedCommands = [];
-      this.resources.refreshThreads();
+      if (!signal.aborted) this.resources.refreshThreads();
     }
     const text = durableReplyText(result.agentText);
     let steps: Answer['steps'] = [];
@@ -922,6 +946,15 @@ export class PlaceSession {
     void this.stop().catch((error) =>
       console.error('[body] stopped session cleanup failed:', error),
     );
+  }
+
+  /** Detach the old invocation synchronously. Process teardown owns its own wait. */
+  retire(): void {
+    this.lifetime.abort();
+    this.stream?.abandon();
+    this.options.cancelGrantedCommands?.();
+    this.squireRelay.close();
+    void this.stop().catch((error) => console.warn('[body] retired session cleanup failed:', error));
   }
 
   /** The helper is stopping: end the session and its Squire relay. */

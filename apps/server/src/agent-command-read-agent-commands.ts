@@ -1,7 +1,7 @@
 import { connectorHostAcceptedSql } from './rooms-mcp-delivery.js';
 import { legacyMessageBody } from './messaging-cutover.js';
 import { publicMentionCommandSql } from './owed-mentions.js';
-import type { AgentCommand,RoomInboxResult } from '@beeline/api-contract/daemon';
+import type { AgentCommand,AgentPlaceReset,RoomInboxResult } from '@beeline/api-contract/daemon';
 import { OPERATOR_OWNER_ID } from '@beeline/api-contract/daemon';
 import { isResumeKind } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
@@ -13,6 +13,7 @@ import { currentIdleReportSql } from './corner-idle.js';
 import type { SqlDatabase } from './database.js';
 import { deliveredTranscriptIdSql } from './message-route.js';
 import { savedScheduleCommand } from './scheduled-command-authority.js';
+import { readAgentPlaceResets } from './agent-place-reset.js';
 
 type ReviewRollup = Pick<CornerLifecycleView, 'checks' | 'checksSummary'>;
 
@@ -47,7 +48,7 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: 
     selected_model: string | null; selected_effort: string | null; fast_mode: boolean | null;
     review_rollup: ReviewRollup | null; delivered_message_id: string | null }>(
     `WITH queued AS MATERIALIZED (
-       SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending'
+       SELECT * FROM agent_commands WHERE agent_id=$1 AND ($2::text IS NULL OR room_id::text=$2) AND state='pending' AND action<>'restart'
      ), obsolete AS MATERIALIZED (
        SELECT item.id,'complete' outcome,NULL reason,NULL result_id
        FROM queued item WHERE item.private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}'
@@ -116,7 +117,8 @@ export async function readAgentCommands(
   db: SqlDatabase,
   agentId: string,
   roomId?: string,
-): Promise<{ commandProtocol: 2; commands: AgentCommand[] }> {
+): Promise<{ commandProtocol: 2; commands: AgentCommand[]; resets?: AgentPlaceReset[] }> {
+  const resets = await readAgentPlaceResets(db,agentId,roomId);
   const rows = await readAgentQueueRows(db,agentId,{roomId});
   // Loaded here: a static import closes a module cycle through the migrations.
   const { daemonCorners } = await import('./daemon/corner-reads.js');
@@ -126,6 +128,7 @@ export async function readAgentCommands(
   ));
   return {
     commandProtocol: 2,
+    ...(resets.length ? { resets } : {}),
     commands: rows.rows.map(item => {
       const createdAt = Math.floor(new Date(item.created_at).getTime() / 1000);
       const source: AgentCommand['source'] = item.message ?? {

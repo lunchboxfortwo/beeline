@@ -1,7 +1,7 @@
 import type { AppRoute,AppTransport,ConnectAppStatus } from './app-connections.js';
 import { AgentInput,AgentMemberMetadata,AgentRoomInput,CornerInput,RoomCursorInput,RoomInput } from './daemon-operations-daemon-operation-map.js';
 import { DaemonActivityItem,DaemonAgentToolMandate,DaemonModelConfigOption,DaemonPermissionScope,DaemonPullRequestFact } from './daemon-operations-revise-corner-brief-input.js';
-import { TurnOutputAuthority } from './daemon-operations.js';
+import { AgentInvocation, TurnOutputAuthority } from './daemon-operations.js';
 import type { CornerMergeHold } from './phone-operations.js';
 import type { CornerLifecycleView,MessageReactionEmoji } from './phone-types.js';
 import type { SystemEvent } from './system-events.js';
@@ -500,6 +500,7 @@ export type PostAgentAttachmentInput = TurnOutputAuthority &
 
 export type PostLiveOutputInput = TurnOutputAuthority &
   AgentRoomInput & {
+    readonly invocation?: AgentInvocation;
     readonly turnId: string;
     readonly text: string;
     /** Current narration run, coalesced across token deltas; not the whole turn. */
@@ -508,6 +509,7 @@ export type PostLiveOutputInput = TurnOutputAuthority &
 
 export type RetractLiveOutputInput = TurnOutputAuthority &
   AgentRoomInput & {
+    readonly invocation?: AgentInvocation;
     readonly turnId: string;
     readonly kind: 'draft' | 'thought';
   };
@@ -517,6 +519,7 @@ export type RetractLiveOutputInput = TurnOutputAuthority &
  * changes the item; a failure to write it is ignored.
  */
 export type PostTurnReceiptInput = AgentRoomInput & {
+  readonly invocation?: AgentInvocation;
   readonly requestId: string;
   readonly trace?: TurnReplay;
   /** How the delivery ended, for the trace only. */
@@ -536,6 +539,7 @@ export type PostTurnReceiptInput = AgentRoomInput & {
 
 export type PostAgentActivityInput = TurnOutputAuthority &
   AgentRoomInput & {
+    readonly invocation?: AgentInvocation;
     readonly requestId: string;
     readonly cornerActivityKey?: string;
     /** Model pinned to the producing session; null when the helper has no model selection. */
