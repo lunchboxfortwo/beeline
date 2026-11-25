@@ -339,7 +339,7 @@ describe('connected agent message protocol',()=>{
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
   });
 
-  it('refuses a claim bound to another thread before touching either thread', async () => {
+  it('MCP-CLAIM-BINDING: refuses a claim bound to another thread before touching either thread', async () => {
     const {client,member} = await scope.connected();
     const addressed = await tools.reportCorner(AGENT);
     const commandRoom = await tools.reportCorner(AGENT);
