@@ -23,9 +23,9 @@ import { monolithPhoneOperation, phoneOperationFailureReason } from '@/sync/tran
 import { LedgerEntryFrame, LedgerRoomUpdate } from '@/components/buzz/Ledger';
 import { type RoomRosterParticipant } from '@/buzz/room-participants';
 import { rosterAgent, durableFactLine, knownAgentPubkeysFor } from './chat-surface-values';
-import { TranscriptPills, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
+import { TranscriptPills, TranscriptSystemBody, type PillIdentityResolver } from '@/components/buzz/TranscriptPills';
 import { TranscriptCard } from '@/components/buzz/TranscriptCard';
-import { isHiddenSystemLine, isPillMessage } from '@/buzz/transcript-pills';
+import { hasCardBody, isHiddenSystemLine, isPillMessage } from '@/buzz/transcript-pills';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 type Props = [
@@ -478,10 +478,14 @@ export function useChatTranscriptRenderer([
       const run = item.pillRun ?? (isPillMessage(item) ? [item] : null);
       if (run) return withMarkers(renderPills(run));
 
+      if (hasCardBody(item) && (!item.choice || item.choice.mode === 'poll' || item.choice.runId)) {
+        return withMarkers(<TranscriptSystemBody message={item} time={ledgerStamp(item.timestamp)}
+          handlers={{ renderBody: renderSystemBody, onOpenIdentity: handleOpenSystemIdentity, onOpenUrl: handleOpenGitHubEvent,
+            onOpenBrief: openCurrentBrief, onOpenCorner: openCorner, cornerId: isCorner ? decodedId : undefined }} />);
+      }
+
       // Member orders and reports keep their own byline.
       item = agentCommandTranscriptMessage(item, roomParticipants);
-      const memberChoice = renderChoice(item);
-      if (memberChoice) return withMarkers(memberChoice);
 
       // ── Archived notice ──────────────────────────────────────────
       if (item.isArchivedNotice) {

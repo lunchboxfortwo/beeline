@@ -14,7 +14,7 @@ type PillFields = Pick<
   | 'systemTranscript' | 'durableFact' | 'presentation'
 >;
 
-function hasCardBody(message: PillFields): boolean {
+export function hasCardBody(message: PillFields): boolean {
   return !message.deleted && Boolean(
     message.systemTranscript?.visibility === 'card' || message.vaultSave || message.roomUpdate ||
     message.writePermission || message.grantRequest || message.squireApproval || message.computerSession ||
@@ -55,8 +55,10 @@ export function isHiddenSystemLine(message: PillFields): boolean {
 
 export function isPillMessage(message: PillFields): boolean {
   if (isHiddenSystemLine(message) || message.isArchivedNotice || message.corner) return false;
+  if (isGitHubEventRun(message)) return true;
+  if (hasCardBody(message)) return false;
   if (message.notificationLifecycleRun || isSystemLine(message)) return true;
-  if (hasCardBody(message) || message.cornerMarkers?.length || message.isAgentActivity ||
+  if (message.cornerMarkers?.length || message.isAgentActivity ||
       message.isAgentDraft || message.isAgentLiveTurn || message.attachments?.length) return false;
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
   return message.agentCommand?.recipient.kind === 'agent' && Boolean(author);

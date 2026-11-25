@@ -14,7 +14,6 @@ vi.mock('./Ledger', () => ({ LedgerEntryFrame: ({ children }: { children: React.
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 
 import { canDecideGrantRequest, GrantRequestCard } from './GrantRequestCard';
-import { TranscriptPills } from './TranscriptPills';
 
 const OWNER = 'a'.repeat(64);
 const AGENT = { pubkey: 'b'.repeat(64), kind: 'agent', name: 'Alan', handle: 'alan' } as const;
@@ -87,21 +86,12 @@ describe('grant request card', () => {
         expect(circles[1].props.fill).toBe(circles[0].props.stroke);
     });
 
-    it('shows another Room member a collapsed pill whose card opens without controls', () => {
+    it('shows another Room member the request without decision controls', () => {
         const other = 'c'.repeat(64);
         const request = (message as any).grantRequest;
         expect(canDecideGrantRequest(request, OWNER, false, false)).toBe(true);
         expect(canDecideGrantRequest(request, other, false, true)).toBe(false);
-        let tree: any;
-        act(() => {
-            tree = create(<TranscriptPills run={[message]}
-                resolve={(id, name, kind) => ({ kind: kind ?? 'human', seed: id, name })}
-                renderBody={row => <GrantRequestCard message={row} viewerIsAgent={false} viewerPubkey={other}
-                    actionId={null} onDecision={() => undefined} />} />);
-        });
-        const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'system-pill');
-        expect(tree.root.findAll((node: any) => node.props.testID === 'grant-grant-1')).toHaveLength(0);
-        act(() => pill().props.onPress());
+        const tree = render({ viewerPubkey: other });
         expect(tree.root.findAll((node: any) => node.type === 'Button' && /^grant-grant-1-(always|once|deny)$/.test(node.props.testID))).toHaveLength(0);
         expect(tree.root.find((node: any) => node.type === 'Text' && node.props.testID === 'grant-grant-1-ask').props.children).toBe('Run a script to Run the tests');
     });

@@ -341,10 +341,11 @@ const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: stri
 ];
 
 it.each(systemCases.flatMap(entry => [false, true].map(desktop => ({ ...entry, desktop }))))(
-  'keeps $name inside a pill at each transcript position (desktop=$desktop)',
+  'renders $name at each transcript position (desktop=$desktop)',
   async ({ patch, opened, copy, desktop, name }) => {
     for (const position of ['lone', 'first', 'middle', 'last']) {
       const target = display(7, patch);
+      if (name === 'approval') target.agentCommand = { kind: 'message', recipient: { id: 'emberus', name: 'Emberus', kind: 'agent' }, text: 'Review the request' };
       const members = [display(1), display(2)];
       const input = position === 'lone' ? [target] : position === 'first' ? [target, ...members]
         : position === 'middle' ? [members[0]!, target, members[1]!] : [...members, target];
@@ -354,13 +355,15 @@ it.each(systemCases.flatMap(entry => [false, true].map(desktop => ({ ...entry, d
       act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={desktop} />); });
       const body = () => tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === opened);
       const pills = tree.root.findAllByType(PillRow);
-      expect(pills).toHaveLength(1);
-      expect(pills[0].props.items.map((item: { id: string }) => item.id)).toEqual([noticeId]);
-      expect(body()).toHaveLength(0);
-      act(() => pills[0].findByType('Button').props.onPress());
+      if (patch.systemTranscript?.visibility === 'card') {
+        expect(pills).toHaveLength(0);
+      } else {
+        expect(pills).toHaveLength(1);
+        expect(pills[0].props.items.map((item: { id: string }) => item.id)).toEqual([noticeId]);
+        expect(body()).toHaveLength(0);
+        act(() => pills[0].findByType('Button').props.onPress());
+      }
       expect(body()).toHaveLength(1);
-      const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
-      expect(open.findAll((node: any) => node.props.testID === opened)).not.toHaveLength(0);
       if (copy) expect(body()[0].props.children).toBe(copy);
       if (name === 'sign-in') {
         await act(async () => body()[0].props.onPress());

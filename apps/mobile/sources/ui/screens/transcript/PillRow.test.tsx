@@ -38,13 +38,10 @@ describe('PillRow', () => {
         const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'agent-pill');
         expect(pill().props['aria-label']).toBe('Read message from Alan → Jimmy, 10:00');
         act(() => pill().props.onPress());
-        // A lone pill opens exactly like a run of one: the run list's face → face row in the transcript column.
         const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
-        const entry = open.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-run-entry-a2a');
-        expect(entry.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
-        expect(entry.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
-        expect(entry.findByProps({ testID: 'a2a-body' }).props.children).toBe('@jimmy Keep it visible');
-        expect(text(entry)).toContain('· 10:00');
+        expect(text(open)).toEqual(['@jimmy Keep it visible']);
+        expect(open.findAll((node: any) => node.type === 'IdentityMark' || node.type === 'Icon.ArrowRight')).toHaveLength(0);
+        expect(open.findAllByProps({ testID: 'chat-byline-words' })).toHaveLength(0);
         expect(pill().props['aria-expanded']).toBe(true);
         act(() => pill().props.onPress());
         expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
@@ -57,7 +54,7 @@ describe('PillRow', () => {
         expect(pill().findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['alan', 'jimmy']);
         expect(tree.root.findAllByProps({ testID: 'a2a-body' })).toHaveLength(0);
         act(() => pill().props.onPress());
-        const entry = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-run-entry-a2a');
+        const entry = tree.root.findByProps({ testID: 'pill-open' });
         expect(entry.findByProps({ testID: 'a2a-body' }).props.children).toBe('@jimmy Keep it visible');
     });
 
@@ -133,6 +130,10 @@ describe('PillRow', () => {
         const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
         const entries = open.findAll((node: any) => node.type === 'YStack' && String(node.props.testID).startsWith('pill-run-entry-'));
         expect(entries.map((entry: any) => entry.props.testID)).toEqual(['m1', 's1', 'm2', 'm3'].map(id => `pill-run-entry-${id}`));
+        for (const [index, entry] of entries.entries()) {
+            expect(text(entry)[0]).toBe(`· ${runItem.run![index]!.time}`);
+            expect(entry.findAllByProps({ testID: 'chat-byline-words' })).toHaveLength(0);
+        }
         const m2 = entries[2];
         expect(m2.findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual(['claude', 'ruby']);
         expect(m2.findAll((node: any) => node.type === 'Icon.ArrowRight')).toHaveLength(1);
@@ -324,9 +325,9 @@ describe('PillRow', () => {
             expect(strings(pill)).toEqual([]);
             expect(pill.props['aria-label']).toBe('Read Beeline event: Opened thread github-event-pills, 20:45');
             act(() => pill.props.onPress());
-            const group = tree.root.find((node: any) => node.type === 'YStack' && node.props.testID === 'pill-event-group-t1');
-            expect(group.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(0);
-            expect(group.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+            const open = tree.root.findByProps({ testID: 'pill-open' });
+            expect(open.findAllByProps({ testID: 'pill-event-group-t1' })).toHaveLength(0);
+            expect(open.findAllByProps({ testID: 'pill-event-text-t1' })).not.toHaveLength(0);
         });
 
         it('leads a run with both rings, heads a thread opening with Beeline, and counts it as a Beeline event', () => {
