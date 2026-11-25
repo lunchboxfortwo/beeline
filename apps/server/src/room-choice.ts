@@ -297,6 +297,8 @@ export async function postRoomChoice(
     messageAttachments?: readonly import('@beeline/api-contract/daemon').DaemonAttachment[];
     messageCard?: Record<string, unknown>;
     messageAudienceId?:string;
+    replyTo?:string;
+    parentCommand?:import('./agent-command.js').CommandRow;
     messageOrigin?:import('@beeline/api-contract/daemon').MessageAddress;
     roomId: string;
     agentId: string;
@@ -392,7 +394,7 @@ export async function postRoomChoice(
   });
   if (input.messageText !== undefined) await queueMessage(database, {
     kind:'post',id:messageId,roomId:input.roomId,authorId:input.agentId,text:input.messageText,
-    origin:input.messageOrigin,audienceId:input.messageAudienceId,presentation:'card',cardType:CHOICE_CARD_TYPE,card:{...card,...input.messageCard},agentIds:[],requestId:input.requestId,
+    replyTo:input.replyTo,parent:input.parentCommand,origin:input.messageOrigin,audienceId:input.messageAudienceId,presentation:'card',cardType:CHOICE_CARD_TYPE,card:{...card,...input.messageCard},agentIds:[],requestId:input.requestId,
     attachments:input.messageAttachments,
   });
   else await systemLine(database, {

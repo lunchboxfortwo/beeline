@@ -4,7 +4,7 @@
 // advertised tool missing from the list, or a new list name nothing advertises, fails here. It changes no permission.
 import { describe as move3_describe, expect as move3_expect, it as move3_it } from 'vitest';
 
-import { CAPABILITY_ROUTES as move3_CAPABILITY_ROUTES, REPOSITORY_ROUTES as move3_REPOSITORY_ROUTES, RUNNER_TOOL as move3_RUNNER_TOOL, SCRATCH_ROUTES as move3_SCRATCH_ROUTES, SILENT_TOOL as move3_SILENT_TOOL, minimalTools as move3_minimalTools, repositoryTools as move3_repositoryTools, scratchTools as move3_scratchTools } from "./minimal-tool-surface.js";
+import { CAPABILITY_ROUTES as move3_CAPABILITY_ROUTES, REPOSITORY_ROUTES as move3_REPOSITORY_ROUTES, RUNNER_TOOL as move3_RUNNER_TOOL, SCRATCH_ROUTES as move3_SCRATCH_ROUTES, minimalTools as move3_minimalTools, repositoryTools as move3_repositoryTools, scratchTools as move3_scratchTools } from "./minimal-tool-surface.js";
 
 import { BEELINE_AGENT_MCP_SERVER_NAME as move3_BEELINE_AGENT_MCP_SERVER_NAME, isBeelineAgentMcpPermissionRequest as move3_isBeelineAgentMcpPermissionRequest } from "./read-only-policy.js";
 import { describe as movedDescribe3 } from 'vitest';
@@ -15,7 +15,7 @@ const listed = (tool: string) => move3_isBeelineAgentMcpPermissionRequest({ tool
 
 
 move3_describe('R-SURFACE-DRIFT: AGENT_SURFACE_TOOL_NAMES vs the advertised tools', () => {
-  const advertised = [...new Set([...move3_minimalTools(true), ...move3_minimalTools(false), move3_RUNNER_TOOL, move3_SILENT_TOOL, ...move3_scratchTools(true), ...move3_repositoryTools()]
+  const advertised = [...new Set([...move3_minimalTools(true), ...move3_minimalTools(false), move3_RUNNER_TOOL, ...move3_scratchTools(true), ...move3_repositoryTools()]
     .map(tool => tool.name))].sort();
   const aliases = new Set([...Object.values(move3_REPOSITORY_ROUTES), ...Object.values(move3_SCRATCH_ROUTES),
     ...Object.values(move3_CAPABILITY_ROUTES).flatMap(routes => Object.values(routes))]);

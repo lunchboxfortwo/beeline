@@ -36,3 +36,22 @@ it.each(['native','HTTP'] as const)('%s tool delivery to a different place leave
    .toEqual([{room_id:CHAT,text:'Final in this turn'},{room_id:OTHER,text:'Explicit answer'}]);
  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
 });
+
+it('limits reply authority to the registered delivery, including batched messages',async()=>{
+  const task = () => sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Task'});
+  const first = await task(), second = await task();
+  const start = async (batchedCommandIds:string[]) => {
+    const invocation = {id:randomUUID(),requestId:first.id};
+    await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:first.id,invocationId:invocation.id,batchedCommandIds},B);
+    return invocation;
+  };
+  const current = await start([]);
+  const reply = (id:string,invocation:typeof current) => daemon.execute('message',{
+    roomId:CHAT, requestId:id, type:'reply', quoteMsgId:id, text:'Answer', invocation,
+  },B);
+  await expect(reply(second.id,current)).rejects.toThrow('woke this turn');
+  await expect(reply(first.id,current)).resolves.toHaveProperty('id');
+  const batch = await start([second.id]);
+  await expect(reply(second.id,batch)).resolves.toHaveProperty('id');
+  await expect(reply(first.id,current)).rejects.toThrow('woke this turn');
+});

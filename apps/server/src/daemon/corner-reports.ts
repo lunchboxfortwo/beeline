@@ -1,6 +1,6 @@
 import { fixCornerText } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
-import { answerQueuedMessage,authorizeCommandOutput,type CommandRow } from '../agent-command.js';
+import { authorizeCommandOutput,type CommandRow } from '../agent-command.js';
 import { CommandRefusalError } from '../commander.js';
 import { currentCornerBrief,resolveCornerBriefApproval,resolveCornerBriefAttachments,resolvePendingCornerBriefAttachments,validateCornerBrief } from '../corner-brief.js';
 import { cornerLifecycleSql } from '../corner-github-cache.js';
@@ -19,12 +19,6 @@ import { daemonReach,daemonWriteResult } from './corner-messages.js';
 import { daemonCheckReviewerAuthors } from './corner-reads.js';
 import { id,Input,Output } from './values.js';
 
-
-  export async function daemonReport(ctx: DaemonContext, text: string, agentId: string, command = ctx.authorizedCommand!, database = ctx.database, automatic = false, status?: unknown, ask?: string) {
-    return answerQueuedMessage(database, agentId, { roomId: command.room_id, requestId: command.turn_request_id,
-      text, report: !automatic, status, ask,
-    });
-  }
 
   export async function daemonWatchCorner(ctx: DaemonContext,
     input: Input<'watchCorner'>,

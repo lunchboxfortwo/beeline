@@ -187,18 +187,13 @@ export function sessionToolScopeMeta(
   const result = meta ? (JSON.parse(JSON.stringify(meta)) as Record<string, unknown>) : undefined;
   if (result && matchProfile(agentCommand)?.metaSystemPrompt) {
     const claude = result.claudeCode as { options: Record<string, unknown> };
-    // Claude retries a thinking-only end_turn inside its SDK unless a successful
-    // terminal MCP call is present. The local handler enforces wake eligibility.
     claude.options.env = {
       // Claude's native elapsed-silence reminder ignores server wake provenance.
       // Beeline's turn prompt owns whether a human is owed a reply.
       CLAUDE_CODE_SILENT_TURN_REMINDER: '0',
       // Claude's native background-task wake starts prompts Beeline never issued.
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
-      CLAUDE_CODE_TERMINAL_MCP_TOOLS: [...new Set([
-        ...terminalTools.split(',').map(name => name.trim()).filter(Boolean),
-        'mcp__beeline-agent__no_reply_needed',
-      ])].join(','),
+      CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalTools,
     };
   }
   return result;

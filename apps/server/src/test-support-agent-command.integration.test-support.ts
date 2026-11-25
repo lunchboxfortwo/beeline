@@ -22,7 +22,7 @@ import { LiveHub } from './live.js';
 
 import { claimAgentConnection, releaseAgentConnection } from './connection-presence.js';
 
-import { createAgentCommand, nextAgentDepth, reconcileCornerMergeBlockers, reconcileConfiguredCornerReviewers, routeSystemCommand, readAgentCommands, } from './agent-command.js';
+import { type CommandRow, createAgentCommand, nextAgentDepth, reconcileCornerMergeBlockers, reconcileConfiguredCornerReviewers, routeSystemCommand, readAgentCommands, } from './agent-command.js';
 
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 
@@ -105,8 +105,11 @@ export async function queueStopOrders() {
   await send('@goosy delegate work');
   const [root] = await commands(B);
   await claim(root!);
+  // Stop must still cancel matching private orders queued before typed messaging.
+  const parent=(await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1',[root!.id])).rows[0]!;
   for (let i = 1; i <= 3; i++) {
-    await daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: `queued task ${i}`, requestId: root!.turnRequestId }, B);
+    await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',parent,
+      privatePayload:{kind:'order',authorId:B,fromRoomId:R,text:`queued task ${i}`}});
   }
   const queued = await commands();
   expect(queued).toHaveLength(3);

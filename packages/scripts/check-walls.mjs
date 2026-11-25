@@ -23,7 +23,6 @@ export const PATH = [
   { file: 'apps/server/src/agent-messaging.ts', functions: ['messageAddress','sendMessage','replyToMessage'] },
   { file: 'apps/server/src/agent-command-read-agent-commands.ts', functions: ['readAgentCommands','readAgentQueueRows'] },
   { file: 'apps/server/src/commander.ts', functions: ['sendOrder', 'reportToCommander'] },
-  { file: 'apps/server/src/daemon/corner-reports.ts', functions: ['daemonReport'] },
   { file: 'apps/server/src/daemon/corner-messages.ts', functions: ['daemonPostCornerMessage'] },
   { file: 'apps/server/src/daemon/execute.ts', functions: ['daemonExecute'] },
   { file: 'apps/server/src/daemon/messages.ts', functions: ['daemonPostRoomMessage'] },
@@ -163,9 +162,9 @@ export function judgeWakeDestinations(root) {
   if(!normalize(messaging).includes(normalize('roomId: to.place, agentId: to.agent')))
     errors.push('message delivery must wake its agent and place tuple');
   const queue=readFileSync(resolve(root,'apps/server/src/agent-command.ts'),'utf8');
-  if(!normalize(queue).includes(normalize('const to = await reportRecipient(db,item)')) ||
+  if(!normalize(queue).includes(normalize('item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item)')) ||
       !normalize(queue).includes(normalize('sendMessage(db,{route:{from,to},text:messageText')))
-    errors.push('reports must use the recipient resolved for the received command');
+    errors.push('explicit replies must use the received message route');
   if(normalize(queue).includes(normalize('replyAddress:chat.commander')) ||
       !normalize(queue).includes(normalize('payload?.route?.from.place')))
     errors.push('System wake answers must retain their thread destination');

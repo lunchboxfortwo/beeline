@@ -1,4 +1,4 @@
-import { agentMessageText, replyNeeded, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
+import { agentMessageText, subscriptionActionPrompt, type AgentCommand, type SystemEvent } from '@beeline/api-contract/daemon';
 import { parseGrantDecisionLine } from '@beeline/api-contract/agent-grants';
 import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contract/scheduled-prompts';
 import { existsSync } from 'node:fs';
@@ -177,7 +177,7 @@ function itemPromptContext(item: AgentCommand, options: {
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),
-    agentMessageText({ from: author, place, id: item.id, replyNeeded: item.parentRoomId ? undefined : replyNeeded(item.reason, item.ask),
+    agentMessageText({ from: author, place, id: source.id,
       text: body.trim() || '(shared attachments)', attachments: attachmentMarkerLines(source.attachments) }),
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
       : source.replyToMessageId ? [`In reply to message ${source.replyToMessageId}`] : []),

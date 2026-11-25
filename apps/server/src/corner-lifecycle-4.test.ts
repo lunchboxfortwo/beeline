@@ -105,9 +105,9 @@ describe('the gate stays shut (AC-8)', () => {
     await say(R, '@hoots release the hold');
     const order = (await commands(A, R)).at(-1)!;
     await claim(order);
-    await rootFixture.daemon.execute('order', { roomId: R, requestId: order.turnRequestId, text: 'The holder said: release the hold', address: cornerId, agent: B }, A);
+    await rootFixture.daemon.execute('message', { roomId: R, requestId: order.turnRequestId, text: 'The holder said: release the hold', type: 'normal', address: `${B}@${cornerId}` }, A);
     const steer = (await commands(B, cornerId)).at(-1)!;
-    expect(steer.reason).toBe('order');
+    expect(steer.reason).toBe('message');
     await claim(steer);
     expect(await implementersMerge()).toBe(0);
     await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: steer.turnRequestId, releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
@@ -136,7 +136,7 @@ describe('the gate stays shut (AC-8)', () => {
     const cornerId = await approved();
     const { holdId } = await rootFixture.phone.execute('setCornerHold', { cornerId }, H);
     const command = await commissioned(cornerId);
-    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,to:{agent:B,place:cornerId},text:'release the hold'},A);
+    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,type:'normal', address:`${B}@${cornerId}`,text:'release the hold'},A);
     const delegated = (await commands(B, cornerId)).at(-1)!;
     await claim(delegated);
     await expect(rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: delegated.turnRequestId, releaseHoldId: holdId }, B)).rejects.toThrow('hold release denied');
@@ -175,10 +175,10 @@ describe('the gate stays shut (AC-8)', () => {
     await say(dm, '@hoots approved');
     const approval = (await commands(A, dm)).at(-1)!;
     await claim(approval);
-    await rootFixture.daemon.execute('order', { roomId: dm, requestId: approval.turnRequestId, address: cornerId, text: 'Release the approved hold', agent: B }, A);
+    await rootFixture.daemon.execute('message', { roomId: dm, requestId: approval.turnRequestId, type: 'normal', address: `${B}@${cornerId}`, text: 'Release the approved hold' }, A);
     const first = (await commands(B, cornerId)).at(-1)!;
     await claim(first);
-    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: first.turnRequestId, address: cornerId, text: 'Release the approved hold', agent: A }, B);
+    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: first.turnRequestId, type: 'normal', address: `${A}@${cornerId}`, text: 'Release the approved hold' }, B);
     const second = (await commands(A, cornerId)).at(-1)!;
     await claim(second);
     await rootFixture.daemon.execute('setCornerHold', { cornerId, roomId: cornerId, requestId: second.turnRequestId, releaseHoldId: holdId }, A);

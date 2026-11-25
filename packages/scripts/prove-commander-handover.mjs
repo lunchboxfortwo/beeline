@@ -13,9 +13,8 @@ const human = 'a'.repeat(64), opener = 'b'.repeat(64), boss = 'c'.repeat(64), wo
 const workspace = randomUUID(), room = randomUUID(), dm = randomUUID();
 const daemon = new HelperDaemonService(db, new LiveHub()), phone = new PhoneService(db, 'http://proof');
 const commands = async (address, agent) => (await daemon.execute('getAgentCommands', { roomId: address }, agent)).commands;
-const authority = turn => ({ roomId: turn.roomId, requestId: turn.turnRequestId, generationId: 'proof' });
-const claim = async turn => { await daemon.execute('claimAgentCommand', {
-  roomId: turn.roomId, commandId: turn.id, generationId: 'proof' }, turn.agentId); return turn; };
+const authority = turn => ({ roomId: turn.roomId, requestId: turn.turnRequestId });
+const claim = async turn => { await daemon.execute('startAgentTurn', { roomId: turn.roomId, requestId: turn.turnRequestId }, turn.agentId); return turn; };
 const message = async (address, text) => {
   const messageId = randomBytes(32).toString('hex');
   await phone.execute('sendRoomMessage', { roomId: address, messageId, text }, human);
@@ -42,10 +41,7 @@ try {
   const original = await claim((await commands(opened.cornerId, worker))[0]);
   await daemon.execute('postAgentTurnReceipt', { ...authority(original), agentId: worker, status: 'complete' }, worker);
   const approved = await message(room, '@boss Take over the brief');
-  const revision = await claim((await commands(room, boss)).find(c => c.sourceMessageId === approved));
-  const historical = await daemon.execute('order', { ...authority(revision), address: opened.cornerId,
-    agent: 'worker', text: 'Finish the earlier assignment' }, boss);
-  const historicalTurn = await claim((await commands(opened.cornerId, worker)).find(c => c.id === historical.id));
+  await claim((await commands(room, boss)).find(c => c.sourceMessageId === approved));
   const dispatch = randomUUID();
   await db.query("INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'New Dispatch Room')", [dispatch, workspace, human]);
   for (const member of [human, boss]) await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
@@ -53,37 +49,15 @@ try {
   const dispatchMessage = await message(dispatch, '@boss Apply the approved revised brief');
   const dispatchTurn = await claim((await commands(dispatch, boss)).find(c => c.sourceMessageId === dispatchMessage));
   await daemon.execute('reviseCornerBrief', { ...authority(dispatchTurn), cornerId: opened.cornerId, expectedRevision: 1,
-    brief: { spec: 'Build under the new commander', repositoryWork: false, change: 'Human approved handover',
+    brief: { spec: 'Build the revised widget', repositoryWork: false, change: 'Human approved the revision',
       approval: { sourceMessageId: approved } } }, boss);
-  await daemon.execute('report', { ...authority(historicalTurn), status: 'blocked', text: 'Earlier assignment result' }, worker);
-  assert.equal((await commands(room, boss)).filter(c => c.reason === 'report' && c.source.body === 'blocked: Earlier assignment result').length, 1);
-  assert.equal((await commands(dispatch, boss)).filter(c => c.reason === 'report').length, 0);
-  console.log('PASS Reproduction R1 in-flight: incoming commander orders from original Room, revises from another Room, and earlier report returns only to original Room.');
   const wake = await createAgentCommand(db, { roomId: opened.cornerId, agentId: worker, sourceMessageId: null, reason: 'corner_check' });
   const next = await claim((await commands(opened.cornerId, worker)).find(c => c.id === wake.id));
-  await assert.rejects(daemon.execute('postCornerMessage', { ...authority(next), cornerId: opened.cornerId,
-    text: '@person Choose the endpoint' }, worker), /Your commander is @boss in New Dispatch Room/);
-  await daemon.execute('report', { ...authority(next), status: 'blocked', text: 'Endpoint decision required' }, worker);
-  assert.equal((await commands(dispatch, boss)).filter(c => c.reason === 'report' && c.source.body === 'blocked: Endpoint decision required').length, 1);
-  assert.equal((await commands(dm, opener)).filter(c => c.reason === 'report').length, 0);
-  console.log('PASS Reproduction R1: built service human approval → revised brief → worker tag check names new commander → private report received only by new commander.');
-
-  const order = await daemon.execute('order', { ...authority(initial), address: room, agent: 'worker', text: 'Post the result' }, opener);
-  const pending = await daemon.execute('order', { ...authority(initial), address: room, agent: 'worker', text: 'Private-only result' }, opener);
-  const turn = await claim((await commands(room, worker)).find(c => c.id === order.id));
-  const posted = await daemon.execute('postCornerMessage', { ...authority(turn), cornerId: room,
-    text: 'The public reply is delivered.' }, worker);
-  await db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [dm, opener]);
-  const result = await daemon.execute('postRoomMessage', { ...authority(turn), text: 'The public reply is delivered.' }, worker);
-  assert.equal(result.id, posted.id);
-  assert.match(result.receipt, /Warning:.*public reply was posted.*private report copy was not delivered/);
-  assert.deepEqual(await daemon.execute('getRequestCompletion', { roomId: room, requestId: turn.turnRequestId }, worker),
-    { completed: true, outcome: 'complete' });
-  const view = await phone.readRoom(room, human);
-  assert.equal(view.messages.filter(m => m.text === 'The public reply is delivered.').length, 1);
-  assert.equal(view.latestAgentTurns.find(t => t.requestId === turn.turnRequestId).status, 'complete');
-  console.log('PASS Reproduction R2: built service public post → commander membership removed → final private copy returns success with warning → phone Room read shows one reply and successful turn, no failed turn card.');
-  const privateOnly = await claim((await commands(room, worker)).find(c => c.id === pending.id));
-  await assert.rejects(daemon.execute('postRoomMessage', { ...authority(privateOnly), text: 'Private-only result' }, worker), /Report was not delivered/);
-  console.log('PASS R2 guard: no public post still refuses undelivered private report.');
+  const block = await daemon.execute('message', { ...authority(next), type: 'blocked', text: 'Endpoint decision required' }, worker);
+  assert((await commands(dm, opener)).some(c => c.id === block.id));
+  assert(!(await commands(dispatch, boss)).some(c => c.id === block.id));
+  await daemon.execute('postRoomMessage', { ...authority(next), text: 'Checked the endpoint', harnessEnded: true }, worker);
+  const posts = await db.query('SELECT room_id FROM messages WHERE author_id=$1 AND text=$2', [worker, 'Checked the endpoint']);
+  assert.deepEqual(posts.rows, [{room_id:opened.cornerId}]);
+  console.log('PASS After a brief revision the opener receives the block in its original DM and the final stays in the thread.');
 } finally { await db.close(); }

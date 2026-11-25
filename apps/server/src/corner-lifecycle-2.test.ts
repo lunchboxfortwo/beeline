@@ -205,7 +205,7 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
-    await rootFixture.daemon.execute('reply',{roomId:review!.roomId,id:review!.id,text:'@hoots attach the production proof.'},review!.agentId);
+    await rootFixture.daemon.execute('message',{roomId:review!.roomId,requestId:review!.turnRequestId,type:'normal',address:`${A}@${review!.roomId}`,text:'@hoots attach the production proof.'},review!.agentId);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'checks', result: 'passing', sourceMessageId: review!.sourceMessageId });
     expect(await reasons(cornerId, A)).not.toContain('corner_review_needed');
   });
@@ -685,7 +685,7 @@ const scope20 = fixtureScope20();
     await say(cornerId, '@hoots hand this corner to goosy');
     const command = (await commands(A, cornerId)).find((c) => c.roomId === cornerId && c.reason === 'human_tag')!;
     await claim(command);
-    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,to:{agent:B,place:cornerId},text:'take this one'},A);
+    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,type:'normal', address:`${B}@${cornerId}`,text:'take this one'},A);
     console.log('Reproduction H1-1:', {
       implementer: await scope20.workerOf(cornerId),
       goosyCommands: (await commands(B, cornerId)).map((c) => c.reason),
@@ -740,7 +740,7 @@ const scope20 = fixtureScope20();
     await say(cornerId, '@hoots hand this corner to goosy');
     const command = (await commands(A, cornerId)).find((c) => c.roomId === cornerId && c.reason === 'human_tag')!;
     await claim(command);
-    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,to:{agent:B,place:cornerId},text:'take this one'},A);
+    await rootFixture.daemon.execute('message',{roomId:cornerId,requestId:command.turnRequestId,type:'normal', address:`${B}@${cornerId}`,text:'take this one'},A);
     // The person's tag put Hoots in the role; the reviewer Goosy never takes it.
     expect(await scope20.workerOf(cornerId)).toBe(A);
   });

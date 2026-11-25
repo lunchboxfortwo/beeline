@@ -49,8 +49,8 @@ const revise = (
   );
 
 // Reproduction BRIEF-APPROVAL-DELIVERY (github-event-pills, 23 Nov): Ruby opened
-// the thread from the owner's tag in its parent Room, so the owner is its
-// commander. Citing the owner's earlier delivery ID and revising without a
+// the thread from the owner's tag in its parent Room. Ruby's session there
+// commands the thread. Citing the owner's earlier delivery ID and revising without a
 // citation were both refused with 403.
 async function openThread() {
   await finishAll();
@@ -77,7 +77,7 @@ async function openThread() {
       [opened.cornerId],
     )
   ).rows[0]!.commander;
-  expect(commander).toBe(HUMAN);
+  expect(commander).toBe(RUBY);
   await finishAll();
   return opened.cornerId;
 }
@@ -103,23 +103,18 @@ it('Reproduction BRIEF-APPROVAL-DELIVERY: an earlier human delivery ID approves 
   );
 }, 60_000);
 
-it('Reproduction BRIEF-APPROVAL-TURN: a revision without a citation cites the human turn that asked for it', async () => {
+it('Reproduction BRIEF-APPROVAL-TURN: a commander records human approval only when citing the human message', async () => {
   const cornerId = await openThread();
-  // Before: 403 "sourceMessageId is required".
-  const doIt = await tag(ROOM, '@ruby just do it');
-  await claim(doIt.command);
-  expect(await revise(doIt.command, cornerId, 1)).toMatchObject({
+  const request = await tag(ROOM, '@ruby just do it');
+  await claim(request.command);
+  expect(await revise(request.command, cornerId, 1)).toMatchObject({
     revision: 2,
-    approval: { sourceMessageId: doIt.messageId, approvedBy: HUMAN },
+    approval: { kind: 'commander-direct', sourceMessageId: '', approvedBy: RUBY },
   });
-  // Revising the brief preserves the original human approval.
-  expect(await revise(doIt.command, cornerId, 2, '')).toMatchObject({
+  expect(await revise(request.command, cornerId, 2, request.messageId)).toMatchObject({
     revision: 3,
-    approval: { sourceMessageId: doIt.messageId, approvedBy: HUMAN },
+    approval: { sourceMessageId: request.messageId, approvedBy: HUMAN },
   });
-  console.info(
-    'Demonstrated BRIEF-APPROVAL-TURN: the current human delivery approves an uncited revision',
-  );
 }, 60_000);
 
 it("BRIEF-APPROVAL-DELIVERY: the commander cites a delivery from any chat it was addressed in; another agent's delivery approves nothing", async () => {

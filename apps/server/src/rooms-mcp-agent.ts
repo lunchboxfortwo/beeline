@@ -1,3 +1,7 @@
+import { normalizePlaceAddresses } from './daemon/place-address.js';
+import { authorizeCommandOutput } from './agent-command-route-agent-result.js';
+import { sendMessage,replyToMessage } from './agent-messaging.js';
+import type { MessageAddress,MessageAsk } from '@beeline/api-contract/daemon';
 import { beginAgentInvocation } from './agent-invocation.js';
 import { queuedContextText } from './agent-command-context.js';
 import { recordedMessageRoute } from './message-route.js';
@@ -315,7 +319,10 @@ export class RoomsMcpAgentTools {
 
   private exec(member: string, op: string, input: Args): Promise<unknown> {
     const replyTo = this.postReplyRouting.getStore();
-    if (op === 'postCornerMessage' && replyTo !== undefined) input.replyTo = replyTo;
+    if (op === 'postCornerMessage') return this.daemon.postCornerMessage({
+      roomId:String(input.roomId),cornerId:String(input.cornerId),text:String(input.text),
+      requestId:input.requestId as string | undefined,replyTo:(replyTo ?? input.replyTo) as string | undefined,
+    },member);
     return this.daemon.execute(op as never, input as never, member) as Promise<unknown>;
   }
 
@@ -393,10 +400,20 @@ export class RoomsMcpAgentTools {
       const context = {roomId:item?.room_id ?? target,requestId:item?.turn_request_id};
       if (name === 'post' && item?.state==='pending' && item.room_id === target && (item.return_room_id ?? target) === target)
         return this.exec(member,'postRoomMessage',{...context,text:args.text,replyToMessageId:args.replyTo});
-      return this.exec(member,name === 'post' ? 'postCornerMessage' : name,
-        name === 'message' ? {...context,to:args.to,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
-        : name === 'reply' ? {...context,id:args.id,text:args.text,ask:args.ask,question:args.question,brief:args.brief,options:args.options}
-        : {...context,cornerId:target,text:args.text,replyTo:args.replyTo});
+      if (name === 'post') return this.exec(member,'postCornerMessage',{...context,cornerId:target,text:args.text,replyTo:args.replyTo});
+      const content = {text:String(args.text),ask:args.ask as MessageAsk | undefined,question:args.question as string | undefined,
+        brief:args.brief as string | undefined,options:args.options as readonly string[] | undefined};
+      if (name === 'message') {
+        const {roomId,to} = normalizePlaceAddresses('message',{roomId:context.roomId,to:args.to as MessageAddress});
+        return this.db.transaction(async db => {
+          const parent = context.requestId ? await authorizeCommandOutput(db,roomId,member,context.requestId) : undefined;
+          return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to}});
+        });
+      }
+      return replyToMessage(this.db,member,{...context,...content,id:String(args.id)},roomId => {
+        void this.daemon.reconcileZeroCheckWorkerCompletion(roomId,member)
+          .catch(error => console.warn('[answer] optional lifecycle refresh omitted:',error));
+      });
     }
     return this.callTool(member,name,args);
   }

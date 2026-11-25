@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { queueMessage } from './agent-command.js';
 import { RoomsMcpAgentTools } from './rooms-mcp-agent.js';
-import { sendMessage } from './agent-messaging.js';
+import { sendMessage,replyToMessage } from './agent-messaging.js';
 import { expectThreadRouting } from './reply-routing-invariants.test-support.js';
 import { A,B,C,H,CHAT,THREAD,OTHER,db,daemon } from './messaging.test-support.js';
 
@@ -13,7 +13,7 @@ const task = (agent:string, place:string, source=CHAT) => sendMessage(db,{
 });
 const output = (roomId:string,requestId:string,text:string) =>
   daemon.execute('postRoomMessage',{roomId,requestId,text,harnessEnded:true},B);
-const report = (roomId:string,id:string,text:string) => daemon.execute('reply',{roomId,id,text},B);
+const report = (roomId:string,id:string,text:string) => replyToMessage(db,B,{roomId,id,text});
 
 it('refuses a reply from another chat to a human tag that woke only the tagged session', async () => {
   const tag = await queueMessage(db, {kind:'post', roomId:OTHER, authorId:H, text:'@jellybean Please inspect'});
@@ -88,17 +88,15 @@ it('a watched event from an archived thread completes in the watching chat', asy
     privatePayload:{kind:'lifecycle',text:'Thread merged',authorId:SYSTEM_IDENTITY_ID,fromRoomId:THREAD,
       route:{from:{agent:SYSTEM_IDENTITY_ID,place:THREAD},to:{agent:B,place:CHAT}}}});
   await db.query('UPDATE rooms SET archived_at=now() WHERE id=$1',[THREAD]);
-  const result=await report(CHAT,item!.id,'done: merge observed');
-  expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[result.id])).rows).toEqual([{room_id:CHAT}]);
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[item!.id])).rows).toEqual([{state:'complete'}]);
+  await expect(report(CHAT,item!.id,'Observed')).rejects.toThrow('Quote a message');
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1',[B])).rows).toEqual([]);
 });
 
-it('returns a reviewer continuation to the implementer in the reviewed thread', async () => {
+it('routes reviewer lifecycle blocks to the assigning commander', async () => {
   await db.query('UPDATE rooms SET reviewer_agent_id=$1 WHERE id=$2',[C,CHAT]);
   await task(H,THREAD);
   const review=await queueMessage(db,{roomId:THREAD,agentId:C,sourceMessageId:null,reason:'corner_review_dispatch'});
-  const resumed=await queueMessage(db,{roomId:THREAD,agentId:C,sourceMessageId:null,reason:'vault_saved',parent:review!});
-  const result=await daemon.execute('reply',{roomId:THREAD,id:resumed!.id,text:'done: review complete'},C);
-  expect((await db.query("SELECT parent_command_id,message->'route' route FROM agent_commands WHERE id=$1",[result.id])).rows)
-    .toEqual([{parent_command_id:resumed!.id,route:{from:{agent:C,place:THREAD},to:{agent:B,place:THREAD}}}]);
+  const saved=await daemon.execute('message',{roomId:THREAD,requestId:review!.id,type:'blocked',text:'Review needs input.'},C);
+  expect((await db.query("SELECT card->'route'->'to' recipient FROM messages WHERE id=$1",[saved.id])).rows)
+    .toEqual([{recipient:{agent:H,place:CHAT}}]);
 });

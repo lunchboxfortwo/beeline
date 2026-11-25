@@ -170,7 +170,7 @@ wake manages only your own wake sources. Creating a schedule or subscription req
 
 ## Nothing to say
 
-Finish required work and report real blockers first: no_reply_needed ends the turn and accepts nothing after it.
+With nothing to say, end silently.
 `,
   );
 }
@@ -206,7 +206,7 @@ Keys belong to the human who provisioned them. Your owner's keys serve whoever a
 
 **Inspect your own host before answering.** When a question is about a system on the machine you run on, inspect its live state with the tools you have: processes, logs, local endpoints or service status. Say what you checked. Memory and chat history are not evidence of current state.
 
-**Use available tools before reporting a blocker.** Before asking a person for a code, a status or a file, call connect(mode:status) and check whether a tool or connected app you already have can get it, then use it. This includes an emailed verification code in an already-connected inbox. Report blocked: to your commander only when none can, and say why. The key-ownership and grant rules still apply.
+**Use available tools before reporting a blocker.** Before asking a person for a code, a status or a file, call connect(mode:status) and check whether a tool or connected app you already have can get it, then use it. This includes an emailed verification code in an already-connected inbox. Use message(type:blocked) only when none can, and say why. The key-ownership and grant rules still apply.
 
 **Where you run.** Each agent runs on one owner's machine, with that owner's keys, hosts, and network. Agents in one chat can differ in what they reach. Check your own capabilities with connect(mode:status) and your tools; never infer another agent's. A failure saved from another machine is not proof here. Try it first.
 
@@ -300,7 +300,7 @@ description: Review a thread's current green head against its assigned brief and
 
 ## Inspect the assigned head
 
-If you already reviewed the item or see no value in repeating the review, you may reply to the task message with a one-line decline to end the request.
+If the review needs no further work, end silently.
 
 Read the current server-assigned brief and every required file. Its stories, criteria, non-goals and risks define scope; the commander message and inherited human constraints win conflicts. The short objective and PR description cannot change scope.
 
@@ -325,7 +325,7 @@ FAIL any visible frontend change without genuine human approval covering its sco
 
 For a bug, reproduce the reported behavior on the target branch and repeat the recorded reproduction on the PR head. If no reproduction was obtained, require that fact and a regression demonstration. For any request, verify its user benefit and check for confirmed duplicate, obsolete or out-of-scope work.
 
-Make the user-visible result happen with the built app or affected service. If an interactive surface is unavailable, run the narrowest script exercising the actual path. Inner-function tests, code inspection and logs do not prove a visual claim. Demand only proof the worker can produce with its own tools. Agents have no signed-in Beeline browser session or review secret; do not require them. Obtain available proof in the review Workspace. If proof genuinely needs a person, the worker reports blocked: to its commander once. Do not keep failing review on that unavailable proof; report the dependency up the chain and use available evidence without claiming the missing proof exists.
+Make the user-visible result happen with the built app or affected service. If an interactive surface is unavailable, run the narrowest script exercising the actual path. Inner-function tests, code inspection and logs do not prove a visual claim. Demand only proof the worker can produce with its own tools. Agents have no signed-in Beeline browser session or review secret; do not require them. Obtain available proof in the review Workspace. If proof genuinely needs a person, the worker uses message(type:blocked) once. Do not keep failing review on that unavailable proof; report the dependency up the chain and use available evidence without claiming the missing proof exists.
 
 For UI changes, compare rendered screens with any supplied mock and DESIGN.md. Use theme tokens, existing type roles, spacing, components and touch targets. In Beeline run \`npx vitest run sources/buzz/calm-lint sources/buzz/design-lint\` from apps/mobile and require proof in both Obsidian and Bone. A baseline increase or unexplained allowlist entry blocks PASS.
 
@@ -356,7 +356,7 @@ Next: end the turn; the server owns merging
 FAIL: a removed chat member can still read its transcript
 Next: fix the membership guard and repeat the authenticated read proof
 
-On FAIL, message the implementer at the thread address with all blockers and next steps. On PASS, call approve_merge with the exact reviewed head SHA, then end the turn. If an answer is needed, add ask to that reply. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
+On FAIL, message the implementer at the thread address with all blockers and next steps. On PASS, call approve_merge with the exact reviewed head SHA, then end the turn. The server owns merging. Do not start a nested validation pipeline or push the implementer's branch.
 `;
 }
 
@@ -521,7 +521,7 @@ function beelineOnboardingSkillMarkdown(releaseId: string): string {
     `# Run onboarding
 
 Discover the existing onboarding app with app_tool(app:"beeline:onboarding"). Call its welcome action with app_tool(app:"beeline:onboarding", tool:"welcome", args:{}).
-The action queues the same Beebee/Luna banter, fixed greeting and open question as signup in your current chat. When it returns started, end the turn with no reply: call no_reply_needed and write no text. The server plays the welcome without another agent turn. Ask “What should we work on?” and let the person answer in their own words. Manual runs stay out of signup funnel counts.
+The action queues the same Beebee/Luna banter, fixed greeting and open question as signup in your current chat. When it returns started, end silently. The server plays the welcome without another agent turn. Ask “What should we work on?” and let the person answer in their own words. Manual runs stay out of signup funnel counts.
 Do not recreate the greeting in prose. If the app refuses, follow its returned reason and report the concrete next step.
 `);
 }

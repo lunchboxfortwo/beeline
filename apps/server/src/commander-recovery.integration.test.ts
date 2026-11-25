@@ -10,7 +10,7 @@ it('RUBY-16: an explicit report leaves queued files in the working thread', asyn
   const uploaded = await objects.uploadArtifact(WORKER, bytes, 'text/plain', 'proof.txt');
   const attachment = { url: uploaded.url, name: 'proof.txt', mimeType: 'text/plain', size: bytes.length };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
-  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'done', text: 'done: proof attached' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), harnessEnded: true, text: 'done: proof attached' }, WORKER);
   const reviewer = '16'.repeat(32);
   await rootFixture.db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Reviewer')`, [reviewer]);
   await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [reviewer, HUMAN]);
@@ -52,7 +52,7 @@ it.each(['report', 'postRoomMessage'] as const)('Reproduction FILE-HANDOFF: inde
   }
   for (const [index, turn] of turns.entries()) {
     const text = `Attached ${attachments[index]!.name}`;
-    if (delivery === 'report') await rootFixture.daemon.execute('report',{...authority(turn),status:'done',text},WORKER);
+    if (delivery === 'report') await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),harnessEnded: true,text},WORKER);
     else await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text},WORKER);
   }
   expect((await commands(DM,RUBY)).filter(c=>c.reason==='report')).toEqual([]);
@@ -97,7 +97,7 @@ it.each(['report', 'postRoomMessage'] as const)('Reproduction FILE-HANDOFF: %s k
     expect(report.source.attachments).toHaveLength(1);
     await claim(report);
     if (delivery === 'report')
-      await rootFixture.daemon.execute('report', { ...authority(report), status: 'done', text: 'done: file attached' }, RUBY);
+      await rootFixture.daemon.execute('postRoomMessage', { ...authority(report), harnessEnded: true, text: 'done: file attached' }, RUBY);
     else await rootFixture.daemon.execute('postRoomMessage', { ...authority(report), text: 'File attached' }, RUBY);
   }
   for (const commander of commanders)
@@ -132,13 +132,13 @@ it('returns a later corner blocker to the session assigning that order', async (
     id: incoming.id,
   } as unknown as AgentCommand);
   await rootFixture.daemon.execute(
-    'order',
-    { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Other requests a follow-up' },
+    'message',
+    { roomId: ROOM, requestId: incoming.turn_request_id, type:'normal',address:`${WORKER}@${opened.cornerId}`, text: 'Other requests a follow-up' },
     OTHER,
   );
-  const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'order')!;
+  const turn = (await commands(opened.cornerId, WORKER)).find((c) => c.reason === 'message')!;
   await claim(turn);
-  await rootFixture.daemon.execute('report', { status: 'blocked', ...authority(turn), text: 'Which follow-up?' }, WORKER);
+  await rootFixture.daemon.execute('message', { type: 'blocked', ...authority(turn), text: 'Which follow-up?' }, WORKER);
   expect((await commands(DM, RUBY)).some((c) => c.source.body === 'Which follow-up?')).toBe(
     false,
   );
@@ -278,7 +278,7 @@ it('keeps private report artifacts in the queue and forwards them with human ans
     },
     WORKER,
   );
-  await rootFixture.daemon.execute('report', { status: 'done', ...authority(turn), text: 'done: report is attached' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { harnessEnded: true, ...authority(turn), text: 'done: report is attached' }, WORKER);
   await rootFixture.daemon.execute(
     'postRoomMessage',
     { ...authority(turn), text: 'report is attached' },
@@ -364,7 +364,7 @@ it('a provider diagnostic leaves work pending until its failure answer is posted
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'provider outage'},WORKER);
   expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(true);
   expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
-  await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text:'The provider stopped before the work finished.'},WORKER);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),harnessEnded:true,text:'The provider stopped before the work finished.'},WORKER);
   expect((await commands(opened.cornerId,WORKER)).some(item=>item.id===turn.id)).toBe(false);
   expect((await commands(DM, RUBY)).filter(item=>item.reason==='report')).toHaveLength(0);
 });
@@ -397,11 +397,9 @@ it('maintains human follows through private orders', async () => {
     agentId: RUBY,
     id: incoming.id,
   } as unknown as AgentCommand);
-  await rootFixture.daemon.execute(
-    'order',
-    { roomId: ROOM, requestId: incoming.turn_request_id, address: opened.cornerId, text: 'Update as the second person asked' },
-    RUBY,
-  );
+  // Retained orders from before typed messaging still identify the person who steered the thread.
+  await createAgentCommand(rootFixture.db,{roomId:opened.cornerId,agentId:WORKER,sourceMessageId:null,reason:'order',parent:incoming,
+    privatePayload:{kind:'order',authorId:RUBY,fromRoomId:ROOM,text:'Update as the second person asked'}});
   expect(
     (
       await rootFixture.db.query(`SELECT 1 FROM corner_follows WHERE corner_id=$1 AND identity_id=$2`, [
@@ -477,10 +475,11 @@ it('retains the failure answer obligation while its return membership is gone',a
   const opened=await open(),turn=await worker(opened.cornerId);
   await rootFixture.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
   await rootFixture.daemon.execute('postAgentTurnReceipt',{...authority(turn),status:'failed',reason:'provider outage'},WORKER);
-  await expect(rootFixture.daemon.execute('report',{...authority(turn),status:'blocked',text:'The provider stopped.'},WORKER)).rejects.toThrow('membership');
+  await expect(rootFixture.daemon.execute('message',{...authority(turn),type: 'blocked',text:'The provider stopped.'},WORKER)).rejects.toThrow('membership');
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'pending'});
   await rootFixture.db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2',[DM,RUBY]);
-  await rootFixture.daemon.execute('report',{...authority(turn),status:'blocked',text:'The provider stopped.'},WORKER);
+  await rootFixture.daemon.execute('message',{...authority(turn),type: 'blocked',text:'The provider stopped.'},WORKER);
+  await rootFixture.daemon.execute('postRoomMessage',{...authority(turn),text:'',harnessEnded:true},WORKER);
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[turn.id])).rows[0]).toEqual({state:'complete'});
 });
 
@@ -607,7 +606,7 @@ it('publishes a file and completes the item when closing text is empty', async (
 it('acknowledges explicit reports so final prose does not send a second report', async () => {
   const opened = await open(),
     turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('report', { status: 'done', ...authority(turn), text: 'done: widget tested' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { harnessEnded: true, ...authority(turn), text: 'done: widget tested' }, WORKER);
   await rootFixture.daemon.execute(
     'postRoomMessage',
     { ...authority(turn), text: 'The widget is tested' },
@@ -635,8 +634,8 @@ it('human Room reports with an agent-written mention enter the needs-you tray an
   const incoming = (await commands(ROOM, RUBY)).find((c) => c.reason === 'human_tag')!;
   await claim(incoming);
   const delivered = await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(incoming), ask: 'Which endpoint should we use?', text: 'needs-decision: choose an endpoint @captain' },
+    'message',
+    { type: 'blocked', ...authority(incoming), text: 'needs-decision: choose an endpoint @captain' },
     RUBY,
   );
   expect((await rootFixture.phone.execute('readNeedsYou', { workspaceId: WS }, HUMAN)).items).toEqual(
@@ -656,8 +655,8 @@ it('accepts a file after a terminal report, posts it with the next message, and 
     turn = await worker(opened.cornerId),
     media = randomUUID();
   await rootFixture.daemon.execute(
-    'report',
-    { status: 'done', ...authority(turn), text: 'done: preparing the artifact' },
+    'postRoomMessage',
+    { harnessEnded: true, ...authority(turn), text: 'done: preparing the artifact' },
     WORKER,
   );
   await rootFixture.db.query(
@@ -678,8 +677,7 @@ it('accepts a file after a terminal report, posts it with the next message, and 
     },
     WORKER,
   )).resolves.toBeDefined();
-  await rootFixture.daemon.execute(
-    'postCornerMessage',
+  await rootFixture.daemon.postCornerMessage(
     { ...authority(turn),cornerId:opened.cornerId, text: 'The artifact is ready' },
     WORKER,
   );
@@ -699,11 +697,11 @@ it('accepts a file after a terminal report, posts it with the next message, and 
 
 it('keeps unrelated Room subscriptions independent of completed orders', async () => {
   await rootFixture.daemon.execute(
-    'order',
-    { ...authority(rootFixture.order), address: ROOM, agent: WORKER, text: 'One-off Room instruction' },
+    'message',
+    { ...authority(rootFixture.order), type:'normal',address:`${WORKER}@${ROOM}`, text: 'One-off Room instruction' },
     RUBY,
   );
-  const prior = (await commands(ROOM, WORKER)).find((c) => c.reason === 'order')!;
+  const prior = (await commands(ROOM, WORKER)).find((c) => c.reason === 'message')!;
   await claim(prior);
   await rootFixture.daemon.execute(
     'postRoomMessage',

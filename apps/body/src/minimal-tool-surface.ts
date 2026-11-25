@@ -526,7 +526,6 @@ export function invocationTool(tool: ToolDefinition): ToolDefinition {
   }}};
 }
 export { RUNNER_TOOL } from './minimal-tool-surface-repository-tools.js';
-export { SILENT_TOOL } from './minimal-tool-surface-repository-tools.js';
 export { placeBeelineApps } from './minimal-tool-surface-repository-tools.js';
 export { minimalTools } from './minimal-tool-surface-repository-tools.js';
 export { repositoryTools } from './minimal-tool-surface-repository-tools.js';

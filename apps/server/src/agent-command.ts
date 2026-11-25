@@ -4,16 +4,14 @@ import { legacyCommandPayload } from './messaging-cutover.js';
 import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
-import { sendSessionMessage } from './session-message.js';
-import { notWokenReceipt,sendMessage } from './agent-messaging.js';
-import { reportRecipient } from './message-route.js';
+import { sendMessage } from './agent-messaging.js';
+import { recordedMessageRoute } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { parseTaggedAgentLifecycleCommand,routeTaggedLifecycleCommand } from './agent-command-create-agent-command.js';
-import { AGENT_COMMAND_DELEGATION_SCHEMA } from './agent-command-queue.js';
 import { queuedWorkflowWakeDetail,squireDecisionDetail,type WorkflowWakeCard } from './agent-input-context.js';
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
@@ -168,7 +166,25 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS generation_id text,
   ADD COLUMN IF NOT EXISTS turn_owner_connection_id text,
   ADD COLUMN IF NOT EXISTS turn_owner_epoch bigint;
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
-${AGENT_COMMAND_DELEGATION_SCHEMA}
+-- Delegation checks its issuing agent at commit without locking a second
+-- recipient membership while another agent owns that queue's fence.
+CREATE OR REPLACE FUNCTION beeline_commit_delegated_order() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.private_payload->>'kind' IS DISTINCT FROM 'order' OR NEW.parent_command_id IS NULL THEN RETURN NULL; END IF;
+  IF EXISTS(SELECT 1 FROM agent_commands current_order WHERE current_order.id=NEW.id AND current_order.state='pending')
+    AND EXISTS(SELECT 1 FROM agent_commands source WHERE source.id=NEW.parent_command_id
+      AND source.agent_id=NEW.private_payload->>'authorId')
+    AND NOT EXISTS(SELECT 1 FROM rooms room JOIN memberships member
+      ON member.room_id=COALESCE(room.parent_id,room.id)
+        AND member.identity_id=NEW.private_payload->>'authorId' AND member.removed_at IS NULL
+      WHERE room.id=NEW.room_id) THEN
+    RAISE EXCEPTION 'access denied: delegated order source membership changed before commit' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END; $$;
+DROP TRIGGER IF EXISTS beeline_commit_delegated_order ON agent_commands;
+CREATE CONSTRAINT TRIGGER beeline_commit_delegated_order AFTER INSERT ON agent_commands
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION beeline_commit_delegated_order();
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
 -- Keep an existing request identity stable across a serving-image overlap.
 -- A connected helper can still be acting on that request during migration.
@@ -549,10 +565,11 @@ async function postMessage(db: SqlDatabase, input: QueuedPost, chat: Chat): Prom
      `INSERT INTO messages(id,room_id,author_id,text,attachments,source_client,presentation,request_id,card,reply_to_message_id,root_message_id,legacy_event,card_type,agent_model)
      SELECT $1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9::jsonb,parent.id,COALESCE(parent.root_message_id,parent.id),$11::jsonb,$12,
        (SELECT selected_model FROM agents WHERE agent_id=$3)
-     FROM (SELECT 1) source LEFT JOIN messages parent ON parent.id=$10 AND parent.room_id=$2 AND parent.deleted_at IS NULL
+     FROM (SELECT 1) source LEFT JOIN messages parent ON parent.id=$10 AND (parent.room_id=$2 OR parent.id=$13 AND parent.room_id=$14) AND parent.deleted_at IS NULL
      ON CONFLICT(id) DO NOTHING RETURNING id,created_at,reply_to_message_id`,
     [id, chat.id, input.authorId, input.text, attachments, input.sourceClient ? json(input.sourceClient) : author?.client_id ? json({id:author.client_id,name:author.client_name}) : null,
-      input.presentation ?? 'message', input.requestId ?? null, input.card ? json(input.card) : null, input.replyTo ?? null, input.tags ? json(input.tags) : null,input.cardType ?? null],
+      input.presentation ?? 'message', input.requestId ?? null, input.card ? json(input.card) : null, input.replyTo ?? null, input.tags ? json(input.tags) : null,input.cardType ?? null,
+      input.parent?.message?.id ?? input.parent?.id ?? null,input.origin?.place ?? null],
   )).rows[0] ?? (await db.query<{ id:string; created_at:Date; reply_to_message_id:string|null }>(
     'SELECT id,created_at,reply_to_message_id FROM messages WHERE id=$1',[id])).rows[0]!;
   // A reply tool records the committed answer for this request. Progress in
@@ -674,7 +691,6 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
       text:input.privatePayload?.text ?? systemText(sourceText ?? input.reason),fromRoomId:from.place,
       route:{from,to:{agent:input.agentId,place:chat.id}},
       ...(input.reason==='corner_brief_revision' ? {replyAddress:undefined} : {}),
-      ...(input.reason==='corner_review_dispatch' && chat.worker ? {replyAddress:{agent:chat.worker,place:chat.id}} : {}),
     } as PrivateCommandPayload;
   }
   const scheduleSender=scheduledReturn ? {agent:scheduledReturn.returnIdentityId ?? SYSTEM_IDENTITY_ID,place:chat.id} : undefined;
@@ -772,7 +788,7 @@ export function refuseMessageMembership(message='address requires current member
 }
 /** The only queue-answer exit. Publication and completion share its transaction. */
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
-  roomId: string; requestId?: string; text: string; report?: boolean; status?: unknown; ask?: string;
+  roomId: string; requestId?: string; text: string;
   messageAsk?: MessageAsk; explicitReply?: boolean;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
@@ -781,7 +797,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   outputFiles?: Attachment[];
   sharedReplyId?: string;
 }): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
-  if (input.harnessEnded && input.invocation && !input.explicitReply && !input.report) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
+  if (input.harnessEnded && input.invocation && !input.explicitReply) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
     db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
     const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
@@ -802,7 +818,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       });
       result ??= saved;
       if (saved.answered === false) unanswered = true;
-      if (!input.explicitReply && !input.report && saved.delivered && saved.id === outputId) {
+      if (!input.explicitReply && saved.delivered && saved.id === outputId) {
         sharedReplyId = saved.id;
         result = saved;
       }
@@ -831,14 +847,6 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     const payload = item?.private_payload;
     const messageText = repairAgentPost(item?.reason === 'voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
     if (item?.state === 'cancelled') refuseStoppedMessage(false);
-    if (input.report && (input.status === 'blocked' || input.status === 'needs_decision')) {
-      if (!messageText) return {id:item?.id ?? '',createdAt:Math.floor(Date.now()/1000),answered:false};
-      const id = input.messageId ?? hash(`legacy-block:${agentId}:${input.roomId}:${input.requestId ?? ''}:${messageText}`);
-      const saved = await sendSessionMessage(db,agentId,{type:'blocked',roomId:input.roomId,text:messageText},item,id,input.ask);
-      if (item) await endAgentTurn(db,item,'complete',null,saved.id);
-      completedNow = true;
-      return {...saved,delivered:true};
-    }
     if (item) {
       const receipt = {id:item.result_message_id ?? item.posted_reply_id ?? item.id,createdAt:Math.floor(Date.now()/1000),delivered:true};
       if (!input.explicitReply) {
@@ -861,36 +869,25 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,replyTo:item.source_message_id ?? item.id,
         });
-        if (!existing && (item.reason === 'corner_review_dispatch' || item.review_context && !item.review_context.purpose)) {
-          const worker = (await db.query<{implementer_agent_id:string}>(
-            'SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[item.room_id])).rows[0]?.implementer_agent_id;
-          if (worker && worker !== agentId) await queueMessage(db,{
-            id:hash(`review-result:${saved.id}`),roomId:item.room_id,agentId:worker,
-            reason:'report',sourceMessageId:saved.id,parent:item,inheritPrivatePayload:false,
-          });
-        }
         if (existing && item.state === 'complete') return {id:existing,createdAt:receipt.createdAt,delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
-        await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,saved.id);
+        await endAgentTurn(db,item,'complete',null,saved.id);
         completedNow = true;
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
       }
       if (!messageText) return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
-      const to = await reportRecipient(db,item);
+      const to = (item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item)).from;
+      if (to.agent === SYSTEM_IDENTITY_ID) refuseMessageMembership('Quote a message that woke this turn.');
       if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[to.place])).rowCount) {
-        await endAgentTurn(db,item,'cancelled','return_address_archived');
-        return {id:item.id,createdAt:receipt.createdAt};
+        refuseMessageMembership('return address archived');
       }
       const from = {agent:agentId,place:item.room_id};
       const id = hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
-      const saved = to.agent === SYSTEM_IDENTITY_ID ? await queueMessage(db,{
-        kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],card:{route:{from,to}},
-        id,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,
-      }) : await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:item.source_message_id ?? item.id});
+      const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:item.source_message_id ?? item.id});
       if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.id]);
       else await endAgentTurn(db,item,'complete',null,saved.id);
       completedNow = true;
-      return {...saved,delivered:true,...(to.agent===SYSTEM_IDENTITY_ID ? {receipt:notWokenReceipt('A reply to a System wake stays in this place.')} : {})};
+      return {...saved,delivered:true};
     }
     const saved = await queueMessage(db,{kind:'post',roomId:input.roomId,authorId:agentId,
       text:modelText(messageText),agentIds:[],id:input.messageId ?? hash(`local-final:${agentId}:${input.roomId}:${input.requestId ?? ''}`),

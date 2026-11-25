@@ -17,28 +17,6 @@ export async function lockAgentCommandQueue(db:SqlDatabase,room: string|readonly
     ORDER BY member.room_id,member.identity_id FOR UPDATE OF member`,[JSON.stringify(recipients)]);
 }
 
-export const AGENT_COMMAND_DELEGATION_SCHEMA = `
--- Delegation checks its issuing agent at commit without locking a second
--- recipient membership while another agent owns that queue's fence.
-CREATE OR REPLACE FUNCTION beeline_commit_delegated_order() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  IF NEW.private_payload->>'kind' IS DISTINCT FROM 'order' OR NEW.parent_command_id IS NULL THEN RETURN NULL; END IF;
-  IF EXISTS(SELECT 1 FROM agent_commands current_order WHERE current_order.id=NEW.id AND current_order.state='pending')
-    AND EXISTS(SELECT 1 FROM agent_commands source WHERE source.id=NEW.parent_command_id
-      AND source.agent_id=NEW.private_payload->>'authorId')
-    AND NOT EXISTS(SELECT 1 FROM rooms room JOIN memberships member
-      ON member.room_id=COALESCE(room.parent_id,room.id)
-        AND member.identity_id=NEW.private_payload->>'authorId' AND member.removed_at IS NULL
-      WHERE room.id=NEW.room_id) THEN
-    RAISE EXCEPTION 'access denied: delegated order source membership changed before commit' USING ERRCODE='23514';
-  END IF;
-  RETURN NULL;
-END; $$;
-DROP TRIGGER IF EXISTS beeline_commit_delegated_order ON agent_commands;
-CREATE CONSTRAINT TRIGGER beeline_commit_delegated_order AFTER INSERT ON agent_commands
-  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION beeline_commit_delegated_order();
-`;
-
 /** The Stop transaction's timestamp fences orders accepted after the Stop. */
 export async function dropQueuedOrdersForStop(db: SqlDatabase, stopped: CommandRow): Promise<number> {
   const order = await commandOrder(db, stopped);

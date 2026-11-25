@@ -336,8 +336,7 @@ export class DaemonAgentSession {
         try {
           const operation = item.operation as keyof DaemonOperationMap;
           if (!DAEMON_OPERATION_NAMES.has(operation)) return { error: 'invalid_daemon_operation', status: 400 };
-          const input = operation === 'order' || operation === 'postCornerMessage'
-            ? { ...(item.input as object), transportRequestId: requestId } : item.input;
+          const input = item.input;
           const result = operation === 'startAgentTurn'
             ? await this.deps.daemon.execute(operation, input as never, this.agentId,
               this.epoch === undefined ? undefined : {connectionId:this.connectionId,epoch:this.epoch})
@@ -350,7 +349,7 @@ export class DaemonAgentSession {
       };
       // Queue/message IDs own conversational replay. The optional-tool RPC ledger
       // cannot claim, expire, or refuse an answer before its native write.
-      if (['postRoomMessage', 'postCornerMessage', 'order', 'report'].includes(String(item.operation)))
+      if (item.operation === 'postRoomMessage')
         reply(await execute());
       else reply(await results.execute(this.agentId, requestId, {operation:item.operation,input:item.input}, execute));
     } catch(error) {

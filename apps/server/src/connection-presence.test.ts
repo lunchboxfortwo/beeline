@@ -86,7 +86,7 @@ it('accepts a claimed turn’s output while its server instance lease is stale',
   const {command}=await claimed();
   const daemon=new DaemonService(database,live);
   await database.query(`UPDATE live_server_instances SET renewed_at=clock_timestamp()-interval '161 seconds' WHERE instance_id=$1`,[presence.instanceId]);
-  await daemon.execute('postCornerMessage',{ roomId:ROOM, cornerId:ROOM, requestId:command.turn_request_id, text:'Live turn write' },AGENT);
+  await daemon.postCornerMessage({ roomId:ROOM, cornerId:ROOM, requestId:command.turn_request_id, text:'Live turn write' },AGENT);
   await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'owner')`,[WORKSPACE,HUMAN]);
   const room=await new PhoneService(database,'http://test').readRoom(ROOM,HUMAN);
   expect(room?.messages.filter(message=>message.text==='Live turn write')).toHaveLength(1);

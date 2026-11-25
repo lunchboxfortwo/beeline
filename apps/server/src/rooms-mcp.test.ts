@@ -374,8 +374,8 @@ const scope1 = fixtureScope1();
       if (notice.table === MCP_WEBHOOK_TABLE) notices.push(notice);
     });
     try {
-      const args = { roomId: ROOM, requestId: commander.turn_request_id, address: ROOM, agent: handle, text: 'Check delivery without a later tag.', transportRequestId:`stable-order-rpc:${route}` };
-      const sent = await scope1.daemon.execute('order', args, AGENT) as { id: string };
+      const args = { roomId: ROOM, requestId: commander.turn_request_id, type:'normal' as const,address:`${member}@${ROOM}`, text: 'Check delivery without a later tag.', transportRequestId:`stable-order-rpc:${route}` };
+      const sent = await scope1.daemon.execute('message', args, AGENT) as { id: string };
       // A queued row alone is insufficient: the event-driven worker needs this committed notification.
       expect(notices).toEqual([{ table: MCP_WEBHOOK_TABLE, operation: 'INSERT', roomId: ROOM }]);
       const received: Record<string, unknown>[] = [];
@@ -390,7 +390,7 @@ const scope1 = fixtureScope1();
       expect(scope1.data(await client.callTool({ name: 'list_mentions', arguments: {} })).wakes)
         .not.toContainEqual(expect.objectContaining({ id:sent.id }));
       notices.length = 0;
-      expect(await scope1.daemon.execute('order', args, AGENT)).toMatchObject({ id: sent.id });
+      expect(await scope1.daemon.execute('message', args, AGENT)).toMatchObject({ id: sent.id });
       expect(notices).toEqual([]);
       expect(await deliverMcpMemberWebhooks(scope1.db, async () => { throw new Error('duplicate delivery'); })).toBe(0);
       const rolledBackId = randomBytes(32).toString('hex');
@@ -431,14 +431,14 @@ const scope1 = fixtureScope1();
     }))!;
     await startQueuedCommand(scope1.daemon, { roomId: ROOM, commandId: commander.id }, AGENT);
     const authority = { roomId: ROOM, requestId: commander.turn_request_id };
-    const place = async (text: string, agent: string) => await scope1.daemon.execute('order',
-      { ...authority, address: ROOM, agent, text,transportRequestId:`order-rpc:${agent}:${text}` } as never, AGENT) as { id: string };
+    const place = async (text: string, agent: string) => await scope1.daemon.execute('message',
+      { ...authority, type:'normal',address:`${agent}@${ROOM}`,text,transportRequestId:`order-rpc:${agent}:${text}` } as never, AGENT) as { id: string };
     const queued = async (commandId: string) => (await scope1.db.query<{ subscription_id: string; body: string }>(
       `SELECT subscription_id, body FROM rooms_mcp_event_deliveries WHERE command_id=$1 ORDER BY subscription_id`,
       [commandId])).rows;
     const handle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [member,ROOM])).rows[0]!.handle;
     const otherHandle = (await scope1.db.query<{ handle: string }>('SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1', [other.member,ROOM])).rows[0]!.handle;
-    const early = await place('queued before any subscription', handle);
+    const early = await place('queued before any subscription', member);
     expect(await queued(early.id)).toEqual([]);
     const mention = (await scope1.eventCall(token, 'events/subscribe', params)).result;
     const wake = (await scope1.eventCall(other.token, 'events/subscribe', {
@@ -446,7 +446,7 @@ const scope1 = fixtureScope1();
       delivery: { mode: 'webhook', url: wakeUrl, secret: wakeSecret },
     })).result;
     const text = 'private order for the subscribed member';
-    const ordered = await place(text, handle);
+    const ordered = await place(text, member);
     const rows = await queued(ordered.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.subscription_id).toBe(mention.id);
@@ -455,7 +455,7 @@ const scope1 = fixtureScope1();
       next: (await pendingMcpWakes(scope1.db, member)).find(item => item.id === ordered.id)!.next,
     } });
     expect((await scope1.db.query(`SELECT 1 FROM rooms_mcp_event_deliveries WHERE subscription_id=$1`, [wake.id])).rowCount).toBe(0);
-    const retried = await place(text, handle);
+    const retried = await place(text, member);
     expect(retried.id).toBe(ordered.id);
     expect(await queued(ordered.id)).toHaveLength(1);
     const received: Array<{ url: string; event: { name?: string; data?: { text?: string } } }> = [];
@@ -499,25 +499,25 @@ const scope1 = fixtureScope1();
     expect(received.map(item => item.event.data?.text)).toEqual(expect.arrayContaining([
       text, 'Private thread assignment for the subscribed implementer', 'done: the report reached the commander',
     ]));
-    const heard = await place('only the wake subscription hears this', otherHandle);
+    const heard = await place('only the wake subscription hears this', other.member);
     const heardRows = await queued(heard.id);
     expect(heardRows).toHaveLength(1);
     expect(heardRows[0]!.subscription_id).toBe(wake.id);
     expect(JSON.parse(heardRows[0]!.body).data.text).toBe('only the wake subscription hears this');
     await scope1.db.query(`UPDATE rooms_mcp_event_subscriptions SET expires_at=now()-interval '1 second' WHERE id=$1`, [mention.id]);
-    expect(await queued((await place('order after the subscription expired', handle)).id)).toEqual([]);
+    expect(await queued((await place('order after the subscription expired', member)).id)).toEqual([]);
     await scope1.db.query(`UPDATE rooms_mcp_event_subscriptions SET expires_at=now()+interval '1 day' WHERE id=$1`, [mention.id]);
     const wakeTooUrl = 'https://hooks.example/wake-too/' + opaque();
     const both = (await scope1.eventCall(token, 'events/subscribe', {
       ...params, name: 'wake', delivery: { ...params.delivery, url: wakeTooUrl, secret },
     })).result;
-    expect((await queued((await place('wake subscription replaces the mention webhook', handle)).id))
+    expect((await queued((await place('wake subscription replaces the mention webhook', member)).id))
       .map(row => row.subscription_id)).toEqual([mention.id]);
     await scope1.eventCall(token, 'events/unsubscribe', { name: 'wake', arguments: {}, delivery: { mode: 'webhook', url: wakeTooUrl } });
     await scope1.eventCall(token, 'events/unsubscribe', { name: 'mention', arguments: {}, delivery: { mode: 'webhook', url } });
-    expect(await queued((await place('order after unsubscribe', handle)).id)).toEqual([]);
+    expect(await queued((await place('order after unsubscribe', member)).id)).toEqual([]);
     await scope1.db.query(`UPDATE rooms_mcp_connections SET revoked_at=now() WHERE client_id=$1`, [other.grant.clientId]);
-    const revoked = await place('order after the connection was revoked', otherHandle);
+    const revoked = await place('order after the connection was revoked', other.member);
     expect(revoked.id).toEqual(expect.any(String));
     expect(await queued(revoked.id)).toEqual([]);
     await scope1.db.query(`UPDATE agent_commands SET state='complete', completed_at=now() WHERE id=$1`, [commander.id]);

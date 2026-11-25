@@ -94,12 +94,6 @@ export const WORKSPACE_TOOL: ToolDefinition = {
   "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
 };
 
-export const SILENT_TOOL: ToolDefinition = {
-  "name": "no_reply_needed",
-  "description": "Acknowledge an answer already posted for this request. An unanswered queue item remains pending: provide your own answer. For a tagged message, messageId selects the tag to acknowledge after answering it.",
-  "inputSchema": {"type": "object", "properties": {"messageId": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Explicitly decline this tagged message in the current chat."}}, "additionalProperties": false}
-};
-
 /**
  * The Beeline apps app_tool serves in a place.
  * Onboarding joins only while the server marks the Room eligible.
@@ -165,8 +159,6 @@ export function agentToolsFor(
     (institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name)) &&
     (operatorAgent || !['send_operator_system_dm','read_operator_system_dm'].includes(tool.name)));
   if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL), invocationTool(WORKSPACE_TOOL));
-  // Every harness can acknowledge an answer it already posted through tools.
-  tools.push(invocationTool(SILENT_TOOL));
   if (!nativeIoProven) tools.push(...scratchTools(cornerTurn && !repositoryCorner));
   return freeAgent ? tools.map(tool => {
     if (tool.name !== 'connect') return tool;

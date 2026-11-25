@@ -145,7 +145,8 @@ BEGIN
   source_block := reply_block_root(NEW.reply_to_message_id);
   IF source_block IS NOT NULL THEN
     IF EXISTS(SELECT 1 FROM messages b LEFT JOIN corner_facts f ON f.corner_id=b.block_corner_id
-      WHERE b.id=source_block AND (f.implementer_agent_id=NEW.author_id
+      WHERE b.id=source_block AND COALESCE(NEW.card->'route'->'from'->>'place',NEW.card->>'sourceRoomId',NEW.room_id::text)
+        =COALESCE(b.block_corner_id::text,b.card->>'sourceRoomId',b.room_id::text) AND (f.implementer_agent_id=NEW.author_id
         OR (b.block_corner_id IS NULL AND b.block_parent_id IS NOT NULL AND b.author_id=NEW.author_id))) THEN
       RETURN NEW;
     END IF;

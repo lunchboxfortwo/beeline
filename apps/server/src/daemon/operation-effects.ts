@@ -157,7 +157,7 @@ export async function startAgentTurnOperation<Name extends keyof DaemonOperation
           AND ($2::text IS NULL OR (connection_id=$2 AND epoch=$3)) FOR SHARE`,
           [authenticatedAgentId,source?.connectionId ?? null,source?.epoch ?? null]);
         if(source && !connection.rowCount) return;
-        if (request.invocationId) await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId);
+        if (request.invocationId) await beginAgentInvocation(db,authenticatedAgentId,request.roomId,request.requestId,request.invocationId,request.batchedCommandIds);
         await db.query(`WITH delivered AS (SELECT * FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3 AND state='pending' FOR SHARE),
           ${workflowOutputBindingCtes('delivered')}
@@ -257,15 +257,6 @@ export async function postBackgroundToolCompletionOperation<Name extends keyof D
         await daemonAccess(ctx, completion.roomId, authenticatedAgentId);
         return await ctx.database.transaction(async (db) => {
           const origin = await authorizeCommandOutput(db, completion.roomId, authenticatedAgentId, completion.requestId);
-          // Older helpers may detach the terminal MCP call before its result
-          // arrives. Its result cannot add work to a turn already ended silently.
-          // Preserve every other background job and every later generation.
-          if (/^(?:(?:mcp__)?beeline[-_]agent__|mcp\.beeline-agent\.)?no_reply_needed$/.test(completion.title) &&
-              (await db.query(`SELECT 1 FROM agent_turns
-                WHERE room_id=$1 AND agent_id=$2 AND request_id=$3
-                  AND completion_kind='no-reply'`,
-              [completion.roomId, authenticatedAgentId, completion.requestId])).rowCount)
-            return daemonWriteResult(ctx);
           // Legacy helpers may acknowledge a detached tool. Its invocation owns
           // the result; a completion receipt never authorizes another model turn.
           await db.query(`INSERT INTO free_agent_events(agent_id,kind,detail)

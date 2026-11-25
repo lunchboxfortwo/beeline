@@ -340,13 +340,15 @@ export class PushDeliveryLoop {
               AND final.presentation='message' AND final.deleted_at IS NULL))
           -- Durable chat from agents waits for completion and selects final prose.
           AND (m.presentation<>'message' OR m.request_id IS NULL
+            OR (m.card->>'reportStatus'='blocked' AND m.card->>'reportToId'=d.identity_id)
             OR NOT EXISTS (SELECT 1 FROM identities a WHERE a.id=m.author_id AND a.kind='agent')
             OR (NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.room_id=m.room_id
                 AND t.request_id=m.request_id AND t.agent_id=m.author_id AND t.status='working')
               AND NOT EXISTS (SELECT 1 FROM ${messagePointsSql('COALESCE(turn.turn_ids,context.turn_ids)', 'newer')} WHERE newer.room_id=m.room_id
                 AND newer.author_id=m.author_id AND newer.request_id=m.request_id
                 AND newer.presentation='message' AND newer.card_type IS NULL AND newer.deleted_at IS NULL
-                AND (newer.created_at,newer.id)>(m.created_at,m.id))))
+                AND ((newer.created_at,newer.id)>(m.created_at,m.id) OR
+                  newer.card->>'reportStatus'='blocked' AND newer.card->>'reportToId'=d.identity_id))))
       ), candidates AS (
         SELECT m.id message_id,room.workspace_id::text workspace_id,
           COALESCE(room.parent_id,room.id)::text room_id,

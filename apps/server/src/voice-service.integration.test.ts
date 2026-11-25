@@ -1,3 +1,4 @@
+import { replyDuringTurn } from './test-fixtures/queued-turn.test-support.js';
 import { randomUUID } from 'node:crypto';
 import { beginAgentInvocation } from './agent-invocation.js';
 import { sendMessage,replyToMessage } from './agent-messaging.js';
@@ -685,11 +686,11 @@ it('Reproduction VOICE-TAG-1: final call tags stay quiet; the full agent message
     const daemon=new DaemonService(db,live);
     const parent=(await daemon.execute('getAgentCommands',{roomId:room},A)).commands.find(item=>item.roomId===room)!;
     await startQueuedCommand(daemon,{roomId:room,commandId:parent.id},A);
-    const sent=await daemon.execute('message',{roomId:room,requestId:parent.turnRequestId,to:{agent:B,place:room},text:'what are you up to?'},A);
+    const sent=await daemon.execute('message',{roomId:room,requestId:parent.turnRequestId,type:'normal', address:`${B}@${room}`,text:'what are you up to?'},A);
     const child=(await daemon.execute('getAgentCommands',{roomId:room},B)).commands.find(item=>item.id===sent.id)!;
     expect(child).toMatchObject({reason:'message',from:{agent:A,place:room}});
     await startQueuedCommand(daemon,{roomId:room,commandId:child.id},B);
-    await daemon.execute('reply',{roomId:room,id:child.id,text:'I am checking the call history.'},B);
+    await replyDuringTurn(daemon,child,'I am checking the call history.');
     expect((await daemon.execute('getAgentCommands',{roomId:room},A)).commands.some(item=>item.reason==='reply' && item.source.body==='I am checking the call history.')).toBe(true);
     await service.recordAnswer(room,A,'Sol is checking the call history.');
     expect(JSON.stringify(await readVoiceContext(db,room,'next-turn',A))).toContain('Sol is checking the call history.');
@@ -710,7 +711,7 @@ it('VOICE-TAG-1: voice orders retain provenance for message() beyond the former 
     await db.query(`UPDATE agent_commands SET agent_depth=3 WHERE id=$1`,[parent.id]);
     await service.recordAnswer(room,A,'@sol what are you doing?',{replyId:'ordered',sourceId:source});
     expect((await db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1 AND agent_id=$2`,[room,B])).rowCount).toBe(0);
-    const sent=await daemon.execute('message',{roomId:room,requestId:parent.turnRequestId,to:{agent:B,place:room},text:'what are you doing?'},A);
+    const sent=await daemon.execute('message',{roomId:room,requestId:parent.turnRequestId,type:'normal', address:`${B}@${room}`,text:'what are you doing?'},A);
     expect((await db.query(`SELECT agent_id,agent_depth,root_source_message_id,reason FROM agent_commands WHERE id=$1`,[sent.id])).rows[0])
       .toEqual({agent_id:B,agent_depth:4,root_source_message_id:source,reason:'message'});
   } finally { await service.leave(joined.call.id,H); await db.query(`DELETE FROM rooms WHERE id=$1`,[room]); }

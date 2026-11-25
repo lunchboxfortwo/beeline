@@ -13,7 +13,7 @@ import type { CommandArguments,DaemonContext,DaemonDependencies } from './daemon
 import { daemonReconcileZeroCheckWorkerCompletion } from './daemon/corner-completion.js';
 import { daemonPostCornerMessage,daemonReach,daemonReactToRoomMessage,daemonWriteResult } from './daemon/corner-messages.js';
 import { daemonApproveCornerMerge,daemonCheckReviewerAuthors,daemonCornerRestore,daemonCorners,daemonListCornerBriefRevisions,daemonMergeCorner,daemonRepository,daemonTargetBranch } from './daemon/corner-reads.js';
-import { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonReport,daemonTargetProposal,daemonWatchCorner } from './daemon/corner-reports.js';
+import { daemonBriefAttachmentRooms,daemonCornerPlan,daemonCornerRemote,daemonRenameCorner,daemonTargetProposal,daemonWatchCorner } from './daemon/corner-reports.js';
 import { daemonArchiveCorner,daemonCreateCorner,daemonEnsureMembership,daemonReviseCornerBrief } from './daemon/corner-writes.js';
 import { daemonExecute } from './daemon/execute.js';
 import { daemonAskRoomChoice,daemonAuthorizeScopedGrant,daemonAuthorizeSquireCall,daemonConsumeAgentGrant,daemonFindGrantRequester,daemonGrantRequester,daemonListAgentGrantRequests,daemonListAgentGrants,daemonOpenRoomPoll,daemonRepositoryOnboardingRequester,daemonRequestAgentGrant,daemonWriteRoomChoice } from './daemon/grants.js';
@@ -107,7 +107,7 @@ export class DaemonService {
    afterCommit: AfterCommit | undefined;
   async execute<Name extends keyof DaemonOperationMap>(...args: CommandArguments<typeof daemonExecute<Name>>): ReturnType<typeof daemonExecute<Name>> {
     const [name, input] = args;
-    if ((name === 'postRoomMessage' || name === 'reply') &&
+    if (name === 'postRoomMessage' &&
         (!input || typeof input !== 'object' || !('text' in input) || typeof input.text !== 'string')) {
       throw new CommandRefusalError('reply text is required', 400);
     }
@@ -179,7 +179,6 @@ export class DaemonService {
   async commands(...args: CommandArguments<typeof daemonCommands>): ReturnType<typeof daemonCommands> { return daemonCommands(this, ...args); }
   async modelCatalog(...args: CommandArguments<typeof daemonModelCatalog>): ReturnType<typeof daemonModelCatalog> { return daemonModelCatalog(this, ...args); }
   async machineReport(...args: CommandArguments<typeof daemonMachineReport>): ReturnType<typeof daemonMachineReport> { return daemonMachineReport(this, ...args); }
-  async report(...args: CommandArguments<typeof daemonReport>): ReturnType<typeof daemonReport> { return daemonReport(this, ...args); }
   async watchCorner(...args: CommandArguments<typeof daemonWatchCorner>): ReturnType<typeof daemonWatchCorner> { return daemonWatchCorner(this, ...args); }
   async cornerRemote(...args: CommandArguments<typeof daemonCornerRemote>): ReturnType<typeof daemonCornerRemote> { return daemonCornerRemote(this, ...args); }
   async cornerPlan(...args: CommandArguments<typeof daemonCornerPlan>): ReturnType<typeof daemonCornerPlan> { return daemonCornerPlan(this, ...args); }

@@ -1,3 +1,4 @@
+import { RoomsMcpAgentTools } from './rooms-mcp-agent.js';
 import { describe, expect, it } from 'vitest';
 import { readRoomView } from '@beeline/api-contract/phone';
 import { sendMessage } from './agent-messaging.js';
@@ -6,10 +7,10 @@ import { A, B, C, H, CHAT, THREAD, OTHER, db, daemon, queued } from './messaging
 
 describe('addressed agent message transcript pills', () => {
   it.each([CHAT, THREAD])('publishes the existing pill in destination %s without another wake', async place => {
-    const sent = await daemon.execute('message', {
-      roomId: OTHER, to: { agent: B, place }, text: 'Please review the phone layout',
+    const sent = await new RoomsMcpAgentTools(db,daemon).call(A,'message', {
+      address: OTHER, to: { agent: B, place }, text: 'Please review the phone layout',
       ask: { question: 'Ready?', options: ['Yes', 'No'] },
-    }, A);
+    }) as {id:string};
     expect(await queued()).toEqual([[B, place]]);
     const phone = new PhoneService(db, 'http://local.test');
     const view = readRoomView(await phone.readRoom(place, H));
@@ -32,8 +33,8 @@ describe('addressed agent message transcript pills', () => {
   });
 
   it('records replies at their frozen destination and does not wake observers', async () => {
-    const sent = await daemon.execute('message', { roomId: OTHER, to: { agent: B, place: THREAD }, text: 'Review this' }, A);
-    await daemon.execute('reply', { id: sent.id, roomId: THREAD, text: 'The layout is ready' }, B);
+    const sent = await daemon.execute('message', { roomId: OTHER, type:'normal', address:`${B}@${THREAD}`, text: 'Review this' }, A);
+    await new RoomsMcpAgentTools(db,daemon).call(B,'reply',{id:sent.id,commandId:sent.id,text:'The layout is ready'});
     expect(await queued()).toEqual([[A, OTHER]]);
     const phone = new PhoneService(db, 'http://local.test');
     const reply = (await phone.readRoom(OTHER, H))!.messages.find(row => row.agentCommand?.kind === 'reply')!;

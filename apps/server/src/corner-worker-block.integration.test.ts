@@ -76,12 +76,13 @@ it('IDLE-BUDGET: commander reactions produce exactly one notice until a person e
   await reactions();
   expect(await idleReports()).toHaveLength(2);
 });
-it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report stays open through orders, turns and prose until worker outcome, yielding the state to work', async status => {
+it('a block stays open through later turns until the worker closes it', async () => {
   const turn = await input();
-  const report = await daemon.execute('report', { ...turn, status, text: 'The router-login secrets are missing.' }, WORKER);
+  const report = await daemon.execute('message', { ...turn, type:'blocked', text: 'The router-login secrets are missing.' }, WORKER);
   expect(await blockReminder(db,WORKER,C)).toContain(report.id);
   expect((await readAgentCommands(db,COMMANDER,ROOM)).commands.some(c=>c.id===report.id)).toBe(true);
-  expect(await state()).toBe('waiting'); // The report ended its turn; the block is all that remains.
+  await daemon.execute('postRoomMessage',{...turn,text:'Waiting for access.',harnessEnded:true},WORKER);
+  expect(await state()).toBe('waiting');
   expect((await db.query("SELECT id FROM messages WHERE card_type='agent-command'")).rows).toEqual([]);
   const next = await input(); // New work keeps the block open and shows Working.
   expect(await state()).toBe('working');
@@ -94,7 +95,6 @@ it.each(['blocked', 'needs_decision'] as const)('WORKER-BLOCK: real %s report st
   await daemon.execute('postRoomMessage',{...finished,text:'Complete.'},WORKER);
   expect(await blockReminder(db,WORKER,C)).toContain(report.id);
   await closeAgentAsk(db,WORKER,{messageId:report.id,reason:'answered'});
-  await daemon.execute('report', { ...finished, status: status === 'blocked' ? 'done' : 'failed', text: 'The task is complete.' }, WORKER);
   expect(await state()).toBe('idle');
 });
 it('WORKER-ROLE: a worker-created corner displays worker activity and a commander turn there as working', async () => {
@@ -108,7 +108,7 @@ it('WORKER-ROLE: a worker-created corner displays worker activity and a commande
   expect(await state()).toBe('idle');
 });
 it('WORKER-BLOCK: native ask cards keep the block open through commander chatter while work shows Working', async () => {
-  await daemon.execute('report', { ...await input(), status: 'blocked', text: 'Need a decision.' }, WORKER);
+  await daemon.execute('message', { ...await input(), type: 'blocked', text: 'Need a decision.' }, WORKER);
   const ask = await input();
   const choice = await daemon.execute('askRoomChoice', { ...ask, prompt: 'Which scope?',
     options: [{ label: 'One' }, { label: 'Two' }] }, WORKER);
@@ -148,7 +148,7 @@ it('IDLE-BUDGET: only human grant decisions and human hold releases replenish no
 });
 
 it('WORKER-BLOCK: granted-run and read activity keep the block open and show Working', async () => {
-  await daemon.execute('report', { ...await input(), status: 'blocked', text: 'Waiting for execution.' }, WORKER);
+  await daemon.execute('message', { ...await input(), type: 'blocked', text: 'Waiting for execution.' }, WORKER);
   const next = await input();
   await daemon.execute('postAgentActivity', { ...next, activity: [{ kind: 'tool', title: 'read status', operation: 'read' }] }, WORKER);
   expect(await state()).toBe('working');

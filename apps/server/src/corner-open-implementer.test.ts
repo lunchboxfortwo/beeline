@@ -285,3 +285,10 @@ it('OPEN-INHERIT-REVIEWER: creation follows the chat reviewer and retries surviv
     await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`, [ROOM]);
   }
 });
+
+it('a self-opened assignment routes its blocker to the opener in the originating chat', async () => {
+  const {cornerId} = await daemon.execute('createCorner',{...await input(),implementer:'alpha'},A);
+  const block = await daemon.execute('message',{roomId:cornerId,type:'blocked',text:'Which branch?'},A);
+  expect((await db.query('SELECT agent_id,room_id FROM agent_commands WHERE id=$1',[block.id])).rows)
+    .toEqual([{agent_id:A,room_id:ROOM}]);
+});

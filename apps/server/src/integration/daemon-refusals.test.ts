@@ -22,7 +22,6 @@ describe('daemon request errors', () => {
     ['handoff', {}, 409, 'workflow handoff requires an active command'],
     ['archiveWorkflow', {}, 409, 'workflow archive requires an active command'],
     ['assignWorkflowRole', {}, 409, 'workflow role assignment requires an active command'],
-    ['reply', { roomId: ROOM }, 400, 'reply text is required'],
     ['postAgentThought', { roomId: ROOM }, 400, 'turnId is required'],
     ['postAgentModelCatalog', {}, 400, 'model options are required'],
     ['postAgentModelCatalog', { options: [] }, 400, 'model options are required'],
@@ -46,8 +45,8 @@ describe('daemon request errors', () => {
     const post = (operation: string, fields = {}) => fixture.request(
       '/v1/daemon/operations/' + operation, 'POST', { ...request, ...fields }, fixture.daemonToken,
     );
-    expect((await post('startAgentTurn')).status).toBe(200);
-    const posted = await post('postCornerMessage', { cornerId: ROOM, text: 'The public reply.' });
+    expect((await post('startAgentTurn', {invocationId:'refusal-test'})).status).toBe(200);
+    const posted = await post('message', {type:'reply', quoteMsgId:sourceId, text:'The public reply.'});
     expect(posted.status).toBe(200);
     const { id: replyId } = await posted.json();
     const readCommand = async () => (await fixture.database.query(

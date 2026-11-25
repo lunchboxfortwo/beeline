@@ -386,12 +386,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     }
     case 'stop':
       return JSON.stringify(await daemonExecute('stopAgentTurn', { address: args.address as string, agent: args.agent as string | undefined }));
-    case 'no_reply_needed': {
-      await activeCommandContext();
-      const result = await daemonExecute('markAgentTurnSilent', { ...(args.messageId ? { messageId: args.messageId } : {}) });
-      if (result.answered === false) return JSON.stringify({ acknowledged: false, instruction: 'An answer is still owed. Reply with your own text.' });
-      return JSON.stringify({ acknowledged: true });
-    }
     case 'inspect_thread': {
       if (typeof args.cornerId !== 'string' || !args.cornerId)
         throw new Error('cornerId is required');

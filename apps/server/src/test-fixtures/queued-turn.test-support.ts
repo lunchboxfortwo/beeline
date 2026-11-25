@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { AgentCommand } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from '../database.js';
 import type { DaemonService } from '../daemon-service.js';
 import type { CommandRow } from '../agent-command.js';
@@ -19,4 +21,11 @@ export async function startQueuedCommand(daemon: DaemonService, input: { roomId:
   if (!command) throw new Error('queue item not found');
   await daemon.execute('startAgentTurn', { roomId: command.roomId, requestId: command.turnRequestId }, agentId);
   return { ...command, commandId: command.id, requestId: command.turnRequestId };
+}
+
+export async function replyDuringTurn(daemon: DaemonService, command: AgentCommand, text: string) {
+  const {roomId,agentId,turnRequestId:requestId} = command;
+  const invocation = {id:randomUUID(),requestId};
+  await daemon.execute('startAgentTurn',{roomId,requestId,invocationId:invocation.id},agentId);
+  return daemon.execute('message',{roomId,requestId,type:'reply',quoteMsgId:command.source.id,text,invocation},agentId);
 }

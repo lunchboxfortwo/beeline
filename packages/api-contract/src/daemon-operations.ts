@@ -94,7 +94,6 @@ export type PostRoomEventInput = TurnOutputAuthority &
   };
 
 
-export type AgentReportStatus = 'done' | 'blocked' | 'failed' | 'needs_decision';
 
 
 export type AgentCommandAction = 'input' | 'restart';

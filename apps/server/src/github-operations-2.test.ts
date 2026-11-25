@@ -13,6 +13,8 @@ const scope1 = fixtureScope1();
     const implementer = 'c'.repeat(64);
     await scope1.database.query(`INSERT INTO identities(id,kind,name) VALUES($1,'agent','Implementer')`, [implementer]);
     await scope1.database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [implementer, HUMAN]);
+    await scope1.database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      SELECT workspace_id,parent_id,$2,'member' FROM rooms WHERE id=$1`,[corner,implementer]);
     await setCornerOwner(scope1.database, corner, implementer);
     const newHead = '2'.repeat(40);
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');

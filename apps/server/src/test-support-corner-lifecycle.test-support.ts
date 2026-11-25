@@ -415,7 +415,7 @@ export async function orderRepairsFromRoom(review: AgentCommand, cornerId: strin
     reason: 'order', parent: (await db.query<import('./agent-command.js').CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [review.id])).rows[0] });
   const turn = (await commands(B, R)).find(command => command.id === coordination!.id)!;
   await claim(turn);
-  await daemon.execute('order', { roomId: R, requestId: turn.turnRequestId, address: cornerId, text }, B);
+  await daemon.execute('message', { roomId: R, requestId: turn.turnRequestId, type:'normal', address: `${A}@${cornerId}`, text }, B);
 }
 
 

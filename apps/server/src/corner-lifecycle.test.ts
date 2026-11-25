@@ -350,7 +350,7 @@ describe('checks dispatch (rows 6-8)', () => {
     const cornerId = await open('owner/widgets', false, B);
     const [work] = await commands(A, cornerId);
     await claim(work!);
-    await rootFixture.daemon.execute('report', { status: 'needs_decision', roomId: cornerId, requestId: work!.turnRequestId, text: 'needs-decision: decide whether to continue' }, A);
+    await rootFixture.daemon.execute('message', { type: 'blocked', roomId: cornerId, requestId: work!.turnRequestId, text: 'needs-decision: decide whether to continue' }, A);
     expect((await commands(B, cornerId)).some(c => c.reason === 'message' && c.source.body.includes('needs-decision:'))).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text='needs-decision: decide whether to continue' AND block_corner_id IS NOT NULL`)).rowCount).toBe(1);
   });
@@ -448,8 +448,8 @@ const scope9 = fixtureScope9();
     const cornerId = await scope9.toReview();
     const [review] = await commands(B, cornerId);
     await claim(review!, 'review-generation');
-    await rootFixture.daemon.execute('order', { roomId: cornerId, requestId: review!.turnRequestId, address: cornerId, text: 'Fix the race condition' }, B);
-    expect((await commands(A, cornerId)).some(c => c.reason === 'order')).toBe(true);
+    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId, type:'normal',address:`${A}@${cornerId}`, text: 'Fix the race condition' }, B);
+    expect((await commands(A, cornerId)).some(c => c.reason === 'message')).toBe(true);
     expect(await currentState(cornerId)).toBe('working');
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B);
     // The PASS is landed by the server, not handed to the implementer.

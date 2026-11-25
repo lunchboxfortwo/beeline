@@ -244,7 +244,7 @@ it('a delivered terminal report keeps its order resumable in the same generation
   const command=(await createAgentCommand(db,{roomId:R,agentId:A,sourceMessageId:null,reason:'order',
     privatePayload:{kind:'order',authorId:H,fromRoomId:R,text:'Finish this assignment'}}))!;
   await startQueuedTurn(db, R, A, command.id);
-  await daemon.execute('report',{ roomId:R, requestId:command.turn_request_id, status:'done', text:'The assignment is finished.' },A);
+  await daemon.execute('postRoomMessage',{ roomId:R, requestId:command.turn_request_id, harnessEnded: true, text:'The assignment is finished.' },A);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[command.id])).rows).toEqual([{state:'complete'}]);
   await releaseAgentConnection(db,live,A,owner.connectionId);
   expect((await readAgentCommands(db, A, R)).commands).toEqual([]);

@@ -1,3 +1,4 @@
+import { replyDuringTurn } from './test-fixtures/queued-turn.test-support.js';
 import { sendMessage } from './agent-messaging.js';
 import { itemPrompt } from '../../body/src/place-prompt.js';
 import { migrate } from './database.js';
@@ -188,7 +189,7 @@ it('Stop preserves other senders, source Rooms, targets, human mentions and newe
   expect(remaining.some(command => command.source.body.includes('Human follow-up'))).toBe(true);
   expect(remaining.some(command => command.id === newer!.id)).toBe(true);
   expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state='pending' AND private_payload->>'text'='survivor'`, [B])).rowCount).toBe(1);
-  await rootFixture.daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: 'after Stop', requestId: root.turnRequestId }, B);
+  await rootFixture.daemon.execute('message', { roomId: R, type: 'normal', address: `${A}@${R}`, text: 'after Stop', requestId: root.turnRequestId }, B);
   const after = (await commands()).find(command => command.source.body.includes('after Stop'))!;
   await expect(claim(after)).resolves.toBeUndefined();
 });
@@ -230,9 +231,7 @@ it.runIf(Boolean(stopProofPostgresUrl))('Stop preserves an order accepted while 
   let arriving: Promise<unknown> | undefined;
   try {
     await Promise.race([stopped, stop.then(() => { throw new Error('Stop did not reach its terminal write'); })]);
-    arriving = new DaemonService(wrap(db, false), live).execute('order', {
-      roomId: R, address: R, agent: 'hoots', text: 'arrived during Stop', requestId: root.turnRequestId,
-    }, B);
+    arriving = new DaemonService(wrap(db, false), live).execute('message', { roomId: R, type: 'normal', address: `${A}@${R}`, text: 'arrived during Stop', requestId: root.turnRequestId }, B);
     await Promise.race([queuedOrder, arriving.then(() => { throw new Error('Order did not reach insertion'); })]);
     release();
     await stop;
@@ -565,7 +564,8 @@ const scope1 = fixtureScope1(room);
     const sent=await sendMessage(rootFixture.db,{route:{from:{agent:A,place:scope1.room},to:{agent:B,place:scope1.room}},text:'Inspect',parent});
     await claim(first);await result(first,'Delegated');
     const next=(await commands(B,scope1.room)).find(item=>item.id===sent.id)!;
-    await claim(next);await rootFixture.daemon.execute('reply',{roomId:next.roomId,id:next.id,text:'Deliberate reply'},B);
+    await claim(next);await replyDuringTurn(rootFixture.daemon,next,'Deliberate reply');
+    await result(next,'');
     expect((await commands(A,scope1.room)).map(item=>item.source.body)).toEqual(['Deliberate reply']);
     expect(await commands(B,scope1.room)).toEqual([]);
   });
@@ -730,13 +730,13 @@ it('rolls final storage back if creating the next command fails', async () => {
   await rootFixture.db.query(`CREATE FUNCTION refuse_command() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected dispatch failure'; END $$;
  CREATE TRIGGER refuse_command BEFORE INSERT ON agent_commands FOR EACH ROW EXECUTE FUNCTION refuse_command();`);
   try {
-    await expect(rootFixture.daemon.execute('reply',{roomId:R,id:c!.id,text:'@goosy Atomic'},A)).rejects.toThrow('injected');
+    await expect(replyDuringTurn(rootFixture.daemon,c!,'@goosy Atomic')).rejects.toThrow('injected');
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text='Atomic'`)).rowCount).toBe(0);
   } finally {
     await rootFixture.db.query(
       `DROP TRIGGER refuse_command ON agent_commands; DROP FUNCTION refuse_command();`,
     );
   }
-  await rootFixture.daemon.execute('reply',{roomId:R,id:c!.id,text:'@goosy Atomic'},A);
+  await replyDuringTurn(rootFixture.daemon,c!,'@goosy Atomic');
   expect(await commands(B)).toHaveLength(1);
 });

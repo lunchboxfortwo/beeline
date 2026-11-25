@@ -25,13 +25,10 @@ try {
   assert.equal(await new AgentScheduleLoop(db).runOnce(), 1);
   assert.equal((await db.query('SELECT 1 FROM agent_schedules WHERE id=$1', [schedule])).rowCount, 0);
   const [command] = (await daemon.execute('getAgentCommands', { roomId: room }, worker)).commands;
-  await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'proof' }, worker);
-  const authority = { roomId: room, requestId: command.turnRequestId, generationId: 'proof' };
-  await daemon.execute('postCornerMessage', { ...authority, cornerId: room, text: 'Work posted' }, worker);
-  const result = await daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, worker);
-  assert.equal(result.delivered, true);
+  await daemon.execute('startAgentTurn', { roomId: room, requestId: command.turnRequestId }, worker);
+  const authority = { roomId: room, requestId: command.turnRequestId };
+  await daemon.execute('postRoomMessage', { ...authority, text: 'Work complete', harnessEnded: true }, worker);
   const view = await phone.readRoom(room, owner);
-  assert.equal(view.messages.filter(row => row.text === 'Work posted').length, 1);
-  assert.equal(view.messages.filter(row => row.text === 'done: Work complete').length, 1);
-  console.log('PASS Reproduction schedule-report-owner: built scheduler tick → claimed turn → Room post → report accepted → owner phone Room read shows one post and one report, after one-shot deletion.');
+  assert.deepEqual(view.messages.filter(row => row.author.pubkey === worker).map(row => row.text), ['Work complete']);
+  console.log('PASS The scheduled final appears once in its room after the one-shot schedule is deleted.');
 } finally { await db.close(); }

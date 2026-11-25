@@ -10,7 +10,7 @@ import type { WorkflowRoleBinding, WorkflowReceiptInput, WorkflowRunReadResult }
 import type { DeleteInstitutionalMemoryInput, InstitutionalContextSnapshot, InstitutionalMemoryTurnStats, InstitutionalMemoryWriteResult, LoadWorkspaceSkillInput, LoadWorkspaceSkillResult, ReportInstitutionalMemoryUsedInput, ReportInstitutionalMemoryUsedResult, SaveInstitutionalMemoryInput, SearchInstitutionalHistoryInput, SearchInstitutionalHistoryResult, SearchInstitutionalMemoryInput, SearchInstitutionalMemoryResult, UpdateInstitutionalMemoryInput } from './institutional-memory.js';
 import type { NotifyFeedbackFixedInput, NotifyFeedbackFixedResult, ReportFeedbackInput, ReportFeedbackResult } from './feedback.js';
 import type { WalletPayInput, WalletContractCallInput, WalletSendOutcome, WalletSwapInput, WalletSwapResult, WalletToolBalanceInput, WalletToolBalanceResult, WalletToolChainsInput, WalletToolChainsResult, WalletToolHistoryInput, WalletToolHistoryResult, WalletToolQuoteInput, WalletToolQuoteResult, WalletToolState, WalletToolStateInput, WalletSignTypedDataInput, WalletSignTypedDataResult } from './wallet.js';
-import { TurnOutputAuthority, AgentCommand, StopAgentTurnResult, AgentReportStatus, CreateAgentScheduleInput, AgentScheduleResult, SetEventSubscriptionsInput, EventSubscriptionsResult, PostRoomEventInput, AgentScheduleListResult, DeleteAgentScheduleInput, UpdateAgentScheduleInput } from './daemon-operations.js';
+import { TurnOutputAuthority, AgentCommand, StopAgentTurnResult, CreateAgentScheduleInput, AgentScheduleResult, SetEventSubscriptionsInput, EventSubscriptionsResult, PostRoomEventInput, AgentScheduleListResult, DeleteAgentScheduleInput, UpdateAgentScheduleInput } from './daemon-operations.js';
 import { WriteResult, DaemonBootstrapInput, DaemonBootstrapResult, WorkspaceRosterInput, WorkspaceRosterResult, RoomInboxResult, RoomConversationInput, RoomConversationResult, DaemonAttachment, RoomPrincipalInput, RoomAuthorityResult, PermissionAuthorityInput, AuthorityDecisionResult, MissionAuthorityInput, CornerWatchKind, CornerWatchResult, WorkScheduleAuthorityInput, AgentToolMandateResult, TargetAgentAuthorityInput, CornerListResult, CornerRestoreResult, CornerBrief, CornerCursorInput, RoomRepositoryStateResult, RoomGitHubTokenResult, RoomTargetBranchResult, IdentitySuccessionResult, AgentConfigurationResult, AgentPresenceResult, RequestCompletionResult, PostRoomMessageInput, PostRoomMessageResult, ReactToRoomMessageInput, PostAgentAttachmentInput, PostLiveOutputInput, RetractLiveOutputInput, PostTurnReceiptInput, PostAgentActivityInput, PostPermissionRequestInput, PostPermissionExecutionInput, PostAgentToolMandateInput, PostAgentCommandsInput, PostAgentModelCatalogInput, PostAgentRunningModelInput, PostCornerRemoteStateInput, PostCornerPlanInput, CornerBriefDraft, PostTargetBranchProposalInput, SearchMcpRegistryInput, SearchMcpRegistryResult, ConnectMcpServerInput, ConnectMcpServerResult, ConnectAppInput, ConnectAppResult, ConnectInput, ConnectResult, ConnectorSearchMatch, CreateCornerInput } from './daemon-operations-room-conversation-window.js';
 import { ReviseCornerBriefInput, PostSquireApprovalInput, PostSquireLoginWallInput, PostSquireLoginWallResult, PostSquireApprovalDecisionInput, RequestAgentGrantInput, RequestAgentGrantResult, AskRoomChoiceResult, AskRoomChoiceInput, OpenRoomPollInput, AgentGrantListResult, AgentGrantRequestListResult, ConsumeAgentGrantInput, AuthorizeSquireCallInput, AuthorizeSquireCallResult, AgentWorkbenchView, OfferConnectorInput, OfferConnectorResult, InstallConnectorInput, PostConnectorStatusInput, PostConnectorVaultInput, GetConnectorStatusInput, ConnectorStatus, ConnectorVaultListResult, ConnectionRefInput, ConnectionDetail, ConnectionGrantRevokeResult, PostConnectionUsageInput, ConnectorAssignmentsResult, CornerResult } from './daemon-operations-revise-corner-brief-input.js';
 
@@ -155,7 +155,7 @@ export type DaemonOperationMap = {
     { readonly commandProtocol: 2; readonly commands: readonly AgentCommand[] }
   >;
   /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
-  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly invocationId?: string; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
+  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly invocationId?: string; readonly batchedCommandIds?: readonly string[]; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
   /** A hosted-model credential bound to one undone queue item (`requestId`). */
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;
   getWorkspaceRoster: Operation<WorkspaceRosterInput, WorkspaceRosterResult>;
@@ -178,12 +178,8 @@ export type DaemonOperationMap = {
       readonly attachments: readonly DaemonAttachment[];
     }
   >;
-  message: Operation<RoomInput & TurnOutputAuthority & ({ readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string } | { readonly to: import('./agent-messaging.js').MessageAddress; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk; readonly question?: string; readonly brief?: string; readonly options?: readonly string[] }), WriteResult>;
-  reply: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly queuedRequestIds?: readonly string[]; readonly id: string; readonly text: string; readonly ask?: import('./agent-messaging.js').MessageAsk; readonly question?: string; readonly brief?: string; readonly options?: readonly string[] }, WriteResult & { readonly _meta?: { readonly beeline: { readonly turnComplete: true } } }>;
-  /** Cutover only: calls serving queued legacy items. Remove with messaging-cutover.ts. */
-  order: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly text: string; readonly agent?: string }, WriteResult>;
+  message: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, WriteResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;
-  report: Operation<RoomInput & TurnOutputAuthority & { readonly status: AgentReportStatus; readonly text: string; readonly ask?: string }, WriteResult>;
   read: Operation<RoomInput & { readonly address: string; readonly limit?: number }, RoomConversationResult>;
   getRoomAuthority: Operation<RoomPrincipalInput, RoomAuthorityResult>;
   getPermissionAuthority: Operation<PermissionAuthorityInput, AuthorityDecisionResult>;
@@ -299,23 +295,6 @@ export type DaemonOperationMap = {
   listRoomMembers: Operation<RoomInput, RoomMemberListResult>;
   /** A reachable corner's pull request: changed files, reviews and comments. */
   readCornerPullRequest: Operation<CornerInput, CornerPullRequestResult>;
-  /** A plain message into a reachable corner, from the caller's active turn. */
-  postCornerMessage: Operation<
-    CornerInput & RoomInput & TurnOutputAuthority & { readonly text: string; readonly replyTo?: string },
-    {
-      readonly id: string;
-      readonly createdAt: number;
-      readonly stored: true;
-      readonly visible: true;
-      readonly receipt: string;
-      readonly effect: 'conversation';
-      readonly address: string;
-      readonly visibility: 'public';
-      readonly reportsAssignment: false;
-      readonly woken: readonly string[];
-      readonly notWoken: readonly { readonly handle: string; readonly reason: string }[];
-    }
-  >;
   getCornerCloseRequests: Operation<CornerCursorInput, RoomInboxResult>;
   listUntrackedCorners: Operation<RoomInput, CornerListResult>;
   getRoomRepositoryState: Operation<RoomInput, RoomRepositoryStateResult>;

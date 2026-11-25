@@ -3,7 +3,6 @@ import { randomBytes } from 'node:crypto';
 import { afterAll,beforeAll,expect,it } from 'vitest';
 import { createAgentCommand,queueMessage,type CommandRow } from './agent-command.js';
 import { setRoomEventSubscriptions } from './agent-subscriptions.js';
-import { reportToCommander } from './commander.js';
 import { LiveHub } from './live.js';
 import { PhoneService } from './phone-service.js';
 import { systemLine } from './system-line.js';
@@ -45,7 +44,7 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => db?.close());
 
-it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue no extra turns', async () => {
+it('SELF-OUTPUT: its own corner assignment queues once; a local final queues no extra turns', async () => {
   const source = randomBytes(32).toString('hex');
   await phone.execute(
     'sendRoomMessage',
@@ -69,29 +68,17 @@ it('SELF-OUTPUT: its own corner assignment queues once; posts and reports queue 
   expect((await daemon.execute('getAgentCommands', { roomId: cornerId }, AGENT)).commands.map(c => c.id))
     .toContain(opening.id);
   await startQueuedCommand(daemon, { roomId: cornerId, commandId: opening.id }, AGENT);
-  await daemon.execute('postCornerMessage', { roomId: cornerId, cornerId, requestId: opening.turn_request_id, text: '@worker mock ready' }, AGENT);
-  await daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: opening.turn_request_id, status: 'complete' }, AGENT);
-  expect(
-    await reportToCommander(db, cornerId, AGENT, 'done: mock ready', opening, 'self-report-proof'),
-  ).toMatchObject({ delivered: true });
-  expect(
-    (
-      await db.query(
-        `SELECT state,private_payload->>'sourceAgentId' source_agent
-    FROM agent_commands WHERE room_id=$1 AND private_payload->>'idleSince' IS NOT NULL`,
-        [cornerId],
-      )
-    ).rows,
-  ).toEqual([]); // No idle-alert work is manufactured after the report.
-  expect((await db.query(`SELECT text FROM messages WHERE id='self-report-proof' AND room_id=$1`,[ROOM])).rows)
-    .toEqual([{text:'done: mock ready'}]);
-  expect((await daemon.execute('getAgentCommands',{roomId:ROOM},AGENT)).commands.map(item=>item.id))
-    .not.toContain('self-report-proof');
-  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[opening.id])).rows[0]).toEqual({state:'pending'});
+  const pending = async () => (await daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT)).commands.map(c => c.id);
+  const before = await pending();
+  await daemon.execute('postRoomMessage', {roomId:cornerId, requestId:opening.turn_request_id, text:'Mock ready'}, AGENT);
+  expect((await db.query('SELECT room_id FROM messages WHERE text=$1',['Mock ready'])).rows)
+    .toEqual([{room_id:cornerId}]);
+  expect((await pending()).filter(id => !before.includes(id))).toEqual([]);
+  expect((await daemon.execute('getAgentCommands', {roomId:cornerId}, AGENT)).commands.filter(c=>c.roomId===cornerId)).toEqual([]);
 
 });
 
-it('SELF-OUTPUT: a different commander receives member reports and the queue rejects System posts', async () => {
+it('SELF-OUTPUT: a different commander receives a worker’s block and the queue rejects System posts', async () => {
   const source = randomBytes(32).toString('hex');
   await phone.execute(
     'sendRoomMessage',
@@ -114,10 +101,10 @@ it('SELF-OUTPUT: a different commander receives member reports and the queue rej
     )
   ).rows[0]!;
   expect(opening.state).toBe('pending');
-  await reportToCommander(db, cornerId, AGENT, 'done: mock ready', opening, 'other-report-proof');
+  const block = await daemon.execute('message', {roomId:cornerId, requestId:opening.turn_request_id, type:'blocked', text:'Which mock should I use?'}, AGENT);
   expect(
-    (await daemon.execute('getAgentCommands', { roomId: cornerId }, OTHER)).commands.map((c) => c.id),
-  ).toContain('other-report-proof');
+    (await daemon.execute('getAgentCommands', { roomId: ROOM }, OTHER)).commands.map((c) => c.id),
+  ).toContain(block.id);
   await expect(queueMessage(db, {
     kind: 'delivery', roomId: cornerId, sourceRoomId: cornerId, sourceItem: opening,
     recipientId: OTHER, authorId: SYSTEM_IDENTITY_ID, text: modelText('Synthetic public report'),
@@ -164,12 +151,12 @@ it.each([false, true])(
 );
 
 it('SELF-OUTPUT: external lifecycle events still wake a self-opening implementer', async () => {
-  const corner = (
-    await db.query<{ room_id: string }>(
-      `SELECT room_id FROM agent_commands WHERE reason='corner_objective' AND agent_id=$1 AND private_payload->'route'->'from'->>'agent'=$2 LIMIT 1`,
-      [AGENT,HUMAN],
-    )
-  ).rows[0]!.room_id;
+  const source = randomBytes(32).toString('hex');
+  await phone.execute('sendRoomMessage', {roomId:ROOM,messageId:source,text:'@worker handle follow-up'}, HUMAN);
+  const incoming = (await daemon.execute('getAgentCommands',{roomId:ROOM},AGENT)).commands.find(c=>c.sourceMessageId===source)!;
+  await startQueuedCommand(daemon,{roomId:ROOM,commandId:incoming.id},AGENT);
+  const {cornerId:corner} = await daemon.execute('createCorner', {roomId:ROOM,requestId:incoming.turnRequestId,
+    name:'Follow-up',objective:'Handle follow-up'}, AGENT);
   const event = await systemLine(db, {
     roomId: corner,
     authorId: AGENT,

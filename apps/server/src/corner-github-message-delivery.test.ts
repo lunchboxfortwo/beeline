@@ -24,18 +24,19 @@ it.each(['blocked', 'failed', 'done', 'done-unregistered'] as const)('Reproducti
     const execute: typeof rootFixture.daemon.execute = process.env.BEELINE_PROVE_BUILT_DELIVERY
       ? (await import(/* @vite-ignore */ builtModule)).daemonExecute.bind(null, rootFixture.daemon)
       : rootFixture.daemon.execute.bind(rootFixture.daemon);
-    const posted = await execute('postCornerMessage', { ...authority(turn), cornerId: opened.cornerId, text: 'GitHub is unavailable; work continues.' }, WORKER);
-    expect((await rootFixture.phone.readRoom(opened.cornerId, HUMAN))?.messages.some(message => message.id === posted.id)).toBe(true);
     if (scenario === 'done-unregistered') {
       await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle-'pr' WHERE corner_id=$1`, [opened.cornerId]);
       await rootFixture.db.query(`UPDATE corner_brief_revisions SET approval_basis=approval_basis || '{"repositoryWork":true}'::jsonb WHERE corner_id=$1`, [opened.cornerId]);
     }
-    const saved = await execute('report', { ...authority(turn), status, text: `${status}: GitHub is unavailable` }, WORKER);
+    const text = `${status}: GitHub is unavailable`;
+    const saved = status === 'blocked'
+      ? await execute('message',{...authority(turn),type:'blocked',text},WORKER)
+      : await execute('postRoomMessage',{...authority(turn),text},WORKER);
     const recipient = (await commands(DM,RUBY)).find(command=>command.id===saved.id);
     if (status === 'blocked') {
       expect(recipient?.source.body).toBe(`${status}: GitHub is unavailable`);
       await claim(recipient!);
-      await execute('order',{...authority(recipient!),address:opened.cornerId,text:'Continue with local proof'},RUBY);
+      await execute('message',{...authority(recipient!),type:'normal',address:`${WORKER}@${opened.cornerId}`,text:'Continue with local proof'},RUBY);
       expect((await commands(opened.cornerId,WORKER)).some(c=>c.source.body==='Continue with local proof')).toBe(true);
     } else {
       expect(recipient).toBeUndefined();

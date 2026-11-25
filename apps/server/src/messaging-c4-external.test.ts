@@ -20,6 +20,7 @@ describe('C4: external agents route like native agents', () => {
   });
   beforeEach(async () => {
     await db().query("DELETE FROM agent_commands");
+    await db().query("DELETE FROM messages WHERE block_corner_id=$1",[THREAD]);
     await db().query('UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1', [ROOM, REVIEWER]);
     await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, AGENT]);
   });
@@ -36,39 +37,38 @@ describe('C4: external agents route like native agents', () => {
   const pending = async (agent: string) => (await db().query<{ id: string; room_id: string; from: unknown; ask: unknown }>(
     `SELECT id,room_id,message->'route'->'from' "from",private_payload->'messageAsk' ask FROM agent_commands
      WHERE agent_id=$1 AND state='pending' AND reason<>'mcp_call' ORDER BY created_at,id`, [agent])).rows;
-  const settle = () => db().query("UPDATE agent_commands SET state='complete' WHERE state='pending'");
   const wake = async (agent: string, reason = 'corner_check') => (await queueMessage(db(), { roomId: THREAD, agentId: agent, sourceMessageId: null, reason,
     privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: THREAD, text: systemText('Checks failed') } }))!;
 
   it.each(Object.entries(places).flatMap(([name, id]) => Object.entries(roles).map(([role, worker]) => [name, role, id, worker] as const)))(
-    'an external commander in the %s messages the thread %s over MCP and receives plain, ask and blocked replies there', async (_name, role, place, worker) => {
+    'an external commander in the %s messages the thread %s over MCP and receives typed replies and blockers there', async (_name, role, place, worker) => {
       const { client, member } = await external();
       const sent = await tools.ok(client, 'message', { address: place, to: { agent: role, place: THREAD }, text: 'Build widget' });
       expect((await pending(worker)).map(row => row.room_id)).toEqual([THREAD]);
-      await settle();
-      await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Done' }, worker);
-      await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'blocked: need a choice', ask }, worker);
-      // A block after a System wake still reaches the implementer’s commander.
-      if (role === 'implementer') await scope.daemon.execute('reply', { roomId:THREAD, id: (await wake(worker)).id, text: 'blocked: build access', ask }, worker);
-      const wakes = (await tools.ok(client, 'list_mentions', {})).wakes as { address: string; from: unknown }[];
-      expect(wakes.map(item => [item.address, item.from])).toEqual(
-        Array(role === 'implementer' ? 3 : 0).fill([place, { agent: worker, place: THREAD }]));
-      expect((await pending(member)).map(row => Boolean(row.ask))).toEqual(role === 'implementer' ? [false, true, true] : []);
+      await scope.daemon.execute('startAgentTurn',{roomId:THREAD,requestId:sent.id,invocationId:crypto.randomUUID()},worker);
+      await scope.daemon.execute('message',{roomId:THREAD,type:'reply',requestId:sent.id,quoteMsgId:sent.id,text:'Done'},worker);
+      await scope.daemon.execute('postRoomMessage',{roomId:THREAD,requestId:sent.id,text:''},worker);
+      if (role === 'implementer') {
+        const sys = await wake(worker);
+        await scope.daemon.execute('message',{roomId:THREAD,type:'blocked',requestId:sys.id,text:'Need build access'},worker);
+      }
+      const wakes = (await tools.ok(client, 'list_mentions', {})).wakes as { address:string; from:unknown }[];
+      expect(wakes.map(item=>[item.address,item.from])).toEqual(
+        Array(role === 'implementer' ? 2 : 1).fill([place,{agent:worker,place:THREAD}]));
     });
 
   it.each(Object.entries(places))('an external thread implementer replies over MCP to a native commander in the %s, including after a System wake', async (_place, place) => {
     const { client, member } = await external();
     await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, member]);
     if (place === DM) await db().query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')", [WORKSPACE, DM, AGENT]);
-    const sent = await scope.daemon.execute('message', { roomId: place, to: { agent: 'implementer', place: THREAD }, text: 'Build widget' }, AGENT);
+    const sent = await scope.daemon.execute('message', { roomId: place, type:'normal',address:`${member}@${THREAD}`,text:'Build widget'},AGENT);
     const received = (await tools.ok(client, 'list_mentions', {})).wakes as { id: string; address: string; from: unknown }[];
     expect(received.map(item => [item.id, item.address, item.from])).toEqual([[sent.id, THREAD, { agent: AGENT, place }]]);
     await tools.ok(client, 'reply', { id: sent.id, text: 'Done' });
     const system = await wake(member);
-    await tools.ok(client, 'reply', { id: system.id, text: 'blocked: build access', ask });
+    expect((await tools.call(client,'reply',{id:system.id,text:'Need build access',ask})).error).toBe(true);
     expect((await pending(AGENT)).map(row => [row.room_id, row.from, Boolean(row.ask)])).toEqual([
       [place, { agent: member, place: THREAD }, false],
-      [place, { agent: member, place: THREAD }, true],
     ]);
     // Condition 3 for an external worker: none of its work was queued outside the thread.
     expect((await db().query("SELECT room_id FROM agent_commands WHERE agent_id=$1 AND room_id<>$2 AND reason<>'mcp_call'", [member, THREAD])).rows).toEqual([]);
@@ -85,12 +85,12 @@ describe('C4: external agents route like native agents', () => {
       expect(value.result.isError, value.result.content[0]!.text).toBeFalsy();
       return JSON.parse(value.result.content[0]!.text).data;
     };
-    const sent = await scope.daemon.execute('message', { roomId: ROOM, to: { agent: 'implementer', place: THREAD }, text: 'Build widget' }, AGENT);
+    const sent = await scope.daemon.execute('message', { roomId: ROOM, type:'normal',address:`${member}@${THREAD}`,text:'Build widget'},AGENT);
     await session('reply', { id: sent.id, text: 'Done' });
-    await session('reply', { id: (await wake(member)).id, text: 'blocked: build access' });
     const asked = await session('message', { address: THREAD, to: { agent: 'reviewer', place: THREAD }, text: 'Please review', ask });
-    expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM,ROOM]);
-    await scope.daemon.execute('reply', { roomId:THREAD, id: asked.id, text: 'Approved' }, REVIEWER);
+    expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM]);
+    await scope.daemon.execute('startAgentTurn',{roomId:THREAD,requestId:asked.id,invocationId:crypto.randomUUID()},REVIEWER);
+    await scope.daemon.execute('message',{roomId:THREAD,type:'reply',requestId:asked.id,quoteMsgId:asked.id,text:'Approved'},REVIEWER);
     expect((await session('list_mentions', {})).wakes.map((item: { address: string; from: unknown }) => [item.address, item.from]))
       .toEqual([[THREAD, { agent: REVIEWER, place: THREAD }]]);
   });
@@ -105,7 +105,8 @@ describe('C4: external agents route like native agents', () => {
     expect(value.result.isError, value.result.content[0]!.text).toBeFalsy();
     const sent = JSON.parse(value.result.content[0]!.text).data;
     expect(await pending(AGENT)).toEqual([{ id: sent.id, room_id: THREAD, from: { agent: member, place: THREAD }, ask: null }]);
-    await scope.daemon.execute('reply', { roomId:THREAD, id: sent.id, text: 'Reviewed' }, AGENT);
+    await scope.daemon.execute('startAgentTurn',{roomId:THREAD,requestId:sent.id,invocationId:crypto.randomUUID()},AGENT);
+    await scope.daemon.execute('message',{roomId:THREAD,type:'reply',requestId:sent.id,quoteMsgId:sent.id,text:'Reviewed'},AGENT);
     expect((await pending(member)).map(row => [row.room_id, row.from]))
       .toEqual([[THREAD, { agent: AGENT, place: THREAD }]]);
   });
@@ -128,7 +129,7 @@ describe('C4: external agents route like native agents', () => {
     for (const [name, replacement] of Object.entries(MCP_RETIRED_TOOLS))
       expect(await tools.call(client, name, {})).toEqual({ error: true, text: `Request refused: ${name} is retired: ${replacement}.` });
     await db().query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1', [THREAD, member]);
-    const sent = await scope.daemon.execute('message', { roomId: ROOM, to: { agent: 'implementer', place: THREAD }, text: 'Build widget' }, AGENT);
+    const sent = await scope.daemon.execute('message', { roomId: ROOM, type:'normal',address:`${member}@${THREAD}`,text:'Build widget'},AGENT);
     // list_mentions and post predate the messaging tools, so a stale host still has them.
     const [received] = (await tools.ok(client, 'list_mentions', {})).wakes as { id: string; next: string }[];
     expect(received).toMatchObject({ id: sent.id, next: expect.stringContaining(`Reply(id: ${sent.id}, text: ...) with your reply`) });

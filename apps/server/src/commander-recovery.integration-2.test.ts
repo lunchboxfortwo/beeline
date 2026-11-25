@@ -5,8 +5,8 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
   const opened = await open(),
     turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(turn), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint' },
+    'message',
+    { type: 'blocked', ...authority(turn), text: 'needs-decision: choose endpoint' },
     WORKER,
   );
   await rootFixture.daemon.execute(
@@ -17,8 +17,8 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
   const returned = (await commands(DM, RUBY)).find((c) => c.reason === 'message')!;
   await claim(returned);
   await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(returned), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint @captain' },
+    'message',
+    { type: 'blocked', ...authority(returned), text: 'needs-decision: choose endpoint @captain' },
     RUBY,
   );
   expect((await rootFixture.phone.readRoom(opened.cornerId, HUMAN))?.cornerOwed).toBe(true);
@@ -173,16 +173,16 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(turn), attachment: attachment(original, 'owner approval'),
     }, WORKER);
-    await rootFixture.daemon.execute('report', {
-      ...authority(turn), status: 'done', text: 'done: design ready',
+    await rootFixture.daemon.execute('postRoomMessage', {
+      ...authority(turn), harnessEnded: true, text: 'done: design ready',
     }, WORKER);
     const report = rootFixture.order;
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(report), attachment: attachment(copy, 'design for approval'),
     }, RUBY);
     if (delivery === 'report') {
-      await rootFixture.daemon.execute('report', {
-        ...authority(report), status: 'done', text: 'done: design attached',
+      await rootFixture.daemon.execute('postRoomMessage', {
+        ...authority(report), harnessEnded: true, text: 'done: design attached',
       }, RUBY);
     } else {
       await rootFixture.daemon.execute('postRoomMessage', {
@@ -213,7 +213,7 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
     .uploadArtifact(WORKER, Buffer.from('Synthetic handoff'), 'text/plain', 'handoff.txt');
   const attachment = { url: uploaded.url, name: 'handoff.txt', mimeType: 'text/plain', size: Buffer.byteLength('Synthetic handoff') };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
-  const report = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Evidence needs review' }, WORKER);
+  const report = await rootFixture.daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Evidence needs review' }, WORKER);
   expect(await read(report.id, RUBY)).toMatchObject({ body: 'Evidence needs review', attachments: [] });
   expect(await read(report.id)).toMatchObject({ body: 'Evidence needs review' });
   // Continuations retain private payloads and expose their own command ids.
@@ -234,8 +234,8 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
 it('Reproduction R-ID: an order card id returns the expanded text and archived sibling messages retain read access', async () => {
   const opened = await open();
   const turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Build the widget from evidence' }, RUBY);
-  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='order' ORDER BY created_at DESC`, [opened.cornerId])).rows[0]!;
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Build the widget from evidence' }, RUBY);
+  const card = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='message' ORDER BY created_at DESC`, [opened.cornerId])).rows[0]!;
   expect(await rootFixture.daemon.execute('getRoomMessage', { ...authority(turn), messageId: card.id }, WORKER))
     .toMatchObject({ body: expect.stringContaining('Build the widget') });
   const sibling = await open();
@@ -404,7 +404,7 @@ it('QUEUE-1: a tag, order and brief revision during a running turn retain separa
   const opened = await open(), active = await worker(opened.cornerId);
   await rootFixture.db.query(`INSERT INTO live_outputs(room_id,agent_id,turn_id,kind,body) VALUES($1,$2,'presence','presence','{"status":"online"}')`, [opened.cornerId, WORKER]);
   await rootFixture.phone.execute('sendRoomMessage', { roomId: opened.cornerId, messageId: randomBytes(32).toString('hex'), text: '@worker First: use the blue widget' }, HUMAN);
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: opened.cornerId, text: 'Second: add rounded edges' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Second: add rounded edges' }, RUBY);
   await rootFixture.daemon.execute('reviseCornerBrief', { ...authority(rootFixture.order), cornerId: opened.cornerId,
     expectedRevision: 1, brief: { spec: 'Third: keep the approved width', repositoryWork: false,
       approval: { sourceMessageId: rootFixture.order.sourceMessageId }, change: 'Third: keep the approved width' } }, RUBY);
@@ -450,12 +450,12 @@ it('AGENT-STOP-3: an orderer stops its own turn and preserves an unrelated human
   const first = (await commands(ROOM, WORKER))[0]!;
   await claim(first);
   await send('@worker Second: check the hinge');
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, agent: 'worker', text: 'Third: sand the edges' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${ROOM}`, text: 'Third: sand the edges' }, RUBY);
   await commands(ROOM, WORKER);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(first), text:'Finished checking the first request.' }, WORKER);
   const next = (await commands(ROOM, WORKER)).filter(command => command.action === 'input');
   expect(next).toHaveLength(2);
-  const assigned = next.find(command => command.reason === 'order')!;
+  const assigned = next.find(command => command.reason === 'message')!;
   await claim(assigned);
   await send('@other Look at the widget');
   const otherTurn = (await commands(ROOM, OTHER))[0]!;
@@ -471,10 +471,10 @@ it('AGENT-STOP-3: an orderer stops its own turn and preserves an unrelated human
   expect(result).toMatchObject({ stopped: true, agent: WORKER });
   expect((await rootFixture.db.query(`SELECT status FROM agent_turns WHERE room_id=$1 AND request_id=$2`,
     [ROOM, assigned.turnRequestId])).rows[0]?.status).toBe('cancelled');
-  await rootFixture.daemon.execute('order', { ...authority(rootFixture.order), address: ROOM, agent: 'worker', text: 'New plan: paint it green' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(rootFixture.order), type: 'normal', address: `${WORKER}@${ROOM}`, text: 'New plan: paint it green' }, RUBY);
   const followUp = (await commands(ROOM, WORKER)).filter(command => command.action === 'input');
   expect(followUp).toHaveLength(2);
-  const newOrder = followUp.find(command => command.reason === 'order')!;
+  const newOrder = followUp.find(command => command.reason === 'message')!;
   expect(newOrder.source.body).toContain('New plan: paint it green');
   await claim(newOrder);
   expect(followUp.some(command => command.source.body.includes('Second: check the hinge'))).toBe(true);
@@ -508,12 +508,12 @@ it('Reproduction files-2: explicit post binds uploaded media before the turn fin
     [media, RUBY, 'artifact/' + media, randomBytes(32).toString('hex')],
   );
   // A post before the upload has no files to deliver.
-  const elsewhere = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: ROOM, text: 'Work started' }, RUBY);
+  const elsewhere = await rootFixture.daemon.postCornerMessage({ ...authority(rootFixture.order), cornerId: ROOM, text: 'Work started' }, RUBY);
   expect((await rootFixture.daemon.execute('getRoomMessage', { roomId: ROOM, messageId: elsewhere.id }, WORKER)).attachments).toHaveLength(0);
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(rootFixture.order), attachment: {
     url: 'http://test/v1/media/' + media, name: 'evidence.txt', mimeType: 'text/plain', size: 2,
   } }, RUBY);
-  const posted = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: DM, text: 'evidence.txt attached' }, RUBY);
+  const posted = await rootFixture.daemon.postCornerMessage({ ...authority(rootFixture.order), cornerId: DM, text: 'evidence.txt attached' }, RUBY);
   const read = await rootFixture.daemon.execute('getRoomMessage', { roomId: DM, messageId: posted.id }, RUBY);
   expect(read.attachments).toEqual([expect.objectContaining({ name: 'evidence.txt', url: 'http://test/v1/media/' + media })]);
   expect((await rootFixture.db.query('SELECT 1 FROM agent_pending_attachments WHERE request_id=$1', [rootFixture.order.turnRequestId])).rowCount).toBe(0);

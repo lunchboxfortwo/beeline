@@ -28,7 +28,8 @@ try {
     privatePayload:{kind:'order',authorId:human,fromRoomId:room,text:modelText('Build the assigned work.')}});
   await daemon.execute('startAgentTurn',{roomId:corner,requestId:command.turn_request_id},worker);
   const turn={roomId:corner,requestId:command.turn_request_id};
-  const report=await daemon.execute('report',{...turn,status:'needs_decision',text:'Which scope should I build?'},worker);
+  const report=await daemon.execute('message',{...turn,type:'blocked',text:'Which scope should I build?'},worker);
+  await daemon.execute('postRoomMessage',{...turn,text:'',harnessEnded:true},worker);
   const state=async()=>{
     await refreshCornerAttention(db,corner);
     return (await phone.readCorners(room,human)).corners.find(row=>row.corner.id===corner).state;
@@ -41,18 +42,19 @@ try {
   assert((await tasks()).includes(report.id));
   await phone.execute('sendRoomReply',{roomId:room,parentMessageId:report.id,text:'Use the smaller scope.'},human);
   assert(!(await tasks()).includes(report.id));
-  assert.equal(await state(),before?'idle':'waiting');
+  assert.equal(await state(),before?'idle':'working');
+  assert.equal((await db.query('SELECT ask_closed_reason FROM messages WHERE id=$1',[report.id])).rows[0].ask_closed_reason,null);
   if(!before) {
     await daemon.execute('closeAgentAsk',{...turn,messageId:report.id,reason:'answered'},worker);
     assert.equal(await state(),'working');
     const answer=(await daemon.execute('getAgentCommands',{roomId:corner},worker)).commands[0];
     await daemon.execute('startAgentTurn',{roomId:corner,requestId:answer.turnRequestId},worker);
-    await daemon.execute('reply',{id:answer.id,text:'done: Continuing with the agreed scope.'},worker);
+    await daemon.execute('postRoomMessage',{roomId:corner,requestId:answer.turnRequestId,text:'Continuing with the agreed scope.',harnessEnded:true},worker);
     assert.equal(await state(),'idle');
   }
   if(process.argv.includes('--choice-reask')) {
     const {sendMessage}=await load('agent-messaging');
-    const choiceBlock=await sendMessage(db,{route:{from:{agent:worker,place:corner},to:{agent:human,place:room}},
+    const choiceBlock=await sendMessage(db,{type:'blocked',route:{from:{agent:worker,place:corner},to:{agent:human,place:room}},
       text:'blocked: Which access?',ask:{question:'Which access?',options:['One','Two']}});
     const choice=(await db.query('SELECT id FROM room_choices WHERE message_id=$1',[choiceBlock.id])).rows[0];
     await phone.execute('answerChoice',{choiceId:choice.id,optionId:'A'},human);
@@ -67,6 +69,6 @@ try {
   }
   console.log(JSON.stringify({reproduction:'22 Nov schedule-target-place',mode:before?'reproduced':'demonstrated',
     report:'waiting; Tasks open',unrelatedMessage:before?'WRONG: thread idle; Tasks open':'thread waiting; Tasks open',
-    directAnswer:before?'WRONG: thread idle; Tasks cleared':'thread waiting; Tasks cleared',
+    directAnswer:before?'WRONG: thread idle; Tasks cleared':'answer queued; Tasks cleared',
     explicitClosure:before?'not reached':'thread working on answer, then idle; Tasks cleared'}));
 } finally { await db.close(); }
