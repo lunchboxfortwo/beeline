@@ -20,7 +20,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   let failUpdate: string | undefined;
   let failRead = false;
   let beforeUpdate: (() => Promise<void>) | undefined;
-  const fleet = new Map<string, { state: string; instance_id: string; config: {
+  const fleet = new Map<string, { state: string; instance_id: string; config?: {
     image: string; env: { keep: string }; rootfs: { persist: string };
   } }>();
   const calls: string[] = [];
@@ -134,7 +134,7 @@ describe('release refresh and committed free-agent sleep events', () => {
     off = service.subscribeToWakes(live);
     await startup.mock.results[0]!.value;
     await seed(1, 'running', 'started');
-    if (release === 'current') fleet.get('m1')!.config.image = IMAGE;
+    if (release === 'current') fleet.get('m1')!.config!.image = IMAGE;
 
     await connect(1);
     expect(signals).toHaveBeenCalledWith(agentId(1));
@@ -142,7 +142,7 @@ describe('release refresh and committed free-agent sleep events', () => {
 
     expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
     expect(fleet.get('m1')).toMatchObject({ state: 'suspended' });
-    expect(fleet.get('m1')!.config.image === IMAGE).toBe(release === 'current');
+    expect(fleet.get('m1')?.config?.image === IMAGE).toBe(release === 'current');
     expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1/suspend']);
   });
 
@@ -162,8 +162,8 @@ describe('release refresh and committed free-agent sleep events', () => {
 
     expect(fleet.get('m1')).toMatchObject({ state: 'suspended', config: { image: IMAGE } });
     expect(fleet.get('m2')).toMatchObject({ state: 'started', instance_id: work === 'working' ? 'v2-updated' : 'v2' });
-    if (work === 'working') expect(fleet.get('m2')!.config.image).toBe(IMAGE);
-    else expect(fleet.get('m2')!.config.image).not.toBe(IMAGE);
+    if (work === 'working') expect(fleet.get('m2')?.config?.image).toBe(IMAGE);
+    else expect(fleet.get('m2')?.config?.image).not.toBe(IMAGE);
     expect(calls.filter(call => call.startsWith('POST'))).toEqual(['POST m1', 'POST m1/suspend', ...(work === 'working' ? ['POST m2'] : [])]);
   });
 
@@ -195,7 +195,7 @@ describe('release refresh and committed free-agent sleep events', () => {
     }
     if (signal === 'release') {
       // Recreate image drift after startup, without reopening the connection.
-      fleet.get('m1')!.config.image = 'old-release';
+      fleet.get('m1')!.config!.image = 'old-release';
       fleet.get('m1')!.state = 'started';
       calls.length = 0;
       live.publish({ type: 'invalidate', roomId: '', reason: 'postgres:free_agents' });
@@ -208,7 +208,7 @@ describe('release refresh and committed free-agent sleep events', () => {
 
     expect((await db.query('SELECT 1 FROM agent_commands')).rowCount).toBe(0);
     expect(fleet.get('m1')).toMatchObject({ state: 'suspended' });
-    expect(fleet.get('m1')!.config.image === IMAGE).toBe(signal !== 'connection');
+    expect(fleet.get('m1')?.config?.image === IMAGE).toBe(signal !== 'connection');
     expect(calls.filter(call => call.startsWith('POST'))).toEqual([...(signal !== 'connection' ? ['POST m1'] : []), 'POST m1/suspend']);
     expect((await db.query(`SELECT squire_work->>'install' install FROM squire_machines`)).rows)
       .toEqual([{ install: 'true' }]);
@@ -231,8 +231,8 @@ describe('release refresh and committed free-agent sleep events', () => {
     await seed(33,'provisioning','stopped',false,false);
     await command(32,'working');
     await service.reconcileAll();
-    for(let n=1;n<=31;n++)expect(fleet.get(`m${n}`)?.config.image).toBe(IMAGE);
-    expect(fleet.get('m32')?.config.image).toBe(IMAGE);
+    for(let n=1;n<=31;n++)expect(fleet.get(`m${n}`)?.config?.image).toBe(IMAGE);
+    expect(fleet.get('m32')?.config?.image).toBe(IMAGE);
     expect((await db.query(`SELECT fly_machine_id FROM free_agents WHERE agent_id=$1`,[agentId(33)])).rows).toEqual([{fly_machine_id:null}]);
     expect(calls.filter(call=>call.includes('/start'))).toEqual(['POST m32/start']);
     expect(calls.filter(call=>call.endsWith('/wait'))).toHaveLength(33);
@@ -244,7 +244,7 @@ describe('release refresh and committed free-agent sleep events', () => {
   it('reports unknown observations after visiting the rest of the inventory',async()=>{
     await seed(1);await seed(2);failUpdate='m1';
     await expect(service.reconcileAll()).rejects.toThrow('observation unavailable for 1');
-    expect(fleet.get('m2')?.config.image).toBe(IMAGE);
+    expect(fleet.get('m2')?.config?.image).toBe(IMAGE);
     expect(fleet.get('m2')?.state).toBe('stopped');
     expect(calls.filter(call=>call==='POST m1')).toHaveLength(1);
     expect(calls.filter(call=>call.endsWith('/start'))).toHaveLength(0);
@@ -255,5 +255,17 @@ describe('release refresh and committed free-agent sleep events', () => {
     await service.reconcileAll();
     expect(logs.some(line=>line.includes('unmapped machine m99: preserved'))).toBe(true);
     expect(calls.every(call=>!call.includes('m99'))).toBe(true);
+  });
+
+  it('continues catch-up when Fly lists a machine without config', async () => {
+    fleet.set('m99', { state: 'stopped', instance_id: 'configless' });
+    await seed(1, 'provisioning', 'stopped', false, false);
+    await seed(2);
+
+    await service.reconcileAll();
+
+    expect(logs).toContain('unmapped machine m99: preserved; ownership reconciliation required');
+    expect(fleet.get('m2')?.config?.image).toBe(IMAGE);
+    expect(calls.every(call => !call.includes('m99') && !call.includes('m1'))).toBe(true);
   });
 });

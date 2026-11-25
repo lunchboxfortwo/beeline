@@ -162,12 +162,13 @@ export type DaemonOperationMap = {
   getOwedMentions: Operation<Record<string, never>, { readonly owedMentions: readonly { readonly roomId: string; readonly messageId: string; readonly memberId: string; readonly replyRule: string; readonly idempotencyKey: string }[] }>;
   getRoomInbox: Operation<RoomCursorInput, RoomInboxResult>;
   getRoomConversation: Operation<RoomConversationInput, RoomConversationResult>;
-  /** One bounded page of an exact message in this Room or a source authorized for the active turn. */
+  /** The full body and attachments of an exact message the reader can open. */
   getRoomMessage: Operation<
     RoomInput & {
       readonly messageId: string;
       /** Resolve a visible file by object id; messageId may be empty for this lookup. */
       readonly attachmentId?: string;
+      /** An offset from a legacy paginated response, counted in Unicode code points. */
       readonly offset?: number;
       readonly requestId?: string;
     },

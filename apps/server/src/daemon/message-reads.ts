@@ -1,17 +1,22 @@
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
+import { roomAudienceCanReadSourceSql } from '../institutional-history.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
-import { AUTHORIZED_ROOMS_CTE } from '../institutional-history.js';
-import { handoff } from '../workflow-runs.js';
 import type { DaemonContext } from './context.js';
-import { Input, AccessDeniedError, id, markExpiredAttachments } from './values.js';
-import { daemonAccess, daemonReviewSourceAccess } from './access.js';
+import { Input, AccessDeniedError, daemonTranscriptVisibilitySql, markExpiredAttachments } from './values.js';
+import { agentRoomMembershipJoins } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { deliveredMessage } from '../corner-brief.js';
 
-// Membership is checked separately. System messages appear in the transcript.
-const readableMessage = "(message.presentation IN ('message','activity','system') OR message.card_type='agent-command')";
+const readableMessage = daemonTranscriptVisibilitySql('message');
+// A borrowed review source grants access only to the addressed transcript.
+// A lookup outside the addressed chat must also respect its human audience.
+const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::boolean AND EXISTS (
+  SELECT 1 FROM rooms source ${agentRoomMembershipJoins('source', '$3')}
+  JOIN rooms output ON output.id=$1 AND output.workspace_id=source.workspace_id
+  WHERE source.id=message.room_id
+    AND ${roomAudienceCanReadSourceSql('COALESCE(output.parent_id,output.id)', 'COALESCE(source.parent_id,source.id)')})))`;
 
-  export async function daemonRoomMessage(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<{ messageId: string; body: string; attachments: DaemonAttachment[]; nextOffset?: number }> {
+  export async function daemonRoomMessage(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<{ messageId: string; body: string; attachments: DaemonAttachment[] }> {
     if (input.attachmentId !== undefined) return ctx.roomAttachment(input, agentId);
     let borrowedSource = false;
     await ctx.access(input.roomId, agentId).catch(async (error: unknown) => {
@@ -33,12 +38,11 @@ const readableMessage = "(message.presentation IN ('message','activity','system'
     // Private hand-offs expose the command id as their message id. Only the
     // sender and recipient may reopen that payload, even in a shared Room.
     const handoff = (await ctx.database.query<{
-      agent_id: string; author_id: string; body: string; total: number;
+      agent_id: string; author_id: string; body: string;
       attachments: DaemonAttachment[]; accessible: boolean;
     }>(
       `SELECT command.agent_id,command.private_payload->>'authorId' author_id,
-              substring(command.private_payload->>'text' FROM $3::integer + 1 FOR 4000) body,
-              char_length(command.private_payload->>'text') total,
+              command.private_payload->>'text' body,
               command.private_payload->'attachments' attachments,
               EXISTS(SELECT 1 FROM rooms handoff_room
                      JOIN memberships member ON member.room_id=COALESCE(handoff_room.parent_id,handoff_room.id)
@@ -48,33 +52,25 @@ const readableMessage = "(message.presentation IN ('message','activity','system'
                        AND member.removed_at IS NULL) accessible
        FROM agent_commands command
        WHERE command.id=$1 AND command.private_payload IS NOT NULL`,
-      [input.messageId, agentId, offset],
+      [input.messageId, agentId],
     )).rows[0];
     if (handoff && (borrowedSource || !handoff.accessible ||
         (handoff.agent_id !== agentId && handoff.author_id !== agentId)))
       throw new Error('message access denied: private hand-off');
     let row = handoff ?? (
-      await ctx.database.query<{ body: string; total: number; attachments: DaemonAttachment[] }>(
-        `SELECT substring(CASE WHEN card_type='agent-command' THEN card->>'text' ELSE text END
-                         FROM $3::integer + 1 FOR 4000) body,
-                char_length(CASE WHEN card_type='agent-command' THEN card->>'text' ELSE text END) total, attachments
+      await ctx.database.query<{ body: string; attachments: DaemonAttachment[] }>(
+        `SELECT CASE WHEN card_type='agent-command' THEN COALESCE(card->>'text',text) ELSE text END body,
+                attachments
          FROM messages message
-         JOIN rooms source ON source.id=message.room_id
-         JOIN rooms output ON output.id=$1
-         WHERE message.id=$2 AND message.deleted_at IS NULL
-           AND COALESCE(source.parent_id,source.id)=COALESCE(output.parent_id,output.id)
-           AND (NOT $4::boolean OR message.room_id=output.id)
-           AND ${readableMessage}`,
-        [input.roomId, input.messageId, offset, borrowedSource],
+         WHERE message.id=$2 AND ${readableScope}`,
+        [input.roomId, input.messageId, agentId, borrowedSource],
       )
     ).rows[0];
-    if (borrowedSource && !row) throw new AccessDeniedError();
-    if (!row) {
+    if (!row && !borrowedSource) {
       // A dispatched review lends access to current brief citations only.
       // Keep this separate from Room access and requester-derived authority.
-      row = (await ctx.database.query<{ body: string; total: number; attachments: DaemonAttachment[] }>(
-        `SELECT substring(message.text FROM $4::integer + 1 FOR 4000) body,
-                char_length(message.text) total,message.attachments
+      row = (await ctx.database.query<{ body: string; attachments: DaemonAttachment[] }>(
+        `SELECT message.text body,message.attachments
          FROM messages message
          JOIN rooms corner ON corner.id=$1 AND corner.archived_at IS NULL
          JOIN rooms source ON source.id=message.room_id AND source.workspace_id=corner.workspace_id
@@ -82,7 +78,7 @@ const readableMessage = "(message.presentation IN ('message','activity','system'
          JOIN LATERAL (SELECT corner_brief_revisions.* FROM corner_brief_revisions
            WHERE corner_id=corner.id ORDER BY revision DESC LIMIT 1) brief
            ON brief.source_room_id=message.room_id
-         WHERE message.id=$3 AND message.deleted_at IS NULL AND message.presentation='message'
+         WHERE message.id=$3 AND ${readableMessage} AND message.presentation='message'
            AND (message.id=brief.source_message_id
              OR message.id=brief.approval_basis->>'sourceMessageId'
              OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(brief.intent_verbatim,'[]'::jsonb)) intent
@@ -94,78 +90,47 @@ const readableMessage = "(message.presentation IN ('message','activity','system'
                AND command.review_context->'pullRequest'=fact.lifecycle->'pr'->'number'
                AND command.review_context->>'briefRevision'=brief.revision::text)
          LIMIT 1`,
-        [input.roomId,agentId,input.messageId,offset],
+        [input.roomId,agentId,input.messageId],
       )).rows[0];
-    }
-    let authority: { workspace_id: string; requester_identity_id: string } | undefined;
-    if (!row) {
-      authority = (
-        await ctx.database.query<{ workspace_id: string; requester_identity_id: string }>(
-          `SELECT output.workspace_id,$2::text requester_identity_id
-           FROM rooms output
-           WHERE output.id=$1`,
-          [input.roomId, agentId],
-        )
-      ).rows[0];
-      if (authority) {
-        row = (
-          await ctx.database.query<{ body: string; total: number; attachments: DaemonAttachment[] }>(
-            `WITH ${AUTHORIZED_ROOMS_CTE}
-             SELECT substring(CASE WHEN message.card_type='agent-command' THEN message.card->>'text' ELSE message.text END
-                              FROM $6::integer + 1 FOR 4000) body,
-                    char_length(CASE WHEN message.card_type='agent-command' THEN message.card->>'text' ELSE message.text END) total,message.attachments
-             FROM messages message
-             JOIN authorized_rooms authorized ON authorized.id=message.room_id
-             WHERE message.id=$5 AND message.deleted_at IS NULL
-               AND ${readableMessage}`,
-            [input.roomId, authority.requester_identity_id, authority.workspace_id, agentId,
-              input.messageId, offset],
-          )
-        ).rows[0];
-      }
     }
     if (!row) {
       // Literal prefix comparison avoids treating user-supplied % or _ as wildcards.
       // Resolve the entire readable scope before selecting a candidate.
       const candidates = await ctx.database.query<{ id: string }>(
-        `WITH ${AUTHORIZED_ROOMS_CTE}
-         SELECT message.id FROM messages message
-         JOIN rooms source ON source.id=message.room_id
-         JOIN rooms output ON output.id=$1
-         WHERE starts_with(message.id,$5) AND message.deleted_at IS NULL
-           AND ${readableMessage}
-           AND (COALESCE(source.parent_id,source.id)=COALESCE(output.parent_id,output.id)
-             OR message.room_id IN (SELECT id FROM authorized_rooms))
+        `SELECT message.id FROM messages message
+         WHERE starts_with(message.id,$2) AND ${readableScope}
          ORDER BY message.id LIMIT 21`,
-        [input.roomId, authority?.requester_identity_id ?? null,
-          authority?.workspace_id ?? null, agentId, input.messageId],
+        [input.roomId, input.messageId, agentId, borrowedSource],
       );
       if (candidates.rows.length > 1)
         throw new Error(`ambiguous message id: ${candidates.rows.slice(0, 20).map(candidate => candidate.id).join(', ')}${candidates.rows.length > 20 ? ' (more matches; use a longer id)' : ''}`);
       if (candidates.rows.length === 1 && candidates.rows[0]!.id !== input.messageId)
         return ctx.roomMessage({ ...input, messageId: candidates.rows[0]!.id }, agentId);
+      if (borrowedSource) throw new AccessDeniedError();
       // Existing messages outside the readable scope are refusals, not misses:
       // download_attachment must preserve forbidden rather than not_found.
       const elsewhere = await ctx.database.query(
         `SELECT 1 FROM messages message
-         WHERE message.id=$1 AND message.deleted_at IS NULL
-           AND ${readableMessage}`,
+         WHERE message.id=$1 AND ${readableMessage}`,
         [input.messageId],
       );
       if (elsewhere.rowCount) throw new Error('message access denied from this chat');
       throw new Error('message not found in this chat');
     }
-    if (offset > row.total) throw new Error('offset exceeds message body');
-    const nextOffset = offset + [...row.body].length;
+    let body = row.body;
+    if (offset) {
+      const characters = [...body];
+      if (offset > characters.length) throw new Error('offset exceeds message body');
+      body = characters.slice(offset).join('');
+    }
     const attachments = markExpiredAttachments(
       row.attachments ?? [],
       await ctx.expiredMediaIds(row.attachments ?? []),
     );
     return {
       messageId: input.messageId,
-      body: row.body,
+      body,
       attachments: await ctx.withStoredDigests(attachments),
-      ...(nextOffset < row.total ? { nextOffset } : {}),
     };
   }
 
@@ -179,7 +144,7 @@ const readableMessage = "(message.presentation IN ('message','activity','system'
       return { messageId: '', body: '', attachments: [] };
     const candidates = await ctx.database.query<{ id: string }>(
       `SELECT message.id FROM messages message
-       WHERE message.deleted_at IS NULL AND EXISTS (
+       WHERE ${readableMessage} AND EXISTS (
          SELECT 1 FROM jsonb_array_elements(message.attachments) file
          WHERE file->>'mediaId'=$1 OR file->>'url' LIKE '%/v1/media/' || $1)
        UNION

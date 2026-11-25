@@ -51,6 +51,53 @@ describe('connected agent message protocol',()=>{
     expect((await scope.db.query('SELECT state, result_message_id FROM agent_commands WHERE id=$1', [task.id])).rows)
       .toEqual([{ state: 'pending', result_message_id: null }]);
   });
+
+  it('opens a listed message by ID and checks the human audience for a cross-chat lookup', async () => {
+    const { client, member } = await scope.connected();
+    const messageId = 'd'.repeat(64);
+    const read = (id: string, address = ROOM) => ({ address, facet: 'message', messageId: id });
+    expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+    await scope.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member')`, [WORKSPACE, PRIVATE, member]);
+    const listed = await tools.ok(client, 'read', { address: PRIVATE, facet: 'messages' });
+    expect(listed.items).toContainEqual(expect.objectContaining({ id: messageId, body: 'private nebula' }));
+    expect(await tools.ok(client, 'read', read(messageId, PRIVATE)))
+      .toMatchObject({ messageId, body: 'private nebula' });
+    expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+    expect((await tools.call(client, 'read', read(messageId.slice(0, 25)))).error).toBe(true);
+
+    await scope.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member')`, [WORKSPACE, PRIVATE, USER]);
+    for (const id of [messageId, messageId.slice(0, 25)]) {
+      expect(await tools.ok(client, 'read', read(id))).toMatchObject({ messageId, body: 'private nebula' });
+    }
+    await scope.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [PRIVATE, member]);
+    expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+    expect((await tools.call(client, 'read', read(messageId, PRIVATE))).error).toBe(true);
+    await scope.db.query(`DELETE FROM memberships WHERE room_id=$1 AND identity_id=$2`, [PRIVATE, USER]);
+  });
+
+  it('opens the same cards that the daemon transcript lists', async () => {
+    const { client } = await scope.connected();
+    const visibleId = '1'.repeat(64);
+    const hiddenId = '2'.repeat(64);
+    const deletedId = '3'.repeat(64);
+    await scope.db.query(`INSERT INTO messages(id,room_id,author_id,presentation,card_type,text,system_transcript,deleted_at)
+      VALUES ($1,$4,$5,'card','choice','Visible card',NULL,NULL),
+             ($2,$4,$5,'card','choice','Card hidden from the phone','{"origin":"system","visibility":"hidden"}',NULL),
+             ($3,$4,$5,'card','choice','Deleted card',NULL,now())`, [visibleId, hiddenId, deletedId, ROOM, USER]);
+
+    const listed = await tools.ok(client, 'read', { address: ROOM, facet: 'messages', from: 'newest' });
+    const cards = listed.items.filter((item: { type: string }) => item.type === 'card');
+    for (const [id, body] of [[visibleId, 'Visible card'], [hiddenId, 'Card hidden from the phone']]) {
+      expect(cards).toContainEqual(expect.objectContaining({ id, body }));
+      expect(await tools.ok(client, 'read', { address: ROOM, facet: 'message', messageId: id }))
+        .toMatchObject({ messageId: id, body });
+    }
+    expect(cards).not.toContainEqual(expect.objectContaining({ id: deletedId }));
+    expect((await tools.call(client, 'read', { address: ROOM, facet: 'message', messageId: deletedId })).error).toBe(true);
+  });
+
   it('renders one person tag with its context and attachment and replies by message id in a joined Claude session', async () => {
     vi.stubEnv('OPENROUTER_EMBEDDING_API_KEY', '');
     const { client, member, token, grant } = await scope.connected();
@@ -113,6 +160,9 @@ describe('connected agent message protocol',()=>{
     const page=await tools.ok(client,'read_messages',{room:PUBLIC_CORNER});
     const delivery=await tools.ok(client,'list_mentions',{});
     const command=(await readAgentCommands(scope.db,member)).commands.find(item=>item.sourceMessageId===messageId)!;
+    expect((await scope.db.query('SELECT text FROM messages WHERE id=$1', [messageId])).rows).toEqual([{ text }]);
+    expect(direct.body).toBe(text);
+    expect(direct).not.toHaveProperty('nextOffset');
     expect(direct.attachments).toEqual([image]);
     expect(command.source.attachments).toEqual([image]);
     expect(itemPrompt(command,{names:new Map()})).toContain('📎 browser-screen.jpg (image/jpeg, 173 KB)');
