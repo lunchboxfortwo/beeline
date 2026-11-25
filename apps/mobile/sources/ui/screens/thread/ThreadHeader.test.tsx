@@ -80,7 +80,7 @@ it('keeps the bar slim, and gives it the title with a work-state glyph once the 
   expect(byTestID(tree, 'thread-chat-link')[0].props.flexShrink).not.toBe(0);
   expect(byTestID(tree, 'thread-chat-link')[0].findByType('T').props.flexShrink).toBe(1);
   expect(byTestID(tree, 'thread-bar-name')[0].props.flexShrink).toBe(1);
-  expect(title.findByType('T').props.flexShrink).toBe(0);
+  expect(title.findByType('T').props.flexShrink).toBe(1);
   act(() => tree.unmount());
 });
 
@@ -162,7 +162,8 @@ it('sets the state mark right after the thread name, centred on its line, with t
     const box = byTestID(tree, `${name}-state`)[0];
     expect(box.props).toMatchObject({height,alignItems:'center',justifyContent:'center'});
     const runs = byTestID(tree, name)[0].children.filter((child: any) => typeof child !== 'string');
-    expect(runs.at(-1)).toBe(box);
+    expect(runs.at(-1)).toBe(box.parent);
+    expect(box.parent.children.at(-1)).toBe(box);
   }
   expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',justifyContent:'center'});
   expect(byTestID(tree,'thread-bar-arrow-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',justifyContent:'center'});
@@ -182,6 +183,7 @@ for (const theme of ['light_stone','dark_stone','light_brass','dark_brass']) {
 const phoneWidth = 360;
 const phoneTitleWidth = phoneWidth - 32 - 18 - 18 - 3 * 8 - 26;
 for (const [title, parts] of [
+  ['grunt-analytics-dashboard', ['grunt-', 'analytics-', 'dashboard']],
   ['accept-provider-terms', ['accept-', 'provider-', 'terms']],
   ['accept-provider-terms-and-conditions', ['accept-', 'provider-', 'terms-', 'and-', 'conditions']],
   ['fix-login', ['fix-', 'login']],
@@ -199,10 +201,10 @@ for (const [title, parts] of [
       const runs = name.findAllByType('T');
       expect(runs.map((run:any) => run.props.children)).toEqual(parts);
       expect(runs.map((run:any) => run.props.children).join('')).toBe(title);
-      for (const run of runs) expect(run.props).toMatchObject({numberOfLines:1,flexShrink:0});
-      // The renderer has no layout engine: assert the indivisible units given to native/web flex.
-      // The final "s" can never wrap independently from "terms".
-      expect(runs.some((run:any) => run.props.children === 's')).toBe(false);
+      const tail = name.children.at(-1);
+      expect(tail.props).toMatchObject({maxWidth:'100%',minWidth:0});
+      expect(tail.children).toEqual([runs.at(-1), byTestID(tree, id + '-state')[0]]);
+      expect(name.children.slice(0, -1)).toEqual(runs.slice(0, -1));
     }
     act(() => tree.unmount());
   });

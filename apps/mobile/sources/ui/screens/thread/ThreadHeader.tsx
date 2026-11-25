@@ -34,20 +34,23 @@ export type ThreadHeaderData = {
     objective?: string;
 };
 
-/** Each run is indivisible on native and web; flex may wrap only after its trailing hyphen.
- * `trail` (the state mark) follows the last run, centred on its line. */
+/** Wrap at hyphens and keep the state mark with the final run. */
 function ThreadName({ title, v, regular = false, testID, trail }: {
     title: string; v: 'title' | 'meta' | 'metaStrong'; regular?: boolean; testID?: string; trail?: React.ReactNode;
 }) {
     const parts = title.match(/[^-]*-|[^-]+$/g) ?? [''];
+    const last = parts.pop();
     const line = typeStyle(v, useTextSize()).lineHeight;
     return (
         <XStack flexShrink={1} minWidth={0} flexWrap="wrap" alignItems="center" accessible accessibilityLabel={title}
             aria-label={title} testID={testID}>
             {parts.map((part, index) => (
-                <T key={index} v={v} regular={regular} color="ink" numberOfLines={1} flexShrink={0}>{part}</T>
+                <T key={index} v={v} regular={regular} color="ink" maxWidth="100%">{part}</T>
             ))}
-            {trail ? <YStack height={line} marginLeft="2" alignItems="center" justifyContent="center" testID={testID ? `${testID}-state` : undefined}>{trail}</YStack> : null}
+            <XStack maxWidth="100%" minWidth={0} alignItems="flex-end">
+                <T v={v} regular={regular} color="ink" minWidth={0} flexShrink={1}>{last}</T>
+                {trail ? <YStack flexShrink={0} height={line} marginLeft="2" alignItems="center" justifyContent="center" testID={testID ? `${testID}-state` : undefined}>{trail}</YStack> : null}
+            </XStack>
         </XStack>
     );
 }
