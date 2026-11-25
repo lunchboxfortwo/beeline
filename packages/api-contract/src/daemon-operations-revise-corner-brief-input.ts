@@ -5,6 +5,7 @@ import type { ChoiceOptionInput } from './room-choices.js';
 import { TurnOutputAuthority } from './daemon-operations.js';
 import { CornerInput, RoomInput, AgentInput } from './daemon-operations-daemon-operation-map.js';
 import { CornerBriefDraft, CornerWatchKind, RegistryMcpManifest } from './daemon-operations-room-conversation-window.js';
+import type { ActivityItem } from './activity-item.js';
 
 
 export type ReviseCornerBriefInput = TurnOutputAuthority &
@@ -613,38 +614,7 @@ export type ConnectorAssignmentsResult = {
   readonly assignments: readonly ConnectorAssignment[];
 };
 
-export type DaemonActivityItem = {
-  readonly kind: 'thinking' | 'tool' | 'output' | 'summary' | 'note';
-  readonly title: string;
-  /**
-   * Durable corner narration when `kind='output'`; an earlier assistant text
-   * run shown inside the steps line when `kind='note'`. Never private thought
-   * text.
-   */
-  readonly text?: string;
-  readonly operation?: string;
-  readonly status?: string;
-  /** Bounded, redacted tool argument summaries for the corner ledger. */
-  readonly command?: string;
-  readonly input?: string;
-  /** Bounded first/last-line excerpt of a completed tool result. */
-  readonly output?: string;
-  /** The identity whose message triggered the turn this row belongs to. */
-  readonly requestedBy?: { readonly pubkey: string; readonly name?: string };
-  readonly files?: readonly { readonly path: string; readonly status?: string }[];
-  /**
-   * On a `note`: this text carries on the previous note. One text run longer
-   * than a note may be is split across consecutive notes, never cut.
-   */
-  readonly continues?: boolean;
-  readonly plan?: {
-    readonly objective?: string;
-    readonly items: readonly {
-      readonly step: string;
-      readonly status: 'pending' | 'in_progress' | 'completed';
-    }[];
-  };
-};
+export type DaemonActivityItem = ActivityItem;
 
 export type DaemonPermissionScope =
   | {

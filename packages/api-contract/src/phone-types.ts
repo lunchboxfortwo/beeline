@@ -7,6 +7,7 @@ import type { ChoiceMode, ChoiceOptionView, ChoiceStatus } from './room-choices.
 import type { ConnectorOfferCardView } from './connector-offers.js';
 import type { readHeader, readMember } from './phone-guards.js';
 import type { AgentSignInCardView } from './agent-sign-in.js';
+import type { ActivityItem } from './activity-item.js';
 export { type RoomLiveDelta, type RoomView, type RoomHistoryView, MESSAGE_SEARCH_QUERY_MAX_BYTES, type MessageSearchView, type MessageSearchResult, type MessageSearchSnippetPart, type RoomHistoryOutline, type RoomHistoryOutlineDay, type ChatListCorner, type RoomCornerSummary, type ChatListItem, type ChatListWorkspace, type ChatListView, type ChatListUnavailable, type WorkspaceListView, type WorkspaceManagedRoomView, type WorkspaceView, type WorkspaceMemberListView, type WorkspaceMemberListQuery, type AgentComposerCommand, type AgentDetailView, type AgentAccessView, type AgentYoloView, type InviteView, type InviteInviterView, type AgentPairingClaimView, type AgentPairingClaimWireView, type AgentPairingAbandonView, type CornerListItem, type CornerListView, type RoomRepositoryView, type RoomRepositoryResolution } from './phone-types-room-live-delta.js';
 
 
@@ -182,47 +183,19 @@ export type RoomToolReference = { readonly roomId: string; readonly anchor: stri
 export type RoomToolPage = { readonly roomId: string; readonly messages: readonly RoomViewMessage[];
   readonly next?: string };
 
-export type RoomViewActivity = {
+type RoomViewActivityFields = {
   readonly toolGroup?: RoomToolReference & { readonly count: number };
   readonly toolOutput?: RoomToolReference & { readonly messageId: string };
-  readonly kind: 'thinking' | 'tool' | 'output' | 'summary' | 'note';
-  readonly title: string;
-  /**
-   * Durable corner narration when `kind='output'`; an earlier assistant text
-   * run shown inside the steps line when `kind='note'`. Never private thought
-   * text.
-   */
-  readonly text?: string;
-  readonly operation?: string;
-  readonly status?: string;
-  /** Bounded, redacted tool argument summaries for the corner ledger. */
-  readonly command?: string;
-  readonly input?: string;
-  /** Bounded first/last-line excerpt of a completed tool result. */
-  readonly output?: string;
   readonly thoughtMs?: number;
-  /** The identity whose message triggered the turn this row belongs to ("at Alex's request"). */
-  readonly requestedBy?: { readonly pubkey: string; readonly name?: string };
   readonly rollup?: Readonly<Record<string, number>>;
   readonly observed?: readonly {
     readonly verb: string;
     readonly target?: string;
     readonly result?: string;
   }[];
-  readonly files?: readonly { readonly path: string; readonly status?: string }[];
-  /**
-   * On a `note`: this text carries on the previous note. One text run longer
-   * than a note may be is split across consecutive notes, never cut.
-   */
-  readonly continues?: boolean;
-  readonly plan?: {
-    readonly objective?: string;
-    readonly items: readonly {
-      readonly step: string;
-      readonly status: 'pending' | 'in_progress' | 'completed';
-    }[];
-  };
-};
+} & ActivityItem;
+
+export type RoomViewActivity = Pick<RoomViewActivityFields, keyof RoomViewActivityFields>;
 
 
 export type SystemTranscript = {
