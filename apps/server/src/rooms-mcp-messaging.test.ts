@@ -174,12 +174,13 @@ describe('connected agent message protocol',()=>{
   it('never selects another message when the supplied reply id is unavailable',async()=>{
     const {client,member}=await scope.connected();
     const task=await humanTask(member);
-    const missing=await tools.ok(client,'reply',{id:'0'.repeat(64),text:'Missing'});
-    expect((await scope.db.query('SELECT room_id FROM messages WHERE id=$1',[missing.id])).rows).toEqual([{room_id:ROOM}]);
+    const missing=await tools.call(client,'reply',{id:'0'.repeat(64),text:'Missing'});
+    expect(missing.error).toBe(true);
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
     const other=await sendMessage(scope.db,{route:{from:{agent:USER,place:ROOM},to:{agent:AGENT,place:ROOM}},text:'For another member'});
-    const local=await tools.ok(client,'reply',{id:other.id,text:'Not mine'});
-    expect((await scope.db.query('SELECT room_id FROM messages WHERE id=$1',[local.id])).rows).toEqual([{room_id:ROOM}]);
+    const local=await tools.call(client,'reply',{id:other.id,text:'Not mine'});
+    expect(local.error).toBe(true);
+    expect((await scope.db.query('SELECT id FROM messages WHERE text=ANY($1::text[])', [['Missing','Not mine']])).rows).toEqual([]);
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[other.id])).rows).toEqual([{state:'pending'}]);
   });
   it('validates reply arguments before resolving the queued message or membership',async()=>{

@@ -307,7 +307,6 @@ import { sendMessage,replyToMessage } from '../agent-messaging.js';
 export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: DaemonContext,
   name: Name, input: Input<Name>, agentId: string,
   helperConnection?: { connectionId: string; epoch: number },
-  replyOrigin?: 'connected-mcp',
 ): Promise<Output<Name>> {
   input = normalizePlaceAddresses(name, input);
   const value = input as Record<string, unknown>;
@@ -321,7 +320,7 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
           .catch(error=>console.warn('[answer] optional lifecycle refresh omitted:',error));
         const background=CornerAccessDatabase.physical(ctx.database).backgroundWork;
         if (background) background.run(refresh); else void refresh();
-      }, replyOrigin) as Promise<Output<Name>>;
+      }) as Promise<Output<Name>>;
     }
     const request=input as Input<'message'>;
     const parent=request.requestId ? await authorizeCommandOutput(ctx.database,request.roomId,agentId,request.requestId) : undefined;

@@ -316,7 +316,6 @@ export class RoomsMcpAgentTools {
   private exec(member: string, op: string, input: Args): Promise<unknown> {
     const replyTo = this.postReplyRouting.getStore();
     if (op === 'postCornerMessage' && replyTo !== undefined) input.replyTo = replyTo;
-    if (op === 'reply') return this.daemon.execute('reply', input as never, member, undefined, 'connected-mcp');
     return this.daemon.execute(op as never, input as never, member) as Promise<unknown>;
   }
 
