@@ -150,9 +150,13 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
         </XStack>
         </>}
         {group?.some(agent => agent.stop) && onStopAgent ? <Button size="inline" variant="quiet" alignSelf="center"
-          label={expanded ? 'Stop all' : 'Stop'} accessibilityLabel="Stop all working agents"
+          label={expanded ? 'Stop all' : 'Stop'} accessibilityLabel={expanded ? 'Stop all working agents' : 'Choose an agent to stop'}
           disabled={group.every(agent => !agent.stop || stoppingAgents.has(`${agent.pubkey}:${agent.stop.requestId}`))}
-          onPress={() => { for (const agent of group) if (!stoppingAgents.has(`${agent.pubkey}:${agent.stop?.requestId}`)) void stopAgent(agent); }}
+          onPress={expanded ? () => {
+            for (const agent of group) {
+              if (!stoppingAgents.has(`${agent.pubkey}:${agent.stop?.requestId}`)) void stopAgent(agent);
+            }
+          } : () => setExpanded(true)}
           testID="stop-all-agents" /> : null}
         {onStop ? (
           <T
