@@ -1,10 +1,12 @@
 import { REQUEST_REASONS,agentMessageText,replyNeeded } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { mentionReplyRule } from '@beeline/api-contract/phone';
 import { createHash,createHmac,randomBytes,randomUUID,timingSafeEqual } from 'node:crypto';
 import type { SqlDatabase } from './database.js';
 import { recordDiagnostic } from './diagnostics.js';
 import { openSecrets,sealSecrets } from './free-agents.js';
+import { publicMentionCommandSql } from './owed-mentions.js';
 import { notifyMcpWakesSql,notifyMcpWebhook,POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
 import { connectorHostAcceptedSql, connectorDeliveryChanged, noteConnectorPresence, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { postMcpWebhook } from './rooms-mcp-members.js';
@@ -167,7 +169,8 @@ export async function queueMcpMentionEvents(db: SqlDatabase, member: string, roo
     JOIN identities i ON i.id=m.author_id
     LEFT JOIN LATERAL (
       SELECT command.id,${queuedContextSql('command')} context FROM agent_commands command
-      WHERE command.agent_id=s.member_id AND command.source_message_id=m.id
+      WHERE command.agent_id=s.member_id AND command.room_id=m.room_id
+        AND command.source_message_id=m.id AND ${publicMentionCommandSql('command')}
       ORDER BY (command.state='pending') DESC,command.created_at DESC,command.id DESC LIMIT 1
     ) queued ON true
     WHERE s.member_id=$1 AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND s.event_name='mention'
@@ -193,6 +196,7 @@ export function mcpCommandWakeSql(first: number, mentionDelivery: boolean): { ct
   const channel = `$${first}`;
   const requests = `$${first + 1}`;
   const mention = `$${first + 2}`;
+  const messageId = deliveredTranscriptIdSql('command');
   return {
     params: [POSTGRES_LIVE_CHANNEL, REQUEST_REASONS, mentionDelivery],
     cte: `queued_mcp_wakes AS (
@@ -200,12 +204,12 @@ export function mcpCommandWakeSql(first: number, mentionDelivery: boolean): { ct
       SELECT s.id,command.id,command.room_id,'evt_'||s.id||'_cmd_'||command.id,
         jsonb_build_object('eventId','evt_'||s.id||'_cmd_'||command.id,'name','wake','timestamp',command.created_at,
           'data',jsonb_build_object(
-            'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'messageId',source.id,'id',command.id,
+            'roomId',command.room_id,'address',command.room_id,'commandId',command.id,'messageId',${messageId},'id',command.id,
             'from',wake_data.origin,'text',wake_data.body,'attachments',wake_data.files,
             'next',concat_ws(E'\n','From: '||COALESCE(sender.name,wake_data.origin->>'agent')||' in #'||COALESCE(place.name,wake_data.origin->>'place'),
-              'messageId: '||source.id,'commandId: '||command.id,'Reply needed: '||wake_data.needed::text,'text: '||COALESCE(wake_data.body,''),
+              'messageId: '||(${messageId}),'commandId: '||command.id,'Reply needed: '||wake_data.needed::text,'text: '||COALESCE(wake_data.body,''),
               'attachment: '||(SELECT string_agg(COALESCE(file->>'name','attachment'),', ') FROM jsonb_array_elements(wake_data.files) file),
-              CASE WHEN wake_data.needed THEN 'Reply(id: '||COALESCE(source.id,command.id)||', text: ...) with your reply' END)),
+              CASE WHEN wake_data.needed THEN 'Reply(id: '||COALESCE(${messageId},command.id)||', text: ...) with your reply' END)),
           'cursor',NULL)::text
       FROM inserted command
       LEFT JOIN messages source ON source.id=command.source_message_id
@@ -254,15 +258,17 @@ export async function deliverMcpEvents(db: SqlDatabase, transport: Transport, si
         WHERE delivery.delivered_at IS NULL AND delivery.claimed_at IS NULL
         ORDER BY delivery.event_id LIMIT 1 FOR UPDATE OF delivery SKIP LOCKED`)).rows[0];
       if (!candidate) return;
-      const commands = (await tx.query<{ state: string }>(`SELECT state FROM agent_commands WHERE agent_id=$1
-        AND (id=$2 OR source_message_id=$3) ORDER BY id FOR UPDATE`, [candidate.member_id,candidate.command_id,candidate.message_id])).rows;
+      const commands = (await tx.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.agent_id=$1
+        AND (command.id=$2 OR command.source_message_id=$3 AND ${publicMentionCommandSql('command')})
+        ORDER BY command.id FOR UPDATE`, [candidate.member_id,candidate.command_id,candidate.message_id])).rows;
       const row = (await tx.query<Subscription & { event_id: string; body: string; message_id: string | null; command_id: string | null; probe_generation: string | null; delivery_generation:string|null; deliverable: boolean }>(`
       WITH claimed AS (SELECT * FROM rooms_mcp_event_deliveries WHERE event_id=$1)
       SELECT s.*,d.event_id,d.body,d.message_id,d.command_id,d.probe_generation,selected.generation delivery_generation,
         ($2::boolean AND beeline_mcp_delivery_owner(s.member_id,'events',s.id) AND (s.expires_at IS NULL OR s.expires_at>now()) AND c.revoked_at IS NULL AND c.client_id IS NOT NULL
          AND r.archived_at IS NULL AND r.id IS NOT NULL
          AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
-           WHERE accepted.agent_id=s.member_id AND (accepted.id=d.command_id OR accepted.source_message_id=d.message_id)
+           WHERE accepted.agent_id=s.member_id
+             AND (accepted.id=d.command_id OR accepted.source_message_id=d.message_id AND ${publicMentionCommandSql('accepted')})
              AND ${connectorHostAcceptedSql('accepted')})
          AND ((d.probe_generation IS NOT NULL AND EXISTS(SELECT 1 FROM rooms_mcp_delivery proof
              WHERE proof.member_id=s.member_id AND proof.generation=d.probe_generation AND proof.receipt_at IS NULL AND proof.failure IS NULL))

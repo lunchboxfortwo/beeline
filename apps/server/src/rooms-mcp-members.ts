@@ -2,6 +2,7 @@ import { mcpWebhookNeedsSecret } from './rooms-mcp-join-policy.js';
 import { agentMessageText } from '@beeline/api-contract/daemon';
 import { queuedContextSql } from './agent-command-context.js';
 import { legacyMessageBody } from './messaging-cutover.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { agentHandleFromName } from '@beeline/api-contract/phone';
 import { typedMentionHandles } from './message-mentions.js';
 import { createHash,randomUUID } from 'node:crypto';
@@ -20,7 +21,7 @@ joinRooms,
 removeIdentityMemberships,
 restoreInvitedWorkspaceMembership,
 } from './membership-join.js';
-import { mentionRouting, recordOwedMention } from './owed-mentions.js';
+import { mentionRouting, publicMentionCommandSql, recordOwedMention } from './owed-mentions.js';
 import { notifyMcpWebhook } from './postgres-live.js';
 import { connectorHostAcceptedSql,connectorDeliveryChanged,markConnectorsOffline,noteConnectorPresence,readMemberDeliveries } from './rooms-mcp-delivery.js';
 import { deliverMcpEvents,mcpWakeText,queueMcpMentionEvents } from './rooms-mcp-events.js';
@@ -340,8 +341,9 @@ export async function deliverMcpMemberWebhooks(
         WHERE delivered_at IS NULL AND claimed_at IS NULL
         ORDER BY created_at,call_id LIMIT 1 FOR UPDATE SKIP LOCKED`)).rows[0];
       if (!candidate) return;
-      const commands = (await tx.query<{ state: string }>(`SELECT state FROM agent_commands WHERE agent_id=$1
-        AND $2 IN (id,source_message_id) ORDER BY id FOR UPDATE`, [candidate.member_id,candidate.message_id])).rows;
+      const commands = (await tx.query<{ state: string }>(`SELECT command.state FROM agent_commands command WHERE command.agent_id=$1
+        AND (command.id=$2 OR command.source_message_id=$2 AND ${publicMentionCommandSql('command')})
+        ORDER BY command.id FOR UPDATE`, [candidate.member_id,candidate.message_id])).rows;
       const claimed = await tx.query<{
         call_id: string; member_id: string; room_id: string; message_id: string;
         body: string; owner_id: string | null; callback_url: string | null; callback_secret: string | null; deliverable: boolean; answered: boolean;
@@ -360,12 +362,13 @@ export async function deliverMcpMemberWebhooks(
              jsonb_build_object('agent',COALESCE(command.private_payload->>'authorId',command.message->>'authorId'),
                'place',COALESCE(command.private_payload->>'fromRoomId',command.room_id::text))) command_from,
            delivery.generation delivery_generation,probe.probe,command.id command_id,
-           source.id source_message_id,queued.id mention_command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
+           ${deliveredTranscriptIdSql('command')} source_message_id,queued.id mention_command_id,command.reason command_reason,command.private_payload->'messageAsk' command_ask,
            left(COALESCE(command.private_payload->>'text',source.text),16000) command_text,(
              $2::boolean AND room.id IS NOT NULL AND room.archived_at IS NULL AND mention.cleared_at IS NULL
              AND beeline_mcp_delivery_owner(claimed.member_id,'webhook')
              AND NOT EXISTS(SELECT 1 FROM agent_commands accepted
-               WHERE accepted.agent_id=claimed.member_id AND claimed.message_id IN (accepted.id,accepted.source_message_id)
+               WHERE accepted.agent_id=claimed.member_id AND (accepted.id=claimed.message_id
+                 OR accepted.source_message_id=claimed.message_id AND ${publicMentionCommandSql('accepted')})
                  AND ${connectorHostAcceptedSql('accepted')})
              AND (probe.member_id IS NOT NULL OR message.id IS NOT NULL OR command.state='pending')
              AND EXISTS (SELECT 1 FROM room_access room_member
@@ -386,7 +389,8 @@ export async function deliverMcpMemberWebhooks(
          LEFT JOIN messages source ON source.id=command.source_message_id
          LEFT JOIN LATERAL (
            SELECT item.id,${queuedContextSql('item')} context FROM agent_commands item
-           WHERE item.agent_id=claimed.member_id AND item.source_message_id=message.id
+           WHERE item.agent_id=claimed.member_id AND item.room_id=message.room_id
+             AND item.source_message_id=message.id AND ${publicMentionCommandSql('item')}
            ORDER BY (item.state='pending') DESC,item.created_at DESC,item.id DESC LIMIT 1
          ) queued ON true
          LEFT JOIN rooms_mcp_delivery delivery ON delivery.member_id=claimed.member_id

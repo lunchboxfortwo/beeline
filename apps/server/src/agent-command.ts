@@ -5,7 +5,7 @@ import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contr
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
-import { recordedMessageRoute, replyableWake } from './message-route.js';
+import { deliveredMessageRoute, recordedMessageRoute, replyableWake } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
@@ -863,7 +863,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     if (item?.state === 'cancelled') refuseStoppedMessage(false);
     if (item) {
       const receipt = {commandId: item.id, completed: item.state === 'complete', published: Boolean(item.public_reply_id),
-        ...(item.public_reply_id ? {id:item.public_reply_id,messageId:item.public_reply_id,createdAt:new Date(item.public_reply_at!).getTime()/1000,stored:true,visible:true} : {})};
+        ...(item.public_reply_id ? {id:item.public_reply_id,messageId:item.public_reply_id,createdAt:Math.floor(new Date(item.public_reply_at!).getTime()/1000),
+          stored:true,visible:true,delivered:true} : {})};
       if (!input.explicitReply) {
         const files = input.outputFiles ?? item.answer_attachments ?? [];
         if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && (payload?.automatic || isBackgroundCommand(item.reason))) return receipt;
@@ -886,7 +887,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         const saved = existing ? {id: existing, stored: true, visible: true} : await queueMessage(db,{
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,
-          replyTo:input.replyToMessageId ?? item.source_message_id ?? item.id,
+          // Native closing output quotes the recorded wake. An addressed post can choose its quote.
+          replyTo:(input.publicPost ? input.replyToMessageId : undefined) ?? item.source_message_id ?? item.id,
         });
         if (!saved.stored) {
           const {receipt: warning, woken, notWoken} = saved as QueuedPostReceipt;
@@ -900,6 +902,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         return {...saved, commandId:item.id, messageId:saved.id, completed:true, published:true, delivered:true};
       }
       const scheduleReply = item.reason === 'schedule' ? replyableWake(item) : undefined;
+      if (!scheduleReply && (item.message?.authorId === SYSTEM_IDENTITY_ID || payload?.authorId === SYSTEM_IDENTITY_ID ||
+        (await deliveredMessageRoute(db,item)).from.agent === SYSTEM_IDENTITY_ID))
+        refuseMessageMembership('Quote a message that woke this turn.');
       const to = (await recordedMessageRoute(db,item)).from;
       if (to.agent === SYSTEM_IDENTITY_ID) refuseMessageMembership('Quote a message that woke this turn.');
       if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[to.place])).rowCount) {
@@ -928,15 +933,17 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   });
   // Optional history and cleanup cannot hold the committed publication receipt.
   const messageId = published.messageId;
-  if (completedNow && messageId) {
+  if (completedNow) {
     const after=()=>Promise.all([
-        observeQueuedAnswer(database,messageId,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
-        recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId})
-          .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),
+        ...(messageId ? [
+          observeQueuedAnswer(database,messageId,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
+          recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId})
+            .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),
+          recordAnswerActivity(database,agentId,messageId,input).catch(error=>console.warn('[answer] optional activity omitted:',error)),
+        ] : []),
         database.query(`SELECT beeline_record_agent_answer(id,false,NULL) FROM agent_commands
           WHERE room_id=$1 AND agent_id=$2 AND turn_request_id=$3`,[input.roomId,agentId,input.requestId ?? null])
           .catch(error=>console.warn('[answer] optional turn status omitted:',error)),
-        recordAnswerActivity(database,agentId,messageId,input).catch(error=>console.warn('[answer] optional activity omitted:',error)),
         database.query('DELETE FROM agent_pending_attachments WHERE room_id=$1 AND agent_id=$2 AND request_id=$3',
           [input.roomId,agentId,input.requestId ?? null]).catch(error=>console.warn('[answer] optional media cleanup omitted:',error)),
       ]).then(()=>undefined);

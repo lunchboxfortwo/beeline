@@ -335,6 +335,8 @@ describe('connected agent message protocol',()=>{
         .toContain('commandId is not an available command');
       expect((await tools.call(client,'message',{address:ROOM,commandId,to:{agent:USER,place:ROOM},text:'Invalid binding'})).error).toBe(true);
     }
+    expect(await tools.call(client,'post',{address:PUBLIC_CORNER,commandId:task.id,text:'Invalid binding'}))
+      .toEqual({error:true,text:'Request refused: commandId is not an available message for you at this address.'});
     expect((await scope.db.query("SELECT 1 FROM messages WHERE author_id=$1 AND text='Invalid binding'",[member])).rowCount).toBe(0);
     expect((await scope.db.query('SELECT state FROM agent_commands WHERE id=$1',[task.id])).rows).toEqual([{state:'pending'}]);
   });

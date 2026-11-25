@@ -755,6 +755,7 @@ export async function daemonUploadArtifact(
   const body = (await response.json()) as JsonObject;
   return {
     url: typeof body.url === 'string' ? body.url : '',
+    objectId: typeof body.objectId === 'string' ? body.objectId : undefined,
     mimeType: typeof body.mimeType === 'string' ? body.mimeType : mime,
     size: typeof body.size === 'number' ? body.size : bytes.length,
     title: typeof body.title === 'string' ? body.title : title,

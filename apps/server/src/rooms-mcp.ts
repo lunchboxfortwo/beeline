@@ -294,7 +294,8 @@ export class RoomsMcp {
        WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND mention.seq>$2::bigint
          AND ${OWED_MENTION_OPEN_SQL}
          AND NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=mention.member_id
-           AND command.source_message_id=mention.message_id AND ${connectorHostAcceptedSql('command')})
+           AND command.source_message_id=mention.message_id AND ${publicMentionCommandSql('command')}
+           AND ${connectorHostAcceptedSql('command')})
          AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=mention.room_id AND active.archived_at IS NULL)
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1, stream])).rows;
     const page = rows.slice(0, limit);

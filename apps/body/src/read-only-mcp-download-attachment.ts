@@ -76,9 +76,7 @@ export function finishResolvedAttachPath(resolved: string): string {
   return resolved;
 }
 
-/** The daemon-facing artifacts pass-through's response: `postArtifact` only
- *  reads `url`, the rest of `UploadArtifactResult`
- *  (`apps/server/src/object-service.ts`) rides along unused. */
+/** The artifact upload response provides the object ID and its media URL. */
 export interface DaemonArtifactUploadResult {
   url: string;
   objectId?: string;

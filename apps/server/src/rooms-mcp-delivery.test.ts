@@ -222,6 +222,15 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
     });
     expect(order).toBeDefined();
     expect(await deliverMcpMemberWebhooks(scope.db, transport)).toBe(3);
+    expect(posts.find(post => post.id === order!.id)).toMatchObject({
+      commandId: order!.id, messageId: null,
+      next: expect.stringContaining(`Reply(id: ${order!.id}, text: ...)`),
+    });
+    const mentionCommand = (await scope.db.query<{ id: string }>(
+      "SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2 AND reason='human_tag'",
+      [member, mention.messageId],
+    )).rows[0]!;
+    expect(posts.find(post => post.messageId === mention.messageId)).toMatchObject({ commandId: mentionCommand.id });
     expect(
       posts
         .slice(1)

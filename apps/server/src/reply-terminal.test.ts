@@ -34,7 +34,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
     const wake = (await tools.ok(client, 'list_mentions', {})).wakes[0];
     expect(wake).toMatchObject({ id: replied.id, reason: 'reply' });
     expect((await scope.db.query('SELECT agent_depth FROM agent_commands WHERE id=$1',[replied.id])).rows).toEqual([{agent_depth:depth+1}]);
-    expect(wake.next).toContain(`id: ${replied.id}\nReply needed: false\ntext: Inspected`);
+    expect(wake.next).toContain(`commandId: ${replied.id}\nReply needed: false\ntext: Inspected`);
     expect(wake.next).not.toMatch(/Reply\(id|no_reply_needed|message\(/);
     const session = renderWake(wake, joined, runner);
     expect(session).toContain('Reply needed: false');

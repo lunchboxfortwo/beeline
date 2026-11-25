@@ -178,7 +178,7 @@ const scope16 = fixtureScope16();
       room_name: scope16.routing.roomName, author_name: scope16.routing.fromName, author_handle: scope16.routing.fromHandle, text: 'x'.repeat(30000) });
     m23_expect(text).toBe([
       'From: Ruby in #Design',
-      'id: message-id',
+      'messageId: message-id',
       'Reply needed: true',
       'text: ' + 'x'.repeat(30000),
       'Reply(id: message-id, text: ...) with your reply',

@@ -139,7 +139,7 @@ mergedDescribe40('member-stream.test.ts', () => {
       ).toBe(
         [
           'From: Jane in #room',
-          'id: message',
+          'messageId: message',
           'Reply needed: true',
           'text: first',
           'second',
@@ -169,7 +169,7 @@ mergedDescribe40('member-stream.test.ts', () => {
       ).toBe(
         [
           'From: Ruby in #milo',
-          'id: order',
+          'commandId: order',
           'Reply needed: true',
           'text: Are you still working?',
           'Reply(id: order, text: ...) with your reply',
@@ -186,7 +186,7 @@ mergedDescribe40('member-stream.test.ts', () => {
           runner,
         );
         m40_expect(text).toBe(
-          ['From: Beeline in #room', 'id: wake', 'Reply needed: false', 'text: An update'].join(
+          ['From: Beeline in #room', 'commandId: wake', 'Reply needed: false', 'text: An update'].join(
             '\n',
           ),
         );

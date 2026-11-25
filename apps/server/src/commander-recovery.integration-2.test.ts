@@ -43,11 +43,18 @@ it('R1 carries a closed thread artifact into a successor brief and refuses priva
   const turn = await worker(source.id);
   const bytes = Buffer.from('R1 evidence');
   const objects = new ObjectService(rootFixture.db, new MemoryObjectStorage(), 'http://test');
-  await postArtifact({ bytes: bytes.toString('base64'), title: 'evidence.txt', mime: 'text/plain' }, {
-    roomId: source.id, roots: [],
-    upload: (content, mime, title) => objects.uploadArtifact(WORKER, content, mime, title),
-    queue: async (attachment) => { await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER); },
-  });
+  const uploadRoot = await mkdtemp(join(tmpdir(), 'beeline-r1-upload-'));
+  const path = join(uploadRoot, 'evidence.txt');
+  try {
+    await writeFile(path, bytes);
+    await postArtifact({ path }, {
+      roomId: source.id, roots: [uploadRoot],
+      upload: (content, mime, title) => objects.uploadArtifact(WORKER, content, mime, title),
+      queue: async (attachment) => { await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER); },
+    });
+  } finally {
+    await rm(uploadRoot, { recursive: true, force: true });
+  }
   const media = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM objects WHERE title='evidence.txt' AND owner_id=$1`, [WORKER])).rows[0]!.id;
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'Evidence recorded' }, WORKER);
   const message = (await rootFixture.db.query<{ id: string }>(`SELECT id FROM messages WHERE room_id=$1 AND text='Evidence recorded'`, [source.id])).rows[0]!;
@@ -386,8 +393,10 @@ it.each(['success', 'failure', 'replacement'])('Reproduction ARTIFACT-REPORT: sh
       expect(uploaded.isError).toBe(true);
       expect(uploaded.content[0]?.text).toContain('storage_unavailable');
       if (outcome === 'failure') return;
-      expect((await call(2,'post_artifact',{path:join(scratch,'evidence.txt')})).isError).not.toBe(true);
-    } else expect(uploaded.isError).not.toBe(true);
+    }
+    const receipt = outcome === 'replacement' ? await call(2,'post_artifact',{path:join(scratch,'evidence.txt')}) : uploaded;
+    expect(receipt.isError, receipt.content[0]?.text).not.toBe(true);
+    expect(JSON.parse(receipt.content[0]!.text)).toMatchObject({objectId:expect.any(String),queued:true,published:false});
     const final = await rootFixture.daemon.execute('postRoomMessage',{...authority(rootFixture.order),text:'Evidence attached'},RUBY);
     const saved = await rootFixture.daemon.execute('getRoomMessage',{roomId:DM,messageId:final.id},RUBY);
     expect(saved).toMatchObject({body:'Evidence attached',attachments:[expect.objectContaining({name:'evidence.txt'})]});

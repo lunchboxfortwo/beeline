@@ -14,8 +14,9 @@ it('dup-reply-1: reply and closing text each publish once',async()=>{
  expect(final.id).not.toBe(reply.id);expect(await answers()).toHaveLength(2);
 });
 it('dup-reply-2: reply and empty completion retain the delivered answer',async()=>{
- const request=await task();await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Done'});
- expect(await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'',harnessEnded:true})).toMatchObject({delivered:true});
+ const request=await task();const reply=await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Done'});
+ expect(await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'',harnessEnded:true}))
+  .toMatchObject({commandId:request.id,messageId:reply.id,completed:true,published:true,delivered:true});
  expect(await answers()).toHaveLength(1);
 });
 it('retries with different transport ids publish once',async()=>{

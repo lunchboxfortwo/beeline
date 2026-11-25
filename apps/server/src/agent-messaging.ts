@@ -9,6 +9,7 @@ import { cornerCommanderIdSql } from './corner-commander.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import type { SqlDatabase } from './database.js';
 import { assertMemberTranscript, modelText } from './message-origin.js';
+import { deliveredTranscriptIdSql } from './message-route.js';
 import { postRoomChoice } from './room-choice.js';
 import { updateWorkItem } from './work-board.js';
 
@@ -147,10 +148,11 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;
   if (invocation?.state === 'cancelled') refuseMessageMembership('command turn cancelled');
   const commandId = input.connected?.commandId;
-  if (commandId) await selectMcpMessage(db, agentId, commandId);
+  if (commandId) await selectMcpMessage(db, agentId, commandId, undefined, true);
   const item = (await db.query<CommandRow>(`SELECT * FROM agent_commands
     WHERE agent_id=$1 AND ($4::boolean OR room_id=$3)
-      AND (id=$2 OR source_message_id=$2 OR ($4 AND message->>'id'=$2))
+      AND (id=$2 OR (CASE WHEN $4 THEN ${deliveredTranscriptIdSql('agent_commands')} ELSE source_message_id END)=$2
+        OR ($4 AND message->>'id'=$2))
       AND (NOT $4::boolean OR action='input' AND reason<>'mcp_call')
       AND ($5::text IS NULL OR id=$5)
     ORDER BY (id=$2) DESC,($4 AND state='pending') DESC,created_at DESC,id DESC LIMIT 1 FOR UPDATE`,

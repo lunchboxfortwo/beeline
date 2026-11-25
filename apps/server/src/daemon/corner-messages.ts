@@ -16,7 +16,7 @@ import { modelText } from '../message-origin.js';
   }, agentId: string) {
     let completed = false;
     const result = await ctx.database.transaction(async db => {
-      const parent = input.commandId ? await selectMcpMessage(db,agentId,input.commandId)
+      const parent = input.commandId ? await selectMcpMessage(db,agentId,input.commandId,input.cornerId)
         : input.requestId ? await authorizeCommandOutput(db,input.roomId,agentId,input.requestId) : undefined;
       if (input.commandId && !input.attachments && parent?.room_id === input.cornerId &&
           (parent.return_room_id ?? input.cornerId) === input.cornerId) {

@@ -399,6 +399,7 @@ export class RoomsMcpAgentTools {
         const parent = commandId ? await selectMcpMessage(db,member,commandId,args.address === undefined ? undefined : target) : undefined;
         await commandAddress(db,target,member);
         const roomId = parent?.room_id ?? target;
+        if (parent) await beginAgentInvocation(db, member, roomId, parent.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
         const {to} = normalizePlaceAddresses('message',{roomId,to:args.to as MessageAddress});
         return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to}});
       });
@@ -760,7 +761,7 @@ export async function pendingMcpWakes(db: SqlDatabase, member: string, options: 
   const {rows} = await readAgentQueueRows(db,member,options);
   const wakes = await Promise.all(rows.filter(item=>item.reason!=='mcp_call').map(async item=>{
     const route = await deliveredMessageRoute(db,item);
-    return {id:item.id, commandId:item.id, messageId:item.source_message_id, address:item.room_id,reason:item.reason,
+    return {id:item.id, commandId:item.id, messageId:item.delivered_message_id, address:item.room_id,reason:item.reason,
       ...(item.private_payload ? {kind:item.private_payload.kind} : {}),from:route.from,
       text:queuedWakeBody(item,item.message?.body ?? item.private_payload?.text ?? item.reason),createdAt:item.created_at,
       ...(item.message?.institutionalContext || item.message?.conversationContext || item.message?.openAsksChanged ? {institutionalContext:queuedContextText(item.message)} : {}),
