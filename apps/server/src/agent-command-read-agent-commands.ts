@@ -134,6 +134,11 @@ export async function readAgentCommands(
       };
       // The reply lookup uses the saved ask ID while the prompt shows the occurrence.
       const promptId = item.wake_context?.scheduleReplyFrom ? item.source_message_id ?? source.id : source.id;
+      const blockGuidance = 'If you cannot resolve this block, escalate with message(type:blocked).';
+      const wakeContext = item.private_payload?.reportStatus === 'blocked' ? {
+        conversationContext: [blockGuidance, source.conversationContext].filter(Boolean).join('\n\n'),
+        ...(source.conversationWindow ? { conversationWindow: `${blockGuidance}\n\n${source.conversationWindow}` } : {}),
+      } : {};
       return {
         ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
         ...(item.selected_model || item.selected_effort || item.fast_mode != null ? { modelSelection: {
@@ -157,7 +162,7 @@ export async function readAgentCommands(
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),
         ...(source.systemEvent?.scheduleId ? {scheduleId:source.systemEvent.scheduleId} : {}),
-        source: { ...source, id: promptId, createdAt, body: queuedWakeBody(item, source.body) + (item.review_rollup ? '' : checkFailureLogBody(source.systemEvent ?? null)) + reportedHeadBody(source.systemEvent ?? null) },
+        source: { ...source, ...wakeContext, id: promptId, createdAt, body: queuedWakeBody(item, source.body) + (item.review_rollup ? '' : checkFailureLogBody(source.systemEvent ?? null)) + reportedHeadBody(source.systemEvent ?? null) },
       };
     }),
   };

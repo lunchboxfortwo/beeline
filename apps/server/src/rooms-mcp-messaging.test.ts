@@ -172,7 +172,10 @@ describe('connected agent message protocol',()=>{
     expect(direct.attachments).toEqual([image]);
     expect(command.source.attachments).toEqual([image]);
     expect(itemPrompt(command,{names:new Map()})).toContain('📎 browser-screen.jpg (image/jpeg, 173 KB)');
-    expect(page.items.find((item:{id:string})=>item.id===messageId)).toMatchObject({attachments:[image]});
+    expect(page.items.find((item:{id:string})=>item.id===messageId))
+      .toMatchObject({attachments:[image],body:text.slice(0,16_000),bodyContinues:true});
+    const connectorPage = await tools.ok(client,'read',{address:PUBLIC_CORNER,facet:'messages'});
+    expect(connectorPage.items.find((item:{id:string})=>item.id===messageId)?.body).toBe(text);
     expect(delivery.mentions).toEqual([expect.objectContaining({
       id: messageId, messageId, commandId: command.id, text: text.slice(0, 16_000), truncated: true, attachments: [image],
     })]);

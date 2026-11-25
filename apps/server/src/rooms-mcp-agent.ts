@@ -1,4 +1,4 @@
-import { InvalidMessagePageError, normalizeMessagePage, readAgentMessagePage, readAgentMessageResult, type MessagePageCursor, type RoomAttachmentResult, type RoomMessageResult } from '@beeline/api-contract/daemon';
+import { InvalidMessagePageError, normalizeMessagePage, readAgentMessagePage, readAgentMessageResult, type MessagePageCursor, type MessagePageLimits, type RoomAttachmentResult, type RoomMessageResult } from '@beeline/api-contract/daemon';
 import { Check, Errors } from 'typebox/value';
 import type { TSchema } from 'typebox';
 import { normalizePlaceAddresses } from './daemon/place-address.js';
@@ -539,12 +539,12 @@ export class RoomsMcpAgentTools {
     throw new McpToolError('unknown read facet');
   }
 
-  async messagePage(member: string, roomId: string, args: Args, maxItems = 8) {
+  async messagePage(member: string, roomId: string, args: Args, limits: MessagePageLimits = {items:8}) {
     try {
       return await readAgentMessagePage({
         roomId, cursor: args.cursor as MessagePageCursor | undefined,
         from: args.from as 'oldest' | 'newest' | undefined, limit: args.limit as number | undefined,
-      }, input => this.daemon.execute('getRoomConversation', input, member), maxItems);
+      }, input => this.daemon.execute('getRoomConversation', input, member), limits);
     } catch (error) {
       if (error instanceof InvalidMessagePageError) throw new CommandRefusalError(error.message, 400);
       throw error;

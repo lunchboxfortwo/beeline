@@ -62,11 +62,11 @@ describe('R-PROMPT-GRANTS recovery and outside context', () => {
     expect(prompt).toContain('ask before calling a host blocker unfixable');
   });
 
-  it('gives every thread one rule for posts outside it', () => {
+  it('does not suggest posting blockers outside the thread as plain messages', () => {
     for (const surface of ['code-corner', 'repo-less-corner'] as const) {
       const prompt = assembleSessionPrompt({ surface, agentName: 'Bee',
         agentCommand: 'claude-agent-acp' }).systemPrompt;
-      expect(prompt.match(/original problem, blocker, and needed decision/g)).toHaveLength(1);
+      expect(prompt).not.toContain('Outside this thread, tell people');
     }
   });
 });
@@ -758,7 +758,7 @@ const scope9 = fixtureScope9();
     expect(reviewer.indexOf('Reviewer rules:')).toBeGreaterThan(
       reviewer.indexOf('Never merge any other pull request.'),
     );
-    expect(reviewer).toContain("never push another agent's branch");
+    expect(reviewer).toContain("Never push another agent's branch");
     expect(reviewer).toContain(CORNER_REVIEWER_AUTHOR_MERGE);
   });
 
@@ -772,9 +772,10 @@ const scope9 = fixtureScope9();
   });
 
 
-  it('tells the reviewer that a finding goes to the author, not a commit, over the finished-fix rule', () => {
+  it('gives the review handback priority over the finished-fix rule', () => {
     const reviewer = scope9.prompt('code-corner-reviewer');
-    expect(reviewer).toContain('Findings go to the author, not a commit');
+    expect(reviewer).toContain("message(type:normal) to the implementer at this thread's address");
+    expect(reviewer).not.toContain('report a blocker if capability is missing');
     expect(reviewer).toContain('This wins over the finished-fix rule.');
   });
 
@@ -807,10 +808,12 @@ const scope9 = fixtureScope9();
   });
 
 
-  it('describes the author when the reviewer opened the thread itself', () => {
+  it('routes review findings to the thread implementer as an addressed message', () => {
     const text = cornerReviewerInstruction({ isReviewer: true, pullRequestNumber: 7, headSha: 'abc' })!;
-    expect(text).toContain("FAIL: message the implementer at this thread's address with all findings");
+    expect(text).toContain("message(type:normal) to the implementer at this thread's address");
+    expect(text).not.toContain('report a blocker');
     expect(text).not.toContain('@author');
+    expect(beelineReviewSkillMarkdown('test')).toContain('On FAIL, send message(type:normal) to the implementer at the thread address');
   });
 });
 describe('assigned thread brief', () => {

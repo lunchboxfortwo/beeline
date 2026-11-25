@@ -42,6 +42,8 @@ export function normalizeMessagePage(input: Readonly<MessagePageInput>) {
   return args;
 }
 
+export type MessagePageLimits = { items: number; bodyChars?: number; responseChars?: number };
+
 type ConversationItem = RoomConversationResult['items'][number];
 function messageRow(item: ConversationItem, offset: number) {
   return {
@@ -66,11 +68,12 @@ const hasContent = (item: ConversationItem) =>
 export async function readAgentMessagePage(
   input: MessagePageInput,
   read: (input: RoomConversationInput) => Promise<RoomConversationResult>,
-  maxItems = 8,
+  limits: MessagePageLimits = {items:8,bodyChars:1000,responseChars:12000},
 ) {
   const args = normalizeMessagePage(input);
   const newest = args.from === 'newest';
-  const itemLimit = Math.min(args.limit ?? 8, maxItems);
+  const itemLimit = Math.min(args.limit ?? 8, limits.items);
+  const responseBudget = limits.responseChars === undefined ? undefined : limits.responseChars - 1000;
   const rows: ConversationItem[] = [];
   let boundary = newest ? args.before : args.after;
   let more = false;
@@ -100,11 +103,13 @@ export async function readAgentMessagePage(
     const text = item.systemEvent && !item.body.trim() ? JSON.stringify(item.systemEvent) : item.body;
     if (start > text.length) throw new InvalidMessagePageError('offset exceeds message body');
     const row = messageRow(item, start);
-    let body = text.slice(start, start + 1000);
-    // Keep the attachment count when the full metadata cannot fit on the page.
-    if (row.attachments && JSON.stringify([...items, row]).length > 11000) delete row.attachments;
-    while (body && JSON.stringify([...items, { ...row, body }]).length > 11000)
-      body = body.slice(0, Math.floor(body.length / 2));
+    let body = text.slice(start, limits.bodyChars === undefined ? undefined : start + limits.bodyChars);
+    if (responseBudget !== undefined) {
+      // Keep the attachment count when the full metadata cannot fit on the page.
+      if (row.attachments && JSON.stringify([...items, row]).length > responseBudget) delete row.attachments;
+      while (body && JSON.stringify([...items, { ...row, body }]).length > responseBudget)
+        body = body.slice(0, Math.floor(body.length / 2));
+    }
     if (!body && text.length > start) break;
     const continues = start + body.length < text.length;
     items.push({ ...row, body, ...(continues ? { bodyContinues: true } : {}) });
@@ -124,5 +129,5 @@ export async function readAgentMessagePage(
     next = { ...(after ? { after } : {}), ...(offset !== undefined ? { offset } : {}) };
   }
   return { cornerId: args.roomId, items, ...(next ? { next } : {}),
-    limits: { items: itemLimit, bodyChars: 1000, responseChars: 12000 } };
+    limits: { ...limits, items: itemLimit } };
 }

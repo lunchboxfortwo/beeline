@@ -361,7 +361,7 @@ export class RoomsMcp {
         if (!row) throw new McpToolError('Invalid cursor');
         cursor = {before:row.cursor};
       }
-      const page = await this.agentTools.messagePage(member, roomId, {cursor,limit}, 30);
+      const page = await this.agentTools.messagePage(member, roomId, {cursor,limit}, {items:30,bodyChars:16000});
       return {...page, ...await this.setupNote(member)};
     }
     if (name === 'search_messages') {

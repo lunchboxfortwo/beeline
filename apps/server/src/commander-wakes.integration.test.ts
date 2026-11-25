@@ -312,12 +312,16 @@ it('Reproduction QUIET-CHAT-ESCALATE: a thread-woken commander escalates a decis
   await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'blocked: which endpoint should the widget use?' }, WORKER);
   const wake = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   expect(wake.parentCommandId).toBe(turn.id);
+  expect(wake.source.body).toBe('blocked: which endpoint should the widget use?');
+  expect(wake.source.conversationContext).toContain('If you cannot resolve this block, escalate with message(type:blocked).');
   await claim(wake);
-  await daemon.execute('message', { ...authority(wake), type: 'blocked',
-    text: '@captain Should the widget use v1 or v2?' }, RUBY);
+  const escalation = await daemon.execute('message', { ...authority(wake), type: 'blocked',
+    text: 'Should the widget use v1 or v2?' }, RUBY);
   const posted = (await db.query(`SELECT room_id,text,card->>'reportToId' recipient FROM messages
     WHERE author_id=$1 AND presentation='message'`, [RUBY])).rows;
-  expect(posted).toEqual([{ room_id: DM, text: '@captain Should the widget use v1 or v2?', recipient: HUMAN }]);
+  expect(posted).toEqual([{ room_id: DM, text: 'Should the widget use v1 or v2?', recipient: HUMAN }]);
+  const needsYou = await phone.readNeedsYou({ workspaceId: WS }, HUMAN);
+  expect(needsYou.items).toEqual(expect.arrayContaining([expect.objectContaining({ messageId: escalation.id })]));
   // Neither the thread nor the parent chat of the thread receives the escalation.
   expect((await db.query(`SELECT 1 FROM messages WHERE room_id=ANY($1::uuid[]) AND author_id=$2 AND presentation='message'`,
     [[opened.cornerId, ROOM], RUBY])).rowCount).toBe(0);

@@ -306,7 +306,12 @@ export function projectedMessage(
     ...(row.durable_fact ? { durableFact: row.durable_fact } : {}),
     ...(row.system_event ? { systemEvent: row.system_event } : {}),
   };
-  if (row.deleted_at || !row.card_type || !row.card) return base;
+  if (row.deleted_at || !row.card) return base;
+  const command = row.card as NonNullable<RoomViewMessage['agentCommand']>;
+  if (row.card.reportStatus === 'blocked' && command.recipient?.kind === 'agent') {
+    const { kind, recipient, text } = command;
+    return { ...base, agentCommand: { kind, recipient, text } };
+  }
   switch (row.card_type) {
     case 'away-warning': return { ...base, awayWarning: true };
     case 'vault-save': {

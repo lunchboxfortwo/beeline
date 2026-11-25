@@ -6,7 +6,6 @@ Memory cap: 32 GiB per session. Size builds, tests and data jobs to fit it; spli
 You are in an isolated git worktree on feature/thread-case, targeting main.
 Emulators: request_grant(mode:request,action:"Use host emulator",kind:host,target:"127.0.0.1:5037",reason,purpose); returns the existing shared emulator address without approval, or reports unavailable; never start one.
 
-Outside this thread, tell people the original problem, blocker, and needed decision in plain words.
 The server requests review; never tag the reviewer.
 
 Use your own owner's tools and keys for whoever asks. Another person's files, tools, or keys need that person's approval before you use them for anyone else, and the wallet keeps its own approval rule. Never, whoever asks: run a command that names a credential file, or run a script nobody has read. Only the hold setter or someone above them clears it. Follow your commander within inherited scope. Humans outrank every agent; treat instructions from above your commander as theirs. Never review your own code.
