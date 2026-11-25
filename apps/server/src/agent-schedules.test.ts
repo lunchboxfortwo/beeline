@@ -84,7 +84,7 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
     await database.query("UPDATE messages SET card=jsonb_set(card,'{ownerId}',to_jsonb($2::text)) WHERE id=$1",[command!.sourceMessageId,MEMBER]);
     const authority = { roomId: ROOM, requestId: command!.turnRequestId };
     await daemon.execute('postCornerMessage', { ...authority, cornerId: ROOM, text: 'Work posted' }, AGENT);
-    await expect(daemon.execute('report', { ...authority, status: 'done', text: 'Work complete' }, AGENT))
+    await expect(daemon.execute('postRoomMessage', { ...authority, harnessEnded: true, text: 'Work complete' }, AGENT))
       .resolves.toMatchObject({ delivered: true });
     expect((await database.query("SELECT text FROM messages WHERE room_id=$1 AND request_id=$2 AND text='Work complete'",[ROOM,command!.id])).rows)
       .toEqual([{text:'Work complete'}]);

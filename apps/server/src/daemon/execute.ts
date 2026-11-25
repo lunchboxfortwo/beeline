@@ -1,6 +1,7 @@
 import type { DaemonOperationMap } from '@beeline/api-contract/daemon';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { createHash,randomBytes } from 'node:crypto';
+import { deliveredReplyCommand } from '../agent-invocation.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
@@ -310,7 +311,9 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
     const messageId = typeof value.transportRequestId === 'string'
       ? createHash('sha256').update(`message:${agentId}:${value.transportRequestId}`).digest('hex') : undefined;
     return ctx.database.transaction(async db => {
-      const parent = request.requestId ? await authorizeCommandOutput(db,request.roomId,agentId,request.requestId) : undefined;
+      const parent = request.type === 'reply'
+        ? await deliveredReplyCommand(db,agentId,request.roomId,request.requestId,request.quoteMsgId,request.invocation)
+        : request.requestId ? await authorizeCommandOutput(db,request.roomId,agentId,request.requestId) : undefined;
       return sendSessionMessage(db,agentId,request,parent,messageId);
     }) as Promise<Output<Name>>;
   }

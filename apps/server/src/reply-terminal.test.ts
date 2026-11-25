@@ -1,4 +1,6 @@
 import { deliverMcpMemberWebhooks } from './rooms-mcp-members.js';
+import { randomUUID } from 'node:crypto';
+import { RoomsMcpAgentTools } from './rooms-mcp-agent.js';
 import { modelText } from './message-origin.js';
 import { queueMessage } from './agent-command.js';
 import { readAgentCommands } from './agent-command-read-agent-commands.js';
@@ -15,11 +17,20 @@ describe('replies without an ask end acknowledgement exchanges', () => {
   const scope = fixtureScope1(), tools = fixtureScope3(scope);
   const native = async () => (await readAgentCommands(scope.db, AGENT)).commands;
 
+  const connected = (name:string,args:Record<string,unknown>) => new RoomsMcpAgentTools(scope.db,scope.daemon).call(AGENT,name,args) as Promise<{id:string;receipt?:string}>;
+  async function nativeReply(id:string,text:string) {
+    const invocation = {requestId:id,id:randomUUID()};
+    await scope.daemon.execute('startAgentTurn',{roomId:ROOM,requestId:id,invocationId:invocation.id},AGENT);
+    const saved = await scope.daemon.execute('message',{type:'reply',roomId:ROOM,requestId:id,quoteMsgId:id,text,invocation},AGENT);
+    await scope.daemon.execute('postRoomMessage',{roomId:ROOM,requestId:id,text:'',harnessEnded:true,invocation},AGENT);
+    return saved;
+  }
+
   it.each([0, 4, 623, 10000])('stops native, MCP and session acknowledgements at depth %i', async depth => {
     const { client } = await scope.connected();
     const sent = await tools.ok(client, 'message', { address: ROOM, to: { agent: AGENT, place: ROOM }, text: 'Inspect this' });
     await scope.db.query('UPDATE agent_commands SET agent_depth=$2 WHERE id=$1', [sent.id, depth]);
-    const replied = await scope.daemon.execute('reply', {roomId:ROOM,id: sent.id, text: 'Inspected' }, AGENT);
+    const replied = await nativeReply(sent.id,'Inspected');
     const wake = (await tools.ok(client, 'list_mentions', {})).wakes[0];
     expect(wake).toMatchObject({ id: replied.id, reason: 'reply' });
     expect((await scope.db.query('SELECT agent_depth FROM agent_commands WHERE id=$1',[replied.id])).rows).toEqual([{agent_depth:depth+1}]);
@@ -37,15 +48,15 @@ describe('replies without an ask end acknowledgement exchanges', () => {
 
     // A genuinely new request still wakes the other agent at any depth.
     const fresh = await tools.ok(client, 'message', { address: ROOM, to: { agent: AGENT, place: ROOM }, text: 'Check another item' });
-    await scope.daemon.execute('reply', {roomId:ROOM,id: fresh.id, text: 'Checked', ask }, AGENT);
+    await connected('reply',{id:fresh.id,text:'Checked',ask});
     const question = (await tools.ok(client, 'list_mentions', {})).wakes[0];
     expect(question.next).toContain(`Reply needed: true\ntext: Checked\nReply(id: ${question.id}, text: ...) with your reply`);
     expect(await tools.ok(client,'no_reply_needed',{address:ROOM,commandId:question.id})).toEqual({cleared:0});
     expect(renderWake(question, joined, runner)).toContain(`Reply(id: ${question.id}, text: ...) with your reply`);
     const answer = await tools.ok(client, 'reply', { id: question.id, text: 'Web; which size?', ask });
     const command = (await native()).find(item => item.id === answer.id)!;
-    expect(itemPrompt(command, { names: new Map() })).toContain(`Reply needed: true\ntext: Web; which size?\nReply(id: ${command.id}, text: ...) with your reply`);
-    const last = await scope.daemon.execute('reply', {roomId:ROOM,id: command.id, text: 'Large' }, AGENT);
+    expect(itemPrompt(command, { names: new Map() })).toContain(`id: ${command.source.id}\ntext: Web; which size?`);
+    const last = await nativeReply(command.id,'Large');
     const [information] = (await tools.ok(client, 'list_mentions', {})).wakes;
     expect(information.id).toBe(last.id);
     expect(information.next).toContain('Reply needed: false');
@@ -60,7 +71,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
     else await scope.db.query('UPDATE rooms_mcp_clients SET callback_url=$2 WHERE id=$1', [grant.clientId, params.delivery.url]);
     for (const asked of [false, true]) {
       const sent = await tools.ok(client, 'message', { address: ROOM, to: { agent: AGENT, place: ROOM }, text: 'Inspect' });
-      const replied = await scope.daemon.execute('reply', {roomId:ROOM,id: sent.id, text: 'Inspected', ...(asked ? {ask} : {}) }, AGENT);
+      const replied = await connected('reply',{id:sent.id,text:'Inspected',...(asked ? {ask} : {})});
       let next: string;
       if (route === 'events') {
         const rows = await scope.db.query<{body:string}>('SELECT body FROM rooms_mcp_event_deliveries WHERE command_id=$1', [replied.id]);
@@ -89,7 +100,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
 
   it.each([false, true])('records self-messages and replies without a wake, ask=%s', async asked => {
     const args = asked ? {ask} : {};
-    const self = await scope.daemon.execute('message', {roomId:ROOM,to:{agent:AGENT,place:ROOM},text:'Note to self',...args}, AGENT);
+    const self = await connected('message',{address:ROOM,to:{agent:AGENT,place:ROOM},text:'Note to self',...args});
     expect(await native()).toEqual([]);
     expect(self).toMatchObject({receipt:'Message stored and visible. No agents woken. You addressed yourself; do the work in this turn.'});
     expect((await scope.db.query('SELECT text FROM messages WHERE id=$1',[self.id])).rows).toEqual([{text:'Note to self'}]);
@@ -98,7 +109,7 @@ describe('replies without an ask end acknowledgement exchanges', () => {
     const legacy = (await queueMessage(scope.db,{roomId:ROOM,agentId:AGENT,sourceMessageId:null,reason:'message',
       privatePayload:{kind:'message',route:{from:{agent:AGENT,place:ROOM},to:{agent:AGENT,place:ROOM}},
         authorId:AGENT,fromRoomId:ROOM,text:modelText('Old self-addressed task')}}))!;
-    const replied = await scope.daemon.execute('reply',{roomId:ROOM,id:legacy.id,text:'Recorded',...args}, AGENT);
+    const replied = await connected('reply',{id:legacy.id,text:'Recorded',...args});
     expect(replied).toMatchObject({receipt:expect.stringContaining('You addressed yourself')});
     expect(await native()).toEqual([]);
     expect((await scope.db.query('SELECT text FROM messages WHERE id=$1',[replied.id])).rows).toEqual([{text:'Recorded'}]);
@@ -106,18 +117,15 @@ describe('replies without an ask end acknowledgement exchanges', () => {
 
   it('lets native agents silently handle an informational reply and keeps asks owed', async () => {
     const { client, member } = await scope.connected();
-    const sent = await scope.daemon.execute('message', { roomId: ROOM, to: { agent: member, place: ROOM }, text: 'Inspect' }, AGENT);
+    const sent = await scope.daemon.execute('message', { roomId:ROOM,type:'normal',address:`${member}@${ROOM}`, text: 'Inspect' }, AGENT);
     const replied = await tools.ok(client, 'reply', { id: sent.id, text: 'Inspected' });
     const command = (await native()).find(item => item.id === replied.id)!;
     const prompt = itemPrompt(command, { names: new Map() });
-    expect(prompt).toContain('Reply needed: false');
+    expect(prompt).toContain(`id: ${command.source.id}\ntext: Inspected`);
     expect(prompt).not.toMatch(/Reply\(id|no_reply_needed|message\(/);
     expect(await scope.daemon.execute('markAgentTurnSilent', { roomId: ROOM, requestId: command.id }, AGENT)).toMatchObject({ answered: true });
     expect(await native()).toEqual([]);
-    const oldAck = await scope.daemon.execute('reply',{roomId:ROOM,id:command.id,text:'Received'},AGENT);
-    expect((await tools.ok(client,'list_mentions',{})).wakes).toEqual([]);
-    expect((await scope.db.query('SELECT text FROM messages WHERE id=$1',[oldAck.id])).rows).toEqual([{text:'Received'}]);
-    const next = await scope.daemon.execute('message',{roomId:ROOM,to:{agent:member,place:ROOM},text:'Check output'},AGENT);
+    const next = await scope.daemon.execute('message',{roomId:ROOM,type:'normal',address:`${member}@${ROOM}`,text:'Check output'},AGENT);
     const question = await tools.ok(client, 'reply', { commandId:next.id,id:next.id, text: 'Which output?', ask });
     expect(await scope.daemon.execute('markAgentTurnSilent', { roomId: ROOM, requestId: question.id }, AGENT)).toMatchObject({ answered: false });
   });

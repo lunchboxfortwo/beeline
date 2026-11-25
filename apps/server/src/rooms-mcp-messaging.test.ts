@@ -107,6 +107,7 @@ describe('connected agent message protocol',()=>{
     expect(sent.id).toMatch(/^[0-9a-f]{64}$/);
     expect((await scope.db.query('SELECT agent_id,room_id,message FROM agent_commands WHERE id=$1',[sent.id])).rows)
       .toMatchObject([{agent_id:AGENT,room_id:ROOM,message:{route:{from:{agent:member,place:ROOM},to:{agent:AGENT,place:ROOM}},body:'Check the widget'}}]);
+    await scope.daemon.execute('startAgentTurn',{roomId:ROOM,requestId:sent.id,invocationId:crypto.randomUUID()},AGENT);
     await scope.daemon.execute('message',{type:'reply',roomId:ROOM,requestId:sent.id,quoteMsgId:sent.id,text:'Checked'},AGENT);
     await scope.daemon.execute('postRoomMessage',{roomId:ROOM,requestId:sent.id,text:''},AGENT);
     const page=await tools.ok(client,'list_mentions',{});
@@ -211,6 +212,7 @@ describe('connected agent message protocol',()=>{
     await scope.db.query('UPDATE corner_facts SET implementer_agent_id=$2 WHERE corner_id=$1',[PUBLIC_CORNER,AGENT]);
     await scope.db.query('DELETE FROM agent_commands WHERE room_id=$1',[PUBLIC_CORNER]);
     const work=await tools.ok(client,'message',{address:ROOM,to:{agent:'implementer',place:PUBLIC_CORNER},text:'Check the widget'});
+    await scope.daemon.execute('startAgentTurn',{roomId:PUBLIC_CORNER,requestId:work.id,invocationId:crypto.randomUUID()},AGENT);
     await scope.daemon.execute('message',{type:'reply',roomId:PUBLIC_CORNER,requestId:work.id,quoteMsgId:work.id,text:'Checked'},AGENT);
     await scope.daemon.execute('postRoomMessage',{roomId:PUBLIC_CORNER,requestId:work.id,text:''},AGENT);
     const wake=(await tools.ok(client,'list_mentions',{})).wakes.find((item:{text:string})=>item.text==='Checked');

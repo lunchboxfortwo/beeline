@@ -214,7 +214,7 @@ it('delivers an 18-hour offline backlog as one prompt without requiring steering
   for (let n = 1; n <= 3; n++)
     expect(prompt).toMatch(
       new RegExp(
-        `^From: asker-${n} in #.+\\nid: tag-${n}\\nReply needed: (true|false)\\ntext: question ${n}$`,
+        `^From: asker-${n} in #.+\\nid: tag-source-${n}\\ntext: question ${n}$`,
         'm',
       ),
     );

@@ -113,7 +113,7 @@ export async function worker(cornerId: string) {
 
 // Failure visibility uses the real receipt, silence owner and private transport.
 export async function privateAssignment() {
-  const receipt = await daemon.execute('order', { ...authority(order), address: ROOM, agent: WORKER, text: 'Sign into the saved Amazon login' }, RUBY);
+  const receipt = await daemon.execute('message', { ...authority(order), type:'normal', address: `${WORKER}@${ROOM}`, text: 'Sign into the saved Amazon login' }, RUBY);
   const turn = (await commands(ROOM, WORKER)).find(c => c.id === receipt.id)!;
   await claim(turn);
   await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'working' }, WORKER);

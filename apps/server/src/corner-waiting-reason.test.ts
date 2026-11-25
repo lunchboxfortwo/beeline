@@ -70,7 +70,7 @@ it('REPORT-WAITING-DERIVED: commander orders and old answered markers cannot cle
   expect(await blocker(cornerId)).toMatchObject({ item_id: report.id });
   const next = await worker(cornerId);
   await closeAgentAsk(rootFixture.db,WORKER,{messageId:report.id,reason:'answered'});
-  await rootFixture.daemon.execute('report', { ...authority(next), status: 'done', text: 'Work completed.' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(next), harnessEnded: true, text: 'Work completed.' }, WORKER);
   expect((await blocker(cornerId)).item_id).toBeNull();
 });
 
@@ -91,7 +91,7 @@ it('R1: holds rank behind a real private report, and retain their actual message
   await rootFixture.daemon.execute('order', { ...authority(delivery), address: cornerId, text: 'Finish.' }, RUBY);
   const next = await worker(cornerId);
   await closeAgentAsk(rootFixture.db,WORKER,{messageId:report.id,reason:'answered'});
-  await rootFixture.daemon.execute('report', { ...authority(next), status: 'done', text: 'Finished.' }, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', { ...authority(next), harnessEnded: true, text: 'Finished.' }, WORKER);
   const selected = await blocker(cornerId);
   expect(selected).toMatchObject({ item_id: hold.holdId, kind: 'merge-hold' });
   expect(cornerRowState({ archived_at: null, machine: { state: 'waiting' }, lifecycle: null, latest_turn_status: null, blocking: true,

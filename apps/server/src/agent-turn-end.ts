@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS agent_invocations (
   final_suppressed boolean NOT NULL DEFAULT false,
   PRIMARY KEY(command_id,invocation_id)
 );
+ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS batched_command_ids text[] NOT NULL DEFAULT ARRAY[]::text[];
 ALTER TABLE agent_invocations ADD COLUMN IF NOT EXISTS ended boolean NOT NULL DEFAULT false;
 ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS connection_epoch bigint;
 -- Stop after the reply: the item is complete but its run is still open.

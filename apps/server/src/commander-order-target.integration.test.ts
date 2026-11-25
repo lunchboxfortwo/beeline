@@ -106,7 +106,7 @@ it.each(['corner', 'parent Room'])('Reproduction corner-peer-orders: %s order pr
   const assigned = (await daemon.execute('getAgentCommands', { roomId: address }, BABY)).commands.find(c => c.id === receipt.id)!;
   expect(assigned).toMatchObject({ private: true, source: { authorId: CANDY, body: 'Replay the user path' } });
   await startQueuedCommand(daemon, { roomId: address, commandId: assigned.id }, BABY);
-  const block=await daemon.execute('report',{roomId:address,requestId:assigned.turnRequestId,status:'blocked',text:'Which path?'},BABY);
+  const block=await daemon.execute('message',{roomId:address,requestId:assigned.turnRequestId,type: 'blocked',text:'Which path?'},BABY);
   const replies=(await daemon.execute('getAgentCommands',{roomId:opened.cornerId},CANDY)).commands;
   expect(replies.find(c=>c.id===block.id)).toMatchObject({private:true,source:{authorId:BABY,body:'Which path?'}});
   expect((await db.query(`SELECT ${cornerImplementerSql('f', 'c')} worker_agent_id FROM corner_facts f JOIN rooms c ON c.id=f.corner_id WHERE f.corner_id=$1`, [opened.cornerId])).rows[0]?.worker_agent_id).not.toBe(BABY);
@@ -169,7 +169,7 @@ it.each(['done', 'blocked', 'failed', 'needs_decision'])('Reproduction report-co
   } else expect(reply).toBeUndefined();
   expect((await db.query('SELECT room_id,text FROM messages WHERE id=$1',[result.id])).rows).toEqual([{room_id:incoming.roomId,text}]);
   // A changed head remains context; it cannot discard a report.
-  await daemon.execute('report', { roomId: incoming.roomId, requestId: incoming.turnRequestId, status: 'done', text: 'done: stale review verdict' }, CANDY);
+  await daemon.execute('postRoomMessage', { roomId: incoming.roomId, requestId: incoming.turnRequestId, harnessEnded: true, text: 'done: stale review verdict' }, CANDY);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [incoming.id])).rows).toEqual([{ state: 'complete' }]);
   expect((await db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND text='done: stale review verdict'`,[incoming.roomId])).rowCount).toBe(1);
   console.info(`Demonstrated Reproduction report-commander-refused: ${status} after repair delivered privately and claimed by opening commander`);
@@ -186,7 +186,7 @@ it('Reproduction report-commander-refused: a current reviewer report keeps its o
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [receipt.id, JSON.stringify(context)]);
   const assigned = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, BABY)).commands.find(c => c.id === receipt.id)!;
   await startQueuedCommand(daemon, { roomId: assigned.roomId, commandId: assigned.id }, BABY);
-  await daemon.execute('report', { roomId: assigned.roomId, requestId: assigned.turnRequestId, status: 'done', text: 'done: current review complete' }, BABY);
+  await daemon.execute('postRoomMessage', { roomId: assigned.roomId, requestId: assigned.turnRequestId, harnessEnded: true, text: 'done: current review complete' }, BABY);
   const reply = (await daemon.execute('getAgentCommands', { roomId: incoming.roomId }, CANDY)).commands.find(c => c.reason === 'report')!;
   expect(reply).toMatchObject({ source: { authorId: BABY, body: expect.stringContaining('done: current review complete') } });
   expect((await db.query(`SELECT review_context FROM agent_commands WHERE id=$1`, [reply.id])).rows[0]?.review_context)

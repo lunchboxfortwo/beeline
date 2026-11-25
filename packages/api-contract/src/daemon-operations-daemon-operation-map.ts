@@ -155,7 +155,7 @@ export type DaemonOperationMap = {
     { readonly commandProtocol: 2; readonly commands: readonly AgentCommand[] }
   >;
   /** Marks the item's turn as working once its helper hands it to the agent session. Status only. */
-  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly invocationId?: string; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
+  startAgentTurn: Operation<RoomInput & { readonly requestId: string; readonly invocationId?: string; readonly batchedCommandIds?: readonly string[]; readonly available?: boolean; readonly failureReason?: string }, WriteResult>;
   /** A hosted-model credential bound to one undone queue item (`requestId`). */
   getDaemonBootstrap: Operation<DaemonBootstrapInput, DaemonBootstrapResult>;
   getWorkspaceRoster: Operation<WorkspaceRosterInput, WorkspaceRosterResult>;
@@ -178,7 +178,7 @@ export type DaemonOperationMap = {
       readonly attachments: readonly DaemonAttachment[];
     }
   >;
-  message: Operation<RoomInput & TurnOutputAuthority & { readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, WriteResult>;
+  message: Operation<RoomInput & TurnOutputAuthority & { readonly invocation?: import('./daemon-operations.js').AgentInvocation; readonly type: 'normal' | 'reply' | 'blocked'; readonly text: string; readonly address?: string; readonly quoteMsgId?: string }, WriteResult>;
   stopAgentTurn: Operation<RoomInput & TurnOutputAuthority & { readonly address: string; readonly agent?: string }, StopAgentTurnResult>;
   read: Operation<RoomInput & { readonly address: string; readonly limit?: number }, RoomConversationResult>;
   getRoomAuthority: Operation<RoomPrincipalInput, RoomAuthorityResult>;

@@ -318,6 +318,7 @@ export class AgentRunner {
           roomId: item.roomId,
           requestId: item.turnRequestId,
           invocationId: invocation.id,
+          ...(batch.length > 1 ? {batchedCommandIds:batch.slice(1).map(command=>command.id)} : {}),
         });
         started = true;
         const answer = await place.session.deliver(item, batch, invocation);

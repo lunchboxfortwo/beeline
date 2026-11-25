@@ -45,6 +45,7 @@ describe('C4: external agents route like native agents', () => {
       const { client, member } = await external();
       const sent = await tools.ok(client, 'message', { address: place, to: { agent: role, place: THREAD }, text: 'Build widget' });
       expect((await pending(worker)).map(row => row.room_id)).toEqual([THREAD]);
+      await scope.daemon.execute('startAgentTurn',{roomId:THREAD,requestId:sent.id,invocationId:crypto.randomUUID()},worker);
       await scope.daemon.execute('message',{roomId:THREAD,type:'reply',requestId:sent.id,quoteMsgId:sent.id,text:'Done'},worker);
       await scope.daemon.execute('postRoomMessage',{roomId:THREAD,requestId:sent.id,text:''},worker);
       if (role === 'implementer') {
@@ -88,6 +89,7 @@ describe('C4: external agents route like native agents', () => {
     await session('reply', { id: sent.id, text: 'Done' });
     const asked = await session('message', { address: THREAD, to: { agent: 'reviewer', place: THREAD }, text: 'Please review', ask });
     expect((await pending(AGENT)).map(row => row.room_id)).toEqual([ROOM]);
+    await scope.daemon.execute('startAgentTurn',{roomId:THREAD,requestId:asked.id,invocationId:crypto.randomUUID()},REVIEWER);
     await scope.daemon.execute('message',{roomId:THREAD,type:'reply',requestId:asked.id,quoteMsgId:asked.id,text:'Approved'},REVIEWER);
     expect((await session('list_mentions', {})).wakes.map((item: { address: string; from: unknown }) => [item.address, item.from]))
       .toEqual([[THREAD, { agent: REVIEWER, place: THREAD }]]);
@@ -103,6 +105,7 @@ describe('C4: external agents route like native agents', () => {
     expect(value.result.isError, value.result.content[0]!.text).toBeFalsy();
     const sent = JSON.parse(value.result.content[0]!.text).data;
     expect(await pending(AGENT)).toEqual([{ id: sent.id, room_id: THREAD, from: { agent: member, place: THREAD }, ask: null }]);
+    await scope.daemon.execute('startAgentTurn',{roomId:THREAD,requestId:sent.id,invocationId:crypto.randomUUID()},AGENT);
     await scope.daemon.execute('message',{roomId:THREAD,type:'reply',requestId:sent.id,quoteMsgId:sent.id,text:'Reviewed'},AGENT);
     expect((await pending(member)).map(row => [row.room_id, row.from]))
       .toEqual([[THREAD, { agent: AGENT, place: THREAD }]]);

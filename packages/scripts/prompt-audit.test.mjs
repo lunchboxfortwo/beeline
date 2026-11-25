@@ -12,11 +12,11 @@ test('audit covers every situation in all three runtimes, without replay-control
     .flatMap(runtime => situations.map(situation => `${runtime}/${situation}.txt`)).sort());
   for (const prompt of prompts) {
     assert.doesNotMatch(prompt.text, /Prompt case replay:|You are the agent described below|Return calls:\[\]/);
-    assert.equal(prompt.text.includes('Message other agents only when you need something from them, or when you are replying to something they need.'), !/^native\/(fresh-thread-first-turn|check-system-event)/.test(prompt.name), prompt.name);
+    assert.equal(prompt.text.includes('Message other agents only when you need something from them, or when you are replying to something they need.'), !prompt.name.startsWith('native/'), prompt.name);
     assert.doesNotMatch(prompt.text, /Message only|final reply is posted|This reply is information|background context|Reply with reply/, prompt.name);
     if (prompt.name.startsWith('mcp/')) assert.ok(prompt.text.startsWith(INSTRUCTIONS));
     if (prompt.name.endsWith('informational-reply.txt') || prompt.name.endsWith('commander-worker-report.txt')) {
-      assert.match(prompt.text, /Reply needed: false/);
+      if (!prompt.name.startsWith('native/')) assert.match(prompt.text, /Reply needed: false/);
       assert.doesNotMatch(prompt.text, /Reply\(id: e{64}/);
     }
     if (prompt.name.endsWith('fresh-thread-first-turn.txt')) {
@@ -25,8 +25,9 @@ test('audit covers every situation in all three runtimes, without replay-control
     }
   }
   const native = prompts.find(prompt => prompt.name === 'native/check-system-event.txt').text;
-  assert.match(native, /^From: System in #widget\nid: e{64}\ntext: All widget checks passed\./m);
-  for (const runtime of ['native', 'mcp', 'session-joined'])
+  assert.match(native, /^From: System in #widget\nid: a{64}\ntext: All widget checks passed\./m);
+  assert.match(prompts.find(prompt => prompt.name === 'native/reply-with-ask.txt').text, /id: a{64}\ntext:/);
+  for (const runtime of ['mcp', 'session-joined'])
     assert.match(prompts.find(prompt => prompt.name === `${runtime}/reply-with-ask.txt`).text, /Reply\(id: e{64}, text: \.\.\.\) with your reply/);
   const joined = prompts.find(prompt => prompt.name === 'session-joined/reply-with-ask.txt').text;
   assert.match(joined, /--as claude-code:\/audit\/project/);

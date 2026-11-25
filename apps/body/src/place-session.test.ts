@@ -189,7 +189,7 @@ it('delivers report audience names from the queue with only people in the roster
     await f.session.deliver(report);
     const prompt = f.prompt.mock.calls[0]![1];
     expect(prompt).toContain(
-      `From: Jellybean in #fast-source-setup\nid: ${report.id}\nReply needed: false\ntext: The work is ready.`,
+      `From: Jellybean in #fast-source-setup\nid: ${report.source.id}\ntext: The work is ready.`,
     );
     expect(prompt).not.toContain('Reply(id:');
     // Offline delivery uses each item's own names, not the session's roster.
@@ -197,7 +197,7 @@ it('delivers report audience names from the queue with only people in the roster
     expect(f.prompt.mock.calls[1]![1]).toContain('From: Jellybean in #');
     await f.session.deliver({ ...report, reason: 'order' });
     expect(f.prompt.mock.calls[2]![1]).toContain(
-      `Reply needed: true\ntext: The work is ready.\nReply(id: ${report.id}, text: ...) with your reply`,
+      `id: ${report.source.id}\ntext: The work is ready.`,
     );
   } finally {
     await f.session.dispose();
@@ -313,7 +313,7 @@ it('allows an unchanged automatic attention wake to finish without repeating a s
   const f = await fixture();
   await f.session.start();
   await f.session.deliver({ ...f.item, reason: 'attention_report' });
-  expect(f.prompt.mock.calls[0]![1]).toContain('Reply needed: false');
+  expect(f.prompt.mock.calls[0]![1]).toContain(f.item.source.body);
   expect(f.prompt.mock.calls[0]![1]).not.toContain('Reply(id:');
   await f.session.dispose();
 });

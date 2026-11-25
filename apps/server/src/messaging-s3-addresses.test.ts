@@ -38,6 +38,7 @@ it('S3: replying to a recorded sender can return to its private chat without joi
 it('S3: native message and reply operations deliver the same immutable tuple envelope',async()=>{
   const sent=await daemon.execute('message',{roomId:CHAT,type:'normal',address:`${B}@${THREAD}`,text:'Build widget'},A);
   expect(await queued()).toEqual([[B,THREAD]]);
+  await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:sent.id,invocationId:crypto.randomUUID()},B);
   await daemon.execute('message',{type:'reply',roomId:THREAD,requestId:sent.id,quoteMsgId:sent.id,text:'Done'},B);
   await daemon.execute('postRoomMessage',{roomId:THREAD,requestId:sent.id,text:''},B);
   expect(await queued()).toEqual([[A,CHAT]]);

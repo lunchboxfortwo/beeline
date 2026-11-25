@@ -106,7 +106,7 @@ export async function queueStopOrders() {
   const [root] = await commands(B);
   await claim(root!);
   for (let i = 1; i <= 3; i++) {
-    await daemon.execute('order', { roomId: R, address: R, agent: 'hoots', text: `queued task ${i}`, requestId: root!.turnRequestId }, B);
+    await daemon.execute('message', { roomId: R, type:'normal', address:`${A}@${R}`, text: `queued task ${i}`, requestId: root!.turnRequestId }, B);
   }
   const queued = await commands();
   expect(queued).toHaveLength(3);

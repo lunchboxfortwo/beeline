@@ -5,7 +5,7 @@ import { DM,DaemonService,HUMAN,LiveHub,ROOM,RUBY,SYSTEM_IDENTITY_ID,WORKER,WS,a
 it.each(['final', 'post-final', 'silent', 'post-silent'] as const)('Reproduction R1 missing attachments: report wake delivers files once (%s)', async mode => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(rootFixture.order), text: 'Work started.' }, RUBY);
-  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Which files?' }, WORKER);
+  await rootFixture.daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Which files?' }, WORKER);
   const wake = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   await claim(wake);
   const objectId = randomUUID();
@@ -223,8 +223,8 @@ it('WAKE-STORM: identical failures of separate Room orders retain both results',
 it('WAKE-STORM: a later delegate report publishes its reply without re-answering the inherited order', async () => {
   const opened = await open();
   const turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('report', {...authority(rootFixture.order),status:'done',text:'done: coordination finished'}, RUBY);
-  await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: reviewer requires authentication'}, WORKER);
+  await rootFixture.daemon.execute('postRoomMessage', {...authority(rootFixture.order),harnessEnded: true,text:'done: coordination finished'}, RUBY);
+  await rootFixture.daemon.execute('message', {...authority(turn),type: 'blocked',text:'blocked: reviewer requires authentication'}, WORKER);
   const returned = (await commands(DM, RUBY)).find(c=>c.reason==='message')!;
   await claim(returned);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(returned),text:'The reviewer still needs to sign in.'}, RUBY);
@@ -479,7 +479,7 @@ it('OBJECTIVE-BRIEF: no-brief objectives use the opening order and plan fills on
 it('Reproduction RETURN-ADDRESS: an agent order without an explicit return address reports to its parent commander', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
   await rootFixture.db.query(`UPDATE agent_commands SET private_payload=private_payload-'fromRoomId' WHERE id=$1`, [turn.id]);
-  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: need a decision' }, WORKER);
+  await rootFixture.daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'blocked: need a decision' }, WORKER);
   const returned = (await commands(DM, RUBY)).filter(c => c.reason === 'message');
   expect(returned).toHaveLength(1);
   expect(returned[0]!.source.body).toBe('blocked: need a decision');
@@ -489,16 +489,16 @@ it('Reproduction RETURN-ADDRESS: an agent order without an explicit return addre
 
 it('Reproduction RETURN-ADDRESS: a report whose parent expired retains the recorded human source route', async () => {
   const opened = await open(), turn = await worker(opened.cornerId);
-  await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'blocked: decision needed' }, WORKER);
+  await rootFixture.daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'blocked: decision needed' }, WORKER);
   const returned = (await commands(DM, RUBY)).find(c => c.reason === 'message')!;
   await claim(returned);
   // Production feedback fb_135f018e: the report parent was gone, but its
   // root_source_message_id still named the human's original Room order.
   await rootFixture.db.query('DELETE FROM agent_commands WHERE id=$1', [rootFixture.order.id]);
   await rootFixture.db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [rootFixture.order.sourceMessageId]);
-  await rootFixture.daemon.execute('report', { ...authority(returned), status: 'needs_decision', text: 'needs-decision: approve the next step?' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(returned), type: 'blocked', text: 'needs-decision: approve the next step?' }, RUBY);
   await rootFixture.db.query('UPDATE messages SET deleted_at=NULL WHERE id=$1', [rootFixture.order.sourceMessageId]);
-  await rootFixture.daemon.execute('report', { ...authority(returned), status: 'needs_decision', text: 'needs-decision: approve the next step?' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(returned), type: 'blocked', text: 'needs-decision: approve the next step?' }, RUBY);
   expect((await rootFixture.phone.readRoom(DM, HUMAN))!.messages.filter(m => m.text === 'needs-decision: approve the next step?')).toHaveLength(1);
 });
 
@@ -555,7 +555,7 @@ it('a stored report completes its item while later tools retain the same authori
   // 12 Nov 19:13 rc.2: a needs_decision report completed the command, then the
   // turn's follow-up order and feedback were refused as "state not claimed".
   const opened = await open(), turn = await worker(opened.cornerId);
-  await daemon.execute('report', { ...authority(turn), status: 'needs_decision', text: 'Which proof account?' }, WORKER);
+  await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Which proof account?' }, WORKER);
   await daemon.execute('order', { ...authority(turn), address: opened.cornerId, agent: RUBY, text: 'Add the Android screenshot on my head.' }, WORKER);
   await daemon.execute('reportFeedback', { ...authority(turn), category: 'bug', summary: 'Follow-up after a report stays possible.' }, WORKER);
   expect((await db.query(`SELECT state FROM agent_commands WHERE id=$1`, [turn.id])).rows[0]).toEqual({ state: 'complete' });
@@ -568,7 +568,7 @@ it('Reproduction wake-14: a released Squire card wakes the asking corner worker 
   // 12 Nov 01:23: the worker asked for a card release and reported that it was
   // waiting. The person released the card; checkout resumed only on a direct tag.
   const opened = await open(), turn = await worker(opened.cornerId);
-  await daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Waiting for the card release.' }, WORKER);
+  await daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Waiting for the card release.' }, WORKER);
   await daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
   await daemon.execute('postSquireApprovalDecision', { roomId: opened.cornerId, requestId: turn.turnRequestId,
     approvalId: 'card-release', status: 'approved', tool: 'inject_card', title: 'Card release', detail: 'Checkout' }, WORKER);

@@ -5,8 +5,8 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
   const opened = await open(),
     turn = await worker(opened.cornerId);
   await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(turn), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint' },
+    'message',
+    { type: 'blocked', ...authority(turn), text: 'needs-decision: choose endpoint' },
     WORKER,
   );
   await rootFixture.daemon.execute(
@@ -17,8 +17,8 @@ it('keeps DM-returned decisions indexed until answered or source membership ends
   const returned = (await commands(DM, RUBY)).find((c) => c.reason === 'message')!;
   await claim(returned);
   await rootFixture.daemon.execute(
-    'report',
-    { status: 'needs_decision', ...authority(returned), ask: 'Which endpoint should we use?', text: 'needs-decision: choose endpoint @captain' },
+    'message',
+    { type: 'blocked', ...authority(returned), text: 'needs-decision: choose endpoint @captain' },
     RUBY,
   );
   expect((await rootFixture.phone.readRoom(opened.cornerId, HUMAN))?.cornerOwed).toBe(true);
@@ -173,16 +173,16 @@ for (const delivery of ['report', 'postRoomMessage'] as const) {
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(turn), attachment: attachment(original, 'owner approval'),
     }, WORKER);
-    await rootFixture.daemon.execute('report', {
-      ...authority(turn), status: 'done', text: 'done: design ready',
+    await rootFixture.daemon.execute('postRoomMessage', {
+      ...authority(turn), harnessEnded: true, text: 'done: design ready',
     }, WORKER);
     const report = rootFixture.order;
     await rootFixture.daemon.execute('postAgentAttachment', {
       ...authority(report), attachment: attachment(copy, 'design for approval'),
     }, RUBY);
     if (delivery === 'report') {
-      await rootFixture.daemon.execute('report', {
-        ...authority(report), status: 'done', text: 'done: design attached',
+      await rootFixture.daemon.execute('postRoomMessage', {
+        ...authority(report), harnessEnded: true, text: 'done: design attached',
       }, RUBY);
     } else {
       await rootFixture.daemon.execute('postRoomMessage', {
@@ -213,7 +213,7 @@ it('Reproduction R-ID: supplied private report and order ids reopen their payloa
     .uploadArtifact(WORKER, Buffer.from('Synthetic handoff'), 'text/plain', 'handoff.txt');
   const attachment = { url: uploaded.url, name: 'handoff.txt', mimeType: 'text/plain', size: Buffer.byteLength('Synthetic handoff') };
   await rootFixture.daemon.execute('postAgentAttachment', { ...authority(turn), attachment }, WORKER);
-  const report = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'blocked', text: 'Evidence needs review' }, WORKER);
+  const report = await rootFixture.daemon.execute('message', { ...authority(turn), type: 'blocked', text: 'Evidence needs review' }, WORKER);
   expect(await read(report.id, RUBY)).toMatchObject({ body: 'Evidence needs review', attachments: [] });
   expect(await read(report.id)).toMatchObject({ body: 'Evidence needs review' });
   // Continuations retain private payloads and expose their own command ids.

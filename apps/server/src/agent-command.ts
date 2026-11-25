@@ -12,7 +12,6 @@ import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from 
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { createHash,randomBytes } from 'node:crypto';
 import { parseTaggedAgentLifecycleCommand,routeTaggedLifecycleCommand } from './agent-command-create-agent-command.js';
-import { AGENT_COMMAND_DELEGATION_SCHEMA } from './agent-command-queue.js';
 import { queuedWorkflowWakeDetail,squireDecisionDetail,type WorkflowWakeCard } from './agent-input-context.js';
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
@@ -167,7 +166,25 @@ ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS generation_id text,
   ADD COLUMN IF NOT EXISTS turn_owner_connection_id text,
   ADD COLUMN IF NOT EXISTS turn_owner_epoch bigint;
 ALTER TABLE agent_pending_attachments ADD COLUMN IF NOT EXISTS generation_id text;
-${AGENT_COMMAND_DELEGATION_SCHEMA}
+-- Delegation checks its issuing agent at commit without locking a second
+-- recipient membership while another agent owns that queue's fence.
+CREATE OR REPLACE FUNCTION beeline_commit_delegated_order() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.private_payload->>'kind' IS DISTINCT FROM 'order' OR NEW.parent_command_id IS NULL THEN RETURN NULL; END IF;
+  IF EXISTS(SELECT 1 FROM agent_commands current_order WHERE current_order.id=NEW.id AND current_order.state='pending')
+    AND EXISTS(SELECT 1 FROM agent_commands source WHERE source.id=NEW.parent_command_id
+      AND source.agent_id=NEW.private_payload->>'authorId')
+    AND NOT EXISTS(SELECT 1 FROM rooms room JOIN memberships member
+      ON member.room_id=COALESCE(room.parent_id,room.id)
+        AND member.identity_id=NEW.private_payload->>'authorId' AND member.removed_at IS NULL
+      WHERE room.id=NEW.room_id) THEN
+    RAISE EXCEPTION 'access denied: delegated order source membership changed before commit' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END; $$;
+DROP TRIGGER IF EXISTS beeline_commit_delegated_order ON agent_commands;
+CREATE CONSTRAINT TRIGGER beeline_commit_delegated_order AFTER INSERT ON agent_commands
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION beeline_commit_delegated_order();
 UPDATE agent_commands SET state='pending' WHERE state='claimed';
 -- Keep an existing request identity stable across a serving-image overlap.
 -- A connected helper can still be acting on that request during migration.

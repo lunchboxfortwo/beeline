@@ -108,7 +108,7 @@ it('WORKER-ROLE: a worker-created corner displays worker activity and a commande
   expect(await state()).toBe('idle');
 });
 it('WORKER-BLOCK: native ask cards keep the block open through commander chatter while work shows Working', async () => {
-  await daemon.execute('report', { ...await input(), status: 'blocked', text: 'Need a decision.' }, WORKER);
+  await daemon.execute('message', { ...await input(), type: 'blocked', text: 'Need a decision.' }, WORKER);
   const ask = await input();
   const choice = await daemon.execute('askRoomChoice', { ...ask, prompt: 'Which scope?',
     options: [{ label: 'One' }, { label: 'Two' }] }, WORKER);
@@ -148,7 +148,7 @@ it('IDLE-BUDGET: only human grant decisions and human hold releases replenish no
 });
 
 it('WORKER-BLOCK: granted-run and read activity keep the block open and show Working', async () => {
-  await daemon.execute('report', { ...await input(), status: 'blocked', text: 'Waiting for execution.' }, WORKER);
+  await daemon.execute('message', { ...await input(), type: 'blocked', text: 'Waiting for execution.' }, WORKER);
   const next = await input();
   await daemon.execute('postAgentActivity', { ...next, activity: [{ kind: 'tool', title: 'read status', operation: 'read' }] }, WORKER);
   expect(await state()).toBe('working');

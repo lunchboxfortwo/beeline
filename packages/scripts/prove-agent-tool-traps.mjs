@@ -53,8 +53,8 @@ try {
   const oldest = JSON.parse(await callAgentTool('read', { facet: 'messages', from: 'oldest', limit: 1 }));
   assert.equal(oldest.items[0].id, first.messageId);
   const [command] = (await daemon.execute('getAgentCommands', { roomId: room }, agent)).commands;
-  await daemon.execute('claimAgentCommand', { roomId: room, commandId: command.id, generationId: 'proof' }, agent);
-  const turn = { roomId: room, requestId: command.turnRequestId, generationId: 'proof' };
+  await daemon.execute('startAgentTurn', { roomId: room, requestId: command.turnRequestId }, agent);
+  const turn = { roomId: room, requestId: command.turnRequestId };
   writeFileSync(contextFile, JSON.stringify({ ...turn, commandReason: command.reason }));
   process.env.BEELINE_TURN_CONTEXT_FILE = contextFile;
   const procedure = JSON.parse(await callAgentTool('read', { facet: 'procedure', name: 'beeline-memory' }));
@@ -84,11 +84,14 @@ try {
     tool: 'proof', title: 'Approval', detail: 'Approved' }, agent);
   const resume = (await daemon.execute('getAgentCommands', { roomId: room }, agent)).commands.find(c => c.sourceMessageId === decision.id);
   assert(resume);
-  await daemon.execute('claimAgentCommand', { roomId: room, commandId: resume.id, generationId: 'resumed' }, agent);
-  writeFileSync(contextFile, JSON.stringify({ roomId: room, requestId: resume.turnRequestId, generationId: 'resumed', commandReason: resume.reason }));
-  assert.deepEqual(JSON.parse(await callAgentTool('no_reply_needed', {})), { acknowledged: true });
-  assert.equal((await db.query("SELECT completion_kind FROM agent_turns WHERE room_id=$1 AND request_id=$2 AND agent_id=$3", [room, resume.turnRequestId, agent])).rows[0].completion_kind, 'no-reply');
-  console.log('PASS tool-traps: built Body HTTP reads default newest and accept procedure name; built schedule list preserves title; merged-provider fixture resolves silently without System senders; Squire resume closes through Body no_reply_needed.');
+  await daemon.execute('startAgentTurn', { roomId: room, requestId: resume.turnRequestId }, agent);
+  await daemon.execute('postRoomMessage', { roomId: room, requestId: resume.turnRequestId,
+    harnessEnded: true, text: '' }, agent);
+  assert.equal((await daemon.execute('getRequestCompletion', {roomId:room,requestId:resume.turnRequestId},agent)).completed,false);
+  assert.equal((await db.query('SELECT 1 FROM messages WHERE request_id=$1 AND author_id=$2', [resume.turnRequestId,agent])).rowCount,0);
+  await daemon.execute('postRoomMessage',{roomId:room,requestId:resume.turnRequestId,text:'Continued the requested work.'},agent);
+  assert.equal((await daemon.execute('getRequestCompletion',{roomId:room,requestId:resume.turnRequestId},agent)).completed,true);
+  console.log('PASS Body reads, schedule titles, silent feedback, and silent Squire resume.');
 } finally {
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));

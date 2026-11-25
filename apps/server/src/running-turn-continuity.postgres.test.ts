@@ -57,7 +57,7 @@ describe.skipIf(!url)('running turns survive answered and superseded sources (Po
     const opened = await daemon.execute('createCorner',{ roomId:room, requestId:parent.turn_request_id, targetRoomId:room, name:'Blocker', objective:'Publish the work', implementer:'worker', brief:{ spec:'Publish the work',repositoryWork:false,approval:{ sourceMessageId:source } } },agent);
     const assignment = (await readAgentCommands(db, worker, opened.cornerId)).commands[0]!;
     await startQueuedTurn(db, opened.cornerId, worker, assignment.id);
-    const block = await daemon.execute('report',{ roomId:opened.cornerId, requestId:assignment.turnRequestId, status:'blocked', text:'blocked: publish is pending' },worker);
+    const block = await daemon.execute('message',{ roomId:opened.cornerId, requestId:assignment.turnRequestId, type:'blocked', text:'publish is pending' },worker);
     // Continue the report in the session that opened the room.
     const report = (await readAgentCommands(db, agent, room)).commands.find(command => command.id === block.id)!;
     await startQueuedTurn(db, room, agent, report.id);

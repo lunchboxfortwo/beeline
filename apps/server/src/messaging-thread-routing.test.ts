@@ -88,6 +88,7 @@ it('rings the human commander once for concurrent blocks without status words', 
 
 it('a reply quotes its waking message and refuses another message before publishing', async () => {
   const task = await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:B,place:THREAD}},text:'Review the change.'});
+  await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:task.id,invocationId:crypto.randomUUID()},B);
   const input = {roomId:THREAD,requestId:task.id,type:'reply' as const,text:'I found a missing field.'};
   await expect(daemon.execute('message',{...input,quoteMsgId:'another'},B)).rejects.toThrow('woke this turn');
   const reply = await daemon.execute('message',{...input,quoteMsgId:task.id},B);
@@ -125,6 +126,7 @@ it('exposes only typed messaging to helpers', async () => {
 
 it('finishes a peer request silently after its typed reply and rejects the completed wake', async () => {
   const task = await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:B,place:THREAD}},text:'Review this.'});
+  await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:task.id,invocationId:crypto.randomUUID()},B);
   const reply = {roomId:THREAD,requestId:task.id,type:'reply' as const,quoteMsgId:task.id,text:'Reviewed.'};
   await daemon.execute('message',reply,B);
   await answerQueuedMessage(db,B,{roomId:THREAD,requestId:task.id,text:''});
