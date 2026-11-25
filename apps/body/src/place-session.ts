@@ -145,6 +145,10 @@ export class PlaceSession {
   private operatorAgent = false;
   promptSectionIds: readonly string[] = [];
 
+  get retirement(): AbortSignal {
+    return this.lifetime.signal;
+  }
+
   constructor(readonly options: PlaceSessionOptions) {
     const root =
       options.config.workspaceRoot ??
@@ -612,10 +616,10 @@ export class PlaceSession {
           : async (request) =>
               unsandboxedPermissionDecision(request, folder, { mountedServers, hostServers }),
       onUsage: (usage) => {
-        if (signal.aborted) return;
-        void postChangedAgentUsage(api, agent.publicKey, usage).catch((error) =>
-          console.error('[agent-usage] publish failed', error),
-        );
+        if (!signal.aborted)
+          void postChangedAgentUsage(api, agent.publicKey, usage).catch((error) =>
+            console.error('[agent-usage] publish failed', error),
+          );
       },
       onCommands: (...args) => { if (!signal.aborted) publishCommands(...args); },
     });

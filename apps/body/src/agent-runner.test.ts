@@ -11,6 +11,8 @@ import { identityFromKey,type AgentRuntimeRecord } from './runtime.js';
 const harness = vi.hoisted(() => ({ start: vi.fn(), deliver: vi.fn(), stop: vi.fn(), steer: vi.fn(), cancel: vi.fn(), refresh: vi.fn(), refreshConfiguration: vi.fn(), configurationChanged: vi.fn() }));
 vi.mock('./place-session.js', () => ({ PlaceSession: class {
   constructor(private readonly options: { cancelGrantedCommands(): void; resetId?: string }) {}
+  private readonly lifetime = new AbortController();
+  readonly retirement = this.lifetime.signal;
   alive = false;
   stale = false;
   start = harness.start;
@@ -23,6 +25,7 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   followUp = harness.steer;
   stop = harness.stop;
   retire() {
+    this.lifetime.abort();
     this.options.cancelGrantedCommands();
     void this.stop();
   }

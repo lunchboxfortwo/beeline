@@ -233,16 +233,17 @@ export class AgentRunner {
     stopped: readonly string[] = [],
     resets: readonly AgentPlaceReset[] = [],
   ): void {
-    for (const { roomId, id } of resets) {
-      if (this.resetIds.get(roomId) === id) continue;
-      this.resetIds.set(roomId, id);
-      const place = this.places.get(roomId);
-      if (!place) continue;
-      clearTimeout(place.idleTimer);
-      this.places.delete(roomId);
-      this.grantRunner.unregister(roomId);
-      place.session.retire();
-    }
+    for (const { roomId, id } of resets)
+      if (this.resetIds.get(roomId) !== id) {
+        this.resetIds.set(roomId, id);
+        const place = this.places.get(roomId);
+        if (place) {
+          clearTimeout(place.idleTimer);
+          this.places.delete(roomId);
+          this.grantRunner.unregister(roomId);
+          place.session.retire();
+        }
+      }
     for (const id of completed) this.completed.add(id);
     // A person stopped a run after its reply: the item is already done, so
     // queue absence cannot carry the Stop. Its closing receipt still follows.
@@ -261,7 +262,7 @@ export class AgentRunner {
   private restoreAnswers(answers: readonly StoredAnswer[]): void {
     this.answersLoaded = true;
     for (const saved of answers) {
-      if (this.resetIds.get(saved.roomId) !== saved.resetId) {
+      if (!this.isCurrentAnswer(saved)) {
         this.removeAnswer(saved);
         continue;
       }
@@ -277,13 +278,13 @@ export class AgentRunner {
   private reconcileQueue(): void {
     const commands = this.latest;
     const listed = new Set(commands.map((item) => item.id));
-    for (const answer of this.stored.values()) {
-      if (this.resetIds.get(answer.roomId) === answer.resetId) continue;
-      this.stored.delete(answer.itemId);
-      this.durable.delete(answer);
-      for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.delete(id);
-      if (!this.posting.has(answer)) this.removeAnswer(answer);
-    }
+    for (const answer of this.stored.values())
+      if (!this.isCurrentAnswer(answer)) {
+        this.stored.delete(answer.itemId);
+        this.durable.delete(answer);
+        for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])]) this.answered.delete(id);
+        if (!this.posting.has(answer)) this.removeAnswer(answer);
+      }
     for (const item of commands)
       if (!this.answered.has(item.id)) this.place(item).session.resources.receiveCommand(item);
     const running = new Set([...this.places.values()].map((place) => place.running?.id));
@@ -343,12 +344,12 @@ export class AgentRunner {
     // acceptance does not prove the running answer covered that new request.
     const batch = turnBatch(item, place.waiting);
     const batched = new Set(batch.map((next) => next.id));
-    const current = () => this.places.get(placeId) === place;
+    const { retirement } = place.session;
     let started = false;
     const invocation = { id: randomUUID(), requestId: item.turnRequestId };
     try {
       await place.session.start(item);
-      if (!current()) return;
+      retirement.throwIfAborted();
       place.turnStarted = item;
       await this.options.daemonApi.execute('startAgentTurn', {
         roomId: item.roomId,
@@ -357,10 +358,10 @@ export class AgentRunner {
         resetId: place.resetId ?? null,
         ...(batch.length > 1 ? {batchedCommandIds:batch.slice(1).map(command=>command.id)} : {}),
       });
-      if (!current()) return;
+      retirement.throwIfAborted();
       started = true;
       const answer = await place.session.deliver(item, batch, invocation);
-      if (!current()) return;
+      retirement.throwIfAborted();
       place.turnStarted = undefined;
       // Empty background work closes quietly; an unanswered request stays owed.
       const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
@@ -380,96 +381,99 @@ export class AgentRunner {
           harnessEnded: true,
           ...steps,
         });
-      if (!current()) return;
+      retirement.throwIfAborted();
       place.waiting = place.waiting.filter((next) => !batched.has(next.id));
       void Promise.resolve()
-        .then(() => { if (current()) this.afterAnswer(item, answer, invocation); })
+        .then(() => { if (!retirement.aborted) this.afterAnswer(item, answer, invocation); })
         .catch((error) => console.warn('[body] answer diagnostics failed:', error));
     } catch (error) {
       // A reset can commit before its snapshot arrives. The server has
       // already fenced this attempt, and the snapshot will redeliver its work.
-      if (!current() || isCancelledTurn(error)) return;
-      console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
-      if (
-        started &&
-        this.completed.has(item.id) &&
-        !this.stopped &&
-        !batch.some((next) => this.latest.some((listed) => listed.id === next.id))
-      )
-        await this.store({
-          itemId: item.id,
-          roomId: item.roomId,
-          requestId: item.turnRequestId,
-          text: '',
-          harnessEnded: true,
-          finishesAnsweredItem: true,
-          resetId: place.resetId,
-          invocation,
-        });
-      if (!current()) return;
-      if (
-        batch.some(
-          (next) =>
-            this.latest.some((listed) => listed.id === next.id) && !this.answered.has(next.id),
-        )
-      ) {
-        if (!this.stopped && !this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) this.reportOwnerBlocker(item, error);
-        if (started && !this.stopped) {
-          const pending = batch.filter((next) =>
-            this.latest.some((listed) => listed.id === next.id),
-          );
-          if (pending.length)
-            await this.store({
-              itemId: pending[0]!.id,
-              roomId: item.roomId,
-              requestId: pending[0]!.turnRequestId,
-              queuedRequestIds: pending.slice(1).map((next) => next.id),
-              text: '',
-              harnessEnded: true,
-              resetId: place.resetId,
-              invocation,
-              failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
-            });
-        } else if (
+      if (!retirement.aborted && !isCancelledTurn(error)) {
+        console.error(`[body] place ${placeId} could not answer ${item.id}:`, error);
+        if (
+          started &&
+          this.completed.has(item.id) &&
           !this.stopped &&
-          this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
-        ) {
-          const failureReported = await this.options.daemonApi.execute('startAgentTurn', {
+          !batch.some((next) => this.latest.some((listed) => listed.id === next.id))
+        )
+          await this.store({
+            itemId: item.id,
             roomId: item.roomId,
             requestId: item.turnRequestId,
-            resetId: place.resetId ?? null,
-            available: false,
-            failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
-          }).then(() => true, (error: unknown) => {
-            if (isCancelledTurn(error)) return false;
-            throw error;
+            text: '',
+            harnessEnded: true,
+            finishesAnsweredItem: true,
+            resetId: place.resetId,
+            invocation,
           });
-          if (!failureReported || !current()) return;
-          this.answered.add(item.id);
-          started = true;
-        } else {
-          place.waiting.unshift(item);
-          if (!this.stopped)
-            void this.options.daemonApi
-              .execute('startAgentTurn', {
+        if (
+          !retirement.aborted && batch.some(
+            (next) =>
+              this.latest.some((listed) => listed.id === next.id) && !this.answered.has(next.id),
+          )
+        ) {
+          if (!this.stopped && !this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN) this.reportOwnerBlocker(item, error);
+          if (started && !this.stopped) {
+            const pending = batch.filter((next) =>
+              this.latest.some((listed) => listed.id === next.id),
+            );
+            if (pending.length)
+              await this.store({
+                itemId: pending[0]!.id,
+                roomId: item.roomId,
+                requestId: pending[0]!.turnRequestId,
+                queuedRequestIds: pending.slice(1).map((next) => next.id),
+                text: '',
+                harnessEnded: true,
+                resetId: place.resetId,
+                invocation,
+                failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
+              });
+          } else if (
+            !this.stopped &&
+            this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
+          ) {
+            try {
+              await this.options.daemonApi.execute('startAgentTurn', {
                 roomId: item.roomId,
                 requestId: item.turnRequestId,
                 resetId: place.resetId ?? null,
                 available: false,
-              })
-              .catch((error) => console.warn('[body] offline status not written:', error));
+                failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
+              });
+              if (!retirement.aborted) {
+                this.answered.add(item.id);
+                started = true;
+              }
+            } catch (refusal) {
+              if (!isCancelledTurn(refusal)) throw refusal;
+            }
+          } else {
+            place.waiting.unshift(item);
+            if (!this.stopped)
+              void this.options.daemonApi
+                .execute('startAgentTurn', {
+                  roomId: item.roomId,
+                  requestId: item.turnRequestId,
+                  resetId: place.resetId ?? null,
+                  available: false,
+                })
+                .catch((error) => console.warn('[body] offline status not written:', error));
+          }
+        }
+        if (!retirement.aborted) {
+          if (started) place.waiting = place.waiting.filter((next) => !batched.has(next.id));
+          await place.session
+            .stop()
+            .catch((stopError) => console.warn('[body] session stop failed:', stopError));
         }
       }
-      if (!current()) return;
-      if (started) place.waiting = place.waiting.filter((next) => !batched.has(next.id));
-      await place.session
-        .stop()
-        .catch((stopError) => console.warn('[body] session stop failed:', stopError));
     } finally {
       place.running = undefined;
       place.turnStarted = undefined;
     }
-    if (started && current()) void this.pump(placeId);
+    if (started && !retirement.aborted) void this.pump(placeId);
   }
 
   private recordTurnStart(item: AgentCommand, resetId?: string): void {
@@ -540,17 +544,21 @@ export class AgentRunner {
     this.posting.add(answer);
     try {
       await this.answers.save(answer);
-      if (this.resetIds.get(answer.roomId) !== answer.resetId) {
+      if (this.isCurrentAnswer(answer)) {
+        this.durable.add(answer);
+        void this.post(answer);
+      } else {
         this.removeAnswer(answer);
         this.posting.delete(answer);
-        return;
       }
-      this.durable.add(answer);
-      void this.post(answer);
     } catch (error) {
       this.posting.delete(answer);
       console.error('[body] answer could not be saved:', error);
     }
+  }
+
+  private isCurrentAnswer(answer: StoredAnswer): boolean {
+    return this.resetIds.get(answer.roomId) === answer.resetId;
   }
 
   private removeAnswer(answer: StoredAnswer): void {
@@ -564,57 +572,60 @@ export class AgentRunner {
     try {
       if (!this.durable.has(answer)) {
         await this.answers.save(answer);
-        if (this.resetIds.get(answer.roomId) !== answer.resetId) return;
-        this.durable.add(answer);
+        if (this.isCurrentAnswer(answer)) this.durable.add(answer);
       }
-      const receipt = await api.execute('postRoomMessage', {
-        roomId: answer.roomId,
-        requestId: answer.itemId,
-        text: answer.text,
-        presentation: 'message',
-        ...(answer.harnessEnded ? { harnessEnded: true } : {}),
-        ...(answer.invocation ? { invocation: answer.invocation } : {}),
-        ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
-        ...(answer.steps ? { steps: answer.steps } : {}),
-      });
-      if (this.resetIds.get(answer.roomId) !== answer.resetId) return;
-      if (receipt.answered !== false) {
-        this.stored.delete(answer.itemId);
-        this.durable.delete(answer);
-        this.removeAnswer(answer);
-      } else if (
-        !answer.text &&
-        this.latest.some(
-          (item) =>
-            [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id) &&
-            !isBackgroundCommand(item.reason),
-        )
-      ) {
-        const pending = this.latest.filter((item) =>
-          [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id),
-        );
-        const hosted =
-          answer.harnessEnded &&
-          (this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID ||
-            this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
-        if (hosted)
-          for (const item of pending)
-            await api.execute('startAgentTurn', {
-              roomId: item.roomId,
-              requestId: item.turnRequestId,
-              resetId: answer.resetId ?? null,
-              available: false,
-              failureReason: answer.failureReason ?? 'Agent harness ended without a public answer',
-            });
-        // Hosted turns close visibly; personal helpers retain the owed request
-        // for their next queue delivery after the server refused an empty answer.
-        await this.answers.remove(answer);
-        if (this.resetIds.get(answer.roomId) !== answer.resetId) return;
-        this.stored.delete(answer.itemId);
-        this.durable.delete(answer);
-        if (!hosted)
-          for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])])
-            this.answered.delete(id);
+      if (this.isCurrentAnswer(answer)) {
+        const receipt = await api.execute('postRoomMessage', {
+          roomId: answer.roomId,
+          requestId: answer.itemId,
+          text: answer.text,
+          presentation: 'message',
+          ...(answer.harnessEnded ? { harnessEnded: true } : {}),
+          ...(answer.invocation ? { invocation: answer.invocation } : {}),
+          ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
+          ...(answer.steps ? { steps: answer.steps } : {}),
+        });
+        if (this.isCurrentAnswer(answer)) {
+          if (receipt.answered !== false) {
+            this.stored.delete(answer.itemId);
+            this.durable.delete(answer);
+            this.removeAnswer(answer);
+          } else if (
+            !answer.text &&
+            this.latest.some(
+              (item) =>
+                [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id) &&
+                !isBackgroundCommand(item.reason),
+            )
+          ) {
+            const pending = this.latest.filter((item) =>
+              [answer.itemId, ...(answer.queuedRequestIds ?? [])].includes(item.id),
+            );
+            const hosted =
+              answer.harnessEnded &&
+              (this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID ||
+                this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
+            if (hosted)
+              for (const item of pending)
+                await api.execute('startAgentTurn', {
+                  roomId: item.roomId,
+                  requestId: item.turnRequestId,
+                  resetId: answer.resetId ?? null,
+                  available: false,
+                  failureReason: answer.failureReason ?? 'Agent harness ended without a public answer',
+                });
+            // Hosted turns close visibly; personal helpers retain the owed request
+            // for their next queue delivery after the server refused an empty answer.
+            await this.answers.remove(answer);
+            if (this.isCurrentAnswer(answer)) {
+              this.stored.delete(answer.itemId);
+              this.durable.delete(answer);
+              if (!hosted)
+                for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])])
+                  this.answered.delete(id);
+            }
+          }
+        }
       }
     } catch (error) {
       // A queued item still owns its stored answer, including after a refusal.
@@ -622,7 +633,7 @@ export class AgentRunner {
       console.warn(`[body] answer for ${answer.itemId} not delivered yet:`, error);
     } finally {
       this.posting.delete(answer);
-      if (this.resetIds.get(answer.roomId) !== answer.resetId) {
+      if (!this.isCurrentAnswer(answer)) {
         this.durable.delete(answer);
         this.removeAnswer(answer);
       }

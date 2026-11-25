@@ -3582,6 +3582,7 @@
         "columns": {
           "command_id": "Executing command; cascade owns retention.",
           "invocation_id": "Fresh helper attempt nonce.",
+          "reset_id": "The place reset observed at invocation start. A later reset leaves the same request owed and changes the current marker, so the invocation's marker cannot be derived from the command.",
           "batched_command_ids": "Additional wakes delivered with this invocation. Pending queue rows alone do not establish delivery.",
           "replied": { "reason": "Legacy reply receipt for serving and rollback images.", "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain" },
           "final_suppressed": { "reason": "Legacy final receipt for serving and rollback images.", "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain" },
