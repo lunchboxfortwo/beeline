@@ -49,9 +49,9 @@ it('interleaves two thread sessions without mixing their output or report recipi
 it('binds connected-app writes to the received command when two tasks are pending', async () => {
   const one=await task(H,THREAD), two=await task(C,OTHER);
   const app=new RoomsMcpAgentTools(db,daemon);
-  await expect(app.call(B,'reply',{commandId:two.id,id:one.id,text:'Local note'})).rejects.toThrow('Quote a message');
+  await app.call(B,'reply',{commandId:two.id,id:one.id,text:'Local note'});
   await app.call(B,'message',{commandId:two.id,to:{agent:A,place:CHAT},text:'Inspect'});
-  expect((await db.query('SELECT room_id FROM messages WHERE text=$1',['Local note'])).rows).toEqual([]);
+  expect((await db.query('SELECT room_id FROM messages WHERE text=$1',['Local note'])).rows).toEqual([{room_id:OTHER}]);
   expect((await db.query("SELECT state FROM agent_commands WHERE id=$1",[one.id])).rows).toEqual([{state:'pending'}]);
   expect((await db.query("SELECT message->'route'->'from' sender,parent_command_id FROM agent_commands WHERE agent_id=$1",[A])).rows)
     .toEqual([{sender:{agent:B,place:OTHER},parent_command_id:two.id}]);
