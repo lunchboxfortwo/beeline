@@ -1,3 +1,4 @@
+import { sessionCommandContext } from './session-tool-connection.js';
 import { boundToolResponse } from './tool-output-budget.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
@@ -828,8 +829,7 @@ export async function brokerRequest(socketPath: string, request: BrokerRequest):
 export function runRegistryMcpBroker(env: NodeJS.ProcessEnv = process.env): void {
   const socketPath = env.BEELINE_REGISTRY_MCP_BROKER_SOCKET;
   const connectorId = env.BEELINE_REGISTRY_MCP_CONNECTOR;
-  const turnContextPath = env.BEELINE_TURN_CONTEXT_FILE;
-  if (!socketPath || !connectorId || !turnContextPath)
+  if (!socketPath || !connectorId)
     throw new Error('Registry MCP broker is unavailable');
   const connectionId = randomBytes(12).toString('base64url');
   let pending = Promise.resolve();
@@ -844,7 +844,7 @@ export function runRegistryMcpBroker(env: NodeJS.ProcessEnv = process.env): void
       }
       let turn: RegistryMcpTurnContext | undefined;
       try {
-        turn = readTurnContext(JSON.parse(readFileSync(turnContextPath, 'utf8')));
+        turn = readTurnContext(await sessionCommandContext(undefined, undefined, env));
       } catch {
         turn = undefined;
       }

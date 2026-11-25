@@ -25,7 +25,6 @@ vi.mock('./place-session.js', () => ({ PlaceSession: class {
   resources={refresh:harness.refresh,refreshConfiguration:harness.refreshConfiguration,receiveCommand() {}};
   configurationChanged(){harness.configurationChanged(this);this.stale=true;void this.resources.refreshConfiguration();}
   grantPlace() { return {}; }
-  async writeContext() {}
 } }));
 const roots: string[] = [];
 beforeEach(() => {

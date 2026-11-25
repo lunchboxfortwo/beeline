@@ -77,9 +77,7 @@ describe('Beeline tool surface across harnesses', () => {
       brief: { spec: 'Build the widget' },
     };
     const savedUrl = process.env.BEELINE_DAEMON_BASE_URL;
-    const savedTurn = process.env.BEELINE_TURN_CONTEXT_FILE;
     delete process.env.BEELINE_DAEMON_BASE_URL;
-    delete process.env.BEELINE_TURN_CONTEXT_FILE;
     try {
       await callAgentTool('open_thread', args, 'oversized-corner');
       throw new Error('expected the call to stop before a daemon');
@@ -94,8 +92,6 @@ describe('Beeline tool surface across harnesses', () => {
     } finally {
       if (savedUrl === undefined) delete process.env.BEELINE_DAEMON_BASE_URL;
       else process.env.BEELINE_DAEMON_BASE_URL = savedUrl;
-      if (savedTurn === undefined) delete process.env.BEELINE_TURN_CONTEXT_FILE;
-      else process.env.BEELINE_TURN_CONTEXT_FILE = savedTurn;
     }
   });
 

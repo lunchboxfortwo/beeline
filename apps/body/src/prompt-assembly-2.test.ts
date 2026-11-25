@@ -187,7 +187,10 @@ const scope16 = fixtureScope16();
 
   m23_it('C2 managed helper prompt routing survives a truncated long instruction', () => {
     const result = m23_assembleTurnPrompt({ surface: 'room', routing: scope16.routing, sessionPrefix: 'x'.repeat(10000), task: { body: 'long task' } });
-    for (const value of [scope16.routing.roomId, scope16.routing.messageId, scope16.routing.memberId, 'message(type:reply, quoteMsgId:message-id)']) m23_expect(result.text.slice(0,400)).toContain(value);
+    const routing = result.text.slice(0, 400);
+    m23_expect(routing).toContain('message(type:reply, quoteMsgId:message-id)');
+    m23_expect(routing).not.toContain(scope16.routing.roomId);
+    m23_expect(routing).not.toContain(scope16.routing.memberId);
   });
 });
 });

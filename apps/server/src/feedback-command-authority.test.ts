@@ -1,8 +1,6 @@
+import * as sessionTools from '../../body/src/session-tool-connection.js';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { callAgentTool } from '../../body/src/read-only-mcp-open-poll.js';
 import { createAgentCommand } from './agent-command.js';
@@ -16,8 +14,6 @@ import { migratedDatabase } from './test-support.js';
 
 it('report_feedback stores external and Beeline workspace reports even when task command authority is unavailable', async () => {
   const db = await migratedDatabase();
-  const scratch = await mkdtemp(join(tmpdir(), 'feedback-authority-'));
-  const contextFile = join(scratch, 'turn.json');
   const owner = 'a'.repeat(64);
   const live = new LiveHub();
   const daemon = new DaemonService(db, live);
@@ -29,7 +25,7 @@ it('report_feedback stores external and Beeline workspace reports even when task
     await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Owner')`, [owner]);
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     vi.stubEnv('BEELINE_DAEMON_BASE_URL', `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', contextFile);
+    const commandContext = vi.spyOn(sessionTools, 'sessionCommandContext');
     for (const [index, workspaceName] of ['Milo workspace', 'Beeline workspace'].entries()) {
       const workspace = randomUUID(), room = randomUUID(), agent = String(index + 1).repeat(64);
       const token = `bdt_feedback_authority_proof_${index}`;
@@ -49,7 +45,7 @@ it('report_feedback stores external and Beeline workspace reports even when task
       const command = await createAgentCommand(db, { roomId: room, agentId: agent, sourceMessageId: source, reason: 'human_tag' });
       for (const [label, requestId] of [['known', command!.turn_request_id], ['unavailable', 'missing-command'], ['cancelled', command!.turn_request_id]] as const) {
         if (label === 'cancelled') await db.query(`UPDATE agent_commands SET state='cancelled' WHERE id=$1`, [command!.id]);
-        await writeFile(contextFile, JSON.stringify({ roomId: room, requestId, promptSectionIds: ['core.identity'] }));
+        commandContext.mockResolvedValue({ roomId: room, requestId, promptSectionIds: ['core.identity'] });
         const summary = `${workspaceName}: ${label} task authority`;
         const result = JSON.parse(await callAgentTool('report_feedback', { category: 'bug', summary }, 'proof'));
         expect(result).toEqual({ itemId: expect.stringMatching(/^fb_/) });
@@ -66,6 +62,5 @@ it('report_feedback stores external and Beeline workspace reports even when task
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));
     await db.close();
-    await rm(scratch, { recursive: true, force: true });
   }
 }, 60_000);

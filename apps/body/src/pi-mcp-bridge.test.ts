@@ -53,6 +53,10 @@ it('asks the Beeline server before a Squire call and keeps its refusal', async (
       body += chunk;
     });
     request.on('end', () => {
+      if (request.url === '/session') {
+        response.end(JSON.stringify({ status: 200, value: { roomId: 'room-1', requestId: 'request-1', itemId: 'c'.repeat(64) } }));
+        return;
+      }
       seen.push({ url: request.url, authorization: request.headers.authorization, commandId: request.headers['x-beeline-command-id'], body });
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ allowed: false }));
@@ -62,9 +66,7 @@ it('asks the Beeline server before a Squire call and keeps its refusal', async (
   try {
     const { port } = server.address() as AddressInfo;
     const spawn = vi.fn();
-    const readFile = vi.fn(async () =>
-      JSON.stringify({ roomId: 'room-1', requestId: 'request-1', itemId: 'c'.repeat(64) }),
-    );
+    const readFile = vi.fn();
     const tools: Tool[] = [];
     const extension = loadBridge(
       piMcpBridgeSource([
@@ -74,7 +76,9 @@ it('asks the Beeline server before a Squire call and keeps its refusal', async (
           env: [
             { name: 'BEELINE_DAEMON_BASE_URL', value: `http://127.0.0.1:${port}` },
             { name: 'BEELINE_DAEMON_TOKEN', value: 'daemon-token' },
-            { name: 'BEELINE_TURN_CONTEXT_FILE', value: '/turn.json' },
+            { name: 'BEELINE_DAEMON_ROOM_ID', value: 'room-1' },
+            { name: 'BEELINE_GRANT_RUNNER_URL', value: `http://127.0.0.1:${port}` },
+            { name: 'BEELINE_GRANT_RUNNER_TOKEN', value: 'runner-token' },
           ],
         },
         {

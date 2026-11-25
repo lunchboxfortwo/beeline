@@ -53,7 +53,7 @@ it('keeps implicit browser selection, approvals, schedules and cleanup in the re
   const transport = new HelperSquireTransport('/isolated', options => {
     callbacks = options; return { requestMcp, close: wireClose } as unknown as StdioSquireMcpClient;
   });
-  const relay = (room: string, decision: typeof approvalsA) => new SquireTaskRelay('agent', room, '', async () => true, '',
+  const relay = (room: string, decision: typeof approvalsA) => new SquireTaskRelay('agent', room, async () => true, '',
     callbacks => transport.acquire({ scope: { agentId: 'agent', roomId: room }, ...callbacks }), decision);
   const a = relay('a', approvalsA), b = relay('b', approvalsB);
   const command = (roomId: string, scheduleId?: string) => ({ agentId: 'agent', roomId, turnRequestId: roomId,

@@ -1,3 +1,5 @@
+import { mkdtempSync as m25_mkdtempSync, rmSync as m25_rmSync, mkdtempSync as m30_mkdtempSync, rmSync as m30_rmSync } from 'node:fs';
+import * as sessionTools from './session-tool-connection.js';
 import { describe, it, expect } from 'vitest';
 
 import { cornerCallText } from './read-only-mcp.js';
@@ -84,7 +86,6 @@ import { resumePrompt as m14_resumePrompt } from "./place-prompt.js";
 import { describe as mergedDescribe14 } from 'vitest';
 
 
-import { mkdtempSync as m24_mkdtempSync, writeFileSync as m24_writeFileSync } from 'node:fs';
 
 
 import { join as m24_join } from 'node:path';
@@ -107,7 +108,6 @@ import { assembleTurnPrompt as m24_assembleTurnPrompt, type PromptSurface as m24
 import { describe as mergedDescribe24 } from 'vitest';
 
 
-import { mkdtempSync as m25_mkdtempSync, rmSync as m25_rmSync, writeFileSync as m25_writeFileSync } from 'node:fs';
 
 
 import { tmpdir as m25_tmpdir } from 'node:os';
@@ -142,7 +142,6 @@ import type { AgentCommand as m26_AgentCommand } from '@beeline/api-contract/dae
 import { callAgentTool as m26_callAgentTool } from "./read-only-mcp.js";
 
 
-import { writeTurnContext as m26_writeTurnContext } from "./place-session.js";
 
 import { describe as mergedDescribe26 } from 'vitest';
 
@@ -174,7 +173,6 @@ import { callAgentTool as m29_callAgentTool, daemonOperationIsSafeToRepeat as m2
 import { describe as mergedDescribe29 } from 'vitest';
 
 
-import { mkdtempSync as m30_mkdtempSync, rmSync as m30_rmSync, writeFileSync as m30_writeFileSync } from 'node:fs';
 
 
 import { tmpdir as m30_tmpdir } from 'node:os';
@@ -217,7 +215,6 @@ import type { AgentCommand as m32_AgentCommand } from '@beeline/api-contract/dae
 import { agentToolsFor as m32_agentToolsFor, callAgentTool as m32_callAgentTool } from "./read-only-mcp.js";
 
 
-import { writeTurnContext as m32_writeTurnContext } from "./place-session.js";
 
 import { describe as mergedDescribe32 } from 'vitest';
 
@@ -433,15 +430,13 @@ const appsIn = (text: string) => [...new Set(text.match(/beeline:[a-z_]+/g) ?? [
 
 
 function useEnvironment(corner: boolean) {
-  const context = m24_join(m24_mkdtempSync(m24_join(m24_tmpdir(), 'place-capabilities-')), 'context.json');
-  m24_writeFileSync(context, JSON.stringify({ roomId: corner ? 'corner' : 'room', requestId: 'request' }));
+  m24_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: corner ? 'corner' : 'room', requestId: 'request' });
   for (const [key, value] of Object.entries({
     BEELINE_DAEMON_ROOM_ID: corner ? 'corner' : 'room',
     BEELINE_DAEMON_CORNER_ID: corner ? 'corner' : '',
     BEELINE_DAEMON_AGENT_ID: 'self',
     BEELINE_DAEMON_BASE_URL: 'http://localhost',
     BEELINE_DAEMON_TOKEN: 'test',
-    BEELINE_TURN_CONTEXT_FILE: context,
   })) m24_vi.stubEnv(key, value);
 }
 
@@ -458,7 +453,7 @@ async function discovered(corner: boolean): Promise<string[]> {
 
 m24_afterEach(() => {
   m24_vi.unstubAllGlobals();
-  m24_vi.unstubAllEnvs();
+  m24_vi.unstubAllEnvs(); m24_vi.restoreAllMocks();
 });
 return {
 PLACES,
@@ -488,17 +483,7 @@ export function fixtureScope23() {
 
   m25_beforeEach(() => {
     home = m25_mkdtempSync(m25_join(m25_tmpdir(), 'beeline-corner-message-'));
-    const context = m25_join(home, 'turn.json');
-    // The active command lives in the corner; the session env still names the
-    // parent Room, as a real corner session does.
-    m25_writeFileSync(
-      context,
-      JSON.stringify({
-        roomId: 'corner-room',
-        requestId: 'request-1',
-      }),
-    );
-    m25_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', context);
+    m25_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'corner-room', requestId: 'request-1' });
     m25_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://daemon.test');
     m25_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'daemon-only');
     m25_vi.stubEnv('BEELINE_DAEMON_AGENT_ID', 'agent-1');
@@ -516,7 +501,7 @@ export function fixtureScope23() {
 
   m25_afterEach(() => {
     m25_vi.unstubAllGlobals();
-    m25_vi.unstubAllEnvs();
+    m25_vi.unstubAllEnvs(); m25_vi.restoreAllMocks();
     m25_rmSync(home, { recursive: true, force: true });
   });
 return {
@@ -531,14 +516,12 @@ export function fixtureScope24() {
 const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
 
 
-let context: { path: string };
-
 
 m26_beforeEach(async () => {
   calls.length=0;
-  context={path:m26_join(m26_mkdtempSync(m26_join(m26_tmpdir(),'onboarding-tools-')),'turn-context.json')};
-  await m26_writeTurnContext(context.path,{id:'item-1',roomId:'room-1',turnRequestId:'request-1',rootCommandId:'command-1',reason:'human_tag'} as m26_AgentCommand);
-  for (const [key,value] of Object.entries({BEELINE_DAEMON_AGENT_ID:'agent-1',BEELINE_DAEMON_ROOM_ID:'room-1',BEELINE_DAEMON_BASE_URL:'http://localhost:1234',BEELINE_DAEMON_TOKEN:'test-token',BEELINE_TURN_CONTEXT_FILE:context.path})) m26_vi.stubEnv(key,value);
+
+  m26_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({roomId:'room-1',requestId:'request-1',taskId:'command-1',itemId:'item-1'});
+  for (const [key,value] of Object.entries({BEELINE_DAEMON_AGENT_ID:'agent-1',BEELINE_DAEMON_ROOM_ID:'room-1',BEELINE_DAEMON_BASE_URL:'http://localhost:1234',BEELINE_DAEMON_TOKEN:'test-token'})) m26_vi.stubEnv(key,value);
   m26_vi.stubGlobal('fetch', async (url:URL,init:RequestInit) => {
     calls.push({name:new URL(url).pathname.split('/').pop()!,input:JSON.parse(String(init.body))});
     return Response.json({state:'no_repo_linked',repositoryOnboarding:true});
@@ -546,10 +529,9 @@ m26_beforeEach(async () => {
 });
 
 
-m26_afterEach(() => {m26_vi.unstubAllEnvs();m26_vi.unstubAllGlobals();});
+m26_afterEach(() => {m26_vi.unstubAllEnvs(); m26_vi.restoreAllMocks();m26_vi.unstubAllGlobals();});
 return {
 calls,
-get context(){return context;}, set context(value: typeof context){context=value;},
 };
 }
 export function fixtureScope25() {
@@ -559,7 +541,6 @@ export function fixtureScope25() {
 m27_beforeEach(() => {
   m27_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://daemon.test');
   m27_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
-  m27_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
 });
 
 
@@ -578,7 +559,6 @@ export function fixtureScope27() {
     m28_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'room');
     m28_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://daemon.test');
     m28_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
-    m28_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
     m28_vi.stubEnv('BEELINE_LIB_DIR', '');
     m28_vi.stubGlobal('fetch', m28_vi.fn(async () => Response.json({ error: 'workspace skill not found' }, { status: 404 })));
   });
@@ -626,9 +606,7 @@ export function fixtureScope33() {
 
   m30_beforeEach(() => {
     home = m30_mkdtempSync(m30_join(m30_tmpdir(), 'beeline-usage-'));
-    const context = m30_join(home, 'turn.json');
-    m30_writeFileSync(context, JSON.stringify({ roomId: 'room-1', requestId: 'r' }));
-    m30_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', context);
+    m30_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'room-1', requestId: 'r' });
     m30_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://daemon.test');
     m30_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'daemon-only');
     m30_vi.stubEnv('BEELINE_DAEMON_AGENT_ID', 'agent-self');
@@ -643,7 +621,7 @@ export function fixtureScope33() {
 
   m30_afterEach(() => {
     m30_vi.unstubAllGlobals();
-    m30_vi.unstubAllEnvs();
+    m30_vi.unstubAllEnvs(); m30_vi.restoreAllMocks();
     m30_rmSync(home, { recursive: true, force: true });
   });
 
@@ -684,7 +662,6 @@ m31_beforeEach(() => {
   m31_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
   m31_vi.stubEnv('BEELINE_DAEMON_ROOM_ID', 'parent');
   m31_vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'watcher');
-  m31_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', '');
   calls = [];
   m31_vi.stubGlobal('fetch', async (url: URL, init: RequestInit) => {
     const input = JSON.parse(String(init.body));
@@ -707,16 +684,14 @@ export function fixtureScope36() {
 
   const calls: { name: string; input: Record<string, unknown> }[] = [];
 
-  let context: { path: string };
 
   m32_beforeEach(async () => {
     calls.length = 0;
-    context = { path: m32_join(m32_mkdtempSync(m32_join(m32_tmpdir(), 'workflow-tools-')), 'turn-context.json') };
-    await m32_writeTurnContext(context.path, { id: 'item-1', roomId: 'room-1', turnRequestId: 'request-1', rootCommandId: 'command-1', reason: 'human_tag' } as m32_AgentCommand);
+
+    m32_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({roomId:'room-1',requestId:'request-1',taskId:'command-1',itemId:'item-1'});
     for (const [key, value] of Object.entries({
       BEELINE_DAEMON_AGENT_ID: 'agent-1', BEELINE_DAEMON_ROOM_ID: 'room-1',
       BEELINE_DAEMON_BASE_URL: 'http://localhost:1234', BEELINE_DAEMON_TOKEN: 'test-token',
-      BEELINE_TURN_CONTEXT_FILE: context.path,
     })) m32_vi.stubEnv(key, value);
     m32_vi.stubGlobal('fetch', async (url: URL, init: RequestInit) => {
       calls.push({ name: new URL(url).pathname.split('/').pop()!, input: JSON.parse(String(init.body)) });
@@ -724,27 +699,24 @@ export function fixtureScope36() {
     });
   });
 
-  m32_afterEach(() => { m32_vi.unstubAllEnvs(); m32_vi.unstubAllGlobals(); });
+  m32_afterEach(() => { m32_vi.unstubAllEnvs(); m32_vi.restoreAllMocks(); m32_vi.unstubAllGlobals(); });
 return {
 calls,
-get context(){return context;}, set context(value: typeof context){context=value;},
 };
 }
 export function fixtureScope37() {
 
   const calls: { name: string; input: Record<string, unknown> }[] = [];
 
-  let context: { path: string };
 
   m32_beforeEach(async () => {
     calls.length = 0;
-    context = { path: m32_join(m32_mkdtempSync(m32_join(m32_tmpdir(), 'workflow-tools-corner-')), 'turn-context.json') };
-    await m32_writeTurnContext(context.path, { id: 'item-1', roomId: 'corner-1', turnRequestId: 'request-1', rootCommandId: 'command-1', reason: 'human_tag' } as m32_AgentCommand);
+
+    m32_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({roomId:'corner-1',requestId:'request-1',taskId:'command-1',itemId:'item-1'});
     for (const [key, value] of Object.entries({
       BEELINE_DAEMON_AGENT_ID: 'agent-1', BEELINE_DAEMON_ROOM_ID: 'parent-room',
       BEELINE_DAEMON_CORNER_ID: 'corner-1',
       BEELINE_DAEMON_BASE_URL: 'http://localhost:1234', BEELINE_DAEMON_TOKEN: 'test-token',
-      BEELINE_TURN_CONTEXT_FILE: context.path,
     })) m32_vi.stubEnv(key, value);
     m32_vi.stubGlobal('fetch', async (url: URL, init: RequestInit) => {
       calls.push({ name: new URL(url).pathname.split('/').pop()!, input: JSON.parse(String(init.body)) });
@@ -752,10 +724,9 @@ export function fixtureScope37() {
     });
   });
 
-  m32_afterEach(() => { m32_vi.unstubAllEnvs(); m32_vi.unstubAllGlobals(); });
+  m32_afterEach(() => { m32_vi.unstubAllEnvs(); m32_vi.restoreAllMocks(); m32_vi.unstubAllGlobals(); });
 return {
 calls,
-get context(){return context;}, set context(value: typeof context){context=value;},
 };
 }
 export function fixtureScope38() {

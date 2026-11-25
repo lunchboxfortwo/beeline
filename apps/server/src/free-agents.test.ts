@@ -454,6 +454,14 @@ describe('free starter agents', () => {
     expect(configuration.soul?.instructions).toContain(FREE_AGENT_TURN_GUIDE);
     const stored=(await db.query<{soul:{instructions:string}}>(`SELECT soul FROM agents WHERE agent_id=$1`,[agent.agent_id])).rows[0]!;
     expect(stored.soul.instructions).not.toContain('beeline:onboarding');
+
+    const retired = 'End every turn with the deliverable or a clear status explaining what is finished, what stopped, and the next step.';
+    const oldGuide = FREE_AGENT_TURN_GUIDE.replace('Never end on a promise', `${retired} Never end on a promise`);
+    await db.query(`UPDATE agents SET soul=jsonb_set(soul,'{instructions}',to_jsonb($2::text))
+      WHERE agent_id=$1`, [agent.agent_id, `Original soul\n\n${oldGuide}`]);
+    const existing = (await daemon.execute('getAgentConfiguration', { roomId }, agent.agent_id)).soul!.instructions;
+    expect(existing).not.toContain(retired);
+    expect(existing.split(FREE_AGENT_TURN_GUIDE)).toHaveLength(2);
   });
 
   it('replaces old team guidance for both existing free agents, including legacy roles, without changing personal agents', async () => {

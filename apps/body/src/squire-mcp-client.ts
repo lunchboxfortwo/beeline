@@ -216,7 +216,6 @@ export class StdioSquireMcpClient {
     if (!this.options.scope.relay) {
       delete env.BEELINE_SQUIRE_RELAY_URL;
       delete env.BEELINE_SQUIRE_RELAY_TOKEN;
-      delete env.BEELINE_TURN_CONTEXT_FILE;
     }
     const child = (this.options.spawn ?? spawn)(
       this.options.command ?? launch.command,

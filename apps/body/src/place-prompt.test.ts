@@ -1,3 +1,4 @@
+import * as sessionTools from './session-tool-connection.js';
 
 import { mkdtempSync as m13_mkdtempSync, mkdirSync as m13_mkdirSync, writeFileSync as m13_writeFileSync, symlinkSync as m13_symlinkSync, rmSync as m13_rmSync } from 'node:fs';
 
@@ -215,7 +216,7 @@ m22_describe('a scheduled prompt across the kind cutover', () => {
 });
 });
 
-import { mkdtempSync as move1_mkdtempSync, rmSync as move1_rmSync, writeFileSync as move1_writeFileSync } from 'node:fs';
+import { mkdtempSync as move1_mkdtempSync, rmSync as move1_rmSync } from 'node:fs';
 
 import { tmpdir as move1_tmpdir } from 'node:os';
 
@@ -240,9 +241,7 @@ let answer: (name: string) => Response;
 
 move1_beforeEach(() => {
   home = move1_mkdtempSync(move1_join(move1_tmpdir(), 'beeline-app-tools-'));
-  const context = move1_join(home, 'turn.json');
-  move1_writeFileSync(context, JSON.stringify({ roomId: 'room-1', requestId: 'request-1' }));
-  move1_vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', context);
+  move1_vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'room-1', requestId: 'request-1' });
   move1_vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'http://daemon.test');
   move1_vi.stubEnv('BEELINE_DAEMON_TOKEN', 'daemon-only');
   move1_vi.stubEnv('BEELINE_DAEMON_AGENT_ID', 'agent-1');
@@ -262,6 +261,7 @@ move1_beforeEach(() => {
 move1_afterEach(() => {
   move1_vi.unstubAllGlobals();
   move1_vi.unstubAllEnvs();
+  move1_vi.restoreAllMocks();
   move1_rmSync(home, { recursive: true, force: true });
 });
 
@@ -539,8 +539,7 @@ move1_describe('server-mediated connected app tools', () => {
 
   move1_it('lets a thread turn discover X and start its connection with the same turn authority', async () => {
     move1_vi.stubEnv('BEELINE_DAEMON_CORNER_ID', 'corner-1');
-    move1_writeFileSync(move1_join(home, 'turn.json'), JSON.stringify({ roomId: 'corner-1',
-      requestId: 'request-1' }));
+    move1_vi.mocked(sessionTools.sessionCommandContext).mockResolvedValue({ roomId: 'corner-1', requestId: 'request-1' });
     answer = (name) => Response.json(name === 'readAgentWorkbench'
       ? { apps: [{ appId, appKey: 'x', name: 'X', transport: 'composio',
           status: 'connecting' }] }

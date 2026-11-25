@@ -1,7 +1,5 @@
+import * as sessionTools from './session-tool-connection.js';
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtemp, writeFile, unlink, rmdir } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { callAgentTool } from './read-only-mcp-open-poll.js';
 import { agentToolsFor } from './minimal-tool-surface.js';
 import { validateAdvertisedToolInput } from './read-only-mcp-open-poll.js';
@@ -17,15 +15,13 @@ describe('typed Work board tools', () => {
       expect(tools.some(tool => tool.name === name)).toBe(false);
   });
   it('dispatches named create, state and assignment tools through the same authorized work write', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'beeline-work-tools-'));
-    const context = join(directory, 'turn.json');
-    await writeFile(context, JSON.stringify({ roomId: 'source-chat', requestId: 'command' }));
+    const context = { roomId: 'source-chat', requestId: 'command' };
     const fetch = vi.fn(
       async (_url: string | URL | Request, _init?: RequestInit) =>
         new Response(JSON.stringify({ messageId: '', createdAt: 1 }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetch);
-    vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', context);
+    vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue(context);
     vi.stubEnv('BEELINE_DAEMON_BASE_URL', 'https://daemon.example');
     vi.stubEnv('BEELINE_DAEMON_TOKEN', 'test-token');
     const written = () =>
@@ -94,8 +90,7 @@ describe('typed Work board tools', () => {
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();
-      await unlink(context);
-      await rmdir(directory);
+      vi.restoreAllMocks();
     }
   });
 });

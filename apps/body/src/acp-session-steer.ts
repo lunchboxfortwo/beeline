@@ -336,10 +336,6 @@ export async function acpClientHandlePermission(
   params: unknown,
 ): Promise<void> {
   const p = (params ?? {}) as AcpPermissionRequest;
-  if (p.sessionId && ctx.terminalSessions.has(p.sessionId)) {
-    ctx.write({ jsonrpc: '2.0', id, result: { outcome: { outcome: 'cancelled' } } });
-    return;
-  }
   const toolCallId = p.toolCall?.toolCallId;
   const metadataKey = p.sessionId && toolCallId ? `${p.sessionId}\0${toolCallId}` : undefined;
   const tracked = metadataKey ? ctx.toolCallMetadata.get(metadataKey) : undefined;
@@ -366,7 +362,6 @@ export async function acpClientHandlePermission(
       decision = 'reject';
     }
   }
-  if (p.sessionId && ctx.terminalSessions.has(p.sessionId)) decision = 'reject';
   if (decision === 'allow') {
     const allow =
       p?.options?.find((o) => o.kind === 'allow_once' || o.kind === 'allow_always') ??

@@ -15,7 +15,8 @@ const output = (roomId:string,requestId:string,text:string) =>
   daemon.execute('postRoomMessage',{roomId,requestId,text,harnessEnded:true},B);
 const report = (roomId:string,id:string,text:string) => replyToMessage(db,B,{roomId,id,text});
 
-it('refuses a reply from another chat to a human tag that woke only the tagged session', async () => {
+it('routes a connected agent reply by the delivered tag ID with older work in another chat', async () => {
+  const local = await task(H,CHAT);
   const tag = await queueMessage(db, {kind:'post', roomId:OTHER, authorId:H, text:'@jellybean Please inspect'});
   const commands = await db.query<{id:string;room_id:string}>(
     'SELECT id,room_id FROM agent_commands WHERE source_message_id=$1 AND agent_id=$2', [tag.id,B]);
@@ -23,10 +24,10 @@ it('refuses a reply from another chat to a human tag that woke only the tagged s
   await expect(report(CHAT,tag.id,'Inspection complete')).rejects.toThrow('Quote a message that woke this turn.');
   expect((await db.query('SELECT room_id FROM messages WHERE author_id=$1', [B])).rows).toEqual([]);
   const app = new RoomsMcpAgentTools(db,daemon);
-  const local = await task(H,CHAT);
   await expect(app.call(B,'reply',{commandId:local.id,id:tag.id,text:'Wrong chat'})).rejects.toThrow('Quote a message');
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1', [B])).rows).toEqual([]);
-  await app.call(B,'reply',{commandId:commands.rows[0]!.id,id:tag.id,text:'Inspection complete'});
+  await app.call(B,'reply',{id:tag.id,text:'Inspection complete'});
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[local.id])).rows).toEqual([{state:'pending'}]);
   expect((await db.query("SELECT room_id,reply_to_message_id,card->'route'->'to' recipient FROM messages WHERE author_id=$1", [B])).rows)
     .toEqual([{room_id:OTHER,reply_to_message_id:tag.id,recipient:{agent:H,place:OTHER}}]);
 });

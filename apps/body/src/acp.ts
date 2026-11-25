@@ -703,7 +703,6 @@ export class AcpClient extends EventEmitter {
     return acpClientWaitForActiveRun(this, sessionId);
   }
 
-  readonly terminalSessions = new Set<string>();
   async handlePermission(id: unknown, params: unknown): Promise<void> {
     return acpClientHandlePermission(this, id, params);
   }

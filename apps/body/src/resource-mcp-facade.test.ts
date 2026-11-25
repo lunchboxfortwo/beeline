@@ -1,3 +1,4 @@
+import * as sessionTools from './session-tool-connection.js';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -5,7 +6,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { authorizeResourceMessage } from './resource-mcp-facade.js';
 import { TurnStoppedError } from './turn-stop.js';
 
@@ -17,6 +18,10 @@ it.each(['command output authority rejected', 'command turn cancelled', 'command
       let body = '';
       request.on('data', chunk => { body += chunk; });
       request.on('end', () => {
+        if (request.url === '/session') {
+          response.end(JSON.stringify({ roomId: 'room', requestId: 'cancelled-command' }));
+          return;
+        }
         calls.push(JSON.parse(body));
         response.writeHead(403, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ error }));
@@ -26,14 +31,11 @@ it.each(['command output authority rejected', 'command turn cancelled', 'command
     await once(server, 'listening');
     const address = server.address() as { port: number };
     const baseUrl = `http://127.0.0.1:${address.port}`;
-    await writeFile(join(root, 'context.json'), JSON.stringify({
-      roomId: 'room', requestId: 'cancelled-command', generationId: 'dead-generation',
-    }));
     await writeFile(join(root, 'auth.json'), JSON.stringify({
-      baseUrl, daemonToken: 'test-token', turnContextPath: join(root, 'context.json'),
+      baseUrl, daemonToken: 'test-token', placeId: 'room',
     }));
     const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./resource-mcp-facade.ts', import.meta.url))], {
-      env: { ...process.env, BEELINE_RESOURCE_TARGET: 'squire',
+      env: { ...process.env, BEELINE_RESOURCE_TARGET: 'squire', BEELINE_GRANT_RUNNER_URL: baseUrl, BEELINE_GRANT_RUNNER_TOKEN: 'fixture',
         BEELINE_RESOURCE_AUTH_FILE: join(root, 'auth.json'),
         BEELINE_RESOURCE_LAUNCH: JSON.stringify({ url: `${baseUrl}/never-called` }) },
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -43,7 +45,7 @@ it.each(['command output authority rejected', 'command turn cancelled', 'command
       child.stdin.end(Array.from({ length: 4 }, (_, id) =>
         JSON.stringify({ jsonrpc: '2.0', id, method: 'ping' })).join('\n') + '\n');
       await exited;
-      expect(calls).toEqual([expect.objectContaining({ generationId: 'dead-generation', consume: false })]);
+      expect(calls).toEqual([expect.objectContaining({ requestId: 'cancelled-command', consume: false })]);
     } finally {
       child.kill('SIGKILL');
       server.closeAllConnections();
@@ -58,7 +60,11 @@ it.each(['revocation', 'stdin close', 'SIGTERM'] as const)('kills the resource t
   const root = await mkdtemp(join(process.cwd(), '.resource-facade-'));
   let revoked = false;
   let calls = 0;
-  const server = createServer((_request, response) => {
+  const server = createServer((request, response) => {
+    if (request.url === '/session') {
+      response.end(JSON.stringify({ roomId: 'room', requestId: 'command' }));
+      return;
+    }
     calls++;
     response.writeHead(revoked ? 403 : 200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(revoked ? { error: 'command output authority rejected' } : { allowed: true }));
@@ -66,12 +72,11 @@ it.each(['revocation', 'stdin close', 'SIGTERM'] as const)('kills the resource t
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const { port } = server.address() as { port: number };
-  const contextPath = join(root, 'context.json');
   const authPath = join(root, 'auth.json');
-  await writeFile(contextPath, JSON.stringify({ roomId: 'room', requestId: 'command', generationId: 'generation' }));
-  await writeFile(authPath, JSON.stringify({ baseUrl: `http://127.0.0.1:${port}`, daemonToken: 'test', turnContextPath: contextPath }));
+  await writeFile(authPath, JSON.stringify({ baseUrl: `http://127.0.0.1:${port}`, daemonToken: 'test', placeId: 'room' }));
   const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./resource-mcp-facade.ts', import.meta.url))], {
     env: { ...process.env, BEELINE_RESOURCE_TARGET: 'files', BEELINE_RESOURCE_AUTH_FILE: authPath,
+      BEELINE_GRANT_RUNNER_URL: `http://127.0.0.1:${port}`, BEELINE_GRANT_RUNNER_TOKEN: 'fixture',
       BEELINE_RESOURCE_LAUNCH: JSON.stringify({ command: process.execPath, args: ['-e', `
         process.on('SIGTERM', () => {});
         require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
@@ -108,7 +113,6 @@ it.each(['revocation', 'stdin close', 'SIGTERM'] as const)('kills the resource t
 
 it('keeps permission denial per-call and ends an invalidated local generation without HTTP', async () => {
   const root = await mkdtemp(join(process.cwd(), '.resource-facade-'));
-  const contextPath = join(root, 'context.json');
   const authPath = join(root, 'auth.json');
   const message = { jsonrpc: '2.0', id: 1, method: 'tools/call' };
   let calls = 0;
@@ -118,13 +122,13 @@ it('keeps permission denial per-call and ends an invalidated local generation wi
     return new Response(JSON.stringify({ allowed: calls > 1 }), { status: 200 });
   }) as typeof fetch;
   try {
-    await writeFile(authPath, JSON.stringify({ baseUrl: 'https://unused.test', daemonToken: 'test', turnContextPath: contextPath }));
-    await writeFile(contextPath, JSON.stringify({ roomId: 'room', requestId: 'command', generationId: 'generation' }));
+    await writeFile(authPath, JSON.stringify({ baseUrl: 'https://unused.test', daemonToken: 'test', placeId: 'room' }));
+    const command = vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'room', requestId: 'command' });
     expect(await authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).toBe(false);
-    await writeFile(contextPath, JSON.stringify({ roomId: 'room', requestId: 'request', itemId: 'd'.repeat(64) }));
+    command.mockResolvedValue({ roomId: 'room', requestId: 'request', itemId: 'd'.repeat(64) });
     expect(await authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).toBe(true);
-    await writeFile(contextPath, '{}');
+    command.mockResolvedValue(undefined);
     await expect(authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).rejects.toBeInstanceOf(TurnStoppedError);
     expect(calls).toBe(2);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); }
 });

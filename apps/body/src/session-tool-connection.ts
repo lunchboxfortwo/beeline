@@ -4,15 +4,15 @@ import type { GrantRunnerEndpoint } from './grant-runner.js';
 import { ask } from './wait.js';
 
 /** The loopback listener may finish starting after the first session opens. */
-export async function sessionToolConnection(): Promise<GrantRunnerEndpoint> {
-  if (process.env.BEELINE_GRANT_RUNNER_FILE) {
+export async function sessionToolConnection(env: NodeJS.ProcessEnv = process.env): Promise<GrantRunnerEndpoint> {
+  if (env.BEELINE_GRANT_RUNNER_FILE) {
     const value = JSON.parse(
-      await readFile(process.env.BEELINE_GRANT_RUNNER_FILE, 'utf8'),
+      await readFile(env.BEELINE_GRANT_RUNNER_FILE, 'utf8'),
     ) as GrantRunnerEndpoint;
     if (value.url && value.token) return value;
   }
-  const url = process.env.BEELINE_GRANT_RUNNER_URL;
-  const token = process.env.BEELINE_GRANT_RUNNER_TOKEN;
+  const url = env.BEELINE_GRANT_RUNNER_URL;
+  const token = env.BEELINE_GRANT_RUNNER_TOKEN;
   if (!url || !token) throw new Error('Session tools are not available yet');
   return { url, token };
 }
@@ -69,8 +69,9 @@ export async function sessionToolRequest(
   output: (line: GrantOutputLine) => void = (line) => {
     process.stderr.write(line.text);
   },
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<unknown> {
-  const endpoint = await sessionToolConnection();
+  const endpoint = await sessionToolConnection(env);
   let status: number;
   let body: { error?: string };
   try {
@@ -101,4 +102,23 @@ export async function sessionToolRequest(
   if (status < 200 || status >= 300)
     throw new Error(body.error ?? `Session tool failed (${status})`);
   return body;
+}
+
+export interface SessionCommandContext {
+  roomId: string;
+  requestId: string;
+  taskId?: string;
+  itemId?: string;
+  promptSectionIds?: readonly string[];
+}
+
+export async function sessionCommandContext(
+  requestId?: string,
+  placeId?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<SessionCommandContext | undefined> {
+  placeId ??= env.BEELINE_DAEMON_CORNER_ID || env.BEELINE_DAEMON_ROOM_ID;
+  if (!placeId || !(env.BEELINE_GRANT_RUNNER_URL || env.BEELINE_GRANT_RUNNER_FILE)) return;
+  const context = await sessionToolRequest('/session', { placeId, action: 'command', requestId }, undefined, env);
+  return (context ?? undefined) as SessionCommandContext | undefined;
 }

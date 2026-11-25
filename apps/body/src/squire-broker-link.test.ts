@@ -154,7 +154,6 @@ async function helperFixture(path: string) {
   const relay = new SquireTaskRelay(
     'agent',
     'room',
-    '',
     async () => true,
     '',
     (callbacks) =>

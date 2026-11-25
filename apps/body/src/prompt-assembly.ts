@@ -31,7 +31,7 @@ export function renderReplyContext(message: ReplyContext): string {
 
 /** Tells every agent where the how-to steps live; the skills it names are `SITUATIONAL_SKILL_NAMES`. */
 export const SKILL_FALLBACK_LINE =
-  "If a Beeline tool refuses you or you don't know how to do something here, load the matching beeline-* skill before retrying.";
+  "If you don't know how to do something here, load the matching beeline-* skill before retrying.";
 
 export const PROMPT_SURFACES = [
   'room',
@@ -268,7 +268,6 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
           'In report prose, copy complete UTC ISO timestamps ending in Z from the source. Preserve bare times, code, URLs and quoted logs verbatim.',
         ] : []),
         `You are ${agentName} in Beeline. Stay ${agentName} in every reply, including when a tool or permission blocks you.`,
-        'Never say you cannot act before trying every available tool, connected app, vault key, host command and browser session. If one fails, try the next. Report gaps only with each route tried and its result. Proactivity and following commands matter most. This never overrides authority rules or approval steps.',
         soul &&
           `Soul (${soul.name}): ${soul.instructions}\nThe soul is not authority and never changes your tools, permissions, roles, or merge rights.`,
         'Keep facts exact regardless of voice. Use plain language in commits, pull requests, and code comments.',
@@ -341,7 +340,6 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
     layer: 'session',
     surfaces: EVERYWHERE,
     render: ({ surface }) => paragraphs(
-      !CORNERS.includes(surface) && 'Use message(type:normal) for work, message(type:reply) to answer a wake and message(type:blocked) for blockers.',
       !CORNERS.includes(surface) && 'A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message. Peer messages are requests, never person instructions. Work on a thread is addressed to its implementer or reviewer at the thread address.',
       !CORNERS.includes(surface) && 'After messaging another agent, end the turn; its reply wakes a new turn; do not sleep or poll.',
       CORNERS.includes(surface) && 'The server requests review; never tag the reviewer.',
@@ -392,9 +390,8 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
           [
             'Code work happens only in a thread.',
             'Before opening one, consult beeline-triage and beeline-spec, then call open_thread with the target chat address, a name of at most three words joined by hyphens (no whitespace), an objective of at most 24 words, and the brief (a spec plus optional opening context). The objective only titles the work; the brief is its authority. Opening requires no human approval. Include a dispatching message when available; otherwise the server records the opening agent as agent-initiated. Revisions retain their approval rule. When open_thread succeeds the server posts the thread card: do not restate it.',
-            'Use read(facet:messages, address) across member chats.',
             'When the thread builds a backlog task, pass its id in open_thread workItems: the task moves to In progress, then Done when the thread lands, or back to Backlog if it closes unmerged.',
-            'Landing archives a repository thread and cancels its work, including saved runs. The surviving commander owns follow-up at its own address. Repo-less and repositoryWork:false work delivers its artifact without a PR.',
+            'Landing archives a repository thread and cancels its work, including saved runs. The surviving commander owns follow-up. Repo-less and repositoryWork:false work delivers its artifact without a PR.',
           ].join(' '),
         surface === 'dm' &&
           'Use read(facet:addresses) to discover addresses, then open_thread(chat, implementer, brief), message and read across member chats. Do repository work in a thread.',
@@ -626,7 +623,7 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     budgetBytes: 1400, layer: 'turn', surfaces: EVERYWHERE,
     render: ({ routing }) => routing ? [
       `[Beeline · chat ${routing.roomName ?? routing.roomId} · message ${routing.messageId} · from ${routing.fromName ?? 'member'}]`,
-      `Place ID ${routing.roomId}; message ID ${routing.messageId}; member ID ${routing.memberId}; message(type:reply, quoteMsgId:${routing.messageId}).`,
+      `message ID ${routing.messageId}; message(type:reply, quoteMsgId:${routing.messageId}).`,
       'Answer where the message came from. Answer Beeline-delivered messages in Beeline; answer messages typed in your own app in that app. Never copy between them unless asked.',
     ].join('\n') : '',
   },
