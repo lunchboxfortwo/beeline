@@ -132,6 +132,8 @@ export async function readAgentCommands(
         body: item.private_payload?.text ?? item.reason,
         attachments: item.private_payload?.attachments ?? [], type: item.private_payload ? 'private' : 'system',
       };
+      // The reply lookup uses the saved ask ID while the prompt shows the occurrence.
+      const promptId = item.wake_context?.scheduleReplyFrom ? item.source_message_id ?? source.id : source.id;
       return {
         ...(item.offline_seconds != null ? { offlineSeconds: Math.max(0, item.offline_seconds) } : {}),
         ...(item.selected_model || item.selected_effort || item.fast_mode != null ? { modelSelection: {
@@ -155,7 +157,7 @@ export async function readAgentCommands(
         ...(item.parent_command_id ? {parentCommandId:item.parent_command_id} : {}),
         agentDepth: item.agent_depth, ...(source.type === 'private' ? {private:true} : {}),
         ...(source.systemEvent?.scheduleId ? {scheduleId:source.systemEvent.scheduleId} : {}),
-        source: { ...source, createdAt, body: queuedWakeBody(item, source.body) + (item.review_rollup ? '' : checkFailureLogBody(source.systemEvent ?? null)) + reportedHeadBody(source.systemEvent ?? null) },
+        source: { ...source, id: promptId, createdAt, body: queuedWakeBody(item, source.body) + (item.review_rollup ? '' : checkFailureLogBody(source.systemEvent ?? null)) + reportedHeadBody(source.systemEvent ?? null) },
       };
     }),
   };

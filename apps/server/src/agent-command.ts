@@ -5,7 +5,7 @@ import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contr
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
 import { sendMessage } from './agent-messaging.js';
-import { recordedMessageRoute } from './message-route.js';
+import { recordedMessageRoute, replyableWake } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
 import type { AgentCommand,AgentCommandAction,RoomInboxResult,MessageRoute,MessageAsk } from '@beeline/api-contract/daemon';
 import { boundReplyExcerpt,isInformationalReply,isBackgroundCommand,wall } from '@beeline/api-contract/daemon';
@@ -286,7 +286,7 @@ export type CommandRow = {
   result_message_id: string | null;
   lifecycle_before: string | null;
   review_context?: Record<string, unknown> | null;
-  wake_context?: { briefRevision: number } | null;
+  wake_context?: { briefRevision?: number; scheduleReplyFrom?: MessageRoute['from'] } | null;
   recovery_context: string | null;
 };
 /**
@@ -673,6 +673,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
   const scheduleOwner = (chat.source?.card as { ownerId?: unknown } | null)?.ownerId;
   const workflowOwner=chat.workflow_owner_id ?? (input.reason==='resume' && parent?.message?.systemEvent?.kind==='workflow-handoff'
     ? parent.message.route?.from.agent : undefined);
+  // The saved requester supplies delivery; the timer remains the command's source.
+  const scheduleReply = input.reason === 'schedule' && parent?.action === 'input' && parent.state !== 'cancelled'
+    && parent.reason !== 'schedule' && parent.reason !== 'mcp_call' ? replyableWake(parent) : undefined;
   const scheduledReturn = input.reason === 'schedule' ? {
     kind: 'lifecycle' as const, authorId: chat.source?.author_id ?? SYSTEM_IDENTITY_ID,
     text: sourceText ?? input.reason, fromRoomId: chat.id,
@@ -744,8 +747,9 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
       parent?.root_source_message_id ?? input.scheduledHumanCommandMessageId ?? input.sourceMessageId ?? id,
       parent ? input.retainDepth || lifecycle || input.resume ? parent.agent_depth : parent.agent_depth + 1 : 0,
       input.avatarJob ?? false, payload ? json(payload) : null, returnRoom, review ? json(review) : null, input.reason === 'corner_brief_revision' ?
-        json({briefRevision: chat.brief_revision ?? 0}) : null, reportAddress ? json(reportAddress) : null,
-      json({ id: privateMessage ? id : input.sourceMessageId ?? id,
+        json({briefRevision: chat.brief_revision ?? 0}) : scheduleReply ? json({scheduleReplyFrom: scheduleReply.from}) : null,
+      reportAddress ? json(reportAddress) : null,
+      json({ id: scheduleReply?.id ?? (privateMessage ? id : input.sourceMessageId ?? id),
         // Cutover only: legacy helper writes keep their existing routing plumbing.
         route:scheduleSender ? {from:scheduleSender,to:{agent:input.agentId,place:chat.id}} : workflowOwner ? {from:{agent:workflowOwner,place:chat.id},to:{agent:input.agentId,place:chat.id}} :
           input.reason==='mcp_call' && parent?.agent_id===input.agentId && parent.message?.route ? parent.message.route :
@@ -885,14 +889,15 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
       }
       if (!messageText) return {id:receipt.id,createdAt:receipt.createdAt,answered:false};
-      const to = (item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item)).from;
+      const scheduleReply = item.reason === 'schedule' ? replyableWake(item) : undefined;
+      const to = scheduleReply?.from ?? (item.message?.route ?? item.private_payload?.route ?? await recordedMessageRoute(db,item)).from;
       if (to.agent === SYSTEM_IDENTITY_ID) refuseMessageMembership('Quote a message that woke this turn.');
       if ((await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[to.place])).rowCount) {
         refuseMessageMembership('return address archived');
       }
       const from = {agent:agentId,place:item.room_id};
       const id = hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
-      const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:item.source_message_id ?? item.id});
+      const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:scheduleReply?.id ?? item.source_message_id ?? item.id});
       if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.id]);
       else await endAgentTurn(db,item,'complete',null,saved.id);
       completedNow = true;
