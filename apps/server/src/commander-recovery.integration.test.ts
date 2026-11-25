@@ -432,7 +432,7 @@ it('maintains human follows through private orders', async () => {
 });
 
 
-it('resumes the incoming human order for a non-opener watch', async () => {
+it('keeps a non-opener watch silent on merge', async () => {
   const opened = await open();
   await rootFixture.db.query(
     `INSERT INTO messages(id,room_id,author_id,text) VALUES('watch-request',$1,$2,'@worker watch the widget')`,
@@ -456,12 +456,7 @@ it('resumes the incoming human order for a non-opener watch', async () => {
     WORKER,
   );
   await systemLine(rootFixture.db, { roomId: opened.cornerId, authorId: HUMAN, subject: { kind: 'system', name: 'GitHub' }, verb: 'merged', kind: 'merged' });
-  const merged = (await commands(ROOM, WORKER)).find((c) => c.reason === 'watched_corner')!;
-  expect(merged.parentCommandId).toBe(incoming.id);
-  await claim(merged);
-  await expect(
-    rootFixture.daemon.execute('report', { status: 'done', ...authority(merged), text: 'done: watched corner merged' }, WORKER),
-  ).resolves.toHaveProperty('id');
+  expect((await commands(ROOM, WORKER)).filter(c => c.reason === 'watched_corner')).toEqual([]);
 });
 
 

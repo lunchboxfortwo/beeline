@@ -24,7 +24,7 @@ it('S4: asks to a person create independent cards; answering clears that card al
   expect(await queued()).toEqual([[B,THREAD]]);
 });
 it('S4: an ask to an agent commander keeps the thread waiting after that recipient replies',async()=>{
-  const question=await sendMessage(db,{route:{from:{agent:B,place:THREAD},to:{agent:A,place:CHAT}},text:'blocked: Need a choice',ask});
+  const question=await sendMessage(db,{type:'blocked',route:{from:{agent:B,place:THREAD},to:{agent:A,place:CHAT}},text:'blocked: Need a choice',ask});
   const waiting=async()=>(await db.query(`SELECT waiting.person_id FROM rooms thread
     CROSS JOIN LATERAL (${cornerWaitingReportSql('thread')}) waiting WHERE thread.id=$1`,[THREAD])).rows;
   expect(await waiting()).toEqual([{person_id:A}]);

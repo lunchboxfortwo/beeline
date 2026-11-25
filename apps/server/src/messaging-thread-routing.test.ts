@@ -105,3 +105,22 @@ it('a commander can pass a blocker to the person who assigned its own work', asy
   expect((await db.query('SELECT identity_id FROM needs_you_marks WHERE message_id=$1',[escalated.id])).rows)
     .toEqual([{identity_id:H}]);
 });
+
+it('returns a blocker to the sibling session assigning this task', async () => {
+  await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:B,place:THREAD}},text:'Open the project.'});
+  await db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1',[OTHER,CHAT]);
+  const task = await daemon.execute('message',{type:'normal',roomId:OTHER,address:`${B}@${THREAD}`,text:'Compare the outputs.'},C);
+  const block = await daemon.execute('message',{type:'blocked',roomId:THREAD,requestId:task.id,text:'Which version?'},B);
+  expect((await db.query('SELECT agent_id,room_id FROM agent_commands WHERE id=$1',[block.id])).rows)
+    .toEqual([{agent_id:C,room_id:OTHER}]);
+});
+
+it('deduplicates blockers across helper versions and keeps a legacy completion local', async () => {
+  const task = await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:B,place:THREAD}},text:'Build.'});
+  await daemon.execute('message',{type:'blocked',roomId:THREAD,requestId:task.id,text:'Which branch?'},B);
+  await expect(daemon.execute('report',{roomId:THREAD,requestId:task.id,status:'needs_decision',text:'Which target?'},B))
+    .rejects.toThrow('open block');
+  const result = await daemon.execute('report',{roomId:THREAD,requestId:task.id,status:'done',text:'Built.'},B);
+  expect((await db.query('SELECT room_id,text FROM messages WHERE id=$1',[result.id])).rows)
+    .toEqual([{room_id:THREAD,text:'Built.'}]);
+});

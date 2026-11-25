@@ -50,7 +50,14 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
         ) SELECT * FROM chain WHERE room_id=$2 AND agent_id=$3 ORDER BY depth LIMIT 1`,
           [parent.parent_command_id,input.roomId,agent])).rows[0];
       }
-      const route = await commanderReportAddress(db,input.roomId,assignment);
+      const order = assignment?.private_payload;
+      const taskSender = order?.kind === 'order' && order.authorId && order.fromRoomId
+        ? {agent:order.authorId,place:order.fromRoomId}
+        : assignment?.reason === 'message' && !assignment.private_payload?.reportStatus
+        ? (assignment.message?.route ?? assignment.private_payload?.route)?.from : undefined;
+      const route = taskSender && (taskSender.agent !== agent || taskSender.place !== input.roomId)
+        ? {recipient:taskSender.agent, returnRoom:taskSender.place}
+        : await commanderReportAddress(db,input.roomId,assignment);
       const recipient = route?.recipient ?? room?.created_by;
       const place = route?.returnRoom ?? room?.parent_id;
       if (!recipient || !place || recipient === agent && place === input.roomId)

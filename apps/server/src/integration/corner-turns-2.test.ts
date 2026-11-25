@@ -545,9 +545,9 @@ const fixture = monolithFixture();
       (await listed()).map((item) => item.room.id).filter((id) => id === ROOM || id === busy);
     expect(await order()).toEqual([busy, ROOM]);
     await fixture.database.query(
-      `INSERT INTO messages(id,room_id,author_id,text,created_at)
-       VALUES('corner-hands-back',$1,$2,'needs-decision: @owner small or large?',now()+interval '10 seconds')`,
-      [cornerId, AGENT],
+      `INSERT INTO messages(id,room_id,author_id,text,created_at,card)
+       VALUES('corner-hands-back',$1,$2,'needs-decision: @owner small or large?',now()+interval '10 seconds',jsonb_build_object('reportStatus','blocked','reportToId',$3::text))`,
+      [cornerId, AGENT,HUMAN],
     );
     const corner = (await listed())
       .find((item) => item.room.id === ROOM)
@@ -607,7 +607,8 @@ const fixture = monolithFixture();
     expect(await owed()).toBe(false);
 
     // An explicit decision asks the viewer and pulls their dropdown open.
-    await say('owed-tag', AGENT, 'needs-decision: @owner matte or gloss?', '2 seconds');
+    await say('owed-tag', AGENT, '@owner matte or gloss?', '2 seconds');
+    await fixture.database.query("UPDATE messages SET card=jsonb_build_object('reportStatus','blocked','reportToId',$1::text) WHERE id='owed-tag'",[HUMAN]);
     expect(await listed()).toEqual(
       expect.objectContaining({ state: 'waiting', mine: true, attention: true }),
     );

@@ -357,10 +357,10 @@ describe('Reproduction IDLE-1: thread status says whether its agent runs or wait
     // The outline asks the human, so the corner owes them a reply.
     const outline = `needs-decision: @human Outline for approval. ${'x'.repeat(400)}`;
     await rootFixture.db.query(
-      `INSERT INTO messages(id,room_id,author_id,text,presentation,created_at)
-       VALUES($1,$2,$3,$4,'message',now()+interval '1 second'),
-             ($5,$2,$3,'thinking','activity',now()+interval '2 seconds')`,
-      [randomBytes(32).toString('hex'), cornerId, A, outline, randomBytes(32).toString('hex')],
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,created_at,card)
+       VALUES($1,$2,$3,$4,'message',now()+interval '1 second',jsonb_build_object('reportStatus','blocked','reportToId',$6::text)),
+             ($5,$2,$3,'thinking','activity',now()+interval '2 seconds',NULL)`,
+      [randomBytes(32).toString('hex'), cornerId, A, outline, randomBytes(32).toString('hex'),H],
     );
     await rootFixture.db.query(`UPDATE agent_turns SET status='complete' WHERE room_id=$1`, [cornerId]);
     await rootFixture.db.query(`UPDATE agent_commands SET state='complete' WHERE room_id=$1`, [cornerId]);

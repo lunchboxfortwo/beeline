@@ -10,11 +10,11 @@ const WORKSPACE = '11111111-1111-4111-8111-111111111111',
 
 describe("an agent's open asks", () => {
   let db: PgliteDatabase;
-  const ask = async (n: number, text = `needs-decision: question ${n}?`, author = AGENT) => {
+  const ask = async (n: number, text = `question ${n}?`, author = AGENT) => {
     const id = n.toString(16).padStart(64, '0');
     await db.query(
       `INSERT INTO messages(id,room_id,author_id,text,card,created_at)
-      VALUES($1,$2,$3,$4,jsonb_build_object('reportToId',$5::text),now()-$6*interval '1 hour')`,
+      VALUES($1,$2,$3,$4,jsonb_build_object('reportStatus','blocked','reportToId',$5::text),now()-$6*interval '1 hour')`,
       [id, ROOM, author, text, PERSON, 100 - n],
     );
     return id;

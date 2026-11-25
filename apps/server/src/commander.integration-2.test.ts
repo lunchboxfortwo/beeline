@@ -254,7 +254,7 @@ it('the same corner can order and report privately to its parent Room commander'
   const child = await worker(opened.cornerId);
   await rootFixture.daemon.execute('order', { ...authority(child), address: ROOM, agent: RUBY, text: 'Recruit parent' }, WORKER);
   await rootFixture.daemon.execute('report', { ...authority(child), status: 'blocked', text: 'blocked: need the commander decision' }, WORKER);
-  expect((await commands(ROOM, RUBY)).find(command => command.reason === 'report'))
+  expect((await commands(ROOM, RUBY)).find(command => command.reason === 'message'))
     .toMatchObject({ private: true, source: { authorId: WORKER, body: 'blocked: need the commander decision' } });
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text=$1 AND block_corner_id IS NOT NULL`, ['blocked: need the commander decision'])).rowCount).toBe(1);
 });
@@ -308,7 +308,7 @@ it('vocabulary: commander orders the child reviewer and its report returns priva
   expect(review).toMatchObject({private:true,source:{body:'Review the exact head'}});
   await claim(review);
   await rootFixture.daemon.execute('report', { ...authority(review), status:'blocked', text:'blocked: waiting for green checks' }, reviewer);
-  expect((await commands(opened.cornerId, WORKER)).find(command => command.reason === 'report')?.source.body).toBe('blocked: waiting for green checks');
+  expect((await commands(DM, RUBY)).find(command => command.reason === 'message')?.source.body).toBe('blocked: waiting for green checks');
   expect((await rootFixture.db.query(`SELECT ${cornerImplementerSql('f', 'c')} worker_agent_id FROM corner_facts f JOIN rooms c ON c.id=f.corner_id WHERE f.corner_id=$1`,[opened.cornerId])).rows[0]?.worker_agent_id).not.toBe(reviewer);
 });
 
@@ -326,7 +326,7 @@ it('vocabulary: corner message starts conversation in the addressed place withou
   await claim(reply);
   await rootFixture.daemon.execute('postRoomMessage', {...authority(reply),text:'Here is my wording suggestion.'},RUBY);
   expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE text=$1',['Here is my wording suggestion.'])).rows).toEqual([{room_id:opened.cornerId}]);
-  expect((await commands(DM,RUBY)).some(command => command.reason === 'report')).toBe(false);
+  expect((await commands(DM,RUBY)).some(command => command.reason === 'message')).toBe(false);
 });
 
 
@@ -334,7 +334,7 @@ it('vocabulary: forbidden thread orders give a usable report step', async () => 
   const opened = await open(), turn = await worker(opened.cornerId);
   await expect(rootFixture.daemon.execute('order', {...authority(turn),address:DM,agent:'ruby',text:'Do parent work'},WORKER)).rejects.toThrow('address requires current membership');
   await rootFixture.daemon.execute('report', {...authority(turn),status:'blocked',text:'blocked: parent work needs the commander'},WORKER);
-  expect((await commands(DM, RUBY)).find(command => command.reason === 'report')?.source.body).toContain('parent work');
+  expect((await commands(DM, RUBY)).find(command => command.reason === 'message')?.source.body).toContain('parent work');
 });
 
 
@@ -368,21 +368,19 @@ it.each(['empty', 'no-reply'])('an early diagnostic leaves an unanswered Room or
   const before = (await rootFixture.db.query('SELECT id FROM messages ORDER BY id')).rows;
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...input }, WORKER);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...input }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toEqual([]);
   expect((await rootFixture.db.query('SELECT id FROM messages ORDER BY id')).rows).toEqual(before);
   expect((await rootFixture.db.query('SELECT status,failure_reason FROM agent_turns WHERE request_id=$1 AND agent_id=$2', [turn.turnRequestId, WORKER])).rows[0])
     .toMatchObject({ status: 'working', failure_reason: null });
   expect((await commands(ROOM,WORKER)).map(command=>command.id)).toContain(turn.id);
 });
 
-it.each(['harness exit','provider unavailable','login required'])('an actual answer about %s reaches its recorded return address',async reason=>{
-  const {turn}=await privateAssignment();const text='Worker stopped while answering this: '+reason;
-  await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text},WORKER);
-  const reports=(await commands(DM,RUBY)).filter(command=>command.reason==='report');
-  expect(reports).toHaveLength(1);expect(reports[0]!.source.body).toBe('failed: '+text);
-  await claim(reports[0]!);
-  await rootFixture.daemon.execute('report',{...authority(reports[0]!),status:'failed',text},RUBY);
-  expect((await rootFixture.phone.readRoom(DM,HUMAN))?.messages.filter(message=>message.text==='failed: '+text)).toHaveLength(1);
+it.each(['harness exit','provider unavailable','login required'])('a failure about %s stays in the working place',async reason=>{
+  const {turn}=await privateAssignment();
+  const text='Worker stopped while answering this: '+reason;
+  const saved=await rootFixture.daemon.execute('report',{...authority(turn),status:'failed',text},WORKER);
+  expect((await rootFixture.db.query('SELECT room_id,text FROM messages WHERE id=$1',[saved.id])).rows).toEqual([{room_id:ROOM,text}]);
+  expect((await commands(DM,RUBY)).map(command=>command.id)).not.toContain(saved.id);
 });
 
 it.each(['explicit', 'implicit'])('failure visibility: %s delivered report suppresses missing-outcome fallback', async kind => {
@@ -393,7 +391,7 @@ it.each(['explicit', 'implicit'])('failure visibility: %s delivered report suppr
   }
   else await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'The saved login needs a decision.' }, WORKER);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(kind==='explicit' ? 1 : 0);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(kind==='explicit' ? 1 : 0);
   expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1', [turn.turnRequestId])).rows[0]?.status).toBe('complete');
 });
 
@@ -402,7 +400,7 @@ it.each(['complete', 'failed'] as const)('failure visibility: a recorded child o
   await rootFixture.daemon.execute('order', { ...authority(turn), address: ROOM, agent: RUBY, text: 'Check the saved login prerequisites' }, WORKER);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status,
     ...(status === 'failed' ? { reason: 'unreported_order: repeated-tool-call; requested work is unconfirmed' } : {}) }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(0);
 });
 
 it('failure visibility: a recorded pending grant permits quiet waiting', async () => {
@@ -411,7 +409,7 @@ it('failure visibility: a recorded pending grant permits quiet waiting', async (
   await rootFixture.db.query(`INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status,command_id)
     VALUES($1,$2,$3,'host','example.com','Needed for assigned work',$2,$4,'pending',$5)`, [grant, WORKER, WS, ROOM, turn.id]);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(0);
 });
 
 it('late diagnostics cannot revive a stopped item or manufacture an answer',async()=>{
@@ -440,7 +438,7 @@ it('closed-corner reports do not fall back through a recorded opening ancestor',
 it('failure visibility: unavailable commander membership refuses explicit report delivery without committing success', async () => {
   const { turn } = await privateAssignment();
   await rootFixture.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
-  await expect(rootFixture.daemon.execute('report', { ...authority(turn), status:'blocked', text: 'The login needs attention' }, WORKER)).rejects.toThrow('return address');
+  await expect(rootFixture.daemon.execute('report', { ...authority(turn), status:'blocked', text: 'The login needs attention' }, WORKER)).rejects.toThrow('membership');
   expect((await rootFixture.db.query('SELECT state,private_payload FROM agent_commands WHERE id=$1', [turn.id])).rows[0])
     .toMatchObject({ state: 'pending', private_payload: expect.not.objectContaining({ reportedGenerationId: expect.anything() }) });
 });
@@ -461,11 +459,11 @@ it('terminal completion reflects an actual failed report rather than an early di
 it('failure visibility: restored commander membership permits one explicit report after a refused publication', async () => {
   const { turn } = await privateAssignment();
   await rootFixture.db.query('UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
-  await expect(rootFixture.daemon.execute('report', { ...authority(turn), status:'blocked', text: 'blocked: login needs attention' }, WORKER)).rejects.toThrow('return address');
+  await expect(rootFixture.daemon.execute('report', { ...authority(turn), status:'blocked', text: 'blocked: login needs attention' }, WORKER)).rejects.toThrow('membership');
   await rootFixture.db.query('UPDATE memberships SET removed_at=NULL WHERE room_id=$1 AND identity_id=$2', [DM, RUBY]);
   await rootFixture.daemon.execute('report', { ...authority(turn), status:'blocked', text: 'blocked: login needs attention' }, WORKER);
   await rootFixture.daemon.execute('report', { ...authority(turn), status:'blocked', text: 'blocked: login needs attention' }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(1);
 });
 
 
@@ -489,14 +487,14 @@ it('failure visibility: Squire approval proves a current durable wait, not a com
   await rootFixture.daemon.execute('postSquireApproval', {action: 'Use the requested resource', purpose: 'complete the requested task',  ...authority(turn), tool: 'operate_login', title: 'Saved login approval',
     detail: 'Approve the saved login', approvalUrl: 'https://example.com/approval', approvalId: 'login-approval', linkKind: 'approval' }, WORKER);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(0);
 });
 
 it('failure visibility: post acknowledges stored visible text and cannot discharge an order', async () => {
   const opened = await open();
   const result = await rootFixture.daemon.execute('postCornerMessage', { ...authority(rootFixture.order), cornerId: opened.cornerId, text: 'Work remains to be done' }, RUBY);
   expect(result).toMatchObject({ stored: true, visible: true, receipt: 'Message stored and visible. No agents woken.' });
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(0);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(0);
 });
 
 it('Reproduction 13: a public final reply closes its private assignment without inventing a commander report', async () => {
@@ -504,7 +502,7 @@ it('Reproduction 13: a public final reply closes its private assignment without 
   await rootFixture.daemon.execute('postRoomMessage', { ...authority(turn), text: 'I checked the login page.' }, WORKER);
   expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1', [turn.id])).rows[0]?.state).toBe('complete');
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete' }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toEqual([]);
 });
 
 
@@ -527,7 +525,7 @@ it.each([true, false])('Reproduction R1/R2: lifecycle receipt preserves delivere
   }
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(wake), agentId: WORKER,
     status: 'failed', reason: 'unreported_order: requested work is unconfirmed' }, WORKER);
-  const reports = (await commands(DM, RUBY)).filter(c => c.reason === 'report');
+  const reports = (await commands(DM, RUBY)).filter(c => c.reason === 'message');
   expect(reports).toHaveLength(delivered ? 1 : 0);
   expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1', [wake.turnRequestId])).rows[0]?.status).toBe(delivered?'complete':'working');
 });
@@ -546,13 +544,13 @@ it.each(['complete', 'failed'] as const)('Reproduction R1: delivered needs-decis
     text: 'needs-decision: choose the next step' }, WORKER)).toMatchObject({ delivered: true });
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status,
     ...(status === 'failed' ? { reason: 'unreported_order: requested work is unconfirmed' } : {}) }, WORKER);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toHaveLength(1);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toHaveLength(1);
   expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1', [turn.turnRequestId])).rows[0]?.status).toBe('complete');
 });
 
 it('Reproduction unreported-order-false: an unreported corner turn with pending checks sends nothing', async () => {
   const { opened, turn, lifecycle } = await cornerTurnWithPendingChecks();
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'message')).toEqual([]);
   expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1 AND agent_id=$2', [turn.turnRequestId, WORKER])).rows[0]?.status).toBe('working');
   expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND card_type='turn-failed'`, [opened.cornerId])).rowCount).toBe(0);
   expect((await rootFixture.db.query('SELECT private_payload FROM agent_commands WHERE id=$1', [turn.id])).rows[0]?.private_payload)
@@ -569,8 +567,7 @@ it('Reproduction unreported-order-false: a later report(done) closes the open or
   await claim(wake);
   await expect(rootFixture.daemon.execute('report', { ...authority(wake), status: 'done', text: 'done: checks passed' }, WORKER))
     .resolves.toMatchObject({ delivered: true });
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'report').map(c => c.source.body)).toEqual(['done: checks passed']);
-  console.info('Demonstrated Reproduction unreported-order-false: later report(done) delivered once to the commander');
+  expect((await rootFixture.db.query('SELECT room_id FROM messages WHERE text=$1',['done: checks passed'])).rows).toEqual([{room_id:opened.cornerId}]);
 });
 
 

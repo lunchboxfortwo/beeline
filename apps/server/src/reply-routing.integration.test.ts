@@ -56,7 +56,7 @@ it.each([true,false])('keeps file-only output home with report first=%s', async 
     .toEqual([{room_id:THREAD,attachments:[file]}]);
   expect((await db.query('SELECT room_id,attachments FROM messages WHERE text=$1',['done: counted'])).rows)
     .toEqual([{room_id:CHAT,attachments:[]}]);
-  expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[late.id])).rows).toEqual([{room_id:THREAD}]);
+  expect((await db.query('SELECT room_id FROM messages WHERE id=$1',[late.id])).rows).toEqual([{room_id:CHAT}]);
 });
 
 it('finishes a chat order silently when the worker only produces output', async () => {

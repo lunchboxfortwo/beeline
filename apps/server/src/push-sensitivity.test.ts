@@ -165,16 +165,8 @@ describe('sensitivity boundaries and replacement slots', () => {
       `UPDATE agent_turns SET status='complete',created_at=now() WHERE room_id=$1 AND request_id=$2`,
       [corner, turn],
     );
-    expect(await loop.runOnce()).toBe(1);
-    expect(send).toHaveBeenLastCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        messageId: final,
-        text: 'Bee: The final result',
-        collapseId: final,
-      }),
-    );
     expect(await loop.runOnce()).toBe(0);
+    expect(send.mock.calls.map(([,message]) => message.messageId)).not.toContain(final);
   });
 
   it('collapses room activity while keeping human messages and attention separate', async () => {

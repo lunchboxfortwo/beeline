@@ -4,6 +4,7 @@ import { legacyCommandPayload } from './messaging-cutover.js';
 import { parseAgentAccessPolicy,senderMayAddressAgent } from '@beeline/api-contract/agent-access';
 import { attachQueuedContext } from './agent-command-context.js';
 import { initializeThreadImplementer } from './corner-lifecycle.js';
+import { sendSessionMessage } from './session-message.js';
 import { notWokenReceipt,sendMessage } from './agent-messaging.js';
 import { reportRecipient } from './message-route.js';
 import { ensureSystemIdentity } from './system-line.js';
@@ -390,7 +391,7 @@ export type QueuedDelivery = {
   kind: 'delivery'; roomId: string; recipientId?: string; id: string;
   sourceRoomId: string; sourceItem: CommandRow; parent?: CommandRow; stopped?: boolean;
   attachments?: readonly Attachment[]; ask?: string; replyTo?: string;
-  automatic?: boolean; idleSince?: string; reportStatus?: PrivateCommandPayload['reportStatus'];
+  automatic?: boolean; idleSince?: string;
 } & { authorId: string; text: AgentVoice };
 export type QueuedOrder = {
   /** Only an agent orders, in its model's words. */
@@ -501,24 +502,14 @@ export async function queueMessage(database: SqlDatabase, raw: QueuedPost | Queu
           scheduledHumanCommandMessageId: input.sourceItem.root_source_message_id, retainDepth: true,
           privatePayload: { kind: 'report', ...({ text: input.text, authorId: input.authorId } as PayloadVoice), fromRoomId: input.sourceRoomId,
             ask: input.ask, sourceAgentId:input.sourceItem.agent_id, automatic: input.automatic, idleSince: input.idleSince,
-            reportStatus: input.reportStatus,
             originCornerId: chat.source_parent_id ? input.sourceRoomId : input.sourceItem.private_payload?.originCornerId, attachments: input.attachments ? [...input.attachments] : undefined },
         }, chat);
-        if (input.reportStatus === 'blocked' || input.reportStatus === 'needs-decision') {
-          await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card,request_id)
-            VALUES($1,$2,$3,$4,'message',jsonb_build_object('reportToId',$5::text,'reportStatus',$6::text,'sourceRoomId',$7::text,
-              'route',jsonb_build_object('from',jsonb_build_object('agent',$3::text,'place',$7::text),'to',jsonb_build_object('agent',$5::text,'place',$2::uuid))),$8)
-            ON CONFLICT(id) DO NOTHING`,[queued!.id,chat.id,input.authorId,input.text,input.recipientId,input.reportStatus,input.sourceRoomId,input.sourceItem.turn_request_id]);
-        }
         return { id: queued!.id, createdAt: new Date(queued!.created_at).getTime() / 1000, delivered: true, receipt: 'Report queued privately; not confirmation of execution.' };
       }
       const saved = await postMessage(db, { kind: 'post', roomId: chat.id, authorId: input.authorId,
         audienceId: input.recipientId, id: input.id, text: input.text, attachments: input.attachments,
         requestId: input.sourceItem.turn_request_id, parent: input.sourceItem, replyTo: input.replyTo,
-        card: input.ask || input.reportStatus ? { ...(input.ask ? { ask: input.ask } : {}),
-          ...(input.reportStatus ? { reportToId: input.recipientId, reportStatus: input.reportStatus,
-            route:{from:{agent:input.authorId,place:input.sourceRoomId},to:{agent:input.recipientId,place:chat.id}},
-            sourceRoomId: input.sourceItem.private_payload?.originCornerId ?? input.sourceRoomId } : {}) } : undefined,
+        card: input.ask ? {ask:input.ask} : undefined,
       }, chat);
       return { id: saved.id, createdAt: saved.createdAt, delivered: true, receipt: saved.receipt, woken:saved.woken, notWoken:saved.notWoken };
     }
@@ -821,12 +812,10 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   });
   let completedNow = false;
   const published = await database.transaction(async db => {
-    const item = (await db.query<CommandRow & { parent_row: CommandRow | null; root_command_row: CommandRow | null; public_reply_id: string | null;
+    const item = (await db.query<CommandRow & { public_reply_id: string | null;
       name: string; stop_requested_at: Date | null }>(
-      `SELECT item.*,row_to_json(parent) parent_row,row_to_json(root_command) root_command_row,identity.name,posted.id public_reply_id
+      `SELECT item.*,identity.name,posted.id public_reply_id
        FROM agent_commands item JOIN identities identity ON identity.id=item.agent_id
-       LEFT JOIN agent_commands parent ON parent.id=item.parent_command_id
-       LEFT JOIN agent_commands root_command ON root_command.id=item.root_command_id
        LEFT JOIN messages posted ON posted.id=COALESCE(item.result_message_id,item.posted_reply_id) AND posted.deleted_at IS NULL
          AND posted.author_id=item.agent_id
        WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
@@ -842,7 +831,15 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     const payload = item?.private_payload;
     const messageText = repairAgentPost(item?.reason === 'voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
     if (item?.state === 'cancelled') refuseStoppedMessage(false);
-    if (item && !input.report) {
+    if (input.report && (input.status === 'blocked' || input.status === 'needs_decision')) {
+      if (!messageText) return {id:item?.id ?? '',createdAt:Math.floor(Date.now()/1000),answered:false};
+      const id = input.messageId ?? hash(`legacy-block:${agentId}:${input.roomId}:${input.requestId ?? ''}:${messageText}`);
+      const saved = await sendSessionMessage(db,agentId,{type:'blocked',roomId:input.roomId,text:messageText},item,id);
+      if (item) await endAgentTurn(db,item,'complete',null,saved.id);
+      completedNow = true;
+      return {...saved,delivered:true};
+    }
+    if (item) {
       const receipt = {id:item.result_message_id ?? item.posted_reply_id ?? item.id,createdAt:Math.floor(Date.now()/1000),delivered:true};
       if (!input.explicitReply) {
         const files = input.outputFiles ?? item.answer_attachments ?? [];
@@ -864,9 +861,17 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,replyTo:item.source_message_id ?? item.id,
         });
+        if (!existing && item.reason === 'corner_review_dispatch') {
+          const worker = (await db.query<{implementer_agent_id:string}>(
+            'SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1',[item.room_id])).rows[0]?.implementer_agent_id;
+          if (worker && worker !== agentId) await queueMessage(db,{
+            id:hash(`review-result:${saved.id}`),roomId:item.room_id,agentId:worker,
+            reason:'report',sourceMessageId:saved.id,parent:item,inheritPrivatePayload:false,
+          });
+        }
         if (existing && item.state === 'complete') return {id:existing,createdAt:receipt.createdAt,delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
-        await endAgentTurn(db,item,'complete',null,saved.id);
+        await endAgentTurn(db,item,input.report && input.status === 'failed' ? 'failed' : 'complete',null,saved.id);
         completedNow = true;
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
       }
@@ -877,39 +882,21 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         return {id:item.id,createdAt:receipt.createdAt};
       }
       const from = {agent:agentId,place:item.room_id};
-      const id = hash(`answer:${item.id}:${to.place}:${to.agent}${input.messageAsk ? ':ask' : ''}`);
+      const id = input.messageId ?? hash(`answer:${item.id}:${to.place}:${to.agent}:${messageText}:${JSON.stringify(input.messageAsk ?? null)}`);
       const saved = to.agent === SYSTEM_IDENTITY_ID ? await queueMessage(db,{
         kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],card:{route:{from,to}},
         id,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,
-      }) : await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:item.id});
+      }) : await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:item.source_message_id ?? item.id});
       if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.id]);
       else await endAgentTurn(db,item,'complete',null,saved.id);
       completedNow = true;
       return {...saved,delivered:true,...(to.agent===SYSTEM_IDENTITY_ID ? {receipt:notWokenReceipt('A reply to a System wake stays in this place.')} : {})};
     }
-    // Cutover only: serving old helper builds keep their original report plumbing.
-    const to = input.report && item ? await reportRecipient(db,item) : undefined;
-    const roomId = to?.place ?? input.roomId;
-    const recipientId = to?.agent;
-    const status = ['done','blocked','failed','needs_decision'].includes(String(input.status))
-      ? String(input.status).replace('_','-') : 'done';
-    if (item && (await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NOT NULL',[roomId])).rowCount) {
-      await endAgentTurn(db,item,'cancelled','return_address_archived');
-      return {id:item.id,createdAt:Math.floor(Date.now()/1000)};
-    }
-    if (!messageText) return {id:item?.id ?? hash(`${agentId}:${input.roomId}`),createdAt:Math.floor(Date.now()/1000),answered:false};
-    const text = modelText(messageText);
-    const answerId = input.messageId ?? hash(`answer:${item?.id ?? `${agentId}:${input.roomId}:${input.requestId ?? ''}`}`);
-    const sourceItem = item ?? { id: answerId, room_id: input.roomId, agent_id: agentId,
-      root_source_message_id: answerId, turn_request_id: input.requestId ?? answerId } as CommandRow;
-    const saved = await queueMessage(db, { kind: 'delivery', roomId, authorId: agentId, recipientId,
-      sourceRoomId: input.roomId, sourceItem, parent: item?.root_command_row && item.root_command_row.agent_id === recipientId ? item.root_command_row : item?.parent_row ?? undefined,
-      id: answerId, text, ask: input.ask, replyTo: input.replyToMessageId ?? item?.source_message_id ?? (input.report ? item?.id : undefined),
-      reportStatus: input.report ? status as PrivateCommandPayload['reportStatus'] : undefined,
-    });
-    completedNow = true;
-    if (item) await endAgentTurn(db, item, input.report && input.status === 'failed' ? 'failed' : 'complete', null, saved.id);
-    return saved;
+    const saved = await queueMessage(db,{kind:'post',roomId:input.roomId,authorId:agentId,
+      text:modelText(messageText),agentIds:[],id:input.messageId ?? hash(`local-final:${agentId}:${input.roomId}:${input.requestId ?? ''}`),
+      requestId:input.requestId,replyTo:input.replyToMessageId,attachments:input.outputFiles});
+    completedNow = saved.stored !== false;
+    return {...saved,delivered:completedNow};
   });
   // Optional history and cleanup cannot hold the committed publication receipt.
   if (completedNow) {

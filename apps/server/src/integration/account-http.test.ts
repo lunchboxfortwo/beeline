@@ -549,9 +549,9 @@ const fixture = monolithFixture();
     };
 
     await fixture.database.query(
-      `INSERT INTO messages(id,room_id,author_id,text,created_at)
-       VALUES('crowded-tag',$1,$2,'needs-decision: @owner hinged or loose?',now())`,
-      [cornerId, AGENT],
+      `INSERT INTO messages(id,room_id,author_id,text,created_at,card)
+       VALUES('crowded-tag',$1,$2,'needs-decision: @owner hinged or loose?',now(),jsonb_build_object('reportStatus','blocked','reportToId',$3::text))`,
+      [cornerId, AGENT,HUMAN],
     );
     await crowd();
     expect(await state()).toBe('waiting');

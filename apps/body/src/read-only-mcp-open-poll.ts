@@ -355,14 +355,13 @@ export async function callAgentTool(
   toolCallId: string,
 ): Promise<string> {
   if (name === 'message') {
-    if ('requestId' in args) throw new Error('message takes no requestId');
     if (args.type === 'reply' && process.env.BEELINE_TURN_CONTEXT_FILE) {
       const context = await readTurnContextFile();
       const commands = Array.isArray(context.commands) ? context.commands : [];
       const wake = [context, ...commands].find(item => item.sourceMessageId === args.quoteMsgId || item.itemId === args.quoteMsgId);
-      if (!wake) throw new Error('Quote a message that woke this turn.');
-      return commandRequest.run(wake.requestId, () => executeAgentTool(name,args,toolCallId));
+      return commandRequest.run(wake?.requestId, () => executeAgentTool(name,args,toolCallId));
     }
+    return executeAgentTool(name,args,toolCallId);
   }
   const { requestId, ...input } = args;
   return commandRequest.run(typeof requestId === 'string' ? requestId : undefined, () =>

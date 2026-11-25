@@ -185,7 +185,7 @@ describe('corner message attribution', () => {
       await result(worker!, text);
       await push.runOnce();
       expect(send.mock.calls.map(([, message]) => message.text)).toEqual(
-        tagged ? [`Hoots: ${text}`] : [],
+        [`Hoots: ${text}`],
       );
     } finally {
       await rootFixture.db.query(
@@ -338,8 +338,8 @@ describe('corner message attribution', () => {
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
     expect(echoed).toMatchObject({ delivered: true });
-    expect((await commands(A, C)).find(command => command.id === echoed.id))
-      .toMatchObject({ private: true, source: { authorId: B, body: expect.stringContaining('failed: FAIL: the pull request is unchanged.') } });
+    expect((await commands(A, C)).find(command => command.sourceMessageId === echoed.id))
+      .toMatchObject({ source: { authorId: B, body: expect.stringContaining('failed: FAIL: the pull request is unchanged.') } });
     expect(afterEcho).toEqual(beforeEcho);
     await result(review!, 'FAIL: the pull request is unchanged.');
     const verdicted = new Set(afterEcho);

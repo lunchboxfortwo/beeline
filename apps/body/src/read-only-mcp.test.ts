@@ -150,11 +150,11 @@ describe('canonical tool contracts', () => {
   });
 
   it('separates assignment completion, feedback, discovery and execution', () => {
-    expect(Check(schema('reply'), { id: 'task', text: 'blocked: input required' })).toBe(true);
-    expect(Check(schema('reply'), { id: 'task', text: 'input required', to: 'captain' })).toBe(
+    expect(Check(schema('message'), { type:'reply',quoteMsgId:'task', text: 'blocked: input required' })).toBe(true);
+    expect(Check(schema('message'), { type:'reply',quoteMsgId:'task', text: 'input required', to: 'captain' })).toBe(
       false,
     );
-    expect(Check(schema('reply'), { category: 'bug', summary: 'Broken tool' })).toBe(false);
+    expect(Check(schema('message'), { category: 'bug', summary: 'Broken tool' })).toBe(false);
     expect(Check(schema('report_feedback'), { category: 'bug', summary: 'Broken tool' })).toBe(
       true,
     );
@@ -205,10 +205,10 @@ mergedDescribe7('agent-choice-tools.test.ts', () => {
         const names = tools.map((tool) => tool.name);
         m7_expect(names).not.toContain('ask_choice');
         m7_expect(names).not.toContain('open_poll');
-        const schema = tools.find((tool) => tool.name === 'reply')!.inputSchema;
+        const schema = tools.find((tool) => tool.name === 'message')!.inputSchema;
         m7_expect(schema.required ?? []).not.toContain('ask');
-        m7_expect(schema.properties?.ask).toMatchObject({ type: 'object' });
-        m7_expect(schema.properties?.ask).not.toHaveProperty('maxLength');
+        m7_expect(names).not.toContain('reply');
+        m7_expect(schema.properties).not.toHaveProperty('ask');
       }
     });
 

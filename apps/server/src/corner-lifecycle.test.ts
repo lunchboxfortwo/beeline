@@ -351,7 +351,7 @@ describe('checks dispatch (rows 6-8)', () => {
     const [work] = await commands(A, cornerId);
     await claim(work!);
     await rootFixture.daemon.execute('report', { status: 'needs_decision', roomId: cornerId, requestId: work!.turnRequestId, text: 'needs-decision: decide whether to continue' }, A);
-    expect((await commands(B, cornerId)).some(c => c.reason === 'report' && c.source.body.includes('needs-decision:'))).toBe(true);
+    expect((await commands(B, cornerId)).some(c => c.reason === 'message' && c.source.body.includes('needs-decision:'))).toBe(true);
     expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE text='needs-decision: decide whether to continue' AND block_corner_id IS NOT NULL`)).rowCount).toBe(1);
   });
 
@@ -807,17 +807,15 @@ const scope11 = fixtureScope11();
   });
 
 
-  it('Reproduction REVISION-REPLY: the implementer\'s reply to a revision wakes the reviser at its own place', async () => {
+  it('Reproduction REVISION-REPLY: revising the brief leaves the original commander in charge', async () => {
     const cornerId = await approved();
     await scope11.implementerOnline();
     expect(await revise(cornerId)).toMatchObject({ wake: { queued: true, agentId: A } });
     const [wake] = (await commands(A, cornerId)).filter(command => command.reason === 'corner_brief_revision');
     await claim(wake!);
-    const sent = await rootFixture.daemon.execute('reply', {roomId:cornerId,id: wake!.id, text: 'Blocked by the revised output contract' }, A);
-    expect(sent).toMatchObject({ delivered: true });
-    expect((await commands(F, R)).filter(command => command.reason === 'reply')).toMatchObject([{ from: { agent: A, place: cornerId } }]);
-    expect((await rootFixture.db.query(`SELECT 1 FROM messages WHERE room_id=$1 AND author_id=$2 AND text LIKE 'Blocked by%'
-      AND presentation='message'`, [cornerId, A])).rowCount).toBe(0);
+    const sent = await rootFixture.daemon.execute('message', {roomId:cornerId,requestId:wake!.id,type:'blocked',text:'Blocked by the revised output contract'},A);
+    expect((await commands(F,R)).map(command => command.id)).not.toContain(sent.id);
+    expect((await rootFixture.db.query("SELECT card->>'reportToId' AS recipient FROM messages WHERE id=$1",[sent.id])).rows[0]?.recipient).toBeTruthy();
   });
 
 

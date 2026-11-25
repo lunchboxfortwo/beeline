@@ -128,7 +128,7 @@ const scope1 = fixtureScope1();
     const { token, member } = await scope1.connected();
     const askId = randomBytes(32).toString('hex');
     await scope1.db.query(`INSERT INTO messages(id,room_id,author_id,text,card)
-      VALUES($1,$2,$3,'blocked: Choose the release surface',jsonb_build_object('reportToId',$4::text))`, [askId, ROOM, member, USER]);
+      VALUES($1,$2,$3,'Choose the release surface',jsonb_build_object('reportStatus','blocked','reportToId',$4::text))`, [askId, ROOM, member, USER]);
     try {
       const source = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Continue the work.' }, USER);
       await createAgentCommand(scope1.db, { roomId: ROOM, agentId: member, sourceMessageId: source.messageId, reason: 'human_message' });
