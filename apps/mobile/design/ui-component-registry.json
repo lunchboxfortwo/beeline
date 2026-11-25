@@ -539,8 +539,8 @@
       "titleLine"
     ],
     "components/buzz/TranscriptPills.tsx": [
-      "OpenedSystemBody",
       "TranscriptPills",
+      "TranscriptSystemBody",
       "pillItem"
     ],
     "components/buzz/TranscriptReference.tsx": [

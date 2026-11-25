@@ -79,7 +79,9 @@ vi.mock('@/buzz/app-sign-in', () => ({ openAppSignIn: vi.fn() }));
 vi.mock('@/components/buzz/VaultSaveCard', () => ({ VaultSaveCard: () => null }));
 vi.mock('@/components/buzz/AgentSignInCard', () => ({ AgentSignInCard: () => null }));
 vi.mock('./RepositoryOnboardingCard', () => ({ RepositoryOnboardingCard: () => null }));
-vi.mock('@/components/buzz/TranscriptPills', () => ({ TranscriptPills: () => null }));
+vi.mock('@/components/buzz/TranscriptPills', async importOriginal => ({
+  ...await importOriginal<typeof import('@/components/buzz/TranscriptPills')>(), TranscriptPills: () => null,
+}));
 vi.mock('@/components/buzz/GrantRequestCard', () => ({ GrantRequestCard: vi.fn(() => null) }));
 vi.mock('./chat-surface-values', () => ({
   knownAgentPubkeysFor: () => new Set(), rosterAgent: () => undefined, durableFactLine: () => '',

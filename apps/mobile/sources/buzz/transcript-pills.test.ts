@@ -54,15 +54,26 @@ describe('transcript pills', () => {
     expect(rows[2]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['after1', 'after2']);
   });
 
-  it('pills provider cards while ordinary attachments and archive banners keep their own rows', () => {
-    expect(isPillMessage(row('c', { ...say('c'), githubEvent: {} as never }))).toBe(true);
+  it.each([
+    'systemTranscript', 'vaultSave', 'roomUpdate', 'writePermission', 'grantRequest', 'squireApproval',
+    'computerSession', 'onboarding', 'choice', 'appSignIn', 'agentSignIn', 'connectorOffer',
+    'notificationLifecycleRun', 'walletTx', 'walletInsufficient', 'walletDelegation', 'targetBranchProposal',
+    'githubEvent', 'daemonFact', 'awayWarning',
+  ] as const)('keeps %s visible between agent hand-offs', field => {
+    const value = field === 'systemTranscript' ? { origin: 'system', visibility: 'card' }
+      : field === 'notificationLifecycleRun' ? { items: [], subline: '' } : {};
+    const card = { ...say('card'), [field]: value };
+    expect(isPillMessage(card)).toBe(false);
+    expect(foldPillRuns([say('before'), card, say('after')])).toEqual([say('before'), card, say('after')]);
+  });
+
+  it('keeps ordinary attachments and archive banners in their own rows', () => {
     expect(isPillMessage(row('a', { ...say('a'), attachments: [{} as never] }))).toBe(false);
     expect(isPillMessage(row('x', { ...say('x'), isArchivedNotice: true }))).toBe(false);
   });
 
-  it('draws a folded PR or thread lifecycle run as a system pill', () => {
+  it('keeps a deleted lifecycle record in a notice pill', () => {
     const run = { items: [], subline: '' } as never;
-    expect(isPillMessage(row('l', { githubEvent: {} as never, notificationLifecycleRun: run }))).toBe(true);
     expect(isPillMessage(row('d', { deleted: true, notificationLifecycleRun: run }))).toBe(true);
   });
 

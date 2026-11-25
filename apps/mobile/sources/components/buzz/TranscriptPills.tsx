@@ -41,7 +41,7 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
       to,
       time,
       body: (
-        <OpenedSystemBody message={message} time={time} handlers={handlers} />
+        <TranscriptSystemBody message={message} time={time} {...handlers} />
       ),
     };
   }
@@ -52,7 +52,7 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
   const to = recipient
     ? resolve(recipient.id, recipient.name, 'agent')
     : firstMention ? resolve(firstMention, '', 'agent') : undefined;
-  // Every opened pill reads as a run row: the face → face heading already names the recipient.
+  // The pill already identifies the recipient.
   const text = recipient ? message.agentCommand!.text : message.text;
   return {
     id: message.id,
@@ -67,11 +67,10 @@ function pillItem(message: ChatDisplayMessage, resolve: PillIdentityResolver, ha
   };
 }
 
-function OpenedSystemBody({ message, time, handlers }: {
+export function TranscriptSystemBody({ message, time, ...handlers }: {
   message: ChatDisplayMessage;
   time: string;
-  handlers: PillHandlers;
-}) {
+} & PillHandlers) {
   if (!message.deleted && message.notificationLifecycleRun) {
     return <NotificationLifecycleCard message={message} cornerId={handlers.cornerId}
       onOpenCorner={handlers.onOpenCorner ?? (() => {})} onOpenUrl={handlers.onOpenUrl ?? (() => {})} />;

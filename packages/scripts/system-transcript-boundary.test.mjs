@@ -70,3 +70,20 @@ test('rejects a system row rendered with ordinary Text beside the pill call', ()
   }
   assert.deepEqual(inspectSystemRenders(file, `${code}\nconst visible = items => items.filter(item => !item.isSystemNotice);`), []);
 });
+
+test('allows a standalone body only for the row checked by the card predicate', () => {
+  const file = 'apps/mobile/sources/app/(app)/beeline/chat/useChatTranscriptRenderer.tsx';
+  const body = '<TranscriptSystemBody message={item} renderBody={renderSystemBody} />';
+  const check = statement => inspectSystemRenders(file, `
+    const renderSystemBody = () => <SquireApprovalCard />;
+    const renderPills = () => <TranscriptPills renderBody={renderSystemBody} />;
+    function render(item) { ${statement} }
+  `);
+  assert.deepEqual(check(`if (hasCardBody(item) && eligible) return ${body};`), []);
+  for (const statement of [
+    `return ${body};`,
+    `if (hasCardBody(other)) return ${body};`,
+    `if (hasCardBody(item) || eligible) return ${body};`,
+    `if (hasCardBody(item)) return null; else return ${body};`,
+  ]) assert.ok(check(statement).length, statement);
+});

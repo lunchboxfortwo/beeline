@@ -277,10 +277,9 @@ function EventPair({ event }: { event: PillEvent }) {
  * One opened event as a system line, the format an opened stop uses: meta at
  * the quiet ink, #number in brass, and a brass chevron when it opens.
  */
-function EventLine({ entry }: { entry: PillRunEntry & { event: PillEvent } }) {
-    const { event } = entry;
+function EventLine({ id, event }: { id: string; event: PillEvent }) {
     const copy = (
-        <T v="meta" color="secondary" numberOfLines={2} ellipsizeMode="tail" testID={`pill-event-text-${entry.id}`}>
+        <T v="meta" color="secondary" numberOfLines={2} ellipsizeMode="tail" testID={`pill-event-text-${id}`}>
             {event.text ?? <>
                 {event.verb ? `${event.verb} ` : null}
                 {event.number ? <T v="meta" color="needsYou">{`#${event.number}`}</T> : null}
@@ -290,12 +289,12 @@ function EventLine({ entry }: { entry: PillRunEntry & { event: PillEvent } }) {
         </T>
     );
     if (!event.open) {
-        return <YStack minHeight={HEIGHT.control} justifyContent="center" testID={`pill-event-${entry.id}`}
+        return <YStack minHeight={HEIGHT.control} justifyContent="center" testID={`pill-event-${id}`}
             accessible accessibilityLabel={event.spoken}>{copy}</YStack>;
     }
     return (
-        <TranscriptNavigationRow testID={`pill-event-${entry.id}`} singleDestination
-            trailing={{ accessibilityLabel: `${event.spoken}. ${event.open.label}`, onPress: event.open.onPress, testID: `pill-event-open-${entry.id}` }}>
+        <TranscriptNavigationRow testID={`pill-event-${id}`} singleDestination
+            trailing={{ accessibilityLabel: `${event.spoken}. ${event.open.label}`, onPress: event.open.onPress, testID: `pill-event-open-${id}` }}>
             {copy}
         </TranscriptNavigationRow>
     );
@@ -314,7 +313,7 @@ function EventGroup({ events }: { events: readonly (PillRunEntry & { event: Pill
                 <Copy small quiet>{`· ${first.time}`}</Copy>
             </XStack>
             <YStack minWidth={0}>
-                {shown.map((entry) => <EventLine key={entry.id} entry={entry} />)}
+                {shown.map((entry) => <EventLine key={entry.id} id={entry.id} event={entry.event} />)}
                 {shown.length < events.length ? (
                     <LedgerDisclosure expanded={false} accessibilityState={{ expanded: false }}
                         accessibilityLabel={`${events.length - shown.length} more ${source} events`} onPress={() => setAll(true)}
@@ -424,8 +423,11 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                     );
                 })}
             </XStack>
-            {/* A lone pill opens exactly like a run of one: same column, same heading, same tone. */}
-            {open ? <RunList run={open.run ?? [open]} /> : null}
+            {open?.run ? <RunList run={open.run} /> : open ? (
+                <TranscriptLine testID="pill-open">
+                    {open.event ? <EventLine id={open.id} event={open.event} /> : open.body}
+                </TranscriptLine>
+            ) : null}
         </YStack>
     );
 }
