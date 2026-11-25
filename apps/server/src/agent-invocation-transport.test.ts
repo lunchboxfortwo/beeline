@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach,expect,it,vi } from 'vitest';
 import { writeTurnContext } from '../../body/src/place-session.js';
-import { executeConversationOperation } from '../../body/src/read-only-mcp-execute-agent-operation.js';
+import { callAgentTool } from '../../body/src/read-only-mcp-open-poll.js';
 import { sendMessage } from './agent-messaging.js';
 import { H,B,CHAT,OTHER,db,daemon } from './messaging.test-support.js';
 
 const roots:string[]=[];
 afterEach(async()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
 it.each(['native','HTTP'] as const)('%s tool delivery to a different place leaves the final visible in the turn’s place',async transport=>{
- const task=()=>sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:CHAT}},text:'Task'});
+ const task=()=>sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Task'});
  const current=await task(),old=await sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Old task'});
  const invocation={id:randomUUID(),requestId:current.id};
  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:current.id,invocationId:invocation.id},B);
@@ -27,11 +27,12 @@ it.each(['native','HTTP'] as const)('%s tool delivery to a different place leave
    return Response.json(await daemon.execute(operation,input,B));
  });
  // Caller-supplied metadata cannot replace the private execution context.
- await executeConversationOperation('reply',{id:old.id,text:'Explicit old answer',invocation:{id:'forged',requestId:old.id}});
+ await expect(callAgentTool('message',{type:'reply',quoteMsgId:old.id,text:'Old answer'},'old')).rejects.toThrow('woke this turn');
+ await callAgentTool('message',{type:'reply',quoteMsgId:current.id,text:'Explicit answer'},'current');
  expect(requests[0]).toMatchObject({roomId:CHAT,requestId:current.id,invocation});
  const final=await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:current.id,text:'Final in this turn',harnessEnded:true,invocation},B);
  expect(final).toMatchObject({delivered:true});
  expect((await db.query("SELECT room_id,text FROM messages WHERE author_id=$1 AND presentation='message' ORDER BY room_id",[B])).rows)
-   .toEqual([{room_id:CHAT,text:'Final in this turn'},{room_id:OTHER,text:'Explicit old answer'}]);
+   .toEqual([{room_id:CHAT,text:'Final in this turn'},{room_id:OTHER,text:'Explicit answer'}]);
  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
 });

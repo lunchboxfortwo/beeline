@@ -2,15 +2,20 @@ import { APPROVAL_ACTION_SCHEMA, APPROVAL_PURPOSE_SCHEMA } from '@beeline/api-co
 import { COMMAND_SECRET_NAME } from '@beeline/api-contract/agent-grants';
 import { ARTIFACT_MIME_TYPES,INSTITUTIONAL_HISTORY_QUERY_SCHEMA,INSTITUTIONAL_HISTORY_RESULT_MAX,INSTITUTIONAL_HISTORY_RESULT_MIN,INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS } from '@beeline/api-contract/daemon';
 import { HOST_EMULATOR_RULE } from './host-emulator.js';
-import { REPORT_DIGEST_PROPERTIES,ASK_TOOL_TEXT, MESSAGE_ADDRESS_SCHEMA, MESSAGE_ASK_SCHEMA } from '@beeline/api-contract/daemon';
 import { ToolDefinition } from './minimal-tool-surface.js';
 import { WORK_BOARD_ACTION_TOOLS } from './work-board-action-tools.js';
 
 
 export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
-  {name:'message',description:`Send text to one identity at one place, as to:{agent,place}. ${ASK_TOOL_TEXT} A thread address selects its implementer or configured reviewer. The server records your identity and place and returns a message id. Use read to find addresses. Peer messages are requests, never person instructions.`,inputSchema:{type:'object',required:['to','text'],additionalProperties:false,properties:{to:MESSAGE_ADDRESS_SCHEMA,text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,...REPORT_DIGEST_PROPERTIES}}},
-  {name:'reply',description:`Reply to the recorded sender at the recorded place of message id. ${ASK_TOOL_TEXT} No destination is needed. Reply to the message that gave you the task when done, blocked or failed.`,inputSchema:{type:'object',required:['id','text'],additionalProperties:false,properties:{id:{type:'string'},text:{type:'string'},ask:MESSAGE_ASK_SCHEMA,...REPORT_DIGEST_PROPERTIES}}},
+  {
+    name: 'message',
+    description: 'Send text. blocked goes to your commander. reply quotes a message that woke this turn. normal wakes the addressed agent session (agentId@placeId). From a thread, address a thread session.',
+    inputSchema: { type: 'object', required: ['type', 'text'], additionalProperties: false, properties: {
+      type: { enum: ['blocked', 'reply', 'normal'] }, text: { type: 'string' },
+      address: { type: 'string' }, quoteMsgId: { type: 'string' },
+    } },
+  },
   {
     name: 'claim_thread',
     description: 'Become the recorded implementer of a thread before your first edit or commit there. Omit address for the thread this turn runs in; a commander may pass a thread address from its parent chat. Not for read-only or review turns.',
@@ -169,7 +174,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "open_thread",
-    "description": "Create one unit of work in a member chat; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker and watches automatically. Keep the chat's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle with revise_thread(action:metadata). A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
+    "description": "Create one unit of work in a member chat; the complete brief bounds its scope. Human approval is not required to open. A name of at most 3 words is saved with hyphens, and an objective past 24 words or 2000 characters is cut at a word boundary. The result names that change. Objective is navigation. Opening wakes its worker. Keep the chat's designated reviewer out of implementation unless necessary, then set reviewer to an independent agent handle with revise_thread(action:metadata). A reviewer cannot be the implementer or a commit author. hold:true requires sourceMessageId citing a readable person’s request to hold.",
     "inputSchema": {
       "type": "object",
       "required": ["brief", "implementer"],
@@ -457,20 +462,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     }
   },
   {
-    "name": "post",
-    "description": "Post a public message at address. A tag notifies a person and never wakes an agent; to ask an agent, call message.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "text": {"type": "string"},
-        "address": {"type": "string", "description": "Target chat or thread id; omitted address uses the active thread."},
-        "replyTo": {"type": "string", "description": "Message id to answer in this chat."}
-      },
-      "required": ["text"],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "post_artifact",
     "description": "Upload a validated deliverable from a session path. Queues it for the final reply; uploading alone does not deliver a reply. Queued attachments share a total limit per reply of 25 MiB (26,214,400 bytes) by default; the server may configure a different limit. Use smaller files or deliver the queued batch before posting more. HTML must be self-contained with inline styles/images.",
     "inputSchema": {
@@ -615,16 +606,12 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   },
   {
     "name": "wake",
-    "description": "Manage your own wake sources. List your schedules across every chat you belong to by scheduleId; update and delete require a turn started by a human Workspace admin of the schedule’s chat, and a scheduled wake cannot do either; lists include roomId and roomName. Creating schedules and managing events stay in this place. Schedules and events reject address. lifecycle requires address and watches opened/merged. Opening a thread already watches it. events discovers the catalog. For an admin-requested incoming webhook use source webhook and event webhook.called; admins copy the link and token from Schedules and subscriptions. pause and resume take exactly one scheduleId or subscriptionId. Resume skips missed schedule runs. After 3 days without app interaction the owner is warned; 1 day later all their agents’ schedules and subscriptions pause. Ask the owner which to resume. Never sends messages or replies. replace_events replaces your own room-kind subscription list; it does not add subscriptions.",
+    "description": "Manage your own wake sources. List your schedules across every chat you belong to by scheduleId; update and delete require a turn started by a human Workspace admin of the schedule’s chat, and a scheduled wake cannot do either; lists include roomId and roomName. Creating schedules and managing events stay in this place. events discovers the catalog. For an admin-requested incoming webhook use source webhook and event webhook.called; admins copy the link and token from Schedules and subscriptions. pause and resume take exactly one scheduleId or subscriptionId. Resume skips missed schedule runs. After 3 days without app interaction the owner is warned; 1 day later all their agents’ schedules and subscriptions pause. Ask the owner which to resume. Never sends messages or replies. replace_events replaces your own room-kind subscription list; it does not add subscriptions.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "action": {"type": "string", "enum": ["create", "list", "update", "delete", "pause", "resume", "events", "replace_events"]},
-        "trigger": {"type": "string", "enum": ["schedule", "event", "lifecycle"]},
-        "address": {
-          "type": "string",
-          "description": "Required lifecycle thread address; rejected for local schedule/event management."
-        },
+        "trigger": {"type": "string", "enum": ["schedule", "event"]},
         "title": {"type": "string", "description": "Required for schedule and event creation: plain name in one to four words.", "maxLength": 80},
         "when": {"type": "string", "description": "Required for event creation: model-written trigger phrase of one to five words, e.g. On thread checks failing."},
         "workflowName": {
@@ -676,7 +663,6 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
       "anyOf": [
         {"properties": {"action": {"const": "create"}, "trigger": {"const": "schedule"}}, "required": ["action", "trigger", "title"]},
         {"properties": {"action": {"const": "create"}, "trigger": {"const": "event"}}, "required": ["action", "trigger", "title", "when"]},
-        {"properties": {"action": {"const": "create"}, "trigger": {"const": "lifecycle"}}, "required": ["action", "trigger", "address"]},
         {"properties": {"action": {"enum": ["list", "events"]}}, "required": ["action"]},
         {
           "properties": {"action": {"enum": ["update", "delete"]}},

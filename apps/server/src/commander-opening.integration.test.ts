@@ -60,7 +60,7 @@ it('later human orders get ordinary replies here while escalations still go to t
   await claim(resumed);
   await rootFixture.daemon.execute('report', { ...authority(resumed), status: 'blocked', text: 'Choose the endpoint' }, WORKER);
   expect((await commands(DM, RUBY)).filter(command => command.reason === 'report'))
-    .toEqual([expect.objectContaining({ source: expect.objectContaining({ authorId: WORKER, body: 'blocked: Choose the endpoint' }) })]);
+    .toEqual([expect.objectContaining({ source: expect.objectContaining({ authorId: WORKER, body: 'Choose the endpoint' }) })]);
   const saved = (await rootFixture.db.query<CommandRow>(`SELECT * FROM agent_commands WHERE id=$1`, [turn.id])).rows[0];
   expect(await commanderReportAddress(rootFixture.db, opened.cornerId, saved))
     .toMatchObject({ recipient: HUMAN, returnRoom: opened.cornerId });
@@ -96,13 +96,13 @@ it.each([false, true])('nested corners report one step up even with opening pare
   await rootFixture.daemon.execute('report', { ...authority(assignment), status: 'blocked', text: 'Nested decision needed' }, RUBY);
   // The outer worker commands the nested corner, so the nested report wakes it there.
   const report = (await commands(outer.cornerId, WORKER)).find(command => command.reason === 'report')!;
-  expect(report).toMatchObject({ private: true, source: { authorId: RUBY, body: 'blocked: Nested decision needed' } });
+  expect(report).toMatchObject({ private: true, source: { authorId: RUBY, body: 'Nested decision needed' } });
   expect((await commands(DM, RUBY)).filter(command => command.reason === 'report')).toEqual([]);
   await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(parentTurn), agentId: WORKER, status: 'complete' }, WORKER);
   await claim(report);
   await rootFixture.daemon.execute('report', { ...authority(report), status: 'needs_decision', text: 'Nested decision needed' }, WORKER);
   expect((await commands(DM, RUBY)).find(command => command.reason === 'report'))
-    .toMatchObject({ private: true, source: { authorId: WORKER, body: 'needs-decision: Nested decision needed' } });
+    .toMatchObject({ private: true, source: { authorId: WORKER, body: 'Nested decision needed' } });
 });
 
 it('a stale recipient field cannot redirect a worker report into the corner', async () => {
@@ -110,7 +110,7 @@ it('a stale recipient field cannot redirect a worker report into the corner', as
   const result = await rootFixture.daemon.execute('report', { ...authority(turn), status: 'needs_decision',
     text: 'Choose the endpoint', to: '@captain' } as never, WORKER);
   expect((await commands(DM, RUBY)).find(command => command.id === result.id))
-    .toMatchObject({ private: true, source: { authorId: WORKER, body: 'needs-decision: Choose the endpoint' } });
+    .toMatchObject({ private: true, source: { authorId: WORKER, body: 'Choose the endpoint' } });
   expect((await rootFixture.db.query(`SELECT id FROM messages WHERE id=$1 AND presentation='message' AND block_corner_id IS NOT NULL`, [result.id])).rows).toEqual([{id:result.id}]);
 });
 

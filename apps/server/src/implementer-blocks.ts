@@ -37,12 +37,6 @@ export async function blockReminder(db: SqlDatabase, agent: string, room: string
   ].join('\n');
 }
 
-export async function refuseDoneWithBlocks(db:SqlDatabase,agent:string,room:string,text:string):Promise<void> {
-  if (!/^done:/i.test(text.trim())) return;
-  const reminder=await blockReminder(db,agent,room);
-  if(reminder) throw new CommandRefusalError(`Clear your open blocks before reporting done.\n${reminder}`,409);
-}
-
 /** A takeover changes authority immediately; the original author retains no special rights. */
 export async function closeBlock(db:SqlDatabase,actor:string,id:string,reason:string):Promise<boolean> {
   const block=(await db.query<{corner:string;worker:string;commander:string;workspace:string;parent:string}>(`

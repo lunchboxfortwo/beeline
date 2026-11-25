@@ -69,7 +69,7 @@ BEGIN
     WHERE activity_corner.id=NEW.room_id AND NEW.author_id=${cornerImplementerSql('activity_fact','activity_corner')}) THEN
     corner=NEW.room_id;
    ELSIF NEW.card->>'reportToId' IS NOT NULL OR COALESCE(NEW.card_type='agent-command'
-     AND NEW.card->>'kind'='report' AND NEW.card->>'text' ~ '^(needs-decision|blocked):',false) THEN
+     AND NEW.card->>'kind'='report' AND NEW.card->>'reportStatus' IN ('blocked','needs-decision'),false) THEN
     SELECT id INTO corner FROM rooms WHERE id::text=${humanReportCornerSql('NEW')};
    ELSIF TG_OP<>'INSERT' OR NOT (
     NEW.presentation='message' AND NEW.system_event IS NULL

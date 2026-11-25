@@ -519,6 +519,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
  * Nested schemas are left intact. Never depend on a harness feature flag.
  */
 export function invocationTool(tool: ToolDefinition): ToolDefinition {
+  if (tool.name === 'message') return tool;
   return {...tool,inputSchema:{...tool.inputSchema,properties:{
     ...(tool.inputSchema.properties as Record<string,unknown>),
     requestId:{type:'string',minLength:1,description:'The claimed request this tool serves.'},

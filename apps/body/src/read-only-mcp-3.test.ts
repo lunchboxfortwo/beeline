@@ -172,14 +172,14 @@ mergedDescribe27('read-only-mcp.order.test.ts', () => {
     const result = await m27_callAgentTool(
       'message',
       {
-        to: { place: '11111111-1111-4111-8111-111111111111', agent: 'candy' },
+        type: 'normal', address: 'candy@11111111-1111-4111-8111-111111111111',
         text: 'Compute 17 + 25',
       },
       'call-1',
     );
     m27_expect(fetch).toHaveBeenCalledTimes(1);
     m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({
-      to: { place: '11111111-1111-4111-8111-111111111111', agent: 'candy' },
+      type: 'normal', address: 'candy@11111111-1111-4111-8111-111111111111',
       text: 'Compute 17 + 25',
     });
     m27_expect(JSON.parse(result as string)).toEqual({ commandIds: ['order-1'] });
@@ -198,7 +198,7 @@ mergedDescribe27('read-only-mcp.order.test.ts', () => {
         m27_callAgentTool(
           'message',
           {
-            to: { place: '11111111-1111-4111-8111-111111111111', agent: 'candy' },
+            type: 'normal', address: 'candy@11111111-1111-4111-8111-111111111111',
             text: 'Compute 17 + 25',
           },
           'call-2',
@@ -215,20 +215,20 @@ mergedDescribe27('read-only-mcp.order.test.ts', () => {
     await m27_callAgentTool(
       'message',
       {
-        to: { place: '11111111-1111-4111-8111-111111111111', agent: '@candy' },
+        type: 'normal', address: 'candy@11111111-1111-4111-8111-111111111111',
         text: 'Check the build',
       },
       'call-3',
     );
     m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({
-      to: { place: '11111111-1111-4111-8111-111111111111', agent: '@candy' },
+      type: 'normal', address: 'candy@11111111-1111-4111-8111-111111111111',
       text: 'Check the build',
     });
     const tool = m27_agentToolsFor(true, true).find((t) => t.name === 'message')!;
     m27_expect(tool.description).not.toMatch(/broadcast/i);
-    m27_expect(tool.description).toContain('one identity');
+    m27_expect(tool.description).toContain('addressed agent session');
     m27_expect(Object.keys((tool.inputSchema as { properties: object }).properties)).toContain(
-      'to',
+      'address',
     );
   });
 });
@@ -458,33 +458,6 @@ mergedDescribe30('read-only-mcp.usage.test.ts', () => {
 mergedDescribe31('read-only-mcp.watch-corner.test.ts', () => {
   const scope34 = fixtureScope34();
 
-  m31_it(
-    'calls watchCorner in the current thread and returns readable state and kinds',
-    async () => {
-      const text = await m31_callAgentTool(
-        'wake',
-        { action: 'create', trigger: 'lifecycle', ...{ address: 'sibling' } },
-        'watch-1',
-      );
-      m31_expect(scope34.calls).toEqual([
-        {
-          name: 'watchCorner',
-          input: { roomId: 'watcher', cornerId: 'sibling', kinds: ['opened', 'merged'] },
-        },
-      ]);
-      m31_expect(text).toContain('Watching for opened, merged');
-      for (const value of [
-        'Ship widget',
-        'review',
-        '42',
-        scope34.snapshot.pullRequestUrl,
-        scope34.snapshot.headSha,
-        'passing',
-      ])
-        m31_expect(text).toContain(value);
-    },
-  );
-
   m31_it('passes a one-time schedule run limit through the wake schema to the daemon', async () => {
     await m31_callAgentTool(
       'wake',
@@ -569,46 +542,13 @@ mergedDescribe31('read-only-mcp.watch-corner.test.ts', () => {
     },
   );
 
-  m31_it('offers lifecycle watches in a DM without chatter or schedule events', () => {
-    const tool = m31_agentToolsFor(true, true).find((t) => t.name === 'wake')!;
-    m31_expect(tool.description).toMatch(/lifecycle/i);
-    m31_expect(tool.inputSchema.required).toEqual(['action']);
+  m31_it('leaves lifecycle wakes out of the native wake schema', () => {
+    for (const dm of [false,true]) {
+      const tool = m31_agentToolsFor(true, dm).find(tool => tool.name === 'wake')!;
+      m31_expect(tool.inputSchema.properties).not.toHaveProperty('address');
+      m31_expect(tool.inputSchema.properties).toHaveProperty('trigger.enum', ['schedule','event']);
+    }
   });
-
-  m31_it('reports an already merged thread with its merge commit, and a closed one', async () => {
-    const merged = { ...scope34.snapshot, workflowState: 'done', mergeCommitSha: 'f'.repeat(40) };
-    m31_vi.stubGlobal('fetch', async () =>
-      Response.json({ kinds: [], state: 'merged', woken: true, snapshot: merged }),
-    );
-    const text = await m31_callAgentTool(
-      'wake',
-      { action: 'create', trigger: 'lifecycle', ...{ address: 'sibling' } },
-      'watch-3',
-    );
-    m31_expect(text).toContain('Thread already merged; one merged wake queued now');
-    m31_expect(text).toContain('f'.repeat(40));
-    m31_vi.stubGlobal('fetch', async () =>
-      Response.json({ kinds: [], state: 'closed', snapshot: scope34.snapshot }),
-    );
-    m31_expect(
-      await m31_callAgentTool(
-        'wake',
-        { action: 'create', trigger: 'lifecycle', ...{ address: 'sibling' } },
-        'watch-4',
-      ),
-    ).toContain('Thread closed without merging');
-  });
-
-  m31_it(
-    'limits the advertised address to threads, including when called from a chat or DM',
-    () => {
-      for (const dm of [false, true]) {
-        const tool = m31_agentToolsFor(true, dm).find((t) => t.name === 'wake')!;
-        m31_expect(tool.description).toContain('requires address and watches opened/merged');
-        m31_expect(tool.inputSchema.properties).not.toHaveProperty('agent');
-      }
-    },
-  );
 });
 mergedDescribe32('read-only-mcp.workflow.test.ts', () => {
   m32_describe('workflow run tools', () => {

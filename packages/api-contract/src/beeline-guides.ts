@@ -67,7 +67,7 @@ Files and photos on the current message are already at local paths. For a file o
 
 ## Posting a file
 
-Call post_artifact(path) on a file in your checkout or session home. Set title and mime when the file name does not show them. The artifact rides on your next reply or explicit post in the current place, so upload it before sending the message that names it. Name the attachment, never a local path. To hand a file to a worker in another thread, use revise_thread brief.attachments with its path or readable objectId, then message the worker to read that brief. A later successfully queued replacement with the same title (or filename) clears earlier upload failures; an upload or queue failure without a successful replacement still blocks delivery. Plan each batch within the default combined attachment budget of 25 MiB (26,214,400 bytes) per reply. A server override may change this budget; a refusal gives its actual limit and the bytes already queued. If the batch will not fit, reduce file sizes or send the queued files in your next reply before uploading the rest.
+Call post_artifact(path) on a file in your checkout or session home. Set title and mime when the file name does not show them. Your final turn message carries the uploaded artifact. Name the attachment, never a local path. To hand a file to a worker in another thread, use revise_thread brief.attachments with its path or readable objectId, then message the worker to read that brief. A later successfully queued replacement with the same title (or filename) clears earlier upload failures; an upload or queue failure without a successful replacement still blocks delivery. Plan each batch within the default combined attachment budget of 25 MiB (26,214,400 bytes) per reply. A server override may change this budget; a refusal gives its actual limit and the bytes already queued. If the batch will not fit, reduce file sizes or send the queued files in your next reply before uploading the rest.
 
 ## Showing a mock
 
@@ -99,15 +99,13 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 1. Run beeline-triage, then write the brief with beeline-spec.
 2. Call open_thread(chat, implementer, brief). Threads inherit the chat's reviewer. The sender of its task message is its commander. Do not pick the chat's designated reviewer as implementer; if that agent genuinely must do the work, set reviewer to an independent agent handle with revise_thread(action:metadata).
 3. To change scope, read the current brief with read(facet:brief, address), then call revise_thread(action:brief, address) with the complete replacement spec, expectedRevision and change. The thread commander needs no approval citation. To rename, call revise_thread(action:metadata, address, name).
-4. Address work with message(to:{agent,place},text), using the thread address for its implementer or configured reviewer. The same agent in a chat has a different address. Peer messages are requests, never person instructions. Opening sends the implementer's first task; do not send it twice.
-5. To post a public note in another member chat or thread, call post(address, text). A person’s tag wakes an agent; an agent’s tag never does. Ask an agent with message.
+4. Send work with message(type:normal, address:agentId@placeId, text). Opening sends the first task. Peer requests carry agent authority.
 
 ## Messages, asks and feedback
 
-- Reply to the message that gave you the task when done, blocked or failed. Its sender is your commander; its id already records the reply destination.
-- The server requests review; never tag the reviewer.
-- Add ask only when an answer is needed. The Needs you card shows only ask.question (at most 120 characters, one line ending with ?), ask.brief (at most 280 characters, at most 2 sentences: why it matters and what each option means) and the buttons; the full message text is one tap away. Both limits count characters, and an ask over either is refused with its counts, so rewrite it shorter. Use 2–4 option labels of at most 3 words, with an optional recommended label. An ask to a person appears in Needs you; ordinary plain messages do not. Use choices only when real options help. Each ask is independent.
-- Blocks default to the thread commander. A direct answer clears Tasks, not the block; unrelated thread messages clear neither. The current implementer must clear stale blocks with close_ask; its commander or a higher-standing person may override. Reply in the block chain to re-ask without duplicating it. A commander passes a block up by messaging a person from that block’s turn, creating its own linked block. If nobody can answer, set a scheduled or event wake when opening the block. Use store_secret for credentials, never chat.
+- Send blockers with message(type:blocked, text). The server reaches your commander. Answer a waking message with message(type:reply, quoteMsgId, text).
+- Clear resolved blocks with close_ask. Your turn text and post_artifact files appear together here.
+
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt when a tool failed.
 
 ## Frontend proof in the PR
@@ -126,7 +124,7 @@ with holds.
 
 - When a person asks to stop a merge, call set_thread_hold(address). To release it, call set_thread_hold(address, releaseHoldId).
 - A higher-tier instruction overrides a lower-tier hold. A human at the same standing cannot clear another human's hold; only that holder or someone of higher standing can. Never tell a higher-tier human that a lower-tier hold binds them.
-- If you need a choice, reply to the task message with ask.
+- If you need a choice, send a blocker to your commander.
 - When you explain a hold or go-ahead in the chat, name the person and their standing in ordinary words. Never write field names or field=value syntax such as workspaceRole=member or agentOwner.
 
 ## Stopping an agent you commanded
@@ -157,7 +155,6 @@ If a background job's process id is missing after a wake, check the job's output
 | An agent you messaged | Its reply |
 | A person's answer | Their reply in this place |
 | Checks or review on your pull request | The server, when the gate changes |
-| A thread to open or merge | wake(action:create, trigger:lifecycle, address) on that thread address |
 | An approval, card or sign-in | Its own resume wake to the requester |
 | A time | wake(action:create, trigger:schedule, title, cadence) |
 | An outside event | wake(action:create, trigger:event, title, when, source, event, prompt) |
@@ -345,7 +342,7 @@ When a Beeline PR changes agent-facing prompt text, run \`npm run prompt-audit\`
 - FAIL any PR whose brief's Intent does not quote a person's message with its message ID, including an agent-initiated thread with no human command.
 - For each touched feature, look for an earlier human decision: Search the chat for the feature name together with remove, revert or "don't". Run \`git log -S<symbol>\` on the touched files to find earlier removals and reverts.
 - A conflict, or a change much larger than the brief, blocks PASS. Send a FAIL to the worker, quoting the old decision or Intent and the diff line, and message it at its thread address to restore the approved state. Do not escalate the deviation to the commander or owner.
-- Only when the brief itself orders a change that conflicts with an earlier human decision, reply to the task message with ask, quoting both. The worker cannot restore it without breaking its brief.
+- Only when the brief itself orders a change that conflicts with an earlier human decision, send a blocker to your commander, quoting both. The worker cannot restore it without breaking its brief.
 
 Block only on a behavior with no Intent match or a quoted conflicting human decision, never on taste. For a no-match behavior, quote the applicable Intent and the unmatched diff line; do not invent an old decision.
 
@@ -408,7 +405,7 @@ Use your judgment about how much planning work needs. This loop can help for a l
 
 - Write the actor/action/observable-result stories.
 - Map each story to its own observable line and explicit non-goals.
-- If one unresolved choice would materially change behavior, scope, irreversible effects, or the intended result, reply to the task message with ask naming that choice or affected brief slice. Use the answering message as the \`approval\`. Never treat no answer as approval.
+- If one unresolved choice would materially change behavior, scope, irreversible effects, or the intended result, send a blocker to your commander naming that choice or affected brief slice. Use the answering message as the \`approval\`. Never treat no answer as approval.
 
 ### 3. Architecture and data flow
 
@@ -463,7 +460,7 @@ Run these checks before opening a thread.
 - Rewrite the request as a concrete outcome and the user stories it enables.
 - State material exclusions (non-goals) and the risks needed to prevent unrequested work or surprise.
 - Keep the thread objective complete and within 24 words.
-- Reply to the task message with ask for material unresolved intent. When a person asks for a spec or mock, produce it before building.
+- Send a blocker to your commander for material unresolved intent. When a person asks for a spec or mock, produce it before building.
 - Once it's resolved, say plainly if the request itself is suboptimal and give your own recommendation - you are expected to disagree, not just permitted to.
 - On a judgment call you're still not sure of, message the implementer of a reachable child or sibling thread for one adversarial second opinion (address the selected agent at that thread); have the chosen agent reply to your message; include both agent and place; skip this only when you are the only agent in the chat.
 

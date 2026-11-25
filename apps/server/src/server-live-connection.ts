@@ -8,7 +8,6 @@ import type { IncomingMessage } from "node:http";
 import { phoneLiveOutput } from "./phone-live-output.js";
 import { machineConnectionOutput, enableMachineTcpKeepalive, serveMachineSocket, serveAgentSocket } from "./machine-connection.js";
 import { randomUUID, createHash } from "node:crypto";
-import { isNeedsYouAsk } from "./needs-you.js";
 import { HelperOverlayViewer, fenceHelperOverlayEnqueue, helperOverlayEnabled } from "./helper-overlay.js";
 import { phoneSocketRequests } from "./phone-socket.js";
 import { fenceCommandReceiptEnqueue } from "./router-command-coverage.js";
@@ -118,8 +117,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
           const local = event.committedRow?.type === 'message' ? event.committedRow.row : null;
           const candidate = event.needsYouCandidate || event.reason === 'phone-write' ||
             event.agentId === principal.identityId ||
-            (local && (local.presentation === 'card' || local.presentation === 'system' ||
-              isNeedsYouAsk(local.text)));
+            (local && (local.presentation === 'card' || local.presentation === 'system'));
           if (!candidate) return;
           void ctx.readLiveRowForViewer(event, event.roomId, principal.identityId,
             { type: 'message', messageId: event.messageId }).then((delta) => {
@@ -127,7 +125,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
             const message = delta.message;
             if (message.author.pubkey === principal.identityId ||
                 message.presentation === 'card' || message.presentation === 'system' ||
-                isNeedsYouAsk(message.text)) sendNeedsYouDelta(event, event.roomId);
+                event.needsYouCandidate) sendNeedsYouDelta(event, event.roomId);
           }).catch(() => undefined);
           return;
         }
@@ -538,7 +536,7 @@ export function handleLiveConnection(ctx: LiveConnectionContext, client: WebSock
                         const message = result.delta.message;
                         if (message.author.pubkey === principal.identityId ||
                             message.presentation === 'card' || message.presentation === 'system' ||
-                            isNeedsYouAsk(message.text)) sendNeedsYouDelta(event, roomId);
+                            event.needsYouCandidate) sendNeedsYouDelta(event, roomId);
                       }
                     })
                     .catch((error) => {

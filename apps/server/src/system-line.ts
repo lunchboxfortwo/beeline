@@ -1,11 +1,10 @@
-import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
 import { githubProviderKey } from './providers/index.js';
 import { restoreRoomMemberships } from './membership-join.js';
 import { roomEventSubscriptions } from './agent-subscriptions.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { approvalAsk } from './tray-approval-ask.js';
-import { createAgentCommand, type CommandRow, routeSystemCommand } from './agent-command.js';
+import { routeSystemCommand } from './agent-command.js';
 import { createHash, randomBytes } from 'node:crypto';
 import {
   formatSystemLine,
@@ -493,14 +492,14 @@ export async function systemLine(
   );
   const id = input.id ?? randomBytes(32).toString('hex');
   let subscriptions: Awaited<ReturnType<typeof roomEventSubscriptions>> = [];
-  let wakes = [...new Set(input.wakes ?? [])].filter(agentId => input.kind !== 'corner-opened' || agentId !== input.subject.id);
+  const passive = ['corner-opened', 'opened', 'merged', 'closed', 'reopened'].includes(input.kind ?? '');
+  let wakes = passive ? [] : [...new Set(input.wakes ?? [])];
   // Only an event carries a cascade. A line with no kind is one nothing reacts
   // to, so it has no causal trace.
   const write = async (
     db: SqlDatabase,
     cascade: Cascade | undefined,
     notBefore: Date | null,
-    watches: { watcher_room_id: string; agent_id: string; incoming_command: CommandRow | null }[],
   ) => {
     const inserted = (await persistSystemRows(db, { operation: 'insert', rows: [{
       id, roomId: input.roomId, authorId, text, event,
@@ -514,7 +513,7 @@ export async function systemLine(
     if (inserted) {
       // Preserve message-before-subscription lock order. One capture chooses each
       // subscription's mode, so a prompt edit cannot dispatch twice on two cuts.
-      if (input.kind && isSubscribableEventKind(input.kind)) {
+      if (!passive && input.kind && isSubscribableEventKind(input.kind)) {
         await db.query('SAVEPOINT room_event_recipients');
         try {
           subscriptions = await roomEventSubscriptions(db, input.roomId, input.kind, true);
@@ -525,21 +524,10 @@ export async function systemLine(
         }
         await db.query('RELEASE SAVEPOINT room_event_recipients');
         wakes = [...new Set([...wakes, ...subscriptions
-          .filter(row => row.prompt === null && input.kind !== 'corner-opened').map(row => row.agent_id)])];
+          .filter(row => row.prompt === null).map(row => row.agent_id)])];
       }
 
-      const watched = watches.length ? (await db.query<{ name: string; merge_sha: string | null }>(`SELECT room.name,fact.lifecycle->'pr'->>'mergeCommitSha' merge_sha FROM rooms room LEFT JOIN corner_github_cache fact ON fact.corner_id=room.id WHERE room.id=$1`, [input.card?.cornerId ?? input.roomId])).rows[0] : undefined;
-      for (const watch of watches)
-        await createAgentCommand(db, {
-          roomId: watch.watcher_room_id,
-          agentId: watch.agent_id,
-          sourceMessageId: id,
-          privatePayload: { text: systemText(`Watched thread ${watched?.name ?? input.subject.name} (${input.card?.cornerId ?? input.roomId}): ${input.kind === 'corner-opened' ? 'opened' : input.kind}${input.kind === 'merged' && watched?.merge_sha ? ` · merge commit ${watched?.merge_sha}` : ''}\n${text}`), authorId: SYSTEM_AUTHOR_ID, fromRoomId: String(input.card?.cornerId ?? input.roomId), kind: 'lifecycle' },
-          reason: 'watched_corner',
-          parent: watch.incoming_command ?? undefined, retainDepth: true,
-          action: 'input',
-        });
-      if (input.routeCommands !== false) await routeSystemCommand(db, {
+      if (!passive && input.routeCommands !== false) await routeSystemCommand(db, {
         roomId: input.roomId,
         sourceMessageId: id,
         kind: input.kind,
@@ -571,25 +559,6 @@ export async function systemLine(
     return { id, text, event, inserted };
   };
   return database.transaction(async (tx) => {
-    const watches =
-      input.kind === 'merged'
-        ? (
-            await tx.query<{ watcher_room_id: string; agent_id: string; incoming_command: CommandRow | null }>(
-              `SELECT w.watcher_room_id,w.agent_id,to_jsonb(incoming) incoming_command FROM corner_watches w
-           LEFT JOIN agent_commands incoming ON incoming.id=w.incoming_command_id
-           JOIN rooms corner ON corner.id=w.corner_id AND corner.parent_id IS NOT NULL
-           JOIN rooms watcher ON watcher.id=w.watcher_room_id AND watcher.archived_at IS NULL
-           JOIN memberships m ON m.room_id=w.watcher_room_id AND m.identity_id=w.agent_id
-             AND m.removed_at IS NULL
-           WHERE w.corner_id=$1 AND w.kinds @> $2::jsonb
-             AND ($3::text IS NULL OR w.agent_id<>$3)
-             AND EXISTS(SELECT 1 FROM memberships target WHERE target.room_id IN (corner.id,corner.parent_id)
-               AND target.identity_id=w.agent_id AND target.removed_at IS NULL)
-           FOR SHARE OF w,m,watcher`,
-              [input.roomId, JSON.stringify(['merged']), null],
-            )
-          ).rows
-        : [];
     const cascade = !input.kind
       ? undefined
       : input.causeId === undefined
@@ -600,7 +569,7 @@ export async function systemLine(
       input.roomId,
       input.kind ? input.causeId : input.afterMessageId,
     );
-    return write(tx, cascade, notBefore, watches);
+    return write(tx, cascade, notBefore);
   });
 }
 
@@ -663,46 +632,6 @@ export async function connectorOfferDecisionLines(database: SqlDatabase,
       ...(line.commandId ? {commandId:line.commandId} : {}),...(line.requestId ? {requestId:line.requestId} : {}),
     });
   }
-}
-
-/**
- * `watch` on an already merged corner queues one private lifecycle wake.
- * An agent that already received this merge gets none, including legacy wakes.
- */
-export async function wakeLateCornerWatcher(
-  db: SqlDatabase,
-  watcherRoomId: string,
-  agentId: string,
-  cornerId: string,
-  incoming?: CommandRow,
-): Promise<boolean> {
-  const line = (
-    await db.query<{ id: string }>(
-      `SELECT id FROM messages WHERE room_id=$1 AND system_event->>'kind'='merged'
-       ORDER BY created_at DESC,id DESC LIMIT 1`,
-      [cornerId],
-    )
-  ).rows[0];
-  if (!line) return false;
-  const earlier = await db.query(
-    `SELECT 1 FROM agent_commands c JOIN messages m ON m.id=c.source_message_id
-     WHERE c.agent_id=$1 AND (m.id=$2 OR (m.system_event->>'kind'='merged'
-       AND m.card->>'type'='corner-complete' AND m.card->>'cornerId'=$3))
-     LIMIT 1`,
-    [agentId, line.id, cornerId],
-  );
-  if (earlier.rowCount) return false;
-  return Boolean(
-    await createAgentCommand(db, {
-      roomId: watcherRoomId,
-      agentId,
-      sourceMessageId: line.id,
-      privatePayload: { text: systemText(`Watched address ${cornerId}: merged`), authorId: SYSTEM_AUTHOR_ID, fromRoomId: cornerId, kind: 'lifecycle' },
-      reason: 'watched_corner',
-      parent: incoming, retainDepth: true,
-      action: 'input',
-    }),
-  );
 }
 
 /**

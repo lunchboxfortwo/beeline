@@ -1,10 +1,5 @@
 import { normalizeApprovalIntent } from '@beeline/api-contract/phone';
 import {
-  reportMessageAsk,
-  validateMessageAsk,
-  type MessageAsk,
-} from '@beeline/api-contract/daemon';
-import {
   INSTITUTIONAL_SEARCH_QUERY_MAX_CHARACTERS,
   institutionalSearchQueryHasNul,
   REPOSITORY_SUBSCRIPTION_EVENTS,
@@ -36,14 +31,13 @@ import {
 } from './read-only-mcp-download-attachment.js';
 import {
   executeAgentOperation,
-  executeConversationOperation,
 } from './read-only-mcp-execute-agent-operation.js';
 import {
   JsonObject,
   ToolDefinition,
   asObject,
-  callCommandTool,
   commandRequest,
+  readTurnContextFile,
   daemonExecute,
   grantRunDepsFromEnv,
   requiredEnv,
@@ -154,11 +148,6 @@ export function advertisedAgentTool(name: string): ToolDefinition {
 }
 
 export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObject): void {
-  if (tool.name === 'message' || tool.name === 'reply')
-    reportMessageAsk(args as import('@beeline/api-contract/daemon').MessageDigest);
-  if ((tool.name === 'message' || tool.name === 'reply') && args.ask !== undefined)
-    validateMessageAsk(args.ask as MessageAsk);
-  if (tool.name === 'post') return;
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
   // and may share a name (e.g. workflow read) with an ordinary tool.
@@ -201,14 +190,6 @@ function fieldLimitDetails(schema: JsonObject, value: unknown, path = ''): strin
 /** Fix tool input that should succeed: drop a broken reply link and lowercase memory keywords. */
 export function normalizeAgentToolArgs(name: string, args: JsonObject): string[] {
   const removed: string[] = [];
-  if (
-    name === 'post' &&
-    'replyTo' in args &&
-    (typeof args.replyTo !== 'string' || !/^[0-9a-f]{64}$/.test(args.replyTo))
-  ) {
-    delete args.replyTo;
-    removed.push('reply link');
-  }
   if (name === 'open_thread') {
     for (const field of ['name', 'objective'] as const) {
       if (args[field] === undefined) continue;
@@ -368,19 +349,24 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
   }
 }
 
-export const turnArtifacts = new Map<
-  string,
-  { uploads: { name: string; result: Promise<string> }[] }
->();
-
 export async function callAgentTool(
   name: string,
   args: JsonObject,
   toolCallId: string,
 ): Promise<string> {
+  if (name === 'message') {
+    if ('requestId' in args) throw new Error('message takes no requestId');
+    if (args.type === 'reply' && process.env.BEELINE_TURN_CONTEXT_FILE) {
+      const context = await readTurnContextFile();
+      const commands = Array.isArray(context.commands) ? context.commands : [];
+      const wake = [context, ...commands].find(item => item.sourceMessageId === args.quoteMsgId || item.itemId === args.quoteMsgId);
+      if (!wake) throw new Error('Quote a message that woke this turn.');
+      return commandRequest.run(wake.requestId, () => executeAgentTool(name,args,toolCallId));
+    }
+  }
   const { requestId, ...input } = args;
   return commandRequest.run(typeof requestId === 'string' ? requestId : undefined, () =>
-    callCommandTool(name, input, toolCallId),
+    executeAgentTool(name, input, toolCallId),
   );
 }
 
@@ -390,7 +376,6 @@ export async function executeAgentTool(
   args: JsonObject,
   toolCallId: string,
 ): Promise<string> {
-  if (name === 'post') return executeConversationOperation(name, args);
   return executeResourceTool(name, args, toolCallId);
 }
 
@@ -417,7 +402,6 @@ async function executeResourceTool(
   };
   switch (name) {
     case 'message':
-    case 'reply':
       return execute(name);
     case 'create_work_item':
     case 'update_work':
@@ -664,17 +648,9 @@ async function executeResourceTool(
       ]);
       if (Object.keys(args).some((key) => !allowed.has(key)))
         throw new Error('wake only manages this agent’s own wake sources');
-      if (args.trigger !== 'lifecycle' && args.address !== undefined)
-        throw new Error(
-          'address is only supported for lifecycle wakes; schedules and events belong to this place',
-        );
-      if (args.trigger === 'lifecycle' && !args.address)
-        throw new Error('lifecycle wake requires address');
       const roomId = agentScheduleRoomId();
       const deps = { ...agentScheduleDepsFromEnv(), selfOnly: true };
       if (args.action === 'pause' || args.action === 'resume') {
-        if (args.trigger === 'lifecycle')
-          throw new Error('pause and resume apply to schedules and subscriptions');
         return JSON.stringify(
           await daemonExecute('setAgentWakePaused', {
             roomId,
@@ -685,13 +661,12 @@ async function executeResourceTool(
         );
       }
       if (args.action === 'list') {
-        const [schedules, subscriptions, watches, events] = await Promise.all([
+        const [schedules, subscriptions, events] = await Promise.all([
           daemonExecute('listAgentSchedules', { roomId, selfOnly: true }),
           daemonExecute('listAgentSubscriptions', { roomId }),
-          daemonExecute('listAgentWatches', { roomId }),
           daemonExecute('listEventSubscriptions', { roomId }),
         ]);
-        return JSON.stringify({ ...schedules, subscriptions, ...watches, events });
+        return JSON.stringify({ ...schedules, subscriptions, events });
       }
       if (args.action === 'events')
         return JSON.stringify({
@@ -708,13 +683,6 @@ async function executeResourceTool(
       if (args.trigger === 'event') {
         if (args.action === 'create') return execute('create_subscription');
         if (args.action === 'delete') return execute('delete_subscription');
-      }
-      if (args.trigger === 'lifecycle') {
-        if (args.action === 'create') return execute('watch');
-        if (args.action === 'delete')
-          return JSON.stringify(
-            await daemonExecute('watchCorner', { roomId, cornerId: args.address, kinds: [] }),
-          );
       }
       throw new Error('unknown wake action/trigger');
     }

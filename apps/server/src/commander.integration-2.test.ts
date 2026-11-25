@@ -272,7 +272,7 @@ it('public corner notes stay durable without waking a worker or commander', asyn
 it('lists only the caller’s own lifecycle watches at the current address', async () => {
   const opened = await open();
   await rootFixture.db.query(`INSERT INTO corner_watches(watcher_room_id,agent_id,corner_id,kinds) VALUES($1,$2,$3,'["merged"]'::jsonb)`, [DM, WORKER, opened.cornerId]);
-  expect(await rootFixture.daemon.execute('listAgentWatches', { roomId: DM }, RUBY)).toEqual({ watches: [{ address: opened.cornerId, kinds: ['opened', 'merged'] }] });
+  expect(await rootFixture.daemon.execute('listAgentWatches', { roomId: DM }, RUBY)).toEqual({ watches: [] });
 });
 
 
@@ -533,23 +533,12 @@ it.each([true, false])('Reproduction R1/R2: lifecycle receipt preserves delivere
 });
 
 
-it.each(['no-reply', 'legacy-failure'])('a merge watch keeps its answer obligation despite a %s diagnostic', async mode => {
+it('a merge leaves the opener with no answer obligation', async () => {
   const opened = await open();
   await systemLine(rootFixture.db, { roomId: opened.cornerId, authorId: HUMAN,
     subject: { kind: 'system', name: 'GitHub' }, verb: 'merged', kind: 'merged' });
-  const wake = (await commands(DM, RUBY)).find(c => c.reason === 'watched_corner')!;
-  expect(wake).toBeDefined();
-  await claim(wake);
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(wake), agentId: RUBY, status: 'working' }, RUBY);
-  await rootFixture.daemon.execute('postAgentTurnReceipt', { ...authority(wake), agentId: RUBY,
-    ...(mode === 'no-reply' ? { status: 'complete' as const, completionKind: 'no-reply' as const }
-      : { status: 'failed' as const, reason: 'unreported_order: requested work is unconfirmed' }) }, RUBY);
-  expect((await rootFixture.phone.readRoom(DM, HUMAN))?.messages.filter(m => m.text.startsWith('failed:'))).toHaveLength(0);
-  expect((await rootFixture.db.query('SELECT status FROM agent_turns WHERE request_id=$1', [wake.turnRequestId])).rows[0]?.status).toBe('working');
-  await rootFixture.daemon.execute('postRoomMessage',{...authority(wake),text:'The watched corner merged.'},RUBY);
-  expect((await rootFixture.db.query('SELECT state FROM agent_commands WHERE id=$1',[wake.id])).rows).toEqual([{state:'complete'}]);
+  expect((await commands(DM, RUBY)).filter(command => command.reason === 'watched_corner')).toEqual([]);
 });
-
 
 it.each(['complete', 'failed'] as const)('Reproduction R1: delivered needs-decision on an order survives %s receipt', async status => {
   const { turn } = await privateAssignment();

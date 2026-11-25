@@ -1,4 +1,3 @@
-import { refuseDoneWithBlocks } from './implementer-blocks.js';
 import { lockAgentInvocation } from './agent-invocation.js';
 import { Check, Errors } from 'typebox/value';
 import { isInformationalReply, MESSAGE_ASK_SCHEMA, validateMessageAsk, reportMessageAsk, type MessageAddress, type MessageAsk, type MessageRoute } from '@beeline/api-contract/daemon';
@@ -39,7 +38,7 @@ export const notWokenReceipt = (reason: string) => `Message stored and visible. 
 
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
-  route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
+  type?: 'normal' | 'blocked' | 'reply'; route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
   parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
 }) {
   assertMemberTranscript(input.route.from.agent);
@@ -47,9 +46,8 @@ export async function sendMessage(db: SqlDatabase, input: {
   input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
   return db.transaction(async tx => {
-    await refuseDoneWithBlocks(tx,input.route.from.agent,input.route.from.place,input.text);
-    const reportStatus = /^(blocked|needs-decision):/i.exec(input.text.trim())?.[1]?.toLowerCase();
-    const to = input.replyTo ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
+    const reportStatus = input.type === 'blocked' ? 'blocked' : undefined;
+    const to = input.replyTo || reportStatus ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
     // A recorded reply can cross a private call site the worker never joined.
     // Its recipient still belongs there; the responder belongs at its own origin.
     const route = { from: input.route.from, to };
@@ -58,14 +56,14 @@ export async function sendMessage(db: SqlDatabase, input: {
     if (!human) {
       // Self-addressed speech and acknowledgements of informational replies
       // stay in the transcript without authorizing another agent turn.
-      const self = to.agent === route.from.agent;
+      const self = !input.type && to.agent === route.from.agent;
       // A commander or implementer may queue one turn for itself in its thread.
       // A turn a self-message started cannot queue another, so it cannot loop.
       const selfWake = self && !input.replyTo && Boolean(input.parent) && input.parent!.private_payload?.selfWake !== true &&
         (await tx.query(`SELECT 1 FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id
           WHERE corner.id=$1 AND corner.archived_at IS NULL
             AND $2 IN (fact.implementer_agent_id,${cornerCommanderIdSql('corner')})`,[to.place,to.agent])).rowCount > 0;
-      const transcriptOnly = self && !selfWake || Boolean(!reportStatus && input.replyTo && !input.ask &&
+      const transcriptOnly = self && !selfWake || Boolean(!input.type && !reportStatus && input.replyTo && !input.ask &&
         isInformationalReply(input.parent?.reason, input.parent?.private_payload?.messageAsk));
       if (transcriptOnly && !(await tx.query(`SELECT 1 FROM room_access member
         JOIN rooms room ON room.id=member.room_id AND room.archived_at IS NULL
@@ -73,9 +71,9 @@ export async function sendMessage(db: SqlDatabase, input: {
         refuseMessageMembership();
       const command = transcriptOnly ? undefined : await queueMessage(tx, {
         id, roomId: to.place, agentId: to.agent,sourceMessageId:null,
-        audienceId:input.replyTo ? to.agent : undefined,
+        audienceId:input.replyTo || reportStatus ? to.agent : undefined,
         reason:reportStatus ? 'message' : input.replyTo ? 'reply' : 'message',parent:input.parent,
-        privatePayload:{kind:input.replyTo ? 'reply' : 'message',route,messageAsk:input.ask,inReplyTo:input.replyTo,
+        privatePayload:{kind:input.replyTo ? 'reply' : 'message',route,reportStatus,messageAsk:input.ask,inReplyTo:input.replyTo,
           text:modelText(input.text),authorId:route.from.agent,fromRoomId:route.from.place,
           returnIdentityId:route.from.agent,attachments:input.attachments,...(selfWake ? {selfWake:true} : {})},
       });
@@ -117,8 +115,8 @@ export async function sendMessage(db: SqlDatabase, input: {
       return { id, createdAt: Math.floor(Date.now()/1000) };
     }
     const saved = await queueMessage(tx,{kind:'post',id,roomId:to.place,authorId:route.from.agent,
-      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent}: {})},agentIds:[],audienceId:input.replyTo ? to.agent : undefined,
-      attachments:input.attachments,parent:input.parent,replyTo:input.parent?.source_message_id ?? input.replyTo ?? (reportStatus ? input.parent?.id : undefined),
+      origin:route.from,text:modelText(input.text),card:{route,sourceRoomId:route.from.place,...(reportStatus ? {reportStatus,reportToId:to.agent}: {})},agentIds:[],audienceId:input.replyTo || reportStatus ? to.agent : undefined,
+      attachments:input.attachments,parent:input.parent,replyTo:input.replyTo ?? input.parent?.source_message_id ?? (reportStatus ? input.parent?.id : undefined),
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
     return { id:saved.id,createdAt:saved.createdAt };
   });

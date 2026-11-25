@@ -67,7 +67,7 @@ it('a receipt for the same request at the wrong destination leaves a final answe
  expect((await answers()).map(row=>row.text)).toEqual(['Original place answer']);
 });
 
-it('a follow-up ask on a reported task stays local and retries publish once',async()=>{
+it('a follow-up ask reaches its recipient and retries publish once',async()=>{
  const request=await task();
  const context={roomId:CHAT,queuedRequestIds:[request.id]};
  await replyToMessage(db,B,{...context,id:request.id,text:'Inspected'});
@@ -76,7 +76,7 @@ it('a follow-up ask on a reported task stays local and retries publish once',asy
  expect(question).not.toHaveProperty('_meta');
  expect(await replyToMessage(db,B,input)).toMatchObject({id:question.id});
  expect(await answers()).toHaveLength(2);
- expect((await db.query('SELECT message_id FROM work_questions WHERE message_id=$1',[question.id])).rows).toHaveLength(0);
+ expect((await db.query('SELECT message_id FROM work_questions WHERE message_id=$1',[question.id])).rows).toHaveLength(1);
 });
 it('an earlier ask in the batch prevents a later reply from ending the native turn',async()=>{
  const first=await task(),second=await task();

@@ -402,7 +402,7 @@ export class PushDeliveryLoop {
           AND workspace_member.removed_at IS NULL
         JOIN identities author ON author.id=m.author_id
         JOIN identities recipient ON recipient.id=m.push_identity_id AND recipient.kind='human'
-        CROSS JOIN LATERAL (SELECT ${pushDirectAttentionSql('m.turn_ids')} direct) attention
+        CROSS JOIN LATERAL (SELECT ${pushDirectAttentionSql()} direct) attention
 
         WHERE (
             room.direct_participants IS NULL

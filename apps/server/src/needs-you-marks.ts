@@ -158,9 +158,9 @@ BEGIN
       NEW.block_parent_id := source_block;
     END IF;
   END IF;
-  IF (NEW.card->>'reportStatus' IN ('blocked','needs-decision') OR NEW.text ~ '^(blocked|needs-decision):') AND NEW.card->>'reportToId' IS NOT NULL AND NEW.block_corner_id IS NULL THEN
+  IF NEW.card->>'reportStatus' IN ('blocked','needs-decision') AND NEW.card->>'reportToId' IS NOT NULL AND NEW.block_corner_id IS NULL THEN
     SELECT room.id INTO NEW.block_corner_id FROM rooms room JOIN corner_facts fact ON fact.corner_id=room.id
-      WHERE room.id::text=COALESCE(NEW.card->>'sourceRoomId',NEW.room_id::text) AND fact.implementer_agent_id=NEW.author_id;
+      WHERE room.id::text=COALESCE(NEW.card->>'sourceRoomId',NEW.room_id::text) AND room.parent_id IS NOT NULL;
   END IF;
   RETURN NEW;
 END $$;
@@ -185,7 +185,7 @@ DO $blocks$ BEGIN
     WHERE room.id=fact.corner_id AND room.archived_at IS NULL
       AND m.author_id IN (fact.implementer_agent_id,fact.owner_agent_id) AND ${humanReportCornerSql('m')}=room.id::text
       AND m.ask_closed_reason IS NULL AND m.deleted_at IS NULL
-      AND COALESCE(m.card->>'reportStatus',substring(m.text FROM '^([^:]+):')) IN ('blocked','needs-decision')
+      AND m.card->>'reportStatus' IN ('blocked','needs-decision')
       AND m.card->>'reportToId' IS NOT NULL
       AND NOT EXISTS(SELECT 1 FROM messages newer WHERE newer.author_id=m.author_id
         AND ${humanReportCornerSql('newer')}=room.id::text AND ${agentReportSql('newer')}

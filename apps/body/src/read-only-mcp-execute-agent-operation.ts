@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { attachmentId,deliverAttachments,withoutImageData } from "./attachment-delivery.js";
 import { beelineManagedSkills,runningBeelineReleaseId } from "./beeline-skill.js";
 import { listGrants,requestGrant,shareBrowser,storeSecret,workbenchStatus } from './read-only-mcp-agent-grant-deps.js';
-import { agentScheduleDepsFromEnv,agentScheduleRoomId,bindBriefFiles,postArtifact } from './read-only-mcp-download-attachment.js';
+import { agentScheduleRoomId,bindBriefFiles,postArtifact } from './read-only-mcp-download-attachment.js';
 import { approveMerge,closeCorner,openCorner,prChecksStatus,readCornerBrief,reportFeedback,reviseCornerBrief,targetCornerId,writeScratchFile } from './read-only-mcp-open-corner.js';
 import { runGrantedCommand } from './read-only-mcp-open-poll.js';
-import { activeCommandContext,asObject,connectorOfferDepsFromEnv,daemonExecute,downloadAttachment,fetchImage,JsonObject,memorySources,requiredEnv,readTurnContextFile,stringArg } from './read-only-mcp.js';
+import { activeCommandContext,asObject,connectorOfferDepsFromEnv,daemonExecute,downloadAttachment,fetchImage,JsonObject,memorySources,requiredEnv,stringArg } from './read-only-mcp.js';
 import { allocatedDirectoryBytes,scratchBudgetMessage } from "./scratch-lifecycle.js";
 import { sessionToolRequest } from './session-tool-connection.js';
 import { squireSessionSignedIn } from "./squire-sign-in.js";
@@ -22,23 +22,8 @@ import { squireSessionSignedIn } from "./squire-sign-in.js";
 
 
 
-export async function executeConversationOperation(name:'post'|'message'|'reply',args:JsonObject):Promise<string> {
-  if (name==='reply') {
-    const context = process.env.BEELINE_TURN_CONTEXT_FILE ? await readTurnContextFile() : {};
-    const commands = Array.isArray(context.commands) ? context.commands : [];
-    const ids = [...new Set([context.requestId,...commands.map(command => asObject(command).requestId)]
-      .filter((id): id is string => typeof id === 'string' && Boolean(id)))];
-    return JSON.stringify(await daemonExecute(name,{...args,...(ids.length ? {queuedRequestIds:ids} : {})}));
-  }
-  if (name==='message') return JSON.stringify(await daemonExecute(name,args));
-  return JSON.stringify(await daemonExecute('postCornerMessage',{
-    cornerId:typeof args.address==='string'?args.address:typeof args.cornerId==='string'?args.cornerId:
-      process.env.BEELINE_DAEMON_CORNER_ID?.trim() || requiredEnv('BEELINE_DAEMON_ROOM_ID'),
-    text:String(args.text ?? ''),replyTo:typeof args.replyTo==='string'?args.replyTo:undefined}));
-}
-
 export async function executeAgentOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
-  if (name==='post'||name==='message'||name==='reply') return executeConversationOperation(name,args);
+  if (name === 'message') return JSON.stringify(await daemonExecute(name,args));
   return executeResourceOperation(name,args,toolCallId);
 }
 
@@ -705,24 +690,6 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       if (!subscriptionId) throw new Error('subscriptionId is required');
       await daemonExecute('deleteAgentSubscription', { roomId: agentScheduleRoomId(), subscriptionId });
       return `Subscription ${subscriptionId} stopped.`;
-    }
-    case 'watch': {
-      const deps = agentScheduleDepsFromEnv();
-      const result = await deps.execute('watchCorner', {
-        roomId: deps.roomId,
-        cornerId: args.address,
-        kinds: ['opened', 'merged'],
-      });
-      const kinds = (result.kinds as string[]).join(', ');
-      const headline =
-        result.state === 'merged'
-          ? `Thread already merged${result.woken ? '; one merged wake queued now' : '; no new wake (already delivered)'}`
-          : result.state === 'closed'
-            ? 'Thread closed without merging; nothing to watch'
-            : kinds
-              ? `Watching for ${kinds}`
-              : 'Watch removed';
-      return `${headline}\n${JSON.stringify(result.snapshot, null, 2)}`;
     }
     case 'request_grant':
       return requestGrant(args);

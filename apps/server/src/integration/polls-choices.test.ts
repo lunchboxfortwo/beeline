@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { pushDirectAttentionSql } from '../push-attention.js';
 import { PushDeliveryLoop } from '.././background.js';
 import { isRoomView, readRoomView, type RoomView } from '@beeline/api-contract/phone';
 import { monolithFixture, wokenBy, AGENT, WORKSPACE, ROOM } from '../test-fixtures/test-support-monolith.js';
@@ -49,6 +50,15 @@ const fixture = monolithFixture();
         text: 'Bee: @owner the question card above needs your pick.',
       }),
     );
+    const progressId = 'e'.repeat(64);
+    await fixture.database.query(`INSERT INTO messages(id,room_id,author_id,request_id,text,presentation)
+      VALUES($1,$2,$3,$4,'I checked the branch.','message')`, [progressId, ROOM, AGENT, requestId]);
+    const attention = await fixture.database.query(`SELECT COALESCE(${pushDirectAttentionSql()},false) AS direct
+      FROM messages m JOIN rooms room ON room.id=m.room_id JOIN identities author ON author.id=m.author_id
+      JOIN push_message_context context ON context.message_id=m.id
+      JOIN push_devices device ON device.token='owner-choice-turn-device-token-1234567890'
+      JOIN identities recipient ON recipient.id=device.identity_id WHERE m.id=$1`, [progressId]);
+    expect(attention.rows).toEqual([{ direct: false }]);
     expect(await loop.runOnce()).toBe(0);
     expect(send).toHaveBeenCalledTimes(1);
   });

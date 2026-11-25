@@ -12,7 +12,7 @@ import { cornerRunStateSql } from '../corner-run.js';
 import { writeCornerTitle } from '../corner-title.js';
 import { type SqlDatabase } from '../database.js';
 import { AUTHORIZED_ROOMS_CTE } from '../institutional-history.js';
-import { systemLine,wakeLateCornerWatcher } from '../system-line.js';
+import { systemLine } from '../system-line.js';
 import { daemonAccess,daemonIdentity } from './access.js';
 import type { DaemonContext } from './context.js';
 import { daemonReach,daemonWriteResult } from './corner-messages.js';
@@ -65,16 +65,10 @@ import { id,Input,Output } from './values.js';
       if (!corner.rowCount)
         throw new Error('watched address must be a thread');
       const { archived, landed, ...snapshot } = corner.rows[0]!;
-      // A closed corner has no further events to watch. A merged one returns
-      // its merge now: one wake on its merge line, unless this agent already
-      // had one for that merge (from a watch or a Room `merged` subscription).
       if (archived) {
         await db.query(`DELETE FROM corner_watches WHERE watcher_room_id=$1 AND agent_id=$2 AND corner_id=$3`, [input.roomId, agentId, input.cornerId]);
         if (!landed) return { kinds: [], state: 'closed', snapshot };
-        const woken = kinds.includes('merged')
-          ? await wakeLateCornerWatcher(db, input.roomId, agentId, input.cornerId, incoming)
-          : false;
-        return { kinds: [], state: 'merged', woken, snapshot };
+        return { kinds: [], state: 'merged', woken: false, snapshot };
       }
       if (!kinds.length)
         await db.query(

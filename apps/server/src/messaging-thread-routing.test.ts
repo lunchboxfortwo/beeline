@@ -60,3 +60,48 @@ it('replies to an owner request delivered in a thread keep the owner’s recorde
   expect((await db.query('SELECT room_id FROM messages WHERE author_id=$1', [B])).rows).toEqual([{ room_id: CHAT }]);
   expect(await queued()).toEqual([]);
 });
+
+it('refuses a normal completion message from a thread to a chat', async () => {
+  await expect(daemon.execute('message', { roomId: THREAD, type: 'normal',
+    address: `${A}@${CHAT}`, text: 'Done' }, B)).rejects.toThrow('thread agent session');
+  expect(await queued()).toEqual([]);
+});
+
+it('routes a blocker after local completion to the assigning session, including the same agent in another place', async () => {
+  const task = await sendMessage(db, {
+    route: { from: { agent: B, place: CHAT }, to: { agent: B, place: THREAD } }, text: 'Build widget',
+    parent: undefined,
+  });
+  await db.query(`INSERT INTO agent_commands(id,agent_id,room_id,reason,action,state,turn_request_id,root_command_id,root_source_message_id,agent_depth,private_payload)
+    VALUES($1,$2,$3,'corner_objective','input','pending',$1,$1,$1,0,$4::jsonb)`, [task.id, B, THREAD,
+    JSON.stringify({kind:'message',authorId:B,fromRoomId:CHAT,text:'Build widget',route:{from:{agent:B,place:CHAT},to:{agent:B,place:THREAD}}})]);
+  await answerQueuedMessage(db, B, {roomId:THREAD, requestId:task.id, text:'Local work finished.'});
+  await daemon.execute('message', {roomId:THREAD, type:'blocked', text:'The branch needs a decision.'}, B);
+  expect(await queued()).toEqual([[B,CHAT]]);
+});
+
+it('rings the human commander once for concurrent blocks without status words', async () => {
+  const results = await Promise.allSettled(['Pick a branch.', 'Pick a target.'].map(text =>
+    daemon.execute('message', {roomId:THREAD,type:'blocked',text}, B)));
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  expect((await db.query(`SELECT mark.identity_id FROM messages m JOIN needs_you_marks mark ON mark.message_id=m.id
+    WHERE m.block_corner_id=$1 AND mark.cleared_at IS NULL`, [THREAD])).rows).toEqual([{identity_id:H}]);
+});
+
+it('a reply quotes its waking message and refuses another message before publishing', async () => {
+  const task = await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:B,place:THREAD}},text:'Review the change.'});
+  const input = {roomId:THREAD,requestId:task.id,type:'reply' as const,text:'I found a missing field.'};
+  await expect(daemon.execute('message',{...input,quoteMsgId:'another'},B)).rejects.toThrow('woke this turn');
+  const reply = await daemon.execute('message',{...input,quoteMsgId:task.id},B);
+  expect((await db.query('SELECT room_id,reply_to_message_id FROM messages WHERE id=$1',[reply.id])).rows)
+    .toEqual([{room_id:CHAT,reply_to_message_id:task.id}]);
+});
+
+it('a commander can pass a blocker to the person who assigned its own work', async () => {
+  const assignment = await sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:A,place:CHAT}},text:'Ship the change.'});
+  const task = await daemon.execute('message',{type:'normal',roomId:CHAT,requestId:assignment.id,address:`${B}@${THREAD}`,text:'Build the change.'},A);
+  const block = await daemon.execute('message',{type:'blocked',roomId:THREAD,requestId:task.id,text:'Which branch?'},B);
+  const escalated = await daemon.execute('message',{type:'blocked',roomId:CHAT,requestId:block.id,text:'Please choose the branch.'},A);
+  expect((await db.query('SELECT identity_id FROM needs_you_marks WHERE message_id=$1',[escalated.id])).rows)
+    .toEqual([{identity_id:H}]);
+});
