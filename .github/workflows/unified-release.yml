@@ -712,7 +712,7 @@ jobs:
             run_url=$(grep -Eo 'https://github\.com/[^ ]+/actions/runs/[0-9]+' <<< "$dispatched" | tail -n 1 || true)
             [ -n "$run_url" ] || { echo "npm publish dispatch returned no run URL: $dispatched" >&2; exit 1; }
             echo "npm publish on GitHub: $run_url"
-            gh run watch "${run_url##*/}" -R "$GITHUB_REPOSITORY" --exit-status || { echo "npm publish failed: $run_url" >&2; exit 1; }
+            node packages/scripts/release-github-run.mjs "$GITHUB_REPOSITORY" "${run_url##*/}" || { echo "npm publish failed: $run_url" >&2; exit 1; }
             exit 0
           fi
           npm install --global npm@^11.15.0

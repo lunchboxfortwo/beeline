@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { watchReleaseRun } from './release-github-run.mjs';
 import { finishReleaseWorkspace, loadEnvironment } from './release-local-process.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -74,7 +75,7 @@ export async function readOtaVersions(env, fetchImpl = fetch) {
   }
 }
 
-export function dispatchPromotion(dispatchedBy, secrets, run = execFileSync) {
+export async function dispatchPromotion(dispatchedBy, secrets, run = execFileSync, pause) {
   const started = performance.now();
   const env = { ...process.env, GH_TOKEN: secrets.GITHUB_TOKEN || secrets.GH_TOKEN };
   const repository = 'lunchboxfortwo/beeline';
@@ -84,7 +85,7 @@ export function dispatchPromotion(dispatchedBy, secrets, run = execFileSync) {
   const url = result.match(/https:\/\/github\.com\/lunchboxfortwo\/beeline\/actions\/runs\/(\d+)/);
   if (!url) throw new Error(`Promotion dispatch returned no workflow URL: ${result}`);
   console.log(`Promotion workflow: ${url[0]}`);
-  run('gh', ['run', 'watch', url[1], '-R', repository, '--exit-status'], { env, stdio: 'inherit' });
+  await watchReleaseRun(repository, url[1], env, run, pause);
   console.log(`Promotion wall time: ${Math.round((performance.now() - started) / 1000)}s`);
 }
 
@@ -129,7 +130,7 @@ async function main(argv) {
     unlock = acquireReleaseLock(join(tmpdir(), `beeline-unified-release-${userInfo().uid}.lock`), directory);
     const secrets = loadEnvironment(join(homedir(), '.config/beeline-release.env'), root);
     if (options.promote) {
-      dispatchPromotion(options.dispatchedBy, secrets);
+      await dispatchPromotion(options.dispatchedBy, secrets);
       return;
     }
     const { source, sha: releaseSha } = prepareReleaseSource(root, directory);

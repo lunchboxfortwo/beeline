@@ -78,7 +78,11 @@ export class Processes {
         if (pending) emit(pending);
         if (errors) emit(errors);
         if (status === 0 && !timedOut) resolveRun(output);
-        else reject(new Error(`${command} failed (${timedOut ? 'timeout' : signal || status})`));
+        else {
+          const error = new Error(`${command} failed (${timedOut ? 'timeout' : signal || status})`);
+          if (!timedOut && !signal) error.stderr = this.redact(errors);
+          reject(error);
+        }
       });
       child.stdin.on('error', () => {});
       child.stdin.end(input);
