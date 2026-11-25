@@ -800,7 +800,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   outputFiles?: Attachment[];
   sharedReplyId?: string;
-}): Promise<{ id: string; createdAt: number; delivered?: boolean; receipt?: string; answered?: boolean; woken?: string[]; notWoken?: {handle:string;reason:string}[] }> {
+}): Promise<Pick<QueuedPostReceipt, 'id' | 'createdAt'> &
+  Partial<Pick<QueuedPostReceipt, 'receipt' | 'woken' | 'notWoken' | 'stored' | 'visible'>> &
+  { delivered?: boolean; answered?: boolean }> {
   if (input.harnessEnded && input.invocation && !input.explicitReply) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
     db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
@@ -867,8 +869,11 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           return receipt;
         }
         const outputId = input.messageId ?? hash(`local-final:${item.id}`);
-        const existing = input.sharedReplyId ?? (item.state === 'complete' ? (await db.query<{id:string}>(
-          'SELECT id FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3',[outputId,item.room_id,agentId])).rows[0]?.id : undefined);
+        const previous = !input.sharedReplyId && item.state === 'complete' ? (await db.query<{ id: string; created_at: Date; deleted_at: Date | null }>(
+          'SELECT id,created_at,deleted_at FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3', [outputId,item.room_id,agentId])).rows[0] : undefined;
+        if (previous) return { id: previous.id, createdAt: Math.floor(new Date(previous.created_at).getTime() / 1000),
+          delivered: true, stored: true, visible: !previous.deleted_at };
+        const existing = input.sharedReplyId;
         const saved = existing ? {...receipt,id:existing} : await queueMessage(db,{
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,replyTo:item.source_message_id ?? item.id,
@@ -877,6 +882,10 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
         await endAgentTurn(db,item,'complete',null,saved.id);
         completedNow = true;
+        if ('stored' in saved) {
+          const { id, createdAt, stored, visible, receipt, woken, notWoken } = saved;
+          return { id, createdAt, stored, visible, receipt, woken, notWoken, delivered: true };
+        }
         return {id:saved.id,createdAt:saved.createdAt,delivered:true};
       }
       if (!messageText) return {id:receipt.id,createdAt:receipt.createdAt,answered:false};

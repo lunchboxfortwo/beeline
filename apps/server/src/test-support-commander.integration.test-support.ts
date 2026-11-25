@@ -136,7 +136,6 @@ export async function cornerTurnWithPendingChecks() {
 export const duplicateReproduction = '572a0de1c06be02cb120b38294e3d9b80b9bdfa8cdf6e53dcb708819b41393c3';
 
 
-export const currentPlaceReminder = 'Posted to your current place. Queued files are attached to this post. Closing text is kept in turn activity.';
 export const rootFixture = {
 get db(){return db;}, set db(value: typeof db){db=value;},
 get daemon(){return daemon;}, set daemon(value: typeof daemon){daemon=value;},

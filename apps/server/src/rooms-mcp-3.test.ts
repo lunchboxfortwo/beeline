@@ -692,6 +692,7 @@ const scope3 = fixtureScope3(scope1);
       await noCornerMemberships();
       const posted = await scope3.ok(client, 'post_artifact', { ...command, address: corner, title: 'mock.html',
         html: '<!doctype html><title>Mock</title><p>Thread mock</p>', text: 'Here is the mock.' });
+      expect(posted).toMatchObject({ address: corner, stored: true, visible: true, receipt: 'Message stored and visible. No agents woken.' });
       expect((await scope1.db.query('SELECT room_id,text,attachments FROM messages WHERE id=$1', [posted.id])).rows[0])
         .toMatchObject({ room_id: corner, text: 'Here is the mock.', attachments: [
           { name: 'mock.html', mimeType: 'text/html', url: expect.stringContaining('/media/') },
