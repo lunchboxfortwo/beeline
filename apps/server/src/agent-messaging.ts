@@ -127,8 +127,8 @@ export async function sendMessage(db: SqlDatabase, input: {
 
 /** The caller supplies an id, never a reply destination. */
 export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
-  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; roomId:string; requestId?:string; queuedRequestIds?:readonly string[];
-},onAnswered?:(roomId:string)=>void) {
+  id:string; text:string; invocation?:import('@beeline/api-contract/daemon').AgentInvocation; ask?:MessageAsk; question?:string; brief?:string; options?:readonly string[]; messageId?:string; requestId?:string; queuedRequestIds?:readonly string[];
+} & ({ roomId: string; connected?: never } | { roomId?: never; connected: { commandId?: string } }),onAnswered?:(roomId:string)=>void) {
   const reportAsk = reportMessageAsk(input);
   input = { ...input, ask: input.ask ?? reportAsk };
   if (input.ask) validateAskInput(input.ask);
@@ -136,8 +136,12 @@ export async function replyToMessage(db: SqlDatabase, agentId: string, input: {
   const invocation = input.invocation && input.roomId ? await lockAgentInvocation(db,agentId,input.roomId,input.invocation) : undefined;
   if (invocation?.state === 'cancelled') refuseMessageMembership('command turn cancelled');
   const item=(await db.query<CommandRow>(`SELECT * FROM agent_commands
-    WHERE agent_id=$1 AND room_id=$3 AND (id=$2 OR source_message_id=$2)
-    ORDER BY (id=$2) DESC,created_at DESC LIMIT 1 FOR UPDATE`,[agentId,input.id,input.roomId])).rows[0];
+    WHERE agent_id=$1 AND ($4::boolean OR room_id=$3)
+      AND (id=$2 OR source_message_id=$2 OR ($4 AND message->>'id'=$2))
+      AND (NOT $4::boolean OR action='input' AND reason<>'mcp_call')
+      AND ($5::text IS NULL OR id=$5)
+    ORDER BY (id=$2) DESC,($4 AND state='pending') DESC,created_at DESC LIMIT 1 FOR UPDATE`,
+    [agentId,input.id,input.roomId ?? null,Boolean(input.connected),input.connected?.commandId ?? null])).rows[0];
   if (!item) refuseMessageMembership('Quote a message that woke this turn.');
   const saved=await answerQueuedMessage(db,agentId,{roomId:item.room_id,requestId:item.id,text:input.text,
     messageAsk:input.ask,messageId:input.messageId,explicitReply:true});

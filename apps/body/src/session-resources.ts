@@ -189,6 +189,10 @@ export class SessionResources {
   read(): unknown {
     return {
       ...this.context,
+      ...(this.context.roster ? { roster: {
+        ...this.context.roster,
+        members: this.context.roster.members.filter(member => member.identityId !== this.options.agentId),
+      } } : {}),
       status: this.status,
       next: 'read(facet:session,name:prepare) installs optional skills and setup and makes the repository checkout. Unavailable resources are tool errors. Trusty Squire uses app_tool(app:"registry-mcp:squire"). Registry MCP uses app_tool(app:"registry-mcp:<serverName>"); approved paths and devices are available to run_granted_command without remounting this session.',
     };

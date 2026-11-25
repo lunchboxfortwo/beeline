@@ -76,7 +76,7 @@ it.each([false, true])(
       join(ownState, 'runtime.json'),
       join(operatorHome, 'settings.json'),
       join(credentialState, 'settings.json'),
-      ...['agent-home/auth.json', 'agent-home/warm-transcript.json', 'turn-context.json'].map(
+      ...['agent-home/auth.json', 'agent-home/warm-transcript.json'].map(
         (name) => join(ownState, 'rooms', 'sibling', name),
       ),
     ];

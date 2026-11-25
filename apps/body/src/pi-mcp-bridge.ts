@@ -218,16 +218,24 @@ async function callServer(server, request, signal) {
   }
 }
 
-// Read the turn file for each call: a live Pi session serves multiple requesters.
-// This generated harness child has no machine registration; keep its closed
-// Squire permission check at the server's command-authorized HTTP ingress.
+// This generated harness child uses the live helper bridge to find its command.
 async function authorizeSquire(signal) {
   const env = SERVERS.find((server) => server.name === 'beeline-agent')?.env;
-  if (!env?.BEELINE_DAEMON_BASE_URL || !env.BEELINE_DAEMON_TOKEN || !env.BEELINE_TURN_CONTEXT_FILE)
+  if (!env?.BEELINE_DAEMON_BASE_URL || !env.BEELINE_DAEMON_TOKEN)
     throw new Error('Squire authorization is unavailable.');
-  const context = JSON.parse(await readFile(env.BEELINE_TURN_CONTEXT_FILE, 'utf8'));
-  if (![context.roomId, context.requestId].every((value) => typeof value === 'string' && value.length > 0))
-    throw new Error('Squire requires an active server command.');
+  const endpoint = env.BEELINE_GRANT_RUNNER_FILE
+    ? JSON.parse(await readFile(env.BEELINE_GRANT_RUNNER_FILE, 'utf8'))
+    : { url: env.BEELINE_GRANT_RUNNER_URL, token: env.BEELINE_GRANT_RUNNER_TOKEN };
+  if (!endpoint.url || !endpoint.token) throw new Error('Squire authorization is unavailable.');
+  const live = await ask({ url: new URL('/session', endpoint.url) }, {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + endpoint.token, 'content-type': 'application/json' },
+    body: JSON.stringify({ action: 'command', placeId: env.BEELINE_DAEMON_CORNER_ID || env.BEELINE_DAEMON_ROOM_ID }),
+    signal,
+  });
+  const frame = (await live.text()).trim().split('\\n').map(line => JSON.parse(line)).at(-1);
+  const context = frame?.status === 200 ? frame.value : undefined;
+  if (!context) throw new Error('Squire requires an active server command.');
   // Pi reads this extension's process output: the wait stays silent.
   const response = await ask({ url: new URL('/v1/daemon/operations/authorizeSquireCall', env.BEELINE_DAEMON_BASE_URL) }, {
     method: 'POST',

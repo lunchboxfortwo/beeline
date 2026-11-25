@@ -1,3 +1,4 @@
+import { removeRetiredStarterTurnRule } from '@beeline/api-contract/beeline-guides';
 import { cornerOwnerSql } from '../corner-worker.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { currentFreeAgentInstructions, FREE_AGENT_REPOSITORY_GUIDE, FREE_AGENT_TURN_GUIDE } from '../free-agents.js';
@@ -88,10 +89,12 @@ import { daemonRepositoryOnboardingRequester } from './grants.js';
         `SELECT 1 FROM free_agents WHERE agent_id=$1`, [agentId],
       )).rowCount > 0;
       const owner = freeAgent ? await daemonRepositoryOnboardingRequester(ctx, agentId, roomId, context) : undefined;
-      if (freeAgent && !row.soul.instructions.includes(FREE_AGENT_TURN_GUIDE))
-        row.soul = { ...row.soul, instructions: `${row.soul.instructions}\n\n${FREE_AGENT_TURN_GUIDE}` };
-      if (freeAgent)
-        row.soul = { ...row.soul, instructions: currentFreeAgentInstructions(row.soul.instructions) };
+      if (freeAgent) {
+        const instructions = removeRetiredStarterTurnRule(row.soul.instructions);
+        const withTurnGuide = instructions.includes(FREE_AGENT_TURN_GUIDE)
+          ? instructions : `${instructions}\n\n${FREE_AGENT_TURN_GUIDE}`;
+        row.soul = { ...row.soul, instructions: currentFreeAgentInstructions(withTurnGuide) };
+      }
       if (owner)
         row.soul = { ...row.soul, instructions: `${row.soul.instructions}\n\n${FREE_AGENT_REPOSITORY_GUIDE}` };
     }

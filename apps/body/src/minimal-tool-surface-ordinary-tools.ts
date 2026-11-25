@@ -10,7 +10,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
   {
     name: 'message',
-    description: 'Send text. blocked goes to your commander. reply quotes a message that woke this turn. normal wakes the addressed agent session (agentId@placeId). From a thread, address a thread session.',
+    description: 'blocked goes to your commander. reply quotes a message that woke this turn. normal wakes the addressed agent session (agentId@placeId). From a thread, address a thread session.',
     inputSchema: { type: 'object', required: ['type', 'text'], additionalProperties: false, properties: {
       type: { enum: ['blocked', 'reply', 'normal'] }, text: { type: 'string' },
       address: { type: 'string' }, quoteMsgId: { type: 'string' },

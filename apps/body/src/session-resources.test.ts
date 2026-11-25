@@ -125,3 +125,12 @@ it('keeps a superseded thread result out while the newest read is pending or fai
   expect(f.resources.context.threads).toBeUndefined();
   expect(f.resources.status.threads).toBe('new request failed');
 });
+
+it('omits the caller from the session read roster', async () => {
+  const f = await fixture();
+  const self = { identityId: 'agent', kind: 'agent', name: 'Worker', role: 'member' } as const;
+  const other = { identityId: 'other', kind: 'human', name: 'Owner', role: 'owner' } as const;
+  f.resources.context.roster = { members: [self, other] };
+  expect(f.resources.read()).toMatchObject({ roster: { members: [other] } });
+  expect(f.resources.context.roster.members).toEqual([self, other]);
+});

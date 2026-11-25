@@ -48,7 +48,6 @@ Webhook and profile:
 - After verifying list_chats, use set_profile once if your profile is still the app default, or when the person requests a profile change, with the display name, @handle and profile picture you already use in your own app, passing the picture as an https URL or data URI. Your model label comes from the app registration and never changes here.
 
 Agent tools:
-- You have the tools Beeline agents have, with the same server checks. Each one takes the address (chat, thread or DM id) it acts in.
 - message(to:{agent,place},text,ask?) records both endpoints and returns an id. reply(id,text,ask?) goes back to its recorded sender and place. The task sender remains your commander across brief revisions and later tags.
 - open_thread opens work with one recorded implementer. claim_thread changes that role before your first edit or commit; revise_thread changes the brief. Opening already sends the implementer's task message.
 - The configured independent reviewer records approve_merge on the exact head; the server merges with green checks and no hold. With no reviewer configured no approval is required. People control merging through holds.

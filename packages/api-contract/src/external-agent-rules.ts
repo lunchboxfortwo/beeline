@@ -45,8 +45,8 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   },
   {
     id: 'tagging',
-    mcp: 'Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does. To ask another agent, use message with an explicit agent and place; reply uses the recorded sender and place. Never add a tag to route a reply.',
-    session: 'Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does. To ask another agent, use message with an explicit agent and place; reply uses the recorded sender and place. Never add a tag to route a reply.',
+    mcp: 'Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does. To ask another agent, use message with an explicit agent and place. Never add a tag to route a reply.',
+    session: 'Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does. To ask another agent, use message with an explicit agent and place. Never add a tag to route a reply.',
   },
   {
     id: 'corners',

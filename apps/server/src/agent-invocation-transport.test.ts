@@ -1,24 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp,rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach,expect,it,vi } from 'vitest';
-import { writeTurnContext } from '../../body/src/place-session.js';
+import { queueMessage } from './agent-command.js';
 import { callAgentTool } from '../../body/src/read-only-mcp-open-poll.js';
 import { sendMessage } from './agent-messaging.js';
 import { H,B,CHAT,OTHER,db,daemon } from './messaging.test-support.js';
 
-const roots:string[]=[];
-afterEach(async()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();for(const root of roots.splice(0))await rm(root,{recursive:true,force:true});});
-it.each(['native','HTTP'] as const)('%s tool delivery to a different place leaves the final visible in the turn’s place',async transport=>{
- const task=()=>sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Task'});
- const current=await task(),old=await sendMessage(db,{route:{from:{agent:H,place:OTHER},to:{agent:B,place:CHAT}},text:'Old task'});
+afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
+it.each(['native','HTTP'] as const)('%s reply uses the human tag that woke the current turn',async transport=>{
+ const old=await queueMessage(db,{roomId:CHAT,agentId:B,sourceMessageId:null,reason:'system'});
+ const stale={id:randomUUID(),requestId:old!.id};
+ await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:old!.id,invocationId:stale.id},B);
+ await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:old!.id,text:'',harnessEnded:true,invocation:stale},B);
+ const wake=await queueMessage(db,{kind:'post',roomId:CHAT,authorId:H,text:'@jellybean Please inspect'});
+ const current=(await db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[B,wake.id])).rows[0]!;
+ const unrelated=await queueMessage(db,{kind:'post',roomId:CHAT,authorId:H,text:'@jellybean Another pending request'});
  const invocation={id:randomUUID(),requestId:current.id};
  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:current.id,invocationId:invocation.id},B);
- const root=await mkdtemp(join(tmpdir(),'invocation-wire-'));roots.push(root);const context=join(root,'turn.json');
- await writeTurnContext(context,{id:current.id,roomId:CHAT,turnRequestId:current.id,rootCommandId:current.id,reason:'human_tag'},[],invocation);
- for(const [key,value] of Object.entries({BEELINE_TURN_CONTEXT_FILE:context,BEELINE_DAEMON_BASE_URL:'http://adapter.test',BEELINE_DAEMON_TOKEN:'fixture',
-  BEELINE_GRANT_RUNNER_FILE:'',BEELINE_GRANT_RUNNER_URL:transport==='native'?'http://native.test':'',BEELINE_GRANT_RUNNER_TOKEN:'fixture'}))vi.stubEnv(key,value);
+ for(const [key,value] of Object.entries({BEELINE_DAEMON_ROOM_ID:CHAT,BEELINE_DAEMON_BASE_URL:'http://adapter.test',BEELINE_DAEMON_TOKEN:'fixture',
+  BEELINE_DAEMON_CORNER_ID:'',BEELINE_GRANT_RUNNER_FILE:'',BEELINE_GRANT_RUNNER_URL:transport==='native'?'http://native.test':'',BEELINE_GRANT_RUNNER_TOKEN:'fixture'}))vi.stubEnv(key,value);
  const requests:Record<string,unknown>[]=[];
  vi.stubGlobal('fetch',async(url:URL,init:RequestInit)=>{
    const body=JSON.parse(String(init.body));const native=new URL(url).hostname==='native.test';
@@ -26,15 +25,15 @@ it.each(['native','HTTP'] as const)('%s tool delivery to a different place leave
    const input=native?body.input:body;requests.push(input);
    return Response.json(await daemon.execute(operation,input,B));
  });
- // Caller-supplied metadata cannot replace the private execution context.
- await expect(callAgentTool('message',{type:'reply',quoteMsgId:old.id,text:'Old answer'},'old')).rejects.toThrow('woke this turn');
- await callAgentTool('message',{type:'reply',quoteMsgId:current.id,text:'Explicit answer'},'current');
- expect(requests[0]).toMatchObject({roomId:CHAT,requestId:current.id,invocation});
- const final=await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:current.id,text:'Final in this turn',harnessEnded:true,invocation},B);
- expect(final).toMatchObject({delivered:true});
- expect((await db.query("SELECT room_id,text FROM messages WHERE author_id=$1 AND presentation='message' ORDER BY room_id",[B])).rows)
-   .toEqual([{room_id:CHAT,text:'Final in this turn'},{room_id:OTHER,text:'Explicit answer'}]);
- expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
+ await expect(callAgentTool('message',{type:'reply',quoteMsgId:unrelated.id,text:'Unrelated answer'},'unrelated')).rejects.toThrow('woke this turn');
+ await callAgentTool('message',{type:'reply',quoteMsgId:wake.id,text:'Explicit answer'},'current');
+ expect(requests.at(-1)).toEqual({roomId:CHAT,type:'reply',quoteMsgId:wake.id,text:'Explicit answer'});
+ expect((await db.query("SELECT room_id,reply_to_message_id,card->'route'->'to' recipient FROM messages WHERE author_id=$1",[B])).rows)
+   .toEqual([{room_id:CHAT,reply_to_message_id:wake.id,recipient:{agent:H,place:CHAT}}]);
+ // An installed helper may still send its previous turn's IDs. A matching quote wins.
+ await expect(daemon.execute('message',{roomId:CHAT,type:'reply',quoteMsgId:wake.id,text:'Legacy answer',
+   requestId:stale.requestId,taskId:old!.id,invocation:stale} as Parameters<typeof daemon.execute<'message'>>[1],B)).resolves.toHaveProperty('id');
+
 });
 
 it('limits reply authority to the registered delivery, including batched messages',async()=>{
@@ -51,7 +50,10 @@ it('limits reply authority to the registered delivery, including batched message
   },B);
   await expect(reply(second.id,current)).rejects.toThrow('woke this turn');
   await expect(reply(first.id,current)).resolves.toHaveProperty('id');
-  const batch = await start([second.id]);
-  await expect(reply(second.id,batch)).resolves.toHaveProperty('id');
+  const replacement={id:randomUUID(),requestId:second.id};
+  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:second.id,invocationId:replacement.id,batchedCommandIds:[first.id]},B);
+  await expect(reply(first.id,current)).resolves.toHaveProperty('id');
+  await expect(reply(second.id,replacement)).resolves.toHaveProperty('id');
+  await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:second.id,text:'',harnessEnded:true,invocation:replacement},B);
   await expect(reply(first.id,current)).rejects.toThrow('woke this turn');
 });

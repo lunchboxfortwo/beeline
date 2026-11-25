@@ -125,7 +125,7 @@ it('posts no chat line under the agent\'s name when GitHub refuses', async () =>
 it('demonstrates the operator executable through authenticated daemon dispatch with server attribution', async () => {
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');
-  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -141,6 +141,12 @@ it('demonstrates the operator executable through authenticated daemon dispatch w
   const service = new DaemonService(...constructorArgs);
   const server = createServer(async (request, response) => {
     try {
+      if (request.url === '/session') {
+        for await (const _chunk of request) { /* consume fixture request */ }
+        response.writeHead(200, { 'content-type': 'application/x-ndjson' })
+          .end(JSON.stringify({ type: 'result', status: 200, value: input }) + '\n');
+        return;
+      }
       expect(request.url).toBe('/v1/daemon/operations/dispatchRoomWorkflow');
       expect(request.headers.authorization).toBe('Bearer fixture-token');
       let body = '';
@@ -154,13 +160,12 @@ it('demonstrates the operator executable through authenticated daemon dispatch w
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const dir = await mkdtemp(join(tmpdir(), 'release-operator-proof-'));
   try {
-    const context = join(dir, 'turn.json');
-    await writeFile(context, JSON.stringify(input));
     const port = (server.address() as import('node:net').AddressInfo).port;
     const script = fileURLToPath(new URL('../../../packages/scripts/dispatch-production-release.mjs', import.meta.url));
     const child = spawn(process.execPath, [script, '-f', 'release_version=v0.1.94', '-f', 'selection=server'], {
       env: { ...process.env, BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${port}`, BEELINE_DAEMON_TOKEN: 'fixture-token',
-        BEELINE_DAEMON_AGENT_ID: agent, BEELINE_TURN_CONTEXT_FILE: context },
+        BEELINE_DAEMON_AGENT_ID: agent, BEELINE_DAEMON_ROOM_ID: room,
+        BEELINE_GRANT_RUNNER_URL: `http://127.0.0.1:${port}`, BEELINE_GRANT_RUNNER_TOKEN: 'runner-fixture' },
     });
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
@@ -185,7 +190,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
   vi.mocked(Sentry.captureException).mockClear();
   const { createServer } = await import('node:http');
   const { spawn } = await import('node:child_process');
-  const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+  const { mkdtemp, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
@@ -196,13 +201,19 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
   constructorArgs[22] = { dispatchProductionRelease: dispatch } as unknown as import('./github-operations.js').GitHubOperations;
   const service = new DaemonService(...constructorArgs);
   const operations: string[] = [];
+  let liveContext = { roomId: room, requestId: input.requestId };
   const server = createServer(async (request, response) => {
     try {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      if (request.url === '/session') {
+        expect(request.headers.authorization).toBe('Bearer runner-fixture');
+        response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(liveContext));
+        return;
+      }
       operations.push(request.url!);
       expect(request.url).toBe('/v1/daemon/operations/dispatchRoomWorkflow');
       expect(request.headers.authorization).toBe('Bearer fixture-token');
-      let body = '';
-      for await (const chunk of request) body += chunk;
       const result = await service.execute('dispatchRoomWorkflow', JSON.parse(body), agent);
       response.writeHead(200).end(JSON.stringify(result));
     } catch (error) {
@@ -225,13 +236,12 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
   if (mode === 'helper') await db.query(`INSERT INTO live_server_instances(instance_id) VALUES('built-helper-server');
     INSERT INTO agent_connections(agent_id,connection_id,epoch,instance_id) VALUES('${agent}','built-helper',1,'built-helper-server')`);
   try {
-    const context = join(dir, 'turn.json');
-    await writeFile(context, JSON.stringify({ ...input }));
     const port = (server.address() as import('node:net').AddressInfo).port;
     const run = async () => {
       const child = spawn(process.execPath, [executable], {
         env: { ...process.env, BEELINE_MCP_SURFACE: 'agent', BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${port}`,
-          BEELINE_DAEMON_TOKEN: 'fixture-token', BEELINE_DAEMON_AGENT_ID: agent, BEELINE_TURN_CONTEXT_FILE: context },
+          BEELINE_DAEMON_TOKEN: 'fixture-token', BEELINE_DAEMON_AGENT_ID: agent, BEELINE_DAEMON_ROOM_ID: room,
+        BEELINE_GRANT_RUNNER_URL: `http://127.0.0.1:${port}`, BEELINE_GRANT_RUNNER_TOKEN: 'runner-fixture' },
       });
       let output = '', errors = '';
       child.stdout.on('data', chunk => { output += chunk; });
@@ -243,7 +253,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
       return JSON.parse(output.trim());
     };
     const result = await run();
-    expect(result.result.isError).not.toBe(true);
+    expect(result.result.isError, JSON.stringify(result.result.content)).not.toBe(true);
     const dispatchId = JSON.parse(result.result.content[0].text).auditMessageId;
     expect(JSON.parse((dispatch.mock.calls.at(-1) as unknown as [string, Record<string, string>])[1].dispatched_by!).auditMessageId).toBe(dispatchId);
     expect(dispatch).toHaveBeenCalledOnce();
@@ -298,7 +308,7 @@ it.each(['legacy', 'helper'])('R-RELEASE-CARD: built %s MCP tool dispatches thro
       if (humanRoot && !edited) expect(command.root_source_message_id).toBe('human-command');
       else expect(command.root_source_message_id).not.toBe('human-command');
       const scheduledContext = (await db.query<{ turn_request_id: string }>(`SELECT turn_request_id FROM agent_commands WHERE id=$1`, [command.id])).rows[0]!;
-      await writeFile(context, JSON.stringify({ roomId: room, requestId: scheduledContext.turn_request_id }));
+      liveContext = { roomId: room, requestId: scheduledContext.turn_request_id };
       const beforeDispatch = await messages();
       const result = await run();
       expect(result.result.isError === true).toBe(!humanRoot || edited);

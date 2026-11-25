@@ -27,12 +27,7 @@ const model = {
 const context = {
   messages: [{ role: 'user' as const, content: 'Synthetic request', timestamp: 1 }],
 };
-it('uses the provisioned bearer for both prompts even when the sandbox sees the first turn context', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'owned-provider-'));
-  roots.push(root);
-  const path = join(root, 'context.json');
-  writeFileSync(path, JSON.stringify({ itemId: 'first', ownedModelDirectory: join(root, 'revoked') }));
-  vi.stubEnv('BEELINE_TURN_CONTEXT_FILE', path);
+it('uses the provisioned bearer for both prompts', async () => {
   vi.stubEnv('BEELINE_FREE_AGENT_MODEL_TOKEN', token);
   vi.stubEnv('BEELINE_MODEL_ROOM_ID', 'general');
   const requests: string[] = [];

@@ -95,9 +95,6 @@ describe('authorized institutional history search', () => {
     await startQueuedTurn(database, OUTPUT, AGENT, active!.id);
     const daemon = new DaemonService(database, new LiveHub(), undefined, undefined, false,
       undefined, false, undefined, undefined, undefined, { enabled: true, live: true });
-    const contextDirectory = await mkdtemp(join(tmpdir(), 'history-search-'));
-    const contextPath = join(contextDirectory, 'context.json');
-    await writeFile(contextPath, JSON.stringify({ roomId: OUTPUT, requestId: 'hsa-1' }));
     const server = createServer(async (request, response) => {
       try {
         expect(request.url).toBe('/v1/daemon/operations/searchInstitutionalHistory');
@@ -117,7 +114,6 @@ describe('authorized institutional history search', () => {
     for (const [key, value] of Object.entries({
       BEELINE_DAEMON_ROOM_ID: OUTPUT, BEELINE_DAEMON_AGENT_ID: AGENT,
       BEELINE_DAEMON_BASE_URL: `http://127.0.0.1:${port}`, BEELINE_DAEMON_TOKEN: 'test',
-      BEELINE_TURN_CONTEXT_FILE: contextPath,
     })) vi.stubEnv(key, value);
     try {
       const schema = agentToolsFor(true, false).find(tool => tool.name === 'search')!.inputSchema;
@@ -132,7 +128,6 @@ describe('authorized institutional history search', () => {
       }
     } finally {
       await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-      await rm(contextDirectory, { recursive: true, force: true });
     }
   });
 

@@ -1,3 +1,4 @@
+import * as sessionTools from './session-tool-connection.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { buildBwrapArgv, sandboxMountPlan } from './bwrap-sandbox.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const roots: string[] = [];
 afterEach(async () => {
-  vi.unstubAllGlobals(); vi.unstubAllEnvs();
+  vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
@@ -23,9 +24,8 @@ it('acknowledges creation without asserting that an unstartable worker is starti
   expect(commit.status).toBe(128);
   expect(commit.stderr).toContain('index.lock');
   expect(commit.stderr).toContain('Read-only file system');
-  const context = join(root, 'turn.json');
-  await writeFile(context, JSON.stringify({ roomId: 'parent', requestId: 'request' }));
-  for (const [key, value] of Object.entries({ BEELINE_TURN_CONTEXT_FILE: context, BEELINE_DAEMON_ROOM_ID: 'parent',
+  vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'parent', requestId: 'request' });
+  for (const [key, value] of Object.entries({ BEELINE_DAEMON_ROOM_ID: 'parent',
     BEELINE_DAEMON_BASE_URL: 'http://daemon.test', BEELINE_DAEMON_TOKEN: 'fixture' })) vi.stubEnv(key, value);
   const calls: string[] = [];
   vi.stubGlobal('fetch', async (url: URL) => {
@@ -46,10 +46,8 @@ it('acknowledges creation without asserting that an unstartable worker is starti
 });
 
 it('opens a fix thread from triage using the parent chat when room is omitted', async () => {
-  const root=await mkdtemp(`${testTmpDir()}/beeline-triage-open-`); roots.push(root);
-  const context=join(root,'turn.json');
-  await writeFile(context,JSON.stringify({roomId:'triage',requestId:'triage-order',itemId:'c'.repeat(64)}));
-  for (const [key,value] of Object.entries({BEELINE_TURN_CONTEXT_FILE:context,BEELINE_DAEMON_ROOM_ID:'parent',
+  vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({roomId:'triage',requestId:'triage-order',itemId:'c'.repeat(64)});
+  for (const [key,value] of Object.entries({BEELINE_DAEMON_ROOM_ID:'parent',
     BEELINE_DAEMON_CORNER_ID:'triage',BEELINE_DAEMON_BASE_URL:'http://daemon.test',BEELINE_DAEMON_TOKEN:'fixture'})) vi.stubEnv(key,value);
   const calls:Record<string,unknown>[]=[];
   vi.stubGlobal('fetch',async (url:URL,init:RequestInit) => {

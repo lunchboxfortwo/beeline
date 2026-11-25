@@ -229,7 +229,7 @@ export const MCP_AGENT_TOOLS: Tool[] = [
   tool('dispatch_release', 'Dispatch a production Beeline release only on an explicit owner or admin command.', {
     address: address(), inputs: { type: 'object', additionalProperties: { type: 'string', maxLength: 256 } },
   }, ['address']),
-  tool('post', 'Post a public message at an address, as an agent does. A tag notifies a person and never wakes an agent; to ask an agent, call message. replyTo does not wake anyone; start with the asker\'s exact @handle. In a thread, progress:true records the text as a progress line in the thread\'s work log instead of a message, the way an agent\'s work shows while it runs; it wakes nobody.', {
+  tool('post', 'Post a public message at an address, as an agent does. A tag notifies a person and never wakes an agent; to ask an agent, call message. replyTo does not wake anyone. In a thread, progress:true records the text as a progress line in the thread\'s work log instead of a message, the way an agent\'s work shows while it runs; it wakes nobody.', {
     address: address(), text: { type: 'string', minLength: 1, maxLength: 16000 }, replyTo: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     progress: { type: 'boolean', description: 'Thread only: record a progress line, not a message.' },
   }, ['address', 'text']),
@@ -387,15 +387,24 @@ export class RoomsMcpAgentTools {
   async call(member: string, name: string, args: Args): Promise<unknown> {
     if (name === 'message' || name === 'reply' || name === 'post' && args.progress !== true) {
       validateToolArguments(MCP_AGENT_TOOLS.find(candidate => candidate.name === name)!, args);
+      const content = {text:String(args.text),ask:args.ask as MessageAsk | undefined,question:args.question as string | undefined,
+        brief:args.brief as string | undefined,options:args.options as readonly string[] | undefined};
+      if (name === 'reply') {
+        return replyToMessage(this.db,member,{...content,id:String(args.id),
+          connected:{commandId:args.commandId as string | undefined}},roomId => {
+          void this.daemon.reconcileZeroCheckWorkerCompletion(roomId,member)
+            .catch(error => console.warn('[answer] optional lifecycle refresh omitted:',error));
+        });
+      }
       const target = name === 'message' ? addressArg(args.address ?? object(args.to).place)
-        : name === 'post' ? addressArg(args.address) : '';
+        : addressArg(args.address);
       const item = (await this.db.query<import('./agent-command.js').CommandRow>(
         `SELECT * FROM agent_commands WHERE agent_id=$1 AND reason<>'mcp_call'
-           AND (state='pending' OR id=$2 OR ($4 AND id=$5))
+           AND (state='pending' OR id=$2)
            AND ($2::text IS NULL OR id=$2)
-           AND ($2 IS NOT NULL OR room_id::text=$3 OR $4)
-         ORDER BY ($4 AND id=$5) DESC,(state='pending') DESC,inbox_sequence,id LIMIT 1`,
-        [member,args.commandId ?? null,target,name==='reply',name==='reply' ? args.id : null])).rows[0];
+           AND ($2 IS NOT NULL OR room_id::text=$3)
+         ORDER BY (state='pending') DESC,inbox_sequence,id LIMIT 1`,
+        [member,args.commandId ?? null,target])).rows[0];
       if (item?.state === 'pending' && typeof args.commandId === 'string')
         await beginAgentInvocation(this.db, member, item.room_id, item.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
       const context = {roomId:item?.room_id ?? target,requestId:item?.turn_request_id};
@@ -407,18 +416,10 @@ export class RoomsMcpAgentTools {
           : await this.daemon.postCornerMessage({ ...context, cornerId: target, text: String(text), replyTo }, member);
         return posted.stored ? posted : { ...posted, id: null, createdAt: null };
       }
-      const content = {text:String(args.text),ask:args.ask as MessageAsk | undefined,question:args.question as string | undefined,
-        brief:args.brief as string | undefined,options:args.options as readonly string[] | undefined};
-      if (name === 'message') {
-        const {roomId,to} = normalizePlaceAddresses('message',{roomId:context.roomId,to:args.to as MessageAddress});
-        return this.db.transaction(async db => {
-          const parent = context.requestId ? await authorizeCommandOutput(db,roomId,member,context.requestId) : undefined;
-          return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to}});
-        });
-      }
-      return replyToMessage(this.db,member,{...context,...content,id:String(args.id)},roomId => {
-        void this.daemon.reconcileZeroCheckWorkerCompletion(roomId,member)
-          .catch(error => console.warn('[answer] optional lifecycle refresh omitted:',error));
+      const {roomId,to} = normalizePlaceAddresses('message',{roomId:context.roomId,to:args.to as MessageAddress});
+      return this.db.transaction(async db => {
+        const parent = context.requestId ? await authorizeCommandOutput(db,roomId,member,context.requestId) : undefined;
+        return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to}});
       });
     }
     return this.callTool(member,name,args);

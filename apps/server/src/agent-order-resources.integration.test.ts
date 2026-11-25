@@ -144,6 +144,10 @@ describe('agent orders act for the issuing owner', () => {
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const input = JSON.parse(Buffer.concat(chunks).toString());
       response.setHeader('content-type', 'application/json');
+      if (request.url === '/session') {
+        response.end(JSON.stringify(turn));
+        return;
+      }
       if (request.url === '/squire') {
         upstreamCalls++;
         response.end(JSON.stringify({ jsonrpc: '2.0', id: input.id, result: { serverInfo: { name: 'Squire fixture' } } }));
@@ -158,12 +162,12 @@ describe('agent orders act for the issuing owner', () => {
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-    const contextPath = join(scratch, 'turn.json'), authPath = join(scratch, 'auth.json');
-    await writeFile(contextPath, JSON.stringify(turn));
-    await writeFile(authPath, JSON.stringify({ baseUrl, daemonToken: 'fixture', turnContextPath: contextPath }));
+    const authPath = join(scratch, 'auth.json');
+    await writeFile(authPath, JSON.stringify({ baseUrl, daemonToken: 'fixture', placeId: turn.roomId }));
     const initialize = async () => {
       const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../../body/src/resource-mcp-facade.ts', import.meta.url))], {
         env: { ...process.env, BEELINE_RESOURCE_TARGET: 'squire', BEELINE_RESOURCE_AUTH_FILE: authPath,
+          BEELINE_GRANT_RUNNER_URL: baseUrl, BEELINE_GRANT_RUNNER_TOKEN: 'fixture',
           BEELINE_RESOURCE_LAUNCH: JSON.stringify({ url: `${baseUrl}/squire` }) },
         stdio: ['pipe', 'pipe', 'pipe'],
       });

@@ -1,5 +1,10 @@
 import { AGENT_INVITATION_PROMPT, BEELINE_PRODUCT_GUIDE } from './agent-invitation-guide.js';
 
+/** Remove release-owned starter wording from stored and cached personas. */
+export function removeRetiredStarterTurnRule(instructions: string): string {
+  return instructions.replace('End every turn with the deliverable or a clear status explaining what is finished, what stopped, and the next step. ', '');
+}
+
 export const BEELINE_FILES_SKILL_NAME = 'beeline-files-and-mocks';
 export const BEELINE_CORNERS_SKILL_NAME = 'beeline-threads-and-merging';
 export const BEELINE_WAKES_SKILL_NAME = 'beeline-waiting-and-wakes';
@@ -14,7 +19,7 @@ export const BEELINE_ONBOARDING_SKILL_NAME = 'beeline-onboarding';
  * Situational skills: each covers one kind of situation an agent meets in
  * Beeline, so its description tells the agent when to load it. The prompt's
  * `tools` section names them and tells an agent to load the matching one
- * when a Beeline tool refuses it or it does not know how to do something.
+ * when it does not know how to do something.
  *
  * Only how-to steps live here. A rule every turn needs belongs in
  * `prompt-assembly.ts`; what a tool's inputs mean belongs in its description.
@@ -103,7 +108,7 @@ export function beelineCornersSkillMarkdown(releaseId: string): string {
 
 ## Messages, asks and feedback
 
-- Send blockers with message(type:blocked, text). The server reaches your commander. Answer a waking message with message(type:reply, quoteMsgId, text).
+- Send blockers with message(type:blocked, text). The server reaches your commander.
 - Clear resolved blocks with close_ask. Your turn text and post_artifact files appear together here.
 
 - For friction in Beeline itself, call report_feedback with tool_name and error_excerpt when a tool failed.

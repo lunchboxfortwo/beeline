@@ -169,6 +169,7 @@ function itemPromptContext(item: AgentCommand, options: {
   const author = inboxItemAuthorName(source, options.names);
   const body = source.systemEvent && RESUME_KINDS.has(source.systemEvent.kind ?? '')
     ? resumePrompt(source) : inboxItemPromptBody(source);
+  const text = body.trim() || '(shared attachments)';
   const from = item.from ?? { agent: source.authorId, place: item.roomId };
   const place = from.place === item.roomId ? item.roomName ?? options.names.get(item.roomId) ?? item.roomId
     : (from.place === item.returnRoomId ? item.returnRoomName : undefined) ?? options.names.get(from.place) ?? from.place;
@@ -177,10 +178,12 @@ function itemPromptContext(item: AgentCommand, options: {
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),
-    agentMessageText({ from: author, place, id: source.id,
-      text: body.trim() || '(shared attachments)', attachments: attachmentMarkerLines(source.attachments) }),
+    source.systemEvent?.kind === 'joined' && !source.attachments?.length && !source.replyToMessageId && !source.systemEvent.subscriptionId
+      ? `text: ${text}`
+      : agentMessageText({ from: author, place, id: source.id,
+          text, attachments: attachmentMarkerLines(source.attachments) }),
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
-      : source.replyToMessageId ? [`In reply to message ${source.replyToMessageId}`] : []),
+      : []),
     ...(source.institutionalContext ? [source.institutionalContext] : []),
     ...(item.reason === 'schedule' && item.sourceMessageId !== source.id
       ? [`Reply with quoteMsgId "${item.sourceMessageId}".`] : []),
@@ -207,7 +210,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(items[0]?.offlineSeconds !== undefined
       ? [`> You were offline for ${hours} h. These arrived while you were away and may be outdated.`] : []),
-    (items[0]?.parentRoomId ? '' : 'Answer each asker in one combined reply. ') + 'Follow the newest instructions when earlier discussion has moved on.',
+    'Follow the newest instructions when earlier discussion has moved on.',
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),

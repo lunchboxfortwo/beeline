@@ -234,7 +234,7 @@ describe('machine-owned vault reports', () => {
 it('refreshes the shared machine observation through local Squire activity without per-agent reports', async () => {
   const { machine, readVault, reports, agents } = await fixture(2);
   const requestMcp = vi.fn(async () => ({ content: [{ type: 'text', text: '{"credentials":[]}' }] }));
-  const relay = new SquireTaskRelay(agents[0]!.agentId, 'room', '', async () => true, '',
+  const relay = new SquireTaskRelay(agents[0]!.agentId, 'room', async () => true, '',
     () => ({ requestMcp, close: () => {} }) as unknown as StdioSquireMcpClient,
     undefined, undefined, undefined, undefined, undefined, () => machine.refreshVault());
   cleanups.push(() => relay.close());

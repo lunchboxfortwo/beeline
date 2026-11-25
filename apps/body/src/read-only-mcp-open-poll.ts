@@ -37,7 +37,6 @@ import {
   ToolDefinition,
   asObject,
   commandRequest,
-  readTurnContextFile,
   daemonExecute,
   grantRunDepsFromEnv,
   requiredEnv,
@@ -354,17 +353,9 @@ export async function callAgentTool(
   args: JsonObject,
   toolCallId: string,
 ): Promise<string> {
-  if (name === 'message') {
-    if (args.type === 'reply' && process.env.BEELINE_TURN_CONTEXT_FILE) {
-      const context = await readTurnContextFile();
-      const commands = Array.isArray(context.commands) ? context.commands : [];
-      const wake = [context, ...commands].find(item => item.sourceMessageId === args.quoteMsgId || item.itemId === args.quoteMsgId);
-      return commandRequest.run(wake?.requestId, () => executeAgentTool(name,args,toolCallId));
-    }
-    return executeAgentTool(name,args,toolCallId);
-  }
+  if (name === 'message') return executeAgentTool(name, args, toolCallId);
   const { requestId, ...input } = args;
-  return commandRequest.run(typeof requestId === 'string' ? requestId : undefined, () =>
+  return commandRequest.run({ requestId: typeof requestId === 'string' ? requestId : undefined }, () =>
     executeAgentTool(name, input, toolCallId),
   );
 }

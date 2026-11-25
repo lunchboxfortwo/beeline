@@ -1,3 +1,4 @@
+import { sessionCommandContext, type SessionCommandContext } from './session-tool-connection.js';
 import { squireApprovalCall, squireApprovalSchemas } from './squire-approval-intent.js';
 import { boundToolResponse } from './tool-output-budget.js';
 import { squireApprovalAction, type SquireApprovalDetails } from '@beeline/api-contract/phone';
@@ -509,7 +510,7 @@ export function squireLoginWallFromMcp(
   return squireLoginWallIn(response.result);
 }
 
-function resourceRequestHeaders(auth: { daemonToken: string; helperVersion?: string }, context: Record<string, unknown>) {
+function resourceRequestHeaders(auth: { daemonToken: string; helperVersion?: string }, context: SessionCommandContext) {
   return {
     authorization: `Bearer ${auth.daemonToken}`,
     'content-type': 'application/json',
@@ -518,34 +519,30 @@ function resourceRequestHeaders(auth: { daemonToken: string; helperVersion?: str
   };
 }
 
-// Sandboxed resource processes have no machine registration. These closed
-// permission/approval adapters retain server command authority on old HTTP wire.
+async function resourceCommand(authFile: string) {
+  const auth = JSON.parse(await readFile(authFile, 'utf8')) as {
+    baseUrl: string;
+    daemonToken: string;
+    placeId: string;
+    helperVersion?: string;
+  };
+  const context = await sessionCommandContext(undefined, auth.placeId);
+  return { auth, context };
+}
+
+// These closed adapters use the server's existing command-authorized HTTP ingress.
 async function postSquireApproval(
   approval: SquireApprovalRelay,
   authFile: string,
   signInUrl?: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const auth = JSON.parse(await readFile(authFile, 'utf8')) as {
-    baseUrl: string;
-    daemonToken: string;
-    turnContextPath: string;
-    helperVersion?: string;
-  };
-  const context = JSON.parse(await readFile(auth.turnContextPath, 'utf8')) as Record<
-    string,
-    unknown
-  >;
-  if (
-    ![context.roomId, context.requestId].every(
-      (value) => typeof value === 'string' && value.length > 0,
-    )
-  )
-    return;
+  const { auth, context } = await resourceCommand(authFile);
+  if (!context) return;
   await fetchImpl(new URL('/v1/daemon/operations/postSquireApproval', auth.baseUrl), {
     method: 'POST',
     headers: resourceRequestHeaders(auth, context),
-    body: JSON.stringify({ ...context, ...approval, ...(signInUrl ? { signInUrl } : {}) }),
+    body: JSON.stringify({ roomId: context.roomId, requestId: context.requestId, ...approval, ...(signInUrl ? { signInUrl } : {}) }),
     signal: undefined,
   });
 }
@@ -555,26 +552,12 @@ async function postSquireLoginWall(
   authFile: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const auth = JSON.parse(await readFile(authFile, 'utf8')) as {
-    baseUrl: string;
-    daemonToken: string;
-    turnContextPath: string;
-    helperVersion?: string;
-  };
-  const context = JSON.parse(await readFile(auth.turnContextPath, 'utf8')) as Record<
-    string,
-    unknown
-  >;
-  if (
-    ![context.roomId, context.requestId].every(
-      (value) => typeof value === 'string' && value.length > 0,
-    )
-  )
-    return;
+  const { auth, context } = await resourceCommand(authFile);
+  if (!context) return;
   await fetchImpl(new URL('/v1/daemon/operations/postSquireLoginWall', auth.baseUrl), {
     method: 'POST',
     headers: resourceRequestHeaders(auth, context),
-    body: JSON.stringify({ ...context, wall: wall.wall, message: wall.message }),
+    body: JSON.stringify({ roomId: context.roomId, requestId: context.requestId, wall: wall.wall, message: wall.message }),
     signal: undefined,
   });
 }
@@ -599,29 +582,16 @@ export async function authorizeResourceMessage(
 ): Promise<boolean> {
   if (!message || Array.isArray(message) || typeof message !== 'object') return false;
   if (typeof message.method !== 'string') return false;
-  const auth = JSON.parse(await readFile(authFile, 'utf8')) as {
-    baseUrl: string;
-    daemonToken: string;
-    turnContextPath: string;
-    helperVersion?: string;
-  };
-  const context = JSON.parse(await readFile(auth.turnContextPath, 'utf8')) as Record<
-    string,
-    unknown
-  >;
-  if (
-    ![context.roomId, context.requestId].every(
-      (value) => typeof value === 'string' && value.length > 0,
-    )
-  )
-    throw new TurnStoppedError('resource generation is no longer active');
+  const { auth, context } = await resourceCommand(authFile);
+  if (!context) throw new TurnStoppedError('resource generation is no longer active');
   const response = await fetchImpl(
     new URL('/v1/daemon/operations/authorizeResourceCall', auth.baseUrl),
     {
       method: 'POST',
       headers: resourceRequestHeaders(auth, context),
       body: JSON.stringify({
-        ...context,
+        roomId: context.roomId,
+        requestId: context.requestId,
         target,
         ...(spendsGrant && !NON_CONSUMING.has(message.method) ? {} : { consume: false }),
         ...resourceCallFacts(message),

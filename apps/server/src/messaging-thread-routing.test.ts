@@ -98,9 +98,12 @@ it('a reply quotes its waking message and refuses another message before publish
 
 it('a commander can pass a blocker to the person who assigned its own work', async () => {
   const assignment = await sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:A,place:CHAT}},text:'Ship the change.'});
-  const task = await daemon.execute('message',{type:'normal',roomId:CHAT,requestId:assignment.id,address:`${B}@${THREAD}`,text:'Build the change.'},A);
-  const block = await daemon.execute('message',{type:'blocked',roomId:THREAD,requestId:task.id,text:'Which branch?'},B);
-  const escalated = await daemon.execute('message',{type:'blocked',roomId:CHAT,requestId:block.id,text:'Please choose the branch.'},A);
+  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:assignment.id,invocationId:'assignment'},A);
+  const task = await daemon.execute('message',{type:'normal',roomId:CHAT,address:`${B}@${THREAD}`,text:'Build the change.'},A);
+  await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:task.id,invocationId:'build'},B);
+  const block = await daemon.execute('message',{type:'blocked',roomId:THREAD,text:'Which branch?'},B);
+  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:block.id,invocationId:'escalation'},A);
+  const escalated = await daemon.execute('message',{type:'blocked',roomId:CHAT,text:'Please choose the branch.'},A);
   expect((await db.query('SELECT identity_id FROM needs_you_marks WHERE message_id=$1',[escalated.id])).rows)
     .toEqual([{identity_id:H}]);
 });

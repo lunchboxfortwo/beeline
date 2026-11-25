@@ -186,7 +186,7 @@ const SESSION_OPERATIONS = new Set(['this.repairCredentialLinks', 'this.startFre
   'openAcpConversation', 'applyAgentModelSelection', 'answering', 'client.startProcess', 'client.stopProcess',
   'repairRoomAgentCredentialLinks', 'lstat', 'assertRealContainedDirectory', 'writeIsolatedHarnessFile',
   'readlink', 'rm', 'symlink', 'rename', 'writeBackDetachedClaudeLogin', 'readFile', 'provisionPiCustomModelConfig',
-  'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'this.writeContext', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
+  'deps.auth.authenticateDaemon', 'deps.auth.retiredDaemonAgent', 'session.claim', 'read', 'readOnlyMcpServer', 'beelineAgentMcpServer', 'installOwnedModelProvider',
   // Owner-requested credential bootstrap refreshes retained thread launchers.
   'this.prepareGitHubLaunchers',
   // Release-owned skills must exist before the harness starts; operator shares stay optional.

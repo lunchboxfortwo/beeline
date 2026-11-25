@@ -454,12 +454,13 @@ it('replaces a native conversation when its repository instructions change', asy
   await f.session.dispose();
 });
 
-it('delivers a frozen reply pointer without waiting for a parent-message read', async () => {
+it('delivers the human tag without a second ID when the parent excerpt is absent', async () => {
   const f = await fixture();
   f.item.source.replyToMessageId = 'parent-message';
   await f.session.start();
   expect(await f.session.deliver(f.item, [])).toMatchObject({ text: 'The answer' });
-  expect(f.prompt.mock.calls[0]?.[1]).toContain('In reply to message parent-message');
+  expect(f.prompt.mock.calls[0]?.[1]).toContain('id: message');
+  expect(f.prompt.mock.calls[0]?.[1]).not.toContain('parent-message');
   await f.session.dispose();
 });
 
