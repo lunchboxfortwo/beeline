@@ -91,7 +91,11 @@ it('overlaps two avatars and exposes each elapsed counter and individual Stop on
     act(() => { tree = create(<TurnProgressLine agents={agents.slice(0,2)} label="Ruby, Jellybean brewing…" startedAt={100} onStopAgent={stop} testID="group"/>); });
     expect(tree.root.findAllByType('IdentityMark')).toHaveLength(2);
     expect(tree.root.findByProps({testID:'stop-all-agents'}).props.label).toBe('Stop');
-    act(() => tree.root.findByProps({testID:'working-agents-toggle'}).props.onPress());
+    const groupStop = tree.root.findByProps({testID:'stop-all-agents'});
+    expect(groupStop.props.accessibilityLabel).toBe('Choose an agent to stop');
+    act(() => groupStop.props.onPress());
+    expect(stop).not.toHaveBeenCalled();
+    expect(tree.root.findByProps({testID:'stop-all-agents'}).props.accessibilityLabel).toBe('Stop all working agents');
     expect(tree.root.findByProps({testID:'stop-all-agents'}).props.label).toBe('Stop all');
     const list = tree.root.findByProps({testID:'working-agents-list'});
     expect(list.findAllByType('T').map((node:any)=>node.props.children)).toEqual(['Ruby','1m 40s','Jellybean','1m 20s']);
@@ -112,4 +116,41 @@ it('caps four agents at three avatars, counts the remainder and retries a failed
   await act(async () => tree.root.findByProps({testID:'stop-agent-Bee'}).props.onPress());
   expect(tree.root.findByProps({testID:'stop-agent-Bee'}).props.disabled).toBe(false);
   act(()=>tree.unmount());
+});
+
+it('toggles the picker from the names and stops a single remaining agent directly', () => {
+  const stopGroupAgent = vi.fn();
+  const stopRemaining = vi.fn();
+  let tree: any;
+  act(() => { tree = create(<TurnProgressLine agents={agents} label="Working…" onStopAgent={stopGroupAgent} />); });
+
+  const toggle = tree.root.findByProps({ testID: 'working-agents-toggle' });
+  act(() => toggle.props.onPress());
+  expect(toggle.props['aria-expanded']).toBe(true);
+  act(() => toggle.props.onPress());
+  expect(tree.root.findAllByProps({ testID: 'working-agents-list' })).toHaveLength(0);
+  act(() => toggle.props.onPress());
+  act(() => tree.update(<TurnProgressLine agents={agents.slice(0, 1)} label="Ruby working…"
+    onStop={stopRemaining} onStopAgent={stopGroupAgent} testID="turn" />));
+  expect(tree.root.findAllByProps({ testID: 'working-agents-list' })).toHaveLength(0);
+  expect(tree.root.findAllByProps({ testID: 'stop-all-agents' })).toHaveLength(0);
+  act(() => tree.root.findByProps({ testID: 'turn-stop' }).props.onPress());
+  expect(stopRemaining).toHaveBeenCalledTimes(1);
+  expect(stopGroupAgent).not.toHaveBeenCalled();
+  act(() => tree.unmount());
+});
+
+it('stops every eligible agent only after an explicit Stop all', async () => {
+  const stop = vi.fn(async () => true);
+  const group = [agents[0], { ...agents[1], stop: undefined }, agents[2]];
+  let tree: any;
+  act(() => { tree = create(<TurnProgressLine agents={group} label="Working…" onStopAgent={stop} />); });
+  const button = tree.root.findByProps({ testID: 'stop-all-agents' });
+  act(() => button.props.onPress());
+  expect(stop).not.toHaveBeenCalled();
+  expect(tree.root.findAllByProps({ testID: 'stop-agent-Jellybean' })).toHaveLength(0);
+  await act(async () => button.props.onPress());
+  expect(stop.mock.calls).toEqual([[agents[0].stop], [agents[2].stop]]);
+  expect(button.props.disabled).toBe(true);
+  act(() => tree.unmount());
 });
