@@ -182,6 +182,8 @@ function itemPromptContext(item: AgentCommand, options: {
     ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
       : source.replyToMessageId ? [`In reply to message ${source.replyToMessageId}`] : []),
     ...(source.institutionalContext ? [source.institutionalContext] : []),
+    ...(item.reason === 'schedule' && item.sourceMessageId !== source.id
+      ? [`Reply with quoteMsgId "${item.sourceMessageId}".`] : []),
     ...(context ? [context] : []),
   ].join('\n');
 }

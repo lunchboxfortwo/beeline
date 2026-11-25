@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contract/scheduled-prompts';
 import { expect, it } from 'vitest';
+import { itemPrompt } from '../../body/src/place-prompt.js';
 import { answerQueuedMessage, type CommandRow } from './agent-command.js';
 import { sendMessage } from './agent-messaging.js';
 import { AgentScheduleLoop } from './agent-schedules.js';
@@ -57,15 +59,19 @@ it.each(['create', 'update'] as const)('Reproduction standing-ask-reply: success
   const occurrences = new Set<string | null>();
   for (let occurrence = 0; occurrence < 2; occurrence += 1) {
     const { run, command, reply } = await fire(scheduleId);
+    const rendered = itemPrompt(run, { names: new Map([[A, 'Ruby']]) });
+    expect(rendered).toContain(`From: ${SCHEDULE_SCHEDULER_NAME} in #Widget\nid: ${command.source_message_id}\ntext: ${prompt}`);
+    expect(rendered).toContain(`Reply with quoteMsgId "${ask.id}".`);
+    await expect(reply(run.source.id)).rejects.toThrow('woke this turn');
     await expect(reply(unrelated.id)).rejects.toThrow('woke this turn');
     const saved = await reply(ask.id);
     expect((await db.query(`SELECT room_id,reply_to_message_id,card_type,card->'recipient'->>'id' recipient
       FROM messages WHERE id=$1`, [saved.id])).rows).toEqual([
       { room_id: CHAT, reply_to_message_id: ask.id, card_type: 'agent-command', recipient: A },
     ]);
-    expect(run.from).toEqual({ agent: A, place: CHAT });
-    expect(run.source.id).toBe(ask.id);
-    expect(run.source.body).toContain(prompt);
+    expect(run.from?.place).toBe(THREAD);
+    expect(run.source.id).toBe(command.source_message_id);
+    expect(run.sourceMessageId).toBe(ask.id);
     expect(run.scheduleId).toBe(scheduleId);
     expect(command.source_message_id).not.toBe(ask.id);
     expect(await resourceReadAuthority(db, command)).toEqual(await resourceReadAuthority(db, original));

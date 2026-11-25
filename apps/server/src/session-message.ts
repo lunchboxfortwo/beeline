@@ -38,7 +38,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       const wake = replyableWake(parent);
       if (parent?.state !== 'pending' || input.quoteMsgId !== wake?.id)
         throw new CommandRefusalError('Quote a message that woke this turn.', 400);
-      to = wake.route.from;
+      to = wake.from;
       quote = input.quoteMsgId;
     } else if (input.type === 'blocked' && input.address === undefined && input.quoteMsgId === undefined) {
       const room = (await db.query<{ parent_id: string | null; created_by: string }>(
@@ -49,9 +49,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       let taskSender:MessageAddress | undefined;
       if (order?.kind === 'order' && order.fromRoomId) {
         taskSender = {agent:order.authorId,place:order.fromRoomId};
-      } else if (assignment?.reason === 'schedule') {
-        taskSender = assignment.message?.replyAddress ?? assignment.message?.route?.from ?? order?.route?.from;
-      } else if (assignment?.reason === 'message') {
+      } else if (assignment?.reason === 'message' || assignment?.reason === 'schedule') {
         taskSender = (assignment.message?.route ?? order?.route)?.from;
       } else if (!assignment && escalating && !room?.parent_id) {
         taskSender = (await db.query<MessageAddress>(`SELECT source.author_id agent,source.room_id place FROM messages source
