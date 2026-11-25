@@ -5,4 +5,4 @@ app = "beeline-free-agents"
 primary_region = "iad"
 
 [build]
-  dockerfile = "apps/infra/free-agent/Dockerfile"
+  dockerfile = "free-agent/Dockerfile"
