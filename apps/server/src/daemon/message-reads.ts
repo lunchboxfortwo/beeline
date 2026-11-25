@@ -1,4 +1,5 @@
 import type { DaemonAttachment } from '@beeline/api-contract/daemon';
+import { roomAudienceCanReadSourceSql } from '../institutional-history.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
 import type { DaemonContext } from './context.js';
 import { Input, AccessDeniedError, daemonTranscriptVisibilitySql, markExpiredAttachments } from './values.js';
@@ -8,9 +9,12 @@ import { deliveredMessage } from '../corner-brief.js';
 
 const readableMessage = daemonTranscriptVisibilitySql('message');
 // A borrowed review source grants access only to the addressed transcript.
+// A lookup outside the addressed chat must also respect its human audience.
 const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::boolean AND EXISTS (
   SELECT 1 FROM rooms source ${agentRoomMembershipJoins('source', '$3')}
-  WHERE source.id=message.room_id)))`;
+  JOIN rooms output ON output.id=$1 AND output.workspace_id=source.workspace_id
+  WHERE source.id=message.room_id
+    AND ${roomAudienceCanReadSourceSql('COALESCE(output.parent_id,output.id)', 'COALESCE(source.parent_id,source.id)')})))`;
 
   export async function daemonRoomMessage(ctx: DaemonContext, input: Input<'getRoomMessage'>, agentId: string): Promise<{ messageId: string; body: string; attachments: DaemonAttachment[] }> {
     if (input.attachmentId !== undefined) return ctx.roomAttachment(input, agentId);

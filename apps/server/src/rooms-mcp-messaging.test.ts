@@ -21,20 +21,29 @@ describe('connected agent message protocol',()=>{
     const task=(await scope.db.query<{id:string}>('SELECT id FROM agent_commands WHERE agent_id=$1 AND source_message_id=$2',[member,source.messageId])).rows[0]!;
     return {...source,id:task.id};
   };
-  it('opens a message by ID from another chat the agent can list', async () => {
+  it('opens a listed message by ID and checks the human audience for a cross-chat lookup', async () => {
     const { client, member } = await scope.connected();
     const messageId = 'd'.repeat(64);
-    const read = (id: string) => ({ address: ROOM, facet: 'message', messageId: id });
+    const read = (id: string, address = ROOM) => ({ address, facet: 'message', messageId: id });
     expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
     await scope.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
       VALUES($1,$2,$3,'member')`, [WORKSPACE, PRIVATE, member]);
     const listed = await tools.ok(client, 'read', { address: PRIVATE, facet: 'messages' });
     expect(listed.items).toContainEqual(expect.objectContaining({ id: messageId, body: 'private nebula' }));
+    expect(await tools.ok(client, 'read', read(messageId, PRIVATE)))
+      .toMatchObject({ messageId, body: 'private nebula' });
+    expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+    expect((await tools.call(client, 'read', read(messageId.slice(0, 25)))).error).toBe(true);
+
+    await scope.db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role)
+      VALUES($1,$2,$3,'member')`, [WORKSPACE, PRIVATE, USER]);
     for (const id of [messageId, messageId.slice(0, 25)]) {
       expect(await tools.ok(client, 'read', read(id))).toMatchObject({ messageId, body: 'private nebula' });
     }
     await scope.db.query(`UPDATE memberships SET removed_at=now() WHERE room_id=$1 AND identity_id=$2`, [PRIVATE, member]);
     expect((await tools.call(client, 'read', read(messageId))).error).toBe(true);
+    expect((await tools.call(client, 'read', read(messageId, PRIVATE))).error).toBe(true);
+    await scope.db.query(`DELETE FROM memberships WHERE room_id=$1 AND identity_id=$2`, [PRIVATE, USER]);
   });
 
   it('opens the same cards that the daemon transcript lists', async () => {

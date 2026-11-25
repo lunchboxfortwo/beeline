@@ -25,6 +25,21 @@ type SearchRow = {
   authorized_room_count: string;
 };
 
+export function roomAudienceCanReadSourceSql(outputRoom: string, sourceRoom: string): string {
+  return `NOT EXISTS (
+    SELECT 1
+    FROM room_access output_member
+    JOIN identities human ON human.id=output_member.identity_id AND human.kind='human'
+    WHERE output_member.room_id=${outputRoom} AND output_member.removed_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM room_access source_member
+        WHERE source_member.room_id=${sourceRoom}
+          AND source_member.identity_id=output_member.identity_id
+          AND source_member.removed_at IS NULL
+      )
+  )`;
+}
+
 /**
  * Params: $1 output Room, $2 reader, $3 Workspace, $4 answering agent.
  * A source Room qualifies when the reader, the agent, and every current
@@ -55,18 +70,7 @@ export const AUTHORIZED_ROOMS_CTE = `authorized_rooms AS (
              WHERE member.room_id=COALESCE(source.parent_id,source.id) AND member.identity_id=$2
                AND member.removed_at IS NULL
            )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM room_access output_member
-             JOIN identities human ON human.id=output_member.identity_id AND human.kind='human'
-             WHERE output_member.room_id=$1 AND output_member.removed_at IS NULL
-               AND NOT EXISTS (
-                 SELECT 1 FROM room_access source_member
-                 WHERE source_member.room_id=COALESCE(source.parent_id,source.id)
-                   AND source_member.identity_id=output_member.identity_id
-                   AND source_member.removed_at IS NULL
-               )
-           )
+           AND ${roomAudienceCanReadSourceSql('$1', 'COALESCE(source.parent_id,source.id)')}
        )`;
 
 function boundedQuery(value: unknown): string {
