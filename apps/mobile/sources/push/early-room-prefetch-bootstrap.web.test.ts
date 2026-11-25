@@ -7,7 +7,7 @@ const reads = vi.hoisted(() => ({
   viewer: vi.fn(async () => 'viewer'),
 }));
 vi.mock('./push-room-prefetch', () => ({ prefetchPushRoom: reads.room }));
-vi.mock('@/buzz/server-read-owner', () => ({ readChatList: reads.chats }));
+vi.mock('@/buzz/chat-list-store', () => ({ readChatList: reads.chats }));
 vi.mock('@/auth/buzz-identity-storage', () => ({
   loadBuzzViewerPubkey: reads.viewer,
   getEffectiveRelayUrl: async () => 'https://server.fixture',

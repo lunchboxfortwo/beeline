@@ -1,6 +1,6 @@
 import { getEffectiveRelayUrl, loadBuzzViewerPubkey } from '@/auth/buzz-identity-storage';
 import { loadActiveCommunityId } from '@/buzz/community-storage';
-import { readChatList } from '@/buzz/server-read-owner';
+import { readChatList } from '@/buzz/chat-list-store';
 import { restoreStoredSurface, surfaceAddress } from '@/buzz/surface-storage';
 import { isChatListView } from '@beeline/buzz-client';
 import { prefetchPushRoom } from './push-room-prefetch';
