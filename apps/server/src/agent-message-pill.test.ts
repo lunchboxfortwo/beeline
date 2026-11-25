@@ -45,14 +45,20 @@ describe('addressed agent message transcript pills', () => {
     expect((await db.query('SELECT 1 FROM agent_commands WHERE agent_id=$1', [C])).rowCount).toBe(0);
   });
 
-  it.each([false, true])('keeps an agent block quiet in the transcript (older record: %s)', async olderRecord => {
+  it('keeps an agent block quiet using its existing report metadata', async () => {
+    await db.query(`INSERT INTO push_devices(token,identity_id,platform,environment,registered_at)
+      VALUES('pill-proof-device',$1,'android','physical',now()-interval '1 day')`, [H]);
+    await db.query(`INSERT INTO push_delivery_floors(id,started_at)
+      VALUES('message-delivery',now()-interval '1 day') ON CONFLICT (id) DO NOTHING`);
     const assignment = await daemon.execute('message', {
       roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Build the widget',
     }, A);
     const block = await daemon.execute('message', {
       roomId: THREAD, requestId: assignment.id, type: 'blocked', text: 'Choose the scope',
     }, B);
-    if (olderRecord) await db.query('UPDATE messages SET card_type=NULL WHERE id=$1', [block.id]);
+    expect((await db.query('SELECT presentation,card_type FROM messages WHERE id=$1', [block.id])).rows)
+      .toEqual([{ presentation: 'message', card_type: null }]);
+    expect((await db.query('SELECT 1 FROM push_message_context WHERE message_id=$1', [block.id])).rowCount).toBe(0);
     expect((await queued()).filter(([agent]) => agent !== B)).toEqual([[A, CHAT]]);
     const phone = new PhoneService(db, 'http://local.test');
     const view = readRoomView(await phone.readRoom(CHAT, H))!;

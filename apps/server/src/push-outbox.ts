@@ -1,5 +1,6 @@
 import type { SqlDatabase } from './database.js';
 import { pushDirectAttentionSql } from './push-attention.js';
+import { agentBlockSql } from './read-cursor.js';
 
 /** Write-side indexes keep delivery reads on message primary keys. */
 export const PUSH_OUTBOX_SCHEMA = `
@@ -45,6 +46,7 @@ BEGIN
   IF m.created_at<now()-interval '1 hour' OR m.presentation='activity'
     OR m.deleted_at IS NOT NULL OR btrim(m.text)=''
     OR m.card_type IN ('agent-yolo','grant-auto','turn-failed','workspace-member-joined','agent-command')
+    OR ${agentBlockSql('m')}
     OR (m.card_type='relay' AND m.card->>'direction'='up')
     OR NOT EXISTS (SELECT 1 FROM push_devices LIMIT 1) THEN RETURN; END IF;
   -- The native turn key merges concurrent message inserts without a history scan.

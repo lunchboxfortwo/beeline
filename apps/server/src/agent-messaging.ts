@@ -78,10 +78,10 @@ export async function sendMessage(db: SqlDatabase, input: {
           returnIdentityId:route.from.agent,attachments:input.attachments,...(selfWake ? {selfWake:true} : {})},
       });
       // A transcript reference shares a delivered command's identity, but is
-      // never a source message or another wake. Blocks keep message presentation
-      // for the existing ask and closure rules.
+      // never a source message or another wake. Room reads enforce place access;
+      // card presentation keeps this reference out of agent conversation context.
       const recorded = await tx.query<{id:string;created_at:Date}>(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at,reply_to_message_id)
-        SELECT $1,$2,$3,$4,CASE WHEN $8::text IS NULL THEN 'card' ELSE 'message' END,'agent-command',jsonb_build_object(
+        SELECT $1,$2,$3,$4,CASE WHEN $8::text IS NULL THEN 'card' ELSE 'message' END,CASE WHEN $8::text IS NULL THEN 'agent-command' END,jsonb_build_object(
           'kind',$5::text,'text',$4::text,'recipient',jsonb_build_object(
             'id',recipient.id,'name',recipient.name,'kind',recipient.kind,
             'handle',beeline_room_handle(recipient.id,$2))) || CASE WHEN $8::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('reportToId',$7::text,'reportStatus',$8::text,'sourceRoomId',$9::text) END,COALESCE($6::timestamptz,now()),(SELECT id FROM messages WHERE id=$10)
