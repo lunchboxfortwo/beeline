@@ -3,33 +3,24 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd -P)"
-local_dir="$repo_dir/packages/scripts/latency-rig/.local"
 export ANDROID_HOME="${ANDROID_HOME:-/home/lunchbox/android-sdk}"
-export ANDROID_AVD_HOME="$local_dir/avd"
 avd_name=beeline-latency-pixel5
 port="${LATENCY_RIG_EMULATOR_PORT:-5580}"
 if ! [[ "$port" =~ ^[0-9]+$ ]] || (( port < 5554 || port > 5680 || port % 2 != 0 )); then
   echo 'LATENCY_RIG_EMULATOR_PORT must be an even Android emulator port from 5554 to 5680' >&2
   exit 2
 fi
-mkdir -p "$ANDROID_AVD_HOME"
-if [[ ! -f "$ANDROID_AVD_HOME/$avd_name.ini" ]]; then
-  printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
-    --name "$avd_name" --package 'system-images;android-35;google_apis;x86_64' \
-    --device pixel_5 --path "$ANDROID_AVD_HOME/$avd_name.avd"
-fi
 serial="emulator-$port"
+read -r checkout_key _ < <(printf '%s' "$repo_dir" | sha256sum)
+unit="beeline-latency-${checkout_key:0:16}-$port.scope"
 if adb devices | awk 'NR > 1 {print $1}' | grep -Fxq "$serial"; then
-  observed="$(adb -s "$serial" emu avd name | head -1 | tr -d '\r')"
-  if [[ "$observed" != "$avd_name" ]]; then
-    echo "$serial belongs to AVD $observed, not this worktree's $avd_name" >&2
-    exit 2
+  if systemctl --user is-active --quiet "$unit"; then
+    echo "$serial is already running"
+    exit 0
   fi
-  echo "$serial is already running"
-  exit 0
+  echo "$serial is already in use by another job" >&2
+  exit 2
 fi
-echo $$ >"$local_dir/emulator.pid"
-echo "Starting $serial (worktree AVD $ANDROID_AVD_HOME/$avd_name.avd)"
 # This runner's 200% quota is a stable scenario, not a device equivalence.
 # The 46% Geekbench single-core score ratio made Android System UI unresponsive.
 # A different host must set an explicitly measured quota.
@@ -46,9 +37,34 @@ if ! [[ "$cpu_quota" =~ ^[0-9]+$ ]] || (( cpu_quota < 10 || cpu_quota > 1000 ));
   echo 'LATENCY_RIG_CPU_QUOTA_PERCENT must be an integer from 10 to 1000' >&2
   exit 2
 fi
-# Keep this process in the caller's session. For CI, run the script in the
-# background of the same job shell and wait on `adb -s "$serial" wait-for-device`.
-exec systemd-run --user --scope --quiet -p "CPUQuota=${cpu_quota}%" \
+scratch="$(mktemp -d "${LATENCY_RIG_SCRATCH_ROOT:-${TMPDIR:-/tmp}}/beeline-emulator.XXXXXX")"
+emulator_pid=""
+# shellcheck disable=SC2317 # Invoked indirectly by the EXIT trap.
+cleanup() {
+  if [[ -n "$emulator_pid" ]]; then
+    kill "$emulator_pid" 2>/dev/null || true
+    wait "$emulator_pid" 2>/dev/null || true
+  fi
+  rm -rf -- "$scratch"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+export ANDROID_USER_HOME="$scratch/android" ANDROID_EMULATOR_HOME="$scratch/android"
+export ANDROID_AVD_HOME="$scratch/avd" TMPDIR="$scratch"
+mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
+printf 'no\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+  --name "$avd_name" --package 'system-images;android-35;google_apis;x86_64' \
+  --device pixel_5 --path "$ANDROID_AVD_HOME/$avd_name.avd"
+echo "Starting $serial (job AVD $ANDROID_AVD_HOME/$avd_name.avd)"
+# The job owns the launcher and waits for it before releasing its scratch.
+systemd-run --user --scope --quiet --unit="$unit" -p "CPUQuota=${cpu_quota}%" \
   "$ANDROID_HOME/emulator/emulator" -avd "$avd_name" -port "$port" \
   -no-window -no-snapshot -no-audio -gpu swiftshader_indirect \
-  >"$local_dir/emulator.log" 2>&1
+  >"$scratch/emulator.log" 2>&1 &
+emulator_pid=$!
+status=0
+wait "$emulator_pid" || status=$?
+emulator_pid=""
+if (( status != 0 )); then tail -n 60 "$scratch/emulator.log" >&2; fi
+exit "$status"

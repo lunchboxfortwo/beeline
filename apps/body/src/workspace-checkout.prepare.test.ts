@@ -1,12 +1,14 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { prepareWorkspace } from './workspace-checkout.js';
+import { wrapAgentCommand } from './bwrap-sandbox.js';
+import { workspaceDependenciesDir } from './dependency-generation.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const exec = promisify(execFile);
@@ -103,14 +105,14 @@ async function fixture(
     source,
     config,
     restore,
-    prepare: (parentRoomId?: string) =>
+    prepare: (parentRoomId?: string, placeId = 'place') =>
       prepareWorkspace({
         api,
         config,
         supervisorRoot,
         workspaceId: 'workspace',
         agent: { name: 'Proof', publicKey: 'a'.repeat(64) },
-        placeId: 'place',
+        placeId,
         ...(parentRoomId ? { parentRoomId } : {}),
       }),
   };
@@ -189,3 +191,68 @@ it('prepare hands its step the thread brief and a writable temp folder tests can
   f.restore.brief = { spec: 'Fix the server read path.' };
   expect((await prepared()).brief).toBe('Fix the server read path.');
 });
+
+it('shares matching root and mobile installs through sealed workspace paths and replaces a changed generation', async () => {
+  const f = await fixture({
+    'corner:prepare': 'node packages/scripts/prepare-corner.mjs',
+    'mobile:install': 'exit 1',
+  }, { brief: { spec: 'Prepare the mobile app.' } });
+  const source = f.source;
+  await mkdir(join(source, 'packages/scripts'), { recursive: true });
+  await writeFile(join(source, 'packages/scripts/prepare-corner.mjs'), `
+    import assert from 'node:assert/strict';
+    import { createRequire } from 'node:module';
+    assert.equal(process.env.BEELINE_READONLY_DEPENDENCIES, '1');
+    assert.equal(process.env.BEELINE_MOBILE_DEPENDENCIES_READY, '1');
+    assert.equal(createRequire(process.cwd() + '/package.json')('dep'), 'shared');
+    assert.equal(createRequire(process.cwd() + '/apps/mobile/package.json')('dep'), 'shared');
+  `);
+  await writeFile(join(source, 'dep', 'index.js'), "module.exports = 'shared';");
+  const { stdout } = await exec('npm', ['pack', './dep', '--json'], { cwd: source });
+  const tarball = (JSON.parse(stdout) as { filename: string }[])[0]!.filename;
+  const manifestPath = join(source, 'package.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.dependencies.dep = `file:${tarball}`;
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  const mobile = join(source, 'apps/mobile');
+  await mkdir(mobile, { recursive: true });
+  await writeFile(join(mobile, 'package.json'), JSON.stringify({
+    name: 'fixture-mobile', dependencies: { dep: `file:../../${tarball}` },
+  }));
+  for (const cwd of [source, mobile])
+    await exec('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit'], { cwd });
+  await commit(source, 'managed');
+
+  const prepare = async (id: string) => {
+    const result = await f.prepare('room', id);
+    expect(result).toContain('Checkout ready at ');
+    return result.slice('Checkout ready at '.length).split(' on ')[0]!;
+  };
+  const first = await prepare('first');
+  const second = await prepare('second');
+  const inode = async (root: string, path: string) => (await stat(join(root, path))).ino;
+  const dependency = 'node_modules/dep/index.js';
+  expect(await inode(first, dependency)).toBe(await inode(second, dependency));
+  expect(await inode(first, `apps/mobile/${dependency}`))
+    .toBe(await inode(second, `apps/mobile/${dependency}`));
+
+  const { stdout: gitDir } = await exec('git', ['-C', first, 'rev-parse', '--git-common-dir']);
+  const gitCommonDir = gitDir.trim();
+  const command = wrapAgentCommand({
+    bwrapPath: f.config.bwrapPath,
+    spec: {
+      mode: 'edit', cwd: first, worktreePath: first, gitCommonDir,
+      sealedPaths: [join(gitCommonDir, workspaceDependenciesDir)],
+    },
+    command: 'chmod',
+    args: ['u+w', dependency],
+  });
+  await expect(exec(command.command, command.args, { cwd: first })).rejects.toThrow(/Read-only file system/);
+
+  const old = await inode(first, dependency);
+  const lockfile = join(first, 'package-lock.json');
+  await writeFile(lockfile, (await readFile(lockfile, 'utf8')) + '\n');
+  expect(await prepare('first')).toBe(first);
+  expect(await inode(first, dependency)).not.toBe(old);
+  expect(await inode(second, dependency)).toBe(old);
+}, 30_000);

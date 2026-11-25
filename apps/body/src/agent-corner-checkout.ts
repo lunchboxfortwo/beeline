@@ -16,6 +16,7 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
+import { workspaceDependenciesDir } from './dependency-generation.js';
 
 const git = (args: string[], env?: NodeJS.ProcessEnv) => runOwnedFile('git', args, { env });
 
@@ -179,7 +180,8 @@ export async function materializeAgentCornerCheckout(input: {
       // HEAD is the completion marker, so interrupted installs rebuild here.
       await mkdir(paths.gitCommonDir, { recursive: true });
       for (const entry of await readdir(paths.gitCommonDir))
-        await rm(resolve(paths.gitCommonDir, entry), { recursive: true, force: true });
+        if (entry !== workspaceDependenciesDir)
+          await rm(resolve(paths.gitCommonDir, entry), { recursive: true, force: true });
       for (const entry of await readdir(staging)) {
         if (entry !== 'HEAD')
           await rename(resolve(staging, entry), resolve(paths.gitCommonDir, entry));

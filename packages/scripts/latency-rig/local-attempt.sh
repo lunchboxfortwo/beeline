@@ -22,7 +22,6 @@ cd "$repo_dir"
 lock_dir="${LATENCY_RIG_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/beeline/latency-rig-speedy}"
 mkdir -p "$lock_dir"
 exec 9>"$lock_dir/capture.lock"
-export GRADLE_USER_HOME="$lock_dir/gradle"
 flock -n 9 || { echo 'Another Speedy rig attempt is running' >&2; exit 2; }
 export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
 export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dorg.gradle.workers.max=2"
@@ -31,7 +30,6 @@ export LATENCY_RIG_DATABASE_URL="postgresql://localhost/$fixture_database?host=%
 export LATENCY_RIG_REVIEW_SECRET
 LATENCY_RIG_REVIEW_SECRET="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
 export LATENCY_RIG_SERVER_PORT="${LATENCY_RIG_SERVER_PORT:-18880}" LATENCY_RIG_PORT="${LATENCY_RIG_PORT:-18881}"
-export LATENCY_RIG_PROXY_LOG="$output/proxy.ndjson" LATENCY_RIG_SQL_LOG="$output/sql.ndjson"
 export EXPO_PUBLIC_BUZZY_MONOLITH_URL="http://10.0.2.2:$LATENCY_RIG_PORT"
 export BEELINE_ANDROID_NATIVE_LATENCY_PROBE=1
 export LATENCY_RIG_RTT_MS=100 LATENCY_RIG_JITTER_MS=0 LATENCY_RIG_MBPS=10
@@ -50,21 +48,32 @@ for (const port of ports) await new Promise((resolve, reject) => {
 });
 JS
 rm -f "$output/report.json" "$output/report.md" "$output/samples.ndjson"
-# Stop the previous fixture app before starting a new backend on these ports.
-adb -s "$device" shell am force-stop app.usebeeline
-# Each attempt starts with the same fixture, including no prior send leases.
-createdb --host=/var/run/postgresql "$fixture_database"
+scratch="$(mktemp -d "${LATENCY_RIG_SCRATCH_ROOT:-${TMPDIR:-/tmp}}/beeline-latency-attempt.XXXXXX")"
+export GRADLE_USER_HOME="$scratch/gradle"
+export LATENCY_RIG_PROXY_LOG="$scratch/proxy.ndjson" LATENCY_RIG_SQL_LOG="$scratch/sql.ndjson"
 server_pid=""
+database_created=false
 cleanup() {
   if [[ -n "$server_pid" ]]; then
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true
   fi
-  dropdb --host=/var/run/postgresql --if-exists "$fixture_database" || echo "Fixture cleanup failed: $fixture_database" >&2
+  if [[ "$database_created" == true ]]; then
+    dropdb --host=/var/run/postgresql --if-exists "$fixture_database" || echo "Fixture cleanup failed: $fixture_database" >&2
+  fi
+  if [[ -f "$scratch/capture/host-load.json" ]]; then
+    cp "$scratch/capture/host-load.json" "$output/capture/host-load.json"
+  fi
+  rm -rf -- "$scratch"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# Stop the previous fixture app before starting a new backend on these ports.
+adb -s "$device" shell am force-stop app.usebeeline
+# Each attempt starts with the same fixture, including no prior send leases.
+createdb --host=/var/run/postgresql "$fixture_database"
+database_created=true
 bash packages/scripts/latency-rig/run-local.sh >"$output/server.log" 2>&1 &
 server_pid=$!
 for _ in {1..180}; do
@@ -79,6 +88,7 @@ mkdir -p "$GRADLE_USER_HOME/init.d"
 cat > "$GRADLE_USER_HOME/gradle.properties" <<'PROPERTIES'
 org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
 org.gradle.workers.max=2
+org.gradle.daemon=false
 reactNativeArchitectures=x86_64
 kotlin.compiler.execution.strategy=in-process
 PROPERTIES
@@ -99,10 +109,10 @@ for _ in {1..30}; do
 done
 if [[ "$signed_in" != true ]]; then echo 'Fixture sign-in did not reach the Room list' >&2; exit 1; fi
 # Builds and migrations have ended before timers start.
-LATENCY_RIG_NIGHTLY=1 node packages/scripts/latency-rig/capture-arrivals.mjs "$output/capture" >"$output/capture.log" 2>&1
-node packages/scripts/latency-rig/join.mjs --moments "$output/capture/moments.ndjson" \
-  --proxy "$LATENCY_RIG_PROXY_LOG" --sql "$LATENCY_RIG_SQL_LOG" --out "$output/samples.ndjson"
-node packages/scripts/latency-rig/analyze.mjs --input "$output/samples.ndjson" \
+LATENCY_RIG_NIGHTLY=1 node packages/scripts/latency-rig/capture-arrivals.mjs "$scratch/capture" >"$output/capture.log" 2>&1
+node packages/scripts/latency-rig/join.mjs --moments "$scratch/capture/moments.ndjson" \
+  --proxy "$LATENCY_RIG_PROXY_LOG" --sql "$LATENCY_RIG_SQL_LOG" --out "$scratch/samples.ndjson"
+node packages/scripts/latency-rig/analyze.mjs --input "$scratch/samples.ndjson" \
   --routes packages/scripts/latency-rig/routes.json --interactions packages/scripts/latency-rig/interactions.json \
   --room-cases packages/scripts/latency-rig/room-arrival-cases.json --nightly \
   --commit "$(git rev-parse HEAD)" --device 'squire; se_api35; x86_64; 2560 MiB; 4 cores' \

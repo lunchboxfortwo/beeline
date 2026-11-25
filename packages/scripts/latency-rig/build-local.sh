@@ -31,6 +31,30 @@ if [[ ! -f "$keystore" ]]; then
 fi
 export ANDROID_SIDELOAD_KEYSTORE_B64
 ANDROID_SIDELOAD_KEYSTORE_B64="$(base64 -w0 "$keystore")"
+gradle_scratch=""
+shared_dependencies=""
+dependencies="$mobile_dir/node_modules"
+# Android's Gradle plugins write under their npm package paths.
+# shellcheck disable=SC2317 # Invoked indirectly by the EXIT trap.
+cleanup() {
+  if [[ -n "$shared_dependencies" ]]; then
+    rm -rf -- "$dependencies"
+    ln -s -- "$shared_dependencies" "$dependencies"
+  fi
+  if [[ -n "$gradle_scratch" ]]; then rm -rf -- "$gradle_scratch"; fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+if [[ -z "${GRADLE_USER_HOME:-}" ]]; then
+  gradle_scratch="$(mktemp -d "${LATENCY_RIG_SCRATCH_ROOT:-${TMPDIR:-/tmp}}/beeline-rig-gradle.XXXXXX")"
+  export GRADLE_USER_HOME="$gradle_scratch"
+fi
+if [[ -L "$dependencies" && -f "$dependencies/.beeline-generation" ]]; then
+  shared_dependencies="$(readlink "$dependencies")"
+  unlink "$dependencies"
+  npm ci --prefix "$mobile_dir" --no-audit --no-fund
+fi
 cd "$mobile_dir"
 bash scripts/android-build.sh
 echo "Release rig APK: $mobile_dir/android/app/build/outputs/apk/release/app-release.apk"
