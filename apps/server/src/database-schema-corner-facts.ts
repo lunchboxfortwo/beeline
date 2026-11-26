@@ -353,8 +353,10 @@ CREATE INDEX IF NOT EXISTS github_auth_flows_expiry_idx ON github_auth_flows(exp
 
 CREATE TABLE IF NOT EXISTS github_webhook_deliveries (
   delivery_id text PRIMARY KEY,
-  received_at timestamptz NOT NULL DEFAULT now()
+  received_at timestamptz NOT NULL DEFAULT now(),
+  claim_expires_at timestamptz
 );
+ALTER TABLE github_webhook_deliveries ADD COLUMN IF NOT EXISTS claim_expires_at timestamptz;
 -- The old payload shape: NULL on every row in production on 2026-11-02.
 
 CREATE TABLE IF NOT EXISTS push_devices (

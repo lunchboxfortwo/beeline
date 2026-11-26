@@ -299,7 +299,7 @@ export type DaemonOperationMap = {
   /** Current members of a Room the caller is in, or of a corner it reaches. */
   listRoomMembers: Operation<RoomInput, RoomMemberListResult>;
   /** A reachable corner's pull request: changed files, reviews and comments. */
-  readCornerPullRequest: Operation<CornerInput, CornerPullRequestResult>;
+  readCornerPullRequest: Operation<CornerInput & { readonly pullRequest?: number | string }, CornerPullRequestResult>;
   getCornerCloseRequests: Operation<CornerCursorInput, RoomInboxResult>;
   listUntrackedCorners: Operation<RoomInput, CornerListResult>;
   getRoomRepositoryState: Operation<RoomInput, RoomRepositoryStateResult>;

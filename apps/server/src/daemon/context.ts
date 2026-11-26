@@ -67,6 +67,7 @@ export interface DaemonDependencies {
     >;
   readonly readPullRequest?: (
       cornerId: string,
+      options?: { pullRequest?: number | string; callerId?: string },
     ) => Promise<Output<'readCornerPullRequest'>>;
   readonly subscriptionReceiverUrl?: string;
   readonly github?: GitHubOperations;

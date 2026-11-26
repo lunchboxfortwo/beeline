@@ -29,7 +29,7 @@ import { notifyFeedbackFixed, reportAgentFeedback } from '../feedback.js';
 import { deleteSkill, saveSkill } from '../institutional-skills.js';
 import { archiveWorkflow, assignWorkflowRole, handoff, getWorkflowRun, cancelWorkflowRun, saveWorkflow, startWorkflow } from '../workflow-runs.js';
 import type { DaemonContext } from './context.js';
-import { Input, Output, id } from './values.js';
+import { AccessDeniedError, Input, Output, id } from './values.js';
 import { getInstitutionalContextOperation, saveInstitutionalMemoryOperation, searchInstitutionalMemoryOperation, searchInstitutionalHistoryOperation, loadWorkspaceSkillOperation, startAgentTurnOperation, getRoomGitHubTokenOperation, markAgentTurnSilentOperation, postBackgroundToolCompletionOperation, endComputerSessionOperation, createLinkSpendRequestOperation, retrieveLinkSpendRequestOperation, postStarterWelcomeOperation, postRepositoryOnboardingOperation, findConnectorsOperation, postVaultSaveCardOperation, setCornerHoldOperation } from './operation-effects.js';
 import { daemonAccess, daemonRoomMembers } from './access.js';
 import { daemonBootstrap, daemonWorkspaceRoster, daemonInbox } from './inbox-roster.js';
@@ -370,11 +370,21 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
           (input as Input<'listRoomMembers'>).roomId,
         )) as Output<Name>;
       case 'readCornerPullRequest': {
-        const { cornerId } = input as Input<'readCornerPullRequest'>;
-        await daemonReach(ctx, cornerId, authenticatedAgentId);
+        const { cornerId, pullRequest } = input as Input<'readCornerPullRequest'>;
+        if (pullRequest === undefined) {
+          await daemonReach(ctx, cornerId, authenticatedAgentId);
+        } else {
+          await daemonAccess(ctx, cornerId, authenticatedAgentId).catch((error: unknown) => {
+            if (error instanceof AccessDeniedError) return daemonReach(ctx, cornerId, authenticatedAgentId);
+            throw error;
+          });
+        }
         if (!ctx.readPullRequest)
           return { status: 'blocked', blocker: 'GitHub is not configured on this server' } as Output<Name>;
-        return (await ctx.readPullRequest(cornerId)) as Output<Name>;
+        return (await ctx.readPullRequest(cornerId, {
+          ...(pullRequest !== undefined ? { pullRequest } : {}),
+          callerId: authenticatedAgentId,
+        })) as Output<Name>;
       }
       case 'getPrChecksStatus':
         if (!ctx.prChecksStatus) throw new Error('GitHub PR checks service unavailable');

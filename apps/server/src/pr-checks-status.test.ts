@@ -559,6 +559,65 @@ describe('PR-scoped check gate', () => {
   });
 
 
+  it('reports pending and failing check states truthfully after a review wake was dispatched', async () => {
+    rootFixture.requiredContexts = ['test'];
+    await ownPr();
+    await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
+    // First dispatch review while checks are passing.
+    rootFixture.rollupState = 'SUCCESS';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS',
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    expect(await gate(AUTHOR)).toMatchObject({
+      checks: 'passed',
+      reviewerWake: {
+        status: 'dispatched',
+        detail: 'The checks-passed transition woke @reviewer.',
+      },
+    });
+    // When checks re-run to pending on the same head, keep the recorded wake cause separate from current checks.
+    rootFixture.rollupState = 'PENDING';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null,
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    const whilePending = await gate(AUTHOR);
+    expect(whilePending.reviewerWake).toEqual({
+      status: 'dispatched',
+      detail: 'The checks-passed transition woke @reviewer; checks are currently pending.',
+    });
+    // When checks are failing on the same head, report current checks separately from the dispatch cause.
+    rootFixture.rollupState = 'FAILURE';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE',
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    const whileFailing = await gate(AUTHOR);
+    expect(whileFailing.reviewerWake).toEqual({
+      status: 'dispatched',
+      detail: 'The checks-passed transition woke @reviewer; checks are currently failing.',
+    });
+    // A generic or unknown stored wake cause must never say "checks-passed" even when current checks pass.
+    await rootFixture.db.query(
+      `UPDATE agent_commands SET review_context=review_context-'wakeCause'
+       WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`,
+      [AUTHOR, REVIEWER],
+    );
+    rootFixture.rollupState = 'SUCCESS';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS',
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    const unknownCausePassing = await gate(AUTHOR);
+    expect(unknownCausePassing.reviewerWake).toEqual({
+      status: 'dispatched',
+      detail: 'A review turn was dispatched to @reviewer; checks are currently passing.',
+    });
+    expect(unknownCausePassing.reviewerWake.detail).not.toContain('checks-passed');
+  });
+
+
   it('refuses other repositories and nonmembers before accessing PR data', async () => {
     await expect(gate(C, 'https://github.com/other/private/pull/614')).rejects.toThrow(
       'chat repository',
