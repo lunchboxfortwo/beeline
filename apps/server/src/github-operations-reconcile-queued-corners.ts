@@ -244,9 +244,8 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
         fallbackBranch],
     );
     for (const room of rooms.rows) {
-      const note = await database.transaction(async (tx) => {
-        if (claim) await claim.assertOwned(tx);
-        return systemLine(tx, {
+      const writeNote = (db: typeof database) =>
+        systemLine(db, {
           id: hash(`beeline:${room.room_id}:github-event:${event}:${card.action}:${dedupeKey}`),
           roomId: room.room_id,
           authorId: room.author_id,
@@ -257,7 +256,12 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           cardType: 'github-event',
           card: { ...card, ...(room.corner_id ? { cornerId: room.corner_id } : {}) },
         });
-      });
+      const note = claim
+        ? await database.transaction(async (tx) => {
+            await claim.assertOwned(tx);
+            return writeNote(tx);
+          })
+        : await writeNote(database);
       if (note.inserted) ctx.onRoomChanged?.(room.room_id);
     }
   }

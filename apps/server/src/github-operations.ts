@@ -381,10 +381,12 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         this.invalidateInstallationRoomTokens(installationId);
       }
       if (deliveryId) {
-        const changed = await this.database.transaction(async (tx) => {
-          if (claim) await claim.assertOwned(tx);
-          return fireRepositorySubscriptions(tx, installationId, event, body, deliveryId);
-        });
+        const changed = claim
+          ? await this.database.transaction(async (tx) => {
+              await claim.assertOwned(tx);
+              return fireRepositorySubscriptions(tx, installationId, event, body, deliveryId);
+            })
+          : await fireRepositorySubscriptions(this.database, installationId, event, body, deliveryId);
         for (const roomId of new Set(changed)) this.onRoomChanged?.(roomId);
       }
       assertActive();
@@ -421,28 +423,41 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
       // full GitHub refresh and repository-change wake for every bound Room.
       if (event !== 'installation' && event !== 'installation_repositories' && event !== 'repository') return;
       if (event === 'installation' && body.action === 'deleted') {
-        await this.database.transaction(async (tx) => {
-          if (claim) await claim.assertOwned(tx);
-          await tx.query(
+        const revoke = async (db: SqlDatabase) => {
+          await db.query(
             `UPDATE github_installations SET status='revoked',updated_at=now() WHERE installation_id=$1`,
-            [install.id],
+            [installationId],
           );
-          await tx.query(
+          await db.query(
             `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1`,
-            [install.id],
+            [installationId],
           );
-        });
+        };
+        if (claim) {
+          await this.database.transaction(async (tx) => {
+            await claim.assertOwned(tx);
+            await revoke(tx);
+          });
+        } else {
+          await revoke(this.database);
+        }
         return;
       }
       if (event === 'installation' && body.action === 'suspend') {
-        await this.database.transaction(async (tx) => {
-          if (claim) await claim.assertOwned(tx);
-          await tx.query(
+        const suspend = (db: SqlDatabase) =>
+          db.query(
             `UPDATE github_installations SET status='suspended',updated_at=now()
              WHERE installation_id=$1 AND status<>'revoked'`,
-            [install.id],
+            [installationId],
           );
-        });
+        if (claim) {
+          await this.database.transaction(async (tx) => {
+            await claim.assertOwned(tx);
+            await suspend(tx);
+          });
+        } else {
+          await suspend(this.database);
+        }
         return;
       }
       const existing = (
@@ -477,13 +492,19 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
           return typeof id === 'number' && Number.isSafeInteger(id) ? [id] : [];
         });
         if (removedIds.length) {
-          await this.database.transaction(async (tx) => {
-            if (claim) await claim.assertOwned(tx);
-            await tx.query(
+          const deactivate = (db: SqlDatabase) =>
+            db.query(
               `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1 AND repository_id=ANY($2::bigint[])`,
-              [install.id, removedIds],
+              [installationId, removedIds],
             );
-          });
+          if (claim) {
+            await this.database.transaction(async (tx) => {
+              await claim.assertOwned(tx);
+              await deactivate(tx);
+            });
+          } else {
+            await deactivate(this.database);
+          }
         }
       }
       assertActive();
