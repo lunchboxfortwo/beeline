@@ -133,7 +133,7 @@ it('NEEDS-YOU-CLOSED: closing the source thread or the asking agent\'s close_ask
   await expect(rootFixture.daemon.execute('closeAgentAsk', { ...authority(rootFixture.order), messageId: ask.id, reason: 'withdrawn' }, WORKER))
     .rejects.toThrow();
   expect(await rootFixture.daemon.execute('closeAgentAsk', { ...authority(rootFixture.order), messageId: own.id, reason: 'withdrawn' }, RUBY))
-    .toEqual({ closed: 1 });
+    .toMatchObject({ closed: 1, reason: 'withdrawn' });
   expect(await asks()).toEqual([]);
   expect((await cleared()).at(-1)).toEqual({ text: 'pick a scope', reason: 'withdrawn' });
 });

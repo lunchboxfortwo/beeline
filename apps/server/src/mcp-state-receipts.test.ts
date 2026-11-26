@@ -491,4 +491,117 @@ describe('mcp-state-receipts server provenance and post-condition receipts', () 
       await database.close();
     }
   });
+
+  it('never leaks uncited parent or request provenance through review-only brief citation reads', async () => {
+    const { database, daemon } = await setupFixture();
+    try {
+      const reviewer = 'e'.repeat(64);
+      const privateSourceRoom = '55555555-5555-4555-8555-555555555555';
+      const reviewCorner = '66666666-6666-4666-8666-666666666666';
+      const headSha = 'f'.repeat(40);
+      await database.query(
+        `INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Speedy','speedy')`,
+        [reviewer],
+      );
+      await database.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2)`, [reviewer, OWNER]);
+      await database.query(
+        `INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'Private Ops')`,
+        [privateSourceRoom, WORKSPACE, OWNER],
+      );
+      await database.query(
+        `INSERT INTO rooms(id,workspace_id,parent_id,created_by,name,reviewer_agent_id) VALUES($1,$2,$3,$4,'review-only-proof',$5)`,
+        [reviewCorner, WORKSPACE, ROOM, AGENT, reviewer],
+      );
+      // Reviewer is in the workspace and parent room (giving corner reach), but NOT in privateSourceRoom.
+      await database.query(
+        `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+          ($1,NULL,$2,'member'),($1,$3,$2,'member'),($1,$4,$5,'owner')`,
+        [WORKSPACE, reviewer, ROOM, privateSourceRoom, OWNER],
+      );
+      await database.query(
+        `INSERT INTO corner_facts(corner_id,owner_agent_id) VALUES($1,$2)`,
+        [reviewCorner, WORKER],
+      );
+      await database.query(
+        `INSERT INTO corner_github_cache(corner_id,lifecycle) VALUES($1,$2::jsonb)
+         ON CONFLICT(corner_id) DO UPDATE SET lifecycle=EXCLUDED.lifecycle`,
+        [reviewCorner, JSON.stringify({ pr: { number: 189, headSha } })],
+      );
+
+      const uncitedId = randomBytes(32).toString('hex');
+      const citedId = randomBytes(32).toString('hex');
+      const citedChildId = randomBytes(32).toString('hex');
+      await database.query(
+        `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'TOP SECRET UNCITED PARENT TEXT')`,
+        [uncitedId, privateSourceRoom, OWNER],
+      );
+      await database.query(
+        `INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id,request_id)
+         VALUES($1,$2,$3,'Approved citation quoting private context',$4,$4,$4)`,
+        [citedId, privateSourceRoom, OWNER, uncitedId],
+      );
+      await database.query(
+        `INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id,root_message_id,request_id)
+         VALUES($1,$2,$3,'Follow-up citation quoting the first citation',$4,$4,$4)`,
+        [citedChildId, privateSourceRoom, OWNER, citedId],
+      );
+      await database.query(
+        `INSERT INTO corner_brief_revisions(corner_id,revision,author_id,source_room_id,source_message_id,spec,intent_verbatim,approval_basis)
+         VALUES($1,1,$2,$3,$4,'## Intent\nReview only.',$5::jsonb,$6::jsonb)`,
+        [
+          reviewCorner,
+          AGENT,
+          privateSourceRoom,
+          citedId,
+          JSON.stringify([{ sourceMessageId: citedChildId, text: 'Follow-up citation quoting the first citation' }]),
+          JSON.stringify({ sourceMessageId: citedId, approvedBy: OWNER }),
+        ],
+      );
+      const reviewCmd = (await createAgentCommand(database, {
+        roomId: reviewCorner,
+        agentId: reviewer,
+        sourceMessageId: citedId,
+        reason: 'corner_review_dispatch',
+      }))!;
+      await database.query(
+        `UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`,
+        [reviewCmd.id, JSON.stringify({ headSha, pullRequest: 189, briefRevision: 1 })],
+      );
+
+      // Uncited message itself remains forbidden.
+      await expect(
+        daemon.execute('getRoomMessage', { roomId: reviewCorner, messageId: uncitedId }, reviewer),
+      ).rejects.toThrow();
+
+      // Reading the cited message must NOT leak the uncited parent's excerpt, author, or ID.
+      const citedRead = await daemon.execute(
+        'getRoomMessage',
+        { roomId: reviewCorner, messageId: citedId },
+        reviewer,
+      );
+      expect(citedRead.body).toBe('Approved citation quoting private context');
+      expect(citedRead.repliesTo).toBeUndefined();
+      expect(citedRead.rootMessageId).toBeUndefined();
+      expect(citedRead.requestAuthorId).toBeUndefined();
+      expect(JSON.stringify(citedRead)).not.toContain('TOP SECRET UNCITED PARENT TEXT');
+      expect(JSON.stringify(citedRead)).not.toContain(uncitedId);
+
+      // Reading a cited message whose parent is ALSO cited still exposes the authorized parent provenance.
+      const citedChildRead = await daemon.execute(
+        'getRoomMessage',
+        { roomId: reviewCorner, messageId: citedChildId },
+        reviewer,
+      );
+      expect(citedChildRead.repliesTo).toMatchObject({
+        messageId: citedId,
+        authorId: OWNER,
+        authorName: 'Lunchbox',
+        excerpt: 'Approved citation quoting private context',
+      });
+      expect(citedChildRead.rootMessageId).toBe(citedId);
+      expect(citedChildRead.requestAuthorId).toBe(OWNER);
+    } finally {
+      await database.close();
+    }
+  });
 });

@@ -45,6 +45,43 @@ const messageMetadataColumns = `
   (SELECT request.author_id FROM messages request
    WHERE request.id=message.request_id AND request.room_id=message.room_id AND request.deleted_at IS NULL) request_author_id`;
 
+const citedInBriefSql = (idExpr: string) =>
+  `(${idExpr}=brief.source_message_id
+    OR ${idExpr}=brief.approval_basis->>'sourceMessageId'
+    OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(brief.intent_verbatim,'[]'::jsonb)) intent
+      WHERE intent->>'sourceMessageId'=${idExpr}))`;
+
+const reviewOnlyMessageMetadataColumns = `
+  message.author_id,
+  beeline_room_handle(message.author_id,message.room_id) author_handle,
+  message.created_at,
+  CASE WHEN EXISTS(SELECT 1 FROM messages parent
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id
+     AND parent.deleted_at IS NULL AND parent.presentation='message'
+     AND ${citedInBriefSql('parent.id')})
+   THEN message.reply_to_message_id END reply_to_message_id,
+  (SELECT parent.author_id FROM messages parent
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id
+     AND parent.deleted_at IS NULL AND parent.presentation='message'
+     AND ${citedInBriefSql('parent.id')}) reply_to_author_id,
+  (SELECT author.name FROM messages parent JOIN identities author ON author.id=parent.author_id
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id
+     AND parent.deleted_at IS NULL AND parent.presentation='message'
+     AND ${citedInBriefSql('parent.id')}) reply_to_author_name,
+  (SELECT left(parent.text,16001) FROM messages parent
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id
+     AND parent.deleted_at IS NULL AND parent.presentation='message'
+     AND ${citedInBriefSql('parent.id')}) reply_to_excerpt,
+  CASE WHEN EXISTS(SELECT 1 FROM messages root
+   WHERE root.id=message.root_message_id AND root.room_id=message.room_id
+     AND root.deleted_at IS NULL AND root.presentation='message'
+     AND ${citedInBriefSql('root.id')})
+   THEN message.root_message_id END root_message_id,
+  (SELECT request.author_id FROM messages request
+   WHERE request.id=message.request_id AND request.room_id=message.room_id
+     AND request.deleted_at IS NULL AND request.presentation='message'
+     AND ${citedInBriefSql('request.id')}) request_author_id`;
+
 const readableMessage = daemonTranscriptVisibilitySql('message');
 // A borrowed review source grants access only to the addressed transcript.
 // A lookup outside the addressed chat must also respect its human audience.
@@ -111,7 +148,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
       // Keep this separate from Room access and requester-derived authority.
       row = (await ctx.database.query<ReadableMessageRow>(
         `SELECT message.text body,message.attachments,
-                ${messageMetadataColumns}
+                ${reviewOnlyMessageMetadataColumns}
          FROM messages message
          JOIN rooms corner ON corner.id=$1 AND corner.archived_at IS NULL
          JOIN rooms source ON source.id=message.room_id AND source.workspace_id=corner.workspace_id
@@ -120,10 +157,7 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
            WHERE corner_id=corner.id ORDER BY revision DESC LIMIT 1) brief
            ON brief.source_room_id=message.room_id
          WHERE message.id=$3 AND ${readableMessage} AND message.presentation='message'
-           AND (message.id=brief.source_message_id
-             OR message.id=brief.approval_basis->>'sourceMessageId'
-             OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(brief.intent_verbatim,'[]'::jsonb)) intent
-               WHERE intent->>'sourceMessageId'=message.id))
+           AND ${citedInBriefSql('message.id')}
            AND EXISTS(SELECT 1 FROM agent_commands command
              WHERE command.room_id=corner.id AND command.agent_id=$2
                AND command.state='pending' AND command.review_context IS NOT NULL

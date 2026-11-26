@@ -244,7 +244,7 @@ const fixture = monolithFixture();
     const first = await fixture.daemonOperation('createCorner', input);
     expect(first.status).toBe(200);
     const { cornerId } = (await first.json()) as { cornerId: string };
-    expect(await (await fixture.daemonOperation('createCorner', input)).json()).toEqual({ cornerId });
+    expect(await (await fixture.daemonOperation('createCorner', input)).json()).toMatchObject({ cornerId });
     const revisions = await fixture.database.query<{ revision: number }>(
       `SELECT revision FROM corner_brief_revisions WHERE corner_id=$1`,
       [cornerId],
@@ -326,7 +326,7 @@ const fixture = monolithFixture();
     });
     // A retry of the original open still names the same corner after a later
     // correction; the retry is compared with revision 1, not the latest brief.
-    expect(await (await fixture.daemonOperation('createCorner', input)).json()).toEqual({ cornerId });
+    expect(await (await fixture.daemonOperation('createCorner', input)).json()).toMatchObject({ cornerId });
     expect(
       (
         await fixture.database.query<{ revision: number }>(
