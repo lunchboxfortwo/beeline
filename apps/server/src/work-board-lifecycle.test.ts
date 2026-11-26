@@ -400,16 +400,38 @@ describe('unified work lifecycle', () => {
          ('emberus-landed',$1,'note','Merged cleanly')`,
       [lunchbox],
     );
+    const unrelatedThread = randomUUID();
     await db.query(
       `INSERT INTO work_item_attachments(work_item_id,kind,name,url,added_by) VALUES
          ('emberus-unfinished','link','Thread: verify-provider-recovery',$1,$3),
+         ('emberus-unfinished','link','Thread: unrelated-design',$4,$3),
+         ('emberus-unfinished','link','Prior thread note',$1,$3),
          ('emberus-unfinished','link','Runbook','https://example.org/runbook',$3),
          ('emberus-landed','link','Thread: ship-queue-fix',$2,$3)`,
       [
         `https://web.usebeeline.app/beeline/chat/${archivedUnmerged}?communityId=${workspace}`,
         `https://web.usebeeline.app/beeline/chat/${landedThread}?communityId=${workspace}`,
         lunchbox,
+        `https://web.usebeeline.app/beeline/chat/${unrelatedThread}?communityId=${workspace}`,
       ],
+    );
+    // Standalone task with a user-added Thread: link to an unrelated thread must also keep its link.
+    const standaloneLinkTask = randomUUID();
+    await updateWorkItem(
+      db,
+      {
+        roomId: chat,
+        id: standaloneLinkTask,
+        title: 'keep-user-links',
+        attachments: [
+          {
+            kind: 'link',
+            name: 'Thread: unrelated-design',
+            url: `https://web.usebeeline.app/beeline/chat/${unrelatedThread}?communityId=${workspace}`,
+          },
+        ],
+      },
+      lunchbox,
     );
 
     await unifyWorkItemsAndThreads(db);
@@ -428,7 +450,14 @@ describe('unified work lifecycle', () => {
     });
     expect(unfinished!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(unfinished!.entries?.some((e) => e.kind === 'note' && e.text === 'Still needs real test')).toBe(true);
-    expect(unfinished!.attachments?.map((a) => a.name)).toEqual(['Runbook']);
+    expect(unfinished!.attachments?.map((a) => a.name).sort()).toEqual([
+      'Prior thread note',
+      'Runbook',
+      'Thread: unrelated-design',
+    ]);
+    expect(
+      board.items.find((i) => i.id === standaloneLinkTask)?.attachments?.map((a) => a.name),
+    ).toEqual(['Thread: unrelated-design']);
 
     const landed = board.items.filter((i) => i.id === landedThread);
     expect(landed).toHaveLength(1);

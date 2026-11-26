@@ -151,6 +151,32 @@ it('promotes a backlog task UUID in-place without work_item_threads duplicates, 
   expect(landed[0]).toMatchObject({ id, title: 'fix-update-hangs', state: 'done', roomArchived: true });
 }, 30_000);
 
+it('preserves a human backlog assignee while recording a separate agent implementer on open_thread promotion', async () => {
+  const id = randomUUID();
+  await updateWorkItem(db, { roomId: R, id, title: 'keep human assignee', state: 'backlog', assigneeId: H }, H);
+  const created = await open([id]);
+  expect(created.cornerId).toBe(id);
+
+  const boardItem = (await readWorkBoard(db, W, H)).items.find((item) => item.id === id);
+  expect(boardItem?.assignee?.pubkey).toBe(H);
+  const storedWork = (await db.query<{ assignee_id: string | null }>('SELECT assignee_id FROM work_items WHERE id=$1', [id])).rows[0];
+  expect(storedWork?.assignee_id).toBe(H);
+  const storedFact = (await db.query<{ implementer_agent_id: string | null }>('SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1', [id])).rows[0];
+  expect(storedFact?.implementer_agent_id).toBe(A);
+
+  // Legacy non-UUID backlog task promoted to a new thread UUID also preserves its stored human assignee.
+  await db.query(
+    `INSERT INTO work_items(id,room_id,state,title,assignee_id,opened_by) VALUES('legacy-human-owned',$1,'backlog','legacy-owned',$2,$2)`,
+    [R, H],
+  );
+  const promotedLegacy = await open(['legacy-human-owned']);
+  expect(promotedLegacy.cornerId).not.toBe('legacy-human-owned');
+  const legacyWork = (await db.query<{ assignee_id: string | null }>('SELECT assignee_id FROM work_items WHERE id=$1', [promotedLegacy.cornerId])).rows[0];
+  expect(legacyWork?.assignee_id).toBe(H);
+  const legacyFact = (await db.query<{ implementer_agent_id: string | null }>('SELECT implementer_agent_id FROM corner_facts WHERE corner_id=$1', [promotedLegacy.cornerId])).rows[0];
+  expect(legacyFact?.implementer_agent_id).toBe(A);
+}, 30_000);
+
 it('moves a promoted thread back to backlog via updateWorkItem and closes via archiveCorner', async () => {
   const id = await task('login card hangs');
   const created = await open([id]);

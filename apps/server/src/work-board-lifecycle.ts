@@ -397,10 +397,11 @@ export async function promoteBacklogTaskRow(
   await db.query("SELECT set_config('beeline.work_actor',$1,true)", [input.actorId]);
   if (input.taskId.toLowerCase() === input.cornerId) {
     // Updating completed_at after inserting the thread fires thread_work_state, which clears stored state.
+    // Preserve any stored task assignee (for example a human owner); corner_facts.implementer_agent_id tracks the implementer separately.
     await db.query(
       `UPDATE work_items SET room_id=$1::uuid,completed_at=NULL,
          title=COALESCE(title,$2),objective=COALESCE(NULLIF($3,''),objective),
-         assignee_id=$4,updated_at=now()
+         assignee_id=COALESCE(assignee_id,$4),updated_at=now()
        WHERE id=$1::text`,
       [input.cornerId, input.effectiveName, input.objective, input.implementerAgentId],
     );
@@ -411,9 +412,10 @@ export async function promoteBacklogTaskRow(
         title: string | null;
         objective: string | null;
         priority: string;
+        assignee_id: string | null;
         opened_by: string;
         created_at: Date;
-      }>(`SELECT title,objective,priority,opened_by,created_at FROM work_items WHERE id=$1`, [
+      }>(`SELECT title,objective,priority,assignee_id,opened_by,created_at FROM work_items WHERE id=$1`, [
         input.taskId,
       ])
     ).rows[0];
@@ -425,7 +427,7 @@ export async function promoteBacklogTaskRow(
         id: input.cornerId,
         title: old?.title ?? input.effectiveName,
         objective: input.objective || old?.objective || undefined,
-        assigneeId: input.implementerAgentId,
+        assigneeId: old?.assignee_id ?? input.implementerAgentId,
       },
       input.actorId,
     );

@@ -162,12 +162,12 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
       await tx.query(
         `DELETE FROM work_item_attachments a
          WHERE a.work_item_id=$1 AND a.kind='link'
-           AND (
-             (a.url LIKE 'https://web.usebeeline.app/beeline/chat/%' AND a.name LIKE 'Thread: %')
-             OR EXISTS(
-               SELECT 1 FROM work_item_threads wit
-               WHERE wit.work_item_id=$1 AND a.url LIKE '%/beeline/chat/' || wit.thread_id::text || '%'
-             )
+           AND EXISTS(
+             SELECT 1 FROM work_item_threads wit
+             JOIN rooms t ON t.id=wit.thread_id
+             WHERE wit.work_item_id=$1
+               AND a.name='Thread: ' || t.name
+               AND a.url='https://web.usebeeline.app/beeline/chat/' || t.id::text || '?communityId=' || t.workspace_id::text
            )`,
         [row.work_item_id],
       );
@@ -255,12 +255,6 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
       )
     ).rows;
     for (const row of standalone) {
-      await tx.query(
-        `DELETE FROM work_item_attachments
-         WHERE work_item_id=$1 AND kind='link'
-           AND url LIKE 'https://web.usebeeline.app/beeline/chat/%' AND name LIKE 'Thread: %'`,
-        [row.id],
-      );
       const normalizedTitle = normalizeWorkTitle(row.title ?? undefined);
       const trailingObjective = row.title ? extractBracketedWorkTitle(row.title).trailing : '';
       const nextObjective =
