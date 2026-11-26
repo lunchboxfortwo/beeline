@@ -420,7 +420,8 @@ describe('unified work lifecycle', () => {
          ('emberus-unfinished','link','Thread: unrelated-design',$4,$3),
          ('emberus-unfinished','link','Prior thread note',$1,$3),
          ('emberus-unfinished','link','Runbook','https://example.org/runbook',$3),
-         ('emberus-landed','link','Thread: ship-queue-fix',$2,$3)`,
+         ('emberus-landed','link','Thread: ship-queue-fix',$2,$3),
+         ('emberus-landed','link','Thread: custom-private-bookmark',$2,$3)`,
       [
         `https://web.usebeeline.app/beeline/chat/${archivedUnmerged}?communityId=${workspace}`,
         `https://web.usebeeline.app/beeline/chat/${landedThread}?communityId=${workspace}`,
@@ -483,7 +484,9 @@ describe('unified work lifecycle', () => {
       roomArchived: true,
     });
     expect(landed[0]!.entries?.some((e) => e.kind === 'note' && e.text === 'Merged cleanly')).toBe(true);
-    expect(landed[0]!.attachments).toEqual([]);
+    // landedThread had no opening card (private-order open): its exact generated link was removed,
+    // while a custom "Thread: ..." bookmark pointing to the same URL survived.
+    expect(landed[0]!.attachments?.map((a) => a.name)).toEqual(['Thread: custom-private-bookmark']);
   });
 
   it('settles a repo-less promoted thread cleanly to Done on close_thread without bouncing back to Backlog', async () => {

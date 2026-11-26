@@ -175,10 +175,7 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
              ) opened ON true
              WHERE wit.work_item_id=$1
                AND a.url='https://web.usebeeline.app/beeline/chat/' || t.id::text || '?communityId=' || t.workspace_id::text
-               AND (
-                 (opened.opening_name IS NOT NULL AND a.name IN ('Thread: ' || opened.opening_name,'Thread: ' || t.name))
-                 OR (opened.opening_name IS NULL AND a.name LIKE 'Thread: %')
-               )
+               AND a.name IN ('Thread: ' || COALESCE(opened.opening_name,t.name),'Thread: ' || t.name)
            )`,
         [row.work_item_id],
       );
