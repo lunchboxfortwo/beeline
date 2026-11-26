@@ -146,6 +146,7 @@ function stringData(value: unknown): Data {
 
 const MENTION_TOKEN = /@([\p{L}\p{M}\p{N}_]+(?:[.-][\p{L}\p{M}\p{N}_]+)*)/gu;
 const MENTION_TOKEN_CHARACTER = /[\p{L}\p{M}\p{N}_.-]/u;
+const FORWARD_CAPTION = /\n\nFORWARDED FROM #[^\n]+$/;
 const FENCED_CODE = /```[\s\S]*?(?:```|$)/g;
 const INLINE_CODE = /`[^`\n]*`/g;
 const DOUBLE_QUOTES = /"[^"\n]*"|“[^”\n]*”/g;
@@ -159,9 +160,10 @@ function codePointAt(text: string, offset: number): string | undefined {
   return [...text.slice(offset)][0];
 }
 
-/** Whether the reply already carries a live standalone `@handle` outside code and quotes. */
+/** Whether the reply already carries a live standalone `@handle` outside code, quotes, and forward captions. */
 function hasTypedMentionToken(message: string): boolean {
   const text = message
+    .replace(FORWARD_CAPTION, '')
     .replace(FENCED_CODE, (block) => block.replace(/[^\n]/g, ' '))
     .replace(INLINE_CODE, (span) => ' '.repeat(span.length))
     .replace(DOUBLE_QUOTES, (span) => ' '.repeat(span.length));

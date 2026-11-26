@@ -94,6 +94,9 @@ it('tags the replied-to agent on inline notification replies unless the user alr
   expect(formatNotificationReplyText('> @grunt\nlooks good', 'crayon')).toBe(
     '@crayon\n> @grunt\nlooks good',
   );
+  expect(
+    formatNotificationReplyText('take a look\n\nFORWARDED FROM #beeline · @maya', 'crayon'),
+  ).toBe('@crayon take a look\n\nFORWARDED FROM #beeline · @maya');
   expect(formatNotificationReplyText('plain human reply')).toBe('plain human reply');
 
   const sendReply = vi.fn(async () => {});

@@ -403,7 +403,7 @@ export class PushDeliveryLoop {
           m.card->'grants'->0 grant_detail,
           m.card->'agent'->>'name' grant_agent_name,
           COALESCE(NULLIF(author.name,''),'Someone') author_name,
-          CASE WHEN author.kind='agent' AND room.direct_participants IS NULL
+          CASE WHEN author.kind='agent'
             THEN NULLIF(btrim(ltrim(beeline_room_handle(author.id,m.room_id),'@')),'') END author_handle,
           CASE WHEN attention.direct OR m.presentation<>'message' THEN m.id
           -- Keep human prose visible when a subsequent agent summary replaces its slot.

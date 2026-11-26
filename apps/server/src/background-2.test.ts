@@ -713,7 +713,11 @@ describe('background advisory-lock ownership', () => {
       expect(sent.get('3'.repeat(64))).toBeUndefined();
       // The @system DM is read-only: no Reply on its lines.
       expect(sent.get('4'.repeat(64))).toBeUndefined();
-      expect(sent.get('5'.repeat(64))).toEqual({ kind: 'reply', authorName: 'Wren' });
+      expect(sent.get('5'.repeat(64))).toEqual({
+        kind: 'reply',
+        authorName: 'Wren',
+        agentHandle: 'wren',
+      });
     } finally {
       await db.close();
     }
@@ -879,7 +883,7 @@ describe('background advisory-lock ownership', () => {
     }
   });
 
-  it('carries the room agent handle on reply actions in rooms and threads, never on human messages or DMs', async () => {
+  it('carries the room agent handle on reply actions for agent messages, never on human messages', async () => {
     const db = await migratedDatabase();
     try {
       const human = 'a'.repeat(64),
@@ -943,7 +947,11 @@ describe('background advisory-lock ownership', () => {
         agentHandle: 'crayon-ws',
       });
       expect(actions.get(humanMsg)).toEqual({ kind: 'reply', authorName: 'Maya' });
-      expect(actions.get(dmMsg)).toEqual({ kind: 'reply', authorName: 'Crayon' });
+      expect(actions.get(dmMsg)).toEqual({
+        kind: 'reply',
+        authorName: 'Crayon',
+        agentHandle: 'crayon-ws',
+      });
       // Replying with the carried agentHandle wakes the agent in that thread.
       const replyId = '9'.repeat(64);
       const sentReply = await new PhoneService(db, 'http://local.test').execute(
