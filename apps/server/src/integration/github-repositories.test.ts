@@ -1,8 +1,11 @@
+import type { AddressInfo } from 'node:net';
 import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { createHmac } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { TokenAuth } from '.././auth.js';
+import { DaemonService } from '.././daemon-service.js';
 import { PhoneService } from '.././phone-service.js';
+import { createBeelineServer } from '.././server.js';
 import { GitHubHttpError } from '@beeline/auth/github';
 import { monolithFixture, HUMAN, AGENT, WORKSPACE, ROOM } from '../test-fixtures/test-support-monolith.js';
 
@@ -491,8 +494,40 @@ const fixture = monolithFixture();
     expect(fixture.processWebhook).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps an active delivery claim exclusive past the old expiry while the first handler is still running', async () => {
+  it('keeps database-backed ownership exclusive across separate server instances after a missed renewal and recovers after the owner exits', async () => {
     const payload = { action: 'opened' };
+    const server2Webhook = vi.fn(async () => undefined);
+    const server2 = createBeelineServer({
+      database: fixture.database,
+      auth: fixture.auth,
+      phone: fixture.phone,
+      daemon: new DaemonService(fixture.database, fixture.live),
+      live: fixture.live,
+      authHandler: fixture.mountedAuth.handle,
+      mediaMaximumBytes: 1024 * 1024,
+      objectService: fixture.objectService,
+      github: {
+        webhookSecret: 'webhook-secret',
+        onWebhook: server2Webhook,
+      },
+    });
+    await new Promise<void>((resolve) => server2.listen(0, '127.0.0.1', resolve));
+    const server2Origin = `http://127.0.0.1:${(server2.address() as AddressInfo).port}`;
+    const sendTo = (targetOrigin: string, delivery: string) => {
+      const bytes = Buffer.from(JSON.stringify(payload));
+      const signature = `sha256=${createHmac('sha256', 'webhook-secret').update(bytes).digest('hex')}`;
+      return phoneFetch(`${targetOrigin}/v1/github/webhook`, {
+        method: 'POST',
+        headers: {
+          'x-hub-signature-256': signature,
+          'x-github-delivery': delivery,
+          'x-github-event': 'pull_request',
+          'content-type': 'application/json',
+        },
+        body: bytes,
+      });
+    };
+
     let releaseSlow!: () => void;
     let slowEntered!: () => void;
     const entered = new Promise<void>((resolve) => { slowEntered = resolve; });
@@ -500,62 +535,99 @@ const fixture = monolithFixture();
       slowEntered();
       await new Promise<void>((resolve) => { releaseSlow = resolve; });
     });
+
+    const originalQuery = fixture.database.query.bind(fixture.database);
+    let failFirstRenewal = true;
+    let renewalAttempts = 0;
+    const querySpy = vi.spyOn(fixture.database, 'query').mockImplementation((sql, values, preparedName) => {
+      if (
+        typeof sql === 'string' &&
+        sql.includes('UPDATE github_webhook_deliveries') &&
+        sql.includes("interval '2 minutes'")
+      ) {
+        renewalAttempts++;
+        if (failFirstRenewal) {
+          failFirstRenewal = false;
+          return Promise.reject(new Error('transient renewal failure'));
+        }
+      }
+      return originalQuery(sql, values, preparedName);
+    });
+
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
-      const firstPromise = fixture.webhook('pull_request', 'slow-delivery', payload);
+      const firstPromise = sendTo(fixture.origin, 'slow-multi-server');
       await entered;
       const initialExpiry = (
-        await fixture.database.query<{ claim_expires_at: string }>(
+        await originalQuery<{ claim_expires_at: string }>(
           `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-          ['slow-delivery'],
+          ['slow-multi-server'],
         )
       ).rows[0]!.claim_expires_at;
-      // Advance past the two-minute initial claim window while the first handler is still running.
-      await vi.advanceTimersByTimeAsync(60_000);
-      await vi.advanceTimersByTimeAsync(70_000);
-      const renewedExpiry = (
-        await fixture.database.query<{ claim_expires_at: string }>(
-          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-          ['slow-delivery'],
+
+      // First renewal at 30s fails (missed renewal); redelivery to server2 must still be suppressed.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(renewalAttempts).toBe(1);
+      const afterMiss = await sendTo(server2Origin, 'slow-multi-server');
+      expect(afterMiss.status).toBe(200);
+      expect(await afterMiss.json()).toEqual({ accepted: false, duplicate: true });
+      expect(server2Webhook).not.toHaveBeenCalled();
+
+      // Retry fires 5s later (well before the 2-minute expiry) and advances the database lease.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(renewalAttempts).toBe(2);
+      const afterRetry = (
+        await originalQuery<{ renewed: boolean; claim_expires_at: string }>(
+          `SELECT (claim_expires_at>$2::timestamptz) renewed, claim_expires_at::text claim_expires_at
+           FROM github_webhook_deliveries WHERE delivery_id=$1`,
+          ['slow-multi-server', initialExpiry],
         )
-      ).rows[0]!.claim_expires_at;
-      expect(Date.parse(renewedExpiry)).toBeGreaterThan(Date.parse(initialExpiry));
+      ).rows[0]!;
+      expect(afterRetry.renewed).toBe(true);
 
-      // Redelivering after the old expiry must not start a second handler while the first is alive.
-      const redelivery = await fixture.webhook('pull_request', 'slow-delivery', payload);
-      expect(redelivery.status).toBe(200);
-      expect(await redelivery.json()).toEqual({ accepted: false, duplicate: true });
+      // Advance past the original two-minute expiry while server1's handler is still running.
+      await vi.advanceTimersByTimeAsync(100_000);
+      expect(renewalAttempts).toBeGreaterThanOrEqual(5);
+      const pastOriginalExpiry = await sendTo(server2Origin, 'slow-multi-server');
+      expect(pastOriginalExpiry.status).toBe(200);
+      expect(await pastOriginalExpiry.json()).toEqual({ accepted: false, duplicate: true });
       expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
+      expect(server2Webhook).not.toHaveBeenCalled();
 
-      // Even if the database claim row is aged past expiry, the live handler still blocks redelivery.
-      await fixture.database.query(
-        `UPDATE github_webhook_deliveries SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE delivery_id=$1`,
-        ['slow-delivery'],
-      );
-      const agedRedelivery = await fixture.webhook('pull_request', 'slow-delivery', payload);
-      expect(agedRedelivery.status).toBe(200);
-      expect(await agedRedelivery.json()).toEqual({ accepted: false, duplicate: true });
-      expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
-
-      // Restore renewed token before finishing so completion clears claim_expires_at cleanly.
-      await fixture.database.query(
-        `UPDATE github_webhook_deliveries SET claim_expires_at=$2::timestamptz WHERE delivery_id=$1`,
-        ['slow-delivery', renewedExpiry],
-      );
       releaseSlow();
       const first = await firstPromise;
       expect(first.status).toBe(202);
       expect(
         (
-          await fixture.database.query<{ claim_expires_at: string | null }>(
+          await originalQuery<{ claim_expires_at: string | null }>(
             `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-            ['slow-delivery'],
+            ['slow-multi-server'],
           )
         ).rows,
       ).toEqual([{ claim_expires_at: null }]);
-      expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
+
+      // Recovery after the owning server exits: an expired unfinished claim is reclaimed by server2.
+      await originalQuery(
+        `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
+         VALUES($1,clock_timestamp()-interval '1 second')`,
+        ['owner-exited-delivery'],
+      );
+      const recovered = await sendTo(server2Origin, 'owner-exited-delivery');
+      expect(recovered.status).toBe(202);
+      expect(await recovered.json()).toEqual({ accepted: true, duplicate: false });
+      expect(server2Webhook).toHaveBeenCalledTimes(1);
+      expect(
+        (
+          await originalQuery<{ claim_expires_at: string | null }>(
+            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+            ['owner-exited-delivery'],
+          )
+        ).rows,
+      ).toEqual([{ claim_expires_at: null }]);
     } finally {
+      querySpy.mockRestore();
       vi.useRealTimers();
+      await new Promise<void>((resolve) => server2.close(() => resolve()));
     }
   });
 });
