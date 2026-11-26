@@ -1,7 +1,10 @@
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import React from 'react';
 import { YStack } from 'tamagui';
+import { CornerDownRight, type LucideProps } from 'lucide-react-native';
+import { Inked, T } from '@/ui/grammar';
 
+import { TranscriptNavigationRow } from './IndexRow';
 import { RepositoryLifecycleRow } from './PrLifecycleCard';
 import { lifecycleCornerTitle, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
 
@@ -70,14 +73,55 @@ export interface DaemonFactCardProps {
   message: ChatDisplayMessage;
   onOpenCorner(cornerId: string): void;
   onOpenUrl(url: string): void;
+  onOpenBacklog?(roomId: string): void;
 }
 
 export const DaemonFactCard = React.memo(function DaemonFactCard({
   message,
   onOpenCorner,
   onOpenUrl,
+  onOpenBacklog,
 }: DaemonFactCardProps) {
   const fact = message.daemonFact!;
+  if (fact.type === 'backlog-added') {
+    const items = fact.items ?? [];
+    const firstName = items[0]?.name ?? 'task';
+    const extraCount = items.length > 1 ? items.length - 1 : 0;
+    const summary = extraCount > 0 ? `${firstName} +${extraCount}` : firstName;
+    const targetRoomId = fact.roomId ?? '';
+    return (
+      <YStack testID="daemon-fact-card-backlog-added">
+        <TranscriptNavigationRow
+          testID={`backlog-added-row-${message.id}`}
+          singleDestination
+          leading={
+            <Inked<LucideProps>
+              glyph={CornerDownRight}
+              color="secondary"
+              size={13}
+              strokeWidth={1.7}
+            />
+          }
+          trailing={
+            targetRoomId && onOpenBacklog
+              ? {
+                  accessibilityLabel: `Added ${summary}. View backlog`,
+                  onPress: () => onOpenBacklog(targetRoomId),
+                  testID: `backlog-added-open-${message.id}`,
+                }
+              : undefined
+          }
+        >
+          <T color="secondary" minWidth={0} numberOfLines={1} ellipsizeMode="tail">
+            <T v="heading" color="ink">Added </T>
+            {summary}
+            <T color="secondary">{' · '}</T>
+            <T v="metaStrong" color="needsYou">View backlog</T>
+          </T>
+        </TranscriptNavigationRow>
+      </YStack>
+    );
+  }
   const agent =
     message.authorIdentity?.kind === 'agent'
       ? (message.authorIdentity.handle ?? message.authorIdentity.name).replace(/^@/, '')

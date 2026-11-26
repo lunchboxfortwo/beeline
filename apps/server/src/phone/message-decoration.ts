@@ -49,7 +49,7 @@ import { phoneReadAppCatalog } from './workbench-catalog.js';
     messages = await phoneDecorateVoiceCallReasons(ctx, roomId, messages);
     const cornerIds = [...new Set(messages.flatMap((message) => {
       const card = message.daemonFact;
-      return card && ['corner-open', 'corner-complete'].includes(card.type) && UUID_PATTERN.test(card.cornerId)
+      return card && ['corner-open', 'corner-complete'].includes(card.type) && card.cornerId && UUID_PATTERN.test(card.cornerId)
         ? [card.cornerId] : [];
     }))];
     if (!cornerIds.length) return messages;

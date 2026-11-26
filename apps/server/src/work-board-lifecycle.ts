@@ -16,7 +16,7 @@ import type { AgentCommandInput } from './agent-command.js';
 import { cornerBriefRevisionHash } from './corner-brief.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
 import { modelText } from './message-origin.js';
-import { systemLine } from './system-line.js';
+import { restateSystemLine, systemLine } from './system-line.js';
 import { abandonCornerWorkflowRuns } from './workflow-runs.js';
 
 export const WORK_ITEM_UUID_RE =
@@ -62,7 +62,147 @@ export function normalizeWorkObjective(raw: string | undefined): string | undefi
 export type UpdateWorkItemHooks = {
   closeThread?: () => Promise<unknown>;
   reconcileMergeQueue?: (cornerId: string) => Promise<void>;
+  /** Agent turn context for coalescing chat-originated backlog-added notices. */
+  requestId?: string;
+  turnRoomId?: string;
 };
+
+type BacklogAddedItem = { readonly id: string; readonly name: string };
+
+/**
+ * Emit or coalesce a chat-originated `backlog-added` daemon-fact row in a top-level chat.
+ * Multiple `create_work_item` calls in one agent turn (`requestId`) update that single row in place.
+ */
+export async function recordBacklogAddedFact(
+  tx: SqlDatabase,
+  input: {
+    roomId: string;
+    itemId: string;
+    name: string;
+    actorId: string;
+    originMessageId?: string;
+    requestId?: string;
+  },
+): Promise<void> {
+  const actor = (
+    await tx.query<{ name: string | null; kind: 'human' | 'agent' }>(
+      'SELECT name,kind FROM identities WHERE id=$1',
+      [input.actorId],
+    )
+  ).rows[0];
+  const actorKind = actor?.kind === 'agent' ? 'agent' : 'person';
+  const actorName = actor?.name?.trim() || 'Someone';
+  const subject = { kind: actorKind, id: input.actorId, name: actorName } as const;
+
+  let sourceMessageId: string | undefined;
+  if (input.originMessageId) {
+    const resident = (
+      await tx.query<{ id: string }>(
+        `SELECT id FROM messages WHERE id=$1 AND room_id=$2 AND deleted_at IS NULL`,
+        [input.originMessageId, input.roomId],
+      )
+    ).rows[0];
+    if (resident) sourceMessageId = resident.id;
+  } else if (input.requestId) {
+    const commandSource = (
+      await tx.query<{ source_message_id: string }>(
+        `SELECT c.source_message_id
+         FROM agent_commands c
+         JOIN messages m ON m.id=c.source_message_id AND m.room_id=$2 AND m.deleted_at IS NULL
+         WHERE c.turn_request_id=$1 AND c.room_id=$2 AND c.source_message_id IS NOT NULL
+         LIMIT 1`,
+        [input.requestId, input.roomId],
+      )
+    ).rows[0];
+    if (commandSource) sourceMessageId = commandSource.source_message_id;
+  }
+
+  const mergeIntoExisting = async (existing: {
+    id: string;
+    card: Record<string, unknown> | null;
+  }) => {
+    const priorCard = existing.card ?? {};
+    const priorItems = Array.isArray(priorCard.items)
+      ? (priorCard.items as BacklogAddedItem[]).filter(
+          (entry) =>
+            entry &&
+            typeof entry.id === 'string' &&
+            entry.id.trim().length > 0 &&
+            typeof entry.name === 'string' &&
+            entry.name.trim().length > 0,
+        )
+      : [];
+    const items = priorItems.some((entry) => entry.id === input.itemId)
+      ? priorItems
+      : [...priorItems, { id: input.itemId, name: input.name }];
+    const objectText =
+      items.length > 1 ? `${items[0]!.name} +${items.length - 1}` : items[0]!.name;
+    const keptSource =
+      typeof priorCard.sourceMessageId === 'string' && priorCard.sourceMessageId
+        ? priorCard.sourceMessageId
+        : sourceMessageId;
+    await restateSystemLine(
+      tx,
+      existing.id,
+      { subject, verb: 'added', object: objectText, consequence: 'View backlog' },
+      {
+        type: 'backlog-added',
+        roomId: input.roomId,
+        items,
+        ...(keptSource ? { sourceMessageId: keptSource } : {}),
+      },
+    );
+  };
+
+  const coalescedId = input.requestId
+    ? createHash('sha256').update(`backlog-added:${input.roomId}:${input.requestId}`).digest('hex')
+    : undefined;
+  if (coalescedId) {
+    const existing = (
+      await tx.query<{ id: string; card: Record<string, unknown> | null }>(
+        `SELECT id,card FROM messages WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,
+        [coalescedId],
+      )
+    ).rows[0];
+    if (existing) {
+      await mergeIntoExisting(existing);
+      return;
+    }
+  }
+
+  const items: BacklogAddedItem[] = [{ id: input.itemId, name: input.name }];
+  const written = await systemLine(tx, {
+    ...(coalescedId ? { id: coalescedId } : {}),
+    roomId: input.roomId,
+    authorId: input.actorId,
+    subject,
+    verb: 'added',
+    object: input.name,
+    consequence: 'View backlog',
+    presentation: 'card',
+    cardType: 'daemon-fact',
+    card: {
+      type: 'backlog-added',
+      roomId: input.roomId,
+      items,
+      ...(sourceMessageId ? { sourceMessageId } : {}),
+    },
+    routeCommands: false,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+    ...(sourceMessageId ? { afterMessageId: sourceMessageId } : {}),
+  });
+
+  // If a concurrent capture in the same agent turn won the initial insert, lock that row and merge into it.
+  if (coalescedId && !written.inserted) {
+    const winner = (
+      await tx.query<{ id: string; card: Record<string, unknown> | null }>(
+        `SELECT id,card FROM messages WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,
+        [coalescedId],
+      )
+    ).rows[0];
+    if (winner) await mergeIntoExisting(winner);
+  }
+}
 
 /** Resolve an identity ID or @handle against current workspace/chat members. */
 export async function resolveWorkAssigneeId(

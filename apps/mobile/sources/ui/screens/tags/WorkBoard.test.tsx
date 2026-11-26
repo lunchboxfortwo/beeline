@@ -11,6 +11,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 vi.mock('@/ui/shell/TabHeader', () => ({ TabHeader: () => null, useScrolledUnder: () => ({ scrolled: false, scrollProps: {} }) }));
 vi.mock('./WorkItemDetail', () => ({ WorkSheet: (props: any) => React.createElement('WorkSheet', props) }));
+vi.mock('./NewTaskSheet', () => ({ NewTaskSheet: (props: any) => React.createElement('NewTaskSheet', props) }));
 vi.mock('@/components/buzz/CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('@/buzz/message-link', () => ({ messageLinkId: () => undefined, openMessageLink: vi.fn() }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn().mockResolvedValue(undefined) }));
@@ -257,4 +258,249 @@ it('gives desktop WorkBoard an aligned 52px header and min-width scrollable colu
         const phoneRoom = tree.root.find((n: any) => n.type === 'Text' && n.props.children === '#ai-study');
         expect(phoneRoom.props.minWidth).toBeUndefined();
     } finally { act(() => tree.unmount()); }
+});
+
+it('drags non-archived tasks between desktop columns, blocks dragging archived threads out of Done, and wires New task and initialChatId', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const person = { pubkey: 'human', kind: 'human' as const, name: 'Ada' };
+    const backlogTask = {
+        id: 't-backlog', roomId: 'chat-1', chatId: 'chat-1', chatName: 'beeline',
+        threadName: 'ship-drag', title: 'ship-drag', state: 'backlog' as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const archivedDone = {
+        id: 't-archived', roomId: 't-archived', roomKind: 'corner' as const, chatId: 'chat-1', chatName: 'beeline',
+        threadName: 'old-thread', title: 'old-thread', state: 'done' as const, roomArchived: true as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const otherChatTask = {
+        id: 't-other', roomId: 'chat-2', chatId: 'chat-2', chatName: 'ops',
+        threadName: 'ops-task', title: 'ops-task', state: 'backlog' as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'human',
+        chats: [{ id: 'chat-1', name: 'beeline' }, { id: 'chat-2', name: 'ops' }],
+        people: [person],
+        items: [backlogTask, archivedDone, otherChatTask],
+    };
+    const move = vi.fn(async () => true);
+    const createTask = vi.fn(async () => true);
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), move, create: createTask, clear: vi.fn(), clearAll: vi.fn() };
+    let tree: any;
+    act(() => { tree = create(<WorkBoard board={board} desktop actions={actions} initialChatId="chat-1" />); });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    try {
+        // initialChatId pre-filters to #beeline
+        expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'work-item-t-backlog')).toHaveLength(1);
+        expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'work-item-t-other')).toHaveLength(0);
+
+        // Non-archived backlog task is draggable and drops onto In progress column
+        const backlogRow = host('work-row-t-backlog');
+        expect(backlogRow.props.draggable).toBe(true);
+        act(() => { backlogRow.props.onDragStart({ dataTransfer: { setData: vi.fn() } }); });
+        act(() => { host('work-column-progress').props.onDrop({ preventDefault: vi.fn(), dataTransfer: { getData: () => 't-backlog' } }); });
+        expect(move).toHaveBeenCalledWith(backlogTask, 'in-progress');
+
+        // Archived thread in Done is not draggable and dropping it onto Backlog does nothing
+        move.mockClear();
+        const archivedRow = host('work-row-t-archived');
+        expect(archivedRow.props.draggable).toBeUndefined();
+        act(() => { host('work-column-backlog').props.onDrop({ preventDefault: vi.fn(), dataTransfer: { getData: () => 't-archived' } }); });
+        expect(move).not.toHaveBeenCalled();
+
+        // New task header button opens NewTaskSheet defaulted to the active chat filter
+        expect(tree.root.findByType('NewTaskSheet').props).toMatchObject({ open: false, defaultChatId: 'chat-1' });
+        act(() => { host('work-new-task').props.onPress(); });
+        expect(tree.root.findByType('NewTaskSheet').props).toMatchObject({ open: true, defaultChatId: 'chat-1' });
+
+        // WorkSheet receives people and onAssign
+        expect(tree.root.findByType('WorkSheet').props).toMatchObject({ people: board.people, onAssign: actions.assign });
+
+        // On phone with initialChatId, Backlog starts expanded
+        act(() => tree.update(<WorkBoard board={board} desktop={false} actions={actions} initialChatId="chat-1" />));
+        expect(host('work-section-backlog').props['aria-expanded']).toBe(true);
+    } finally { act(() => tree.unmount()); }
+});
+
+it('resolves phone long-press drag in window coordinates and always clears drag state on release or cancel', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const person = { pubkey: 'human', kind: 'human' as const, name: 'Ada' };
+    const backlogTask = {
+        id: 't-phone', roomId: 'chat-1', chatId: 'chat-1', chatName: 'beeline',
+        threadName: 'phone-drag', title: 'phone-drag', state: 'backlog' as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'human',
+        chats: [{ id: 'chat-1', name: 'beeline' }],
+        people: [person],
+        items: [backlogTask],
+    };
+    const move = vi.fn(async () => true);
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), move, clear: vi.fn(), clearAll: vi.fn() };
+    const windowRects: Record<string, [number, number, number, number]> = {
+        'work-sections': [0, 120, 390, 600],
+        'work-drop-progress': [0, 200, 390, 100],
+        'work-drop-backlog': [0, 320, 390, 100],
+        'work-drop-done': [0, 440, 390, 100],
+    };
+    let tree: any;
+    act(() => {
+        tree = create(
+            <WorkBoard board={board} desktop={false} actions={actions} initialChatId="chat-1" />,
+            {
+                createNodeMock: (element: any) => {
+                    const rect = windowRects[element?.props?.testID];
+                    return rect
+                        ? { measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => cb(...rect) }
+                        : {};
+                },
+            },
+        );
+    });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    const scroll = () => tree.root.findByType('ScrollView');
+    try {
+        // Record board-relative layouts that intentionally differ from window Y coordinates.
+        act(() => {
+            host('work-drop-progress').props.onLayout({ nativeEvent: { layout: { y: 80, height: 100 } } });
+            host('work-drop-backlog').props.onLayout({ nativeEvent: { layout: { y: 200, height: 100 } } });
+            host('work-drop-done').props.onLayout({ nativeEvent: { layout: { y: 320, height: 100 } } });
+        });
+
+        // 1. Long-press, drag using pageY into In progress (while child-relative locationY points elsewhere), and release.
+        act(() => { host('work-item-t-phone').props.onLongPress(); });
+        expect(host('work-row-t-phone').props.opacity).toBe(0.5);
+        expect(scroll().props.scrollEnabled).toBe(false);
+        act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { locationY: 12, pageY: 240 } }); });
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { locationY: 12, pageY: 240 } }); });
+        expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'in-progress');
+        expect(host('work-row-t-phone').props.opacity).toBe(1);
+        expect(scroll().props.scrollEnabled).toBe(true);
+
+        // 2. Releasing outside any section clears drag state without moving.
+        move.mockClear();
+        act(() => { host('work-item-t-phone').props.onLongPress(); });
+        expect(host('work-row-t-phone').props.opacity).toBe(0.5);
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { locationY: 5, pageY: 40 } }); });
+        expect(move).not.toHaveBeenCalled();
+        expect(host('work-row-t-phone').props.opacity).toBe(1);
+        expect(scroll().props.scrollEnabled).toBe(true);
+
+        // 3. Touch cancel clears drag state without moving.
+        act(() => { host('work-item-t-phone').props.onLongPress(); });
+        expect(host('work-row-t-phone').props.opacity).toBe(0.5);
+        act(() => { host('work-sections').props.onTouchCancel(); });
+        expect(move).not.toHaveBeenCalled();
+        expect(host('work-row-t-phone').props.opacity).toBe(1);
+        expect(scroll().props.scrollEnabled).toBe(true);
+    } finally { act(() => tree.unmount()); }
+});
+
+it('auto-scrolls near viewport edges on phone, refreshes drop bounds, and drops onto an initially offscreen section', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.useFakeTimers();
+    const person = { pubkey: 'human', kind: 'human' as const, name: 'Ada' };
+    const backlogTask = {
+        id: 't-offscreen', roomId: 'chat-1', chatId: 'chat-1', chatName: 'beeline',
+        threadName: 'offscreen-drag', title: 'offscreen-drag', state: 'backlog' as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'human',
+        chats: [{ id: 'chat-1', name: 'beeline' }],
+        people: [person],
+        items: [backlogTask],
+    };
+    const move = vi.fn(async () => true);
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), move, clear: vi.fn(), clearAll: vi.fn() };
+
+    // Viewport spans window Y 100..700 (height 600). Done starts offscreen at window Y 920..1020.
+    let currentScrollY = 0;
+    const scrollTo = vi.fn(({ y }: { y: number }) => {
+        currentScrollY = y;
+    });
+    const baseWindowY: Record<string, { y: number; height: number }> = {
+        'work-sections': { y: 100, height: 1100 },
+        'work-drop-progress': { y: 120, height: 120 },
+        'work-drop-backlog': { y: 260, height: 120 },
+        'work-drop-done': { y: 920, height: 100 },
+    };
+
+    let tree: any;
+    act(() => {
+        tree = create(
+            <WorkBoard board={board} desktop={false} actions={actions} initialChatId="chat-1" />,
+            {
+                createNodeMock: (element: any) => {
+                    const id = element?.props?.testID;
+                    if (id === 'work-phone-scroll') {
+                        return {
+                            scrollTo,
+                            measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => cb(0, 100, 390, 600),
+                        };
+                    }
+                    const base = baseWindowY[id];
+                    if (base) {
+                        return {
+                            measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) =>
+                                cb(0, base.y - currentScrollY, 390, base.height),
+                        };
+                    }
+                    return {};
+                },
+            },
+        );
+    });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    try {
+        act(() => {
+            host('work-phone-scroll').props.onContentSizeChange(390, 1100);
+            host('work-drop-progress').props.onLayout({ nativeEvent: { layout: { y: 20, height: 120 } } });
+            host('work-drop-backlog').props.onLayout({ nativeEvent: { layout: { y: 160, height: 120 } } });
+            host('work-drop-done').props.onLayout({ nativeEvent: { layout: { y: 820, height: 100 } } });
+        });
+
+        // Start drag while Done is offscreen (920..1020 > viewport bottom 700).
+        act(() => { host('work-item-t-offscreen').props.onLongPress(); });
+        expect(currentScrollY).toBe(0);
+
+        // Hold finger near bottom edge (pageY=680): triggers edge auto-scroll downward.
+        act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { pageY: 680 } }); });
+        act(() => { vi.advanceTimersByTime(32 * 15); });
+        expect(scrollTo).toHaveBeenCalled();
+        expect(currentScrollY).toBeGreaterThanOrEqual(240);
+
+        // A delayed native onScroll carrying an earlier offset must NOT rewind the authoritative drag offset or corrupt drop bounds.
+        act(() => {
+            host('work-phone-scroll').props.onScroll({ nativeEvent: { contentOffset: { y: 48 } } });
+        });
+
+        // Done has scrolled into view under pageY=680 (920 - currentScrollY <= 680 <= 1020 - currentScrollY).
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { pageY: 680 } }); });
+        expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'done');
+        expect(host('work-row-t-offscreen').props.opacity).toBe(1);
+
+        // Auto-scroll stops completely after release.
+        const scrollCountAfterRelease = scrollTo.mock.calls.length;
+        act(() => { vi.advanceTimersByTime(32 * 5); });
+        expect(scrollTo).toHaveBeenCalledTimes(scrollCountAfterRelease);
+
+        // Now start scrolled down and drag near top edge (pageY=110) to reach offscreen In progress above,
+        // even if a stale delayed onScroll from the previous scrolled-down position arrives mid-drag.
+        move.mockClear();
+        act(() => { host('work-item-t-offscreen').props.onLongPress(); });
+        act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { pageY: 110 } }); });
+        act(() => { vi.advanceTimersByTime(32 * 20); });
+        expect(currentScrollY).toBe(0);
+        act(() => {
+            host('work-phone-scroll').props.onScroll({ nativeEvent: { contentOffset: { y: 260 } } });
+        });
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { pageY: 160 } }); });
+        expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'in-progress');
+    } finally {
+        act(() => tree.unmount());
+        vi.useRealTimers();
+    }
 });

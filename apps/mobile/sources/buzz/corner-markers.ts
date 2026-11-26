@@ -23,6 +23,7 @@ export function anchorCornerMarkers(messages: readonly ChatDisplayMessage[]): Ch
       message.daemonFact?.type &&
       message.daemonFact.type !== 'corner-open' &&
       message.daemonFact.type !== 'corner-complete' &&
+      message.daemonFact.type !== 'backlog-added' &&
       message.systemEvent?.kind !== 'corner-opened'
     )
       continue;

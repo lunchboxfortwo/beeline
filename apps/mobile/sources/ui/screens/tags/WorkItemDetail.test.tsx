@@ -245,3 +245,77 @@ it('routes saved #beeline/<place> links to threads, chats, and room ids when tap
         expect(work.openExternalUrl).not.toHaveBeenCalled();
     } finally { act(() => tree.unmount()); }
 });
+
+it('routes https://web.usebeeline.app attachment links in-app and allows changing assignee via WorkAssigneePicker', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    work.navigate.mockClear();
+    work.openExternalUrl.mockClear();
+    const onAssign = vi.fn(async () => true);
+    const ada = { pubkey: 'human-1', kind: 'human' as const, name: 'Ada' };
+    const ruby = { pubkey: 'agent-1', kind: 'agent' as const, name: 'Ruby' };
+    const item = {
+        id: 'task-assign',
+        roomId: 'room',
+        title: 'Task assign',
+        state: 'backlog',
+        assignee: ada,
+        entries: [],
+        attachments: [
+            { id: 'att-web', kind: 'link', name: 'Web thread', url: 'https://web.usebeeline.app/beeline/chat/thread-42?communityId=ws-9', addedBy: ada, createdAt: 1 },
+            { id: 'att-ext', kind: 'link', name: 'External', url: 'https://example.org/spec', addedBy: ada, createdAt: 2 },
+        ],
+    } as unknown as WorkItemView;
+    let tree: any;
+    act(() => {
+        tree = create(
+            <WorkItemDetail
+                item={item}
+                workspaceId="ws-9"
+                viewerId="human-1"
+                desktop={false}
+                now={0}
+                people={[ada, ruby]}
+                onAssign={onAssign}
+            />,
+        );
+    });
+    try {
+        await act(async () => {
+            tree.root.find((node: any) => node.props['aria-label'] === 'Web thread').props.onPress();
+        });
+        await vi.waitFor(() => {
+            expect(work.navigate).toHaveBeenCalledWith({
+                pathname: '/beeline/chat/[channelId]',
+                params: { channelId: 'thread-42', communityId: 'ws-9' },
+            });
+        });
+        expect(work.openExternalUrl).not.toHaveBeenCalled();
+
+        await act(async () => {
+            tree.root.find((node: any) => node.props['aria-label'] === 'External').props.onPress();
+        });
+        expect(work.openExternalUrl).toHaveBeenCalledWith('https://example.org/spec');
+
+        const toggle = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'work-assignee-toggle');
+        act(() => { toggle.props.onPress(); });
+        const pickRuby = tree.root.find((node: any) => node.props['aria-label'] === 'Assign to Ruby');
+        await act(async () => { pickRuby.props.onPress(); });
+        expect(onAssign).toHaveBeenCalledWith(item, 'agent-1');
+
+        // Archived items cannot change assignee.
+        act(() => {
+            tree.update(
+                <WorkItemDetail
+                    item={{ ...item, roomArchived: true }}
+                    workspaceId="ws-9"
+                    viewerId="human-1"
+                    desktop={false}
+                    now={0}
+                    people={[ada, ruby]}
+                    onAssign={onAssign}
+                />,
+            );
+        });
+        expect(tree.root.findAll((node: any) => node.props.testID === 'work-assignee-toggle')).toHaveLength(0);
+    } finally { act(() => tree.unmount()); }
+});
