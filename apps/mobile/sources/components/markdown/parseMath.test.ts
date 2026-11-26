@@ -140,4 +140,37 @@ describe('markdown math blocks and inline spans', () => {
       { type: 'text', content: [{ styles: [], text: '$$5 and $$10', url: null }] },
     ]);
   });
+
+  it('protects backtick code spans and autolink URLs during inline math matching', () => {
+    // An unfinished `\(` must not consume a `\)` inside a later backtick code span
+    expect(parseMarkdownSpans('\\(unfinished then `code\\)`', false)).toEqual([
+      { styles: [], text: '\\(unfinished then ', url: null },
+      { styles: ['code'], text: 'code\\)', url: null },
+    ]);
+
+    // A later valid inline math span still parses after unfinished `\(` + code
+    expect(parseMarkdownSpans('\\(unfinished then `code\\)` and \\(x + 1\\)', false)).toEqual([
+      { styles: [], text: '\\(unfinished then ', url: null },
+      { styles: ['code'], text: 'code\\)', url: null },
+      { styles: [], text: ' and ', url: null },
+      { styles: ['math'], text: 'x + 1', url: null },
+    ]);
+
+    // Bare URL containing `\(x\)` keeps its existing autolink target with no math span
+    expect(parseMarkdownSpans('https://example.com/\\(x\\)', false)).toEqual([
+      { styles: [], text: 'https://example.com/\\(x\\', url: 'https://example.com/\\(x\\' },
+      { styles: [], text: ')', url: null },
+    ]);
+
+    expect(parseMarkdownSpans('https://example.com/\\(x\\)/path', false)).toEqual([
+      { styles: [], text: 'https://example.com/\\(x\\)/path', url: 'https://example.com/\\(x\\)/path' },
+    ]);
+
+    // An unfinished `\(` must not consume a `\)` inside a later URL either
+    expect(parseMarkdownSpans('\\(unfinished then https://example.com/a\\)', false)).toEqual([
+      { styles: [], text: '\\(unfinished then ', url: null },
+      { styles: [], text: 'https://example.com/a\\', url: 'https://example.com/a\\' },
+      { styles: [], text: ')', url: null },
+    ]);
+  });
 });

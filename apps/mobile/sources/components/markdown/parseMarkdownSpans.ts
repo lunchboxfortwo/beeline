@@ -4,9 +4,10 @@ import { formatInlineMath } from "./parseMath";
 // Streaming text may end in the middle of a construct. Match only completed
 // delimiters so a later chunk can turn the original plain text into Markdown
 // instead of permanently consuming its opening syntax.
-// Inline math uses strict `\( ... \)` pairs so dollar amounts ($5, $0.15/1M)
-// and backtick code spans stay untouched.
-const pattern = /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)|((?<!\\)\\\(([^\n]+?)\\\))/g;
+// Bare URLs and backtick code spans are matched in the same left-to-right pass,
+// and inline math `\( ... \)` refuses to cross backticks, URLs, or another `\(`
+// so unfinished math never eats code spans or splits autolinks.
+const pattern = /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)|(https?:\/\/[^\s<]+|(?<![A-Za-z0-9_/#])#beeline\/[^\s/()<>]+\/[0-9a-f]{64}(?![A-Za-z0-9_/-]))|((?<!\\)\\\(((?:(?!`|https?:\/\/|#beeline\/|(?<!\\)\\\()[^\n])+?)\\\))/g;
 
 export function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, styles: MarkdownSpan['styles']) {
     const urlPattern = /https?:\/\/[^\s<]+|(?<![A-Za-z0-9_/#])#beeline\/[^\s/()<>]+\/[0-9a-f]{64}(?![A-Za-z0-9_/-])/g;
@@ -80,12 +81,15 @@ export function parseMarkdownSpans(markdown: string, header: boolean) {
             // Inline code
             spans.push({ styles: ['code'], text: match[9], url: null });
         } else if (match[10]) {
+            // Bare autolink: preserve exact URL and trailing punctuation handling
+            pushTextWithAutoLinks(spans, match[10], []);
+        } else if (match[11]) {
             // Inline math `\( ... \)`
-            const rawMath = match[11] ?? '';
+            const rawMath = match[12] ?? '';
             if (rawMath.trim().length > 0) {
                 spans.push({ styles: ['math'], text: formatInlineMath(rawMath), url: null });
             } else {
-                pushTextWithAutoLinks(spans, match[10], []);
+                pushTextWithAutoLinks(spans, match[11], []);
             }
         }
 
