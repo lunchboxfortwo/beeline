@@ -20,7 +20,6 @@ import { useCopiedToast } from '@/components/buzz/CopiedToast';
 import { ZoomableArtifactImage } from '@/components/buzz/ZoomableArtifactImage';
 import { ArtifactPdfView } from '@/components/buzz/ArtifactPdfView';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
-import { ViewerConversationDock } from '@/components/buzz/ViewerConversationDock';
 import { RunnableArtifact } from './RunnableArtifact';
 import { DocumentFrame, TypedView } from '@/ui/grammar';
 import {
@@ -46,7 +45,6 @@ export function DesktopArtifactPane({
   groupAttachments,
   markdown,
   authorHandle,
-  roomId,
   onClose,
 }: {
   onClose(): void;
@@ -63,8 +61,10 @@ export function DesktopArtifactPane({
   return (
     <ViewerScreen testID="desktop-artifact-pane">
       <ViewerHeader
+        desktop
         title={format === 'game' ? `Interactive · ${title}` : title}
         detail={kindLine}
+        testID="desktop-artifact-header"
         titleTestID="desktop-artifact-title"
         detailTestID="desktop-artifact-kind-line"
         onClose={onClose}
@@ -129,8 +129,6 @@ export function DesktopArtifactPane({
         <ViewerPager index={paging.index} count={paging.count} noun={noun}
           onPrevious={() => paging.step(-1)} onNext={() => paging.step(1)} />
       ) : null}
-      {attachment && <ViewerConversationDock kind="artifact" title={attachment.name} roomId={roomId} agentHandle={authorHandle}
-        artifact={attachment} />}
       {toast}
     </ViewerScreen>
   );

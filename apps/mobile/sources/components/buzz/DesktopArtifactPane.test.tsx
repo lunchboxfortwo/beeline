@@ -93,8 +93,9 @@ vi.mock('@/components/buzz/ArtifactPdfView', () => ({
   ArtifactPdfView: (props: Record<string, unknown>) =>
     React.createElement('ArtifactPdfView', props, null),
 }));
+const viewerDock = vi.hoisted(() => vi.fn(() => null));
 vi.mock('@/components/buzz/ViewerConversationDock', () => ({
-  ViewerConversationDock: () => null,
+  ViewerConversationDock: viewerDock,
 }));
 
 import { DesktopArtifactFrame, DesktopArtifactPane } from './DesktopArtifactPane';
@@ -354,6 +355,22 @@ describe('the desktop work pane artifact view', () => {
     );
     await flush();
     expect(renderer.root.findByProps({ testID: 'desktop-artifact-open-browser' })).toBeDefined();
+  });
+
+  it('aligns its desktop header to the 52px top-bar baseline and omits the duplicate phone TalkDock', async () => {
+    viewerDock.mockClear();
+    mocks.fetchArtifactBytes.mockResolvedValue(new TextEncoder().encode('<p>mock</p>'));
+    const renderer = render(
+      <DesktopArtifactPane attachment={attachment()} authorHandle="crayon" roomId="room-1" onClose={mocks.onClose} />,
+    );
+    await flush();
+    const header = renderer.root.find(
+      (node: any) => typeof node.type === 'string' && node.props.testID === 'desktop-artifact-header',
+    );
+    expect(header.props.height).toBe(52);
+    expect(header.props.paddingTop).toBe('0');
+    expect(header.props.paddingBottom).toBe('0');
+    expect(viewerDock).not.toHaveBeenCalled();
   });
 
   it('the close affordance clears the pane', async () => {

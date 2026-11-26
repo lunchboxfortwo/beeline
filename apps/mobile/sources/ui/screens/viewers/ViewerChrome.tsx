@@ -15,7 +15,7 @@ export function ViewerScreen({ children, testID }: { children: React.ReactNode; 
     return <YStack flex={1} minHeight={0} backgroundColor="canvas" testID={testID}>{children}</YStack>;
 }
 
-export function ViewerHeader({ title, detail, leading, children, onClose, closeLabel, closeTestID, safeTop = false, testID, titleTestID = 'viewer-title', detailTestID = 'viewer-detail' }: {
+export function ViewerHeader({ title, detail, leading, children, onClose, closeLabel, closeTestID, safeTop = false, desktop = false, testID, titleTestID = 'viewer-title', detailTestID = 'viewer-detail' }: {
     title: string;
     detail?: string;
     titleTestID?: string;
@@ -27,12 +27,23 @@ export function ViewerHeader({ title, detail, leading, children, onClose, closeL
     closeTestID: string;
     /** Phone viewers cover the status bar, so the header clears it. */
     safeTop?: boolean;
+    /** Desktop panes share the 52 px top-bar baseline with PlaceHeader and SidebarView. */
+    desktop?: boolean;
     testID?: string;
 }) {
     return (
         <>
             {safeTop ? <SafeTop /> : null}
-            <XStack paddingHorizontal="3" paddingTop="3" paddingBottom="2" gap="2" alignItems="center" backgroundColor="canvas" testID={testID}>
+            <XStack
+                height={desktop ? HEIGHT.tabBar : undefined}
+                paddingHorizontal={desktop ? '4' : '3'}
+                paddingTop={desktop ? '0' : '3'}
+                paddingBottom={desktop ? '0' : '2'}
+                gap="2"
+                alignItems="center"
+                backgroundColor="canvas"
+                testID={testID}
+            >
                 {leading}
                 <YStack flex={1} minWidth={0}>
                     <Copy strong numberOfLines={1} testID={titleTestID}>{title}</Copy>

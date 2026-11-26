@@ -25,23 +25,31 @@ export function DesktopViewerPane({ children, initialShare = 0.48 }: {
     requestedWidth ?? (Number.isFinite(measuredWidth) ? measuredWidth * initialShare : undefined));
   const latest = React.useRef({ width, measuredWidth });
   latest.current = { width, measuredWidth };
+  const [hovered, setHovered] = React.useState(false);
+  const [dragging, setDragging] = React.useState(false);
   const dragStart = React.useRef(width);
   const resizePan = React.useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 2,
     onPanResponderGrant: () => {
       dragged.current = true;
+      setDragging(true);
       dragStart.current = latest.current.width;
     },
     onPanResponderMove: (_, gesture) => {
       setRequestedWidth(desktopDocumentPaneWidth(latest.current.measuredWidth, dragStart.current - gesture.dx));
     },
     onPanResponderRelease: (_, gesture) => {
+      setDragging(false);
       const next = desktopDocumentPaneWidth(latest.current.measuredWidth, dragStart.current - gesture.dx);
       setRequestedWidth(next);
       void saveDesktopViewerWidth(next);
     },
+    onPanResponderTerminate: () => {
+      setDragging(false);
+    },
   }), []);
+  const active = hovered || dragging;
   return <YStack width={width} height="100%" flexShrink={0} position="relative"
     backgroundColor="canvas" borderLeftWidth={1} borderLeftColor="stroke"
     onLayout={event => {
@@ -50,7 +58,13 @@ export function DesktopViewerPane({ children, initialShare = 0.48 }: {
     }} testID="desktop-inspector">
     <YStack {...(resizePan.panHandlers as object)} accessibilityLabel="Resize work pane"
       position="absolute" left={-3} top={0} bottom={0} width={7} cursor="col-resize"
-      backgroundColor="strongStroke" zIndex={4} testID="desktop-inspector-resizer" />
+      backgroundColor="transparent" alignItems="center" zIndex={4}
+      onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}
+      testID="desktop-inspector-resizer">
+      <YStack width={active ? 2 : 0} height="100%"
+        backgroundColor={active ? 'strongStroke' : 'transparent'}
+        pointerEvents="none" testID="desktop-inspector-resizer-rule" />
+    </YStack>
     {children}
   </YStack>;
 }
