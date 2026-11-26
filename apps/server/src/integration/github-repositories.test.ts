@@ -616,16 +616,24 @@ const fixture = monolithFixture();
       'github-client-secret',
     );
 
+    const claimExpiresOf = async (deliveryId: string) =>
+      (
+        await originalQuery<{ claim_expires_at: string | null }>(
+          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+          [deliveryId],
+        )
+      ).rows;
+    const expireDelivery = (deliveryId: string) =>
+      originalQuery(
+        `UPDATE github_webhook_deliveries SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE delivery_id=$1`,
+        [deliveryId],
+      );
+
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
       const firstPromise = sendTo(fixture.origin, 'slow-multi-server');
       await entered;
-      const initialExpiry = (
-        await originalQuery<{ claim_expires_at: string }>(
-          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-          ['slow-multi-server'],
-        )
-      ).rows[0]!.claim_expires_at;
+      const initialExpiry = (await claimExpiresOf('slow-multi-server'))[0]!.claim_expires_at!;
 
       // First renewal at 30s fails (missed renewal); redelivery to server2 must still be suppressed.
       await vi.advanceTimersByTimeAsync(30_000);
@@ -659,14 +667,7 @@ const fixture = monolithFixture();
       releaseSlow();
       const first = await firstPromise;
       expect(first.status).toBe(202);
-      expect(
-        (
-          await originalQuery<{ claim_expires_at: string | null }>(
-            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-            ['slow-multi-server'],
-          )
-        ).rows,
-      ).toEqual([{ claim_expires_at: null }]);
+      expect(await claimExpiresOf('slow-multi-server')).toEqual([{ claim_expires_at: null }]);
 
       // Stalled renewal held past lease expiry: server1 must abort and stop its handler before
       // the 2-minute DB lease can expire, so server2 never runs concurrently with server1.
@@ -731,14 +732,7 @@ const fixture = monolithFixture();
       // Releasing the hung renewal query after takeover must not overwrite server2's completed delivery.
       releaseHeldRenewal?.();
       await heldRenewalPromise;
-      expect(
-        (
-          await originalQuery<{ claim_expires_at: string | null }>(
-            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-            ['stalled-renewal-delivery'],
-          )
-        ).rows,
-      ).toEqual([{ claim_expires_at: null }]);
+      expect(await claimExpiresOf('stalled-renewal-delivery')).toEqual([{ claim_expires_at: null }]);
       const afterTakeoverDuplicate = await sendTo(server2Origin, 'stalled-renewal-delivery');
       expect(afterTakeoverDuplicate.status).toBe(200);
       expect(await afterTakeoverDuplicate.json()).toEqual({ accepted: false, duplicate: true });
@@ -767,17 +761,31 @@ const fixture = monolithFixture();
         failing: [],
         checks: [{ name: 'typecheck', status: 'passed' as const, conclusion: 'success' }],
       };
+      const checksOf = async () =>
+        (
+          await originalQuery<{ checks: string }>(
+            `SELECT lifecycle->>'checks' checks FROM corner_github_cache WHERE corner_id=$1`,
+            [cornerId],
+          )
+        ).rows[0]?.checks;
+      const deferRollup = (
+        spy: { mockImplementationOnce: (fn: () => Promise<typeof failedRollup | typeof passedRollup>) => unknown },
+        result: typeof failedRollup | typeof passedRollup,
+      ) => {
+        let started!: () => void;
+        let release!: () => void;
+        const entered = new Promise<void>((resolve) => { started = resolve; });
+        spy.mockImplementationOnce(async () => {
+          started();
+          await new Promise<void>((resolve) => { release = resolve; });
+          return result;
+        });
+        return { entered, release: () => release() };
+      };
       const server1UpdateLifecycleSpy = vi.spyOn(fixture.githubOperations, 'updateLifecycle');
 
       const realHeldRenewalEntered = armHeldRenewal('stalled-real-check-refresh');
-      let server1RollupStarted!: () => void;
-      const server1RollupEntered = new Promise<void>((resolve) => { server1RollupStarted = resolve; });
-      let releaseServer1Rollup!: () => void;
-      fixture.githubApp.readCommitCheckRollup.mockImplementationOnce(async () => {
-        server1RollupStarted();
-        await new Promise<void>((resolve) => { releaseServer1Rollup = resolve; });
-        return failedRollup;
-      });
+      const server1Rollup = deferRollup(fixture.githubApp.readCommitCheckRollup, failedRollup);
       let server1HandlerSettled!: () => void;
       const server1HandlerDone = new Promise<void>((resolve) => { server1HandlerSettled = resolve; });
       let server1HandlerError: unknown;
@@ -792,14 +800,7 @@ const fixture = monolithFixture();
         }
       });
 
-      let server2RollupStarted!: () => void;
-      const server2RollupEntered = new Promise<void>((resolve) => { server2RollupStarted = resolve; });
-      let releaseServer2Rollup!: () => void;
-      server2GithubApp.readCommitCheckRollup.mockImplementationOnce(async () => {
-        server2RollupStarted();
-        await new Promise<void>((resolve) => { releaseServer2Rollup = resolve; });
-        return passedRollup;
-      });
+      const server2Rollup = deferRollup(server2GithubApp.readCommitCheckRollup, passedRollup);
       server2Webhook.mockImplementationOnce((event, body, deliveryId, claim) =>
         server2GithubOperations.processWebhook(event, body, deliveryId, claim),
       );
@@ -810,7 +811,7 @@ const fixture = monolithFixture();
         'check_run',
         checkPayload,
       );
-      await server1RollupEntered;
+      await server1Rollup.entered;
 
       // Hold server1's renewal past the pre-expiry guard while its GitHub check read stays in flight.
       await vi.advanceTimersByTimeAsync(30_000);
@@ -821,35 +822,23 @@ const fixture = monolithFixture();
 
       // Simulate the 2-minute Postgres lease expiring while server1's GitHub read is still hung,
       // then let server2 take over ownership of the delivery.
-      await originalQuery(
-        `UPDATE github_webhook_deliveries
-         SET claim_expires_at=clock_timestamp()-interval '1 second'
-         WHERE delivery_id=$1`,
-        ['stalled-real-check-refresh'],
-      );
+      await expireDelivery('stalled-real-check-refresh');
       const server2RealTakeoverPromise = sendTo(
         server2Origin,
         'stalled-real-check-refresh',
         'check_run',
         checkPayload,
       );
-      await server2RollupEntered;
+      await server2Rollup.entered;
 
       // Release server1's late GitHub check read (which reports failed) before server2 writes.
       // Server1 must be fenced from writing lifecycle state, notes, or PR reads.
-      releaseServer1Rollup();
+      server1Rollup.release();
       await server1HandlerDone;
       expect(server1HandlerError).toBeInstanceOf(Error);
       expect(server1UpdateLifecycleSpy).not.toHaveBeenCalled();
       expect(server1ReadPr).not.toHaveBeenCalled();
-      expect(
-        (
-          await originalQuery<{ checks: string }>(
-            `SELECT lifecycle->>'checks' checks FROM corner_github_cache WHERE corner_id=$1`,
-            [cornerId],
-          )
-        ).rows[0]?.checks,
-      ).toBe('pending');
+      expect(await checksOf()).toBe('pending');
       expect(
         (
           await originalQuery(
@@ -860,50 +849,22 @@ const fixture = monolithFixture();
       ).toBe(0);
 
       // Server2 finishes its check refresh cleanly and commits passing state.
-      releaseServer2Rollup();
+      server2Rollup.release();
       const server2RealTakeover = await server2RealTakeoverPromise;
       expect(server2RealTakeover.status).toBe(202);
       expect(await server2RealTakeover.json()).toEqual({ accepted: true, duplicate: false });
-      expect(
-        (
-          await originalQuery<{ checks: string }>(
-            `SELECT lifecycle->>'checks' checks FROM corner_github_cache WHERE corner_id=$1`,
-            [cornerId],
-          )
-        ).rows[0]?.checks,
-      ).toBe('passing');
+      expect(await checksOf()).toBe('passing');
       releaseHeldRenewal?.();
       await heldRenewalPromise;
-      expect(
-        (
-          await originalQuery<{ claim_expires_at: string | null }>(
-            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-            ['stalled-real-check-refresh'],
-          )
-        ).rows,
-      ).toEqual([{ claim_expires_at: null }]);
+      expect(await claimExpiresOf('stalled-real-check-refresh')).toEqual([{ claim_expires_at: null }]);
 
       // Database write fence: even if server1's local expiry timer has not fired yet when
       // Postgres ownership moves to server2, server1's write transaction is still fenced.
-      let dbFenceRollupStarted!: () => void;
-      const dbFenceRollupEntered = new Promise<void>((resolve) => { dbFenceRollupStarted = resolve; });
-      let releaseDbFenceRollup!: () => void;
-      fixture.githubApp.readCommitCheckRollup.mockImplementationOnce(async () => {
-        dbFenceRollupStarted();
-        await new Promise<void>((resolve) => { releaseDbFenceRollup = resolve; });
-        return failedRollup;
-      });
+      const dbFenceRollup = deferRollup(fixture.githubApp.readCommitCheckRollup, failedRollup);
       fixture.processWebhook.mockImplementationOnce((event, body, deliveryId, claim) =>
         fixture.githubOperations.processWebhook(event, body, deliveryId, claim),
       );
-      let server2DbFenceStarted!: () => void;
-      const server2DbFenceEntered = new Promise<void>((resolve) => { server2DbFenceStarted = resolve; });
-      let releaseServer2DbFence!: () => void;
-      server2GithubApp.readCommitCheckRollup.mockImplementationOnce(async () => {
-        server2DbFenceStarted();
-        await new Promise<void>((resolve) => { releaseServer2DbFence = resolve; });
-        return passedRollup;
-      });
+      const server2DbFence = deferRollup(server2GithubApp.readCommitCheckRollup, passedRollup);
       server2Webhook.mockImplementationOnce((event, body, deliveryId, claim) =>
         server2GithubOperations.processWebhook(event, body, deliveryId, claim),
       );
@@ -914,38 +875,92 @@ const fixture = monolithFixture();
         'check_run',
         checkPayload,
       );
-      await dbFenceRollupEntered;
-      await originalQuery(
-        `UPDATE github_webhook_deliveries
-         SET claim_expires_at=clock_timestamp()-interval '1 second'
-         WHERE delivery_id=$1`,
-        ['db-fenced-check-refresh'],
-      );
+      await dbFenceRollup.entered;
+      await expireDelivery('db-fenced-check-refresh');
       const dbFenceSecondPromise = sendTo(
         server2Origin,
         'db-fenced-check-refresh',
         'check_run',
         checkPayload,
       );
-      await server2DbFenceEntered;
+      await server2DbFence.entered;
 
-      releaseDbFenceRollup();
+      dbFenceRollup.release();
       const dbFenceFirst = await dbFenceFirstPromise;
       expect(dbFenceFirst.status).toBe(500);
       expect(server1UpdateLifecycleSpy).not.toHaveBeenCalled();
-      expect(
-        (
-          await originalQuery<{ checks: string }>(
-            `SELECT lifecycle->>'checks' checks FROM corner_github_cache WHERE corner_id=$1`,
-            [cornerId],
-          )
-        ).rows[0]?.checks,
-      ).toBe('passing');
+      expect(await checksOf()).toBe('passing');
 
-      releaseServer2DbFence();
+      server2DbFence.release();
       const dbFenceSecond = await dbFenceSecondPromise;
       expect(dbFenceSecond.status).toBe(202);
       expect(await dbFenceSecond.json()).toEqual({ accepted: true, duplicate: false });
+
+      // Transient GitHub read failure: stall server1's checks-unavailable write transaction
+      // while server2 takes over, then release server1 and verify check state stays untouched.
+      const originalTransaction = fixture.database.transaction.bind(fixture.database);
+      let holdNextTransaction = false;
+      let transientWriteStarted!: () => void;
+      const transientWritePaused = new Promise<void>((resolve) => { transientWriteStarted = resolve; });
+      let releaseTransientWrite: (() => void) | undefined;
+      const transactionSpy = vi
+        .spyOn(fixture.database, 'transaction')
+        .mockImplementation((work) => {
+          if (holdNextTransaction) {
+            holdNextTransaction = false;
+            transientWriteStarted();
+            return new Promise<void>((resolve) => { releaseTransientWrite = resolve; }).then(() =>
+              originalTransaction(work),
+            );
+          }
+          return originalTransaction(work);
+        });
+      try {
+        fixture.githubApp.readCommitCheckRollup.mockImplementationOnce(async () => {
+          holdNextTransaction = true;
+          throw new GitHubHttpError('Checks', 502);
+        });
+        fixture.processWebhook.mockImplementationOnce((event, body, deliveryId, claim) =>
+          fixture.githubOperations.processWebhook(event, body, deliveryId, claim),
+        );
+        const server2Transient = deferRollup(server2GithubApp.readCommitCheckRollup, passedRollup);
+        server2Webhook.mockImplementationOnce((event, body, deliveryId, claim) =>
+          server2GithubOperations.processWebhook(event, body, deliveryId, claim),
+        );
+
+        const transientFirstPromise = sendTo(
+          fixture.origin,
+          'transient-fenced-check-refresh',
+          'check_run',
+          checkPayload,
+        );
+        await transientWritePaused;
+        await expireDelivery('transient-fenced-check-refresh');
+        const transientSecondPromise = sendTo(
+          server2Origin,
+          'transient-fenced-check-refresh',
+          'check_run',
+          checkPayload,
+        );
+        await server2Transient.entered;
+
+        releaseTransientWrite?.();
+        const transientFirst = await transientFirstPromise;
+        expect(transientFirst.status).toBe(500);
+        expect(await checksOf()).toBe('passing');
+
+        server2Transient.release();
+        const transientSecond = await transientSecondPromise;
+        expect(transientSecond.status).toBe(202);
+        expect(await transientSecond.json()).toEqual({ accepted: true, duplicate: false });
+        expect(await checksOf()).toBe('passing');
+        expect(await claimExpiresOf('transient-fenced-check-refresh')).toEqual([
+          { claim_expires_at: null },
+        ]);
+      } finally {
+        releaseTransientWrite?.();
+        transactionSpy.mockRestore();
+      }
 
       // Recovery after the owning server exits: an expired unfinished claim is reclaimed by server2.
       await originalQuery(
@@ -956,15 +971,8 @@ const fixture = monolithFixture();
       const recovered = await sendTo(server2Origin, 'owner-exited-delivery');
       expect(recovered.status).toBe(202);
       expect(await recovered.json()).toEqual({ accepted: true, duplicate: false });
-      expect(server2Webhook).toHaveBeenCalledTimes(4);
-      expect(
-        (
-          await originalQuery<{ claim_expires_at: string | null }>(
-            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
-            ['owner-exited-delivery'],
-          )
-        ).rows,
-      ).toEqual([{ claim_expires_at: null }]);
+      expect(server2Webhook).toHaveBeenCalledTimes(5);
+      expect(await claimExpiresOf('owner-exited-delivery')).toEqual([{ claim_expires_at: null }]);
     } finally {
       releaseHeldRenewal?.();
       querySpy.mockRestore();

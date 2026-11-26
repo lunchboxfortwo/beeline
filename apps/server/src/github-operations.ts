@@ -374,14 +374,17 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
       if (!installation || typeof installation !== 'object' || Array.isArray(installation)) return;
       const install = installation as Record<string, unknown>;
       if (typeof install.id !== 'number') return;
+      const installationId = install.id;
       // Before any later return, so `new_permissions_accepted` drops stale tokens
       // even though this handler has no branch of its own for that action.
       if (event === 'installation' || event === 'installation_repositories') {
-        this.invalidateInstallationRoomTokens(install.id);
+        this.invalidateInstallationRoomTokens(installationId);
       }
       if (deliveryId) {
-        if (claim) await claim.assertOwned(this.database);
-        const changed = await fireRepositorySubscriptions(this.database, install.id, event, body, deliveryId);
+        const changed = await this.database.transaction(async (tx) => {
+          if (claim) await claim.assertOwned(tx);
+          return fireRepositorySubscriptions(tx, installationId, event, body, deliveryId);
+        });
         for (const roomId of new Set(changed)) this.onRoomChanged?.(roomId);
       }
       assertActive();
@@ -418,24 +421,28 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
       // full GitHub refresh and repository-change wake for every bound Room.
       if (event !== 'installation' && event !== 'installation_repositories' && event !== 'repository') return;
       if (event === 'installation' && body.action === 'deleted') {
-        if (claim) await claim.assertOwned(this.database);
-        await this.database.query(
-          `UPDATE github_installations SET status='revoked',updated_at=now() WHERE installation_id=$1`,
-          [install.id],
-        );
-        await this.database.query(
-          `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1`,
-          [install.id],
-        );
+        await this.database.transaction(async (tx) => {
+          if (claim) await claim.assertOwned(tx);
+          await tx.query(
+            `UPDATE github_installations SET status='revoked',updated_at=now() WHERE installation_id=$1`,
+            [install.id],
+          );
+          await tx.query(
+            `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1`,
+            [install.id],
+          );
+        });
         return;
       }
       if (event === 'installation' && body.action === 'suspend') {
-        if (claim) await claim.assertOwned(this.database);
-        await this.database.query(
-          `UPDATE github_installations SET status='suspended',updated_at=now()
-           WHERE installation_id=$1 AND status<>'revoked'`,
-          [install.id],
-        );
+        await this.database.transaction(async (tx) => {
+          if (claim) await claim.assertOwned(tx);
+          await tx.query(
+            `UPDATE github_installations SET status='suspended',updated_at=now()
+             WHERE installation_id=$1 AND status<>'revoked'`,
+            [install.id],
+          );
+        });
         return;
       }
       const existing = (
@@ -470,11 +477,13 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
           return typeof id === 'number' && Number.isSafeInteger(id) ? [id] : [];
         });
         if (removedIds.length) {
-          if (claim) await claim.assertOwned(this.database);
-          await this.database.query(
-            `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1 AND repository_id=ANY($2::bigint[])`,
-            [install.id, removedIds],
-          );
+          await this.database.transaction(async (tx) => {
+            if (claim) await claim.assertOwned(tx);
+            await tx.query(
+              `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1 AND repository_id=ANY($2::bigint[])`,
+              [install.id, removedIds],
+            );
+          });
         }
       }
       assertActive();

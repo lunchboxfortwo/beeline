@@ -244,17 +244,19 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
         fallbackBranch],
     );
     for (const room of rooms.rows) {
-      if (claim) await claim.assertOwned(database);
-      const note = await systemLine(database, {
-        id: hash(`beeline:${room.room_id}:github-event:${event}:${card.action}:${dedupeKey}`),
-        roomId: room.room_id,
-        authorId: room.author_id,
-        subject: { kind: githubProviderKey, name: card.actor },
-        verb: card.action,
-        object: { text: card.title, url: card.url },
-        presentation: 'card',
-        cardType: 'github-event',
-        card: { ...card, ...(room.corner_id ? { cornerId: room.corner_id } : {}) },
+      const note = await database.transaction(async (tx) => {
+        if (claim) await claim.assertOwned(tx);
+        return systemLine(tx, {
+          id: hash(`beeline:${room.room_id}:github-event:${event}:${card.action}:${dedupeKey}`),
+          roomId: room.room_id,
+          authorId: room.author_id,
+          subject: { kind: githubProviderKey, name: card.actor },
+          verb: card.action,
+          object: { text: card.title, url: card.url },
+          presentation: 'card',
+          cardType: 'github-event',
+          card: { ...card, ...(room.corner_id ? { cornerId: room.corner_id } : {}) },
+        });
       });
       if (note.inserted) ctx.onRoomChanged?.(room.room_id);
     }
@@ -455,52 +457,56 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
         const commits =
           integer(body.size) ?? (Array.isArray(body.commits) ? body.commits.length : 0);
         const head = text(body.after);
-        if (head) {
-          const lifecycle = await ctx.lifecycle(target.corner_id, database);
-          if (claim) await claim.assertOwned(database);
-          await ctx.updateLifecycle(
-            target.corner_id,
-            {
-              checks: 'unknown',
-              checksSummary: {
-                status: 'unknown',
-                total: 0,
-                failing: [],
-                checks: [],
-                updatedAt: Math.floor((await database.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
+        let pushNoteInserted = false;
+        await database.transaction(async (tx) => {
+          await lockCornerLifecycle(tx, target.corner_id);
+          if (claim) await claim.assertOwned(tx);
+          if (head) {
+            const lifecycle = await ctx.lifecycle(target.corner_id, tx);
+            await ctx.updateLifecycle(
+              target.corner_id,
+              {
+                checks: 'unknown',
+                checksSummary: {
+                  status: 'unknown',
+                  total: 0,
+                  failing: [],
+                  checks: [],
+                  updatedAt: Math.floor((await tx.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
+                },
+                ...(lifecycle.pr ? { pr: { ...lifecycle.pr, headSha: head, mergeability: 'unknown' } } : {}),
               },
-              ...(lifecycle.pr ? { pr: { ...lifecycle.pr, headSha: head, mergeability: 'unknown' } } : {}),
-            },
-            database,
-          );
-          if (claim) await claim.assertOwned(database);
-          await advanceCorner(database, target.corner_id, {
-            kind: 'push',
-            headSha: head,
-            contents: {
-              summary: `pushed to ${branch}`,
+              tx,
+            );
+            await advanceCorner(tx, target.corner_id, {
+              kind: 'push',
               headSha: head,
-              ...(lifecycle.pr?.url ? { prUrl: lifecycle.pr.url } : {}),
+              contents: {
+                summary: `pushed to ${branch}`,
+                headSha: head,
+                ...(lifecycle.pr?.url ? { prUrl: lifecycle.pr.url } : {}),
+              },
+            });
+          }
+          pushNoteInserted = await ctx.systemNote(
+            target.corner_id,
+            target.author_id,
+            {
+              subject: actor(text(record(body.pusher)?.name) ?? actorLogin),
+              verb: commits === 1 ? systemMessage('github-operations.commit-pushed', head?.slice(0, 7) ?? '')
+                : systemMessage('github-operations.commits-pushed', commits, head?.slice(0, 7) ?? ''),
+              object: {
+                text: String(commits),
+                ...(head ? { headSha: head } : {}),
+                ...(compare ? { url: compare } : {}),
+              },
             },
-          });
-        }
-        if (claim) await claim.assertOwned(database);
-        await ctx.systemNote(
-          target.corner_id,
-          target.author_id,
-          {
-            subject: actor(text(record(body.pusher)?.name) ?? actorLogin),
-            verb: commits === 1 ? systemMessage('github-operations.commit-pushed', head?.slice(0, 7) ?? '')
-              : systemMessage('github-operations.commits-pushed', commits, head?.slice(0, 7) ?? ''),
-            object: {
-              text: String(commits),
-              ...(head ? { headSha: head } : {}),
-              ...(compare ? { url: compare } : {}),
-            },
-          },
-          `github:push:${text(body.after) ?? hash(JSON.stringify(body))}`,
-          database,
-        );
+            `github:push:${text(body.after) ?? hash(JSON.stringify(body))}`,
+            tx,
+            true,
+          );
+        });
+        if (pushNoteInserted) ctx.onRoomChanged?.(target.corner_id);
         continue;
       }
       const check = checkFact(event, body);

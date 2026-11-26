@@ -256,15 +256,22 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
     } catch (error) {
       if (claim?.signal.aborted) throw claim.signal.reason ?? error;
       if (transientGitHubError(error)) {
-        if (claim) await claim.assertOwned(database);
-        await recordCornerGithubFact(database, target.corner_id, { kind: 'checks-unavailable', headSha: checkHeadSha, fetchStartedAt });
+        await database.transaction(async (tx) => {
+          await lockCornerLifecycle(tx, target.corner_id);
+          if (claim) await claim.assertOwned(tx);
+          await recordCornerGithubFact(tx, target.corner_id, {
+            kind: 'checks-unavailable',
+            headSha: checkHeadSha,
+            fetchStartedAt,
+          });
+        });
       }
       throw error;
     }
     // A checks read repairs only its check snapshot; mergeability refreshes
     // retain their event path and must not reset a pending merge claim's age.
     if (!options?.snapshot) {
-      if (claim) await claim.assertOwned(database);
+      claim?.assertActive();
       await ctx.refreshStaleMergeability(target.corner_id, confirmedPr, claim);
     }
   }
