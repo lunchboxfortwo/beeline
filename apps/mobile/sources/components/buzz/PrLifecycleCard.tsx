@@ -87,9 +87,7 @@ export function RepositoryLifecycleRow({
             : undefined
         }
       >
-        {/* Centre the body line in the 44 copy target without moving either icon
-            or changing the row's layout and hit target (approved title-alignment mock). */}
-        <XStack alignItems="baseline" y={2.5}>
+        <XStack alignItems="baseline">
           <T color="secondary" minWidth={0} numberOfLines={1} ellipsizeMode="tail">
             <T v="heading" color={/fail/i.test(state) ? 'needsYou' : 'ink'}>{verb} </T>
             {item.title}
@@ -120,7 +118,6 @@ export function RepositoryLifecycleRow({
     <T
       v={isRepositoryLifecycleItem(item) ? 'body' : 'meta'}
       color="secondary"
-      marginVertical={isRepositoryLifecycleItem(item) ? 0 : '1'}
       numberOfLines={2}
       ellipsizeMode="tail"
     >

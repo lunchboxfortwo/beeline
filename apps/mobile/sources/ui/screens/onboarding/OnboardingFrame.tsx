@@ -43,7 +43,7 @@ export function Choice({ icon, title, line, onPress, accent = false, expanded, t
     return (
         <ListItem
             padding="4" gap="3" borderRadius="lg" borderWidth={1} borderColor={accent ? 'needsYou' : 'strongStroke'}
-            backgroundColor="raised" alignItems="flex-start" justifyContent="flex-start" onPress={onPress}
+            backgroundColor="raised" alignItems="center" justifyContent="flex-start" onPress={onPress}
             aria-label={title} accessibilityRole="button"
             accessibilityState={expanded === undefined ? undefined : { expanded }} testID={testID}
         >
@@ -54,7 +54,7 @@ export function Choice({ icon, title, line, onPress, accent = false, expanded, t
                 <T v="heading">{title}</T>
                 <T v="meta" color="secondary">{line}</T>
             </YStack>
-            <YStack paddingTop="2"><Glyph icon={expanded ? ChevronDown : ChevronRight} size={16} /></YStack>
+            <Glyph icon={expanded ? ChevronDown : ChevronRight} size={16} />
         </ListItem>
     );
 }

@@ -1,7 +1,7 @@
 import React, { useState, type ReactNode } from 'react';
 import { Card, Input, ListItem, Separator, XStack, YStack } from 'tamagui';
 import { Check, ChevronDown, ChevronRight, ExternalLink, X } from 'lucide-react-native';
-import { Btn, Copy, Glyph, HEIGHT, T, Spinner } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, T, Spinner, typeStyle, useTextSize } from '@/ui/grammar';
 import { SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
 import { ChoiceOption } from '@/ui/screens/transcript/cards/ChoiceOption';
 import { ErrorBanner } from './ErrorBanner';
@@ -146,9 +146,11 @@ export function TranscriptCard({
   const decisions = actions
     .filter((action) => action.accessibilityRole !== 'link')
     .sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary)));
+  const headingLine = typeStyle('heading', useTextSize()).lineHeight;
+  const multiLineHead = Boolean(subline) || wrapTitle;
   const titleTestID = testID ? `${testID}-title` : undefined;
   const titleLine = (
-    <XStack gap="2" alignItems="flex-start">
+    <XStack gap="2" alignItems={alignSublineWithTitle || wrapTitle ? 'flex-start' : 'center'}>
       {identity ? <YStack>{identity}</YStack> : null}
       <YStack flex={1} minWidth={0}>
         <T v="heading" numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
@@ -159,15 +161,19 @@ export function TranscriptCard({
     </XStack>
   );
   const head = (
-    <XStack gap="2" alignItems="flex-start" flex={1} minWidth={0}>
+    <XStack gap="2" alignItems={multiLineHead ? 'flex-start' : 'center'} flex={1} minWidth={0}>
       <YStack flex={1} minWidth={0} gap="1">
         {titleLine}
         {!alignSublineWithTitle && subline ? (
           <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
         ) : null}
       </YStack>
-      {stamp ? <T v="meta" color="secondary">{stamp}</T> : null}
-      {onHeaderPress ? <Glyph icon={headerExpanded ? ChevronDown : ChevronRight} size={16} /> : null}
+      {stamp ? <YStack height={headingLine} justifyContent="center"><T v="meta" color="secondary">{stamp}</T></YStack> : null}
+      {onHeaderPress ? (
+        <YStack height={headingLine} justifyContent="center">
+          <Glyph icon={headerExpanded ? ChevronDown : ChevronRight} size={16} />
+        </YStack>
+      ) : null}
       {onDismiss ? (
         <Btn kind="icon" label={dismissLabel} onPress={onDismiss} testID={testID ? `${testID}-dismiss` : undefined}>
           <Glyph icon={X} size={16} />
@@ -302,16 +308,17 @@ function ActionButton({ action }: { action: TranscriptCardAction }) {
 }
 
 function CardRow({ row, wrapTitle }: { row: TranscriptCardRow; wrapTitle: boolean }) {
+  const line = typeStyle('body', useTextSize()).lineHeight;
   const content = (
     <XStack gap="3" alignItems="flex-start" paddingVertical="2" flex={1} minWidth={0}>
-      <YStack width={80}>
+      <YStack width={80} height={line} justifyContent="center">
         <T v="meta" color={row.tone === 'waiting' ? 'needsYou' : row.tone === 'failed' ? 'removed' : 'secondary'}>{row.state}</T>
       </YStack>
       <YStack flex={1} minWidth={0} gap="1">
         <T v="body" numberOfLines={wrapTitle ? undefined : 1}>{row.title}</T>
         <T v="meta" color="secondary" numberOfLines={wrapTitle ? undefined : 1}>{row.kindLine}</T>
       </YStack>
-      {row.onPress ? <YStack paddingTop="0.5"><Glyph icon={ChevronRight} size={16} /></YStack> : null}
+      {row.onPress ? <YStack height={line} justifyContent="center"><Glyph icon={ChevronRight} size={16} /></YStack> : null}
     </XStack>
   );
   return row.onPress ? (

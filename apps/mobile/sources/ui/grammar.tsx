@@ -188,17 +188,18 @@ export function Row({ label, value, detail, icon, leading, onPress, last, right,
     onPress?: () => void; last?: boolean; right?: React.ReactNode; testID?: string; tone?: 'removed';
 }) {
     const step = useStep();
+    const line = typeStyle(tone ? 'heading' : 'body', useTextSize()).lineHeight;
     const body = (
         <XStack gap={step('3')} alignItems="flex-start" paddingVertical={step('3')} flexGrow={1} flexShrink={1} minWidth={0}>
             {leading}
-            {icon ? <YStack paddingTop="0.5"><Glyph icon={icon} size={18} /></YStack> : null}
+            {icon ? <YStack height={line} justifyContent="center"><Glyph icon={icon} size={18} /></YStack> : null}
             <YStack flex={1} minWidth={0} gap={step('1')}>
                 {tone ? <T v="heading" color={tone}>{label}</T> : <Copy>{label}</Copy>}
                 {detail ? <Copy small quiet>{detail}</Copy> : null}
             </YStack>
             {value ? <YStack maxWidth="50%"><Copy quiet>{value}</Copy></YStack> : null}
             {right}
-            {onPress ? <YStack paddingTop="0.5"><Glyph icon={ChevronRight} size={16} /></YStack> : null}
+            {onPress ? <YStack height={line} justifyContent="center"><Glyph icon={ChevronRight} size={16} /></YStack> : null}
         </XStack>
     );
     return (
