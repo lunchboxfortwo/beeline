@@ -490,4 +490,72 @@ const fixture = monolithFixture();
     expect(await afterRecovery.json()).toEqual({ accepted: false, duplicate: true });
     expect(fixture.processWebhook).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps an active delivery claim exclusive past the old expiry while the first handler is still running', async () => {
+    const payload = { action: 'opened' };
+    let releaseSlow!: () => void;
+    let slowEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { slowEntered = resolve; });
+    fixture.processWebhook.mockImplementationOnce(async () => {
+      slowEntered();
+      await new Promise<void>((resolve) => { releaseSlow = resolve; });
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const firstPromise = fixture.webhook('pull_request', 'slow-delivery', payload);
+      await entered;
+      const initialExpiry = (
+        await fixture.database.query<{ claim_expires_at: string }>(
+          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+          ['slow-delivery'],
+        )
+      ).rows[0]!.claim_expires_at;
+      // Advance past the two-minute initial claim window while the first handler is still running.
+      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(70_000);
+      const renewedExpiry = (
+        await fixture.database.query<{ claim_expires_at: string }>(
+          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+          ['slow-delivery'],
+        )
+      ).rows[0]!.claim_expires_at;
+      expect(Date.parse(renewedExpiry)).toBeGreaterThan(Date.parse(initialExpiry));
+
+      // Redelivering after the old expiry must not start a second handler while the first is alive.
+      const redelivery = await fixture.webhook('pull_request', 'slow-delivery', payload);
+      expect(redelivery.status).toBe(200);
+      expect(await redelivery.json()).toEqual({ accepted: false, duplicate: true });
+      expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
+
+      // Even if the database claim row is aged past expiry, the live handler still blocks redelivery.
+      await fixture.database.query(
+        `UPDATE github_webhook_deliveries SET claim_expires_at=clock_timestamp()-interval '1 second' WHERE delivery_id=$1`,
+        ['slow-delivery'],
+      );
+      const agedRedelivery = await fixture.webhook('pull_request', 'slow-delivery', payload);
+      expect(agedRedelivery.status).toBe(200);
+      expect(await agedRedelivery.json()).toEqual({ accepted: false, duplicate: true });
+      expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
+
+      // Restore renewed token before finishing so completion clears claim_expires_at cleanly.
+      await fixture.database.query(
+        `UPDATE github_webhook_deliveries SET claim_expires_at=$2::timestamptz WHERE delivery_id=$1`,
+        ['slow-delivery', renewedExpiry],
+      );
+      releaseSlow();
+      const first = await firstPromise;
+      expect(first.status).toBe(202);
+      expect(
+        (
+          await fixture.database.query<{ claim_expires_at: string | null }>(
+            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+            ['slow-delivery'],
+          )
+        ).rows,
+      ).toEqual([{ claim_expires_at: null }]);
+      expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

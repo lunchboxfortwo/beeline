@@ -32,8 +32,21 @@ import { serveEmailImage } from "./email-images.js";
 import { ServerOptions, exactPath, bytes, MAX_JSON_BYTES, json, body, appSignInWebOrigin, appSignInReturnCookie, bearerSecretMatches, clientKey, publicJson, funnelRateLimit, signatureMatches } from './server.js';
 import { PhoneHttpOperation, daemonIdentity, refuseDaemon, phoneIdentity } from './server-create-beeline-server.js';
 import { routeAuthenticated } from './server-authenticated-routes.js';
+import { OwnerScheduleClock } from './owner-schedule-clock.js';
+import type { SqlDatabase } from './database.js';
 
 let webhookWritesSincePrune = 0;
+const WEBHOOK_CLAIM_RENEW_MS = 60_000;
+const activeWebhookDeliveries = new WeakMap<SqlDatabase, Set<string>>();
+
+function activeWebhookDeliveriesFor(database: SqlDatabase): Set<string> {
+  let active = activeWebhookDeliveries.get(database);
+  if (!active) {
+    active = new Set<string>();
+    activeWebhookDeliveries.set(database, active);
+  }
+  return active;
+}
 
 
 
@@ -776,39 +789,81 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof delivery !== 'string' || typeof event !== 'string')
       throw new Error('GitHub delivery headers are required');
     const parsed = JSON.parse(payload.toString('utf8')) as unknown;
-    // Claim with a short expiry so concurrent duplicates are skipped while an
-    // interrupted claim (process crash before completion) can be reclaimed on redelivery.
-    const claimed = await options.database.query<{ claim_expires_at: string }>(
-      `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
-       VALUES($1,clock_timestamp()+interval '2 minutes')
-       ON CONFLICT (delivery_id) DO UPDATE
-         SET received_at=clock_timestamp(),
-             claim_expires_at=clock_timestamp()+interval '2 minutes'
-         WHERE github_webhook_deliveries.claim_expires_at IS NOT NULL
-           AND github_webhook_deliveries.claim_expires_at<=clock_timestamp()
-       RETURNING claim_expires_at::text claim_expires_at`,
-      [delivery],
-    );
-    const claimToken = claimed.rows[0]?.claim_expires_at;
-    if (!claimToken) {
+    const activeDeliveries = activeWebhookDeliveriesFor(options.database);
+    if (activeDeliveries.has(delivery)) {
       json(response, 200, { accepted: false, duplicate: true });
       return;
     }
+    activeDeliveries.add(delivery);
     try {
-      if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery);
-    } catch (error) {
-      await options.database
-        .query(
-          `DELETE FROM github_webhook_deliveries WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
+      // Claim with a renewable lease so the delivery stays exclusive while its
+      // handler is alive, and only becomes reclaimable if the owning process dies.
+      const claimed = await options.database.query<{ claim_expires_at: string }>(
+        `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
+         VALUES($1,clock_timestamp()+interval '2 minutes')
+         ON CONFLICT (delivery_id) DO UPDATE
+           SET received_at=clock_timestamp(),
+               claim_expires_at=clock_timestamp()+interval '2 minutes'
+           WHERE github_webhook_deliveries.claim_expires_at IS NOT NULL
+             AND github_webhook_deliveries.claim_expires_at<=clock_timestamp()
+         RETURNING claim_expires_at::text claim_expires_at`,
+        [delivery],
+      );
+      let claimToken = claimed.rows[0]?.claim_expires_at;
+      if (!claimToken) {
+        json(response, 200, { accepted: false, duplicate: true });
+        return;
+      }
+      let handlerAlive = true;
+      let renewWrite: Promise<void> = Promise.resolve();
+      const renewClock = new OwnerScheduleClock(() => {
+        if (!handlerAlive || !claimToken) return;
+        const expectedToken = claimToken;
+        renewWrite = renewWrite.then(async () => {
+          if (!handlerAlive || claimToken !== expectedToken) return;
+          try {
+            const renewed = await options.database.query<{ claim_expires_at: string }>(
+              `UPDATE github_webhook_deliveries
+               SET claim_expires_at=clock_timestamp()+interval '2 minutes'
+               WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz
+               RETURNING claim_expires_at::text claim_expires_at`,
+              [delivery, expectedToken],
+            );
+            if (renewed.rows[0]?.claim_expires_at) {
+              claimToken = renewed.rows[0].claim_expires_at;
+              if (handlerAlive) renewClock.arm(WEBHOOK_CLAIM_RENEW_MS);
+            }
+          } catch (error) {
+            console.warn('[github-webhook] delivery claim renewal failed', error);
+            if (handlerAlive) renewClock.arm(WEBHOOK_CLAIM_RENEW_MS);
+          }
+        });
+      });
+      renewClock.arm(WEBHOOK_CLAIM_RENEW_MS);
+      try {
+        try {
+          if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery);
+        } finally {
+          handlerAlive = false;
+          renewClock.stop();
+          await renewWrite;
+        }
+        await options.database.query(
+          `UPDATE github_webhook_deliveries SET claim_expires_at=NULL WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
           [delivery, claimToken],
-        )
-        .catch(() => undefined);
-      throw error;
+        );
+      } catch (error) {
+        await options.database
+          .query(
+            `DELETE FROM github_webhook_deliveries WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
+            [delivery, claimToken],
+          )
+          .catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      activeDeliveries.delete(delivery);
     }
-    await options.database.query(
-      `UPDATE github_webhook_deliveries SET claim_expires_at=NULL WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
-      [delivery, claimToken],
-    );
     if (++webhookWritesSincePrune % 64 === 1) {
       try {
         await options.database.query(
