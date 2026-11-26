@@ -548,6 +548,17 @@
       "strict": true,
       "fix": "Keep the two bounded shutdown deadlines in shutdown.ts; do not add request cutoffs, retry or background clocks.",
       "filePattern": "^apps/server/src/shutdown\\.ts$"
+    },
+    {
+      "id": "ui.screen-platform-branches",
+      "module": "Mobile UI",
+      "invariant": "Screen and route files do not add new platform or viewport branches; platform adaptation stays in ui/shell and grammar primitives.",
+      "pattern": "\\b(?:Platform\\.OS|useIsDesktop|isDesktopShell|isTauri|useFinePointer)\\b",
+      "scope": ["apps/mobile/sources/ui/screens", "apps/mobile/sources/app"],
+      "owners": [],
+      "strict": true,
+      "total": 96,
+      "fix": "Keep Platform.OS, useIsDesktop, isDesktopShell, isTauri, and useFinePointer inside apps/mobile/sources/ui/shell/, ui/grammar*, or shared components; do not add new platform branches in screens or routes."
     }
   ],
   "storage": {

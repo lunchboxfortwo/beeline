@@ -33,9 +33,9 @@ it('ATTACH-BACK-1: one Back closes Attach and leaves the chat open; the next Bac
   }
   let tree: ReturnType<typeof create>;
   act(() => { tree = create(<Chat />); });
-  expect(tree!.root.findByType('Sheet').props.open).toBe(true);
+  expect(tree!.root.findByType('HullModal').props.visible).toBe(true);
   act(pressBack);
-  expect(tree!.root.findByType('Sheet').props.open).toBe(false);
+  expect(tree!.root.findByType('HullModal').props.visible).toBe(false);
   expect(leaveChat).not.toHaveBeenCalled();
   expect(pick).not.toHaveBeenCalled();
   act(pressBack);

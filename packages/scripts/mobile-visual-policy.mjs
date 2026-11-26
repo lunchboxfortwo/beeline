@@ -25,7 +25,7 @@ const CONCEPT_COMPONENTS = {
 };
 // Existing drawn adapters. No new icon module or alternate thread/chat mark.
 const LOCAL_ICONS = {
-  ChevronGlyph: new Set(['ChevronGlyph', 'CHEVRON_ROW_SIZE', 'CHEVRON_BACK_SIZE']),
+  ChevronGlyph: new Set(['ChevronGlyph', 'CHEVRON_ROW_SIZE']),
   CloseGlyph: new Set(['CloseButton']),
   ExternalGlyph: new Set(['ExternalGlyph']),
   MicGlyph: new Set(['ConversationGlyph', 'COMPOSER_GLYPH_SIZE']),

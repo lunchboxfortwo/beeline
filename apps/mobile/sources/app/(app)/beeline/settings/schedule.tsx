@@ -1,16 +1,12 @@
 import { PageLoader } from '@/ui/PageLoader';
 import { RoutineBody } from '@/ui/screens/profiles/RoutineBody';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useState } from 'react';
 import { ScrollView, YStack } from 'tamagui';
 import { router, useLocalSearchParams } from 'expo-router';
 import { stopSchedule, useScheduledWork } from '@/buzz/scheduled-work';
-import {
-  StopScheduledWork,
-} from '@/components/buzz/ScheduledWorkDetail';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
+import { StopScheduledWork } from '@/components/buzz/ScheduledWorkDetail';
 import { Copy, SafeBottom, SafeTop, ScreenHeader } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -22,7 +18,6 @@ function first(value: string | string[] | undefined): string | undefined {
  */
 export default function PromptSchedule() {
   useLatencyRouteFrame('/beeline/settings/schedule');
-  const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{
     roomId?: string | string[];
     scheduleId?: string | string[];
@@ -51,21 +46,22 @@ export default function PromptSchedule() {
   };
 
   return (
-    <YStack flex={1} backgroundColor="canvas"
-      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
-      alignSelf={desktopPageLayout ? 'center' : undefined}>
+    <YStack flex={1} backgroundColor="canvas" width="100%" maxWidth={720} alignSelf="center">
       <SafeTop />
       <ScreenHeader title="Routine" back={() => router.back()} backLabel="Back to Routines" />
       {stopFailed ? (
-        <SettingsRow
-          title="Could not stop this schedule."
-          action="Retry"
-          onPress={() => void stop()}
-          testID="schedule-stop-error"
-        />
-      ) : error ? (
-        <SettingsRow title={error}
+        <YStack paddingHorizontal="4" paddingTop="3">
+          <ErrorBanner
+            inline
+            title="Could not stop this schedule."
+            onRetry={() => void stop()}
+            testID="schedule-stop-error"
           />
+        </YStack>
+      ) : error ? (
+        <YStack paddingHorizontal="4" paddingTop="3">
+          <ErrorBanner inline title={error} />
+        </YStack>
       ) : null}
       {loading && !work ? (
         <YStack padding="8" alignItems="center" justifyContent="center">

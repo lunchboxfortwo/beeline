@@ -98,7 +98,7 @@ describe('Chat info', () => {
         data.room.room.reviewerAgentId = 'agent-0';
         const tree = render();
         act(() => pressable(tree, 'chat-reviewer').props.onPress());
-        const scroll = tree.root.findByType('Sheet.ScrollView');
+        const scroll = tree.root.find((node: any) => node.type === 'ScrollView' && node.props.testID === 'sheet-reviewer-scroll');
         const rows = scroll.findAll((node: any) => node.type === 'ListItem');
         expect(rows).toHaveLength(26);
         expect(rows[0].props.testID).toBe('reviewer-none');
@@ -168,7 +168,7 @@ describe('Chat info', () => {
         const tree = render();
         infoReads.mockClear();
         act(() => pressable(tree, 'chat-repository').props.onPress());
-        expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(true);
+        expect(tree.root.findAllByType('HullModal')[0].props.visible).toBe(true);
         expect(infoReads).not.toHaveBeenCalled();
         expect(tree.root.findByType('RepoList').props.loading).toBe(true);
         const nameRead = vi.fn(() => 'owner/repo');
@@ -183,7 +183,7 @@ describe('Chat info', () => {
         act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
         expect(infoReads).not.toHaveBeenCalled();
         act(() => tree.root.findAllByType('Button').find((node: any) => node.props['aria-label'] === 'Cancel').props.onPress());
-        expect(tree.root.findAllByType('Sheet')[0].props.open).toBe(false);
+        expect(tree.root.findAllByType('HullModal')[0].props.visible).toBe(false);
         expect(infoReads).not.toHaveBeenCalled();
     });
 
@@ -305,7 +305,8 @@ describe('Chat info', () => {
         act(() => list.props.onSelect(list.props.getCandidate(list.props.candidates[0])));
         data.room.viewer.permissions.manage = false;
         act(() => tree.update(<ChatInfoScreen roomId={ROOM} close={vi.fn()} />));
-        await act(async () => control(tree, 'chat-repository-save').props.onPress());
+        expect(tree.root.findAllByType('HullModal')[0].props.visible).toBe(false);
+        expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'chat-repository-save')).toHaveLength(0);
         expect(operation.mock.calls.map(call => call[0])).toEqual(['listGitHubRepositories', 'listGitHubRepositories']);
     });
 

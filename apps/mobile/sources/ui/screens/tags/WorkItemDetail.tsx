@@ -392,7 +392,7 @@ export function WorkSheet({
   if (item) last.current = item;
   const shown = last.current;
   return (
-    <SheetFrame open={Boolean(item)} close={close} title={shown?.title ?? ''} testID="work-sheet" belowModals>
+    <SheetFrame open={Boolean(item)} close={close} title={shown?.title ?? ''} testID="work-sheet">
       {shown ? <WorkItemDetail key={shown.id} item={shown} {...props} /> : null}
     </SheetFrame>
   );

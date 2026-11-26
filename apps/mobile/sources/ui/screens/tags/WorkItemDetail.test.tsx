@@ -5,8 +5,10 @@ import { expect, it, vi } from 'vitest';
 import type { WorkItemView } from '@beeline/api-contract/phone';
 
 const keyboard = vi.hoisted(() => ({ height: { value: 0 } }));
+const viewport = vi.hoisted(() => ({ height: 844, width: 390 }));
 vi.mock('react-native-keyboard-controller', () => ({ useReanimatedKeyboardAnimation: () => keyboard }));
-vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
+vi.mock('@/ui/window-dimensions', () => ({ useWindowDimensions: () => viewport }));
+vi.mock('react-native', () => ({ useWindowDimensions: () => viewport }));
 vi.mock('@/ui/lower-keyboard', () => ({ lowerKeyboard: vi.fn() }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
@@ -57,20 +59,20 @@ vi.mock('@/sync/transport/room-view-client', () => ({
 import { KeyboardBody } from '@/ui/grammar';
 import { WorkItemDetail, WorkSheet } from './WorkItemDetail';
 
-it('keeps the note and Send inside the shared keyboard body while activity can shrink and scroll', () => {
+it('keeps the note and Send inside the shared keyboard body on phone and centers on desktop via HullModal', () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    viewport.width = 390;
+    viewport.height = 844;
     const item = { id: 'test', roomId: 'room', title: 'Test backlog item', state: 'backlog', entries: [], attachments: [] } as unknown as WorkItemView;
     let tree: any;
-    const sheet = () => <WorkSheet item={item} close={vi.fn()} workspaceId="ws" viewerId="viewer" desktop={false} now={0} />;
-    act(() => { tree = create(sheet()); });
+    const sheet = (desktop = false) => <WorkSheet item={item} close={vi.fn()} workspaceId="ws" viewerId="viewer" desktop={desktop} now={0} />;
+    act(() => { tree = create(sheet(false)); });
     try {
         const body = tree.root.findByType(KeyboardBody);
         expect(body.props.maxHeight).toBe(844 - 24 - 24);
-        const sheetNode = tree.root.findByType('Sheet');
-        const overlayNode = tree.root.findByType('Sheet.Overlay');
-        expect(sheetNode.props.zIndex).toBeLessThan(9999);
-        expect(sheetNode.props.portalProps?.zIndex).toBeLessThan(9999);
-        expect(overlayNode.props.zIndex).toBeLessThan(sheetNode.props.zIndex);
+        const modal = tree.root.findByType('HullModal');
+        expect(modal.props.visible).toBe(true);
+        expect(modal.props.placement).toBe('bottom');
         for (const id of ['work-note-input', 'work-note-send']) {
             expect(body.findAll((node: any) => typeof node.type === 'string' && node.props.testID === id)).toHaveLength(1);
         }
@@ -78,13 +80,25 @@ it('keeps the note and Send inside the shared keyboard body while activity can s
         expect(scroll.props.flexShrink).toBe(1);
         expect(scroll.props.keyboardShouldPersistTaps).toBe('handled');
         keyboard.height.value = -300;
-        act(() => { tree.update(sheet()); });
+        act(() => { tree.update(sheet(false)); });
         const padded = tree.root.findByType(KeyboardBody).findByType('View');
         expect(Object.assign({}, ...padded.props.style).paddingBottom).toBe(300);
         keyboard.height.value = 0;
-        act(() => { tree.update(sheet()); });
+        act(() => { tree.update(sheet(false)); });
         expect(Math.abs(Object.assign({}, ...tree.root.findByType(KeyboardBody).findByType('View').props.style).paddingBottom)).toBe(0);
-    } finally { act(() => tree.unmount()); }
+
+        // Desktop viewport centers the same WorkSheet without a drag grip in the shared HullModal stack.
+        viewport.width = 1440;
+        viewport.height = 900;
+        act(() => { tree.update(sheet(true)); });
+        expect(tree.root.findByType('HullModal').props.placement).toBe('center');
+        expect(tree.root.findByType('HullFloatingSurface').props.borderRadius).toBe('house');
+        expect(tree.root.findAll((node: any) => node.props.testID === 'work-sheet-grip')).toHaveLength(0);
+    } finally {
+        viewport.width = 390;
+        viewport.height = 844;
+        act(() => tree.unmount());
+    }
 });
 
 it('TASK-STATE-1: the task sheet sets Backlog, In progress or Done through updateWorkItem', async () => {

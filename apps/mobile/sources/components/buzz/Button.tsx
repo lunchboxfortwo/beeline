@@ -164,7 +164,7 @@ function ButtonFrame({
       minHeight={inline || (compact && finePointer) ? 0 : 44}
       paddingVertical={!inline && compact && finePointer ? '1' : 0}
       paddingHorizontal={inline || iconOnly ? 0 : '4'}
-      borderRadius="sm"
+      borderRadius="house"
       borderWidth={inline ? 0 : 1}
       backgroundColor={
         inline

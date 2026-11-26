@@ -19,9 +19,6 @@ export type ChevronDirection = 'left' | 'right' | 'up' | 'down';
  */
 export const CHEVRON_ROW_SIZE = 14;
 
-/** The one size every screen's back control draws its chevron at. */
-export const CHEVRON_BACK_SIZE = 22;
-
 /**
  * Every chevron's drawn extent is centred on the box centre, so a chevron
  * needs no per-surface nudge to sit level with the mark beside it. The

@@ -123,7 +123,15 @@ export function HullActionSheet({
   // Without a grip or navigation above it, the title clears the surface's top edge itself.
   const clearsTop = !grip && navigation == null;
   return (
-    <HullFloatingSurface width="100%" testID={testID}>
+    <HullFloatingSurface
+      width="100%"
+      borderRadius={desktop ? 'house' : undefined}
+      borderTopLeftRadius={desktop ? 'house' : 'viewer'}
+      borderTopRightRadius={desktop ? 'house' : 'viewer'}
+      borderBottomLeftRadius={desktop ? 'house' : 0}
+      borderBottomRightRadius={desktop ? 'house' : 0}
+      testID={testID}
+    >
       {grip ? (
         <YStack
           accessibilityElementsHidden
@@ -132,7 +140,7 @@ export function HullActionSheet({
           alignItems="center"
           justifyContent="center"
         >
-          <YStack width={34} height={3} borderRadius="sm" backgroundColor="secondary" opacity={0.55} />
+          <YStack width={34} height={3} borderRadius="house" backgroundColor="secondary" opacity={0.55} />
         </YStack>
       ) : null}
       {navigation}

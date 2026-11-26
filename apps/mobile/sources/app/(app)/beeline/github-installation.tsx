@@ -1,15 +1,12 @@
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import { YStack } from 'tamagui';
 import * as WebBrowser from 'expo-web-browser';
 import { Redirect, type Href, useLocalSearchParams } from 'expo-router';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { Copy } from '@/ui/grammar';
+import { Button } from '@/components/buzz/Button';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
+import { Copy, Row, Screen, Section } from '@/ui/grammar';
 import { clearPendingGitHubInstallation, completeGitHubInstallationRoute, githubInstallationReturnPath } from '@/auth/github-auth-session';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 
@@ -21,7 +18,6 @@ function InstallationReturn({ path }: { path: string }) {
 
 /** Keep progress and recoverable errors in Beeline after GitHub's consent page. */
 export default function GitHubInstallation() {
-  const desktopPageLayout = useDesktopPageLayout();
   useLatencyRouteFrame('/beeline/github-installation');
   const { installed, error: connectionError } = useLocalSearchParams<{ installed?: string; error?: string }>();
   const [returnPath, setReturnPath] = useState<string | null>(null);
@@ -51,14 +47,36 @@ export default function GitHubInstallation() {
     return () => { alive = false; };
   }, [installed, connectionError]);
   if (returnPath) return <InstallationReturn path={returnPath} />;
-  return <YStack flex={1} justifyContent="center" padding="6" gap="4" backgroundColor="canvas"
-    width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
-    alignSelf={desktopPageLayout ? 'center' : undefined} testID="github-installation-return">
-    <PageHeader title={error ? 'GitHub needs another try' : 'Connecting GitHub'} />
-    {error ? <SettingsRow title="Continue connecting GitHub"
-      description="Return to your chat to refresh repositories and finish setup."
-      action="Back to chat" onPress={() => setReturnPath(recoveryPath)} /> : <Copy quiet>
-      Checking your installation and loading the repositories Beeline can work in.
-    </Copy>}
-  </YStack>;
+  return (
+    <Screen
+      title={error ? 'GitHub needs another try' : 'Connecting GitHub'}
+      headerTestID="github-installation-header"
+      testID="github-installation-return"
+    >
+      {error ? (
+        <>
+          <Section title="GitHub">
+            <Row
+              label="Continue connecting GitHub"
+              detail="Return to your chat to refresh repositories and finish setup."
+              right={
+                <Button
+                  label="Back to chat"
+                  variant="secondary"
+                  onPress={() => setReturnPath(recoveryPath)}
+                  testID="github-installation-recovery"
+                />
+              }
+              last
+            />
+          </Section>
+          <ErrorBanner inline title={error} testID="github-installation-error" />
+        </>
+      ) : (
+        <Copy quiet>
+          Checking your installation and loading the repositories Beeline can work in.
+        </Copy>
+      )}
+    </Screen>
+  );
 }

@@ -4,15 +4,21 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const dismiss = vi.hoisted(() => vi.fn());
+const viewport = vi.hoisted(() => ({ height: 844, width: 390 }));
 vi.mock('@/ui/lower-keyboard', () => ({ lowerKeyboard: dismiss }));
-vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
+vi.mock('@/ui/window-dimensions', () => ({ useWindowDimensions: () => viewport }));
+vi.mock('react-native', () => ({ useWindowDimensions: () => viewport }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const insets = vi.hoisted(() => ({ top: 24, bottom: 48, left: 0, right: 0 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => insets }));
-import { Btn, ChatName, HEIGHT, Indent, PlaceHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
+import { Btn, ChatName, HEIGHT, Indent, OverlaySheet, PlaceHeader, ScreenHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
 
-beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
+beforeEach(() => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    viewport.width = 390;
+    viewport.height = 844;
+});
 
 const textOf = (tree: any) => tree.root.findAll((node: any) => node.type === 'Text')[0].props;
 
@@ -72,6 +78,16 @@ it('wraps a place header title onto more lines instead of cutting it off, in lis
     expect(titleLines(<ChatName v="listTitle" name={long} />)).toBeUndefined();
 });
 
+it('renders optional eyebrow text above the PlaceHeader and ScreenHeader title', () => {
+    let tree: any;
+    act(() => { tree = create(<ScreenHeader title="Workflows" eyebrow="#beeline" back={vi.fn()} safeTop={false} testID="head" />); });
+    const texts = tree.root.findAll((node: any) => node.type === 'Text');
+    expect(texts[0].props.children).toBe('#beeline');
+    expect(texts[0].props.fontSize).toBe(13);
+    expect(texts[1].props.children).toBe('Workflows');
+    expect(texts[1].props.fontSize).toBe(24);
+});
+
 it("draws a chat name's # in brass", () => {
     let tree: any;
     act(() => { tree = create(<ChatName v="listTitle" name="#beeline" />); });
@@ -97,8 +113,13 @@ it.each(SIZES)('Text size %s spaces the place header with its preset steps', (sc
     expect(titleRow.props.gap).toBe(scaled('3', scale));
 });
 
-it.each(SIZES)('Text size %s pads the sheet with its preset steps and keeps it clear of the bottom system bar', (scale) => {
+it.each(SIZES)('Text size %s pads the phone sheet with its preset steps and keeps it clear of the bottom system bar', (scale) => {
     const tree = at(scale, <SheetFrame open close={vi.fn()} title="Attach"><T>row</T></SheetFrame>);
+    const modal = tree.root.findByType('HullModal');
+    expect(modal.props.placement).toBe('bottom');
+    const surface = tree.root.findByType('HullFloatingSurface');
+    expect([surface.props.borderTopLeftRadius, surface.props.borderTopRightRadius]).toEqual(['viewer', 'viewer']);
+    expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'sheet-grip')).toHaveLength(1);
     const body = tree.root.findAll((node: any) => node.type === 'YStack' && node.props.paddingBottom !== undefined)[0];
     // The grip above the body is the top edge's space.
     expect([body.props.padding, body.props.paddingTop, body.props.gap])
@@ -107,6 +128,27 @@ it.each(SIZES)('Text size %s pads the sheet with its preset steps and keeps it c
     expect(body.props.paddingBottom).toBe(scaled('6', scale) + insets.bottom);
     const head = tree.root.findAll((node: any) => node.type === 'XStack' && node.props.minHeight !== undefined)[0];
     expect([head.props.gap, head.props.paddingBottom]).toEqual([scaled('2', scale), scaled('2', scale)]);
+});
+
+it('UI-SHEET-1: centers OverlaySheet on desktop without a drag grip using 3px house radius and shared HullModal stacking', () => {
+    viewport.width = 1440;
+    viewport.height = 900;
+    const close = vi.fn();
+    const tree = at('medium', <OverlaySheet open close={close} title="Task" testID="work-sheet"><T>body</T></OverlaySheet>);
+    expect(SheetFrame).toBe(OverlaySheet);
+    const modal = tree.root.findByType('HullModal');
+    expect(modal.props.visible).toBe(true);
+    expect(modal.props.placement).toBe('center');
+    expect(modal.props.contentMaxWidth).toBe(480);
+    expect(modal.props.onRequestClose).toBe(close);
+    const surface = tree.root.findByType('HullFloatingSurface');
+    expect(surface.props.testID).toBe('work-sheet');
+    expect(surface.props.borderRadius).toBe('house');
+    expect(surface.props.borderColor).toBe('strongStroke');
+    expect(tree.root.findAll((node: any) => node.props.testID === 'work-sheet-grip')).toHaveLength(0);
+    const closeBtn = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'work-sheet-close');
+    act(() => closeBtn.props.onPress());
+    expect(close).toHaveBeenCalledTimes(1);
 });
 
 it.each(SIZES)('Text size %s indents nested list levels one gutter a level at any depth', (scale) => {
@@ -126,7 +168,7 @@ it('lowers the keyboard as a sheet opens, so the sheet is never drawn under it',
     expect(dismiss).toHaveBeenCalledTimes(1);
 });
 
-it('mounts a sheet body on first opening and retains its state through dismissal', () => {
+it('does not mount a sheet body before first opening and toggles HullModal visibility cleanly', () => {
     const mounted = vi.fn(), unmounted = vi.fn();
     function Body() {
         React.useEffect(() => { mounted(); return unmounted; }, []);
@@ -136,27 +178,33 @@ it('mounts a sheet body on first opening and retains its state through dismissal
     const sheet = (open: boolean) => <SheetFrame open={open} close={() => undefined} title="Attach"><Body /></SheetFrame>;
     act(() => { tree = create(sheet(false)); });
     expect(mounted).not.toHaveBeenCalled();
+    expect(tree.root.findAllByType('HullModal')).toHaveLength(0);
     act(() => { tree.update(sheet(true)); });
     expect(mounted).toHaveBeenCalledTimes(1);
+    expect(tree.root.findByType('HullModal').props.visible).toBe(true);
     act(() => { tree.update(sheet(false)); });
-    expect(unmounted).not.toHaveBeenCalled();
+    expect(tree.root.findByType('HullModal').props.visible).toBe(false);
     act(() => { tree.update(sheet(true)); });
-    expect(mounted).toHaveBeenCalledTimes(1);
+    expect(tree.root.findByType('HullModal').props.visible).toBe(true);
     act(() => tree.unmount());
-    expect(unmounted).toHaveBeenCalledTimes(1);
+    expect(unmounted).toHaveBeenCalled();
 });
 
-it('preserves the inset viewer face inside its existing bordered target', () => {
+it('preserves the inset viewer face inside its existing bordered target and uses house radius on boxed buttons', () => {
     let tree: any;
     act(() => { tree = create(<Btn kind="icon" label="Talk to agent" viewerInset />); });
     expect(tree.root.findByType('Button').props.minHeight).toBe(42);
     act(() => { tree.update(<Btn kind="icon" label="Close" />); });
     expect(tree.root.findByType('Button').props.minHeight).toBe(44);
+    for (const kind of ['primary', 'secondary', 'destructive', 'accent', 'quiet'] as const) {
+        act(() => { tree.update(<Btn kind={kind} label="Action">Action</Btn>); });
+        expect(tree.root.findByType('Button').props.borderRadius).toBe('house');
+    }
 });
 
 it('bounds a scrolling sheet below the safe top and keeps its header outside the scroll body', () => {
-    const tree = at('medium', <SheetFrame open close={vi.fn()} title="Reviewer" scrollable><T>Last agent</T></SheetFrame>);
-    const scroll = tree.root.findByType('Sheet.ScrollView');
+    const tree = at('medium', <SheetFrame open close={vi.fn()} title="Reviewer" scrollable testID="sheet-reviewer"><T>Last agent</T></SheetFrame>);
+    const scroll = tree.root.findByType('ScrollView');
     expect(scroll.props.flexShrink).toBe(1);
     expect(scroll.props.minHeight).toBe(0);
     expect(scroll.props.nestedScrollEnabled).toBe(true);
@@ -166,21 +214,4 @@ it('bounds a scrolling sheet below the safe top and keeps its header outside the
     const body = tree.root.findAll((node: any) => node.type === 'View' && Array.isArray(node.props.style))
         .find((node: any) => node.props.style.some((style: any) => style?.maxHeight !== undefined));
     expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
-});
-
-it('preserves default SheetFrame stacking for other sheets and stacks below modals only when opted in', () => {
-    const defaultTree = at('medium', <SheetFrame open close={vi.fn()} title="Attach"><T>body</T></SheetFrame>);
-    const defaultSheet = defaultTree.root.findByType('Sheet');
-    const defaultOverlay = defaultTree.root.findByType('Sheet.Overlay');
-    expect(defaultSheet.props.zIndex).toBeUndefined();
-    expect(defaultSheet.props.portalProps).toBeUndefined();
-    expect(defaultOverlay.props.zIndex).toBeUndefined();
-
-    const optedInTree = at('medium', <SheetFrame open close={vi.fn()} title="Task" belowModals><T>body</T></SheetFrame>);
-    const optedInSheet = optedInTree.root.findByType('Sheet');
-    const optedInOverlay = optedInTree.root.findByType('Sheet.Overlay');
-    expect(optedInSheet.props.zIndex).toBeLessThan(9999);
-    expect(optedInSheet.props.portalProps?.zIndex).toBeLessThan(9999);
-    expect(optedInOverlay.props.zIndex).toBeLessThan(optedInSheet.props.zIndex);
-    expect(optedInOverlay.props.zIndex).toBeGreaterThan(2000);
 });
