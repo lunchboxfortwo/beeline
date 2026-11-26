@@ -6,12 +6,14 @@ import {
   parseChatLinkToken,
   threadLinkToken,
   workItemLinkLabel,
+  type RoomViewIdentity,
   type WorkItemView,
   type WorkState,
 } from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { mediaIdFromUrl } from '@/buzz/artifact';
+import { beelineUrlHref } from '@/buzz/beeline-url';
 import { cornerHref, roomHref } from '@/buzz/corner-navigation';
 import { messageLinkId, openChatMessageLink, openMessageLink } from '@/buzz/message-link';
 import { loadWorkBoard } from '@/buzz/work-board-store';
@@ -22,6 +24,7 @@ import {
 } from '@/sync/transport/monolith-operation';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { Btn, Glyph, SheetFrame, SheetScroll, T } from '@/ui/grammar';
+import { WorkAssigneePicker, WorkAvatar } from './WorkAssigneePicker';
 import { WorkStateMark } from './WorkMarks';
 
 const STATE_LABEL = {
@@ -42,18 +45,24 @@ export function WorkItemDetail({
   viewerId,
   desktop,
   now,
+  people,
+  onAssign,
 }: {
   item: WorkItemView;
   workspaceId: string;
   viewerId: string;
   desktop: boolean;
   now: number;
+  people?: readonly RoomViewIdentity[];
+  onAssign?: (item: WorkItemView, identityId: string | null) => Promise<void | boolean>;
 }) {
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [changingState, setChangingState] = useState(false);
-  const busy = useRef({ note: false, attachment: false, state: false });
+  const [changingAssignee, setChangingAssignee] = useState(false);
+  const [pickingAssignee, setPickingAssignee] = useState(false);
+  const busy = useRef({ note: false, attachment: false, state: false, assignee: false });
   const address = { roomId: item.roomId, id: item.id };
   const refresh = () => loadWorkBoard(workspaceId, true);
   const send = async () => {
@@ -84,6 +93,26 @@ export function WorkItemDetail({
     } finally {
       busy.current.state = false;
       setChangingState(false);
+    }
+  };
+  const changeAssignee = async (assigneeId: string | null) => {
+    if (item.roomArchived || assigneeId === (item.assignee?.pubkey ?? null) || busy.current.assignee) {
+      return;
+    }
+    busy.current.assignee = true;
+    setChangingAssignee(true);
+    try {
+      if (onAssign) {
+        await onAssign(item, assigneeId);
+      } else {
+        await monolithPhoneOperation('updateWorkItem', { ...address, assigneeId });
+        await refresh();
+      }
+    } catch {
+      /* The shared connection owner handles transport failures. */
+    } finally {
+      busy.current.assignee = false;
+      setChangingAssignee(false);
     }
   };
   const attach = async (kind: 'file' | 'link') => {
@@ -183,6 +212,44 @@ export function WorkItemDetail({
               ))}
             </XStack>
           ) : null}
+          {!item.roomArchived && people && people.length > 0 ? (
+            <YStack gap="2">
+              <XStack gap="2" alignItems="center" testID="work-assignee-row">
+                <T v="meta" color="secondary">
+                  Assignee
+                </T>
+                <Btn
+                  kind="secondary"
+                  label={item.assignee ? `Change assignee ${item.assignee.name}` : 'Assign'}
+                  disabled={changingAssignee}
+                  onPress={() => setPickingAssignee((current) => !current)}
+                  testID="work-assignee-toggle"
+                >
+                  <XStack gap="2" alignItems="center">
+                    {item.assignee ? <WorkAvatar person={item.assignee} size={20} /> : null}
+                    <T v="meta">{item.assignee ? item.assignee.name : 'Unassigned'}</T>
+                  </XStack>
+                </Btn>
+              </XStack>
+              {pickingAssignee ? (
+                <WorkAssigneePicker
+                  people={people}
+                  onPick={(person) => {
+                    setPickingAssignee(false);
+                    void changeAssignee(person?.pubkey ?? null);
+                  }}
+                />
+              ) : null}
+            </YStack>
+          ) : item.assignee ? (
+            <XStack gap="2" alignItems="center" testID="work-assignee-row">
+              <T v="meta" color="secondary">
+                Assignee
+              </T>
+              <WorkAvatar person={item.assignee} size={20} />
+              <T v="meta">{item.assignee.name}</T>
+            </XStack>
+          ) : null}
           {item.objective ? <T testID="work-sheet-objective">{item.objective}</T> : null}
           <YStack gap="2">
             <T v="meta" color="secondary">
@@ -269,8 +336,16 @@ export function WorkItemDetail({
                         );
                         if (chat) router.navigate(roomHref(chat.room.id, workspaceId));
                       })().catch(() => undefined);
-                    } else if (/^(?:https?|beeline):/i.test(attachment.url))
-                      void openExternalUrl(attachment.url);
+                    } else if (/^(?:https?|beeline):/i.test(attachment.url)) {
+                      const href = beelineUrlHref(attachment.url);
+                      if (href) {
+                        void import('expo-router')
+                          .then(({ router }) => router.navigate(href))
+                          .catch(() => undefined);
+                      } else {
+                        void openExternalUrl(attachment.url);
+                      }
+                    }
                   }}
                 >
                   <Glyph
@@ -387,6 +462,8 @@ export function WorkSheet({
   viewerId: string;
   desktop: boolean;
   now: number;
+  people?: readonly RoomViewIdentity[];
+  onAssign?: (item: WorkItemView, identityId: string | null) => Promise<void | boolean>;
 }) {
   const last = useRef(item);
   if (item) last.current = item;

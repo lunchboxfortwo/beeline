@@ -581,4 +581,72 @@ describe('unified work lifecycle', () => {
     const delivered = await readAgentCommands(db, ruby, chat);
     expect(delivered.commands[0]?.tasks).toEqual(openBacklog);
   });
+
+  it('emits inline backlog-added facts for message capture and coalesced agent chat turns, and none for direct Tasks creation', async () => {
+    // Direct Tasks creation (no originMessageId, no agent chat turn) posts nothing to the chat.
+    const directId = randomUUID();
+    await phone.execute('updateWorkItem', { roomId: chat, id: directId, title: 'direct-task', state: 'backlog' }, lunchbox);
+    expect((await phone.readRoom(chat, lunchbox))?.messages).toEqual([]);
+
+    // Message capture ("Save to backlog") posts one anchored backlog-added daemon-fact in that chat.
+    const msgId = '1'.repeat(64);
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,'Ship column drag and drop','message')`,
+      [msgId, chat, lunchbox],
+    );
+    const capturedId = randomUUID();
+    await phone.execute(
+      'updateWorkItem',
+      { roomId: chat, id: capturedId, title: 'Ship column drag and drop', state: 'backlog', originMessageId: msgId },
+      lunchbox,
+    );
+    const afterCapture = (await phone.readRoom(chat, lunchbox))?.messages ?? [];
+    const captureFacts = afterCapture.filter((m) => m.daemonFact?.type === 'backlog-added');
+    expect(captureFacts).toHaveLength(1);
+    expect(captureFacts[0]?.daemonFact).toEqual({
+      type: 'backlog-added',
+      roomId: chat,
+      items: [{ id: capturedId, name: 'Ship-column-drag' }],
+      sourceMessageId: msgId,
+    });
+
+    // Multiple agent create_work_item calls in one top-level chat turn coalesce into a single backlog-added row.
+    const reqMsgId = '2'.repeat(64);
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,'@ruby file two tasks','message')`,
+      [reqMsgId, chat, lunchbox],
+    );
+    await createAgentCommand(db, {
+      roomId: chat,
+      agentId: ruby,
+      sourceMessageId: reqMsgId,
+      reason: 'human_tag',
+    });
+    const turnRequestId = (await readAgentCommands(db, ruby, chat)).commands[0]!.turnRequestId;
+    const agentTask1 = randomUUID();
+    const agentTask2 = randomUUID();
+    await daemon.execute(
+      'updateWorkItem',
+      { roomId: chat, targetRoomId: chat, requestId: turnRequestId, id: agentTask1, title: 'first-turn-task', state: 'backlog' },
+      ruby,
+    );
+    await daemon.execute(
+      'updateWorkItem',
+      { roomId: chat, targetRoomId: chat, requestId: turnRequestId, id: agentTask2, title: 'second-turn-task', state: 'backlog' },
+      ruby,
+    );
+    const afterAgent = (await phone.readRoom(chat, lunchbox))?.messages ?? [];
+    const allBacklogFacts = afterAgent.filter((m) => m.daemonFact?.type === 'backlog-added');
+    expect(allBacklogFacts).toHaveLength(2);
+    const coalesced = allBacklogFacts.find((m) => m.daemonFact?.sourceMessageId === reqMsgId);
+    expect(coalesced?.daemonFact).toEqual({
+      type: 'backlog-added',
+      roomId: chat,
+      items: [
+        { id: agentTask1, name: 'first-turn-task' },
+        { id: agentTask2, name: 'second-turn-task' },
+      ],
+      sourceMessageId: reqMsgId,
+    });
+  });
 });

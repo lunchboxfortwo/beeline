@@ -126,6 +126,7 @@ export type UpdateWorkItemInput = {
   readonly state?: WorkState;
   readonly objective?: string;
   readonly assigneeId?: string | null;
+  readonly originMessageId?: string;
 };
 export type AskOwnerQuestionInput = {
   readonly about: WorkAbout;

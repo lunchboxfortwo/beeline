@@ -82,6 +82,8 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
             return archived;
           },
           reconcileMergeQueue: ctx.github ? (id) => ctx.github!.reconcileQueuedCorners(id) : undefined,
+          requestId: raw.requestId,
+          turnRoomId: raw.roomId,
         });
         const saved = (await ctx.database.query<{
           title: string | null;
