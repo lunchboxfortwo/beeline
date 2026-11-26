@@ -64,6 +64,7 @@ CREATE INDEX IF NOT EXISTS work_item_entries_author_idx ON work_item_entries(aut
 CREATE OR REPLACE FUNCTION beeline_work_item_entry() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE actor text := COALESCE(NULLIF(current_setting('beeline.work_actor',true),''),NEW.opened_by);
 BEGIN
+  IF current_setting('beeline.work_migration',true)='on' THEN RETURN NEW; END IF;
   -- A thread's own row stores no state (its corner machine owns it), so it logs no state move.
   IF TG_OP='INSERT' AND NEW.state IS NOT NULL THEN
     INSERT INTO work_item_entries(work_item_id,author_id,kind,text)
@@ -99,9 +100,7 @@ CREATE TRIGGER work_attachment_changed AFTER INSERT ON work_item_attachments
 DROP TRIGGER IF EXISTS work_note_changed ON work_item_entries;
 CREATE TRIGGER work_note_changed AFTER INSERT ON work_item_entries
   FOR EACH ROW WHEN (NEW.kind='note') EXECUTE FUNCTION beeline_work_detail_changed();
--- A chat task a thread builds (work-item-threads.ts). Opening the thread links it and moves
--- it to In progress. When its last open linked thread closes, it moves to Done if any linked
--- thread landed, else back to Backlog.
+-- Retired link table folded by unifyWorkItemsAndThreads; kept for migration and rollout compatibility.
 CREATE TABLE IF NOT EXISTS work_item_threads (
   work_item_id text NOT NULL REFERENCES work_items(id) ON DELETE CASCADE,
   thread_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,

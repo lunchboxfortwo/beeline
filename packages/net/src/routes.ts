@@ -348,6 +348,7 @@ const daemonOperations = {
   stopAgentTurn: true,
   updateAgentSchedule: true,
   updateInstitutionalMemory: true,
+  listWorkItems: true,
   walletContractCall: true,
   walletPay: true,
   walletSignTypedData: true,

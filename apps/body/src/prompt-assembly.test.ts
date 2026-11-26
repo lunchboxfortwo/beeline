@@ -838,3 +838,32 @@ it('uses chat and thread language across all assembled agent prompt surfaces', (
     expect(systemPrompt).not.toContain('Before pushing or opening a PR for this thread, call claim_thread.');
   }
 });
+
+describe('backlog tasks in turn context and proactive rules', () => {
+  it('injects up to 15 open backlog tasks in room turns and omits them on other surfaces', () => {
+    const tasks = Array.from({ length: 18 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      title: `backlog-task-${index + 1}`,
+      ...(index === 0 ? { assigneeHandle: 'lunchbox', objective: 'Unify task ids.' } : {}),
+    }));
+    const roomTurn = assembleTurnPrompt({ surface: 'room', tasks, task: { body: 'What is next?' } }).text;
+    expect(roomTurn).toContain('- backlog-task-1 (00000000-0000-4000-8000-000000000001) [assigned @lunchbox]: Unify task ids.');
+    expect(roomTurn).toContain('backlog-task-15');
+    expect(roomTurn).not.toContain('backlog-task-16');
+    for (const surface of ['dm', 'code-corner', 'repo-less-corner'] as const) {
+      expect(assembleTurnPrompt({ surface, tasks, task: { body: 'What is next?' } }).text).not.toContain('backlog-task-1');
+    }
+  });
+
+  it('includes the three narrow backlog rules in room session prompt and triage skill within budget', () => {
+    const { systemPrompt, report } = assembleSessionPrompt({ surface: 'room', agentName: 'Bee', agentCommand: 'claude-agent-acp' });
+    expect(report.reduce((sum, item) => sum + item.bytes, 0)).toBeLessThanOrEqual(SESSION_BUDGET_BYTES);
+    expect(systemPrompt).toContain('Promote any matching backlog task by passing its id in open_thread workItems.');
+    expect(systemPrompt).toContain('Call create_work_item only when a human explicitly defers or splits scope; never invent speculative tasks.');
+    expect(systemPrompt).toContain('When parking work to Backlog with update_work, include a note.');
+    const triage = beelineManagedSkills('test', { isReviewer: false }).find((skill) => skill.name === 'beeline-triage')!.content;
+    expect(triage).toContain('read(facet:tasks)');
+    expect(triage).toContain('create_work_item');
+    expect(triage).toContain('update_work');
+  });
+});

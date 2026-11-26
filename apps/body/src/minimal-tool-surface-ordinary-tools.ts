@@ -22,7 +22,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
     description: 'Become the recorded implementer of a thread before your first edit or commit there. Omit address for the thread this turn runs in; a commander may pass a thread address from its parent chat. Not for read-only or review turns.',
     inputSchema: { type: 'object', properties: { address: { type: 'string', description: 'Thread address; defaults to this place.' } }, additionalProperties: false },
   },
-  {name:'update_work',description:'Create or update a work item for a thread. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, objective or its single assignee (who has the ball); null unassigns. On the thread task, done closes the thread as close_thread does and backlog parks it; this changes no agent command authority.',inputSchema:{type:'object',additionalProperties:false,required:['roomId'],properties:{id:{type:'string'},roomId:{type:'string'},title:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},objective:{type:'string'},assigneeId:{anyOf:[{type:'string'},{type:'null'}]},note:{type:'string'},attachments:{type:'array',items:{type:'object',required:['kind','name'],properties:{kind:{enum:['link','file']},name:{type:'string'},url:{type:'string'},objectId:{type:'string'}},additionalProperties:false}}}}},
+  {name:'update_work',description:'Create or update a work item for a thread or chat. Pass id to edit a particular task or question; omit it for the thread task. Any member agent may set state, objective or its single assignee (identity id or @handle; null unassigns). On the thread task, done closes the thread as close_thread does and backlog parks it; this changes no agent command authority.',inputSchema:{type:'object',additionalProperties:false,required:['roomId'],properties:{id:{type:'string'},roomId:{type:'string'},title:{type:'string'},state:{enum:['needs-you','in-progress','in-review','backlog','done']},objective:{type:'string'},assigneeId:{anyOf:[{type:'string'},{type:'null'}]},note:{type:'string'},attachments:{type:'array',items:{type:'object',required:['kind','name'],properties:{kind:{enum:['link','file']},name:{type:'string'},url:{type:'string'},objectId:{type:'string'}},additionalProperties:false}}}}},
   {name:'close_ask',description:'Explicitly clear an ask or block: answered, withdrawn or superseded. A thread block belongs to its current implementer; its commander or a higher-standing person may override. Replies clear Tasks, not blocks.',inputSchema:{type:'object',additionalProperties:false,required:['id','reason'],properties:{id:{type:'string',description:'The ask id from your open asks.'},reason:{enum:['answered','withdrawn','superseded']}}}},
   {
     "name": "read",
@@ -39,6 +39,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
           "enum": [
             "addresses",
             "threads",
+            "tasks",
             "members",
             "messages",
             "message",
@@ -51,8 +52,9 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
             "usage",
             "session"
           ],
-          "description": "addresses discovers places; messages uses bounded paging; procedure uses slug; message uses messageId; attachment uses attachmentId; usage reads only your own usage; session reads optional configuration and capability load results."
+          "description": "addresses discovers places; tasks lists work items (optional state filter); messages uses bounded paging; procedure uses slug; message uses messageId; attachment uses attachmentId; usage reads only your own usage; session reads optional configuration and capability load results."
         },
+        "state": {"type": "string", "enum": ["needs-you", "in-progress", "in-review", "backlog", "done"], "description": "Optional work state filter for facet tasks."},
         "cursor": {
           "type": "object",
           "properties": {

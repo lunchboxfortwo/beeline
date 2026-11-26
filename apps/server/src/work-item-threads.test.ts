@@ -1,18 +1,18 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
 import { PhoneService } from './phone-service.js';
 import { HelperDaemonService as DaemonService } from './test-fixtures/helper-daemon.js';
 import { GitHubOperations } from './github-operations.js';
 import { LiveHub } from './live.js';
-import { updateWorkItem } from './work-board.js';
+import { readWorkBoard, updateWorkItem } from './work-board.js';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 
 /**
- * Reproduction R1 stand-in: a backlog task moves to In progress when a thread
- * opens to build it, Done when that thread lands, and back to Backlog when it
- * closes unmerged. Merges drive the real GitHub `pull_request` closed webhook.
+ * In-place backlog-to-thread promotion: passing a single backlog task UUID to
+ * `open_thread` promotes that exact UUID and normalized 3-word hyphenated name
+ * into its thread without writing a duplicate `work_item_threads` row.
  */
 
 const H = 'a'.repeat(64),
@@ -64,9 +64,9 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => db?.close());
 
-async function task(title: string, roomId = R) {
-  const id = randomBytes(32).toString('hex');
-  await updateWorkItem(db, { roomId, id, title, state: 'backlog' }, A);
+async function task(title: string, roomId = R, note?: string) {
+  const id = randomUUID();
+  await updateWorkItem(db, { roomId, id, title, state: 'backlog', ...(note ? { note } : {}) }, A);
   return id;
 }
 
@@ -79,19 +79,26 @@ async function open(workItems: string[] | undefined, retry?: (string[] | undefin
   const command = (await daemon.execute('getAgentCommands', { roomId: R }, A)).commands.at(-1)!;
   await startQueuedCommand(daemon, { roomId: R, commandId: command.id }, A);
   pr += 1;
-  const create = (items: string[] | undefined) => daemon.execute(
-    'createCorner',
-    {
-      roomId: R, requestId: command.turnRequestId, idempotencyKey: `open-${pr}`, name: `Build-${pr}`,
-      objective: 'Build the task', repository: 'owner/widgets', targetBranch: 'main',
-      ...(items ? { workItems: items } : {}),
-      brief: { spec: 'Build the task', approval: { sourceMessageId: command.sourceMessageId } },
-    },
-    A,
-  );
+  const create = (items: string[] | undefined) =>
+    daemon.execute(
+      'createCorner',
+      {
+        roomId: R,
+        requestId: command.turnRequestId,
+        idempotencyKey: `open-${pr}`,
+        name: `Build-${pr}`,
+        objective: 'Build the task',
+        repository: 'owner/widgets',
+        targetBranch: 'main',
+        ...(items ? { workItems: items } : {}),
+        brief: { spec: 'Build the task', approval: { sourceMessageId: command.sourceMessageId } },
+      },
+      A,
+    );
   const created = await create(workItems);
   const retries = [];
-  for (const items of retry ?? []) retries.push(await create(items).then(value => value, (error: Error) => error));
+  for (const items of retry ?? [])
+    retries.push(await create(items).then((value) => value, (error: Error) => error));
   return Object.assign(created, { retries });
 }
 
@@ -101,66 +108,66 @@ async function merge(cornerId: string) {
   const url = `https://github.com/owner/widgets/pull/${number}`;
   await db.query(`UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`, [
     cornerId,
-    JSON.stringify({ lifecycle: 'in-review', checks: 'passing',
-      pr: { number, url, headSha: '9'.repeat(40), targetBranch: 'main' } }),
+    JSON.stringify({
+      lifecycle: 'in-review',
+      checks: 'passing',
+      pr: { number, url, headSha: '9'.repeat(40), targetBranch: 'main' },
+    }),
   ]);
   await github.processWebhook('pull_request', {
     installation: { id: 77 },
     repository: { id: 101, full_name: 'owner/widgets' },
     action: 'closed',
     pull_request: {
-      number, title: 'Build the task', html_url: url,
-      head: { ref: branch, sha: '9'.repeat(40) }, base: { ref: 'main' },
-      merged: true, merged_at: '2026-11-22T20:03:00Z', merge_commit_sha: 'f'.repeat(40),
-      commits: 1, changed_files: 1,
+      number,
+      title: 'Build the task',
+      html_url: url,
+      head: { ref: branch, sha: '9'.repeat(40) },
+      base: { ref: 'main' },
+      merged: true,
+      merged_at: '2026-11-22T20:03:00Z',
+      merge_commit_sha: 'f'.repeat(40),
+      commits: 1,
+      changed_files: 1,
     },
     sender: { login: 'octocat' },
   });
 }
 
-async function state(id: string) {
-  return (await db.query<{ state: string; completed: boolean }>(
-    `SELECT state,completed_at IS NOT NULL completed FROM work_items WHERE id=$1`, [id])).rows[0];
-}
-
-async function events(id: string) {
-  return (await db.query<{ text: string }>(
-    `SELECT text FROM work_item_entries WHERE work_item_id=$1 AND kind='event' ORDER BY created_at,id`, [id],
-  )).rows.map(row => row.text);
-}
-
-it('opening a thread for a backlog task moves it to in progress with a thread link; landing moves it to done', async () => {
-  const id = await task('`npx usebeeline update` hangs with no output');
+it('promotes a backlog task UUID in-place without work_item_threads duplicates, and landing marks it done', async () => {
+  const id = await task('fix update hangs with no output', R, 'Keep spinner quiet');
   const created = await open([id]);
-  expect(await state(id)).toEqual({ state: 'in-progress', completed: false });
-  const links = (await db.query(
-    `SELECT kind,name,url FROM work_item_attachments WHERE work_item_id=$1`, [id])).rows;
-  expect(links).toEqual([{ kind: 'link', name: `Thread: Build-${pr}`,
-    url: `https://web.usebeeline.app/beeline/chat/${created.cornerId}?communityId=${W}` }]);
+  expect(created.cornerId).toBe(id);
+  expect(created.name).toBe('fix-update-hangs');
+  expect((await db.query(`SELECT 1 FROM work_item_threads`)).rowCount).toBe(0);
+  const board = await readWorkBoard(db, W, H);
+  const rows = board.items.filter((item) => item.id === id || item.title === 'fix-update-hangs');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ id, roomId: id, title: 'fix-update-hangs', state: 'in-progress' });
+  expect(rows[0]!.entries?.some((entry) => entry.kind === 'note' && entry.text === 'Keep spinner quiet')).toBe(true);
   await merge(created.cornerId);
-  expect(await state(id)).toEqual({ state: 'done', completed: true });
-  expect(await events(id)).toEqual([
-    'created this item in Backlog', 'moved this to In progress', 'moved this to Done',
-  ]);
+  const landed = (await readWorkBoard(db, W, H)).items.filter((item) => item.id === id);
+  expect(landed).toHaveLength(1);
+  expect(landed[0]).toMatchObject({ id, title: 'fix-update-hangs', state: 'done', roomArchived: true });
 }, 30_000);
 
-it('closing the thread without merging returns its task to backlog', async () => {
-  const id = await task('/login card hangs');
+it('moves a promoted thread back to backlog via updateWorkItem and closes via archiveCorner', async () => {
+  const id = await task('login card hangs');
   const created = await open([id]);
-  expect((await state(id))!.state).toBe('in-progress');
-  await daemon.execute('archiveCorner', { cornerId: created.cornerId }, A);
-  expect(await state(id)).toEqual({ state: 'backlog', completed: false });
+  expect(created.cornerId).toBe(id);
+  await updateWorkItem(db, { roomId: id, state: 'backlog' }, H);
+  expect((await readWorkBoard(db, W, H)).items.find((item) => item.id === id)?.state).toBe('backlog');
+  await daemon.execute('archiveCorner', { cornerId: id }, A);
+  expect((await readWorkBoard(db, W, H)).items.find((item) => item.id === id)?.state).toBe('done');
 }, 30_000);
 
-it('a task linked to two threads is done only when the last open one closes', async () => {
-  const id = await task('Shared task');
-  const first = await open([id]);
-  const second = await open([id]);
-  await merge(first.cornerId);
-  expect((await state(id))!.state).toBe('in-progress');
-  await daemon.execute('archiveCorner', { cornerId: second.cornerId }, A);
-  // One linked thread landed, so the task is done.
-  expect((await state(id))!.state).toBe('done');
+it('refuses a second open against an already-promoted task UUID or more than one task id', async () => {
+  const a = await task('first task');
+  const b = await task('second task');
+  await expect(open([a, b])).rejects.toThrow(/at most one backlog task/);
+  const promoted = await open([a]);
+  expect(promoted.cornerId).toBe(a);
+  await expect(open([a])).rejects.toThrow(/workItems must be task ids in the thread's parent chat/);
 }, 30_000);
 
 it('refuses ids that are not tasks in the parent chat, and opens nothing', async () => {
@@ -170,22 +177,17 @@ it('refuses ids that are not tasks in the parent chat, and opens nothing', async
   await expect(open([elsewhere])).rejects.toThrow(/workItems must be task ids in the thread's parent chat/);
   await expect(open(['missing'])).rejects.toThrow(/missing/);
   expect(await threads()).toBe(before);
-  expect((await state(elsewhere))!.state).toBe('backlog');
 }, 30_000);
 
-it('a retry of the same opening must name the same tasks', async () => {
+it('a retry of the same opening must name the same task', async () => {
   const a = await task('Retry A');
-  const b = await task('Retry B');
   const c = await task('Retry C');
-  // Same tasks in another order and with a duplicate: the same thread, nothing new.
-  const same = await open([a, b], [[b, a, a]]);
-  expect(same.retries[0]).toMatchObject({ cornerId: same.cornerId });
-  // Changed tasks, or tasks added to an opening that named none, are a different assignment.
-  const changed = await open([a], [[c]]);
-  const added = await open(undefined, [[c]]);
+  const same = await open([a], [[a, a]]);
+  expect(same.cornerId).toBe(a);
+  expect(same.retries[0]).toMatchObject({ cornerId: a });
+  const changed = await open([c], [[randomUUID()]]);
+  const added = await open(undefined, [[randomUUID()]]);
   for (const retry of [changed.retries[0], added.retries[0]])
     expect(String(retry)).toMatch(/thread assignment conflict.*work items/);
-  expect((await state(c))!.state).toBe('backlog');
-  expect((await db.query(`SELECT 1 FROM work_item_threads WHERE work_item_id=$1`, [c])).rowCount).toBe(0);
-  expect((await db.query(`SELECT 1 FROM work_item_threads WHERE thread_id=$1`, [same.cornerId])).rowCount).toBe(2);
+  expect((await db.query(`SELECT 1 FROM work_item_threads`)).rowCount).toBe(0);
 }, 30_000);

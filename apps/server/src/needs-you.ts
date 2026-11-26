@@ -149,6 +149,8 @@ type ApprovalCard = {
   harness?: AgentSignInHarness;
   name?: string;
   facts?: unknown;
+  workItemId?: string;
+  assigneeId?: string;
 };
 
 type Row = {
@@ -297,6 +299,7 @@ const QUESTION_WHERE = `mark.cleared_at IS NULL AND m.deleted_at IS NULL
   AND ((m.presentation='message'
     AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
     AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question'))
+    OR (m.card_type='work-assignment' AND m.card->>'assigneeId'=mark.identity_id)
     OR ${questionRecipientSql('m', 'mark.identity_id')}
     OR (m.block_reasked_at IS NOT NULL AND m.card->>'reportToId'=mark.identity_id))`;
 
@@ -472,7 +475,7 @@ const questionBranch=(projection:CandidateProjection)=>`
   JOIN messages m ON m.id=mark.message_id
   JOIN viewer_rooms room ON room.id=m.room_id
   ${projection==='cells'?'LEFT JOIN identities author ON author.id=m.author_id':''}
-  WHERE ${QUESTION_WHERE} AND (m.presentation='message' OR (m.block_reasked_at IS NOT NULL AND m.card_type='${CHOICE_CARD_TYPE}' AND m.card->>'status'='answered'))
+  WHERE ${QUESTION_WHERE} AND (m.presentation='message' OR m.card_type='work-assignment' OR (m.block_reasked_at IS NOT NULL AND m.card_type='${CHOICE_CARD_TYPE}' AND m.card->>'status'='answered'))
     AND (NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id) OR (m.block_reasked_at IS NOT NULL AND m.card_type='${CHOICE_CARD_TYPE}' AND m.card->>'status'='answered'))
 `;
 
@@ -617,8 +620,10 @@ export async function needsYouItems(database: SqlDatabase, workspaceId: string, 
           approval.kind === 'grant'
             ? { ...row.card, grants: row.card?.grants?.filter(entry => entry.grantId && row.pending_grant_ids?.includes(entry.grantId)) }
             : row.card ?? {}) ?? approval.subject
-      : [typeof row.card?.question === 'string' ? row.card.question : needsYouRowText(row.text, row.viewer_handle, typeof row.card?.ask === 'string' ? row.card.ask : undefined),
-          ...(typeof row.card?.brief === 'string' ? [row.card.brief] : [])].join('\n\n'),
+      : typeof row.card?.workItemId === 'string'
+        ? row.text
+        : [typeof row.card?.question === 'string' ? row.card.question : needsYouRowText(row.text, row.viewer_handle, typeof row.card?.ask === 'string' ? row.card.ask : undefined),
+            ...(typeof row.card?.brief === 'string' ? [row.card.brief] : [])].join('\n\n'),
     createdAt: Math.floor(row.created_at.getTime() / 1000),
     ...(expiresAt !== undefined ? { expiresAt } : {}),
     ...(row.author_id && row.author_kind && row.author_name

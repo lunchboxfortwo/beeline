@@ -2,7 +2,7 @@ import { becomeThreadImplementer } from '../corner-lifecycle.js';
 import { cornerReviewerSql } from '../corner-reviewer.js';
 import { addWorkNote, attachToWorkItem } from '../work-item-detail.js';
 import { askOwnerQuestion } from '../work-questions.js';
-import { updateWorkItem } from '../work-board.js';
+import { readWorkItemsForAgent, updateWorkItem } from '../work-board.js';
 import { closeAgentAsk } from '../agent-open-asks.js';
 import { setAgentWakePaused } from '../agent-wake-pause.js';
 import { attachUsageAccount, helperUsageEnabled, publishUsageAccount } from '../helper-usage.js';
@@ -60,6 +60,10 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
       case 'attachToWorkItem':
         await attachToWorkItem(ctx.database,{...input as Input<'attachToWorkItem'>,roomId:(input as Input<'attachToWorkItem'>).targetRoomId},authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
+      case 'listWorkItems': {
+        const query = input as Input<'listWorkItems'>;
+        return (await readWorkItemsForAgent(ctx.database, authenticatedAgentId, query)) as Output<Name>;
+      }
       case 'updateWorkItem': {
         const raw = input as Input<'updateWorkItem'>;
         const update={...raw,roomId:raw.targetRoomId};
@@ -67,8 +71,8 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         const existed = (await ctx.database.query('SELECT 1 FROM work_items WHERE id=$1', [itemId])).rowCount > 0;
         let archivedReceipt: string | undefined;
         // Done on a thread is the agent's existing close (PR closed, branch deleted, locked refused).
-        await updateWorkItem(ctx.database,update,authenticatedAgentId,authenticatedAgentId,
-          async () => {
+        await updateWorkItem(ctx.database,update,authenticatedAgentId,authenticatedAgentId,{
+          closeThread: async () => {
             const archived = await daemonArchiveCorner(
               ctx,
               { cornerId: update.roomId, roomId: raw.roomId, requestId: raw.requestId },
@@ -76,7 +80,9 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
             );
             archivedReceipt = archived.receipt;
             return archived;
-          });
+          },
+          reconcileMergeQueue: ctx.github ? (id) => ctx.github!.reconcileQueuedCorners(id) : undefined,
+        });
         const saved = (await ctx.database.query<{
           title: string | null;
           state: string | null;

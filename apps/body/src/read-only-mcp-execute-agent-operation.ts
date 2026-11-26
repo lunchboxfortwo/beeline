@@ -28,6 +28,14 @@ export async function executeAgentOperation(name:string,args:JsonObject,toolCall
   return executeResourceOperation(name,args,toolCallId);
 }
 
+function deterministicWorkItemUuid(seed: string): string {
+  const bytes = createHash('sha256').update(seed).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 async function executeResourceOperation(name:string,args:JsonObject,toolCallId:string):Promise<string> {
   switch (name) {
     case 'create_work_item':
@@ -35,7 +43,7 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       const context = await activeCommandContext();
       const update = name === 'create_work_item' ? {
         ...args,
-        id: createHash('sha256').update(`work-item:${context.requestId}:${toolCallId}`).digest('hex'),
+        id: deterministicWorkItemUuid(`work-item:${context.requestId}:${toolCallId}`),
         state: args.state ?? 'backlog',
       } : args;
       const result = await daemonExecute('updateWorkItem', {
@@ -43,6 +51,11 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       });
       return JSON.stringify({...result, id: update.id ?? args.roomId});
     }
+    case 'list_tasks':
+      return JSON.stringify(await daemonExecute('listWorkItems', {
+        ...(typeof args.address === 'string' && args.address ? { roomId: args.address } : {}),
+        ...(typeof args.state === 'string' ? { state: args.state } : {}),
+      }));
     case 'close_ask':
       return JSON.stringify(await daemonExecute('closeAgentAsk', { messageId: args.id, reason: args.reason }));
     case 'get_chat_message': {

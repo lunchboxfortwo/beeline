@@ -637,10 +637,14 @@ const scope3 = fixtureScope3(scope1);
       const created = await scope3.ok(client, 'create_work_item', { roomId: ROOM, title: 'Inspect main', commandId: order.id });
       const second = await scope3.ok(client, 'create_work_item', { roomId: ROOM, title: 'Inspect body', commandId: order.id });
       expect(second.id).not.toBe(created.id);
-      expect(created.id).toMatch(/^[0-9a-f]{64}$/);
+      expect(created.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       expect((await scope1.db.query('SELECT state FROM work_items WHERE id=$1', [created.id])).rows)
         .toEqual([{ state: 'backlog' }]);
-      await scope3.ok(client, 'update_work', { roomId: ROOM, id: created.id, objective: 'Prove the current checks' });
+      const listed = await scope3.ok(client, 'read', { facet: 'tasks', address: ROOM, state: 'backlog' });
+      expect((listed.tasks as Array<{ id: string; title: string }>).find(t => t.id === created.id)).toMatchObject({ id: created.id, title: 'Inspect-main' });
+      const listedAll = await scope3.ok(client, 'read', { facet: 'tasks' });
+      expect((listedAll.tasks as Array<{ id: string }>).some(t => t.id === created.id)).toBe(true);
+      await scope3.ok(client, 'update_work', { roomId: ROOM, id: created.id, objective: 'Prove the current checks', assigneeId: `@${handle}` });
       await scope3.ok(client,'update_work',{roomId:ROOM,id:created.id,state:'in-review',assigneeId:member,note:'The local checks passed.',attachments:[{kind:'link',name:'Check evidence',url:'https://example.com/checks'}]});
       const board = await scope1.phone.execute('readWorkBoard', { workspaceId: WORKSPACE }, USER);
       expect(board.items.find(item => item.id === created.id)).toMatchObject({ state: 'in-review',

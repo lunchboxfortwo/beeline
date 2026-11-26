@@ -49,7 +49,7 @@ import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { openRouterRoutingInput } from './openrouter-routing.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
-import { itemPrompt, memberThreads, offlineBatchPrompt } from './place-prompt.js';
+import { itemPrompt, memberTasks, memberThreads, offlineBatchPrompt } from './place-prompt.js';
 import {
   assembleSessionPrompt,
   cornerHasRepositoryWork,
@@ -820,6 +820,10 @@ export class PlaceSession {
         this.surface,
         this.resources.threadsForDelivery(batch.length ? batch : [item]),
         this.options,
+      ),
+      tasks: memberTasks(
+        this.surface,
+        this.resources.tasksForDelivery(batch.length ? batch : [item]),
       ),
       fresh: !this.windowDelivered,
     };

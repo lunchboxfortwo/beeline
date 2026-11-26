@@ -358,6 +358,7 @@ export const DAEMON_OPERATION_ROUTES: Record<keyof DaemonOperationMap, true> = {
   addWorkNote: true,
   attachToWorkItem: true,
   updateWorkItem: true,
+  listWorkItems: true,
   closeAgentAsk: true,
   openRoomPoll: true,
   listAgentGrants: true,

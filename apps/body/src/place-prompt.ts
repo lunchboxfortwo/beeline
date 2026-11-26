@@ -4,7 +4,7 @@ import { SCHEDULE_RAN_VERB, SCHEDULE_SCHEDULER_NAME } from '@beeline/api-contrac
 import { existsSync } from 'node:fs';
 import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
 import { attachmentMarkerLines } from './attachment-delivery.js';
-import { renderMemberThreads, type OpenCornerRow, type PromptSurface } from './prompt-assembly.js';
+import { renderMemberTasks, renderMemberThreads, type OpenCornerRow, type OpenTaskRow, type PromptSurface } from './prompt-assembly.js';
 
 /**
  * Whether this principal may start a turn. Agents are server-validated Room members
@@ -145,6 +145,14 @@ export function memberThreads(
   );
 }
 
+/** Open backlog tasks of this chat, rendered by `renderMemberTasks`. */
+export function memberTasks(
+  surface: PromptSurface,
+  tasks: readonly OpenTaskRow[] | undefined,
+): string {
+  return tasks?.length ? renderMemberTasks(surface, tasks) : '';
+}
+
 const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squire-approval-decided']);
 
 /**
@@ -162,6 +170,8 @@ function itemPromptContext(item: AgentCommand, options: {
   turnPrefix?: string;
   /** Open threads of this place, rendered by `renderMemberThreads`. */
   threads?: string;
+  /** Open backlog tasks of this place, rendered by `renderMemberTasks`. */
+  tasks?: string;
   /** The session has not received the recent window yet. */
   fresh?: boolean;
 }): string {
@@ -178,6 +188,7 @@ function itemPromptContext(item: AgentCommand, options: {
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),
+    ...(options.tasks ? [options.tasks] : []),
     source.systemEvent?.kind === 'joined' && !source.attachments?.length && !source.replyToMessageId && !source.systemEvent.subscriptionId
       ? `text: ${text}`
       : agentMessageText({ from: author, place, id: source.id,
@@ -214,6 +225,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
     ...(options.threads ? [options.threads] : []),
+    ...(options.tasks ? [options.tasks] : []),
     ...visible.map((item, index) => itemPromptContext(item, { names: options.names, fresh: index === 0 && options.fresh })),
     ...(asks ? [asks] : []),
   ].join('\n\n');

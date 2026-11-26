@@ -23,7 +23,10 @@ import { daemonCheckReviewerAuthors } from './corner-reads.js';
 import { daemonBriefAttachmentRooms } from './corner-reports.js';
 import { Input } from './values.js';
 import { modelText } from '../message-origin.js';
-import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-threads.js';
+import { normalizedThreadWorkItems } from '../work-item-threads.js';
+import { clearWorkAssignmentMarks, normalizeWorkTitle } from '../work-board.js';
+
+const CORNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 
 
@@ -76,12 +79,16 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
       Boolean(parent.repository_key);
     if (repositoryWork && !input.brief)
       throw new Error('a brief is required for repository threads');
+    const normalizedWorkItems = normalizedThreadWorkItems(input.workItems);
+    if (normalizedWorkItems.length > 1) {
+      throw new CommandRefusalError('a thread promotes at most one backlog task; pass one task id in workItems', 400);
+    }
     let cornerId: string = randomUUID();
+    let effectiveName: string = name;
     let approvedBy: ThreadApproverLink | undefined;
     let implementerHandle: string | undefined;
     const opener = await daemonIdentity(ctx, agentId);
     await ctx.database.transaction(async (db) => {
-      await lockCornerLifecycle(db, cornerId);
       // Opening a corner is idempotent for one confirmed tool call while that
       // corner remains active. Locking the parent closes the read/insert race:
       // a concurrent retry waits, sees the winner, and returns its id without
@@ -101,12 +108,14 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           brief_revision_hash: string | null;
           brief_change: string | null;
           brief_attachments: import('@beeline/api-contract/daemon').CornerBriefAttachment[] | null;
+          opening_work_items: string[] | null;
         }>(
           `SELECT child.id::text corner_id,child.name,${cornerObjectiveSql('child')} objective,${cornerOwnerSql('child.id')} owner_agent_id,child.created_by,
                   ${cornerRequestSql('child.id')} request_id,child.repository_key,child.repository_target_branch,
                   initial.revision brief_revision,
                   initial.revision_hash brief_revision_hash,initial.change brief_change,
-                  initial.attachments brief_attachments
+                  initial.attachments brief_attachments,
+                  ARRAY(SELECT jsonb_array_elements_text(COALESCE(opening.private_payload->'workItems','[]'::jsonb))) opening_work_items
            FROM rooms child
            JOIN corner_facts fact ON fact.corner_id=child.id
            LEFT JOIN LATERAL (${cornerOpeningSql('child.id')}) opening ON true
@@ -148,17 +157,17 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
             existing.brief_change === (input.brief.change ?? null) &&
             sameAttachments
           : existing.brief_revision === null;
-        // A retry names the same tasks the first open linked, or it is a different assignment.
-        const linked = (await db.query<{ id: string }>(
-          `SELECT work_item_id id FROM work_item_threads WHERE thread_id=$1`,
-          [existing.corner_id])).rows.map(row => row.id).sort().join('\n');
-        const sameWorkItems = linked === normalizedThreadWorkItems(input.workItems).join('\n');
+        // A retry names the same task the first open promoted, or it is a different assignment.
+        const recordedWorkItems = normalizedThreadWorkItems(existing.opening_work_items ?? undefined);
+        const sameWorkItems = recordedWorkItems.join('\n') === normalizedWorkItems.join('\n');
+        const promotedNameMatches =
+          sameWorkItems && normalizedWorkItems.length === 1 && existing.corner_id === normalizedWorkItems[0];
         if (
           !sameWorkItems ||
           existing.owner_agent_id !== implementerAgentId ||
           existing.created_by !== agentId ||
           existing.request_id !== input.requestId ||
-          existing.name !== name ||
+          (!promotedNameMatches && existing.name !== name) ||
           existing.objective !== objective ||
           existing.repository_key !== (input.repository ?? null) ||
           existing.repository_target_branch !== (input.targetBranch ?? 'main') ||
@@ -168,7 +177,7 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
             existing.owner_agent_id !== implementerAgentId && 'implementer',
             existing.created_by !== agentId && 'opener',
             existing.request_id !== input.requestId && 'request',
-            existing.name !== name && 'name',
+            !promotedNameMatches && existing.name !== name && 'name',
             existing.objective !== objective && 'objective',
             existing.repository_key !== (input.repository ?? null) && 'repository',
             existing.repository_target_branch !== (input.targetBranch ?? 'main') && 'target branch',
@@ -180,6 +189,7 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           );
         }
         cornerId = existing.corner_id;
+        effectiveName = existing.name;
         const current = await currentCornerBrief(db, cornerId);
         if (current?.approval) {
           approvedBy = {
@@ -194,6 +204,28 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           input.implementer;
         return;
       }
+      let promotedTask: { id: string; title: string | null; objective: string | null } | undefined;
+      if (normalizedWorkItems.length === 1) {
+        const taskId = normalizedWorkItems[0]!;
+        promotedTask = (
+          await db.query<{ id: string; title: string | null; objective: string | null }>(
+            `SELECT w.id,w.title,w.objective FROM work_items w
+             WHERE w.id=$1 AND w.room_id=$2 AND w.source_message_id IS NULL
+               AND NOT EXISTS(SELECT 1 FROM rooms thread WHERE thread.id::text=w.id)
+             FOR UPDATE OF w`,
+            [taskId, roomId],
+          )
+        ).rows[0];
+        if (!promotedTask) {
+          throw new CommandRefusalError(
+            `workItems must be task ids in the thread's parent chat: ${taskId}`,
+            400,
+          );
+        }
+        if (CORNER_UUID_RE.test(promotedTask.id)) cornerId = promotedTask.id.toLowerCase();
+        effectiveName = normalizeWorkTitle(promotedTask.title ?? undefined) ?? name;
+      }
+      await lockCornerLifecycle(db, cornerId);
       if (input.implementer !== undefined) {
         const implementer = (
           await db.query<{ id: string; kind: string }>(
@@ -224,12 +256,45 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           parent.workspace_id,
           roomId,
           agentId,
-          name,
+          effectiveName,
           input.repository ?? null,
           input.targetBranch ?? 'main',
         ],
       );
       await createCornerFacts(db, cornerId);
+      if (promotedTask) {
+        await db.query("SELECT set_config('beeline.work_actor',$1,true)", [agentId]);
+        if (promotedTask.id.toLowerCase() === cornerId) {
+          await db.query(
+            `UPDATE work_items SET room_id=$1::uuid,state=NULL,completed_at=NULL,
+               title=COALESCE(title,$2),objective=COALESCE(NULLIF($3,''),objective),
+               assignee_id=$4,updated_at=now()
+             WHERE id=$1::text`,
+            [cornerId, effectiveName, objective, implementerAgentId],
+          );
+        } else {
+          // Legacy non-UUID backlog row promoted in-place to the new thread UUID.
+          await db.query("SELECT set_config('beeline.work_migration','on',true)");
+          await db.query(
+            `INSERT INTO work_items(id,room_id,source_message_id,state,priority,title,objective,assignee_id,opened_by,completed_at,created_at,updated_at)
+             SELECT $2::text,$2::uuid,NULL,NULL,priority,COALESCE(title,$3),COALESCE(NULLIF($4,''),objective),$5,opened_by,NULL,created_at,now()
+             FROM work_items WHERE id=$1`,
+            [promotedTask.id, cornerId, effectiveName, objective, implementerAgentId],
+          );
+          await db.query(`UPDATE work_item_entries SET work_item_id=$2 WHERE work_item_id=$1`, [promotedTask.id, cornerId]);
+          await db.query(`UPDATE work_item_attachments SET work_item_id=$2 WHERE work_item_id=$1`, [promotedTask.id, cornerId]);
+          await db.query(`DELETE FROM work_items WHERE id=$1`, [promotedTask.id]);
+          await db.query("SELECT set_config('beeline.work_migration','',true)");
+        }
+        await db.query(
+          `INSERT INTO work_item_entries(work_item_id,author_id,kind,text) VALUES($1,$2,'event','moved this to In progress')`,
+          [cornerId, agentId],
+        );
+        await clearWorkAssignmentMarks(db, promotedTask.id, 'answered');
+        if (promotedTask.id.toLowerCase() !== cornerId) {
+          await clearWorkAssignmentMarks(db, cornerId, 'answered');
+        }
+      }
       if (input.hold === true) {
         await setCornerHold(db, { cornerId, sourceMessageId: input.sourceMessageId }, commissionedBy ?? agentId, agentId);
       }
@@ -289,9 +354,6 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           ],
         );
       }
-      // The chat tasks this thread builds move to In progress with the open.
-      if (input.workItems?.length) await linkThreadWorkItems(db, { threadId: cornerId, chatId: roomId,
-        workspaceId: parent.workspace_id, threadName: name, itemIds: input.workItems, actorId: agentId });
       const from = { agent: agentId, place: commandRoomId };
       const taskText=implementerAgentId===agentId
         ? parentCommand.message?.body ?? parentCommand.private_payload?.text ?? input.brief?.spec ?? objective
@@ -303,7 +365,8 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
         agentId: implementerAgentId,
         sourceMessageId: null,
         privatePayload: { objective, text: modelText(taskText),authorId:from.agent,fromRoomId:from.place,
-          kind:'message',route:{from,to:{agent:implementerAgentId,place:cornerId}},openKey:idempotencyKey },
+          kind:'message',route:{from,to:{agent:implementerAgentId,place:cornerId}},openKey:idempotencyKey,
+          ...(normalizedWorkItems.length ? { workItems: normalizedWorkItems } : {}) },
         reason: 'corner_objective',
         parent: parentCommand,
         retainDepth: true,
@@ -326,11 +389,11 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           subject: { kind: 'agent', id: agentId, name: opener.name },
           verb: systemMessage("daemon-service.opened-a-corner"),
           kind: destination.roomId === roomId ? 'corner-opened' : undefined,
-          object: { text: name, id: cornerId },
+          object: { text: effectiveName, id: cornerId },
           presentation: 'card',
           cardType: 'daemon-fact',
-          card: { type: 'corner-open', cornerId, name,
-            objective: destination.roomId === roomId ? name : objective,
+          card: { type: 'corner-open', cornerId, name: effectiveName,
+            objective: destination.roomId === roomId ? effectiveName : objective,
             ...(destination.sourceMessageId ? { sourceMessageId: destination.sourceMessageId } : {}) },
           afterMessageId: destination.sourceMessageId,
         });
@@ -341,12 +404,12 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
 
     });
     const warnings = [...textNotes, ...(input.brief ? validateCornerBrief(input.brief, repositoryWork) : [])];
-    const receiptParts = [`Opened thread ${name}`];
+    const receiptParts = [`Opened thread ${effectiveName}`];
     if (implementerHandle) receiptParts.push(`assigned @${implementerHandle.replace(/^@/, '')}`);
     if (approvedBy) receiptParts.push(`approved by ${approvedBy.name || approvedBy.identityId.slice(0, 8)}`);
     return {
       cornerId,
-      name,
+      name: effectiveName,
       ...(implementerHandle ? { implementer: implementerHandle } : {}),
       ...(approvedBy ? { approvedBy } : {}),
       receipt: receiptParts.join(' · '),

@@ -486,6 +486,8 @@ Run these checks before opening a thread.
 
 ## Output
 
+Before calling open_thread, check the chat's open backlog list (or read(facet:tasks)); if an existing backlog task matches the request, pass its UUID in workItems so the thread promotes that exact task in-place instead of minting a duplicate. Only file new backlog items with create_work_item when a human explicitly defers work or asks to split scope out — never create speculative tasks on your own. When parking an active thread back to Backlog through update_work, record a concise note explaining what remains.
+
 When dispatching work, pass the complete brief to open_thread; approval is optional for opening; no separate outline post or human approval is required. Add applicable warnings to the brief:
 
 \`Triage warning — warranted: <evidence-backed reason>\`

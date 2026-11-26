@@ -419,6 +419,8 @@ async function executeResourceTool(
           return execute('list_chats', input);
         case 'threads':
           return execute('list_threads', input);
+        case 'tasks':
+          return execute('list_tasks', input);
         case 'members':
           return execute('list_chat_members', input);
         case 'messages':
