@@ -327,7 +327,11 @@ describe.skipIf(!url)('pending work reaches the helper on PostgreSQL', () => {
     const next = await ask('After cancellation');
     held.resolve({...answer(),text:'',stopReason:'cancelled'});
     await answered(first.id,next.id);
-    expect(delivered().map(item => item.id)).toContain(next.id);
+    // The unanswered first request may share the next prompt with the new input.
+    const deliveredIds = harness.deliver.mock.calls.flatMap(
+      ([, batch]: [AgentCommand, readonly AgentCommand[]]) => batch.map(item => item.id),
+    );
+    expect(deliveredIds).toContain(next.id);
     expect((await readAgentCommands(fixture.database,agent)).commands).toEqual([]);
     expect(harness.deliver.mock.calls[0]![0].id).toBe(first.id);
   });
