@@ -281,9 +281,9 @@ function SectionHead({
   return (
     <ListItem
       minHeight={44}
+      marginTop="3"
       paddingHorizontal="4"
-      paddingTop="3"
-      paddingBottom="0"
+      paddingVertical="0"
       gap="2"
       backgroundColor="transparent"
       onPress={onToggle}
