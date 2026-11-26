@@ -3,7 +3,7 @@ import type { ToolDefinition } from './minimal-tool-surface.js';
 
 /** Creating a separate task remains distinct from updating the thread's task. */
 export const WORK_BOARD_ACTION_TOOLS:ToolDefinition[]=[{
-  name:'create_work_item',description:'Create a distinct task in a chat or thread. Returns its id for later update_work calls.',
+  name:'create_work_item',description:'Create a distinct task in a chat or thread. Returns its UUID id for later update_work or open_thread workItems calls. assigneeId accepts an identity id or @handle.',
   inputSchema:{type:'object',required:['roomId','title'],additionalProperties:false,properties:{
     roomId:{type:'string'},title:{type:'string'},objective:{type:'string'},state:{enum:WORK_STATES},
     assigneeId:{anyOf:[{type:'string'},{type:'null'}]},

@@ -23,6 +23,7 @@ export type DaemonOperationMap = {
   /** The asking agent closes its own open ask on every person's Needs you list, keeping the reason. */
   closeAgentAsk: Operation<RoomInput & TurnOutputAuthority & { readonly messageId: string; readonly reason: 'answered' | 'withdrawn' | 'superseded' }, { readonly closed: number; readonly reason?: 'answered' | 'withdrawn' | 'superseded'; readonly receipt?: string }>;
   updateWorkItem: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').UpdateWorkItemInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
+  listWorkItems: Operation<{ readonly roomId?: string; readonly state?: import('./work-board.js').WorkState }, { readonly tasks: readonly import('./work-board.js').WorkItemView[] }>;
   askOwnerQuestion: Operation<RoomInput & TurnOutputAuthority & import('./work-board.js').AskOwnerQuestionInput, WriteResult>;
   postVaultSaveCard: Operation<RoomInput & TurnOutputAuthority & import('./vault-save.js').VaultSaveRequest, WriteResult>;
   getInstitutionalContext: Operation<RoomInput & TurnOutputAuthority, InstitutionalContextSnapshot>;

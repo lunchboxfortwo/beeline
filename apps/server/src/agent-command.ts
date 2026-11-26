@@ -240,6 +240,8 @@ export type PrivateCommandPayload = PayloadVoice & {
   replyAddress?: MessageRoute['from'];
   /** Stable tool-call key on the corner's opening order. */
   openKey?: string;
+  /** Backlog task IDs promoted by this thread opening, for idempotent retry matching. */
+  workItems?: readonly string[];
   ask?: string;
   objective?: string;
   automatic?: boolean;

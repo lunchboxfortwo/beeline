@@ -58,7 +58,7 @@ import { messageId } from './values.js';
        SELECT $1,message.id,room.workspace_id,now(),'manual',CASE WHEN $4::boolean THEN now() END
        FROM messages message
        JOIN rooms room ON room.id=message.room_id AND room.workspace_id=$3
-       JOIN memberships member ON member.room_id=room.id AND member.identity_id=$1
+       JOIN room_access member ON member.room_id=room.id AND member.identity_id=$1
          AND member.removed_at IS NULL
        WHERE message.id=$2
        ON CONFLICT(identity_id,message_id)

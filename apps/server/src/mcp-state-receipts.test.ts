@@ -432,7 +432,7 @@ describe('mcp-state-receipts server provenance and post-condition receipts', () 
         },
         AGENT,
       );
-      expect(workCreated.receipt).toContain('Created task "Verify receipts"');
+      expect(workCreated.receipt).toContain('Created task "Verify-receipts"');
       expect(workCreated.receipt).toContain('backlog');
 
       const workUpdated = await daemon.execute(
@@ -446,7 +446,7 @@ describe('mcp-state-receipts server provenance and post-condition receipts', () 
         },
         AGENT,
       );
-      expect(workUpdated.receipt).toContain('Updated task "Verify receipts"');
+      expect(workUpdated.receipt).toContain('Updated task "Verify-receipts"');
       expect(workUpdated.receipt).toContain('in-progress');
 
       // Blocked message + close_ask.

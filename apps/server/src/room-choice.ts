@@ -52,7 +52,7 @@ export const CORNER_LIFECYCLE_CARD_TYPE = 'corner-workflow-handoff';
  * agent, so this line stays visible to humans without waking anyone new.
  */
 export const HIDDEN_WAKE_CARD_TYPES = [
-  'grant-decision', 'connector-offer-decision', 'squire-approval-decision', CORNER_LIFECYCLE_CARD_TYPE,
+  'grant-decision', 'connector-offer-decision', 'squire-approval-decision', CORNER_LIFECYCLE_CARD_TYPE, 'work-assignment',
 ] as const;
 
 export function hiddenWakeCardSql(alias?: string): string {

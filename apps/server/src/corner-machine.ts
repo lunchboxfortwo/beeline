@@ -177,8 +177,10 @@ export function transitionCorner(
     return { state: current, wakes, notifications, suppression: 'stale head' };
   if (event.kind === 'open' && event.command)
     wake('open', `open:${event.command.privatePayload?.openKey ?? ''}`);
+  if (event.kind === 'backlog' && !event.backlog && event.command)
+    wake('open', `resume:${event.command.privatePayload?.openKey ?? ''}`);
   if (event.kind === 'brief-revised') wake('revision', `revision:${event.revision}`);
-  if (event.kind === 'merge-refused')
+  if (!backlog && event.kind === 'merge-refused')
     wake(
       'merge-refused',
       `refused:${event.headSha}:${event.reason}:${event.confirmedUnmerged ? f.checkSourceId : ''}`,
@@ -193,43 +195,45 @@ export function transitionCorner(
     ((sameTarget && current.reviewDue) || event.kind === 'checks' || event.kind === 'brief-revised')
   )
     base.reviewDue = true;
-  if (
-    review?.findings &&
-    !review.delivered &&
-    f.implementerId &&
-    headSha &&
-    !f.approved &&
-    !f.turnRunning &&
-    !f.blocker
-  )
-    wake('review-findings', `review-failed:${headSha}:${review.id}`);
-  if (
-    checks === 'failing' &&
-    !checksUnderway &&
-    f.checkSourceId &&
-    (!f.turnRunning || event.kind === 'checks')
-  )
-    wake('checks-failed', redKey);
-  // Only a live GitHub read emits this event; a stored verdict never wakes.
-  if (event.kind === 'merge-conflict' && f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
-  if (headSha) {
-    if (f.approved || f.reviewerRequired === false) {
-      if (
-        gateChecks === 'passing' &&
-        !f.mergeHeld &&
-        (event.kind === 'approval' || event.kind === 'checks' || event.kind === 'hold-released')
-      )
-        wake('land');
-    } else if (
-      reviewReady &&
-      !(f.implementerActive ?? f.turnRunning) &&
-      !(f.reviewRequestActive ?? f.reviewerActive) &&
-      !wakes.some((effect) => effect.kind === 'review-findings' || effect.kind === 'revision') &&
-      (base.reviewDue || !f.reviewRequests)
-    ) {
-      if (f.reviewerConfigured)
-        wake('review');
-      else if (!f.blocker) wake('review-gap');
+  if (!backlog) {
+    if (
+      review?.findings &&
+      !review.delivered &&
+      f.implementerId &&
+      headSha &&
+      !f.approved &&
+      !f.turnRunning &&
+      !f.blocker
+    )
+      wake('review-findings', `review-failed:${headSha}:${review.id}`);
+    if (
+      checks === 'failing' &&
+      !checksUnderway &&
+      f.checkSourceId &&
+      (!f.turnRunning || event.kind === 'checks')
+    )
+      wake('checks-failed', redKey);
+    // Only a live GitHub read emits this event; a stored verdict never wakes.
+    if (event.kind === 'merge-conflict' && f.lifecycle?.pr?.mergeability === 'dirty') wake('merge-conflict');
+    if (headSha) {
+      if (f.approved || f.reviewerRequired === false) {
+        if (
+          gateChecks === 'passing' &&
+          !f.mergeHeld &&
+          (event.kind === 'approval' || event.kind === 'checks' || event.kind === 'hold-released')
+        )
+          wake('land');
+      } else if (
+        reviewReady &&
+        !(f.implementerActive ?? f.turnRunning) &&
+        !(f.reviewRequestActive ?? f.reviewerActive) &&
+        !wakes.some((effect) => effect.kind === 'review-findings' || effect.kind === 'revision') &&
+        (base.reviewDue || !f.reviewRequests)
+      ) {
+        if (f.reviewerConfigured)
+          wake('review');
+        else if (!f.blocker) wake('review-gap');
+      }
     }
   }
   const state: CornerMachine = { ...base, ...threadState({

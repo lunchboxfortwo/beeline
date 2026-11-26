@@ -9,6 +9,7 @@ function requestedSql(message = 'm'): string {
   return `${message}.deleted_at IS NULL AND ${message}.author_id<>recipient.id AND (
     (${askingMessageSql(message)} AND ${message}.card->>'reportToId'=recipient.id)
     OR (recipient.kind='human' AND ${questionRecipientSql(message, 'recipient.id')})
+    OR (recipient.kind='human' AND ${message}.card_type='work-assignment' AND ${message}.card->>'assigneeId'=recipient.id)
   )`;
 }
 
@@ -61,6 +62,8 @@ BEGIN
       SELECT jsonb_array_elements_text(COALESCE(m.card->'mentionIds','[]'::jsonb)
         || jsonb_build_array(m.card->'requester'->>'pubkey'))
         WHERE EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question')
+      UNION
+      SELECT m.card->>'assigneeId' WHERE m.card_type='work-assignment'
     ) addressed ON true
     JOIN identities recipient ON recipient.id=addressed.identity_id
     WHERE m.id=asking_id
@@ -90,6 +93,7 @@ BEGIN
   -- message, an agent command or a question row can raise or clear one.
   -- Question rows refresh the mark from their own trigger.
   IF TG_OP='INSERT' AND NEW.presentation IS DISTINCT FROM 'message' AND NEW.card_type IS DISTINCT FROM 'agent-command'
+    AND NEW.card_type IS DISTINCT FROM 'work-assignment'
     AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=NEW.id)
     AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=NEW.id AND choice.mode='question') THEN
     RETURN NEW;

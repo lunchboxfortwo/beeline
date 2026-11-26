@@ -119,11 +119,19 @@ describe('one thread state: the corner machine', () => {
     expect(transitionCorner({ state: 'idle', backlog: true }, { facts, event: { kind: 'reconcile' } }).notifications).toEqual([]);
     expect(transitionCorner({ state: 'idle' }, { facts, event: { kind: 'reconcile' } }).notifications)
       .toEqual([{ kind: 'idle', key: 'idle:1' }]);
-    // Work still runs a Backlog thread; leaving Backlog restores plain idle.
+    // Work still runs a Backlog thread; leaving Backlog resumes the assigned implementer.
     expect(transitionCorner({ state: 'idle', backlog: true }, { facts: { ...facts, turnRunning: true }, event: { kind: 'reconcile' } }).state)
       .toMatchObject({ state: 'working', backlog: true });
     await updateWorkItem(db, { roomId: thread, state: 'in-progress' }, person);
+    expect(await readers()).toMatchObject({ list: { state: 'working', reason: undefined }, board: { state: 'in-progress', idle: false } });
+    expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND state='pending'`, [thread, agent])).rowCount).toBe(1);
+    // An unassigned parked thread leaves Backlog to plain idle without queueing work.
+    await updateWorkItem(db, { roomId: thread, state: 'backlog' }, person);
+    await db.query('UPDATE corner_facts SET implementer_agent_id=NULL WHERE corner_id=$1', [thread]);
+    await updateWorkItem(db, { roomId: thread, assigneeId: null }, person);
+    await updateWorkItem(db, { roomId: thread, state: 'in-progress' }, person);
     expect(await readers()).toMatchObject({ list: { state: 'idle', reason: undefined }, board: { state: 'in-progress', idle: true } });
+    expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND state='pending'`, [thread])).rowCount).toBe(0);
   });
 
   it('Done on a thread is exactly its existing close, through each caller’s close', async () => {

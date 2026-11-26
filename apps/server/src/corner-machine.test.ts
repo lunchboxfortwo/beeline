@@ -221,4 +221,18 @@ describe('corner transition table', () => {
     expect(ended.wakes.map(wake => wake.kind)).toEqual(['review']);
   });
 
+  it('suppresses automatic checks-failed, review, review-findings, review-gap, land, merge-refused and merge-conflict wakes while in backlog', () => {
+    const parked: CornerMachine = { state: 'idle', reason: 'backlog', backlog: true, headSha: head, pullRequest: 7 };
+    expect(run({ ...green, lifecycle: { ...green.lifecycle!, checks: 'failing' }, checkSourceId: 'red-1' },
+      { kind: 'checks', result: 'failing', sourceMessageId: 'red-1' }, parked).wakes).toEqual([]);
+    expect(run(green, { kind: 'checks', result: 'passing', sourceMessageId: 'green-1' }, parked).wakes).toEqual([]);
+    expect(run({ ...green, reviewerConfigured: false }, observe, parked).wakes).toEqual([]);
+    expect(run({ ...green, implementerId: 'worker', reviewEnded: { id: 'rev-1', findings: 'FAIL: fix tests', delivered: false } },
+      observe, parked).wakes).toEqual([]);
+    expect(run({ ...green, approved: true }, { kind: 'approval', headSha: head }, parked).wakes).toEqual([]);
+    expect(run({ ...green, lifecycle: { ...green.lifecycle!, pr: { ...pr, mergeability: 'dirty' } } },
+      { kind: 'merge-conflict', sourceMessageId: 'conflict-1' }, parked).wakes).toEqual([]);
+    expect(run(green, { kind: 'merge-refused', headSha: head, reason: 'removed from queue' }, parked).wakes).toEqual([]);
+  });
+
 });

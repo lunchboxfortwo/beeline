@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 // Task, transcript, resume, review and lifecycle instructions remain per-turn.
-const CACHED = new Set(['turn.session', 'turn.members', 'turn.memory', 'turn.corners',
+const CACHED = new Set(['turn.session', 'turn.members', 'turn.memory', 'turn.corners', 'turn.tasks',
   'turn.objective', 'turn.rename', 'turn.brief', 'turn.checkout', 'turn.capabilities']);
 export interface DeliveryEntry { readonly id: string; readonly text: string }
 const hash = (text: string): string => createHash('sha256').update(text).digest('hex');

@@ -102,6 +102,13 @@ export type WorkItemView = {
   readonly askIds?: readonly string[];
   readonly recommendedOptionId?: string;
 };
+export type OpenBacklogTask = {
+  readonly id: string;
+  readonly title: string;
+  readonly objective?: string;
+  readonly assigneeHandle?: string;
+  readonly assigneeName?: string;
+};
 export type WorkBoardView = {
   readonly workspaceId: string;
   readonly workspaceName: string;

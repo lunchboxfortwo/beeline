@@ -1,5 +1,5 @@
 import { closeInactiveCorners, nextCornerCloseDelay } from './corner-auto-close.js';
-import { foldThreadWorkStates } from './work-board.js';
+import { foldThreadWorkStates, unifyWorkItemsAndThreads } from './work-board.js';
 import { workflowBackfillOnce } from './migrations/workflow-cleanup.js';
 import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { githubProviderKey } from './providers/index.js';
@@ -239,6 +239,7 @@ async function main() {
       )
     : undefined;
   await workflowBackfillOnce(jobsDatabase, 'thread-work-state-v1', foldThreadWorkStates);
+  await workflowBackfillOnce(jobsDatabase, 'unify-work-items-v1', unifyWorkItemsAndThreads);
   // Generated procedures are anchored to real code, so the curator's staleness
   // pass needs an installation token and the repository's default branch. With
   // no GitHub App configured there is no anchor to check and no contradiction to
