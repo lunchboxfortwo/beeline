@@ -467,21 +467,14 @@ export function useChatTranscriptRenderer([
           cornerId={isCorner ? decodedId : undefined}
         />
       );
-      const withMarkers = (body: React.ReactNode) => item.cornerMarkers?.length ? (
-        <YStack>
-          {body}
-          {renderPills(item.cornerMarkers)}
-        </YStack>
-      ) : body;
-
       if (item.corner || isHiddenSystemLine(item)) return null;
       const run = item.pillRun ?? (isPillMessage(item) ? [item] : null);
-      if (run) return withMarkers(renderPills(run));
+      if (run) return renderPills(run);
 
       if (hasCardBody(item) && (!item.choice || item.choice.mode === 'poll' || item.choice.runId)) {
-        return withMarkers(<TranscriptSystemBody message={item} time={ledgerStamp(item.timestamp)}
+        return <TranscriptSystemBody message={item} time={ledgerStamp(item.timestamp)}
           renderBody={renderSystemBody} onOpenIdentity={handleOpenSystemIdentity} onOpenUrl={handleOpenGitHubEvent}
-          onOpenBrief={openCurrentBrief} onOpenCorner={openCorner} cornerId={isCorner ? decodedId : undefined} />);
+          onOpenBrief={openCurrentBrief} onOpenCorner={openCorner} cornerId={isCorner ? decodedId : undefined} />;
       }
 
       // Member orders and reports keep their own byline.
@@ -557,7 +550,7 @@ export function useChatTranscriptRenderer([
         />
       );
       ownsReplyGesture = item.presentation !== 'card' || item.choice?.mode === 'question';
-      return withMarkers(ledgerMessage);
+      return ledgerMessage;
       };
       const content = renderContent();
       if (!content || ownsReplyGesture || rowDesktopLayout || isReadOnlyDirectMessage ||

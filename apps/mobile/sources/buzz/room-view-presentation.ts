@@ -16,6 +16,7 @@ import {
 import type { AgentActivityItem } from '@/sync/transport';
 import type { DisplayableAgent } from '@/buzz/agent-display';
 import type { CornerState } from '@beeline/api-contract/phone';
+import type { TranscriptReadBoundary } from './system-lines';
 
 export type AgentTurnStatus = 'working' | 'complete' | 'failed';
 export type CornerProcessState = 'live' | 'suspended' | 'waiting-for-slot';
@@ -272,15 +273,15 @@ export type ChatDisplayMessage = {
   /** Repository activity is a typed surface, never a transcript speaker. */
   foldedIds?: string[];
   /** Original server ordering for each durable message in a folded row. */
-  foldedReadBoundaries?: { id: string; orderAtMs: number }[];
+  foldedReadBoundaries?: TranscriptReadBoundary[];
   notificationLifecycleRun?: import('./pr-lifecycle').NotificationLifecycleRun;
   /** A run of consecutive pills folded into this row (`buzz/transcript-pills.ts`). */
   pillRun?: ChatDisplayMessage[];
   githubEvent?: NonNullable<RoomViewMessage['githubEvent']>;
   /** Daemon lifecycle facts are server-projected cards, never prose rows. */
   daemonFact?: NonNullable<RoomViewMessage['daemonFact']>;
-  /** Corners opened from this message, anchored beneath it (`buzz/corner-markers.ts`). */
-  cornerMarkers?: ChatDisplayMessage[];
+  /** This source stays on its own row above the corner markers it anchors. */
+  hasAnchoredCornerMarkers?: true;
   /** An agent asking its owner for reach; rendered as the grant card. */
   grantRequest?: NonNullable<RoomViewMessage['grantRequest']>;
   /** Trusty Squire's own approval page, relayed into its owner DM. */

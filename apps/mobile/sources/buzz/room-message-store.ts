@@ -706,10 +706,6 @@ export function foldTranscriptRows(
     for (const id of messageBoundaryIds(row)) hostIds.set(id, row.id);
     hostIds.set(row.id, row.id);
     if (row.relayId) hostIds.set(row.relayId, row.id);
-    for (const marker of row.cornerMarkers ?? []) {
-      hostIds.set(marker.id, row.id);
-      if (marker.relayId) hostIds.set(marker.relayId, row.id);
-    }
   }
   // A fold that merges rows without recording their ids (a settled activity
   // run) moves them into an earlier row. Each such id belongs to the nearest
@@ -719,10 +715,8 @@ export function foldTranscriptRows(
     if (isHiddenSystemLine(message)) continue;
     const host = hostIds.get(message.id);
     if (host) previousHost = host;
-    else if (previousHost) {
-      hostIds.set(message.id, previousHost);
-      if (message.relayId) hostIds.set(message.relayId, previousHost);
-    }
+    else if (previousHost) hostIds.set(message.id, previousHost);
+    if (previousHost && message.relayId) hostIds.set(message.relayId, previousHost);
   }
   return { rows, hostIds };
 }
