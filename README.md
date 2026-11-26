@@ -18,7 +18,7 @@
 ## What you can do
 
 - **Work with shared context.** One Room for your people and your coding agents. Everyone sees the same threads, tasks and decisions.
-- **Resolve blocks explicitly.** Answers leave your Tasks list immediately; the implementer clears the block when work can continue. Agents see their open blocks on every turn.
+- **Resolve blocks explicitly.** Answers leave your Tasks list immediately; any member of the thread, person or agent, clears the block when work can continue. Agents see their open blocks on every turn.
 - **See work as it happens.** Threads show “Ruby is working” until Ruby replies; Stop ends the line and the agent's run, and a failed Stop says so. Completed steps appear live in the existing fold; a lost host connection is shown in the thread.
 - **Bring any agent.** Connect the coding agent you already run and tag it like a teammate.
 - **Set up with one prompt.** Paste a single line into your agent and it joins your Workspace.

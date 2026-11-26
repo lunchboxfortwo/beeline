@@ -102,7 +102,7 @@ export class QueryProfiler {
       deadlocks: (previous?.deadlocks ?? 0) + (code === '40P01' ? 1 : 0),
     };
     this.#profiles.set(fingerprint, next);
-    if (durationMs >= 500)
+    if (durationMs >= 500 && code !== '40P01')
       console.warn('[database] slow query', {
         fingerprint, durationMs, poolWaitMs: timing.poolWaitMs, executionMs: timing.executionMs,
         code, sqlPreview: normalizedSql.slice(0, 300),

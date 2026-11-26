@@ -23,7 +23,6 @@ import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT,ensureSystemIdentity,systemLine } from './system-line.js';
 import { abandonCornerWorkflowRuns } from './workflow-runs.js';
 import { SYSTEM_AUTHOR_ID,systemText } from './message-origin.js';
-import { settleThreadWorkItems } from './work-item-threads.js';
 
 
 
@@ -484,8 +483,7 @@ async function writeCornerAdvance(
     const archived = plan.state.state === 'archived' && !corner.archived &&
       (event.kind === 'closed' || event.kind === 'merged' || corner.lifecycle.outcome === 'landed' || corner.lifecycle.pr?.mergedAt)
       ? await archiveCorner(db, cornerId, event.kind === 'closed' ? event.preserveTurn : undefined) : false;
-    if (archived) await settleThreadWorkItems(db, cornerId, event.kind === 'merged' ||
-      corner.lifecycle.outcome === 'landed' || Boolean(corner.lifecycle.pr?.mergedAt));
+    void archived;
     if (event.kind === 'closed') await db.query(
       `UPDATE corner_github_cache SET lifecycle=lifecycle||'{"lifecycle":"done","checks":"unknown"}'::jsonb WHERE corner_id=$1`, [cornerId]);
     let wakeResult: RevisionWake | undefined;
@@ -515,7 +513,7 @@ async function writeCornerAdvance(
         }
         case 'open': {
           const command =
-            event.kind === 'open' && event.command
+            (event.kind === 'open' || (event.kind === 'backlog' && !event.backlog)) && event.command
               ? await createAgentCommand(db, event.command)
               : undefined;
           result = {

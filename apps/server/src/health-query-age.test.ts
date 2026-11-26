@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PostgresDatabase } from './database.js';
+import { stubClient } from './test-support-database.test-support.js';
 import type { Pool } from 'pg';
 
 /**
@@ -11,15 +12,11 @@ import type { Pool } from 'pg';
  * that cannot fail is worse than none, so these tests assert it CAN.
  */
 function poolStub(gate: Promise<unknown>): Pool {
-  const client = {
-    query: async () => {
-      await gate;
-      return { rows: [], rowCount: 0 };
-    },
-    release: () => undefined,
-    once: () => undefined,
-    removeListener: () => undefined,
-  };
+  const client = stubClient();
+  client.query.mockImplementation(async () => {
+    await gate;
+    return { rows: [], rowCount: 0 };
+  });
   return {
     connect: async () => client,
     on: () => undefined,

@@ -6,6 +6,7 @@ import type { activeCornerHolds } from './corner-holds.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
+import { ROUTER_AUTHORITY_LOCK_SQL } from './database-advisory-locks.js';
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
 import { claimCornerLand } from './corner-lifecycle.js';
@@ -23,7 +24,7 @@ export async function lockCornerLifecycle(db: SqlDatabase, cornerId: string): Pr
 /** Archival writers take lifecycle first, then authority before command or
  * Room/member locks. Acquiring only at the archival trigger is too late. */
 export async function lockCornerArchivalAuthority(database: SqlDatabase): Promise<void> {
-  await database.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [ROUTER_AUTHORITY_LOCK]);
+  await database.query(ROUTER_AUTHORITY_LOCK_SQL, [ROUTER_AUTHORITY_LOCK]);
 }
 
 
@@ -207,9 +208,11 @@ export async function cornerMergeGate(
   const rows = await db.query<{
     configured_reviewer_id: string | null;
     approved: boolean;
+    backlog: boolean;
     holds: CornerMergeGate['holds'];
   }>(
     `SELECT ${cornerReviewerSql()} configured_reviewer_id,
+              COALESCE(fact.machine->>'backlog','false')='true' backlog,
               EXISTS (
                 SELECT 1 FROM corner_merge_approvals approval
                 WHERE approval.corner_id=fact.corner_id AND approval.pull_request_number=$2
@@ -238,7 +241,7 @@ export async function cornerMergeGate(
     approved: corner.approved,
     held,
     holds: corner.holds,
-    open: (!corner.configured_reviewer_id || corner.approved) && !held,
+    open: (!corner.configured_reviewer_id || corner.approved) && !held && !corner.backlog,
   };
 }
 
@@ -267,6 +270,7 @@ export async function confirmCornerMergeAuthority(
     const pr = corner?.lifecycle.pr;
     if (!corner) return blocked('the corner no longer exists');
     if (corner.archived) return blocked('the corner is archived');
+    if (corner.machine?.backlog) return blocked('the thread is in backlog');
     if (!pr?.number) return blocked('the corner has no pull request');
     const gate = await cornerMergeGate(db, cornerId, { number: pr.number, headSha });
     if (!gate.open)

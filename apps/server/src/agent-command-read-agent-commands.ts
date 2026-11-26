@@ -133,11 +133,15 @@ export async function readAgentCommands(
   const resets = await readAgentPlaceResets(db,agentId,roomId);
   const rows = await readAgentQueueRows(db,agentId,{roomId});
   // Loaded here: a static import closes a module cycle through the migrations.
-  const { daemonCorners } = await import('./daemon/corner-reads.js');
-  const threads = new Map(await Promise.all(
-    [...new Set(rows.rows.map(item => item.parent_room_id ?? item.room_id))]
-      .map(async placeId => [placeId, await daemonCorners({ database: db }, placeId, agentId, true)] as const),
-  ));
+  const [{ daemonCorners }, { readOpenBacklogTasks }] = await Promise.all([
+    import('./daemon/corner-reads.js'),
+    import('./work-board.js'),
+  ]);
+  const placeIds = [...new Set(rows.rows.map(item => item.parent_room_id ?? item.room_id))];
+  const [threads, tasks] = await Promise.all([
+    Promise.all(placeIds.map(async placeId => [placeId, await daemonCorners({ database: db }, placeId, agentId, true)] as const)).then(entries => new Map(entries)),
+    Promise.all(placeIds.map(async placeId => [placeId, await readOpenBacklogTasks(db, placeId, agentId, 15)] as const)).then(entries => new Map(entries)),
+  ]);
   return {
     commandProtocol: 2,
     ...(resets.length ? { resets } : {}),
@@ -164,6 +168,7 @@ export async function readAgentCommands(
           ...(item.fast_mode != null ? { fastMode: item.fast_mode } : {}),
         } } : {}),
         threads: threads.get(item.parent_room_id ?? item.room_id),
+        ...(tasks.get(item.parent_room_id ?? item.room_id)?.length ? { tasks: tasks.get(item.parent_room_id ?? item.room_id) } : {}),
         id: item.id, roomId: item.room_id, returnRoomId: item.return_room_id ?? item.room_id,
         ...(item.room_name ? { roomName: item.room_name } : {}),
         ...(item.return_room_name ? { returnRoomName: item.return_room_name } : {}),

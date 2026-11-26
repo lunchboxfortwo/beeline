@@ -9,6 +9,7 @@ import { PushDeliveryLoop } from './background.js';
 import { backfillPushOutbox } from './push-outbox.js';
 import { messageSearchDocumentSql } from './message-search-document-sql.js';
 import { PgliteDatabase } from './test-support.js';
+import { updateWorkItem } from './work-board.js';
 import * as sentry from './sentry.js';
 
 const person = 'a'.repeat(64), author = 'b'.repeat(64);
@@ -215,4 +216,27 @@ it('does not send a claim that expires while waiting for provider capacity', asy
       .toEqual([{status:'failed',error:'Push expired before provider send'}]);
     expect((await query(`SELECT * FROM push_outbox`)).rows).toHaveLength(0);
   } finally { vi.restoreAllMocks(); await db.close(); }
+});
+
+it('enqueues and delivers one push notification when a backlog task is assigned to another human', async () => {
+  const db = new PgliteDatabase();
+  try {
+    await setup(db);
+    await db.query(`INSERT INTO push_devices(identity_id,token,platform,environment,registered_at) VALUES($1,'author-device','android','physical',now()-interval '1 minute')`, [author]);
+    const taskId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    await updateWorkItem(db, { roomId: room, id: taskId, title: 'squire 5618 fix', state: 'backlog' }, author);
+    await updateWorkItem(db, { roomId: room, id: taskId, assigneeId: person }, author);
+    const queued = (await db.query<{ device_token: string }>(`SELECT device_token FROM push_outbox`)).rows;
+    expect(queued).toEqual([{ device_token: 'proof-device' }]);
+    const send = vi.fn().mockResolvedValue(undefined);
+    expect(await new PushDeliveryLoop(db, { send }).runOnce()).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]).toEqual([
+      'proof-device',
+      expect.objectContaining({
+        text: 'Peer assigned you backlog item squire-5618-fix',
+        recipientIdentityId: person,
+      }),
+    ]);
+  } finally { await db.close(); }
 });

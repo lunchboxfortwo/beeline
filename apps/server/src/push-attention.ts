@@ -9,6 +9,7 @@ export function pushDirectAttentionSql(): string {
     OR (m.card_type='away-warning' AND m.card->>'ownerId'=recipient.id)
     OR (m.card_type='machine-offline' AND m.card->>'status'='open'
       AND m.card->>'ownerId'=recipient.id)
+    OR (m.card_type='work-assignment' AND m.card->>'assigneeId'=recipient.id)
     OR ${addressedToPersonSql('m', 'recipient.id', 'recipient.handle', 'recipient.kind', false)}
   )`;
 }

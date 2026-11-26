@@ -3,7 +3,7 @@
     {
       "id": "phone.write-door",
       "module": "Phone socket",
-      "invariant": "Mobile writes use the existing live socket; HTTP shares only reads and documented non-phone tool operations.",
+      "invariant": "Mobile writes use the existing live socket. HTTP shares reads, documented non-phone tool operations, and running-update receipts from shipped builds.",
       "pattern": "\\b(?:phone\\.(?:execute|markRead|markUnread|stopScheduledWorkCommand|uploadMedia)|options\\.voice\\.(?:join|leave|idle|resume|nativeStop|profiles\\.(?:save|preview))|dispatchPhoneOperation|requestCommand)\\s*\\(|\\bt\\s*:\\s*[\\'\"]req[\\'\"]",
       "scope": ["apps/mobile/sources", "apps/server/src"],
       "owners": [
@@ -25,7 +25,7 @@
       "ownerSites": 14,
       "strict": true,
       "total": 0,
-      "fix": "Send phone operations through LiveConnection.request. Keep HTTP limited to its documented non-phone tool commands; do not add another sender. Rooms MCP retains its separate authenticated tool boundary."
+      "fix": "Send phone operations through LiveConnection.request. Keep HTTP writes limited to documented non-phone tool commands and legacy running-update receipts. Rooms MCP retains its separate authenticated tool boundary."
     },
     {
       "id": "work.command-creation",
@@ -3557,12 +3557,25 @@
       },
       "work_item_threads": {
         "module": "Rooms and messages",
-        "reason": "Which task an agent opened a thread to build is its explicit choice at open time; nothing in the task or thread text records it.",
+        "reason": "Retired link table folded by unifyWorkItemsAndThreads; retained through rolling release overlap.",
+        "drop": "Next release after unify-work-items-v1 drains old servers.",
         "columns": {
-          "work_item_id": "The chat task the thread was opened to build.",
-          "thread_id": "The thread opened to build it.",
-          "landed": "Whether that thread merged, so a task with several threads is Done once the last closes and any landed.",
-          "created_at": "When the link was made at thread open."
+          "work_item_id": {
+            "reason": "Retired link key folded by unifyWorkItemsAndThreads; retained for migration and rollback overlap.",
+            "drop": "Next release after unify-work-items-v1 drains old servers."
+          },
+          "thread_id": {
+            "reason": "Retired thread foreign key folded by unifyWorkItemsAndThreads; retained for migration and rollback overlap.",
+            "drop": "Next release after unify-work-items-v1 drains old servers."
+          },
+          "landed": {
+            "reason": "Retired landing flag read by unifyWorkItemsAndThreads; retained for migration and rollback overlap.",
+            "drop": "Next release after unify-work-items-v1 drains old servers."
+          },
+          "created_at": {
+            "reason": "Retired link timestamp read by unifyWorkItemsAndThreads; retained for migration and rollback overlap.",
+            "drop": "Next release after unify-work-items-v1 drains old servers."
+          }
         }
       },
       "work_questions": {
@@ -3833,7 +3846,8 @@
         "brief": "Optional report context, at most 280 Unicode characters; persisted without truncation for Needs you reads.",
         "reportToId": "the person a human-directed worker report addresses; written with the report, it scopes the derived wait",
         "reportStatus": "The explicit report operation records its outcome independently of presentation text.",
-        "owner": "the person who decides a grant-request card; written with the card, it keeps asks with different deciders on separate cards"
+        "owner": "the person who decides a grant-request card; written with the card, it keeps asks with different deciders on separate cards",
+        "workItemId": "Identifies the backlog task a human work-assignment Needs you receipt links to."
       },
       "legacy_event": {
         "turnGenerationId": "existing before the registry; weekly audit reviews"

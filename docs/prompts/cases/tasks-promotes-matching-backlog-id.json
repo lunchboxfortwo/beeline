@@ -1,0 +1,113 @@
+{
+  "id": "tasks-promotes-matching-backlog-id",
+  "section": "turn.tasks",
+  "summary": "The agent promotes a matching open backlog task UUID via open_thread workItems instead of creating a duplicate.",
+  "place": "room",
+  "turn": {
+    "task": {
+      "body": "@ruby please pick up the billing-retry-fix task and open a thread for @juniper to implement it.",
+      "fromName": "dana",
+      "commandReason": "human_tag"
+    },
+    "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above.",
+    "tasks": [
+      {
+        "id": "8a1c3f90-2b4d-4e5f-9a1b-1234567890ab",
+        "title": "billing-retry-fix",
+        "objective": "Stop duplicate billing retries after timeout.",
+        "assigneeHandle": "juniper",
+        "assigneeName": "Juniper"
+      }
+    ]
+  },
+  "pass": {
+    "call": "open_thread",
+    "args": {
+      "workItems": {
+        "contains": "8a1c3f90-2b4d-4e5f-9a1b-1234567890ab"
+      }
+    }
+  },
+  "scenario": {
+    "history": [],
+    "files": {},
+    "results": [
+      {
+        "call": "read",
+        "args": {
+          "facet": "procedure"
+        },
+        "result": {
+          "slug": "workspace-core",
+          "markdown": "Machine: forge. Shell and connected services are described by the session tool surface. No additional saved procedures."
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "addresses"
+        },
+        "result": {
+          "places": [
+            {
+              "address": "09c40034-77e4-5fe3-8c40-cc637d013185",
+              "name": "tasks-promotes-matching-backlog-id",
+              "kind": "room"
+            }
+          ]
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "tasks"
+        },
+        "result": {
+          "tasks": [
+            {
+              "id": "8a1c3f90-2b4d-4e5f-9a1b-1234567890ab",
+              "title": "billing-retry-fix",
+              "objective": "Stop duplicate billing retries after timeout.",
+              "state": "backlog"
+            }
+          ]
+        }
+      },
+      {
+        "call": "read",
+        "args": {
+          "facet": "members"
+        },
+        "result": {
+          "members": "Members (exact tag spellings):\n- @juniper — Juniper (agent) · owner @dana\n- @dana — Dana (person)\nYou are @ruby, a member of this chat; you are not listed above."
+        }
+      },
+      {
+        "call": "open_thread",
+        "args": {},
+        "result": {
+          "cornerId": "8a1c3f90-2b4d-4e5f-9a1b-1234567890ab",
+          "name": "billing-retry-fix",
+          "implementer": "juniper",
+          "receipt": "Opened thread billing-retry-fix · assigned @juniper"
+        }
+      },
+      {
+        "call": "reply",
+        "result": {
+          "id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "delivered": true
+        }
+      }
+    ],
+    "connect": {
+      "status": {
+        "apps": [],
+        "readiness": "No additional connected services recorded for this case."
+      },
+      "discover": {
+        "apps": []
+      }
+    }
+  }
+}

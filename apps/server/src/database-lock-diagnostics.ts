@@ -69,6 +69,7 @@ type Watch = { pid: number; observedAt?: number; blockers: Blocker[]; sampled: b
  * No SQL replay, new pool, or wait for diagnostics on the request path. */
 export class DatabaseLockDiagnostics {
   readonly #watches = new Set<Watch>();
+  readonly #deadlocks = new WeakMap<object, Watch>();
   #probing = false;
   #lastProbeAt = -Infinity;
 
@@ -85,7 +86,9 @@ export class DatabaseLockDiagnostics {
       return await pending;
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
-      if (code === '55P03' || code === '40P01' || (code === '57014' && watch.blockers.length)) {
+      if (code === '40P01' && error && typeof error === 'object') {
+        this.#deadlocks.set(error, watch);
+      } else if (code === '55P03' || (code === '57014' && watch.blockers.length)) {
         console.warn('[database] lock timeout', {
           code, waitingPid: pid, statement: diagnosticSql(sql).slice(0, 1000),
           statementFingerprint: queryFingerprint(diagnosticSql(sql)),
@@ -104,6 +107,19 @@ export class DatabaseLockDiagnostics {
       // Other statements finishing can expose a wait that began later in SQL.
       void this.#sample();
     }
+  }
+
+  deadlockObservation(error: object) {
+    const watch = this.#deadlocks.get(error);
+    if (!watch) return;
+    // A deadlock can involve inline SQL and arbitrary PL/pgSQL error context.
+    // The caller log uses the safe backend observation without that text.
+    return {
+      waitingPid: watch.pid || undefined,
+      observedAt: watch.observedAt,
+      observation: watch.blockers.length ? 'captured' : watch.failed ? 'unavailable' : watch.sampled ? 'no-blocker-observed' : 'not-sampled',
+      blockers: watch.blockers.map(({ blocking_query, ...blocker }) => blocker),
+    };
   }
 
   async #sample(): Promise<void> {

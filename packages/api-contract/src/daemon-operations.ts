@@ -143,6 +143,8 @@ export function isBackgroundCommand(reason: string): boolean {
 export type AgentCommand = {
   /** Active threads at queue delivery, before any optional helper refresh. */
   readonly threads?: CornerListResult;
+  /** Open backlog tasks for this chat at queue delivery (up to 15). */
+  readonly tasks?: readonly import('./work-board.js').OpenBacklogTask[];
   /**
    * The owner's model choice when the server read this queue, so a turn sent
    * right after a change runs it without waiting for a configuration read.

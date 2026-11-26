@@ -2,7 +2,8 @@ import { cornerImplementerSql } from './corner-worker.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
 import type { SqlDatabase } from './database.js';
 
-/** Explicit closure owns worker blocks; native requests keep their terminal owners. */
+/** Explicit closure owns worker blocks, and a closed block no longer holds the thread whoever wrote it;
+ * native requests keep their terminal owners. */
 export function cornerWaitingSql(corner: string): string {
   const worker = cornerImplementerSql('waiting_fact', corner);
   return `SELECT waiting.*
@@ -22,7 +23,7 @@ export function cornerWaitingSql(corner: string): string {
       FROM corner_owed owed JOIN messages item ON item.id=owed.message_id
       JOIN memberships member ON member.room_id=${corner}.parent_id AND member.identity_id=owed.person_id AND member.removed_at IS NULL
       WHERE owed.corner_id=${corner}.id AND owed.blocking AND (owed.expires_at IS NULL OR owed.expires_at>now())
-        AND NOT (item.card->>'reportToId' IS NOT NULL AND item.author_id=${worker})
+        AND NOT (item.card->>'reportToId' IS NOT NULL AND (item.author_id=${worker} OR item.ask_closed_reason IS NOT NULL))
       UNION ALL
       SELECT choice.message_id,NULL::text,choice.created_at,item.room_id,item.created_at,
         'question','message',false,ARRAY[item.id]

@@ -1,6 +1,6 @@
 import { connectorDeliveryChanged, recoverMemberDelivery } from './rooms-mcp-delivery.js';
 import { notifyCommittedCommand } from './postgres-live.js';
-import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
+import { ROUTER_AUTHORITY_TRIGGER_LOCK_SQL } from './database-advisory-locks.js';
 import { MEMBERSHIP_AUTHORITY_SCHEMA } from './membership-authority-schema.js';
 import { committedCommandNotificationSchema } from './postgres-live.js';
 import type { ServerResponse } from 'node:http';
@@ -59,7 +59,7 @@ CREATE OR REPLACE FUNCTION beeline_mcp_authority_lock() RETURNS trigger AS $$
 DECLARE item jsonb;
 BEGIN
  -- Preceding serving readers need this writer fence until this release drains.
- PERFORM pg_advisory_xact_lock(hashtextextended('${ROUTER_AUTHORITY_LOCK}',0));
+ ${ROUTER_AUTHORITY_TRIGGER_LOCK_SQL}
  item:=CASE WHEN TG_OP='DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END;
  INSERT INTO router_authority(scope)
    SELECT DISTINCT 'mcp:'||m.member_id FROM rooms_mcp_members m WHERE

@@ -34,7 +34,7 @@ describe('typed Work board tools', () => {
           'create-1',
         ),
       );
-      expect(created.id).toMatch(/^[a-f0-9]{64}$/);
+      expect(created.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       expect(written()).toMatchObject({
         roomId: 'source-chat',
         requestId: 'command',
@@ -87,6 +87,9 @@ describe('typed Work board tools', () => {
       expect(written().attachments[0]).toEqual({ kind: 'link', name: 'Plan', url: 'https://example.org' });
       await callAgentTool('update_work', { ...target, attachments: [ { kind: 'file', name: 'plan.pdf', objectId: 'stored-object' }] }, 'file');
       expect(written().attachments[0].objectId).toBe('stored-object');
+      await callAgentTool('read', { facet: 'tasks', address: 'target-chat', state: 'backlog' }, 'read-tasks');
+      expect(String(fetch.mock.calls.at(-1)![0])).toMatch(/listWorkItems$/);
+      expect(written()).toEqual({ roomId: 'target-chat', state: 'backlog' });
     } finally {
       vi.unstubAllGlobals();
       vi.unstubAllEnvs();

@@ -392,7 +392,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
           [
             'Code work happens only in a thread.',
             'Before opening one, consult beeline-triage and beeline-spec, then call open_thread with the target chat address, a name of at most three words joined by hyphens (no whitespace), an objective of at most 24 words, and the brief (a spec plus optional opening context). The objective only titles the work; the brief is its authority. Opening requires no human approval. Include a dispatching message when available; otherwise the server records the opening agent as agent-initiated. Revisions retain their approval rule. When open_thread succeeds the server posts the thread card: do not restate it.',
-            'When the thread builds a backlog task, pass its id in open_thread workItems: the task moves to In progress, then Done when the thread lands, or back to Backlog if it closes unmerged.',
+            'Promote any matching backlog task by passing its id in open_thread workItems. Call create_work_item only when a human explicitly defers or splits scope; never invent speculative tasks. When parking work to Backlog with update_work, include a note.',
             'Landing archives a repository thread and cancels its work, including saved runs. The surviving commander owns follow-up. Repo-less and repositoryWork:false work delivers its artifact without a PR.',
           ].join(' '),
         surface === 'dm' &&
@@ -568,6 +568,7 @@ export interface TurnPromptContext {
   readonly members?: string;
   readonly memory?: string;
   readonly corners?: readonly OpenCornerRow[];
+  readonly tasks?: readonly OpenTaskRow[];
   readonly closedCorners?: readonly {
     readonly name?: string;
     readonly cornerId: string;
@@ -616,6 +617,24 @@ export function renderOpenCornerLine(corner: OpenCornerRow): string {
     corner.archived ? 'archived' : '',
   ].filter(Boolean);
   return `- ${corner.name ?? corner.cornerId} (${corner.cornerId}), ${fields.join(', ')}${corner.objective ? `: ${corner.objective}` : ''}`;
+}
+
+export type OpenTaskRow = {
+  readonly id: string;
+  readonly title: string;
+  readonly objective?: string;
+  readonly assigneeHandle?: string;
+  readonly assigneeName?: string;
+};
+
+/** One line per open backlog task in a chat turn. */
+export function renderOpenTaskLine(task: OpenTaskRow): string {
+  const assigned = task.assigneeHandle
+    ? ` [assigned @${task.assigneeHandle.replace(/^@/, '')}]`
+    : task.assigneeName
+      ? ` [assigned ${task.assigneeName}]`
+      : '';
+  return `- ${task.title} (${task.id})${assigned}${task.objective ? `: ${task.objective}` : ''}`;
 }
 
 export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
@@ -793,6 +812,18 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
         .join('\n\n'),
   },
   {
+    id: 'turn.tasks',
+    topic: 'backlog-tasks',
+    why: { 'turn.tasks': 'Chat agents need open backlog task IDs in turn context so open_thread promotes the matching task instead of duplicating it.' },
+    budgetBytes: 4_000,
+    layer: 'turn',
+    surfaces: ['room'],
+    render: ({ tasks }) =>
+      tasks?.length
+        ? `Open backlog tasks in this chat (use read(facet:tasks) for details):\n${tasks.slice(0, 15).map(renderOpenTaskLine).join('\n')}`
+        : '',
+  },
+  {
     id: 'turn.reviewer-target',
     topic: 'reviewer-target',
     why: { 'turn.reviewer-target': 'The reviewer must review the head that is green now, not one named in an older message.' },
@@ -850,6 +881,19 @@ export function renderMemberThreads(
   return applicable(
     TURN_SECTIONS.filter((section) => section.id === 'turn.corners'),
     { surface, corners, task: { body: '' } },
+  )
+    .map((entry) => entry.text)
+    .join('');
+}
+
+/** The `turn.tasks` section alone, for the live place prompt. */
+export function renderMemberTasks(
+  surface: PromptSurface,
+  tasks: readonly OpenTaskRow[],
+): string {
+  return applicable(
+    TURN_SECTIONS.filter((section) => section.id === 'turn.tasks'),
+    { surface, tasks, task: { body: '' } },
   )
     .map((entry) => entry.text)
     .join('');

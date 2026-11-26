@@ -5,6 +5,8 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
 import { migrate, postgresPoolConfig, PostgresDatabase, type SqlDatabase } from './database.js';
+import { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
+import { lockAgentPlace } from './agent-place-reset.js';
 import { GitHubOperations } from './github-operations.js';
 import { DaemonService } from './daemon-service.js';
 import { LiveHub } from './live.js';
@@ -14,6 +16,7 @@ import { createAgentCommand } from './agent-command.js';
 import { claimAgentConnection } from './connection-presence.js';
 import { TokenAuth } from './auth.js';
 import { flushSentryWakes } from './sentry-wake.js';
+import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
 const url = process.env.BEELINE_INCIDENT_TEST_POSTGRES_URL;
 if (url && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname))
@@ -249,6 +252,71 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     if (kind === 'insert') await db.query(`DROP TRIGGER sentry_insert_contention ON agent_commands; DROP FUNCTION sentry_insert_contention()`);
     expect((await db.query(`SELECT pending FROM sentry_wake_issues`)).rows).toEqual([{ pending: false }]);
     expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='subscribed_event'`, [triage])).rowCount).toBe(1);
+  });
+
+  it('logs the deadlocked call site, distinct advisory keys and a fingerprint without private SQL values', async () => {
+    const isolated = new URL(url!); isolated.pathname = `/${databaseName}`;
+    const app = new PostgresDatabase(isolated.toString(), 1, { lockDiagnostics: new DatabaseLockDiagnostics(db) });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const privateParameter = 'private bound parameter';
+    const fingerprints = new Set<string>();
+    const agentPlaceKeys = new Set<string>();
+    try {
+      // A different agent takes a different lock for the same room. The last
+      // transaction reuses the client but takes neither advisory lock.
+      for (const [agentId, privateLiteral] of [
+        [A, 'first private message literal'],
+        [B, 'second private message literal'],
+        [undefined, 'third private message literal'],
+      ] as const) {
+        warn.mockClear();
+        const victimLocked = deferred(), contenderLocked = deferred();
+        const victim = app.transaction(async tx => {
+          await tx.query("SET LOCAL deadlock_timeout='600ms'");
+          if (agentId) {
+            await lockAgentPlace(tx, agentId, C);
+            // A room change takes the router authority lock inside its trigger.
+            await tx.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [C]);
+          } else {
+            await tx.query('SELECT id FROM rooms WHERE id=$1 FOR UPDATE', [C]);
+          }
+          victimLocked.resolve();
+          await contenderLocked.promise;
+          await tx.query(`SELECT id FROM rooms WHERE id=$1 AND $2::text <> '${privateLiteral}' FOR UPDATE`,
+            [R, privateParameter]);
+        });
+        const contender = db.transaction(async tx => {
+          await tx.query("SET LOCAL deadlock_timeout='5s'");
+          await tx.query('SELECT id FROM rooms WHERE id=$1 FOR UPDATE', [R]);
+          contenderLocked.resolve();
+          await victimLocked.promise;
+          await tx.query('SELECT id FROM rooms WHERE id=$1 FOR UPDATE', [C]);
+        });
+        const outcomes = await Promise.allSettled([victim, contender]);
+        expect(outcomes).toMatchObject([{ status: 'rejected', reason: { code: '40P01' } }, { status: 'fulfilled' }]);
+        const deadlocks = warn.mock.calls.filter(([message]) => message === '[database] deadlock');
+        expect(deadlocks).toHaveLength(1);
+        const [, fields] = deadlocks[0]!;
+        const log = JSON.parse(fields);
+        expect(log).toMatchObject({
+          code: '40P01',
+          operation: expect.stringMatching(/^incident-deadlocks\.test\.ts:\d+:\d+$/),
+          statementFingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
+          advisoryLockKeys: agentId ? [expect.stringMatching(/^agent-place:/), ROUTER_AUTHORITY_LOCK] : [],
+        });
+        fingerprints.add(log.statementFingerprint);
+        if (agentId) agentPlaceKeys.add(log.advisoryLockKeys[0]);
+        const output = JSON.stringify(warn.mock.calls);
+        for (const privateValue of [privateLiteral, privateParameter, A, B, C, R]) {
+          expect(output).not.toContain(privateValue);
+        }
+      }
+      expect.soft(agentPlaceKeys.size).toBe(2);
+      expect(fingerprints.size).toBe(1);
+    } finally {
+      warn.mockRestore();
+      await app.close();
+    }
   });
 
   it('R-BRIEF-DEADLOCK: brief revision returns a real deadlock and a separate action can recover', async () => {

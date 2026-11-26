@@ -41,6 +41,7 @@ export class SessionResources {
   private threadsReceivedAt = 0;
   private readonly receivedCommands = new WeakSet<AgentCommand>();
   private commandThreads?: { value: Context['threads']; receivedAt: number };
+  private commandTasks?: { value: AgentCommand['tasks']; receivedAt: number };
   readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
   private readonly connections = new Map<string, Promise<string>>();
   private writes = Promise.resolve();
@@ -85,6 +86,7 @@ export class SessionResources {
   receiveCommand(item: AgentCommand): void {
     this.receivedCommands.add(item);
     if (item.threads) this.commandThreads = { value: item.threads, receivedAt: performance.now() };
+    this.commandTasks = { value: item.tasks, receivedAt: performance.now() };
   }
 
   threadsForDelivery(items: readonly AgentCommand[]): Context['threads'] | undefined {
@@ -92,6 +94,11 @@ export class SessionResources {
     return this.commandThreads && this.commandThreads.receivedAt > this.threadsReceivedAt
       ? this.commandThreads.value
       : this.context.threads;
+  }
+
+  tasksForDelivery(items: readonly AgentCommand[]): AgentCommand['tasks'] | undefined {
+    for (const item of items) if (!this.receivedCommands.has(item)) this.receiveCommand(item);
+    return this.commandTasks?.value;
   }
 
   refresh(): void {
