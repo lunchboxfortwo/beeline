@@ -41,10 +41,11 @@ it('a batch from different issuers wakes each distinct thread commander once',as
   await daemon.execute('postRoomMessage',{roomId:THREAD,requestId:requests[0]!.id,
     queuedRequestIds:requests.slice(1).map(request=>request.id),text:'Checks passed in every place'},B);
   const replies=(await db.query<{room_id:string;agent_id:string}>(`SELECT room_id,agent_id FROM agent_commands
-    WHERE reason='reply'`)).rows;
-  expect(replies).toHaveLength(destinations.length);
-  expect(replies).toEqual(expect.arrayContaining(
-    destinations.map(({agent,place})=>({room_id:place,agent_id:agent})),
-  ));
+    WHERE reason='reply' ORDER BY room_id,agent_id`)).rows;
+  expect(replies).toEqual([
+    {room_id:CHAT,agent_id:A},
+    {room_id:CHAT,agent_id:C},
+    {room_id:OTHER,agent_id:A},
+  ]);
   expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state='pending'",[B])).rowCount).toBe(0);
 });

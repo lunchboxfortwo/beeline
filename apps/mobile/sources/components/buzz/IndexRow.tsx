@@ -56,7 +56,7 @@ export function TranscriptNavigationRow({
       <Inked color="needsYou" glyph={ChevronGlyph} direction="right" size={CHEVRON_ROW_SIZE} />
     </YStack>
   );
-  // Centred on the first line of meta-size copy.
+  // Centred on the row's vertical axis.
   const glyph = leading ? <YStack flexShrink={0} height={44} justifyContent="center">{leading}</YStack> : null;
   if (singleDestination && trailing)
     return (
@@ -66,13 +66,13 @@ export function TranscriptNavigationRow({
           {...trailing}
           hitSlop={{ top: 6, bottom: 6 }}
           minHeight={HEIGHT.control}
-          alignItems="flex-start"
+          alignItems="center"
           gap="2"
           borderTopWidth={divider ? HAIRLINE : 0}
           borderTopColor="stroke"
         >
           {glyph}
-          <YStack minHeight={HEIGHT.control} minWidth={44} flex={1} paddingVertical="2">{children}</YStack>
+          <YStack minHeight={HEIGHT.control} minWidth={44} flex={1} justifyContent="center" paddingVertical="2">{children}</YStack>
           {chevron}
         </XStack>
       </YStack>
@@ -80,7 +80,7 @@ export function TranscriptNavigationRow({
   return (
     <XStack
       minHeight={HEIGHT.control}
-      alignItems="flex-start"
+      alignItems="center"
       gap="2"
       borderTopWidth={divider ? HAIRLINE : 0}
       borderTopColor="stroke"
@@ -88,11 +88,11 @@ export function TranscriptNavigationRow({
     >
       {glyph}
       {primary ? (
-        <YStack accessibilityRole="link" {...primary} minHeight={HEIGHT.control} minWidth={44} flex={1} paddingVertical="2">
+        <YStack accessibilityRole="link" {...primary} minHeight={HEIGHT.control} minWidth={44} flex={1} justifyContent="center" paddingVertical="2">
           {children}
         </YStack>
       ) : (
-        <YStack minHeight={HEIGHT.control} minWidth={44} flex={1} paddingVertical="2">{children}</YStack>
+        <YStack minHeight={HEIGHT.control} minWidth={44} flex={1} justifyContent="center" paddingVertical="2">{children}</YStack>
       )}
       {trailing ? (
         <YStack accessibilityRole="link" {...trailing} minHeight={HEIGHT.control} minWidth={44} alignItems="center" justifyContent="center">

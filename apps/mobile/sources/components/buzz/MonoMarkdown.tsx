@@ -3,7 +3,7 @@ import { useReaderZone } from '@/buzz/report-time';
 import React, { createContext, useCallback, useContext, useMemo } from 'react';
 import { Platform, type StyleProp, type TextStyle } from 'react-native';
 import { XStack, YStack } from 'tamagui';
-import { Glyph, Indent, ProseRun, T, type ProseMark } from '@/ui/grammar';
+import { Glyph, Indent, ProseRun, T, typeStyle, useTextSize, type ProseMark } from '@/ui/grammar';
 import { Check } from 'lucide-react-native';
 import { parseMarkdown, type MarkdownSpan } from '@/components/markdown/parseMarkdown';
 import { formatMathNodesInline, parseMath, type MathNode } from '@/components/markdown/parseMath';
@@ -466,6 +466,21 @@ function MarkdownTable({ headers, rows, onLink }: { headers: MarkdownSpan[][]; r
   );
 }
 
+function lineHeightOf(style: unknown, fallback: number): number {
+  if (!style) return fallback;
+  if (Array.isArray(style)) {
+    for (let index = style.length - 1; index >= 0; index -= 1) {
+      const value = lineHeightOf(style[index], -1);
+      if (value > 0) return value;
+    }
+    return fallback;
+  }
+  if (typeof style === 'object' && 'lineHeight' in style && typeof style.lineHeight === 'number') {
+    return style.lineHeight;
+  }
+  return fallback;
+}
+
 const MATH_RELATION_OPS = new Set([
   '=', '<', '>', '≤', '≥', '≠', '≈', '≡', '∼', '≃', '≅', '∝', '≪', '≫',
   '→', '←', '↔', '⇒', '⇐', '⇔', '↦',
@@ -699,6 +714,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
   testID,
 }: MonoMarkdownProps) {
   const zone = useReaderZone();
+  const bodyLine = typeStyle('body', useTextSize()).lineHeight;
   const blocks = useMemo(() => parseMarkdown(document ? markdown : localizeReportTimes(markdown, zone), document), [markdown, document, zone]);
   // Android starts native text selection under a long-pressed link as well as
   // the link's preview. The row's long press already owns selection there
@@ -711,6 +727,7 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
     [mentionHandles],
   );
   const base = textStyle;
+  const taskLine = lineHeightOf(base, bodyLine);
   const onLink = useCallback((url: string) => {
     if (messageLinkId(url)) {
       void openMessageLink(url).catch(async () => {
@@ -807,8 +824,10 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
                   <XStack gap="2" alignItems="flex-start">
                     {'checked' in item && item.checked !== undefined ? (
                       // A task item's box, drawn in the stroke token; done holds the check.
-                      <YStack borderWidth={1} borderColor="stroke" borderRadius="sm" marginTop="1" testID={item.checked ? 'task-done' : 'task-open'}>
-                        {item.checked ? <Glyph icon={Check} size={14} /> : <YStack width={14} height={14} />}
+                      <YStack height={taskLine} justifyContent="center">
+                        <YStack borderWidth={1} borderColor="stroke" borderRadius="sm" testID={item.checked ? 'task-done' : 'task-open'}>
+                          {item.checked ? <Glyph icon={Check} size={14} /> : <YStack width={14} height={14} />}
+                        </YStack>
                       </YStack>
                     ) : null}
                   <ProseRun

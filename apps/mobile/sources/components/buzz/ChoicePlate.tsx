@@ -56,8 +56,9 @@ export function TranscriptCardChoicePlate({
       ) : null}
       <XStack position="relative" alignItems="flex-start" gap="2" paddingVertical="2" paddingHorizontal="4">
         <YStack
-          minWidth={26}
-          padding="1"
+          minWidth={28}
+          height={28}
+          paddingHorizontal="1"
           borderWidth={1}
           borderColor={choice.costly ? 'removed' : choice.selected ? 'needsYou' : 'strongStroke'}
           borderRadius="sm"
@@ -83,31 +84,35 @@ export function TranscriptCardChoicePlate({
             </T>
           )}
         </YStack>
-        <YStack flex={1} minWidth={0}>
+        <XStack flex={1} minWidth={0} alignItems="center">
+          <YStack width={0} height={28} />
           <T
+            flex={1}
+            minWidth={0}
             v={choice.leader ? 'heading' : 'body'}
             color={choice.disabled && !choice.busy ? 'secondary' : 'ink'}
           >
             {choice.label}
           </T>
-        </YStack>
+        </XStack>
         {choice.busy ? (
-          <YStack justifyContent="center" height={26}>
+          <YStack justifyContent="center" height={28}>
             <Spinner />
           </YStack>
         ) : null}
         {closed && choice.votes !== undefined ? (
-          <T
-            v={choice.leader ? 'metaStrong' : 'code'}
-            color={choice.leader ? 'needsYou' : 'secondary'}
-            fontVariant={['tabular-nums']}
-            paddingTop="1"
-            minWidth={16}
-            textAlign="right"
-            testID={`transcript-card-choice-count-${choice.id}`}
-          >
-            {choice.votes}
-          </T>
+          <YStack justifyContent="center" height={28}>
+            <T
+              v={choice.leader ? 'metaStrong' : 'code'}
+              color={choice.leader ? 'needsYou' : 'secondary'}
+              fontVariant={['tabular-nums']}
+              minWidth={16}
+              textAlign="right"
+              testID={`transcript-card-choice-count-${choice.id}`}
+            >
+              {choice.votes}
+            </T>
+          </YStack>
         ) : null}
       </XStack>
     </>
@@ -120,6 +125,7 @@ export function TranscriptCardChoicePlate({
       position="relative"
       overflow="hidden"
       minHeight={52}
+      justifyContent="center"
       borderWidth={1}
       borderRadius="sm"
       borderColor={choice.disabled && !choice.busy ? 'stroke' : choice.selected ? 'needsYou' : closed ? 'stroke' : 'strongStroke'}
