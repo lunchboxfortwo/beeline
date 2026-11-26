@@ -165,9 +165,20 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
            AND EXISTS(
              SELECT 1 FROM work_item_threads wit
              JOIN rooms t ON t.id=wit.thread_id
+             LEFT JOIN LATERAL (
+               SELECT COALESCE(NULLIF(m.card->>'name',''),NULLIF(m.system_event->'object'->>'text','')) opening_name
+               FROM messages m
+               WHERE m.card_type='daemon-fact' AND m.card->>'cornerId'=t.id::text
+                 AND COALESCE(NULLIF(m.card->>'name',''),NULLIF(m.system_event->'object'->>'text','')) IS NOT NULL
+               ORDER BY m.created_at,m.id
+               LIMIT 1
+             ) opened ON true
              WHERE wit.work_item_id=$1
-               AND a.name='Thread: ' || t.name
                AND a.url='https://web.usebeeline.app/beeline/chat/' || t.id::text || '?communityId=' || t.workspace_id::text
+               AND (
+                 (opened.opening_name IS NOT NULL AND a.name IN ('Thread: ' || opened.opening_name,'Thread: ' || t.name))
+                 OR (opened.opening_name IS NULL AND a.name LIKE 'Thread: %')
+               )
            )`,
         [row.work_item_id],
       );

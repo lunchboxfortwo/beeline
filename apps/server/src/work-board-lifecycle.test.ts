@@ -401,9 +401,22 @@ describe('unified work lifecycle', () => {
       [lunchbox],
     );
     const unrelatedThread = randomUUID();
+    // Record the original opening card, then rename the linked thread before migration.
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event)
+       VALUES('open-card-1',$1,$2,'@ruby opened a corner verify-provider-recovery','card','daemon-fact',$3::jsonb,$4::jsonb)`,
+      [
+        chat,
+        ruby,
+        JSON.stringify({ type: 'corner-open', cornerId: archivedUnmerged, name: 'verify-provider-recovery' }),
+        JSON.stringify({ kind: 'corner-opened', object: { text: 'verify-provider-recovery', id: archivedUnmerged } }),
+      ],
+    );
+    await db.query(`UPDATE rooms SET name='provider-recovery-renamed' WHERE id=$1`, [archivedUnmerged]);
     await db.query(
       `INSERT INTO work_item_attachments(work_item_id,kind,name,url,added_by) VALUES
          ('emberus-unfinished','link','Thread: verify-provider-recovery',$1,$3),
+         ('emberus-unfinished','link','Thread: custom-bookmark',$1,$3),
          ('emberus-unfinished','link','Thread: unrelated-design',$4,$3),
          ('emberus-unfinished','link','Prior thread note',$1,$3),
          ('emberus-unfinished','link','Runbook','https://example.org/runbook',$3),
@@ -453,6 +466,7 @@ describe('unified work lifecycle', () => {
     expect(unfinished!.attachments?.map((a) => a.name).sort()).toEqual([
       'Prior thread note',
       'Runbook',
+      'Thread: custom-bookmark',
       'Thread: unrelated-design',
     ]);
     expect(
