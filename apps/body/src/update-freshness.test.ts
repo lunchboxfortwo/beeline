@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { expect, it, vi } from 'vitest';
-import { prepareLatestRelease, requiredBundlePaths, readUpdateState, writeUpdateState } from './self-update.js';
+import { hostPlatformKey, prepareLatestRelease, requiredBundlePaths, readUpdateState, writeUpdateState } from './self-update.js';
 import { ReleaseTransaction } from './managed-update.js';
 
 it.each([false, true])('repairs with the active newer release when force=%s and publication is older', async force => {
@@ -43,12 +43,33 @@ it('verifies different bytes at the same version and stages force repairs separa
   await writeFile(join(layout.releasesRoot, 'same/.stage-ok'), 'a'.repeat(64));
   await writeFile(join(layout.releasesRoot, 'same/lib/beeline/bundle.json'), JSON.stringify({ version: 'v1.2.3', commit: 'same' }));
   await symlink(join(layout.releasesRoot, 'same'), layout.libDir);
-  const manifest = { url: 'http://fixture/manifest.json', bundle: { file: 'bundle.tar.gz', version: 'v1.2.3', commit: 'same', sha256 } };
+  const version = 'v1.2.3';
+  const releaseUrl = `https://downloads.usebeeline.app/dl/releases/${version}`;
+  const fetchImpl = vi.fn()
+    .mockImplementationOnce(async () => Response.json({ latest: '1.2.3' }))
+    .mockImplementationOnce(async () => Response.json({
+      version,
+      sourceCommit: 'same',
+      bundles: { [hostPlatformKey()]: { file: 'bundle.tar.gz', sha256 } },
+    }))
+    .mockImplementationOnce(async () => new Response(bytes));
+  const options = { env: {}, fetchImpl, logger: () => {} };
   try {
-    const target = await prepareLatestRelease(layout, { manifest, fetchImpl: async () => new Response(bytes), logger: () => {} });
+    const target = await prepareLatestRelease(layout, options);
     expect(target.releaseId).not.toBe('same');
     expect((await readFile(join(layout.releasesRoot, target.releaseId, '.stage-ok'), 'utf8')).trim()).toBe(sha256);
-    const repair = await prepareLatestRelease(layout, { manifest, force: true, fetchImpl: async () => new Response(bytes), logger: () => {} });
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      'https://registry.npmjs.org/-/package/usebeeline/dist-tags',
+      `${releaseUrl}/manifest.json`,
+      `${releaseUrl}/bundle.tar.gz`,
+    ]);
+    const manifest = { url: `${releaseUrl}/manifest.json`, bundle: { file: 'bundle.tar.gz', version, commit: 'same', sha256 } };
+    await expect(prepareLatestRelease(layout, {
+      ...options, manifest, force: true, fetchImpl: async () => new Response('corrupt'),
+    })).rejects.toThrow('checksum mismatch');
+    const repair = await prepareLatestRelease(layout, {
+      ...options, manifest, force: true, fetchImpl: async () => new Response(bytes),
+    });
     expect(repair.releaseId).toContain('repair');
     expect(repair.releaseId).not.toBe(target.releaseId);
   } finally { await rm(root, { recursive: true, force: true }); }

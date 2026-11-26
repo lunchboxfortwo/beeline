@@ -1,4 +1,3 @@
-import { versionAtLeast } from './self-update-manifest.js';
 import { downloadBytes } from './update-download.js';
 import {
   readFile,
@@ -20,8 +19,8 @@ import { createHash } from 'node:crypto';
 import {
   type PublishedBundle,
   type InstalledBundleIdentity,
-  resolveManifestUrl,
-  parseUpdateManifest,
+  readPublishedBundle,
+  versionAtLeast,
 } from './self-update-manifest.js';
 import { type SelfUpdateManagerOptions, activateRelease } from './self-update-activate-release.js';
 
@@ -269,11 +268,11 @@ export async function installedReleaseChannel(
   return env.BEELINE_RELEASE_CHANNEL?.trim() || 'latest';
 }
 
-export async function updateCommandManifestUrl(
+export async function updateCommandReleaseEnv(
   layout: BeelineInstallLayout,
   override: string | undefined,
   rememberChannel: boolean,
-): Promise<string> {
+): Promise<NodeJS.ProcessEnv> {
   const explicit = process.env.BEELINE_RELEASE_CHANNEL?.trim();
   if (rememberChannel && (explicit === 'next' || explicit === 'latest')) {
     // Keep the preference independent of the update worker's staging and check results.
@@ -281,7 +280,11 @@ export async function updateCommandManifestUrl(
     await mkdir(dirname(path), { recursive: true });
     await replaceFile(path, `${explicit}\n`, 0o600);
   }
-  return override ?? resolveManifestUrl(process.env, explicit || await installedReleaseChannel(layout));
+  return {
+    ...process.env,
+    BEELINE_UPDATE_RELEASE_CHANNEL: explicit || await installedReleaseChannel(layout),
+    BEELINE_UPDATE_MANIFEST_URL: override ?? process.env.BEELINE_UPDATE_MANIFEST_URL,
+  };
 }
 
 export async function readUpdateState(layout: BeelineInstallLayout): Promise<UpdateStateFile> {
@@ -383,10 +386,6 @@ export function archiveUrlFor(manifestUrl: string, file: string): string {
   const index = withoutTrailingSlash.lastIndexOf('/');
   if (index < 0) return file;
   return `${withoutTrailingSlash.slice(0, index)}/${file}`;
-}
-
-export async function fetchText(url: string, fetchImpl: typeof fetch): Promise<string> {
-  return Buffer.from(await downloadBytes(url, fetchImpl)).toString('utf8');
 }
 
 export const BUNDLE_ENTRYPOINT = 'lib/beeline/beeline-cli.mjs';
@@ -689,11 +688,13 @@ export async function prepareLatestRelease(
     });
   try {
     const env = options.env ?? process.env;
-    const manifestUrl =
-      options.manifest?.url ?? resolveManifestUrl(env, await installedReleaseChannel(layout, env));
-    const bundle =
-      options.manifest?.bundle ??
-      parseUpdateManifest(await fetchText(manifestUrl, fetchImpl), hostPlatformKey()).bundle;
+    const { url, bundle } =
+      options.manifest ??
+      (await readPublishedBundle(hostPlatformKey(), {
+        env,
+        releaseChannel: env.BEELINE_UPDATE_RELEASE_CHANNEL || await installedReleaseChannel(layout, env),
+        fetchImpl,
+      }));
     options.signal?.throwIfAborted();
     const installed = await readInstalledBundleIdentity(layout);
     const active = await activeReleaseId(layout);
@@ -727,7 +728,7 @@ export async function prepareLatestRelease(
         ? pending!
         : !options.force && (await holds(active))
           ? active!
-          : await stageRelease(layout, manifestUrl, bundle, {
+          : await stageRelease(layout, url, bundle, {
               fetchImpl,
               logger: options.logger,
               force: options.force,

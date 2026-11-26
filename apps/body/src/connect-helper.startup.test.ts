@@ -196,8 +196,9 @@ it('does not activate a cold install cancelled during release preparation', asyn
   });
   try {
     const error = await installCurrentRelease(
-      async () =>
-        Response.json({
+      async (url) =>
+        String(url).endsWith('/dist-tags') ? Response.json({ latest: '0.1.201' }) : Response.json({
+          version: 'v0.1.201',
           bundles: {
             [hostPlatformKey()]: {
               file: 'bundle.tar.gz',
