@@ -30,14 +30,15 @@ import {
   discoveredBeelineInstallLayout,
   hostPlatformKey,
   fetchText,
+  installedReleaseChannel,
   readInstalledBundleIdentity,
   readUpdateState,
+  updateCommandManifestUrl,
   type BeelineInstallLayout,
 } from './self-update.js';
 import {
   compareBundleIdentity,
   parseUpdateManifest,
-  resolveManifestUrl,
 } from './self-update-manifest.js';
 
 interface RuntimeAdapterRefreshOptions extends AdapterUpdateOptions {
@@ -131,6 +132,7 @@ async function printStatus(layout: BeelineInstallLayout): Promise<void> {
   const state = await readUpdateState(layout);
   console.log(`${pc.bold('installed bundle')}  ${describeIdentity(installed)}`);
   console.log(`${pc.bold('active release')}    ${active ?? 'none (legacy layout, never updated)'}`);
+  console.log(`${pc.bold('release channel')}   ${await installedReleaseChannel(layout)}`);
   if (state.lastCheckAt) {
     console.log(
       `${pc.bold('last check')}         ${new Date(state.lastCheckAt).toISOString()} — ${state.lastCheckResult ?? 'unknown'}`,
@@ -156,19 +158,19 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
     }
 
     const layout = await requireLayout();
-    const manifestUrlFlag = args.indexOf('--manifest-url');
-    const manifestUrl =
-      manifestUrlFlag >= 0 && args[manifestUrlFlag + 1]
-        ? args[manifestUrlFlag + 1]!
-        : resolveManifestUrl(process.env);
-    const checkOnly = args.includes('--check');
-    const force = args.includes('--force');
-
     if (args.includes('--status')) {
       await printStatus(layout);
       return;
     }
 
+    const manifestUrlFlag = args.indexOf('--manifest-url');
+    const checkOnly = args.includes('--check');
+    const force = args.includes('--force');
+    const manifestUrl = await updateCommandManifestUrl(
+      layout,
+      manifestUrlFlag >= 0 ? args[manifestUrlFlag + 1] : undefined,
+      args.includes('update') && !checkOnly,
+    );
     const installed = await readInstalledBundleIdentity(layout);
     console.log(`[beeline] installed bundle: ${describeIdentity(installed)}`);
 

@@ -1,9 +1,16 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { afterEach, expect, it, vi } from 'vitest';
 import { runUpdateCommand } from './self-update-cli.js';
 import { convergeMachine, prepareMachineRelease } from './recovery.js';
 import { convergeDependencies } from './recovery-dependencies.js';
+import { anchorLayout, prepareLatestRelease } from './self-update.js';
+import { DEFAULT_UPDATE_MANIFEST_URL } from './self-update-manifest.js';
 vi.mock('./recovery.js', () => ({ prepareMachineRelease: vi.fn(), convergeMachine: vi.fn() }));
 vi.mock('./recovery-dependencies.js', () => ({ convergeDependencies: vi.fn(async () => {}) }));
+vi.mock('./helper-status.js', () => ({ helperStatusLines: vi.fn(async () => ['not running']) }));
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -56,4 +63,50 @@ it('repairs the installed helper after a freshness failure on the direct CLI', a
   await expect(runUpdateCommand(['update'])).rejects.toThrow('freshness unconfirmed');
   expect(convergeMachine).toHaveBeenCalledWith(expect.objectContaining({ reportAgentsOnly: true }));
   expect(convergeDependencies).not.toHaveBeenCalled();
+});
+
+it('keeps the chosen channel across background checks and shows it in status', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'beeline-update-channel-'));
+  const layout = anchorLayout(join(root, 'lib/beeline'));
+  vi.stubEnv('BEELINE_LIB_DIR', layout.libDir);
+  vi.stubEnv('BEELINE_RELEASE_CHANNEL', undefined);
+  vi.stubEnv('BEELINE_UPDATE_MANIFEST_URL', undefined);
+  vi.mocked(prepareMachineRelease).mockResolvedValue({ releaseId: 'target', identity: {} });
+  vi.mocked(convergeMachine).mockResolvedValue({
+    pid: 123,
+    generation: 'current',
+    loadedRelease: 'target',
+    processState: 'serving',
+    updatedAt: '',
+    agents: {},
+  });
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const expectBackgroundManifest = async (env: NodeJS.ProcessEnv, url: string) => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error('fixture stops after manifest selection'));
+    await expect(prepareLatestRelease(layout, { env, fetchImpl })).rejects.toThrow('fixture stops');
+    expect(fetchImpl).toHaveBeenCalledWith(url, expect.anything());
+  };
+  try {
+    await expectBackgroundManifest({}, DEFAULT_UPDATE_MANIFEST_URL);
+
+    vi.stubEnv('BEELINE_RELEASE_CHANNEL', 'next');
+    await runUpdateCommand(['update']);
+    vi.stubEnv('BEELINE_RELEASE_CHANNEL', undefined);
+    const nextUrl = 'https://usebeeline.app/dl/next/manifest.json';
+    await expectBackgroundManifest({}, nextUrl);
+    await runUpdateCommand(['update']);
+    expect(prepareMachineRelease).toHaveBeenLastCalledWith(
+      layout,
+      expect.objectContaining({ env: expect.objectContaining({ BEELINE_UPDATE_MANIFEST_URL: nextUrl }) }),
+    );
+    await runUpdateCommand(['update', '--status']);
+    const statusLines = log.mock.calls.map(([line]) => stripVTControlCharacters(line));
+    expect(statusLines).toContainEqual(expect.stringMatching(/^release channel\s+next$/));
+
+    vi.stubEnv('BEELINE_RELEASE_CHANNEL', 'latest');
+    await runUpdateCommand(['update']);
+    await expectBackgroundManifest({ BEELINE_RELEASE_CHANNEL: 'next' }, DEFAULT_UPDATE_MANIFEST_URL);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

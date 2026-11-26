@@ -8,18 +8,16 @@ import {
   discoveredBeelineInstallLayout,
   beelineInstallLayout,
   activeReleaseId,
+  installedReleaseChannel,
   readInstalledBundleIdentity,
   readUpdateState,
+  updateCommandManifestUrl,
   resolveBundleEntrypoint,
   hostPlatformKey,
   activateRelease,
   fetchText,
 } from './self-update.js';
-import {
-  resolveManifestUrl,
-  parseUpdateManifest,
-  compareBundleIdentity,
-} from './self-update-manifest.js';
+import { parseUpdateManifest, compareBundleIdentity } from './self-update-manifest.js';
 import { askMachine, helperAbsent, type MachineAnswer } from './machine-control.js';
 import { runOwned } from './wait.js';
 import { exitWithOwner } from './owner-link.js';
@@ -113,6 +111,7 @@ async function main(): Promise<void> {
             native,
             installed: await readInstalledBundleIdentity(layout),
             activeRelease: await activeReleaseId(layout),
+            releaseChannel: await installedReleaseChannel(layout),
             releaseSelection: await readUpdateState(layout),
             helper: helper ?? { state: 'not responding' },
             agents,
@@ -124,8 +123,13 @@ async function main(): Promise<void> {
       return;
     }
     const index = args.indexOf('--manifest-url');
-    const url = index >= 0 ? args[index + 1]! : resolveManifestUrl();
-    if (args.includes('--check')) {
+    const checkOnly = args.includes('--check');
+    const url = await updateCommandManifestUrl(
+      layout,
+      index >= 0 ? args[index + 1] : undefined,
+      command === 'update' && !checkOnly,
+    );
+    if (checkOnly) {
       const bundle = parseUpdateManifest(await fetchText(url, fetch), hostPlatformKey()).bundle;
       console.log(compareBundleIdentity(await readInstalledBundleIdentity(layout), bundle));
       return;
