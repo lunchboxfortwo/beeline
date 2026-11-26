@@ -212,7 +212,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
     const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
     setComposerHeight(Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, contentHeight)));
   }, [setComposerHeight]);
-  const roomName = roomSurface?.room?.name?.trim();
+  const roomName = roomSurface?.room?.name?.trim().replace(/^#+/, '').trim();
   const hasAgentMembers = Boolean(roomSurface?.members.some(member => member.identity.kind === 'agent'));
   let composerPlaceholder: string | undefined;
   if (isCorner) {

@@ -48,7 +48,9 @@ const OUTCOME_WORDS = {
 } as const;
 
 function lineAccessibilityLabel(line: ToolLedgerLine): string {
-  if (line.kind === 'note') return `Note: ${line.label}`;
+  if (line.kind === 'note') {
+    return line.startupWarning ? `Startup note: ${line.label}` : `Note: ${line.label}`;
+  }
   const parts = [line.label];
   if (line.kind !== 'thought') parts.push(OUTCOME_WORDS[line.outcome]);
   if (line.reason) parts.push(line.reason);
@@ -73,6 +75,34 @@ function ToolLedgerLineRow({
   const duration = formatToolCallDuration(line.durationMs);
   const showVerdict = line.kind === 'tool';
   const accessibilityLabel = lineAccessibilityLabel(line);
+  if (line.kind === 'note' && line.startupWarning) {
+    return (
+      <TranscriptNavigationRow
+        divider={divider}
+        testID={testID}
+        singleDestination={Boolean(onPress)}
+        trailing={
+          onPress
+            ? {
+                onPress,
+                accessibilityLabel,
+                accessibilityRole: 'button',
+                accessibilityHint: 'Opens this startup note',
+              }
+            : undefined
+        }
+      >
+        <XStack alignItems="flex-start" gap="2" minWidth={0}>
+          <T v="meta" color="secondary" flexShrink={0} numberOfLines={1}>
+            Startup note
+          </T>
+          <T v="meta" color="secondary" flex={1} minWidth={0} numberOfLines={2}>
+            {line.label}
+          </T>
+        </XStack>
+      </TranscriptNavigationRow>
+    );
+  }
   if (line.kind === 'note') {
     // Text the agent wrote before a later tool call. It is not the reply, but
     // it is the agent's own words, so it is shown whole — never cut to a line.
@@ -91,20 +121,75 @@ function ToolLedgerLineRow({
   }
   const action = line.verb ?? (line.glyph === '>_' ? 'ran' : line.glyph === '≡' ? 'read' : 'used');
   const hasNamedAction = line.label.startsWith(`${action} `);
-  const verb = line.outcome === 'failure' ? 'Failed' : line.outcome === 'running' ? 'Running' : action.charAt(0).toUpperCase() + action.slice(1);
+  const verb =
+    line.outcome === 'failure'
+      ? 'Failed'
+      : line.outcome === 'running'
+        ? 'Running'
+        : action.charAt(0).toUpperCase() + action.slice(1);
+  const redundantFailureLabel = line.outcome === 'failure' && /^action\s+failed$/i.test(line.label);
   return (
-    <TranscriptNavigationRow testID={testID} singleDestination divider={divider}
-      trailing={onPress ? { onPress, accessibilityLabel, accessibilityRole: 'button',
-        accessibilityState: { busy: line.outcome === 'running' },
-        accessibilityHint: 'Opens this call’s output' } : undefined}>
-      <XStack alignItems="center" gap="2">
-        {!hasNamedAction || line.outcome === 'failure' ? <T v="meta" color={line.outcome === 'failure' ? 'needsYou' : 'ink'}>{verb}</T> : null}
-        <T v="code" ellipsizeMode="middle" numberOfLines={1} flex={1} minWidth={48}>{line.label}</T>
-        {line.reason ? <T v="meta" color="secondary" numberOfLines={1} minWidth={0}>{line.reason}</T> : null}
-        {duration ? <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']}>{duration}</T> : null}
-        {showVerdict && hasNamedAction && line.outcome === 'failure' ? <T v="code" color="needsYou" accessibilityElementsHidden width={18} flexShrink={0} textAlign="right" testID={`activity-verdict-${line.id}`}>✗</T> : null}
-        {showVerdict && line.outcome === 'running' ? <Spinner testID={`activity-verdict-${line.id}`} /> : null}
-      </XStack>
+    <TranscriptNavigationRow
+      testID={testID}
+      singleDestination
+      divider={divider}
+      trailing={
+        onPress
+          ? {
+              onPress,
+              accessibilityLabel,
+              accessibilityRole: 'button',
+              accessibilityState: { busy: line.outcome === 'running' },
+              accessibilityHint: 'Opens this call’s output',
+            }
+          : undefined
+      }
+    >
+      <YStack gap="1" minWidth={0}>
+        <XStack alignItems="center" gap="2" minWidth={0}>
+          {!hasNamedAction || line.outcome === 'failure' ? (
+            <T
+              v="meta"
+              color={line.outcome === 'failure' ? 'needsYou' : 'ink'}
+              flexShrink={0}
+              numberOfLines={1}
+            >
+              {verb}
+            </T>
+          ) : null}
+          {!redundantFailureLabel ? (
+            <T v="code" ellipsizeMode="middle" numberOfLines={1} flex={1} minWidth={48}>
+              {line.label}
+            </T>
+          ) : null}
+          {duration ? (
+            <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']}>
+              {duration}
+            </T>
+          ) : null}
+          {showVerdict && hasNamedAction && line.outcome === 'failure' ? (
+            <T
+              v="code"
+              color="needsYou"
+              accessibilityElementsHidden
+              width={18}
+              flexShrink={0}
+              textAlign="right"
+              testID={`activity-verdict-${line.id}`}
+            >
+              ✗
+            </T>
+          ) : null}
+          {showVerdict && line.outcome === 'running' ? (
+            <Spinner testID={`activity-verdict-${line.id}`} />
+          ) : null}
+        </XStack>
+        {line.outcome === 'failure' && line.reason ? (
+          <T v="meta" color="secondary" width="100%" minWidth={0} testID={`activity-reason-${line.id}`}>
+            {line.reason}
+          </T>
+        ) : null}
+      </YStack>
     </TranscriptNavigationRow>
   );
 }
@@ -129,8 +214,15 @@ function useToolOutput() {
     void request.then(page => {
       if (generation !== current.current) return;
       const full = toolPageLines(page).find(item => item.id === next.id);
-      setLine({ ...next, detail: full?.detail, requester: full?.requester,
-        reason: full?.reason, outputHidden: full?.outputHidden });
+      setLine({
+        ...next,
+        detail: full?.detail,
+        requester: full?.requester,
+        reason: full?.reason,
+        outputHidden: full?.outputHidden,
+        command: full?.command ?? next.command,
+        input: full?.input ?? next.input,
+      });
     }).catch((cause) => {
       if (generation !== current.current) return;
       const message = appReadErrorCopy(cause);
@@ -142,8 +234,8 @@ function useToolOutput() {
 }
 
 /**
- * One collapsed machine-run summary — `⌄ 6 steps · 2 failed · 48s` —
- * that expands in place into its individual ledger lines.
+ * One collapsed machine-run summary — `⌄ Listed schedules · 6 steps · 2 failed · 48s` —
+ * that expands in place into its individual ledger lines and folded read-only groups.
  */
 function ToolRunGroupRow({
   run,
@@ -154,6 +246,7 @@ function ToolRunGroupRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [expandedFolds, setExpandedFolds] = useState<Record<string, boolean>>({});
   const [loaded,setLoaded]=useState<ToolLedgerLine[]>([]);
   const [remoteIndex,setRemoteIndex]=useState(0);
   const [cursor,setCursor]=useState<string|undefined>();
@@ -173,27 +266,74 @@ function ToolRunGroupRow({
     }).catch(()=>setFailed(true)).finally(()=>{pending.current=false;setLoading(false);});
   };
   const duration = formatToolCallDuration(run.durationMs);
-  const summary = toolGroupSummary(run.count, run.failed, run.durationMs, run.notes);
+  const summary = toolGroupSummary(run.count, run.failed, run.durationMs, run.notes, run.provenance);
   const steps = run.count > 0 || run.notes === 0;
+  const visibleLines = remote.length || showAll || lines.length <= 3 ? lines : lines.slice(0, 2);
+  const pressHandler = (item: ToolLedgerLine) =>
+    item.kind === 'tool' || item.detail || item.toolOutput ? () => onPressLine?.(item) : undefined;
   return (
     <LedgerLogGroup testID={`tool-run-container-${run.id}`}>
-      <LedgerDisclosure expanded={expanded} onPress={() => { if (expanded) setShowAll(false); else if(remote.length&&!loaded.length)load(); setExpanded(value => !value); }}
-        accessibilityLabel={`${summary}, expandable`} accessibilityState={{ expanded }} rowTestID={`tool-run-group-${run.id}`}>
+      <LedgerDisclosure
+        expanded={expanded}
+        onPress={() => {
+          if (expanded) {
+            setShowAll(false);
+            setExpandedFolds({});
+          } else if (remote.length && !loaded.length) {
+            load();
+          }
+          setExpanded((value) => !value);
+        }}
+        accessibilityLabel={`${summary}, expandable`}
+        accessibilityState={{ expanded }}
+        rowTestID={`tool-run-group-${run.id}`}
+      >
+        {run.provenance ? `${run.provenance} · ` : null}
         {steps ? `${run.count} ${run.count === 1 ? 'step' : 'steps'}` : null}
         {run.failed ? <T v="meta" color="needsYou">{` · ${run.failed} failed`}</T> : null}
         {run.notes ? `${steps ? ' · ' : ''}${run.notes} ${run.notes === 1 ? 'note' : 'notes'}` : null}
         {duration ? ` · ${duration}` : null}
       </LedgerDisclosure>
       {expanded
-        ? (remote.length||showAll || lines.length <= 3 ? lines : lines.slice(0, 2)).map((line, index) => (
-            <ToolLedgerLineRow
-              key={line.id}
-              line={line}
-              divider={index > 0}
-              onPress={line.kind === 'tool' || line.detail||line.toolOutput ? () => onPressLine?.(line) : undefined}
-              testID={`tool-ledger-line-${line.id}`}
-            />
-          ))
+        ? visibleLines.map((line, index) =>
+            line.folded?.length ? (
+              <LedgerLogGroup key={line.id} testID={`tool-observation-group-${line.id}`}>
+                <LedgerDisclosure
+                  expanded={Boolean(expandedFolds[line.id])}
+                  onPress={() =>
+                    setExpandedFolds((previous) => ({
+                      ...previous,
+                      [line.id]: !previous[line.id],
+                    }))
+                  }
+                  accessibilityLabel={`${line.label}, expandable`}
+                  accessibilityState={{ expanded: Boolean(expandedFolds[line.id]) }}
+                  rowTestID={`tool-observation-fold-${line.id}`}
+                >
+                  {line.label}
+                </LedgerDisclosure>
+                {expandedFolds[line.id]
+                  ? line.folded.map((child, childIndex) => (
+                      <ToolLedgerLineRow
+                        key={child.id}
+                        line={child}
+                        divider={childIndex > 0}
+                        onPress={pressHandler(child)}
+                        testID={`tool-ledger-line-${child.id}`}
+                      />
+                    ))
+                  : null}
+              </LedgerLogGroup>
+            ) : (
+              <ToolLedgerLineRow
+                key={line.id}
+                line={line}
+                divider={index > 0}
+                onPress={pressHandler(line)}
+                testID={`tool-ledger-line-${line.id}`}
+              />
+            ),
+          )
         : null}
       {expanded && (hasRemote||!showAll&&lines.length>3) ? <LedgerDisclosure
         expanded={false} accessibilityState={{ expanded: false }}
@@ -218,7 +358,7 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
   testID?: string;
 }) {
   const runs = useMemo(
-    () => groupToolLedgerRuns(toolLedgerLines(buildTurnActivity(items).steps)),
+    () => groupToolLedgerRuns(toolLedgerLines(buildTurnActivity(items, { settled: true }).steps)),
     [items],
   );
   const {line:sheetLine,error:sheetError,open:openLine,close:closeLine}=useToolOutput();
@@ -229,6 +369,8 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
         <ToolRunGroupRow key={run.id} onPressLine={openLine} run={run} />
       ))}
       <ToolOutputSheet
+        command={sheetLine?.command}
+        input={sheetLine?.input}
         detail={sheetLine?.detail}
         outputHidden={sheetLine?.outputHidden}
         error={sheetError}
@@ -256,7 +398,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   messageDraftKey,
   mark,
 }: ActivityTimelineProps) {
-  const turn = useMemo(() => buildTurnActivity(items), [items]);
+  const turn = useMemo(() => buildTurnActivity(items, { settled: !active }), [items, active]);
   const runs = useMemo(
     () => groupToolLedgerRuns(toolLedgerLines(turn.steps, active)),
     [turn, active],
@@ -302,6 +444,8 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
       ) : null}
       </TranscriptLine>
       <ToolOutputSheet
+        command={sheetLine?.command}
+        input={sheetLine?.input}
         detail={sheetLine?.detail}
         outputHidden={sheetLine?.outputHidden}
         error={sheetError}

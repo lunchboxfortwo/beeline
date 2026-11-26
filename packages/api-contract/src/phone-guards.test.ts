@@ -20,6 +20,28 @@ m45_describe('phone surface readers', () => {
     m45_expect(m45_readRoomViewMessage({ ...scope1.message, squireApproval })?.squireApproval).toMatchObject(intent);
   });
 
+  m45_it('preserves structured tool activity metadata and tolerates legacy rows without it', () => {
+    const activity = [
+      {
+        kind: 'tool',
+        title: 'mcp.beeline-agent.wake',
+        operation: 'other',
+        status: 'completed',
+        command: 'rg -n wake apps/server/src',
+        input: '{"action":"list"}',
+        output: 'line 1\n[… omitted …]\nline 99',
+        files: [{ path: 'skills/waiting-and-wakes/SKILL.md' }],
+      },
+      {
+        kind: 'tool',
+        title: 'Legacy step',
+        status: 'completed',
+      },
+    ];
+    const parsed = m45_readRoomViewMessage({ ...scope1.message, activity });
+    m45_expect(parsed?.activity).toEqual(activity);
+  });
+
   m45_it.each(['agent', 'human', undefined, 'invalid'])('UAR-1 preserves known command recipient kind %s', (kind) => {
     const agentCommand = { kind: 'report', text: 'Choose the scope', recipient: { id: 'recipient', name: 'Recipient', kind } };
     const parsed = m45_readRoomViewMessage({ ...scope1.message, agentCommand });

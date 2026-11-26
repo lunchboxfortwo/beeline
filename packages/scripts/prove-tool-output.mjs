@@ -33,7 +33,7 @@ try {
   assert(output.output.startsWith('file contents\n'));
   assert(!output.output.includes('planted-secret'));
   assert(Buffer.byteLength(output.output)<=4096);
-  assert(output.output.endsWith('[cut off]'));
+  assert(output.output.includes('[… omitted …]'));
   assert.equal(secret.output,'Output hidden: contains a secret.');
   assert.equal(empty.output,undefined);
   const pgpassRow = tapped.messages[0].activity.at(-1);
