@@ -199,6 +199,12 @@ test('Docker and Fly image-build adapters account for daemon work in the worker 
     { command: '/real/docker', args: ['build', '--cgroup-parent=beeline-ci2.slice', '--file', 'apps/server/Dockerfile', '--tag', 'registry.fly.io/beeline-server:sha-fixture', '--build-arg', 'RELEASE_SHA=fixture', '.'], legacy: true },
     { command: '/real/docker', args: ['push', 'registry.fly.io/beeline-server:sha-fixture'] },
   ]);
+  const absoluteServerArgs = ['deploy', '.', '--config', 'apps/infra/fly.beeline-server.toml', '--app', 'beeline-server', '--dockerfile', resolve(root, 'apps/server/Dockerfile'), '--local-only', '--build-only', '--push', '--image-label', 'sha-fixture', '--build-arg', 'RELEASE_SHA=fixture'];
+  assert.deepEqual(localToolPlan('flyctl', absoluteServerArgs, config), calls);
+  const configServerArgs = ['deploy', '.', '--config', 'apps/infra/fly.beeline-server.toml', '--app', 'beeline-server', '--local-only', '--build-only', '--push', '--image-label', 'sha-fixture', '--build-arg', 'RELEASE_SHA=fixture'];
+  assert.deepEqual(localToolPlan('flyctl', configServerArgs, config), calls);
+  assert.throws(() => localToolPlan('flyctl', ['deploy', '.', '--config', 'apps/infra/fly.beeline-server.toml', '--app', 'beeline-server', '--dockerfile', 'apps/server/Dockerfile', '--local-only', '--build-only', '--push', '--image-label', 'sha-fixture'], config), /explicit Dockerfile/);
+  assert.throws(() => localToolPlan('flyctl', ['deploy', '.', '--config', 'apps/infra/fly.beeline-server.toml', '--app', 'beeline-server', '--dockerfile', '/tmp/apps/server/Dockerfile', '--local-only', '--build-only', '--push', '--image-label', 'sha-fixture'], config), /explicit Dockerfile/);
   const rollout = ['deploy', '--image', 'registry.fly.io/beeline-server@sha256:fixture'];
   assert.deepEqual(localToolPlan('flyctl', rollout, config), [{ command: config.flyctl, args: rollout }]);
   assert.throws(() => localToolPlan('flyctl', [...args, '--remote-only'], config), /Unsupported/);

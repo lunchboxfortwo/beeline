@@ -9,6 +9,9 @@ version="${3:-development}"
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'invalid server source SHA' >&2; exit 1; }
 test "$(git rev-parse HEAD)" = "$sha"
 source_image="registry.fly.io/beeline-server:source-$sha"
+# Pass an absolute Dockerfile path to flyctl so --config under apps/infra never
+# causes relative --dockerfile resolution against apps/infra/.
+dockerfile="$(pwd -P)/apps/server/Dockerfile"
 if [ "$mode" = prepare-local ]; then
   if ! docker image inspect "$source_image" >/dev/null 2>&1; then
     docker build --file apps/server/Dockerfile --tag "$source_image" \
@@ -17,7 +20,7 @@ if [ "$mode" = prepare-local ]; then
 elif [ "$mode" = prebuild ]; then
   flyctl auth docker
   flyctl deploy . --local-only --config apps/infra/fly.beeline-server.toml \
-    --dockerfile apps/server/Dockerfile --app beeline-server \
+    --dockerfile "$dockerfile" --app beeline-server \
     --build-arg BEELINE_RELEASE_VERSION=development --build-arg "BEELINE_RELEASE_SHA=$sha" \
     --image-label "source-$sha" --build-only --push --yes
 elif [[ "$mode" == release || "$mode" == build-local || "$mode" == push-local ]]; then
@@ -64,7 +67,7 @@ EOF
   else
     echo 'No prebuilt server image available; building the exact release from source.'
     flyctl deploy . --local-only --config apps/infra/fly.beeline-server.toml \
-      --dockerfile apps/server/Dockerfile --app beeline-server \
+      --dockerfile "$dockerfile" --app beeline-server \
       --build-arg "BEELINE_RELEASE_VERSION=$version" --build-arg "BEELINE_RELEASE_SHA=$sha" \
       --build-arg "BEELINE_FREE_AGENT_IMAGE=$IMAGE_REF" \
       --image-label "$label" --build-only --push --yes
