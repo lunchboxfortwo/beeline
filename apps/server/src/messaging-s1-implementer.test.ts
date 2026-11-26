@@ -36,11 +36,13 @@ describe('S1: repair wakes keep the recorded implementer after another person ta
   });
 });
 
-it.each(['I inspected the change.','done: FAIL','blocked: FAIL'])('keeps reviewer commentary local: %s', async text=>{
+it.each(['I inspected the change.','done: FAIL','blocked: FAIL'])('hands final review text to the implementer: %s', async text=>{
   const thread = await inReview();
   const review = (await rootFixture.db.query<CommandRow>("SELECT * FROM agent_commands WHERE room_id=$1 AND reason='corner_review_dispatch'",[thread])).rows[0]!;
   const before = (await rootFixture.db.query<{id:string}>('SELECT id FROM agent_commands')).rows.map(row=>row.id);
   await rootFixture.daemon.execute('postRoomMessage',{roomId:thread,requestId:review.id,text},B);
   await advanceCorner(rootFixture.db,thread,{kind:'reconcile'});
-  expect((await rootFixture.db.query('SELECT reason FROM agent_commands WHERE agent_id=$1 AND NOT(id=ANY($2::text[]))',[A,before])).rows).toEqual([]);
+  const wakes = await rootFixture.db.query(`SELECT agent_id,room_id,reason,private_payload->>'text' text
+    FROM agent_commands WHERE NOT(id=ANY($1::text[]))`, [before]);
+  expect(wakes.rows).toEqual([{ agent_id:A, room_id:thread, reason:'corner_review_needed', text }]);
 });

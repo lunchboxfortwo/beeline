@@ -3,6 +3,7 @@ import { modelText } from './message-origin.js';
 import { recordCornerMergeApproval } from './corner-merge-approval.js';
 import { CornerMachineEvents } from './corner-attention.js';
 import { POSTGRES_LIVE_CHANNEL } from './postgres-live.js';
+import { RoomsMcpAgentTools } from './rooms-mcp-agent.js';
 
 const reviewReport = findings;
 
@@ -342,9 +343,7 @@ describe('thread message attribution', () => {
   });
 
 
-  // Only the reviewer's PASS moves review; a verdict that tags nobody (or a
-  // person) is an ordinary message and wakes no agent.
-  it('wakes nobody and stays in review when a review without a PASS tags no agent', async () => {
+  it('hands back the final text after the review ends, leaving interim conversation inert', async () => {
     await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
     await greenHead(11, '1'.repeat(40));
     const [review] = await commands(B, C);
@@ -352,7 +351,7 @@ describe('thread message attribution', () => {
     // A check event is not a human assignment, even when its fixture author is human.
     // Preserve the agent's prose; a human mention does not wake another agent.
     const dropped = await rootFixture.daemon.postCornerMessage({roomId:C,cornerId:C,requestId:review!.turnRequestId,text:'@human the reproduction is missing. Fix that and push.'},B);
-    await result(review!,'');
+    await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
     expect(dropped.receipt).toContain('Message stored and visible.');
     expect((await rootFixture.db.query<{ text: string }>(
       `SELECT text FROM messages WHERE id=$1`, [dropped.id],
@@ -361,13 +360,20 @@ describe('thread message attribution', () => {
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('$1::uuid')} workflow_state`, [C],
     )).rows[0]?.workflow_state).toBe('review');
+    const final = 'Please attach the reproduction.';
+    await result(review!, final);
+    await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
+    expect(await commands(A, C)).toMatchObject([{ reason: 'corner_review_needed', source: { body: final } }]);
   });
 
 
   it.each([
-    { verdict: 'FAIL: add the missing evidence.', approved: false, wake: 'corner_review_needed' },
-    { verdict: 'PASS: ready to land.', approved: true, wake: 'report' },
-  ])('REVIEW-TURN-TEXT: $verdict posts once and wakes only the implementer', async ({ verdict, approved, wake }) => {
+    { surface: 'native', verdict: 'FAIL: add the missing evidence.', approved: false },
+    { surface: 'native', verdict: '**Review blocked.** Add a screenshot of the built mobile composer.', approved: false },
+    { surface: 'native', verdict: 'PASS: ready to land.', approved: true },
+    { surface: 'MCP', verdict: 'PASS: ready to land.', approved: false },
+    { surface: 'MCP', verdict: 'Verified the requested changes.', approved: true },
+  ])('REVIEW-TURN-TEXT: $surface $verdict (approved=$approved) posts once and wakes only the implementer', async ({ surface, verdict, approved }) => {
     const { db, daemon, phone } = rootFixture;
     const headSha = '1'.repeat(40);
     await phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
@@ -386,14 +392,24 @@ describe('thread message attribution', () => {
         live.publish({ type: 'invalidate', roomId: C, reason: 'postgres:corner_state' });
     });
     try {
-      if (approved) {
-        await expect(daemon.execute('approveCornerMerge', {
-          cornerId: C, roomId: C, requestId: review!.turnRequestId, headSha, text: verdict,
+      if (surface === 'MCP') {
+        const tools = new RoomsMcpAgentTools(db, daemon);
+        const input = { address: C, commandId: review!.id, text: verdict };
+        if (approved) await expect(tools.call(B, 'approve_merge', { ...input, headSha }))
+          .resolves.toMatchObject({ status: 'approved', headSha });
+        else await expect(tools.call(B, 'post', input)).resolves.toMatchObject({ stored: true });
+      } else {
+        const turn = { roomId: C, requestId: review!.turnRequestId };
+        if (approved) await expect(daemon.execute('approveCornerMerge', {
+          ...turn, cornerId: C, headSha, text: verdict,
         }, B)).resolves.toMatchObject({ status: 'approved', headSha });
+        await expect(daemon.execute('postRoomMessage', {
+          ...turn, text: verdict, presentation: 'message', harnessEnded: true,
+        }, B)).resolves.toMatchObject({ completed: true, published: true });
+        await daemon.execute('postAgentTurnReceipt', { ...turn, agentId: B, outcome: 'answered' }, B);
       }
-      await result(review!, verdict);
       await expect.poll(async () => (await commands(A, C))[0]?.source.body)
-        .toContain(approved ? 'PASS' : verdict);
+        .toBe(approved ? 'PASS' : verdict);
     } finally {
       await unlisten();
       await runtime.stop();
@@ -407,7 +423,7 @@ describe('thread message attribution', () => {
     expect((await db.query(
       `SELECT room_id,agent_id,reason FROM agent_commands WHERE id<>ALL($1::text[])`,
       [beforeCommands.map(({ id }) => id)],
-    )).rows).toEqual([{ room_id: C, agent_id: A, reason: wake }]);
+    )).rows).toEqual([{ room_id: C, agent_id: A, reason: approved ? 'report' : 'corner_review_needed' }]);
     expect((await db.query(
       'SELECT approved_by,head_sha FROM corner_merge_approvals WHERE corner_id=$1', [C],
     )).rows).toEqual(approved ? [{ approved_by: B, head_sha: headSha }] : []);

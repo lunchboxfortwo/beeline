@@ -25,10 +25,11 @@ The stored machine names the agent its state is about; rows read that name.
 
 Red checks wake the implementer with the recorded failing jobs. Green checks wake
 the independent configured reviewer inside the corner. Review uses the required
-checks when configured and the whole rollup otherwise. Completed findings go
-to the recorded implementer once per review. A completed request without a
-verdict ends that request. A new green check result, head or brief revision can
-request review again. A missing handback command is replanned using the same ID.
+checks when configured and the whole rollup otherwise. When a review command
+ends without approval on that head, its recorded turn text goes to the
+implementer once per review. A review can end without turn text. A new green
+check result, head or brief revision can request review again. A missing
+handback command is replanned using the same ID.
 Reports retain their current order-author return route.
 
 Pending approval grants also keep their recorded `room_id` corner in

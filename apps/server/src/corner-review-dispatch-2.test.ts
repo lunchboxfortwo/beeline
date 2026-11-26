@@ -521,14 +521,14 @@ describe('the corner implementer the workflow wakes follows a person hand-over',
 });
 
 
-it.each(['empty','status','failed'])('a %s review result ends silently without retrying',async ending=>{
+it.each(['empty','failed'])('a %s diagnostic receipt leaves the unanswered review queued',async ending=>{
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   await greenHead(91,'d'.repeat(40));
   const [review]=await commands(B,C);await claim(review!);
-  if(ending==='status')await result(review!,'Review ended without a verdict.');
-  else await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:ending==='failed'?'failed':'complete', ...(ending==='failed'?{reason:'provider unavailable'}:{}) },B);
+  await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status:ending==='failed'?'failed':'complete', ...(ending==='failed'?{reason:'provider unavailable'}:{}) },B);
   for(let event=0;event<3;event++)await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-  expect((await commands(B,C)).some(item=>item.id===review!.id)).toBe(ending!=='status');
+  expect((await commands(B,C)).some(item=>item.id===review!.id)).toBe(true);
+  expect((await commands(A,C)).filter(command=>command.reason==='corner_review_needed')).toHaveLength(0);
   expect((await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows
     .some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
   if(ending==='failed')expect((await commands(A,C)).filter(c=>c.reason==='report'&&c.source.body.includes('failed:'))).toHaveLength(0);
@@ -799,7 +799,8 @@ it('committed-event recovery: startup green, lost command and reviewer completio
     await machine.refresh(C);
     const lines=(await rootFixture.db.query<{text:string}>(`SELECT text FROM messages WHERE room_id=$1`,[C])).rows;
     expect(lines.some(line=>line.text.includes('reviewer gave no verdict'))).toBe(false);
-    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed')).toHaveLength(0);
+    expect((await commands(A, C)).filter(command => command.reason === 'corner_review_needed'))
+      .toMatchObject([{ source: { body: 'The review is complete.' } }]);
     expect(await commands(B, C)).toEqual([]);
     expect(errors).toEqual([]);
     await machine.stop();
