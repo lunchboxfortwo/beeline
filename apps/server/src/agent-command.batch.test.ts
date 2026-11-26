@@ -20,7 +20,7 @@ it.each([CHAT,THREAD])('one combined result in %s publishes one session post and
   ]);
   const expectedReplyWakes=place===THREAD?[{room_id:CHAT,agent_id:A}]:[];
   expect((await db.query(`SELECT room_id,agent_id FROM agent_commands
-    WHERE agent_id=$1 AND reason='reply'`,[A])).rows).toEqual(expectedReplyWakes);
+    WHERE reason='reply'`)).rows).toEqual(expectedReplyWakes);
   expect((await db.query(`SELECT state,result_message_id,answer_attachments FROM agent_commands
     WHERE id=ANY($1::text[])`,[requests.map(request=>request.id)])).rows).toEqual([
     {state:'complete',result_message_id:result.id,answer_attachments:[]},
@@ -29,7 +29,7 @@ it.each([CHAT,THREAD])('one combined result in %s publishes one session post and
 
   await daemon.execute('postRoomMessage',input,B);
   expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND text=$2',[B,input.text])).rowCount).toBe(1);
-  expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND reason='reply'",[A])).rowCount).toBe(expectedReplyWakes.length);
+  expect((await db.query("SELECT 1 FROM agent_commands WHERE reason='reply'")).rowCount).toBe(expectedReplyWakes.length);
 });
 
 it('a batch from different issuers wakes each distinct thread commander once',async()=>{
