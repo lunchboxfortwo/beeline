@@ -32,12 +32,15 @@ type RequestOptions = {
   reconnectAttempt?: true;
   /** Durable sends have their own one-replay budget on this same connection. */
   reconnectOwnedByOutbox?: true;
+  /** Verify a silent open socket with one zero-DB ping after a timeout and replace if dead. */
+  recoverSilentSocket?: true;
 };
 type PendingRequest = {
   operation: string;
   frame: string;
   socket?: WebSocket;
   generation?: number;
+  onSent?: (socket: WebSocket, generation: number, activityAtSend: number) => void;
   resolve(value: unknown): void;
   reject(reason: unknown, transportFailed?: boolean): void;
 };
@@ -97,6 +100,8 @@ const roomIdsFromFilters = (filters: SurfaceFilters) =>
 const isOpen = (socket: WebSocket | undefined): socket is WebSocket & { readyState: 1 } => socket?.readyState === 1;
 /** Pause between socket admissions while the outage banner shows in the foreground. */
 const OUTAGE_RECONNECT_MS = 5_000;
+/** Bound for the one-shot zero-DB ping check after an explicit silent timeout. */
+const LIVENESS_PING_TIMEOUT_MS = 2_500;
 
 /** The production native/browser host supplies online events without probes. */
 export function subscribeNetworkOnline(online: () => void): () => void {
@@ -141,6 +146,13 @@ export class LiveConnection {
   private requestId = 0;
   private socketEpoch = 0;
   private socketGeneration = 0;
+  private socketActivity = 0;
+  private lastSocketActivityAt = 0;
+  private livenessCheck?: {
+    socket: WebSocket;
+    promise: Promise<'alive' | 'dead' | 'aborted'>;
+    finish: (result: 'alive' | 'dead' | 'aborted') => void;
+  };
   // Identity protects against old authorization completing after sign-out.
   private identity = 0;
   // An old screen's release must not hide a new identity's view of the same Room.
@@ -219,9 +231,13 @@ export class LiveConnection {
     let failed: boolean | undefined;
     let reconnected = options.reconnectAttempt === true || this.recovering;
     let generation = this.socketGeneration;
+    let sent: { socket: WebSocket; generation: number; activityAtSend: number } | undefined;
     const outcome = (value: boolean, socketGeneration: number) => {
       failed = value;
       generation = socketGeneration;
+    };
+    const onSent = (socket: WebSocket, socketGeneration: number, activityAtSend: number) => {
+      sent = { socket, generation: socketGeneration, activityAtSend };
     };
     const current = () => !this.disposed && this.foreground && identity === this.identity && session === failureSession;
     const observed = !TELEMETRY_OPERATIONS.includes(operation);
@@ -233,13 +249,26 @@ export class LiveConnection {
     }
     const send=() => {
       if (observed) this.deps.telemetry?.record({name:'operation_started',operation,actionId:diagnostic?.actionId,requestId:diagnostic?.requestId});
-      return this.sendRequest(operation,args,options,outcome,diagnostic) as Promise<PhoneOperationMap[Name]['output']>;
+      return this.sendRequest(operation,args,options,outcome,diagnostic,onSent) as Promise<PhoneOperationMap[Name]['output']>;
     };
     try {
       let result: PhoneOperationMap[Name]['output'];
       try {
         result=await send();
       } catch (error) {
+        if (
+          options.recoverSilentSocket &&
+          error instanceof MonolithRequestTimeoutError &&
+          !reconnected &&
+          current() &&
+          !options.signal?.aborted &&
+          sent &&
+          this.socket === sent.socket &&
+          this.socketGeneration === sent.generation
+        ) {
+          await this.recoverSilentSocket(sent.socket, sent.generation, sent.activityAtSend, current, options.signal);
+          throw error;
+        }
         if (reconnected || !failed || !current() || options.signal?.aborted) throw error;
         // The durable outbox owns the one same-id send replay and calls this
         // connection's shared recovery itself; replay failures must not get a
@@ -340,6 +369,7 @@ export class LiveConnection {
     options: RequestOptions,
     outcome: (failed: boolean, generation: number) => void,
     diagnostic?: ReturnType<NonNullable<Dependencies['telemetry']>['origin']>,
+    onSent?: (socket: WebSocket, generation: number, activityAtSend: number) => void,
   ): Promise<unknown> {
     if (options.signal?.aborted) return Promise.reject(this.abortError());
     // Native close callbacks can arrive late. Settle the old socket's requests
@@ -366,6 +396,7 @@ export class LiveConnection {
           args,
           ...(diagnostic ? { diagnostic } : {}),
         }),
+        onSent,
         resolve: (value) => {
           if (!finish()) return;
           outcome(false, request.generation ?? this.socketGeneration);
@@ -429,6 +460,7 @@ export class LiveConnection {
       if (request.socket) continue;
       request.socket = socket;
       request.generation = this.socketGeneration;
+      request.onSent?.(socket, this.socketGeneration, this.socketActivity);
       try {
         socket.send(request.frame);
       } catch {
@@ -475,6 +507,9 @@ export class LiveConnection {
         };
         const received = (event: MessageEvent) => {
           if (this.socket !== socket) return;
+          this.socketActivity++;
+          this.lastSocketActivityAt = Date.now();
+          if (this.livenessCheck?.socket === socket) this.livenessCheck.finish('alive');
           let frame: unknown;
           try {
             frame = JSON.parse(String(event.data));
@@ -550,6 +585,7 @@ export class LiveConnection {
     }
   }
   private dropConnection(transportFailed = false): void {
+    this.livenessCheck?.finish('aborted');
     this.endLaunch();
     const socket = this.socket;
     this.socket = undefined;
@@ -575,6 +611,75 @@ export class LiveConnection {
     if (isOpen(this.socket)) this.dropConnection();
     this.reconnectNow();
     this.refreshRoom();
+  }
+
+  /**
+   * Event-driven one-shot liveness check triggered only after an explicit
+   * silent request timeout. Uses the server's zero-DB ping handler and never
+   * schedules periodic heartbeats or probes on idle sockets.
+   */
+  private checkSocketLiveness(socket: WebSocket): Promise<'alive' | 'dead' | 'aborted'> {
+    if (this.livenessCheck?.socket === socket) return this.livenessCheck.promise;
+    this.livenessCheck?.finish('aborted');
+    if (this.socket !== socket || !isOpen(socket)) return Promise.resolve('aborted');
+    let finish!: (result: 'alive' | 'dead' | 'aborted') => void;
+    const promise = new Promise<'alive' | 'dead' | 'aborted'>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => finish('dead'), LIVENESS_PING_TIMEOUT_MS);
+      finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (this.livenessCheck?.promise === promise) this.livenessCheck = undefined;
+        resolve(result);
+      };
+    });
+    this.livenessCheck = { socket, promise, finish };
+    try {
+      socket.send('{"type":"ping"}');
+    } catch {
+      finish('dead');
+    }
+    return promise;
+  }
+
+  private async recoverSilentSocket(
+    socket: WebSocket,
+    generation: number,
+    activityAtSend: number,
+    current: () => boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (this.socket !== socket || this.socketGeneration !== generation || !current() || signal?.aborted) {
+      return false;
+    }
+    if (!isOpen(socket)) {
+      if (socket.readyState > 1) {
+        this.dropConnection();
+        void this.reconnectAfterFailure(generation).then(() => this.refreshRoom(), () => undefined);
+        return true;
+      }
+      return false;
+    }
+    const recentlyActive =
+      this.socketActivity > activityAtSend &&
+      Date.now() - this.lastSocketActivityAt < LIVENESS_PING_TIMEOUT_MS;
+    if (recentlyActive) return false;
+    const status = await this.checkSocketLiveness(socket);
+    if (
+      status !== 'dead' ||
+      this.socket !== socket ||
+      this.socketGeneration !== generation ||
+      !current() ||
+      signal?.aborted
+    ) {
+      return false;
+    }
+    // Confirmed silent/half-open socket: replace it without replaying the
+    // ambiguous write, and refresh open rooms once the replacement confirms.
+    this.dropConnection();
+    void this.reconnectAfterFailure(generation).then(() => this.refreshRoom(), () => undefined);
+    return true;
   }
 
   /** One failed explicit send may replace its socket, then refresh open screens. */
