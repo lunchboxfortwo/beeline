@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { afterEach, expect, it, vi } from 'vitest';
 import { runUpdateCommand } from './self-update-cli.js';
 import { convergeMachine, prepareMachineRelease } from './recovery.js';
@@ -99,7 +100,8 @@ it('keeps the chosen channel across background checks and shows it in status', a
       expect.objectContaining({ env: expect.objectContaining({ BEELINE_UPDATE_MANIFEST_URL: nextUrl }) }),
     );
     await runUpdateCommand(['update', '--status']);
-    expect(log.mock.calls.flat()).toContainEqual(expect.stringMatching(/release channel\s+next/));
+    const statusLines = log.mock.calls.map(([line]) => stripVTControlCharacters(line));
+    expect(statusLines).toContainEqual(expect.stringMatching(/^release channel\s+next$/));
 
     vi.stubEnv('BEELINE_RELEASE_CHANNEL', 'latest');
     await runUpdateCommand(['update']);
