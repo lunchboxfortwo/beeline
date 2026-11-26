@@ -9,9 +9,10 @@ An operator with vault access stages the existing Fly org deploy token in
 the host user with mode `0600`. systemd reads it on each collector start.
 
 Run `bash packages/scripts/log-walk/install-host.sh` as the host user to install
-or update the collectors. It prepares a dedicated checkout of `main` at
-`~/.local/share/beeline-log-walk/checkout`, writes the collector environment,
-and installs, enables, and restarts the `beeline-log-collector@<app>.service` units.
+or update the server and free-agent collectors. It prepares their checkout of
+`main` at `~/.local/share/beeline-log-walk/token-checkout`, writes their
+environment, and installs, enables, and restarts their systemd units. The voice
+collector continues using its existing template, environment, and checkout.
 
 Raw logs land at
 `~/.local/share/beeline-log-walk/raw/<app>/<UTC date>.log`.
@@ -19,5 +20,9 @@ The systemd journal records stream failures and authentication errors.
 
 `collect.sh` reconnects `flyctl logs` every ten minutes, forcibly terminating
 streams that ignore SIGTERM. systemd restarts the collector if it dies.
-Collectors keep eight days of logs. If Fly rejects the token, the affected
-collector exits and stays failed. Restart it after the credential is repaired.
+Collectors keep eight days of logs. If Fly rejects the token or systemd cannot
+load it, the affected service stays failed. Restart it after the credential is
+repaired.
+
+Run `bash packages/scripts/log-walk/test-systemd.sh` with a running user
+manager to test the credential setup failure using a disposable service.
