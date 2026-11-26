@@ -24,6 +24,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     let to: MessageAddress;
     let quote: string | undefined;
     let openBlockIds: string[] = [];
+    let existed = false;
     if (input.type === 'normal' && typeof input.address === 'string' && input.quoteMsgId === undefined) {
       const parts = input.address.split('@');
       const [recipient, place] = parts;
@@ -66,6 +67,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
         throw new CommandRefusalError('No commander is recorded for this session.', 400);
       to = {agent: recipient, place};
       if (room?.parent_id) {
+        if (id) existed = (await db.query('SELECT 1 FROM messages WHERE id=$1', [id])).rowCount > 0;
         openBlockIds = (await db.query<{id:string}>(`SELECT id FROM (${openBlocksSql('$1')}) block WHERE author_id=$2 ORDER BY created_at,id`, [input.roomId,agent]))
           .rows.map((row) => row.id);
       }
@@ -73,12 +75,16 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
     }
     const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
-    if (parent && saved.messageId && (quote || input.type === 'blocked')) await db.query(
+    const replayed = existed && saved.messageId === id;
+    if (parent && saved.messageId && !replayed && (quote || input.type === 'blocked')) await db.query(
       'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.messageId]);
-    if (input.type === 'blocked' && saved.messageId && openBlockIds.length) {
-      const replaced = await supersedeOpenBlocks(db, input.roomId, agent, saved.messageId, openBlockIds);
-      if (replaced.length && saved.receipt) {
-        return { ...saved, receipt: `${saved.receipt} · superseded previous block ${replaced.map((oldId) => oldId.slice(0, 8)).join(', ')}` };
+    if (input.type === 'blocked' && saved.messageId && openBlockIds.length && !replayed) {
+      const createdOpenBlock = (await db.query(`SELECT 1 FROM (${openBlocksSql('$1')}) block WHERE id=$2`, [input.roomId, saved.messageId])).rowCount > 0;
+      if (createdOpenBlock) {
+        const replaced = await supersedeOpenBlocks(db, input.roomId, agent, saved.messageId, openBlockIds);
+        if (replaced.length && saved.receipt) {
+          return { ...saved, receipt: `${saved.receipt} · superseded previous block ${replaced.map((oldId) => oldId.slice(0, 8)).join(', ')}` };
+        }
       }
     }
     return saved;

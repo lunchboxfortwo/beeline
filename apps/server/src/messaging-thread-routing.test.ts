@@ -215,6 +215,41 @@ it('replaces an open human-commander block after the first was answered via wake
     );
 });
 
+it.each(['agent', 'human'] as const)('replaying an older blocked transport request keeps the current %s-commander blocker open', async commander => {
+  const task = commander === 'agent'
+    ? await sendMessage(db, { route: { from: { agent: A, place: CHAT }, to: { agent: B, place: THREAD } }, text: 'Ship the fix.' })
+    : undefined;
+  const firstInput = {
+    roomId: THREAD,
+    ...(task ? { requestId: task.id } : {}),
+    type: 'blocked' as const,
+    text: 'First blocker.',
+    transportRequestId: `replay-first-${commander}`,
+  };
+  const secondInput = {
+    roomId: THREAD,
+    ...(task ? { requestId: task.id } : {}),
+    type: 'blocked' as const,
+    text: 'Second blocker.',
+    transportRequestId: `replay-second-${commander}`,
+  };
+  const first = await daemon.execute('message', firstInput as never, B);
+  const second = await daemon.execute('message', secondInput as never, B);
+  const replayed = await daemon.execute('message', firstInput as never, B);
+
+  expect(replayed.id).toBe(first.id);
+  expect((await db.query('SELECT id FROM messages WHERE block_corner_id=$1 AND ask_closed_reason IS NULL', [THREAD])).rows)
+    .toEqual([{ id: second.id }]);
+  expect((await db.query('SELECT ask_closed_reason,ask_closed_by FROM messages WHERE id=$1', [first.id])).rows)
+    .toEqual([{ ask_closed_reason: `superseded by ${second.id}`, ask_closed_by: B }]);
+  expect((await db.query('SELECT ask_closed_reason FROM messages WHERE id=$1', [second.id])).rows)
+    .toEqual([{ ask_closed_reason: null }]);
+  if (commander === 'human') {
+    expect((await db.query('SELECT message_id FROM needs_you_marks WHERE identity_id=$1 AND cleared_at IS NULL', [H])).rows)
+      .toEqual([{ message_id: second.id }]);
+  }
+});
+
 it('rings the blocker even when the same chat turn later posts local text', async () => {
   const {PushDeliveryLoop} = await import('./background.js');
   const {vi} = await import('vitest');
