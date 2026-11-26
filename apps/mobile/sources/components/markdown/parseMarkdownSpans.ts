@@ -1,9 +1,40 @@
 import type { MarkdownSpan } from "./parseMarkdown";
+import { formatInlineMath } from "./parseMath";
 
 // Streaming text may end in the middle of a construct. Match only completed
 // delimiters so a later chunk can turn the original plain text into Markdown
 // instead of permanently consuming its opening syntax.
-const pattern = /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)/g;
+// Bare URLs stop before completed Markdown spans (backtick code, links,
+// emphasis) so adjacent constructs are never absorbed into a URL, while
+// complete inline math `\( ... \)` takes precedence over emphasis without
+// crossing code spans, links, URLs, or another `\(`.
+const pattern = /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)|(https?:\/\/(?:(?!`[^`\n]*`|\[[^\]]+\]\([^)]+\)|\*\*[^\n]*?\*\*|(?<!\*)\*(?!\*)[^\n]*?\*(?!\*))[^\s<])+|(?<![A-Za-z0-9_/#])#beeline\/[^\s/()<>]+\/[0-9a-f]{64}(?![A-Za-z0-9_/-]))|((?<!\\)\\\(((?:(?!`|\[[^\]]+\]\([^)]+\)|https?:\/\/|#beeline\/|(?<!\\)\\\()[^\n])+?)\\\))/g;
+
+const inlineMathPattern = /(?<!\\)\\\(((?:(?!`|(?<!\\)\\\()[^\n])+?)\\\)/g;
+
+function pushTextWithInlineMath(spans: MarkdownSpan[], text: string, styles: MarkdownSpan['styles']) {
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    inlineMathPattern.lastIndex = 0;
+
+    while ((match = inlineMathPattern.exec(text)) !== null) {
+        const before = text.slice(lastIndex, match.index);
+        if (before) {
+            spans.push({ styles, text: before, url: null });
+        }
+        const rawMath = match[1] ?? '';
+        if (rawMath.trim().length > 0) {
+            spans.push({ styles: [...styles, 'math'], text: formatInlineMath(rawMath), url: null });
+        } else {
+            spans.push({ styles, text: match[0], url: null });
+        }
+        lastIndex = inlineMathPattern.lastIndex;
+    }
+
+    if (lastIndex < text.length) {
+        spans.push({ styles, text: text.slice(lastIndex), url: null });
+    }
+}
 
 export function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, styles: MarkdownSpan['styles']) {
     const urlPattern = /https?:\/\/[^\s<]+|(?<![A-Za-z0-9_/#])#beeline\/[^\s/()<>]+\/[0-9a-f]{64}(?![A-Za-z0-9_/-])/g;
@@ -13,7 +44,7 @@ export function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, style
     while ((match = urlPattern.exec(text)) !== null) {
         const plainText = text.slice(lastIndex, match.index);
         if (plainText) {
-            spans.push({ styles, text: plainText, url: null });
+            pushTextWithInlineMath(spans, plainText, styles);
         }
 
         let url = match[0];
@@ -34,7 +65,7 @@ export function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, style
     }
 
     if (lastIndex < text.length) {
-        spans.push({ styles, text: text.slice(lastIndex), url: null });
+        pushTextWithInlineMath(spans, text.slice(lastIndex), styles);
     }
 }
 
@@ -76,6 +107,17 @@ export function parseMarkdownSpans(markdown: string, header: boolean) {
         } else if (match[8]) {
             // Inline code
             spans.push({ styles: ['code'], text: match[9], url: null });
+        } else if (match[10]) {
+            // Bare autolink: preserve exact URL and trailing punctuation handling
+            pushTextWithAutoLinks(spans, match[10], []);
+        } else if (match[11]) {
+            // Inline math `\( ... \)`
+            const rawMath = match[12] ?? '';
+            if (rawMath.trim().length > 0) {
+                spans.push({ styles: ['math'], text: formatInlineMath(rawMath), url: null });
+            } else {
+                pushTextWithAutoLinks(spans, match[11], []);
+            }
         }
 
         lastIndex = pattern.lastIndex;

@@ -65,6 +65,66 @@ function parseTable(lines: string[], startIndex: number): { table: MarkdownBlock
     return { table, nextIndex: index };
 }
 
+function parseDisplayMath(
+    lines: string[],
+    startIndex: number,
+    open: '\\[' | '$$',
+    close: '\\]' | '$$',
+): { block: MarkdownBlock | null; nextIndex: number } {
+    const firstTrimmed = lines[startIndex].trim();
+    if (!firstTrimmed.startsWith(open)) {
+        return { block: null, nextIndex: startIndex };
+    }
+
+    // Single-line display math: `\[ ... \]` or `$$ ... $$`
+    if (firstTrimmed.length > open.length + close.length && firstTrimmed.endsWith(close)) {
+        const inner = firstTrimmed.slice(open.length, firstTrimmed.length - close.length).trim();
+        if (inner.length > 0) {
+            return { block: { type: 'math-block', content: inner }, nextIndex: startIndex + 1 };
+        }
+        return { block: null, nextIndex: startIndex };
+    }
+
+    // Multi-line display math: scan forward for a matching closing delimiter.
+    // Streaming safety: if no closing delimiter exists yet, leave lines as plain text.
+    const bodyLines: string[] = [];
+    const firstRemainder = firstTrimmed.slice(open.length).trim();
+    if (firstRemainder.length > 0) {
+        bodyLines.push(firstRemainder);
+    }
+
+    let cursor = startIndex + 1;
+    while (cursor < lines.length) {
+        const candidate = lines[cursor].trim();
+        // Never swallow a fenced code block if a display math opening is unclosed.
+        if (candidate.startsWith('```')) {
+            return { block: null, nextIndex: startIndex };
+        }
+        if (candidate === close) {
+            const content = bodyLines.join('\n').trim();
+            if (content.length > 0) {
+                return { block: { type: 'math-block', content }, nextIndex: cursor + 1 };
+            }
+            return { block: null, nextIndex: startIndex };
+        }
+        if (candidate.endsWith(close)) {
+            const beforeClose = candidate.slice(0, candidate.length - close.length).trim();
+            if (beforeClose.length > 0) {
+                bodyLines.push(beforeClose);
+            }
+            const content = bodyLines.join('\n').trim();
+            if (content.length > 0) {
+                return { block: { type: 'math-block', content }, nextIndex: cursor + 1 };
+            }
+            return { block: null, nextIndex: startIndex };
+        }
+        bodyLines.push(lines[cursor]);
+        cursor++;
+    }
+
+    return { block: null, nextIndex: startIndex };
+}
+
 export function parseMarkdownBlock(markdown: string, document = false) {
     const blocks: MarkdownBlock[] = [];
     const lines = markdown.split('\n');
@@ -120,6 +180,19 @@ export function parseMarkdownBlock(markdown: string, document = false) {
                 blocks.push({ type: 'code-block', language, content: contentString });
             }
             continue;
+        }
+
+        // Display math block (`\[ ... \]` or `$$ ... $$`, single-line or multi-line).
+        // Only closed delimiter pairs become math blocks so streaming chunks stay plain text.
+        if (trimmed.startsWith('\\[') || trimmed.startsWith('$$')) {
+            const open = trimmed.startsWith('\\[') ? '\\[' : '$$';
+            const close = open === '\\[' ? '\\]' : '$$';
+            const { block, nextIndex } = parseDisplayMath(lines, index - 1, open, close);
+            if (block) {
+                blocks.push(block);
+                index = nextIndex;
+                continue outer;
+            }
         }
 
         // Horizontal rule

@@ -6,6 +6,7 @@ import { XStack, YStack } from 'tamagui';
 import { Glyph, Indent, ProseRun, T, type ProseMark } from '@/ui/grammar';
 import { Check } from 'lucide-react-native';
 import { parseMarkdown, type MarkdownSpan } from '@/components/markdown/parseMarkdown';
+import { formatMathNodesInline, parseMath, type MathNode } from '@/components/markdown/parseMath';
 import { CodeBlock } from '@/components/buzz/CodeBlock';
 import {
   findChannelReferences,
@@ -57,7 +58,7 @@ export function glossMentions(
 ): MentionSpan[] {
   const out: MentionSpan[] = [];
   for (const span of spans) {
-    if (span.url || span.styles.includes('code')) {
+    if (span.url || span.styles.includes('code') || span.styles.includes('math')) {
       out.push(span);
       continue;
     }
@@ -95,8 +96,8 @@ export function glossChannelReferences(
   if (!index) return spans;
   const out: MentionSpan[] = [];
   for (const span of spans) {
-    // A mention span is already a tagged token; url/code are machine text.
-    if (span.url || span.styles.includes('code') || span.mention) {
+    // A mention span is already a tagged token; url/code/math are machine text.
+    if (span.url || span.styles.includes('code') || span.styles.includes('math') || span.mention) {
       out.push(span);
       continue;
     }
@@ -124,7 +125,7 @@ export function glossChannelReferences(
 export function glossChatLinks(spans: MentionSpan[]): MentionSpan[] {
   const out: MentionSpan[] = [];
   for (const span of spans) {
-    if (span.url || span.styles.includes('code') || span.mention || span.channelRef) {
+    if (span.url || span.styles.includes('code') || span.styles.includes('math') || span.mention || span.channelRef) {
       out.push(span);
       continue;
     }
@@ -263,7 +264,7 @@ function spanMarks(span: MentionSpan, viewerHandle?: string): ProseMark[] {
   const marks: ProseMark[] = [];
   if (span.styles.includes('bold') || span.styles.includes('semibold')) marks.push('strong');
   if (span.styles.includes('italic')) marks.push('emphasis');
-  if (span.styles.includes('code')) marks.push('code');
+  if (span.styles.includes('code') || span.styles.includes('math')) marks.push('code');
   if (span.url) marks.push('link');
   // A tagged identity, and a resolved channel reference, pop in the theme's
   // brass: the one chromatic spend in prose, never a new accent or chip.
@@ -328,8 +329,8 @@ function InlineMarkdown({
             />
           );
         }
-        // Join only standalone command tokens; paths, URLs and code stay literal.
-        const text = span.url || span.styles.includes('code')
+        // Join only standalone command tokens; paths, URLs, code and math stay literal.
+        const text = span.url || span.styles.includes('code') || span.styles.includes('math')
           ? span.text
           : span.text.replace(/(^|[\s(])\/([a-zA-Z][\w-]*)(?=$|[\s).,!?;:])/g,
               (_, before: string, name: string) => `${before}/\u2060${name.replace(/-/g, '\u2060-\u2060')}`);
@@ -462,6 +463,223 @@ function MarkdownTable({ headers, rows, onLink }: { headers: MarkdownSpan[][]; r
         </XStack>
       ))}
     </YStack>
+  );
+}
+
+const MATH_RELATION_OPS = new Set([
+  '=', '<', '>', '≤', '≥', '≠', '≈', '≡', '∼', '≃', '≅', '∝', '≪', '≫',
+  '→', '←', '↔', '⇒', '⇐', '⇔', '↦',
+]);
+
+type MathRowSegment =
+  | { kind: 'frac'; num: MathNode[]; den: MathNode[] }
+  | { kind: 'op'; value: string }
+  | { kind: 'run'; nodes: MathNode[] };
+
+type MathTextChunk = { text: string; tone: 'text' | 'bold' | 'var' | 'op' };
+
+function isSplitOperator(nodes: MathNode[], index: number): boolean {
+  const node = nodes[index];
+  if (!node || node.type !== 'symbol' || node.kind !== 'op') return false;
+  const prev = index > 0 ? nodes[index - 1] : undefined;
+  const next = index + 1 < nodes.length ? nodes[index + 1] : undefined;
+  if (!prev || !next) return false;
+  if (prev.type === 'symbol' && prev.kind === 'op') return false;
+  if (MATH_RELATION_OPS.has(node.value)) return true;
+  return prev.type === 'frac' || next.type === 'frac';
+}
+
+function splitMathRowSegments(nodes: MathNode[]): MathRowSegment[] {
+  const segments: MathRowSegment[] = [];
+  let current: MathNode[] = [];
+  const flush = () => {
+    if (current.length > 0) {
+      segments.push({ kind: 'run', nodes: current });
+      current = [];
+    }
+  };
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i]!;
+    if (node.type === 'frac') {
+      flush();
+      segments.push({ kind: 'frac', num: node.num, den: node.den });
+    } else if (isSplitOperator(nodes, i)) {
+      flush();
+      segments.push({ kind: 'op', value: (node as { value: string }).value });
+    } else {
+      current.push(node);
+    }
+  }
+  flush();
+  return segments;
+}
+
+function buildMathTextChunks(nodes: MathNode[]): MathTextChunk[] {
+  const chunks: MathTextChunk[] = [];
+  const push = (text: string, tone: MathTextChunk['tone']) => {
+    if (!text) return;
+    const last = chunks[chunks.length - 1];
+    if (last && last.tone === tone) {
+      last.text += text;
+    } else {
+      chunks.push({ text, tone });
+    }
+  };
+
+  for (let i = 0; i < nodes.length; i += 1) {
+    const node = nodes[i]!;
+    const prev = i > 0 ? nodes[i - 1] : undefined;
+    const next = i + 1 < nodes.length ? nodes[i + 1] : undefined;
+    const lastChar = chunks.length > 0 ? chunks[chunks.length - 1]!.text.slice(-1) : '';
+    const prevIsOpen = prev?.type === 'symbol' && prev.kind === 'punct' && (prev.value === '(' || prev.value === '[' || prev.value === '{');
+    const nextIsClose = next?.type === 'symbol' && next.kind === 'punct' && (next.value === ')' || next.value === ']' || next.value === '}' || next.value === ',' || next.value === ';');
+
+    if (node.type === 'symbol' && node.kind === 'op') {
+      const unary = (node.value === '−' || node.value === '+' || node.value === '±') && (!prev || prevIsOpen || (prev.type === 'symbol' && prev.kind === 'op'));
+      const trailingTimes = node.value === '×' && !next;
+      if (unary || trailingTimes) {
+        push(node.value, 'op');
+      } else {
+        const leading = chunks.length > 0 && lastChar !== ' ' ? ' ' : '';
+        const trailing = next && !nextIsClose ? ' ' : '';
+        push(`${leading}${node.value}${trailing}`, 'op');
+      }
+      continue;
+    }
+
+    if (node.type === 'symbol' && node.kind === 'func') {
+      const leading = chunks.length > 0 && lastChar !== ' ' && !prevIsOpen ? ' ' : '';
+      const nextIsOpen = next?.type === 'symbol' && next.kind === 'punct' && (next.value === '(' || next.value === '[');
+      const nextIsOp = next?.type === 'symbol' && next.kind === 'op';
+      const trailing = next && !nextIsOpen && !nextIsClose && !nextIsOp ? ' ' : '';
+      push(`${leading}${node.value}${trailing}`, 'var');
+      continue;
+    }
+
+    if (node.type === 'symbol' && node.kind === 'punct') {
+      const trailing = (node.value === ',' || node.value === ';') && next ? ' ' : '';
+      const tone = prev?.type === 'text' || prev?.type === 'symbol' && prev.kind === 'num' ? 'text' : 'var';
+      push(`${node.value}${trailing}`, tone);
+      continue;
+    }
+
+    if (chunks.length > 0 && lastChar !== ' ' && !prevIsOpen && (node.type === 'text' || prev?.type === 'text')) {
+      push(' ', 'text');
+    }
+
+    if (node.type === 'text') {
+      push(node.value, node.bold ? 'bold' : 'text');
+    } else if (node.type === 'symbol' && node.kind === 'num') {
+      push(node.value, 'text');
+    } else {
+      push(formatMathNodesInline([node], true), 'var');
+    }
+  }
+
+  return chunks;
+}
+
+function MathInlineRun({
+  nodes,
+  userSelect,
+  center = false,
+}: {
+  nodes: MathNode[];
+  userSelect: 'none' | 'text';
+  center?: boolean;
+}) {
+  const chunks = useMemo(() => buildMathTextChunks(nodes), [nodes]);
+  if (chunks.length === 0) return null;
+  const align = center ? 'center' : undefined;
+  if (chunks.length === 1) {
+    const only = chunks[0]!;
+    const variant = only.tone === 'bold' ? 'heading' : only.tone === 'text' ? 'body' : 'code';
+    return (
+      <T v={variant} color={only.tone === 'op' ? 'secondary' : 'ink'} textAlign={align} userSelect={userSelect}>
+        {only.text}
+      </T>
+    );
+  }
+  const hasProse = chunks.some((chunk) => chunk.tone === 'text' || chunk.tone === 'bold');
+  return (
+    <T v={hasProse ? 'body' : 'code'} color="ink" textAlign={align} userSelect={userSelect}>
+      {chunks.map((chunk, chunkIndex) => {
+        if (chunk.tone === 'op') {
+          return <T key={chunkIndex} v="code" color="secondary">{chunk.text}</T>;
+        }
+        if (chunk.tone === 'bold') {
+          return <T key={chunkIndex} v="heading" color="ink">{chunk.text}</T>;
+        }
+        if (chunk.tone === 'var') {
+          return <T key={chunkIndex} v="code" color="ink">{chunk.text}</T>;
+        }
+        return chunk.text;
+      })}
+    </T>
+  );
+}
+
+/**
+ * Display math block (`\[ ... \]` or `$$ ... $$`) rendered purely with
+ * Tamagui stacks and grammar type styles: stacked fractions over a 1px
+ * `secondary` divider bar, unwrapped `\text{...}`, Unicode symbols, and a
+ * quiet monospace fallback for exotic LaTeX.
+ */
+function MathBlock({ content, userSelect }: { content: string; userSelect: 'none' | 'text' }) {
+  const parsed = useMemo(() => parseMath(content), [content]);
+  if (parsed.kind === 'fallback') {
+    return (
+      <T v="code" color="secondary" userSelect={userSelect} testID="math-fallback">
+        {parsed.text}
+      </T>
+    );
+  }
+  const segments = splitMathRowSegments(parsed.nodes);
+  return (
+    <XStack flexWrap="wrap" alignItems="center" rowGap="2" columnGap="2" maxWidth="100%" minWidth={0}>
+      {segments.map((segment, segIndex) => {
+        if (segment.kind === 'frac') {
+          return (
+            <YStack
+              key={segIndex}
+              alignItems="center"
+              justifyContent="center"
+              maxWidth="100%"
+              minWidth={0}
+              testID="math-fraction"
+            >
+              <XStack
+                alignItems="center"
+                justifyContent="center"
+                flexWrap="wrap"
+                paddingHorizontal="2"
+                paddingBottom="1"
+              >
+                <MathInlineRun nodes={segment.num} userSelect={userSelect} center />
+              </XStack>
+              <YStack alignSelf="stretch" height={1} backgroundColor="secondary" testID="math-fraction-bar" />
+              <XStack
+                alignItems="center"
+                justifyContent="center"
+                flexWrap="wrap"
+                paddingHorizontal="2"
+                paddingTop="1"
+              >
+                <MathInlineRun nodes={segment.den} userSelect={userSelect} center />
+              </XStack>
+            </YStack>
+          );
+        }
+        if (segment.kind === 'op') {
+          return (
+            <T key={segIndex} v="code" color="secondary" userSelect={userSelect}>
+              {segment.value}
+            </T>
+          );
+        }
+        return <MathInlineRun key={segIndex} nodes={segment.nodes} userSelect={userSelect} />;
+      })}
+    </XStack>
   );
 }
 
@@ -648,6 +866,23 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
           return (
             <YStack key={index} maxWidth="100%" paddingLeft="4" paddingVertical="1" borderLeftWidth={2} borderLeftColor="strongStroke" marginBottom={last ? 0 : document ? '4' : '2'}>
               <MarkdownTable headers={block.headers} rows={block.rows} onLink={onLink} />
+            </YStack>
+          );
+        }
+        if (block.type === 'math-block') {
+          return (
+            <YStack
+              key={index}
+              maxWidth="100%"
+              minWidth={0}
+              paddingLeft="4"
+              paddingVertical="2"
+              borderLeftWidth={2}
+              borderLeftColor="strongStroke"
+              marginBottom={last ? 0 : document ? '4' : '2'}
+              testID="math-block"
+            >
+              <MathBlock content={block.content} userSelect={proseSelect} />
             </YStack>
           );
         }
