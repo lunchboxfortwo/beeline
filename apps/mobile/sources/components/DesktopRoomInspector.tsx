@@ -19,7 +19,7 @@ export function DesktopRoomInspector({ room, content, onClose }: {
         roomId={content.artifact.roomId ?? room.room.id} onClose={onClose} />
     ) : (
       <ComputerSessionViewer session={content.session} active={focused} onClose={onClose}
-        roomId={room.room.id} agentHandle={content.session.agentHandle} />
+        roomId={room.room.id} agentHandle={content.session.agentHandle} desktop />
     )}
   </DesktopViewerPane>;
 }

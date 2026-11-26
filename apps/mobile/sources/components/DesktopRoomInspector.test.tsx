@@ -35,24 +35,38 @@ describe('artifact/browser-only desktop pane', () => {
     viewer.props.onClose(); expect(close).toHaveBeenCalledOnce();
     expect(tree.root.findAllByProps({ testID: 'desktop-work-corner-transcript' })).toHaveLength(0);
   });
-  it('keeps live browser focus and session access intact', async () => {
+  it('keeps live browser focus, desktop mode, and session access intact', async () => {
     await render(computer);
     expect(tree.root.findByType('BrowserViewer').props.active).toBe(true);
+    expect(tree.root.findByType('BrowserViewer').props.desktop).toBe(true);
     fixture.active = false;
     await act(async () => tree.update(<DesktopRoomInspector room={room} content={computer} onClose={vi.fn()} />));
     expect(tree.root.findByType('BrowserViewer').props.active).toBe(false);
   });
-  it('drags the visible LEFT divider, saves widths above 480, and restores on remount', async () => {
+  it('drags the transparent LEFT hairline divider, highlights on hover/drag, saves widths above 480, and restores on remount', async () => {
     await render();
     expect(pane().props.width).toBeCloseTo(614.4);
-    const handle = tree.root.findByProps({ testID: 'desktop-inspector-resizer' });
-    expect(handle.props.left).toBe(-3); expect(handle.props.cursor).toBe('col-resize');
-    expect(handle.props.backgroundColor).toBe('strongStroke');
+    expect(pane().props.borderLeftWidth).toBe(1);
+    expect(pane().props.borderLeftColor).toBe('stroke');
+    const handle = () => tree.root.findByProps({ testID: 'desktop-inspector-resizer' });
+    const rule = () => tree.root.findByProps({ testID: 'desktop-inspector-resizer-rule' });
+    expect(handle().props.left).toBe(-3); expect(handle().props.cursor).toBe('col-resize');
+    expect(handle().props.backgroundColor).toBe('transparent');
+    expect(rule().props.width).toBe(0);
+    expect(rule().props.backgroundColor).toBe('transparent');
+    act(() => handle().props.onMouseEnter());
+    expect(rule().props.width).toBe(2);
+    expect(rule().props.backgroundColor).toBe('strongStroke');
+    act(() => handle().props.onMouseLeave());
+    expect(rule().props.width).toBe(0);
     const pan = fixture.pan;
     act(() => pan.onPanResponderGrant());
+    expect(rule().props.width).toBe(2);
+    expect(rule().props.backgroundColor).toBe('strongStroke');
     act(() => pan.onPanResponderMove(null, { dx: -100 }));
     expect(pane().props.width).toBeCloseTo(714.4);
     await act(async () => pan.onPanResponderRelease(null, { dx: -100 }));
+    expect(rule().props.width).toBe(0);
     expect(fixture.save).toHaveBeenCalledWith(714.4);
     expect(fixture.pan).toBe(pan);
     await act(async () => tree.unmount()); await render();

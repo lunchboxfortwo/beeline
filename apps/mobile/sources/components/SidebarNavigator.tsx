@@ -134,7 +134,7 @@ const DesktopSidebarNavigator = React.memo(() => {
     : DESKTOP_NAV_DEFAULT_WIDTH;
   const drawerWidth = showSessionChrome && !zenMode ? (showSidebar ? fullDrawerWidth : 0) : 0;
   React.useEffect(() => {
-    setDesktopAvailableWidth(windowWidth - drawerWidth);
+    setDesktopAvailableWidth(windowWidth - drawerWidth, windowWidth);
   }, [windowWidth, drawerWidth]);
   // fullDrawerWidth changes on every move (it derives from storedDrawerWidth,
   // which onPanResponderMove updates), so it can't be a dependency here: on

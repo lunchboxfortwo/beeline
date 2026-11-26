@@ -1,7 +1,8 @@
 import React from 'react';
 import { Card, ListItem, XStack, YStack } from 'tamagui';
-import { ExternalLink, ChevronRight, X as XIcon } from 'lucide-react-native';
-import { Btn, Copy, Glyph, SafeBottom, SafeTop, T } from '@/ui/grammar';
+import { ExternalLink, ChevronRight } from 'lucide-react-native';
+import { Btn, Copy, Glyph, SafeBottom, T } from '@/ui/grammar';
+import { ViewerAction, ViewerHeader } from './ViewerChrome';
 
 /** Pre-redesign browser card geometry, with Stone grammar surfaces and type. */
 export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowser, testID }: {
@@ -32,22 +33,72 @@ export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowse
     );
 }
 
-/** Pre-redesign browser layout: Open in browser and Close above a full-bleed stream. */
-export function BrowserViewerFrame({ onOpenInBrowser, onClose, stream, dock, safeArea }: {
+/** Unified browser viewer frame: live status dot, session title, Open in browser, Close, and bottom hairline. */
+export function BrowserViewerFrame({
+    title = 'Browser',
+    live = false,
+    ended = false,
+    unavailable = false,
+    onOpenInBrowser,
+    onClose,
+    stream,
+    dock,
+    safeArea,
+    desktop = false,
+}: {
+    title?: string;
+    live?: boolean;
+    ended?: boolean;
+    unavailable?: boolean;
     onOpenInBrowser?: () => void;
     onClose: () => void;
     stream: React.ReactNode;
     dock: React.ReactNode;
     /** Phone viewers cover both system bars. */
     safeArea: boolean;
+    /** Desktop panes share the 52 px top-bar baseline with PlaceHeader and SidebarView. */
+    desktop?: boolean;
 }) {
+    const detail = ended
+        ? 'Session ended'
+        : unavailable
+            ? 'Browser unavailable'
+            : live
+                ? 'Live session'
+                : 'Connecting…';
     return (
         <YStack flex={1} minHeight={0} backgroundColor="canvas" testID="computer-session-viewer">
-            {safeArea ? <SafeTop /> : null}
-            <XStack marginHorizontal="4" marginTop="4" marginBottom="2" gap="2" alignItems="center" justifyContent="flex-end" testID="computer-session-controls">
-                {onOpenInBrowser ? <Btn kind="quiet" padding={0} label="Open in browser" accessibilityRole="link" role="link" onPress={onOpenInBrowser} testID="computer-session-open-browser"><XStack gap="2" alignItems="center"><T v="meta">Open in browser</T><Glyph icon={ExternalLink} size={14}/></XStack></Btn> : null}
-                <Btn kind="icon" label="Close browser" onPress={onClose} testID="computer-session-close"><Glyph icon={XIcon} size={16}/></Btn>
-            </XStack>
+            <ViewerHeader
+                desktop={desktop}
+                safeTop={safeArea}
+                title={title}
+                detail={detail}
+                titleTestID="computer-session-title"
+                detailTestID="computer-session-status"
+                leading={live ? (
+                    <YStack
+                        width={8}
+                        height={8}
+                        borderRadius="full"
+                        backgroundColor="added"
+                        testID="computer-session-live-dot"
+                    />
+                ) : null}
+                onClose={onClose}
+                closeLabel="Close browser"
+                closeTestID="computer-session-close"
+                testID="computer-session-controls"
+            >
+                {onOpenInBrowser ? (
+                    <ViewerAction
+                        label="Open in browser"
+                        title="Open in browser"
+                        icon={ExternalLink}
+                        onPress={onOpenInBrowser}
+                        testID="computer-session-open-browser"
+                    />
+                ) : null}
+            </ViewerHeader>
             <YStack flex={1} minHeight={0}>{stream}</YStack>
             {safeArea ? <SafeBottom /> : null}
             {dock}

@@ -103,18 +103,21 @@ it('mints a fresh steering token before opening the system browser', async () =>
   await act(async () => tree!.unmount());
 });
 
-it('keeps only Open in browser and Close in the header; closing never ends the share', async () => {
+it('uses the unified viewer header on phone with title, live status, Open in browser, Close, and TalkDock; closing never ends the share', async () => {
   const onClose = vi.fn();
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={onClose} />); });
   const viewer = tree!.root.findByProps({ testID: 'computer-session-viewer' });
   expect(viewer.findAllByType(SafeTop)).toHaveLength(1);
   expect(viewer.findAllByType(SafeBottom)).toHaveLength(1);
+  expect(viewer.findAllByType(ViewerConversationDock)).toHaveLength(1);
+  expect(viewer.findByProps({ testID: 'computer-session-live-dot' }).props.backgroundColor).toBe('added');
+  expect(viewer.findByProps({ testID: 'computer-session-title' }).props.children).toBe('Browser');
+  expect(viewer.findByProps({ testID: 'computer-session-status' }).props.children).toBe('Live session');
   const controls = tree!.root.findByProps({ testID: 'computer-session-controls' });
   expect(controls.findAllByType(Btn).map((button: any) => button.props.label))
     .toEqual(['Open in browser', 'Close browser']);
-  expect(controls.findAllByType(Btn).map((button: any) => button.props.kind)).toEqual(['quiet', 'icon']);
-  expect(controls.findAllByType('Text').flatMap((node: any) => [node.props.children].flat().filter((value: unknown) => typeof value === 'string'))).toEqual(['Open in browser']);
+  expect(controls.findAllByType(Btn).map((button: any) => button.props.kind)).toEqual(['secondary', 'icon']);
   expect(tree!.root.findAllByProps({ testID: 'computer-session-keyboard-toggle' })).toHaveLength(0);
   expect(tree!.root.findAllByProps({ testID: 'computer-session-key-bar' })).toHaveLength(0);
   const page = new URL(tree!.root.findByType('WebView').props.source.uri);
@@ -124,6 +127,27 @@ it('keeps only Open in browser and Close in the header; closing never ends the s
   await act(async () => tree!.root.findByProps({ testID: 'computer-session-close' }).props.onPress());
   expect(onClose).toHaveBeenCalledOnce();
   expect(phoneOperation).toHaveBeenCalledExactlyOnceWith('openComputerSession', { id: 'session-1' });
+  await act(async () => tree!.unmount());
+});
+
+it('uses the 52px desktop header without safe-area spacers or TalkDock in the desktop side pane', async () => {
+  let tree: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionViewer session={session} desktop onClose={() => undefined} />); });
+  const viewer = tree!.root.findByProps({ testID: 'computer-session-viewer' });
+  expect(viewer.findAllByType(SafeTop)).toHaveLength(0);
+  expect(viewer.findAllByType(SafeBottom)).toHaveLength(0);
+  expect(viewer.findAllByType(ViewerConversationDock)).toHaveLength(0);
+  const controls = viewer.find(
+    (node: any) => typeof node.type === 'string' && node.props.testID === 'computer-session-controls',
+  );
+  expect(controls.props.height).toBe(52);
+  expect(controls.props.paddingTop).toBe('0');
+  expect(controls.props.paddingBottom).toBe('0');
+  expect(viewer.findByProps({ testID: 'computer-session-live-dot' }).props.backgroundColor).toBe('added');
+  expect(viewer.findByProps({ testID: 'computer-session-title' }).props.children).toBe('Browser');
+  expect(viewer.findByProps({ testID: 'computer-session-status' }).props.children).toBe('Live session');
+  expect(controls.findAllByType(Btn).map((button: any) => button.props.label))
+    .toEqual(['Open in browser', 'Close browser']);
   await act(async () => tree!.unmount());
 });
 
@@ -251,12 +275,25 @@ it('delegates clipboard access to the cross-origin web viewer frame', async () =
   }
 });
 
-it('removes the stream if background authorization refuses current viewer access', async () => {
+it('removes the stream and marks the header unavailable if background authorization refuses current viewer access', async () => {
   phoneOperation.mockRejectedValueOnce(Object.assign(new Error('access denied'), { status: 403 }));
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={() => {}} />); });
   expect(tree!.root.findAllByType('WebView')).toHaveLength(0);
   expect(tree!.root.findAllByType('Text').some((node: any) => node.props.children === 'Browser is unavailable')).toBe(true);
+  expect(tree!.root.findByProps({ testID: 'computer-session-status' }).props.children).toBe('Browser unavailable');
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-live-dot' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-open-browser' })).toHaveLength(0);
+  await act(async () => tree!.unmount());
+});
+
+it('shows Browser unavailable in the desktop viewer header too when authorization is refused', async () => {
+  phoneOperation.mockRejectedValueOnce(Object.assign(new Error('access denied'), { status: 403 }));
+  let tree: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionViewer session={session} desktop onClose={() => {}} />); });
+  expect(tree!.root.findByProps({ testID: 'computer-session-status' }).props.children).toBe('Browser unavailable');
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-live-dot' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-open-browser' })).toHaveLength(0);
   await act(async () => tree!.unmount());
 });
 

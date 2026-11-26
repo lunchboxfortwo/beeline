@@ -264,8 +264,8 @@ export function WarmComputerSessionHost() {
 }
 
 /** Browser controls occupy their own row above the live page. */
-export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, active = true, warm = false }: {
-  session: ComputerSessionView; onClose: () => void; roomId?: string; agentHandle?: string; active?: boolean; warm?: boolean;
+export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, active = true, warm = false, desktop = false }: {
+  session: ComputerSessionView; onClose: () => void; roomId?: string; agentHandle?: string; active?: boolean; warm?: boolean; desktop?: boolean;
 }) {
   const foreground = useComputerForeground();
   const focused = useViewerRoomFocused(roomId);
@@ -324,7 +324,12 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
   const live = !ended && !unavailable && Boolean(session.access);
   return (
     <BrowserViewerFrame
-      safeArea
+      desktop={desktop}
+      safeArea={!desktop}
+      title={session.title || 'Browser'}
+      live={live}
+      ended={ended}
+      unavailable={unavailable}
       onOpenInBrowser={live ? () => void openInBrowser() : undefined}
       onClose={onClose}
       stream={
@@ -347,7 +352,7 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
           ) : null}
         </>
       }
-      dock={displayed ? (
+      dock={!desktop && displayed ? (
         <ViewerConversationDock keyboardAvoidedByParent={!warm} kind="computer" title={session.title} roomId={roomId}
           agentHandle={agentHandle} captureScreen={() => captureRef.current?.() ?? Promise.resolve(null)} />
       ) : null}
