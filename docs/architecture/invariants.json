@@ -1442,7 +1442,8 @@
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
           "delivery_id": "existing before the registry; weekly audit reviews",
-          "received_at": "existing before the registry; weekly audit reviews"
+          "received_at": "existing before the registry; weekly audit reviews",
+          "claim_expires_at": "Marks an in-flight webhook delivery claim so concurrent duplicates are skipped while interrupted claims recover after expiry; NULL marks completion."
         }
       },
       "helper_release_notifications": {
@@ -3652,7 +3653,8 @@
         "pullRequest": "existing before the registry; weekly audit reviews",
         "cornerId": "existing before the registry; weekly audit reviews",
         "briefRevision": "The brief revision captured at review dispatch; it must remain comparable with the current revision.",
-        "checks": "The checks captured at dispatch distinguish a pre-green wake from the first green-head review; current check facts cannot recover that earlier state."
+        "checks": "The checks captured at dispatch distinguish a pre-green wake from the first green-head review; current check facts cannot recover that earlier state.",
+        "wakeCause": "The dispatch cause recorded when a review turn was queued so status reads report why review started alongside live checks."
       },
       "wake_context": {},
       "coalesced_attachments": {},

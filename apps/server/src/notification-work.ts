@@ -5,9 +5,25 @@ export class NotificationWork {
 
   constructor(private readonly concurrency = 2) {}
 
-  async acquire(): Promise<() => void> {
-    if (this.active >= this.concurrency) await new Promise<void>(resolve => this.waiting.push(resolve));
-    else this.active++;
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) throw signal.reason ?? new Error('aborted');
+    if (this.active >= this.concurrency) {
+      await new Promise<void>((resolve, reject) => {
+        const entry = () => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          const index = this.waiting.indexOf(entry);
+          if (index >= 0) this.waiting.splice(index, 1);
+          reject(signal?.reason ?? new Error('aborted'));
+        };
+        this.waiting.push(entry);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+    } else {
+      this.active++;
+    }
     let released = false;
     return () => {
       if (released) return;

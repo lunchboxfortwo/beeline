@@ -8,6 +8,7 @@ import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { recordCornerGithubFact, advanceCorner, lockCornerLifecycle, cornerMergeGate } from './corner-lifecycle.js';
 import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, branchForEvent, text, record, githubUrl, hash, integer, checkFact } from './github-operations.js';
+import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
 
 
@@ -93,7 +94,8 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
   }
 
 
-  export async function gitHubOperationsProcessBaseBranchPush(ctx: GitHubOperations, body: GitHubRecord, installationId: number): Promise<void> {
+  export async function gitHubOperationsProcessBaseBranchPush(ctx: GitHubOperations, body: GitHubRecord, installationId: number, claim?: GitHubWebhookClaim): Promise<void> {
+    claim?.assertActive();
     const repository = repositoryName(body);
     const branch = branchForEvent('push', body);
     const deliveredSha = text(body.after);
@@ -133,11 +135,13 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
       repositoryIds: [Number(affected.rows[0]!.repository_id)],
     });
     const baseSha = await ctx.app.readBranchHead(token.token, repository, branch);
+    claim?.assertActive();
     for (const row of affected.rows) {
       let changed = false;
       await ctx.database.transaction(async (tx) => {
         // The cache write mirrors into corner_facts; lock facts before cache.
         await lockCornerLifecycle(tx, row.corner_id);
+        if (claim) await claim.assertOwned(tx);
         const lifecycle = (
           await tx.query<{ lifecycle: CornerLifecycleView }>(
             `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,
@@ -161,7 +165,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         );
         changed = true;
       });
-      if (changed) await ctx.refreshStaleMergeability(row.corner_id);
+      if (changed) await ctx.refreshStaleMergeability(row.corner_id, undefined, claim);
     }
   }
 
@@ -172,7 +176,8 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
    * mainline check results are not Room conversation. Corner PRs use the
    * same repository events; CI stays on processCornerEvent.
    */
-  export async function gitHubOperationsProcessRepositoryEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number) {
+  export async function gitHubOperationsProcessRepositoryEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number, claim?: GitHubWebhookClaim) {
+    claim?.assertActive();
     const database = ctx.database;
     if (event !== 'issues' && event !== 'pull_request') return;
     const repository = repositoryName(body);
@@ -239,23 +244,34 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         fallbackBranch],
     );
     for (const room of rooms.rows) {
-      const note = await systemLine(database, {
-        id: hash(`beeline:${room.room_id}:github-event:${event}:${card.action}:${dedupeKey}`),
-        roomId: room.room_id,
-        authorId: room.author_id,
-        subject: { kind: githubProviderKey, name: card.actor },
-        verb: card.action,
-        object: { text: card.title, url: card.url },
-        presentation: 'card',
-        cardType: 'github-event',
-        card: { ...card, ...(room.corner_id ? { cornerId: room.corner_id } : {}) },
-      });
+      const writeNote = (db: typeof database) =>
+        systemLine(db, {
+          id: hash(`beeline:${room.room_id}:github-event:${event}:${card.action}:${dedupeKey}`),
+          roomId: room.room_id,
+          authorId: room.author_id,
+          subject: { kind: githubProviderKey, name: card.actor },
+          verb: card.action,
+          object: { text: card.title, url: card.url },
+          presentation: 'card',
+          cardType: 'github-event',
+          card: { ...card, ...(room.corner_id ? { cornerId: room.corner_id } : {}) },
+        });
+      const note = claim
+        ? await database.transaction(async (tx) => {
+            await claim.assertOwned(tx);
+            return writeNote(tx);
+          })
+        : await writeNote(database);
       if (note.inserted) ctx.onRoomChanged?.(room.room_id);
     }
   }
 
 
-  export async function gitHubOperationsProcessCornerEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number) {
+  export async function gitHubOperationsProcessCornerEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number, deliveryId?: string, claim?: GitHubWebhookClaim) {
+    const assertActive = () => {
+      claim?.assertActive();
+    };
+    assertActive();
     const database = ctx.database;
     const repository = repositoryName(body);
     const branch = branchForEvent(event, body);
@@ -311,6 +327,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
     const actor = (login?: string) =>
       login ? { kind: githubProviderKey, name: login } : GITHUB_SUBJECT;
     for (const target of targets) {
+      assertActive();
       if (!target.author_id) continue;
       if (event === 'pull_request') {
         const pullRequest = record(body.pull_request);
@@ -331,8 +348,9 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
           const previous = await ctx.app.readPullRequest(token.token, repository, recordedPrNumber);
           if (previous.state !== 'closed' || previous.merged) continue;
           const replacement = await ctx.app.readPullRequest(token.token, repository, number);
+          assertActive();
           if (replacement.state !== 'open' || replacement.headRef !== branch) continue;
-          await ctx.recordClosedCornerPullRequest(target.corner_id, recordedPrNumber, database);
+          await ctx.recordClosedCornerPullRequest(target.corner_id, recordedPrNumber, database, claim);
         }
         const targetBranch = text(record(pullRequest?.base)?.ref);
         const webhookBaseSha = text(record(pullRequest?.base)?.sha);
@@ -344,6 +362,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
             repositoryIds: [Number(target.repository_id)],
           });
           const live = await ctx.app.readPullRequest(token.token, repository, number);
+          assertActive();
           if (live.state === 'closed' || live.merged) continue;
           headSha = live.headSha;
         }
@@ -353,6 +372,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         if (!merged && url && number && targetBranch && headSha && body.action !== 'closed') {
           await database.transaction(async (tx) => {
             await lockCornerLifecycle(tx, target.corner_id);
+            if (claim) await claim.assertOwned(tx);
             const previous = (
               await tx.query<{ lifecycle: CornerLifecycleView }>(
                 `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,
@@ -399,10 +419,10 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
           });
           if (differentPr) continue;
           if (mergeability === 'unknown' || mergeability === 'dirty')
-            await ctx.refreshStaleMergeability(target.corner_id);
+            await ctx.refreshStaleMergeability(target.corner_id, undefined, claim);
           if (body.action === 'opened' || body.action === 'synchronize' || body.action === 'reopened')
-            await ctx.refreshCheckRollup({ ...target, has_pr: true, pr_number: String(number) }, repository,
-              { name: 'Pull request checks', status: 'pending', headSha, url }, database);
+            await ctx.refreshWebhookCheckRollup({ ...target, has_pr: true, pr_number: String(number) }, repository,
+              { name: 'Pull request checks', status: 'pending', headSha, url }, database, deliveryId, claim);
         }
         if (merged && url) {
           await ctx.mergeCorner(
@@ -426,9 +446,11 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
               files: integer(pullRequest?.changed_files) ?? 0,
             },
             database,
+            undefined,
+            claim,
           );
         } else if (body.action === 'closed' && number) {
-          await ctx.recordClosedCornerPullRequest(target.corner_id, number, database);
+          await ctx.recordClosedCornerPullRequest(target.corner_id, number, database, claim);
         }
         continue;
       }
@@ -439,52 +461,59 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         const commits =
           integer(body.size) ?? (Array.isArray(body.commits) ? body.commits.length : 0);
         const head = text(body.after);
-        if (head) {
-          const lifecycle = await ctx.lifecycle(target.corner_id, database);
-          await ctx.updateLifecycle(
-            target.corner_id,
-            {
-              checks: 'unknown',
-              checksSummary: {
-                status: 'unknown',
-                total: 0,
-                failing: [],
-                checks: [],
-                updatedAt: Math.floor((await database.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
+        let pushNoteInserted = false;
+        await database.transaction(async (tx) => {
+          await lockCornerLifecycle(tx, target.corner_id);
+          if (claim) await claim.assertOwned(tx);
+          if (head) {
+            const lifecycle = await ctx.lifecycle(target.corner_id, tx);
+            await ctx.updateLifecycle(
+              target.corner_id,
+              {
+                checks: 'unknown',
+                checksSummary: {
+                  status: 'unknown',
+                  total: 0,
+                  failing: [],
+                  checks: [],
+                  updatedAt: Math.floor((await tx.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
+                },
+                ...(lifecycle.pr ? { pr: { ...lifecycle.pr, headSha: head, mergeability: 'unknown' } } : {}),
               },
-              ...(lifecycle.pr ? { pr: { ...lifecycle.pr, headSha: head, mergeability: 'unknown' } } : {}),
-            },
-            database,
-          );
-          await advanceCorner(database, target.corner_id, {
-            kind: 'push',
-            headSha: head,
-            contents: {
-              summary: `pushed to ${branch}`,
+              tx,
+            );
+            await advanceCorner(tx, target.corner_id, {
+              kind: 'push',
               headSha: head,
-              ...(lifecycle.pr?.url ? { prUrl: lifecycle.pr.url } : {}),
+              contents: {
+                summary: `pushed to ${branch}`,
+                headSha: head,
+                ...(lifecycle.pr?.url ? { prUrl: lifecycle.pr.url } : {}),
+              },
+            });
+          }
+          pushNoteInserted = await ctx.systemNote(
+            target.corner_id,
+            target.author_id,
+            {
+              subject: actor(text(record(body.pusher)?.name) ?? actorLogin),
+              verb: commits === 1 ? systemMessage('github-operations.commit-pushed', head?.slice(0, 7) ?? '')
+                : systemMessage('github-operations.commits-pushed', commits, head?.slice(0, 7) ?? ''),
+              object: {
+                text: String(commits),
+                ...(head ? { headSha: head } : {}),
+                ...(compare ? { url: compare } : {}),
+              },
             },
-          });
-        }
-        await ctx.systemNote(
-          target.corner_id,
-          target.author_id,
-          {
-            subject: actor(text(record(body.pusher)?.name) ?? actorLogin),
-            verb: commits === 1 ? systemMessage('github-operations.commit-pushed', head?.slice(0, 7) ?? '')
-              : systemMessage('github-operations.commits-pushed', commits, head?.slice(0, 7) ?? ''),
-            object: {
-              text: String(commits),
-              ...(head ? { headSha: head } : {}),
-              ...(compare ? { url: compare } : {}),
-            },
-          },
-          `github:push:${text(body.after) ?? hash(JSON.stringify(body))}`,
-          database,
-        );
+            `github:push:${text(body.after) ?? hash(JSON.stringify(body))}`,
+            tx,
+            true,
+          );
+        });
+        if (pushNoteInserted) ctx.onRoomChanged?.(target.corner_id);
         continue;
       }
       const check = checkFact(event, body);
-      if (check?.headSha) await ctx.refreshCheckRollup(target, repository, check, database);
+      if (check?.headSha) await ctx.refreshWebhookCheckRollup(target, repository, check, database, deliveryId, claim);
     }
   }

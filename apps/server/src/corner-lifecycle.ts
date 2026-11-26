@@ -596,12 +596,17 @@ async function writeCornerAdvance(
                 object: { text: corner.configured_reviewer_name ?? 'reviewer', id: reviewer, headSha: head },
               })
             ).id;
+          const ciGate = (corner.lifecycle as { ciGate?: { required?: true; checks: string | null } }).ciGate;
+          const wakeCause = event.kind === 'brief-revised' ? 'brief-revised'
+            : corner.lifecycle.checks === 'passing' ? 'checks-passed'
+            : ciGate?.required ? 'required-checks-passed'
+            : ciGate?.checks === null ? 'no-required-checks' : 'review-dispatched';
           const queued = await queueReviewerCommand(db, {
             roomId: cornerId,
             agentId: reviewer,
             sourceMessageId: source,
             reason: 'corner_review_dispatch',
-          });
+          }, wakeCause);
           if (queued.blocked || queued.command?.state === 'pending')
             delete plan.state.reviewDue;
           result = queued.command
@@ -768,6 +773,7 @@ export async function noteReviewBlocked(
 export async function queueReviewerCommand(
   db: SqlDatabase,
   input: Parameters<typeof createAgentCommand>[1],
+  wakeCause?: string,
 ): Promise<{ command?: CommandRow; error?: string; blocked?: boolean }> {
   const brief = (
     await db.query<{ revision: number }>(
@@ -775,7 +781,7 @@ export async function queueReviewerCommand(
       [input.roomId],
     )
   ).rows[0];
-  const context = (
+  const baseContext = (
     await db.query<{ context: Record<string, unknown> | null }>(
       `SELECT CASE WHEN lifecycle->'pr'->>'headSha' IS NOT NULL AND lifecycle->'pr'->>'number' IS NOT NULL
        THEN jsonb_build_object('cornerId',corner_id,'headSha',lifecycle->'pr'->>'headSha',
@@ -785,6 +791,7 @@ export async function queueReviewerCommand(
       [input.roomId, brief?.revision ?? 0],
     )
   ).rows[0]?.context;
+  const context = baseContext && wakeCause ? { ...baseContext, wakeCause } : baseContext;
   const headSha = typeof context?.headSha === 'string' ? context.headSha : undefined;
   const rawPull = context?.pullRequest;
   const pullRequest =
@@ -847,41 +854,25 @@ export async function queueReviewerCommand(
     };
   }
 }
-export { CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
-
-export { lockCornerLifecycle } from './corner-lifecycle-review-state.js';
-
-export type { CornerMachine } from './corner-machine.js';
-
-export type { CornerMachineFacts } from './corner-machine.js';
-
-export { transitionCorner } from './corner-machine.js';
-
-export { planCornerCheckObservation } from './corner-machine.js';
-
-export { checksSettled } from './corner-machine.js';
-
-export { actionsJobId } from './corner-machine.js';
-
-export type { CornerEvent } from './corner-lifecycle-values.js';
-
-export { CORNER_MACHINE_SCHEMA } from './corner-lifecycle-values.js';
-
-
-
-export { lockCornerArchivalAuthority } from './corner-lifecycle-review-state.js';
-
-
-
-export { cornerReviewWokenSql } from './corner-lifecycle-review-state.js';
-
-export { cornerMergeability } from './corner-lifecycle-review-state.js';
-
-export { cornerMergeGate } from './corner-lifecycle-review-state.js';
-
-export { confirmCornerMergeAuthority } from './corner-lifecycle-review-state.js';
-
-export { deleteStoredCornerWorkflows } from './corner-lifecycle-review-state.js';
+export { CORNER_LIFECYCLE_SLUG, CORNER_MACHINE_SCHEMA, type CornerEvent } from './corner-lifecycle-values.js';
+export {
+  lockCornerLifecycle,
+  lockCornerArchivalAuthority,
+  cornerReviewWokenSql,
+  cornerReviewWakeCauseSql,
+  cornerMergeability,
+  cornerMergeGate,
+  confirmCornerMergeAuthority,
+  deleteStoredCornerWorkflows,
+} from './corner-lifecycle-review-state.js';
+export {
+  type CornerMachine,
+  type CornerMachineFacts,
+  transitionCorner,
+  planCornerCheckObservation,
+  checksSettled,
+  actionsJobId,
+} from './corner-machine.js';
 
 /** The one router for GitHub/helper facts. Callers retain their existing lifecycle
  * locks and emit observations; this owner decides the guarded cache transition.

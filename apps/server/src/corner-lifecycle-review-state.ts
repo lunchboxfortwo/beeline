@@ -39,6 +39,20 @@ export function cornerReviewWokenSql(cornerId: string): string {
 }
 
 
+/** The stored wake cause recorded on the latest review dispatch for the current PR head. */
+export function cornerReviewWakeCauseSql(cornerId: string): string {
+  return `(SELECT COALESCE(review.review_context->>'wakeCause', review.reason)
+    FROM agent_commands review JOIN rooms corner ON corner.id=review.room_id
+    JOIN rooms parent ON parent.id=corner.parent_id JOIN corner_github_cache cache ON cache.corner_id=corner.id
+    WHERE corner.id=${cornerId}
+      AND review.agent_id=${cornerReviewerSql()} AND ${greenReviewRequestSql('review')}
+      AND review.reason='corner_review_dispatch' AND review.state IN ('pending','complete')
+      AND review.review_context->>'headSha'=cache.lifecycle->'pr'->>'headSha'
+      AND review.review_context->'pullRequest'=cache.lifecycle->'pr'->'number'
+    ORDER BY review.inbox_sequence DESC LIMIT 1)`;
+}
+
+
 export async function noteReviewDispatchFailure(
   db: SqlDatabase,
   cornerId: string,
