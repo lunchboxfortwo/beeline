@@ -785,4 +785,180 @@ describe('background advisory-lock ownership', () => {
       await db.close();
     }
   });
+
+  it('shelves delivered push notifications on Android and iOS when a thread closes without fabricating read marks', async () => {
+    const db = await migratedDatabase();
+    try {
+      const human = 'a'.repeat(64),
+        agent = 'b'.repeat(64),
+        workspace = '11111111-1111-4111-8111-111111111111',
+        room = '22222222-2222-4222-8222-222222222222',
+        thread = '33333333-3333-4333-8333-333333333333',
+        openThread = '44444444-4444-4444-8444-444444444444',
+        beforeReg = '0'.repeat(64),
+        first = '1'.repeat(64),
+        second = '2'.repeat(64),
+        stillOpen = '3'.repeat(64),
+        android = 'android-token-archived-thread',
+        ios = 'c0ffee'.repeat(10) + 'abcd';
+      await db.query(
+        `INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Owner','owner'),($2,'agent','Bee','bee')`,
+        [human, agent],
+      );
+      await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [workspace]);
+      await db.query(
+        `INSERT INTO rooms(id,workspace_id,parent_id,name) VALUES
+         ($1,$4,NULL,'Beeline'),($2,$4,$1,'closed-thread'),($3,$4,$1,'open-thread')`,
+        [room, thread, openThread, workspace],
+      );
+      await db.query(
+        `INSERT INTO push_devices(token,identity_id,platform,environment,registered_at) VALUES
+         ($1,$3,'android','physical',now()-interval '1 hour'),
+         ($2,$3,'ios','physical',now()-interval '1 hour')`,
+        [android, ios, human],
+      );
+      await db.query(
+        `INSERT INTO messages(id,room_id,author_id,text,created_at) VALUES
+         ($1,$5,$7,'before reg',now()-interval '2 hours'),
+         ($2,$5,$7,'opened PR',now()-interval '20 minutes'),
+         ($3,$5,$7,'fixed checks',now()-interval '10 minutes'),
+         ($4,$6,$7,'still active',now()-interval '5 minutes')`,
+        [beforeReg, first, second, stillOpen, thread, openThread, agent],
+      );
+      await db.query(
+        `INSERT INTO push_delivery_claims(message_id,device_token,status)
+         SELECT m.id,d.token,'delivered' FROM messages m CROSS JOIN push_devices d`,
+      );
+      // Even with an older read mark on the thread, closing clears every delivered
+      // claim since registration in one entry without duplicating the channel.
+      await db.query(
+        `INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id)
+         SELECT room_id,$2,created_at,id FROM messages WHERE id=$1`,
+        [first, human],
+      );
+      const androidClear = vi.fn().mockResolvedValue(undefined);
+      const iosClear = vi.fn().mockResolvedValue(undefined);
+      const loop = new PushDeliveryLoop(
+        db,
+        { send: vi.fn().mockResolvedValue(undefined), clearRead: androidClear },
+        { send: vi.fn().mockResolvedValue(undefined), clearRead: iosClear },
+      );
+      // Mark the thread archived before running: branch 1 excludes archived threads
+      // while branch 2 batches both claims (`second` and `first`) once per device.
+      await db.query(`UPDATE rooms SET archived_at=now() WHERE id=$1`, [thread]);
+      await loop.runOnce();
+      expect(androidClear).toHaveBeenCalledOnce();
+      expect(androidClear).toHaveBeenLastCalledWith(android, [
+        { channelId: thread, messageId: second, readMessageIds: [first] },
+      ]);
+      expect(iosClear).toHaveBeenCalledOnce();
+      expect(iosClear).toHaveBeenLastCalledWith(ios, [
+        { channelId: thread, messageId: second, readMessageIds: [first] },
+      ]);
+      // Subsequent ticks do not re-clear already cleared claims, and open threads stay untouched.
+      androidClear.mockClear();
+      iosClear.mockClear();
+      await loop.runOnce();
+      expect(androidClear).not.toHaveBeenCalled();
+      expect(iosClear).not.toHaveBeenCalled();
+      expect(
+        (await db.query<{ message_id: string }>(
+          `SELECT message_id FROM push_delivery_claims WHERE device_token=$1 AND read_cleared_at IS NULL ORDER BY message_id`,
+          [android],
+        )).rows.map((row) => row.message_id),
+      ).toEqual([beforeReg, stillOpen]);
+      // Archiving did not advance or fabricate a read mark on the closed thread.
+      expect(
+        (await db.query<{ message_id: string }>(
+          `SELECT message_id FROM room_read_marks WHERE room_id=$1 AND identity_id=$2`,
+          [thread, human],
+        )).rows,
+      ).toEqual([{ message_id: first }]);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('carries the room agent handle on reply actions in rooms and threads, never on human messages or DMs', async () => {
+    const db = await migratedDatabase();
+    try {
+      const human = 'a'.repeat(64),
+        peerHuman = 'd'.repeat(64),
+        agent = 'c'.repeat(64),
+        workspace = '11111111-1111-4111-8111-111111111111',
+        room = '22222222-2222-4222-8222-222222222222',
+        thread = '33333333-3333-4333-8333-333333333333',
+        agentDm = '44444444-4444-4444-8444-444444444444';
+      await db.query(
+        `INSERT INTO identities(id,kind,name,handle,push_level) VALUES
+         ($1,'human','Owner','owner','full'),
+         ($2,'human','Maya','maya','off'),
+         ($3,'agent','Crayon','crayon','off')`,
+        [human, peerHuman, agent],
+      );
+      await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Hive')`, [workspace]);
+      await db.query(
+        `INSERT INTO workspace_handles(workspace_id,identity_id,handle) VALUES($1,$2,'crayon-ws')`,
+        [workspace, agent],
+      );
+      await db.query(
+        `INSERT INTO rooms(id,workspace_id,parent_id,name,direct_participants) VALUES
+         ($1,$4,NULL,'Beeline',NULL),
+         ($2,$4,$1,'push-close-reply',NULL),
+         ($3,$4,NULL,'Direct',$5::jsonb)`,
+        [room, thread, agentDm, workspace, JSON.stringify([human, agent].sort())],
+      );
+      await db.query(
+        `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES
+         ($1,NULL,$2,'owner'),($1,NULL,$3,'member'),($1,NULL,$4,'member'),
+         ($1,$5,$2,'owner'),($1,$5,$3,'member'),($1,$5,$4,'member'),
+         ($1,$6,$2,'owner'),($1,$6,$4,'member')`,
+        [workspace, human, peerHuman, agent, room, agentDm],
+      );
+      await db.query(
+        `INSERT INTO push_devices(token,identity_id,platform,environment)
+         VALUES('owner-device-token-12345678901234567890',$1,'android','physical')`,
+        [human],
+      );
+      const send = vi.fn().mockResolvedValue(undefined);
+      const loop = new PushDeliveryLoop(db, { send });
+      expect(await loop.runOnce()).toBe(0);
+      const threadMsg = '1'.repeat(64),
+        humanMsg = '2'.repeat(64),
+        dmMsg = '3'.repeat(64);
+      await db.query(
+        `INSERT INTO messages(id,room_id,author_id,text) VALUES
+         ($1,$4,$7,'Opened the PR.'),
+         ($2,$5,$8,'@owner thoughts?'),
+         ($3,$6,$7,'DM ping')`,
+        [threadMsg, humanMsg, dmMsg, thread, room, agentDm, agent, peerHuman],
+      );
+      expect(await loop.runOnce()).toBe(3);
+      const actions = new Map(
+        send.mock.calls.map(([, message]) => [message.messageId as string, message.action]),
+      );
+      expect(actions.get(threadMsg)).toEqual({
+        kind: 'reply',
+        authorName: 'Crayon',
+        agentHandle: 'crayon-ws',
+      });
+      expect(actions.get(humanMsg)).toEqual({ kind: 'reply', authorName: 'Maya' });
+      expect(actions.get(dmMsg)).toEqual({ kind: 'reply', authorName: 'Crayon' });
+      // Replying with the carried agentHandle wakes the agent in that thread.
+      const replyId = '9'.repeat(64);
+      const sentReply = await new PhoneService(db, 'http://local.test').execute(
+        'sendRoomReply',
+        {
+          roomId: thread,
+          parentMessageId: threadMsg,
+          messageId: replyId,
+          text: `@${(actions.get(threadMsg) as { agentHandle: string }).agentHandle} ship it`,
+        },
+        human,
+      );
+      expect(sentReply.pendingAgentCommands.map((item) => item.agentPubkey)).toEqual([agent]);
+    } finally {
+      await db.close();
+    }
+  });
 });

@@ -171,7 +171,7 @@ export class PushDeliveryLoop {
     return delivered;
   }
 
-  /** Batch delivered claims at or before each read mark into one silent push per device. */
+  /** Batch delivered claims at or before each read mark, or in archived threads, into one silent push per device. */
   private async sendReadClears(): Promise<void> {
     // One rule for both platforms; each sender keeps its own size limit.
     const platforms = {
@@ -192,12 +192,12 @@ export class PushDeliveryLoop {
       `SELECT device.token,device.platform,batch.channel_ids,batch.message_ids,batch.read_message_ids
        FROM push_devices device
        CROSS JOIN LATERAL (
-         SELECT array_agg(pending.room_id ORDER BY pending.message_created_at,pending.room_id) channel_ids,
-           array_agg(pending.message_id ORDER BY pending.message_created_at,pending.room_id) message_ids,
+         SELECT array_agg(pending.room_id ORDER BY pending.sort_at,pending.room_id) channel_ids,
+           array_agg(pending.message_id ORDER BY pending.sort_at,pending.room_id) message_ids,
            array_agg(pending.read_ids::text
-             ORDER BY pending.message_created_at,pending.room_id) read_message_ids
+             ORDER BY pending.sort_at,pending.room_id) read_message_ids
          FROM (
-           SELECT mark.room_id::text room_id,mark.message_created_at,mark.message_id,
+           SELECT mark.room_id::text room_id,mark.message_created_at sort_at,mark.message_id,
              COALESCE((
                SELECT jsonb_agg(pushed.id ORDER BY pushed.created_at DESC,pushed.id DESC)
                FROM (
@@ -213,6 +213,10 @@ export class PushDeliveryLoop {
              ),'[]'::jsonb) read_ids
            FROM room_read_marks mark
            WHERE mark.identity_id=device.identity_id
+             AND NOT EXISTS (
+               SELECT 1 FROM rooms archived
+               WHERE archived.id=mark.room_id AND archived.parent_id IS NOT NULL
+                 AND archived.archived_at IS NOT NULL)
              AND EXISTS (
                SELECT 1 FROM push_delivery_claims claim
                JOIN LATERAL (SELECT ${messageColumns('stored')} FROM messages stored WHERE id=claim.message_id OFFSET 0) message ON true
@@ -220,7 +224,21 @@ export class PushDeliveryLoop {
                  AND claim.read_cleared_at IS NULL
                  AND message.room_id=mark.room_id AND message.created_at>=device.registered_at
                  AND (message.created_at,message.id)<=(mark.message_created_at,mark.message_id))
-           ORDER BY mark.message_created_at,mark.room_id::text
+           UNION ALL
+           SELECT archived.room_id,archived.archived_at sort_at,archived.ids[1] message_id,
+             COALESCE(to_jsonb(archived.ids[2:]),'[]'::jsonb) read_ids
+           FROM (
+             SELECT room.id::text room_id,room.archived_at,
+               array_agg(message.id ORDER BY message.created_at DESC,message.id DESC) ids
+             FROM push_delivery_claims claim
+             JOIN LATERAL (SELECT ${messageColumns('stored')} FROM messages stored WHERE id=claim.message_id OFFSET 0) message ON true
+             JOIN rooms room ON room.id=message.room_id
+               AND room.parent_id IS NOT NULL AND room.archived_at IS NOT NULL
+             WHERE claim.device_token=device.token AND claim.status='delivered'
+               AND claim.read_cleared_at IS NULL
+               AND message.created_at>=device.registered_at
+             GROUP BY room.id,room.archived_at
+           ) archived
          ) pending
        ) batch
        WHERE device.platform=ANY($1::text[]) AND batch.channel_ids IS NOT NULL
@@ -291,6 +309,7 @@ export class PushDeliveryLoop {
       grant_detail: {purpose?:string;machine?:string;script?:unknown} | null;
       grant_agent_name: string | null;
       author_name: string | null;
+      author_handle: string | null;
       collapse_id: string | null;
       direct_attention: boolean;
       room_name: string | null;
@@ -384,6 +403,8 @@ export class PushDeliveryLoop {
           m.card->'grants'->0 grant_detail,
           m.card->'agent'->>'name' grant_agent_name,
           COALESCE(NULLIF(author.name,''),'Someone') author_name,
+          CASE WHEN author.kind='agent' AND room.direct_participants IS NULL
+            THEN NULLIF(btrim(ltrim(beeline_room_handle(author.id,m.room_id),'@')),'') END author_handle,
           CASE WHEN attention.direct OR m.presentation<>'message' THEN m.id
           -- Keep human prose visible when a subsequent agent summary replaces its slot.
           ELSE CASE WHEN author.kind='human' THEN room.id::text ELSE 'agent:'||room.id::text END
@@ -427,7 +448,7 @@ export class PushDeliveryLoop {
           btrim(notification.text) text,false prefix_author,device.device_token token,push_device.identity_id,recipient.time_zone,
           notification.created_at,
           NULL::text action,NULL::text grant_id,NULL::text grant_kind,NULL::text grant_target,NULL::jsonb grant_detail,
-          NULL::text grant_agent_name,NULL::text author_name,NULL::text collapse_id,
+          NULL::text grant_agent_name,NULL::text author_name,NULL::text author_handle,NULL::text collapse_id,
           false direct_attention,NULL::text room_name,NULL::text corner_name,NULL::jsonb dm_peer
         FROM jsonb_to_recordset($1::jsonb) queued(message_id text,device_token text)
         JOIN workspace_join_notifications notification ON notification.id=queued.message_id
@@ -450,7 +471,7 @@ export class PushDeliveryLoop {
           candidate.notification_type,candidate.text,candidate.token,candidate.identity_id,
           candidate.prefix_author,candidate.time_zone,candidate.created_at,device.platform,
           candidate.action,candidate.grant_id,candidate.grant_kind,candidate.grant_target,candidate.grant_detail,
-          candidate.grant_agent_name,candidate.author_name,candidate.collapse_id,
+          candidate.grant_agent_name,candidate.author_name,candidate.author_handle,candidate.collapse_id,
           candidate.direct_attention,candidate.room_name,candidate.corner_name,candidate.dm_peer
         FROM candidates candidate
         JOIN push_devices device ON device.token=candidate.token
@@ -462,7 +483,7 @@ export class PushDeliveryLoop {
       )
       SELECT message_id,workspace_id,room_id,channel_id,corner_id,target,
         notification_type,text,token,identity_id,platform,time_zone,prefix_author,
-        action,grant_id,grant_kind,grant_target,grant_detail,grant_agent_name,author_name,collapse_id,
+        action,grant_id,grant_kind,grant_target,grant_detail,grant_agent_name,author_name,author_handle,collapse_id,
         direct_attention,room_name,corner_name,dm_peer
       FROM unclaimed ORDER BY created_at,message_id
     `, [JSON.stringify(due.rows)]);
@@ -668,6 +689,7 @@ function pushActionFor(candidate: {
   grant_target: string | null;
   grant_agent_name: string | null;
   author_name: string | null;
+  author_handle: string | null;
 }): { action?: PushAction } {
   if (
     candidate.action === 'grant' &&
@@ -685,7 +707,13 @@ function pushActionFor(candidate: {
       },
     };
   if (candidate.action === 'reply')
-    return { action: { kind: 'reply', authorName: candidate.author_name ?? 'Someone' } };
+    return {
+      action: {
+        kind: 'reply',
+        authorName: candidate.author_name ?? 'Someone',
+        ...(candidate.author_handle ? { agentHandle: candidate.author_handle } : {}),
+      },
+    };
   return {};
 }
 

@@ -144,6 +144,56 @@ function stringData(value: unknown): Data {
   return data;
 }
 
+const MENTION_TOKEN = /@([\p{L}\p{M}\p{N}_]+(?:[.-][\p{L}\p{M}\p{N}_]+)*)/gu;
+const MENTION_TOKEN_CHARACTER = /[\p{L}\p{M}\p{N}_.-]/u;
+const FENCED_CODE = /```[\s\S]*?(?:```|$)/g;
+const INLINE_CODE = /`[^`\n]*`/g;
+const DOUBLE_QUOTES = /"[^"\n]*"|“[^”\n]*”/g;
+
+function codePointBefore(text: string, offset: number): string | undefined {
+  if (offset <= 0) return undefined;
+  return [...text.slice(0, offset)].at(-1);
+}
+
+function codePointAt(text: string, offset: number): string | undefined {
+  return [...text.slice(offset)][0];
+}
+
+/** Whether the reply already carries a live standalone `@handle` outside code and quotes. */
+function hasTypedMentionToken(message: string): boolean {
+  const text = message
+    .replace(FENCED_CODE, (block) => block.replace(/[^\n]/g, ' '))
+    .replace(INLINE_CODE, (span) => ' '.repeat(span.length))
+    .replace(DOUBLE_QUOTES, (span) => ' '.repeat(span.length));
+  for (const match of text.matchAll(MENTION_TOKEN)) {
+    const offset = match.index ?? 0;
+    const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+    if (/^\s*>/.test(text.slice(lineStart, offset))) continue;
+    const before = codePointBefore(text, offset);
+    const punctuation = text.slice(offset + match[0].length).match(/^[.-]+/u)?.[0];
+    const afterPunctuation = punctuation
+      ? codePointAt(text, offset + match[0].length + punctuation.length)
+      : undefined;
+    if (
+      (!before || !MENTION_TOKEN_CHARACTER.test(before)) &&
+      (!afterPunctuation || !MENTION_TOKEN_CHARACTER.test(afterPunctuation))
+    )
+      return true;
+  }
+  return false;
+}
+
+/**
+ * Tag the pushed agent visibly on an inline notification reply unless the user
+ * already wrote an explicit `@handle`. Keeps the visible-tag rule intact.
+ */
+export function formatNotificationReplyText(text: string, agentHandle?: string): string {
+  const handle = agentHandle?.trim().replace(/^@/, '');
+  if (!handle || !text || hasTypedMentionToken(text)) return text;
+  // Preserve leading blockquote syntax so a quoted `@handle` stays quoted.
+  return /^\s*>/.test(text) ? `@${handle}\n${text}` : `@${handle} ${text}`;
+}
+
 /** Accepts a notification response or the Android task payload wrapping one. */
 export function readNotificationAction(payload: unknown): NotificationActionRequest | null {
   if (!payload || typeof payload !== 'object') return null;
@@ -168,9 +218,9 @@ export function readNotificationAction(payload: unknown): NotificationActionRequ
     return { kind: 'grant', key, notificationId, decision, grantId: data.grantId, body, data };
   }
   if (actionId === REPLY_PUSH_ACTION) {
-    const text = typeof response.userText === 'string' ? response.userText.trim() : '';
+    const rawText = typeof response.userText === 'string' ? response.userText.trim() : '';
     const roomId = data.cornerId ?? data.channelId;
-    if (data.categoryId !== PUSH_ACTION_CATEGORIES.reply || !roomId || !data.messageId || !text)
+    if (data.categoryId !== PUSH_ACTION_CATEGORIES.reply || !roomId || !data.messageId || !rawText)
       return null;
     return {
       kind: 'reply',
@@ -178,7 +228,7 @@ export function readNotificationAction(payload: unknown): NotificationActionRequ
       notificationId,
       roomId,
       parentMessageId: data.messageId,
-      text,
+      text: formatNotificationReplyText(rawText, data.agentHandle),
       body,
       data,
     };

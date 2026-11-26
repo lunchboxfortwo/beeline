@@ -233,6 +233,18 @@ describe('Firebase push inline actions', () => {
       channelId: 'dm-1',
       messageId: 'message-1',
     });
+    expect(payload.data).not.toHaveProperty('agentHandle');
+
+    const agentPayload = firebasePushMessage('device-token', {
+      ...base,
+      text: 'Crayon: Ready for review.',
+      action: { kind: 'reply', authorName: 'Crayon', agentHandle: 'crayon' },
+    });
+    expect(agentPayload.data).toMatchObject({
+      categoryId: 'beeline-reply',
+      authorName: 'Crayon',
+      agentHandle: 'crayon',
+    });
   });
 
   it('sends a permission ask whole, without spending its first line on the app name', () => {

@@ -184,6 +184,30 @@ describe('APNs provider token and request', () => {
       categoryId: 'beeline-reply',
       authorName: 'Maya',
     });
+    expect(request.payload).not.toHaveProperty('agentHandle');
+
+    const agentRequest = apnsPushRequest(
+      'device-token',
+      {
+        messageId: 'message-2',
+        workspaceId: 'workspace-1',
+        roomId: 'room-1',
+        channelId: 'corner-1',
+        cornerId: 'corner-1',
+        target: 'message',
+        type: 'message',
+        text: 'Crayon: Ready for review.',
+        action: { kind: 'reply', authorName: 'Crayon', agentHandle: 'crayon' },
+      },
+      'app.usebeeline.mobile',
+      'provider-token',
+    );
+    expect(agentRequest.payload).toMatchObject({
+      aps: { category: 'beeline-reply' },
+      categoryId: 'beeline-reply',
+      authorName: 'Crayon',
+      agentHandle: 'crayon',
+    });
   });
 
   it.each([
