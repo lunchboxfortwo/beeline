@@ -207,17 +207,23 @@ describe('UI vertical alignment sweep', () => {
         subline="0xabc · Base · $12 left"
         stamp="20:10"
         onHeaderPress={vi.fn()}
+        onDismiss={vi.fn()}
         headerTestID="multi-header"
+        testID="multi-card"
       />,
     );
     try {
       const headerButton = multi.root.find((n: any) => n.type === 'ListItem' && n.props.testID === 'multi-header');
       const headRow = headerButton.find((n: any) => n.type === 'XStack' && n.props.flex === 1);
       expect(headRow.props.alignItems).toBe('flex-start');
+      const dismissBtn = headRow.find((n: any) => n.type === 'Button' && n.props.testID === 'multi-card-dismiss');
+      expect(dismissBtn.props.minWidth).toBe(HEIGHT.control);
+      expect(dismissBtn.props.minHeight).toBe(HEIGHT.control);
+      expect(dismissBtn.props.alignItems).toBe('flex-start');
       const headerLineWrappers = headRow.findAll(
         (n: any) => n.type === 'YStack' && n.props.height === headingLine && n.props.justifyContent === 'center',
       );
-      expect(headerLineWrappers).toHaveLength(2);
+      expect(headerLineWrappers).toHaveLength(3);
     } finally {
       act(() => multi.unmount());
     }
@@ -253,8 +259,12 @@ describe('UI vertical alignment sweep', () => {
       busy: true,
       onPress: vi.fn(),
     };
-    const optionTree = renderAt('medium', <ChoiceOption choice={choice} closed />);
+    const optionTree = renderAt('medium', <ChoiceOption choice={{ ...choice, share: 0.6 }} closed />);
     try {
+      const wash = optionTree.root.find((n: any) => n.type === 'YStack' && n.props.testID === 'transcript-card-choice-wash-opt-a');
+      expect(wash.props.borderRadius).toBe('md');
+      const frame = optionTree.root.find((n: any) => n.type === 'ListItem' && n.props.testID === 'transcript-card-choice-opt-a');
+      expect(frame.props.position).toBeUndefined();
       const labelRow = optionTree.root.find((n: any) => n.type === 'XStack' && n.props.flex === 1 && n.props.alignItems === 'center');
       expect(labelRow.findAll((n: any) => n.type === 'YStack' && n.props.width === 0 && n.props.height === 28)).toHaveLength(1);
       const trailingBoxes = optionTree.root.findAll(

@@ -175,8 +175,21 @@ export function TranscriptCard({
         </YStack>
       ) : null}
       {onDismiss ? (
-        <Btn kind="icon" label={dismissLabel} onPress={onDismiss} testID={testID ? `${testID}-dismiss` : undefined}>
-          <Glyph icon={X} size={16} />
+        <Btn
+          kind="icon"
+          label={dismissLabel}
+          onPress={onDismiss}
+          alignItems={multiLineHead ? 'flex-start' : 'center'}
+          padding="0"
+          testID={testID ? `${testID}-dismiss` : undefined}
+        >
+          {multiLineHead ? (
+            <YStack height={headingLine} justifyContent="center">
+              <Glyph icon={X} size={16} />
+            </YStack>
+          ) : (
+            <Glyph icon={X} size={16} />
+          )}
         </Btn>
       ) : null}
     </XStack>
