@@ -6,7 +6,7 @@ vi.mock('react-native', () => ({}));
 vi.mock('tamagui', () => ({ YStack: 'YStack' }));
 vi.mock('expo-haptics', () => ({}));
 vi.mock('expo-router', () => ({ router: {} }));
-vi.mock('@/modal', () => ({ Modal: {} }));
+vi.mock('@/modal', () => ({ Modal: { alert: vi.fn() } }));
 vi.mock('@/sync/transport', () => ({}));
 vi.mock('@/buzz/app-error-copy', () => ({ appErrorCopy: vi.fn() }));
 vi.mock('@/buzz/agent-display', () => ({}));
@@ -103,5 +103,56 @@ it('BOOKMARK-RETIRED-1: the message sheet offers no Bookmark', () => {
   const rows = tree.root.findAllByType('Row').map((row: any) => row.props.testID);
   expect(rows).toEqual(['message-report-action', 'message-copy-action', 'message-copy-link-action',
     'message-select-action', 'message-forward-action', 'message-delete-action']);
+  act(() => tree.unmount());
+});
+
+it('saves a top-level chat message to Backlog with originMessageId and hides Save to backlog in threads and DMs', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const { monolithPhoneOperation } = await import('@/sync/transport/monolith-operation');
+  vi.mocked(monolithPhoneOperation).mockReset();
+  vi.mocked(monolithPhoneOperation).mockResolvedValueOnce(undefined);
+  const showCopyToast = vi.fn();
+  const readRoom = vi.fn();
+  const setMessageActionsTarget = vi.fn();
+  const target = { id: 'msg-1', relayId: 'msg-1', text: 'Fix drag and drop on Tasks\nWith cleanup', isUser: true, timestamp: 1,
+    authorIdentity: { pubkey: 'p', name: 'Maya', handle: 'maya', kind: 'human' } };
+  const props = {
+    decodedId: 'chat-1',
+    isCorner: false,
+    isDirectMessage: false,
+    memberManagement: {},
+    outbox: { states: new Map(), current: () => new Map() },
+    renameDraft: '',
+    roomSurface: null,
+    canDeleteMessage: () => false,
+    setMessageActionsTarget,
+    showCopyToast,
+    readRoom,
+    messageActionsTarget: target,
+  } as unknown as React.ComponentProps<typeof ChatSurfaceOverlays>;
+  let tree!: ReturnType<typeof create>;
+  act(() => { tree = create(<ChatSurfaceOverlays {...props} />); });
+  const row = tree.root.findByProps({ testID: 'message-save-backlog-action' });
+  expect(row.props.label).toBe('Save to backlog');
+  await act(async () => { row.props.onPress(); });
+  expect(setMessageActionsTarget).toHaveBeenCalledWith(null);
+  expect(monolithPhoneOperation).toHaveBeenCalledWith(
+    'updateWorkItem',
+    expect.objectContaining({
+      id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+      roomId: 'chat-1',
+      title: 'Fix drag and drop on Tasks',
+      objective: 'Fix drag and drop on Tasks\nWith cleanup',
+      state: 'backlog',
+      originMessageId: 'msg-1',
+    }),
+  );
+  expect(showCopyToast).toHaveBeenCalledWith('Saved to backlog');
+  expect(readRoom).toHaveBeenCalled();
+
+  act(() => tree.update(<ChatSurfaceOverlays {...props} isCorner />));
+  expect(tree.root.findAllByProps({ testID: 'message-save-backlog-action' })).toHaveLength(0);
+  act(() => tree.update(<ChatSurfaceOverlays {...props} isDirectMessage />));
+  expect(tree.root.findAllByProps({ testID: 'message-save-backlog-action' })).toHaveLength(0);
   act(() => tree.unmount());
 });

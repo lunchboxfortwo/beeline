@@ -363,6 +363,9 @@ export function displayRoomMessage(
         ...(message.daemonFact.subgoals
           ? { subgoals: message.daemonFact.subgoals.map((subgoal) => ({ ...subgoal })) }
           : {}),
+        ...(message.daemonFact.items
+          ? { items: message.daemonFact.items.map((entry) => ({ ...entry })) }
+          : {}),
       }
     : undefined;
   return {

@@ -271,8 +271,28 @@ function readGithubEvent(value: unknown): NonNullable<RoomViewMessage['githubEve
 
 function readDaemonFact(value: unknown): NonNullable<RoomViewMessage['daemonFact']> | null {
   const item = record(value);
+  if (!item) return null;
+  if (item.type === 'backlog-added') {
+    if (!uuid(item.roomId)) return null;
+    const items = readList(item.items, (candidate) => {
+      const entry = record(candidate);
+      if (!entry || !nonempty(entry.id) || !nonempty(entry.name)) return null;
+      return { id: entry.id, name: entry.name };
+    });
+    if (!items?.length) return null;
+    return {
+      type: 'backlog-added',
+      roomId: item.roomId,
+      items,
+      ...field(
+        'sourceMessageId',
+        typeof item.sourceMessageId === 'string' && item.sourceMessageId
+          ? item.sourceMessageId
+          : undefined,
+      ),
+    };
+  }
   if (
-    !item ||
     (item.type !== 'corner-complete' &&
       item.type !== 'checks-failing' &&
       item.type !== 'worktree-cleaned' &&
@@ -337,7 +357,10 @@ function readDaemonFact(value: unknown): NonNullable<RoomViewMessage['daemonFact
         ) {
           return null;
         }
-        return { step: entry.step, status: entry.status };
+        return {
+          step: entry.step,
+          status: entry.status as 'pending' | 'in_progress' | 'completed',
+        };
       }),
     ),
   };

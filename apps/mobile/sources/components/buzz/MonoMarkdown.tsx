@@ -17,6 +17,7 @@ import { messageLinkId, openMessageLink } from '@/buzz/message-link';
 import { findChatLinkTokens, type ChatLinkToken } from '@beeline/api-contract/phone';
 import { ChatLinkRun, MessageLinkLabel } from '@/components/buzz/ChatLinks';
 import { openExternalUrl } from '@/utils/open-external-url';
+import { beelineUrlHref } from '@/buzz/beeline-url';
 
 /** The viewer's own normalized handle; a mention of it is highlighted. */
 const ViewerMention = createContext<string | undefined>(undefined);
@@ -734,6 +735,11 @@ export const MonoMarkdown = React.memo(function MonoMarkdown({
         const { Modal } = await import('@/modal/ModalManager');
         Modal.alert('Message not available', 'This message could not be opened. Check your access and try again.');
       });
+      return;
+    }
+    const href = beelineUrlHref(url);
+    if (href) {
+      void import('expo-router').then(({ router }) => router.navigate(href)).catch(() => undefined);
       return;
     }
     if (/^https?:\/\//i.test(url)) void openExternalUrl(url).catch(() => undefined);

@@ -143,22 +143,19 @@ it('counts a PR event once when webhook and subscription lines both stored it', 
   expect(runCountLabel(item!.run!)).toBe('1 message · 1 event');
 });
 
-it('opens a thread event in its thread, and a check inside its own thread on GitHub', () => {
+it('keeps corner-open inline outside lifecycle pills while checks-failing still pills and opens GitHub inside its thread', () => {
   const opened: ChatDisplayMessage = { id: 'open', text: '', isUser: false, timestamp: 1_800_000_000,
     daemonFact: { type: 'corner-open', cornerId: 'c1', objective: 'Fix the stop path', name: 'stop-path' } as never };
   const failed: ChatDisplayMessage = { id: 'fail', text: '', isUser: false, timestamp: 1_800_000_060,
     daemonFact: { type: 'checks-failing', cornerId: 'c2', objective: 'x', name: 'other', pullRequest: { url: 'https://github.com/o/r/pull/9' } } as never };
   const rows = foldPrLifecycleRuns([opened, failed]);
+  expect(rows.map(row => row.id)).toEqual(['open', 'fail']);
+  expect(rows[0]!.notificationLifecycleRun).toBeUndefined();
   const openCorner = vi.fn();
   const openUrl = vi.fn();
-  const [item] = pillItems(rows, () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: openCorner, onOpenUrl: openUrl, cornerId: 'c2' });
-  // A thread opening is Beeline's, never GitHub's.
-  expect(item!.run![0]).toMatchObject({ from: { kind: 'system', name: 'Beeline' },
-    event: { source: 'beeline', verb: 'Opened thread', mark: 'thread', title: 'stop-path', spoken: 'Opened thread stop-path' } });
-  item!.run![0]!.event!.open!.onPress();
-  expect(openCorner).toHaveBeenCalledWith('c1');
-  expect(item!.run![1]).toMatchObject({ from: { kind: 'github' }, event: { source: 'github', verb: 'Failed', mark: 'failed', number: '9' } });
-  item!.run![1]!.event!.open!.onPress();
+  const [item] = pillItems([rows[1]!], () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: openCorner, onOpenUrl: openUrl, cornerId: 'c2' });
+  expect(item).toMatchObject({ from: { kind: 'github' }, event: { source: 'github', verb: 'Failed', mark: 'failed', number: '9' } });
+  item!.event!.open!.onPress();
   expect(openUrl).toHaveBeenCalledWith('https://github.com/o/r/pull/9');
 });
 
@@ -181,7 +178,8 @@ it('draws a lone GitHub event and payments as separate closed pills', () => {
 });
 
 // Exercise the production chat renderer's row choice with native hosts replaced.
-vi.mock('expo-router', () => ({ router: {} }));
+const routerPush = vi.hoisted(() => vi.fn());
+vi.mock('expo-router', () => ({ router: { push: routerPush } }));
 vi.mock('@/modal', () => ({ Modal: {} }));
 vi.mock('@/buzz/app-sign-in', () => ({ openAppSignIn: vi.fn() }));
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn(), phoneOperationFailureReason: vi.fn() }));
@@ -209,7 +207,17 @@ vi.mock('@/app/(app)/beeline/chat/RoomMessageVariants', async () => {
     agentCommandTranscriptMessage,
     OrdinaryLedgerMessage: ({ message }: any) => <Text>{message.text}</Text>,
     SwipeToReply: ({ children }: any) => <>{children}</>,
-    GitHubEventCard: () => null, NotificationLifecycleCard: () => null, DaemonFactCard: () => null,
+    GitHubEventCard: () => null, NotificationLifecycleCard: () => null,
+    DaemonFactCard: ({ message, onOpenCorner, onOpenBacklog }: any) =>
+      message.daemonFact?.type === 'backlog-added'
+        ? React.createElement('Pressable', {
+            testID: `backlog-added-open-${message.id}`,
+            onPress: () => onOpenBacklog?.(message.daemonFact.roomId),
+          }, React.createElement(Text, {}, `Added ${message.daemonFact.items?.[0]?.name ?? ''}`))
+        : React.createElement('Pressable', {
+            testID: `corner-open-${message.id}`,
+            onPress: () => onOpenCorner?.(message.daemonFact?.cornerId),
+          }, React.createElement(Text, {}, `Opened ${message.daemonFact?.name ?? ''}`)),
     GrantRequestCard: () => null, SquireApprovalCard: ({ message, viewerPubkey }: any) =>
       <Text testID={`approval-${message.id}`}>{viewerPubkey === message.squireApproval.owner?.pubkey
         ? message.squireApproval.approvalUrl : message.squireApproval.title}</Text>,
@@ -270,13 +278,17 @@ it('PR-CHAT-ONLY uses large PR cards and small failed-head lines with no PR titl
   act(() => tree.unmount());
 });
 
-it('keeps a lone thread opening in a Room with no repository on the Beeline ring', () => {
+it('keeps a lone thread opening and backlog-added unpilled as direct inline rows', () => {
   const opened: ChatDisplayMessage = { id: 'open', text: '', isUser: false, timestamp: 1_800_000_000,
     daemonFact: { type: 'corner-open', cornerId: 'c1', objective: 'Plan the launch', name: 'launch-plan' } as never };
-  const rows = foldPillRuns(foldPrLifecycleRuns([opened]));
-  const items = pillItems(rows[0]!.pillRun ?? [rows[0]!], () => ({ kind: 'system', name: 'Beeline' }), { onOpenCorner: vi.fn() });
-  expect(items).toEqual([expect.objectContaining({ from: { kind: 'system', name: 'Beeline' },
-    event: expect.objectContaining({ source: 'beeline', mark: 'thread' }) })]);
+  const added: ChatDisplayMessage = { id: 'added', text: '', isUser: false, timestamp: 1_800_000_010,
+    daemonFact: { type: 'backlog-added', roomId: 'r1', items: [{ id: 't1', name: 'ship-tasks' }] } as never };
+  const rows = foldPillRuns(foldPrLifecycleRuns([opened, added]));
+  expect(rows.map(row => row.id)).toEqual(['open', 'added']);
+  expect(rows[0]!.notificationLifecycleRun).toBeUndefined();
+  expect(rows[0]!.pillRun).toBeUndefined();
+  expect(rows[1]!.notificationLifecycleRun).toBeUndefined();
+  expect(rows[1]!.pillRun).toBeUndefined();
 });
 
 const ROOM = '33333333-3333-4333-8333-333333333333';
@@ -414,7 +426,7 @@ it.each([false, true])('preserves unread run boundaries, jumps and hidden record
   act(() => tree.unmount());
 });
 
-it('keeps a thread opening pilled at its source message and opens the thread from the pill', () => {
+it('keeps a thread opening inline and unpilled at its source message and opens the thread in one tap', () => {
   const source = display(1);
   const cornerId = '55555555-5555-4555-8555-555555555555';
   const marker = display(3, { presentation: 'card', systemTranscript: card,
@@ -427,38 +439,41 @@ it('keeps a thread opening pilled at its source message and opens the thread fro
   const openCorner = vi.fn();
   let tree: any;
   act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop openCorner={openCorner} />); });
-  const pill = tree.root.findByType(PillRow);
-  expect(pill.props.items[0]).toMatchObject({ id: marker.id, event: { source: 'beeline', mark: 'thread' } });
-  expect(tree.root.findAllByProps({ testID: `pill-event-open-${marker.id}` })).toHaveLength(0);
-  act(() => pill.findByType('Button').props.onPress());
-  const action = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `pill-event-${marker.id}`);
+  expect(tree.root.findAllByType(PillRow)).toHaveLength(0);
+  const action = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `corner-open-${marker.id}`);
   act(() => action.props.onPress());
   expect(openCorner).toHaveBeenCalledWith(cornerId);
   act(() => tree.unmount());
 });
 
-it('renders one phone pill for an anchored thread opening followed by a PR opening', () => {
+it('keeps an anchored thread opening inline and separate from a following PR opening pill, and opens Tasks for backlog-added', () => {
+  routerPush.mockClear();
   const source = display(1, { text: '@carbon yes go' });
   const marker = display(2, { presentation: 'card', systemTranscript: card,
     daemonFact: { type: 'corner-open', cornerId: ROOM, name: 'sample-thread', objective: '', sourceMessageId: source.id },
   });
-  const opened = display(3, {
+  const backlog = display(3, { presentation: 'card', systemTranscript: card,
+    daemonFact: { type: 'backlog-added', roomId: ROOM, items: [{ id: '11111111-1111-4111-8111-111111111111', name: 'ship-drag' }], sourceMessageId: source.id },
+  });
+  const opened = display(4, {
     presentation: 'system', systemTranscript: { origin: 'github', visibility: 'notice' },
     systemEvent: { subject: { kind: 'github', name: 'GitHub' }, verb: 'opened pull request',
       object: { text: 'Fix labels', url: 'https://github.com/example/example/pull/7' } },
   });
-  const folded = foldTranscriptRows([source, marker, opened], null);
-  expect(folded.rows.map(row => row.id)).toEqual([source.id, marker.id]);
-  expect(folded.hostIds.get(opened.id)).toBe(marker.id);
+  const folded = foldTranscriptRows([source, marker, backlog, opened], null);
+  expect(folded.rows.map(row => row.id)).toEqual([source.id, marker.id, backlog.id, opened.id]);
   let tree: any;
   act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={false} />); });
   const pills = tree.root.findAllByType(PillRow);
   expect(pills).toHaveLength(1);
   expect(pills[0].props.items).toHaveLength(1);
-  expect(pills[0].props.items[0].run).toMatchObject([
-    { id: marker.id, event: { source: 'beeline', mark: 'thread' } },
-    { id: opened.id, event: { source: 'github', mark: 'opened' } },
-  ]);
+  expect(pills[0].props.items[0]).toMatchObject({ id: opened.id, event: { source: 'github', mark: 'opened' } });
+  const backlogAction = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `backlog-added-open-${backlog.id}`);
+  act(() => backlogAction.props.onPress());
+  expect(routerPush).toHaveBeenCalledWith({
+    pathname: '/beeline/tray',
+    params: { chatId: ROOM },
+  });
   act(() => tree.unmount());
 });
 

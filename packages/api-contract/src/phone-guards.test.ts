@@ -650,6 +650,23 @@ m45_describe('phone surface readers', () => {
       cornerId,
       objective: 'Fix the auth test',
     });
+    // A chat-originated backlog-added card reads with its roomId, items, and optional sourceMessageId.
+    const roomId = 'dddddddd-4444-4444-8444-dddddddddddd';
+    m45_expect(
+      read({
+        type: 'backlog-added',
+        roomId,
+        items: [{ id: '11111111-1111-4111-8111-111111111111', name: 'fix-login' }],
+        sourceMessageId: 'e'.repeat(64),
+      }),
+    ).toEqual({
+      type: 'backlog-added',
+      roomId,
+      items: [{ id: '11111111-1111-4111-8111-111111111111', name: 'fix-login' }],
+      sourceMessageId: 'e'.repeat(64),
+    });
+    m45_expect(read({ type: 'backlog-added', roomId, items: [] })).toBeUndefined();
+    m45_expect(read({ type: 'backlog-added', roomId: 'not-a-uuid', items: [{ id: 'a', name: 'b' }] })).toBeUndefined();
   });
 });
 m45_describe('Room payload compatibility in both directions', () => {

@@ -431,6 +431,15 @@ export function useChatTranscriptRenderer([
                 message={item}
                 onOpenCorner={openCorner}
                 onOpenUrl={handleOpenGitHubEvent}
+                onOpenBacklog={(chatId) =>
+                  router.push({
+                    pathname: '/beeline/tray',
+                    params: {
+                      ...(activeCommunityId ? { communityId: activeCommunityId } : {}),
+                      chatId,
+                    },
+                  } as never)
+                }
               />
             </YStack>
           );
