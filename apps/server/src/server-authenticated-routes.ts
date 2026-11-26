@@ -1,3 +1,4 @@
+import { ClientAbortError } from './command-refusal.js';
 import { helperReadRetryAfter, helperRequestCommand } from './helper-requests.js';
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { InvitePreviewAccess } from "./invite-preview.js";
@@ -270,7 +271,8 @@ export async function routeAuthenticated(request: IncomingMessage, response: Ser
     let audio: Buffer;
     try {
       audio = await bytes(request, TRANSCRIPTION_MAXIMUM_BYTES);
-    } catch {
+    } catch (error) {
+      if (error instanceof ClientAbortError) throw error;
       console.warn('[transcription] audio over the upload limit; Groq not called');
       json(response, 413, { error: 'audio_too_large' });
       return;

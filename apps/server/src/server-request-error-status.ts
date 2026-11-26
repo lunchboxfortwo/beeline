@@ -4,7 +4,7 @@ import { ComposioRequestError } from './composio-apps.js';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { PhoneOperationError } from "./phone-operations.js";
 import { WorkflowAuthorizationError } from "./workflow-admin.js";
-import { CommandRefusalError, ExpectedRefusalError } from "./command-refusal.js";
+import { ClientAbortError, CommandRefusalError, ExpectedRefusalError } from "./command-refusal.js";
 import { WorkspaceSkillNotFoundError } from "./institutional-skills.js";
 import { institutionalMemoryErrorStatus } from "./institutional-memory-shadow.js";
 import { AGENT_OWNER_AUTHORITY_MESSAGE, WORKSPACE_ADMIN_AUTHORITY_MESSAGE, SPENDING_OWNER_AUTHORITY_MESSAGE, YOLO_AUTHORITY_MESSAGE, CONNECTOR_OFFER_AUTHORITY_MESSAGE, CONNECTOR_OFFER_WALLET_AUTHORITY_MESSAGE } from "./phone-service.js";
@@ -12,6 +12,7 @@ import { GitHubHttpError, ProductionReleaseBusyError } from "@beeline/auth/githu
 import { GitHubSignInError } from "./auth.js";
 
 export function requestErrorStatus(error: unknown): number {
+  if (error instanceof ClientAbortError) return 499;
   if (error instanceof GitHubSignInError) return 401;
   if (error instanceof WallRefusal) return error.status;
   if (error instanceof ProductionReleaseBusyError) return 409;
