@@ -275,12 +275,25 @@ it('delegates clipboard access to the cross-origin web viewer frame', async () =
   }
 });
 
-it('removes the stream if background authorization refuses current viewer access', async () => {
+it('removes the stream and marks the header unavailable if background authorization refuses current viewer access', async () => {
   phoneOperation.mockRejectedValueOnce(Object.assign(new Error('access denied'), { status: 403 }));
   let tree: ReturnType<typeof create>;
   await act(async () => { tree = create(<ComputerSessionViewer session={session} onClose={() => {}} />); });
   expect(tree!.root.findAllByType('WebView')).toHaveLength(0);
   expect(tree!.root.findAllByType('Text').some((node: any) => node.props.children === 'Browser is unavailable')).toBe(true);
+  expect(tree!.root.findByProps({ testID: 'computer-session-status' }).props.children).toBe('Browser unavailable');
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-live-dot' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-open-browser' })).toHaveLength(0);
+  await act(async () => tree!.unmount());
+});
+
+it('shows Browser unavailable in the desktop viewer header too when authorization is refused', async () => {
+  phoneOperation.mockRejectedValueOnce(Object.assign(new Error('access denied'), { status: 403 }));
+  let tree: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionViewer session={session} desktop onClose={() => {}} />); });
+  expect(tree!.root.findByProps({ testID: 'computer-session-status' }).props.children).toBe('Browser unavailable');
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-live-dot' })).toHaveLength(0);
+  expect(tree!.root.findAllByProps({ testID: 'computer-session-open-browser' })).toHaveLength(0);
   await act(async () => tree!.unmount());
 });
 

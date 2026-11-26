@@ -329,6 +329,7 @@ export function ComputerSessionViewer({ session, onClose, roomId, agentHandle, a
       title={session.title || 'Browser'}
       live={live}
       ended={ended}
+      unavailable={unavailable}
       onOpenInBrowser={live ? () => void openInBrowser() : undefined}
       onClose={onClose}
       stream={

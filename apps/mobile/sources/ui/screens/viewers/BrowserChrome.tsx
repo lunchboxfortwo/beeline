@@ -38,6 +38,7 @@ export function BrowserViewerFrame({
     title = 'Browser',
     live = false,
     ended = false,
+    unavailable = false,
     onOpenInBrowser,
     onClose,
     stream,
@@ -48,6 +49,7 @@ export function BrowserViewerFrame({
     title?: string;
     live?: boolean;
     ended?: boolean;
+    unavailable?: boolean;
     onOpenInBrowser?: () => void;
     onClose: () => void;
     stream: React.ReactNode;
@@ -57,7 +59,13 @@ export function BrowserViewerFrame({
     /** Desktop panes share the 52 px top-bar baseline with PlaceHeader and SidebarView. */
     desktop?: boolean;
 }) {
-    const detail = ended ? 'Session ended' : live ? 'Live session' : 'Connecting…';
+    const detail = ended
+        ? 'Session ended'
+        : unavailable
+            ? 'Browser unavailable'
+            : live
+                ? 'Live session'
+                : 'Connecting…';
     return (
         <YStack flex={1} minHeight={0} backgroundColor="canvas" testID="computer-session-viewer">
             <ViewerHeader
