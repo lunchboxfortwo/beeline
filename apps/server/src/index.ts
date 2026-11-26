@@ -56,6 +56,7 @@ import { createBeelineServer, DEFAULT_MEDIA_MAXIMUM_BYTES } from './server.js';
 import { objectStorageFromEnv } from './object-storage.js';
 import { ObjectService } from './object-service.js';
 import { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
+import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 import { GitHubOperations } from './github-operations.js';
 import { createMonolithAuth } from './monolith-auth.js';
 import { ComposioApps } from './composio-apps.js';
@@ -199,10 +200,10 @@ async function main() {
     event: string,
     payload: unknown,
     deliveryId?: string,
-    signal?: AbortSignal,
+    claim?: GitHubWebhookClaim,
   ) => {
     if (!github) throw new Error('GitHub webhook processor is unavailable');
-    await github.processWebhook(event, payload, deliveryId, signal);
+    await github.processWebhook(event, payload, deliveryId, claim);
   };
   const webAppOrigins = (process.env.BEELINE_WEB_APP_ORIGINS ?? '')
     .split(',')

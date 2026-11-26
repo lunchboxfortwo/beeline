@@ -11,19 +11,22 @@ import { recordCornerGithubFact, advanceCorner, planCornerCheckObservation, chec
 import { routeSystemCommand } from './agent-command.js';
 import { cornerCiGate, cornerGateChecks, type CornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
+import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
 
 
   export async function gitHubOperationsRefreshCheckRollup(ctx: GitHubOperations,
     target: CornerWebhookTarget & { has_pr?: boolean; pr_number?: string | null }, repository: string,
     check: NonNullable<ReturnType<typeof checkFact>>, database: SqlDatabase,
-    options?: { quiet?: boolean; snapshot?: {
+    options?: { quiet?: boolean; claim?: GitHubWebhookClaim; snapshot?: {
       rollup: Awaited<ReturnType<GitHubAppClient['readCommitCheckRollup']>>;
       pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>;
       fetchStartedAt: number;
       token: string;
     } },
   ) {
+    const claim = options?.claim;
+    claim?.assertActive();
     const checkHeadSha = check.headSha!;
     // An obsolete event cannot admit provider work for a head already replaced
     // in committed state. Later checks still fence a push during this read.
@@ -32,6 +35,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
     let fetchStartedAt = 0;
     let confirmedPr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>> | undefined;
     try {
+        claim?.assertActive();
         // Use the database clock across server instances, with subsecond precision
         // to order overlapping fetches while keeping updatedAt in epoch seconds.
         fetchStartedAt = options?.snapshot?.fetchStartedAt ?? (await database.query<{ started_at: number }>(
@@ -40,9 +44,11 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         const token = options?.snapshot ?? await ctx.app.installationToken(Number(target.installation_id), {
           repositoryIds: [Number(target.repository_id)],
         });
+        claim?.assertActive();
         // The base branch's protection names the head's CI gate.
         const rollup = options?.snapshot?.rollup ?? await ctx.app.readCommitCheckRollup(
           token.token, repository, checkHeadSha, admitted.pr.targetBranch || undefined);
+        claim?.assertActive();
         const ciGate = cornerCiGate(rollup, checkHeadSha);
         // A push can move GitHub's PR head before either its push or synchronize
         // webhook reaches us. The stored head alone cannot authorize a verdict.
@@ -66,9 +72,10 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         const livePr = options?.snapshot?.pr ?? (target.pr_number && (rollup.state === 'passed' || rollup.state === 'failed' || failedChecks.length > 0)
           ? await ctx.app.readPullRequest(token.token, repository, Number(target.pr_number))
           : undefined);
+        claim?.assertActive();
         confirmedPr = livePr;
         if (livePr?.state === 'closed' && !livePr.merged) {
-          await ctx.recordClosedCornerPullRequest(target.corner_id, Number(target.pr_number), database);
+          await ctx.recordClosedCornerPullRequest(target.corner_id, Number(target.pr_number), database, claim);
           return;
         }
         if (livePr?.merged) {
@@ -79,7 +86,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             headSha: livePr.headSha, mergedAt: livePr.mergedAt,
             mergeCommitSha: livePr.mergeCommitSha, mergedBy: livePr.mergedBy,
             commits: 0, files: 0,
-          }, database, livePr.number);
+          }, database, livePr.number, claim);
           return;
         }
         if (livePr && livePr.headSha !== checkHeadSha) return;
@@ -101,6 +108,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             return { name: item.name, url: item.url, jobId };
           }
         }));
+        claim?.assertActive();
         const providerCheck = check;
         let noteInserted = false;
         // Each replay starts with the provider fact, not a label from an aborted attempt.
@@ -185,6 +193,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
         // and the other lifecycle reads run before that lock.
         const advanced = await advanceCorner(database, target.corner_id, { kind: 'reconcile' }, {
           project(corner) {
+            claim?.assertActive();
             if (!admits(corner.lifecycle)) return undefined;
             const plan = planCheckRefresh(corner.lifecycle);
             const { branch: _branch, ...lifecycle } = {
@@ -195,6 +204,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             return { corner: { ...corner, lifecycle }, event: plan.event };
           },
           async write(db) {
+            if (claim) await claim.assertOwned(db);
             noteInserted = false;
             // Webhooks signal a refresh. Revalidate its head and age only after
             // the provider has replied, under the corner row lock.
@@ -238,17 +248,25 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
             return plan.event ?? false;
           },
         });
-        if (advanced.land) await ctx.landCorner(target.corner_id);
+        if (advanced.land) {
+          if (claim) await claim.assertOwned(database);
+          await ctx.landCorner(target.corner_id);
+        }
         if (noteInserted) ctx.onRoomChanged?.(target.corner_id);
     } catch (error) {
+      if (claim?.signal.aborted) throw claim.signal.reason ?? error;
       if (transientGitHubError(error)) {
+        if (claim) await claim.assertOwned(database);
         await recordCornerGithubFact(database, target.corner_id, { kind: 'checks-unavailable', headSha: checkHeadSha, fetchStartedAt });
       }
       throw error;
     }
     // A checks read repairs only its check snapshot; mergeability refreshes
     // retain their event path and must not reset a pending merge claim's age.
-    if (!options?.snapshot) await ctx.refreshStaleMergeability(target.corner_id, confirmedPr);
+    if (!options?.snapshot) {
+      if (claim) await claim.assertOwned(database);
+      await ctx.refreshStaleMergeability(target.corner_id, confirmedPr, claim);
+    }
   }
 
 
@@ -323,7 +341,9 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
     },
     database: SqlDatabase = ctx.database,
     expectedPrNumber?: number,
+    claim?: GitHubWebhookClaim,
   ) {
+    claim?.assertActive();
     // Match webhook order: commit the repository fact before archival takes
     // any locks. Its message ID precedes the AFTER trigger's Workspace journal;
     // waiting for that ID while owning the journal forms a deadlock cycle.
@@ -334,7 +354,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
       ...(pullRequest.mergedBy ? { sender: { login: pullRequest.mergedBy } } : {}),
       pull_request: { merged: true, title: pullRequest.title, html_url: pullRequest.url,
         head: { ref: pullRequest.branch }, base: { ref: pullRequest.targetBranch } },
-    }, Number(target.installation_id));
+    }, Number(target.installation_id), claim);
     const mergeKey = `github:pull-request:merged:${pullRequest.url}`;
     let updated = false;
     let archived = false;
@@ -343,6 +363,7 @@ import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, 
       archived = false;
       await lockCornerLifecycle(database, target.corner_id);
       await lockCornerArchivalAuthority(database);
+      if (claim) await claim.assertOwned(database);
       const current = (
         await database.query<{ lifecycle: CornerLifecycleView; locked: boolean }>(
           `SELECT gh.lifecycle,fact.locked FROM corner_facts fact

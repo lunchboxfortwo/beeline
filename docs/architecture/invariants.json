@@ -3588,7 +3588,7 @@
           "replied": { "reason": "Legacy reply receipt for serving and rollback images.", "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain" },
           "final_suppressed": { "reason": "Legacy final receipt for serving and rollback images.", "drop": "docs/agent-server-surfaces.md#turn-recovery-storage-retirement after serving and rollback images drain" },
           "ended": "Harness return is independent of reply delivery; a person's Stop after the reply cancels the run until it ends.",
-          "self_closed": "Marks an invocation that closed its own thread mid-turn so only that invocation may publish its closing answer to the archived thread."
+          "self_closed": "Records whether this invocation closed its own thread so only that invocation may post its closing summary after archival."
         }
       }
     },

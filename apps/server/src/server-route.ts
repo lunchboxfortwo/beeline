@@ -776,8 +776,8 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof delivery !== 'string' || typeof event !== 'string')
       throw new Error('GitHub delivery headers are required');
     const parsed = JSON.parse(payload.toString('utf8')) as unknown;
-    const outcome = await runClaimedGitHubWebhook(options.database, delivery, async (signal) => {
-      if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery, signal);
+    const outcome = await runClaimedGitHubWebhook(options.database, delivery, async (claim) => {
+      if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery, claim);
     });
     if (outcome === 'duplicate') {
       json(response, 200, { accepted: false, duplicate: true });

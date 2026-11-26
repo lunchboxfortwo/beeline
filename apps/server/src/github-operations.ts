@@ -19,6 +19,7 @@ import { gitHubOperationsReconcileQueuedCorners, gitHubOperationsRecordConfirmed
 import { gitHubOperationsRefreshCheckRollup, gitHubOperationsLifecycle, gitHubOperationsUpdateLifecycle, gitHubOperationsSystemNote, gitHubOperationsMergeCorner, gitHubOperationsDeleteCornerBranch, gitHubOperationsSyncInstallation, gitHubOperationsListAdministeredInstallations, gitHubOperationsUserCanAdministerInstallation, gitHubOperationsAssertInstallationAccess } from './github-operations-refresh-check-rollup.js';
 import { gitHubOperationsUserCredential, gitHubOperationsRotateUserCredential, gitHubOperationsStoreRepository } from './github-operations-user-credential.js';
 import { repositoryIconPushTarget, resolveRepositoryIcons } from './repository-icons.js';
+import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
 export class GitHubOperations {
 
@@ -65,9 +66,9 @@ export class GitHubOperations {
     check: NonNullable<ReturnType<typeof checkFact>>,
     database: SqlDatabase,
     deliveryId?: string,
-    signal?: AbortSignal,
+    claim?: GitHubWebhookClaim,
   ): Promise<void> {
-    if (signal?.aborted) throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
+    claim?.assertActive();
     const headSha = check.headSha;
     const deliveryKey = deliveryId && headSha ? `${deliveryId}:${target.corner_id}:${headSha}` : undefined;
     if (deliveryKey) {
@@ -79,15 +80,24 @@ export class GitHubOperations {
       }
     }
     try {
-      await this.refreshCheckRollup(target, repository, check, database);
+      await this.refreshCheckRollup(target, repository, check, database, claim ? { claim } : undefined);
+      claim?.assertActive();
     } catch (error) {
-      if (signal?.aborted) {
+      if (claim?.signal.aborted) {
         if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
-        throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
+        throw claim.signal.reason ?? error;
       }
       if (!transientGitHubError(error)) {
         if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
         throw error;
+      }
+      if (claim) {
+        try {
+          await claim.assertOwned(database);
+        } catch (ownershipError) {
+          if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
+          throw ownershipError;
+        }
       }
       const firstDelay = githubRetryDelay(error, WEBHOOK_CHECK_RETRY_DELAYS_MS[0]!);
       if (headSha) this.scheduleWebhookCheckRetry(target, repository, check, database, firstDelay);
@@ -331,16 +341,16 @@ async closeCornerPullRequest(cornerId: string): Promise<{
     blocker: string;
 }> { return gitHubOperationsCloseCornerPullRequest(this, cornerId); }
 /** PR association and run state move together for tool calls and GitHub facts. */
-async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database): Promise<boolean> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database); }
+async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database, claim?: GitHubWebhookClaim): Promise<boolean> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database, claim); }
 /** Caller is authorized by DaemonService: it reaches the corner. */
 async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number | string; callerId?: string }): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId, options); }
 
 
-  async processWebhook(event: string, payload: unknown, deliveryId?: string, signal?: AbortSignal) {
+  async processWebhook(event: string, payload: unknown, deliveryId?: string, claim?: GitHubWebhookClaim) {
     if (this.#stoppingChecks)
       throw new CommandRefusalError('GitHub check service is shutting down', 409);
     const assertActive = () => {
-      if (signal?.aborted) throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
+      claim?.assertActive();
     };
     assertActive();
     let finish!: () => void;
@@ -348,7 +358,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
     this.#checkWork.add(work);
     let release: (() => void) | undefined;
     try {
-      release = await this.#webhooks.acquire(signal);
+      release = await this.#webhooks.acquire(claim?.signal);
       assertActive();
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
       const body = payload as Record<string, unknown>;
@@ -356,6 +366,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
       // Retired: merge recovery no longer waits on a person's message.
       if (event === 'beeline:human-message') return;
       if (event === 'merge_group') {
+        if (claim) await claim.assertOwned(this.database);
         await this.reconcileQueuedCorners();
         return;
       }
@@ -369,6 +380,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         this.invalidateInstallationRoomTokens(install.id);
       }
       if (deliveryId) {
+        if (claim) await claim.assertOwned(this.database);
         const changed = await fireRepositorySubscriptions(this.database, install.id, event, body, deliveryId);
         for (const roomId of new Set(changed)) this.onRoomChanged?.(roomId);
       }
@@ -382,18 +394,22 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         event === 'workflow_run' ||
         event === 'status'
       ) {
-        await this.processRepositoryEvent(event, body, install.id);
+        await this.processRepositoryEvent(event, body, install.id, claim);
         assertActive();
-        await this.processCornerEvent(event, body, install.id, deliveryId, signal);
+        await this.processCornerEvent(event, body, install.id, deliveryId, claim);
         assertActive();
-        if (event === 'push') await this.processBaseBranchPush(body, install.id);
+        if (event === 'push') await this.processBaseBranchPush(body, install.id, claim);
         assertActive();
         if (event === 'push') {
           const iconRepository = await repositoryIconPushTarget(this.database, body);
           assertActive();
-          if (iconRepository) await this.resolveRepositoryIcons([iconRepository]);
+          if (iconRepository) {
+            if (claim) await claim.assertOwned(this.database);
+            await this.resolveRepositoryIcons([iconRepository]);
+          }
         }
         assertActive();
+        if (claim) await claim.assertOwned(this.database);
         await this.reconcileQueuedCorners();
         return;
       }
@@ -402,6 +418,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
       // full GitHub refresh and repository-change wake for every bound Room.
       if (event !== 'installation' && event !== 'installation_repositories' && event !== 'repository') return;
       if (event === 'installation' && body.action === 'deleted') {
+        if (claim) await claim.assertOwned(this.database);
         await this.database.query(
           `UPDATE github_installations SET status='revoked',updated_at=now() WHERE installation_id=$1`,
           [install.id],
@@ -413,6 +430,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         return;
       }
       if (event === 'installation' && body.action === 'suspend') {
+        if (claim) await claim.assertOwned(this.database);
         await this.database.query(
           `UPDATE github_installations SET status='suspended',updated_at=now()
            WHERE installation_id=$1 AND status<>'revoked'`,
@@ -452,6 +470,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
           return typeof id === 'number' && Number.isSafeInteger(id) ? [id] : [];
         });
         if (removedIds.length) {
+          if (claim) await claim.assertOwned(this.database);
           await this.database.query(
             `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1 AND repository_id=ANY($2::bigint[])`,
             [install.id, removedIds],
@@ -459,6 +478,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         }
       }
       assertActive();
+      if (claim) await claim.assertOwned(this.database);
       await this.syncInstallation(owner, install.id);
     } finally {
       release?.();
@@ -473,7 +493,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
  * checks previously clean verdicts: checks can finish after the base moves
  * without a pull-request webhook carrying the new conflict.
  */
-async refreshStaleMergeability(cornerId?: string, confirmedPr?: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>): Promise<void> { return gitHubOperationsRefreshStaleMergeability(this, cornerId, confirmedPr); }
+async refreshStaleMergeability(cornerId?: string, confirmedPr?: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>, claim?: GitHubWebhookClaim): Promise<void> { return gitHubOperationsRefreshStaleMergeability(this, cornerId, confirmedPr, claim); }
 /** Reconcile committed queue facts against GitHub; never enqueue from a wake. */
 /**
  * Settles merge-queue entries against the live gate. For one corner (a hold,
@@ -483,20 +503,21 @@ async refreshStaleMergeability(cornerId?: string, confirmedPr?: Awaited<ReturnTy
  */
 async reconcileQueuedCorners(cornerId?: string): Promise<void> { return gitHubOperationsReconcileQueuedCorners(this, cornerId); }
 async recordConfirmedCornerMerge(target: CornerWebhookTarget, repository: string, number: number, pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>) { return gitHubOperationsRecordConfirmedCornerMerge(this, target, repository, number, pr); }
-async processBaseBranchPush(body: GitHubRecord, installationId: number): Promise<void> { return gitHubOperationsProcessBaseBranchPush(this, body, installationId); }
+async processBaseBranchPush(body: GitHubRecord, installationId: number, claim?: GitHubWebhookClaim): Promise<void> { return gitHubOperationsProcessBaseBranchPush(this, body, installationId, claim); }
 /**
  * Room-level repository activity. Issues and pull requests post on
  * opened/closed. Raw pushes and CI do NOT post: commit churn and
  * mainline check results are not Room conversation. Corner PRs use the
  * same repository events; CI stays on processCornerEvent.
  */
-async processRepositoryEvent(event: string, body: GitHubRecord, installationId: number) { return gitHubOperationsProcessRepositoryEvent(this, event, body, installationId); }
-async processCornerEvent(event: string, body: GitHubRecord, installationId: number, deliveryId?: string, signal?: AbortSignal) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId, deliveryId, signal); }
+async processRepositoryEvent(event: string, body: GitHubRecord, installationId: number, claim?: GitHubWebhookClaim) { return gitHubOperationsProcessRepositoryEvent(this, event, body, installationId, claim); }
+async processCornerEvent(event: string, body: GitHubRecord, installationId: number, deliveryId?: string, claim?: GitHubWebhookClaim) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId, deliveryId, claim); }
 async refreshCheckRollup(target: CornerWebhookTarget & {
     has_pr?: boolean;
     pr_number?: string | null;
 }, repository: string, check: NonNullable<ReturnType<typeof checkFact>>, database: SqlDatabase, options?: {
     quiet?: boolean;
+    claim?: GitHubWebhookClaim;
     snapshot?: {
         rollup: Awaited<ReturnType<GitHubAppClient['readCommitCheckRollup']>>;
         pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>;
@@ -520,7 +541,7 @@ async mergeCorner(target: CornerWebhookTarget, pullRequest: {
     mergedBy?: string;
     commits: number;
     files: number;
-}, database: SqlDatabase = this.database, expectedPrNumber?: number) { return gitHubOperationsMergeCorner(this, target, pullRequest, database, expectedPrNumber); }
+}, database: SqlDatabase = this.database, expectedPrNumber?: number, claim?: GitHubWebhookClaim) { return gitHubOperationsMergeCorner(this, target, pullRequest, database, expectedPrNumber, claim); }
 /** One post-commit attempt; no persistent branch cleanup queue or retry. */
 async deleteCornerBranch(cornerId: string) { return gitHubOperationsDeleteCornerBranch(this, cornerId); }
 async syncInstallation(viewerId: string, installationId: number, transaction?: SqlDatabase) { return gitHubOperationsSyncInstallation(this, viewerId, installationId, transaction); }

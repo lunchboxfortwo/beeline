@@ -213,6 +213,96 @@ export const QUOTA_AXI_CLAUDE_REPORT = {
 } as const;
 
 /**
+ * `quota-axi --provider agy --json --full --no-credential-refresh`
+ * (quota-axi 0.1.64), run on squire on 2026-11-26 in a Beeline Antigravity
+ * session. Only `quotaSemantics` is trimmed; nothing else is edited.
+ */
+export const QUOTA_AXI_AGY_REPORT = {
+  "generatedAt": "2026-11-26T16:56:57.633Z",
+  "schemaVersion": 5,
+  "providers": [
+    {
+      "provider": "agy",
+      "label": "Antigravity",
+      "source": "cli",
+      "windows": [
+        {
+          "id": "gemini_5h",
+          "label": "Gemini 5-hour",
+          "kind": "session",
+          "resetsAt": "2026-11-26T18:48:36.000Z",
+          "resetText": "You have used some of your 5-hour limit, it will fully refresh in 1 hour, 51 minutes.",
+          "windowSeconds": 18000,
+          "percentUsed": 88,
+          "percentRemaining": 12,
+          "pace": {
+            "status": "unknown",
+            "reason": "stale"
+          }
+        },
+        {
+          "id": "gemini_weekly",
+          "label": "Gemini weekly",
+          "kind": "weekly",
+          "resetsAt": "2026-12-03T13:48:36.000Z",
+          "resetText": "You have used some of your weekly limit, it will fully refresh in 6 days, 20 hours.",
+          "windowSeconds": 604800,
+          "percentUsed": 23,
+          "percentRemaining": 77,
+          "pace": {
+            "status": "unknown",
+            "reason": "stale"
+          }
+        },
+        {
+          "id": "claude_gpt_5h",
+          "label": "Claude/GPT 5-hour",
+          "kind": "session",
+          "resetsAt": "1970-01-01T00:00:00.000Z",
+          "windowSeconds": 18000,
+          "percentUsed": 0,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "stale"
+          }
+        },
+        {
+          "id": "claude_gpt_weekly",
+          "label": "Claude/GPT weekly",
+          "kind": "weekly",
+          "resetsAt": "1970-01-01T00:00:00.000Z",
+          "windowSeconds": 604800,
+          "percentUsed": 0,
+          "percentRemaining": 100,
+          "pace": {
+            "status": "unknown",
+            "reason": "stale"
+          }
+        }
+      ],
+      "attempts": [
+        {
+          "source": "cli",
+          "status": "success"
+        }
+      ],
+      "state": {
+        "status": "stale",
+        "stale": true,
+        "refreshedAt": "2026-11-26T16:56:57.633Z",
+        "sourcesTried": [
+          "cli"
+        ]
+      },
+      "accountKeys": [
+        "default"
+      ]
+    }
+  ]
+} as const;
+
+/**
  * `session/request_permission` payloads captured VERBATIM from a real
  * `@agentclientprotocol/claude-agent-acp` (v0.66.0) process.
  *

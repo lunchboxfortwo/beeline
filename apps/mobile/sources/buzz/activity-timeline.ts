@@ -7,6 +7,8 @@ import {
   peelShellCommand,
   redactDisplayPaths,
 } from './tool-call-classify';
+import type { ToolIdentityLookup } from './tool-identity-lookup';
+import { cleanToolOutputText } from './tool-output-format';
 
 /**
  * How a single tool call reaches the reader.
@@ -57,6 +59,9 @@ export type TurnActivityAction = {
   /** Who asked for the turn this call belongs to; quiet text in the expanded row. */
   requestedBy?: { pubkey: string; name?: string };
   files?: TurnActivityFile[];
+  plan?: AgentActivityItem['plan'];
+  /** True for legacy summary rollup-only rows (`reading 8`) with zero inspectable detail. */
+  rollupOnly?: true;
 };
 
 export type TurnActivity = {
@@ -136,9 +141,36 @@ function searchTerms(value: string): string | undefined {
   return named ? clamp(redactPaths(named).replace(/\s+\S+\.[\w-]+$/i, ''), 44) : undefined;
 }
 
+function outputIndicatesError(raw: string | undefined): boolean {
+  if (!raw?.trim()) return false;
+  const cleaned = cleanToolOutputText(raw).trim();
+  if (!cleaned.startsWith('{')) return false;
+  try {
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return false;
+    if (parsed.isError === true || parsed.is_error === true) return true;
+    const nested = parsed.output;
+    if (
+      nested &&
+      typeof nested === 'object' &&
+      !Array.isArray(nested) &&
+      typeof (nested as Record<string, unknown>).Error === 'string' &&
+      String((nested as Record<string, unknown>).Error).trim().length > 0
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function isFailure(item: AgentActivityItem): boolean {
   const status = item.status ?? '';
-  if (/\b(?:failed|error|unavailable|denied)\b/i.test(status)) return true;
+  if (/\b(?:failed|error|unavailable|denied|rejected|timed[_ -]?out|cancell?ed)\b/i.test(status)) {
+    return true;
+  }
+  if (outputIndicatesError(item.output)) return true;
   // A settled status is the event's authority. Successful output frequently
   // contains phrases such as "0 errors" and must not be reclassified by copy.
   if (/\b(?:completed|complete|success|succeeded|passed|done)\b/i.test(status)) return false;
@@ -171,19 +203,30 @@ export function failureReason(item: AgentActivityItem): string | undefined {
   const statusCode = Number(item.status?.match(/(?:exit|code)\s*(\d+)/i)?.[1]);
   if (!raw) return Number.isFinite(statusCode) ? `exit ${statusCode}` : undefined;
   // Body usually JSON-stringifies the tool result envelope.
-  let text = raw;
+  let text = cleanToolOutputText(raw);
   let exitCode: number | undefined;
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = JSON.parse(text.trim()) as Record<string, unknown>;
     if (parsed && typeof parsed === 'object') {
+      const nestedOut =
+        parsed.output && typeof parsed.output === 'object' && !Array.isArray(parsed.output)
+          ? (parsed.output as Record<string, unknown>)
+          : undefined;
       if (typeof parsed.formatted_output === 'string') text = parsed.formatted_output;
       if (typeof parsed.exit_code === 'number') exitCode = parsed.exit_code;
       if (typeof parsed.stderr === 'string' && parsed.stderr.trim()) text = parsed.stderr;
+      else if (typeof nestedOut?.Error === 'string' && nestedOut.Error.trim()) {
+        text = nestedOut.Error;
+      } else if (typeof parsed.error === 'string' && parsed.error.trim()) {
+        text = parsed.error;
+      } else if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        text = parsed.message;
+      }
     }
   } catch {
     // Plain-text output stays as-is.
   }
-  text = text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+  text = cleanToolOutputText(text);
   const lines = text
     .split('\n')
     .map((line) => line.trim())
@@ -251,7 +294,7 @@ function commandLabel(command: string): string | undefined {
 }
 
 /** Concise historical-safe verb-object label derived only from existing fields. */
-export function ledgerStepLabel(item: AgentActivityItem): string {
+export function ledgerStepLabel(item: AgentActivityItem, lookup?: ToolIdentityLookup): string {
   const kind = item.toolKind?.toLowerCase();
   const source = `${item.title} ${item.command ?? ''} ${item.input ?? ''}`;
   const file = item.files?.[0]?.path ? displayFilePath(item.files[0].path) : firstFileName(source);
@@ -260,7 +303,7 @@ export function ledgerStepLabel(item: AgentActivityItem): string {
   );
   const mcp = parseMcpTool(item.title, item.command, item.input);
   if (mcp) {
-    const described = describeMcpCall(mcp, item.input, item.command, item.output);
+    const described = describeMcpCall(mcp, item.input, item.command, item.output, lookup);
     return clamp(redactPaths(`${described.verb} ${described.object}`), MAX_LEDGER_LABEL);
   }
   let label: string | undefined;
@@ -494,7 +537,7 @@ function liveNoteText(total: number, verbs: ReadonlyMap<string, number>): string
  */
 export function buildTurnActivity(
   items: readonly AgentActivityItem[],
-  options?: { settled?: boolean },
+  options?: { settled?: boolean; lookup?: ToolIdentityLookup },
 ): TurnActivity {
   type OrderedStep = { kind: 'tool'; id: string } | { kind: 'projected'; step: TurnActivityAction };
 
@@ -586,6 +629,7 @@ export function buildTurnActivity(
               label: clamp(label, MAX_LEDGER_LABEL),
               outcome: 'success',
               toolKind: verb,
+              rollupOnly: true,
             },
           });
         }
@@ -638,7 +682,7 @@ export function buildTurnActivity(
       ...(tool.toolOutput ? { toolOutput: tool.toolOutput } : {}),
       weight,
       title,
-      label: ledgerStepLabel(tool),
+      label: ledgerStepLabel(tool, options?.lookup),
       outcome: activityOutcome(tool),
       ...(reason ? { reason } : {}),
       ...(tool.toolKind ? { toolKind: tool.toolKind } : {}),
@@ -648,6 +692,10 @@ export function buildTurnActivity(
       ...((tool.output ?? tool.text) ? { output: tool.output ?? tool.text } : {}),
       ...(tool.requestedBy ? { requestedBy: { ...tool.requestedBy } } : {}),
       ...(tool.files?.length ? { files: tool.files.map((file) => ({ ...file })) } : {}),
+      ...(tool.plan
+        ? { plan: { ...tool.plan, items: tool.plan.items.map((item) => ({ ...item })) } }
+        : {}),
+      ...(/^\d+\s+earlier\s+steps$/i.test(title) ? { rollupOnly: true as const } : {}),
     };
     toolSteps.set(id, row);
     if (weight === 'observation') {

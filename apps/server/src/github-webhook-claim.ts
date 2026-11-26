@@ -8,31 +8,39 @@ const WEBHOOK_CLAIM_EXPIRY_GUARD_MS = 10_000;
 
 let webhookWritesSincePrune = 0;
 
+export interface GitHubWebhookClaim {
+  readonly signal: AbortSignal;
+  assertActive(): void;
+  assertOwned(db: SqlDatabase): Promise<void>;
+}
+
 /**
- * Claims a GitHub webhook delivery in the database with a renewable lease and a
- * pre-expiry abort guard. Concurrent or redelivered webhooks across server
- * instances stay exclusive while the handler runs, and a stalled renewal aborts
- * the owning handler before another server can reclaim the delivery.
+ * Claims a GitHub webhook delivery in the database with a renewable lease, a
+ * pre-expiry abort guard, and transactional write fencing. Concurrent or
+ * redelivered webhooks across server instances stay exclusive while the handler
+ * runs, and a stalled renewal aborts the owning handler and fences its writes
+ * before another server can reclaim the delivery.
  */
 export async function runClaimedGitHubWebhook(
   database: SqlDatabase,
   delivery: string,
-  run: (signal: AbortSignal) => Promise<void>,
+  run: (claim: GitHubWebhookClaim) => Promise<void>,
 ): Promise<'accepted' | 'duplicate'> {
   const claimStartedAt = Date.now();
-  const claimed = await database.query<{ claim_expires_at: string }>(
-    `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
-     VALUES($1,clock_timestamp()+interval '2 minutes')
+  const claimed = await database.query<{ received_at: string; claim_expires_at: string }>(
+    `INSERT INTO github_webhook_deliveries(delivery_id,received_at,claim_expires_at)
+     VALUES($1,clock_timestamp(),clock_timestamp()+interval '2 minutes')
      ON CONFLICT (delivery_id) DO UPDATE
-       SET received_at=clock_timestamp(),
+       SET received_at=GREATEST(clock_timestamp(),github_webhook_deliveries.received_at+interval '1 microsecond'),
            claim_expires_at=clock_timestamp()+interval '2 minutes'
        WHERE github_webhook_deliveries.claim_expires_at IS NOT NULL
          AND github_webhook_deliveries.claim_expires_at<=clock_timestamp()
-     RETURNING claim_expires_at::text claim_expires_at`,
+     RETURNING received_at::text received_at, claim_expires_at::text claim_expires_at`,
     [delivery],
   );
+  const claimOwnerAt = claimed.rows[0]?.received_at;
   const initialToken = claimed.rows[0]?.claim_expires_at;
-  if (!initialToken) return 'duplicate';
+  if (!claimOwnerAt || !initialToken) return 'duplicate';
   let claimToken = initialToken;
 
   let handlerAlive = true;
@@ -47,8 +55,9 @@ export async function runClaimedGitHubWebhook(
   const releaseClaimToken = (token: string) =>
     database
       .query(
-        `DELETE FROM github_webhook_deliveries WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
-        [delivery, token],
+        `DELETE FROM github_webhook_deliveries
+         WHERE delivery_id=$1 AND received_at=$2::timestamptz AND claim_expires_at=$3::timestamptz`,
+        [delivery, claimOwnerAt, token],
       )
       .catch(() => undefined);
 
@@ -62,6 +71,39 @@ export async function runClaimedGitHubWebhook(
     const error = new Error(reason);
     claimAbort.abort(error);
     rejectOnClaimLoss(error);
+  };
+
+  const claimError = () =>
+    claimAbort.signal.reason instanceof Error
+      ? claimAbort.signal.reason
+      : new Error('GitHub webhook delivery claim expired');
+
+  const assertActive = () => {
+    if (claimLost || claimAbort.signal.aborted) throw claimError();
+  };
+
+  const assertOwned = async (db: SqlDatabase): Promise<void> => {
+    assertActive();
+    const owned = await db.query(
+      `SELECT 1 FROM github_webhook_deliveries
+       WHERE delivery_id=$1
+         AND received_at=$2::timestamptz
+         AND claim_expires_at IS NOT NULL
+         AND claim_expires_at>clock_timestamp()
+       FOR SHARE`,
+      [delivery, claimOwnerAt],
+    );
+    if (!owned.rowCount) {
+      loseClaim('GitHub webhook delivery claim was lost');
+      throw claimError();
+    }
+    assertActive();
+  };
+
+  const claim: GitHubWebhookClaim = {
+    signal: claimAbort.signal,
+    assertActive,
+    assertOwned,
   };
 
   const expiryClock = new OwnerScheduleClock(() => {
@@ -87,9 +129,9 @@ export async function runClaimedGitHubWebhook(
         const renewed = await database.query<{ claim_expires_at: string }>(
           `UPDATE github_webhook_deliveries
            SET claim_expires_at=clock_timestamp()+interval '2 minutes'
-           WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz
+           WHERE delivery_id=$1 AND received_at=$2::timestamptz AND claim_expires_at=$3::timestamptz
            RETURNING claim_expires_at::text claim_expires_at`,
-          [delivery, expectedToken],
+          [delivery, claimOwnerAt, expectedToken],
         );
         const nextToken = renewed.rows[0]?.claim_expires_at;
         if (!nextToken) {
@@ -119,7 +161,7 @@ export async function runClaimedGitHubWebhook(
   let handlerPromise: Promise<void> = Promise.resolve();
   try {
     if (claimLost) throw claimAbort.signal.reason;
-    handlerPromise = Promise.resolve(run(claimAbort.signal)).finally(() => {
+    handlerPromise = Promise.resolve(run(claim)).finally(() => {
       handlerSettled = true;
     });
     handlerPromise.catch(() => undefined);
@@ -133,8 +175,10 @@ export async function runClaimedGitHubWebhook(
     expiryClock.stop();
     if (claimLost) throw claimAbort.signal.reason;
     const completed = await database.query(
-      `UPDATE github_webhook_deliveries SET claim_expires_at=NULL WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
-      [delivery, claimToken],
+      `UPDATE github_webhook_deliveries
+       SET claim_expires_at=NULL
+       WHERE delivery_id=$1 AND received_at=$2::timestamptz AND claim_expires_at=$3::timestamptz`,
+      [delivery, claimOwnerAt, claimToken],
     );
     if (!completed.rowCount) {
       throw new Error('GitHub webhook delivery claim was lost before completion');
@@ -151,7 +195,9 @@ export async function runClaimedGitHubWebhook(
       if (handlerSettled) {
         await releaseClaimToken(claimToken);
       } else {
-        void handlerPromise.finally(() => releaseClaimToken(claimToken));
+        void handlerPromise
+          .then(() => undefined, () => undefined)
+          .then(() => releaseClaimToken(claimToken));
       }
     }
     throw error;

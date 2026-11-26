@@ -17,6 +17,7 @@ import { recordCornerGithubFact, advanceCorner, cornerReviewWokenSql, cornerRevi
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { ciGateChecks, cornerCiGate, storedCornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
+import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
 
 
@@ -418,12 +419,14 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   /** A confirmed unmerged close ends the linked work unless it is a locked standing thread. */
   export async function gitHubOperationsRecordClosedCornerPullRequest(ctx: GitHubOperations,
     cornerId: string, number: number, database: SqlDatabase = ctx.database,
+    claim?: GitHubWebhookClaim,
   ): Promise<boolean> {
     let archived = false;
     const changed = await database.transaction(async db => {
       archived = false;
       await lockCornerLifecycle(db, cornerId);
       await lockCornerArchivalAuthority(db);
+      if (claim) await claim.assertOwned(db);
       const removed = await recordCornerGithubFact(db, cornerId, { kind: 'pr-forgotten', number });
       if (!removed) return false;
       if (!removed.archived) {
@@ -565,7 +568,9 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   export async function gitHubOperationsRefreshStaleMergeability(ctx: GitHubOperations,
     cornerId?: string,
     confirmedPr?: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>,
+    claim?: GitHubWebhookClaim,
   ): Promise<void> {
+    claim?.assertActive();
     const rows = await ctx.database.query<{
       corner_id: string;
       repository: string;
@@ -601,6 +606,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
       [cornerId ?? null],
     );
     for (const row of rows.rows) {
+      claim?.assertActive();
       try {
         const token = await ctx.app.installationToken(Number(row.installation_id), {
           repositoryIds: [Number(row.repository_id)],
@@ -608,6 +614,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         const pr = cornerId && confirmedPr?.number === row.number
           ? confirmedPr
           : await ctx.app.readPullRequest(token.token, row.repository, row.number);
+        claim?.assertActive();
         if (pr.mergeability === 'unknown') continue;
         const staleBase = Boolean(
           row.base_sha &&
@@ -630,10 +637,12 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
             contained = headContainsCurrentMain(pr.mergeability, comparedMergeBase(compared), mainHead);
           } catch { contained = false; }
         }
+        claim?.assertActive();
         await ctx.database.transaction(async (tx) => {
           // Conflict dispatch advances the lifecycle in this transaction, like
           // check refresh. Take its lock before retaining the cache row.
           await lockCornerLifecycle(tx, row.corner_id);
+          if (claim) await claim.assertOwned(tx);
           const current = (
             await tx.query<{ lifecycle: CornerLifecycleView }>(
               `SELECT lifecycle FROM corner_github_cache WHERE corner_id=$1 FOR UPDATE`,
@@ -678,6 +687,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
           if (note.inserted) ctx.onRoomChanged?.(row.corner_id);
         });
       } catch (error) {
+        if (claim?.signal.aborted) throw claim.signal.reason ?? error;
         console.error(`[server] mergeability refresh failed for thread ${row.corner_id}:`, error);
       }
     }
