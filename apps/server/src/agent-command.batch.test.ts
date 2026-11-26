@@ -2,7 +2,7 @@ import { expect,it } from 'vitest';
 import { sendMessage } from './agent-messaging.js';
 import { A,B,C,CHAT,THREAD,OTHER,db,daemon } from './messaging.test-support.js';
 
-it.each([CHAT,THREAD])('one combined result in %s publishes one session post and no report',async place=>{
+it.each([CHAT,THREAD])('one combined result in %s publishes one session post and wakes only thread commanders once',async place=>{
   const requests=[];
   for(let i=0;i<2;i++)requests.push(await sendMessage(db,{
     route:{from:{agent:A,place:CHAT},to:{agent:B,place}},text:'Please run the checks',
@@ -18,8 +18,9 @@ it.each([CHAT,THREAD])('one combined result in %s publishes one session post and
     FROM messages WHERE author_id=$1 AND text=$2`,[B,input.text])).rows).toEqual([
     {id:result.id,room_id:place,presentation:'message',card_type:null,kind:null,attachments:[file]},
   ]);
-  expect((await db.query(`SELECT id,room_id,agent_id FROM agent_commands
-    WHERE agent_id=$1 AND reason='reply'`,[A])).rows).toEqual([]);
+  const expectedReplyWakes=place===THREAD?[{room_id:CHAT,agent_id:A}]:[];
+  expect((await db.query(`SELECT room_id,agent_id FROM agent_commands
+    WHERE agent_id=$1 AND reason='reply'`,[A])).rows).toEqual(expectedReplyWakes);
   expect((await db.query(`SELECT state,result_message_id,answer_attachments FROM agent_commands
     WHERE id=ANY($1::text[])`,[requests.map(request=>request.id)])).rows).toEqual([
     {state:'complete',result_message_id:result.id,answer_attachments:[]},
@@ -28,19 +29,22 @@ it.each([CHAT,THREAD])('one combined result in %s publishes one session post and
 
   await daemon.execute('postRoomMessage',input,B);
   expect((await db.query('SELECT 1 FROM messages WHERE author_id=$1 AND text=$2',[B,input.text])).rowCount).toBe(1);
-  expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND reason='reply'",[A])).rowCount).toBe(0);
+  expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND reason='reply'",[A])).rowCount).toBe(expectedReplyWakes.length);
 });
 
-it('a batch from different issuers settles locally',async()=>{
+it('a batch from different issuers wakes each distinct thread commander once',async()=>{
   const destinations=[{agent:A,place:CHAT},{agent:C,place:CHAT},{agent:A,place:OTHER}];
   const requests=[];
-  for(const from of destinations)requests.push(await sendMessage(db,{
+  for(const from of [...destinations,destinations[0]!])requests.push(await sendMessage(db,{
     route:{from,to:{agent:B,place:THREAD}},text:'Please run the checks',
   }));
   await daemon.execute('postRoomMessage',{roomId:THREAD,requestId:requests[0]!.id,
     queuedRequestIds:requests.slice(1).map(request=>request.id),text:'Checks passed in every place'},B);
   const replies=(await db.query<{room_id:string;agent_id:string}>(`SELECT room_id,agent_id FROM agent_commands
     WHERE reason='reply'`)).rows;
-  expect(replies).toEqual([]);
+  expect(replies).toHaveLength(destinations.length);
+  expect(replies).toEqual(expect.arrayContaining(
+    destinations.map(({agent,place})=>({room_id:place,agent_id:agent})),
+  ));
   expect((await db.query("SELECT 1 FROM agent_commands WHERE agent_id=$1 AND state='pending'",[B])).rowCount).toBe(0);
 });
