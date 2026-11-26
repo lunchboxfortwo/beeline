@@ -46,7 +46,7 @@ function scanShellAssignmentValueEnd(
     if (ch === '"' || ch === "'") {
       const inner = ch;
       i += 1;
-      while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+      while (i < source.length) {
         if (enclosingQuote && source[i] === enclosingQuote) break;
         if (inner === '"' && source[i] === '\\' && i + 1 < source.length) {
           i += 2;
@@ -63,7 +63,7 @@ function scanShellAssignmentValueEnd(
     if (ch === '\\' && i + 1 < source.length) {
       if (enclosingQuote === '"' && source[i + 1] === '"') {
         i += 2;
-        while (i < source.length && source[i] !== '\n' && source[i] !== '\r') {
+        while (i < source.length) {
           if (source[i] === '"') break;
           if (source[i] === '\\' && source[i + 1] === '"') {
             i += 2;

@@ -31,6 +31,12 @@ describe('redactToolDetail', () => {
     expect(redactToolDetail('SERVICE_ENV=prefix";synthetic-suffix" run')).toBe(
       'SERVICE_ENV=[REDACTED] run',
     );
+    expect(redactToolDetail('SERVICE_ENV="line-one\nline-two" run')).toBe(
+      'SERVICE_ENV=[REDACTED] run',
+    );
+    expect(redactToolDetail("SERVICE_ENV='line-one\nline-two'\necho ok")).toBe(
+      'SERVICE_ENV=[REDACTED]\necho ok',
+    );
     expect(redactToolDetail(`SERVICE_ENV="prefix"middle'synthetic-tail' run`)).toBe(
       'SERVICE_ENV=[REDACTED] run',
     );
