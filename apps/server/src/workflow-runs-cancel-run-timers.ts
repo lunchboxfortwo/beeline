@@ -14,7 +14,7 @@ import type { SqlDatabase } from './database.js';
 import { closeRunChoices, postRoomChoice } from './room-choice.js';
 import { ensureSystemIdentity, identitySubject, systemLine } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
-import { loadRunStart, noteWorkflowRoleExhausted, RunScope, WORKFLOW_HANDOFF_CARD_TYPE, loadRunRoleAgents, resolveRoleBinding, saveRunStatus, TriedAgent, mentionsFor, roleReasons, workflowRequester, WorkflowRunCard, openRun, loadIdentityRow } from './workflow-runs.js';
+import { loadRunStart, noteWorkflowRoleExhausted, RunScope, WORKFLOW_HANDOFF_CARD_TYPE, workflowHandoffRecord, loadRunRoleAgents, resolveRoleBinding, saveRunStatus, TriedAgent, mentionsFor, roleReasons, workflowRequester, WorkflowRunCard, openRun, loadIdentityRow } from './workflow-runs.js';
 
 
 
@@ -186,10 +186,19 @@ export async function enterState(
       WHEN extract(isodow FROM now() AT TIME ZONE 'America/New_York')=1 THEN 14 ELSE 1 END AS days`);
     await reserveServiceReviewWorkspaces(db,nextAgentId,runId,daily ? window.rows[0]!.days : 1);
   }
-  const attempt = run.seq + 1;
   const cardId = randomBytes(32).toString('hex');
   const status = isTerminal ? (nextState as { status: 'done' | 'failed' }).status : undefined;
   await ensureSystemIdentity(db);
+  const record = workflowHandoffRecord(run, toState, roleBindings, {
+    fromState: stateName,
+    outcome: input.outcome,
+    contents: input.contents,
+    receipt: { ...input.receiptInput, exit: { gate: input.outcome, actorId: input.actorId, ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}) } },
+    ...(input.commandId ? { commandId: input.commandId } : {}),
+    ...(nextState.hint ? { receiptHint: nextState.hint } : {}),
+    ...(status ? { status } : {}),
+  });
+  const attempt = record.card.seq;
   await systemLine(db, {
     id: cardId,
     roomId,
@@ -197,23 +206,7 @@ export async function enterState(
     kind: 'workflow-handoff',
     ...(!isTerminal && !isGate && nextAgentId ? { wakes: [nextAgentId] } : {}),
     presentation: 'card',
-    cardType: WORKFLOW_HANDOFF_CARD_TYPE,
-    card: {
-      runId,
-      seq: attempt,
-      workflowSlug: run.workflowSlug,
-      workflowVersion: run.workflowVersion,
-      roleBindings,
-      fromState: stateName,
-      outcome: input.outcome,
-      toState,
-      contents: input.contents,
-      receipt: { ...input.receiptInput, exit: { gate: input.outcome, actorId: input.actorId, ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}) } },
-      answers: run.seq,
-      ...(input.commandId ? { commandId: input.commandId } : {}),
-      ...(nextState.hint ? { receiptHint: nextState.hint } : {}),
-      ...(status ? { status } : {}),
-    },
+    ...record,
   });
   await saveRunStatus(db, scope, toState);
   await dispatchState(db, {
@@ -250,9 +243,14 @@ export async function moveRole(
   const names = await mentionsFor(db, [input.picked, ...(from ? [from] : [])],roomId);
   if (!await claimRun(db, scope)) return { state: scope.stateName, attempt: scope.run.seq };
   if (state.kind === 'gate') await closeRunChoices(db, roomId, runId);
-  const attempt = run.seq + 1;
   const cardId = randomBytes(32).toString('hex');
   await ensureSystemIdentity(db);
+  const record = workflowHandoffRecord(run, stateName, roleBindings, {
+    ...(input.resume ? { fromState: run.toState, outcome: 'resumed' } : { reassigned: true }),
+    ...(input.tried.length ? { tried: input.tried } : {}),
+    ...(state.hint ? { receiptHint: state.hint } : {}),
+  });
+  const attempt = record.card.seq;
   await systemLine(db, {
     id: cardId,
     roomId,
@@ -266,19 +264,7 @@ export async function moveRole(
     kind: 'workflow-handoff',
     ...(state.kind === 'gate' ? {} : { wakes: [input.picked] }),
     presentation: 'card',
-    cardType: WORKFLOW_HANDOFF_CARD_TYPE,
-    card: {
-      runId,
-      seq: attempt,
-      workflowSlug: run.workflowSlug,
-      workflowVersion: run.workflowVersion,
-      roleBindings,
-      toState: stateName,
-      ...(input.resume ? { fromState: run.toState, outcome: 'resumed' } : { reassigned: true }),
-      answers: run.seq,
-      ...(input.tried.length ? { tried: input.tried } : {}),
-      ...(state.hint ? { receiptHint: state.hint } : {}),
-    },
+    ...record,
   });
   await dispatchState(db, {
     workspaceId: scope.workspaceId,
@@ -318,22 +304,14 @@ export async function closeRun(
     afterMessageId: runId,
     // No event kind: a closed run is a durable record that wakes nobody.
     presentation: 'system',
-    cardType: WORKFLOW_HANDOFF_CARD_TYPE,
-    card: {
-      runId,
-      seq: run.seq + 1,
-      workflowSlug: run.workflowSlug,
-      workflowVersion: run.workflowVersion,
-      roleBindings: run.roleBindings,
+    ...workflowHandoffRecord(run, stateName, run.roleBindings, {
       fromState: stateName,
-      toState: stateName,
       outcome: input.outcome,
       status: input.status,
-      answers: run.seq,
       ...(input.outcome === 'expired' && scope.state?.kind ? { expiredStepKind: scope.state.kind } : {}),
       ...(input.cancellation ? { cancellation: input.cancellation } : { closure: { reason: input.reason } }),
       contents: { reason: input.reason },
-    },
+    }),
   });
   await saveRunStatus(db, scope, stateName, input.status);
   return true;

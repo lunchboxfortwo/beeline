@@ -251,34 +251,55 @@ describe('start_workflow', () => {
     await saveWorkflow(database, command, { contract: describedWorkflow(CONTRACT) });
     const { runId } = await startWorkflow(database, command, {
       name: 'corner',
-      roleBindings: { implementer: REVIEWER, reviewer: REVIEWER, approver: APPROVER },
+      roleBindings: { implementer: IMPLEMENTER, reviewer: REVIEWER, approver: APPROVER },
     });
     const phone = new PhoneService(database, 'http://localhost');
     const start = (await phone.readRoom(ROOM, OWNER))!.messages.find(message => message.id === runId)!;
-    const wakes = (await database.query<{ agent_id: string }>(
-      `SELECT agent_id FROM agent_commands WHERE source_message_id=$1`, [runId],
-    )).rows.map(row => row.agent_id);
     await assignWorkflowRole(database, command, { runId, role: 'implementer', targetAgentId: REVIEWER });
-    await handoff(database, await commandFor(REVIEWER), {
+    const reviewer = await commandFor(REVIEWER);
+    await handoff(database, reviewer, {
       runId, outcome: 'stuck', contents: { summary: 'stuck', prUrl: 'none' },
     });
-    await cancelWorkflowRun(database, command, { runId, reason: 'Stop the demonstration' });
+    const reason = 'Stop the demonstration';
+    await cancelWorkflowRun(database, command, { runId, reason });
     const messages = (await phone.readRoom(ROOM, OWNER))!.messages;
     const cancel = messages.find(message => message.text.includes('cancelled workflow'))!;
     const handoffLine = messages.find(message => message.text.includes('handed off'))!;
     const moved = messages.find(message => message.text.includes('moved'))!;
     expect(start.text).toBe(`Impy started workflow corner · run ${runId.slice(0, 8)}`);
     expect(start.systemEvent?.subject).toMatchObject({ id: IMPLEMENTER, name: 'Impy' });
-    expect(wakes).toEqual([REVIEWER]);
     expect(handoffLine.text).toBe(`Ravi handed off ask_human · run ${runId.slice(0, 8)} of corner`);
     expect(cancel.text).toBe(`@impy cancelled workflow corner · run ${runId.slice(0, 8)}`);
-    const cards = (await database.query<{ id: string; presentation: string; card: { runId: string } }>(
-      `SELECT id,presentation,card FROM messages WHERE id=ANY($1::text[])`, [[start.id, moved.id, handoffLine.id, cancel.id]],
+    const ids = [start.id, moved.id, handoffLine.id, cancel.id];
+    const cards = (await database.query<{ id: string; presentation: string; card: unknown }>(
+      `SELECT id,presentation,card FROM messages WHERE id=ANY($1::text[]) AND card_type='workflow-handoff'
+       ORDER BY (card->>'seq')::int`, [ids],
     )).rows;
-    expect(cards.every(row => row.card.runId === runId)).toBe(true);
+    const common = {
+      runId, workflowSlug: 'corner', workflowVersion: 1,
+      roleBindings: { implementer: REVIEWER, reviewer: REVIEWER, approver: APPROVER },
+    };
+    expect(cards.map(row => row.id)).toEqual(ids);
+    expect(cards.map(row => row.card)).toStrictEqual([
+      { ...common, seq: 0, toState: 'implement', roleBindings: { ...common.roleBindings, implementer: IMPLEMENTER },
+        runStatus: 'abandoned', requesterId: IMPLEMENTER, ownerId: null, startKind: 'direct', outputCommandIds: [reviewer.id] },
+      { ...common, seq: 1, answers: 0, toState: 'implement', reassigned: true },
+      { ...common, seq: 2, answers: 1, fromState: 'implement', toState: 'ask_human', outcome: 'stuck',
+        contents: { summary: 'stuck', prUrl: 'none' }, receipt: { exit: { gate: 'stuck', actorId: REVIEWER } },
+        commandId: reviewer.id },
+      { ...common, seq: 3, answers: 2, fromState: 'ask_human', toState: 'ask_human', outcome: 'cancelled',
+        status: 'abandoned', cancellation: { reason, actorId: IMPLEMENTER }, contents: { reason } },
+    ]);
+    expect((await database.query(
+      `SELECT source_message_id,agent_id FROM agent_commands WHERE source_message_id=ANY($1::text[])
+       ORDER BY array_position($1::text[],source_message_id)`, [ids],
+    )).rows).toEqual([
+      { source_message_id: start.id, agent_id: IMPLEMENTER },
+      { source_message_id: moved.id, agent_id: REVIEWER },
+    ]);
     expect((await getWorkflowRun(database, ROOM, runId)).status).toBe('abandoned');
     console.log(`Reproduction workflow-notice-1: start workflow → reassign → hand off → cancel → read Room; stored=${cards.map(row => row.presentation).join(',')}; phone=${[start, moved, handoffLine, cancel].map(message => message.presentation).join(',')}`);
-    expect(cards.map(row => row.presentation).sort()).toEqual(['card', 'card', 'card', 'system']);
+    expect(cards.map(row => row.presentation)).toEqual(['card', 'card', 'card', 'system']);
     expect([start, moved, handoffLine, cancel].map(message => message.presentation)).toEqual(['card', 'card', 'card', 'system']);
     expect(messages.find(message => message.choice)?.presentation).toBe('card');
   });
