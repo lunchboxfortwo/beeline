@@ -71,7 +71,7 @@ export function isGitHubEventRun(message: Pick<ChatDisplayMessage, 'notification
   return Boolean(items?.length && !message.deleted && items.every(isGitHubLifecycleItem));
 }
 
-/** Fold consecutive avatar pills and GitHub event runs into `pillRun`; payment runs and lone pills stay separate. */
+/** Fold consecutive pill messages (system notices, agent pills, stops and GitHub event runs) into `pillRun`; payment runs and lone pills stay separate. */
 export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDisplayMessage[] {
   const result: ChatDisplayMessage[] = [];
   let run: ChatDisplayMessage[] = [];
@@ -96,8 +96,7 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
   };
   for (const message of messages) {
     if (isPillMessage(message) && !message.hasAnchoredCornerMarkers &&
-        (isGitHubEventRun(message) || Boolean(stopNotice(message)) ||
-          (!isSystemLine(message) && !message.notificationLifecycleRun))) {
+        (!message.notificationLifecycleRun || isGitHubEventRun(message))) {
       run.push(message);
       continue;
     }
