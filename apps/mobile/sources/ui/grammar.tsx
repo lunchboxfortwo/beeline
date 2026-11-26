@@ -344,8 +344,9 @@ export function SheetFrame({ open, close, title, testID, children, back, scrolla
     if (!opened.current) return null;
     return (
         <Theme name={theme}>
-            <Sheet modal open={open} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>
-                <Sheet.Overlay backgroundColor={SCRIM} />
+            {/* Keep modal sheets above in-page chrome (<= 2000) and below RN Web Modal dialogs (zIndex 9999). */}
+            <Sheet modal open={open} zIndex={5000} portalProps={{ zIndex: 5000 }} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>
+                <Sheet.Overlay zIndex={4999} backgroundColor={SCRIM} />
                 <Sheet.Container maxWidth={480} width="100%" alignSelf="center" testID={testID}>
                     <Sheet.Background backgroundColor="raised" borderTopLeftRadius="lg" borderTopRightRadius="lg" borderWidth={1} borderColor="stroke" />
                     {/* The grip sits on the sheet's own edge; the whole sheet is the drag surface. */}

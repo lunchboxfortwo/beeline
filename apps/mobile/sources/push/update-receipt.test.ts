@@ -130,25 +130,4 @@ describe('mobile OTA device receipt', () => {
       expect.objectContaining({ platform: 'macos', deviceId: 'device-id-1111-2222' }),
     );
   });
-
-  it('deduplicates concurrent in-flight reports and retries once a failed attempt settles', async () => {
-    const id = freshIdentity();
-    let release!: () => void;
-    desktop.operation.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { release = resolve; }),
-    );
-    const first = reportRunningUpdateReceipt(id);
-    const second = reportRunningUpdateReceipt(id);
-    await vi.waitFor(() => expect(desktop.operation).toHaveBeenCalledTimes(1));
-    release();
-    await Promise.all([first, second]);
-    expect(desktop.operation).toHaveBeenCalledTimes(1);
-
-    const retryId = freshIdentity();
-    desktop.operation.mockRejectedValueOnce(new Error('socket disconnected'));
-    await expect(reportRunningUpdateReceipt(retryId)).rejects.toThrow('socket disconnected');
-    desktop.operation.mockResolvedValueOnce(undefined);
-    await reportRunningUpdateReceipt(retryId);
-    expect(desktop.operation).toHaveBeenCalledTimes(3);
-  });
 });

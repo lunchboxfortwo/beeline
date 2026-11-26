@@ -20,6 +20,9 @@ const work = vi.hoisted(() => ({
   prompt: vi.fn(async (): Promise<string | null> => null),
   alert: vi.fn(),
   actionSheet: vi.fn(),
+  navigate: vi.fn(),
+  resolveChatLinks: vi.fn(async () => ({ links: [] as any[] })),
+  chats: vi.fn(async () => ({ chats: [] as any[] })),
 }));
 vi.mock('@/buzz/work-board-store', () => ({ loadWorkBoard: work.loadWorkBoard }));
 vi.mock('@/sync/transport/monolith-operation', () => ({
@@ -39,6 +42,17 @@ vi.mock('@/buzz/message-link', () => ({
 }));
 vi.mock('@/modal', () => ({
   Modal: { prompt: work.prompt, alert: work.alert, actionSheet: work.actionSheet },
+}));
+vi.mock('expo-router', () => ({ router: { navigate: work.navigate } }));
+vi.mock('@/auth/buzz-identity-storage', () => ({
+  loadBuzzIdentity: vi.fn(async () => ({ publicKey: 'viewer', secretKey: new Uint8Array(32) })),
+  getEffectiveRelayUrl: vi.fn(async () => 'https://server.test'),
+}));
+vi.mock('@/sync/transport/room-view-client', () => ({
+  RoomViewClient: class {
+    resolveChatLinks = work.resolveChatLinks;
+    chats = work.chats;
+  },
 }));
 import { KeyboardBody } from '@/ui/grammar';
 import { WorkItemDetail, WorkSheet } from './WorkItemDetail';
@@ -143,6 +157,72 @@ it('attaches pasted Beeline links, refuses invalid links clearly, and opens mess
         const attBtn = tree.root.find((node: any) => node.props['aria-label'] === '#beeline');
         await act(async () => { attBtn.props.onPress(); });
         expect(work.openMessageLink).toHaveBeenCalledWith(messageUrl);
+        expect(work.openExternalUrl).not.toHaveBeenCalled();
+    } finally { act(() => tree.unmount()); }
+});
+
+it('routes saved #beeline/<place> links to threads, chats, and room ids when tapped', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    work.navigate.mockClear();
+    work.resolveChatLinks.mockReset();
+    work.chats.mockReset();
+    work.openExternalUrl.mockClear();
+    const roomUuid = '22222222-2222-4222-8222-222222222222';
+    const item = {
+        id: 'task-places',
+        roomId: 'room',
+        title: 'Task places',
+        state: 'backlog',
+        entries: [],
+        attachments: [
+            { id: 'att-thread', kind: 'link', name: 'Thread place', url: '#beeline/fix-thread', addedBy: { pubkey: 'viewer', kind: 'human', name: 'Ada' }, createdAt: 1 },
+            { id: 'att-chat', kind: 'link', name: 'Chat place', url: '#beeline/general', addedBy: { pubkey: 'viewer', kind: 'human', name: 'Ada' }, createdAt: 2 },
+            { id: 'att-uuid', kind: 'link', name: 'Room id place', url: `#beeline/${roomUuid}`, addedBy: { pubkey: 'viewer', kind: 'human', name: 'Ada' }, createdAt: 3 },
+        ],
+    } as unknown as WorkItemView;
+    let tree: any;
+    act(() => { tree = create(<WorkItemDetail item={item} workspaceId="ws" viewerId="viewer" desktop={false} now={0} />); });
+    try {
+        // Thread place resolves through resolveChatLinks and navigates to the corner route.
+        work.resolveChatLinks.mockResolvedValueOnce({
+            links: [{ key: '↳fix-thread', kind: 'thread', roomId: 'thread-1', parentRoomId: 'room', name: 'fix-thread' }],
+        });
+        await act(async () => {
+            tree.root.find((node: any) => node.props['aria-label'] === 'Thread place').props.onPress();
+        });
+        await vi.waitFor(() => {
+            expect(work.resolveChatLinks).toHaveBeenCalledWith('room', ['↳fix-thread']);
+            expect(work.navigate).toHaveBeenCalledWith({
+                pathname: '/beeline/chat/[channelId]',
+                params: { channelId: 'thread-1', parent: 'room', title: 'fix-thread' },
+            });
+        });
+
+        // Chat place falls back to the workspace chat list and navigates to the chat room.
+        work.resolveChatLinks.mockResolvedValueOnce({ links: [] });
+        work.chats.mockResolvedValueOnce({
+            chats: [{ room: { id: 'chat-general', name: 'general' } }],
+        });
+        await act(async () => {
+            tree.root.find((node: any) => node.props['aria-label'] === 'Chat place').props.onPress();
+        });
+        await vi.waitFor(() => {
+            expect(work.navigate).toHaveBeenCalledWith({
+                pathname: '/beeline/chat/[channelId]',
+                params: { channelId: 'chat-general', communityId: 'ws' },
+            });
+        });
+
+        // Direct room UUID navigates straight to the room.
+        await act(async () => {
+            tree.root.find((node: any) => node.props['aria-label'] === 'Room id place').props.onPress();
+        });
+        await vi.waitFor(() => {
+            expect(work.navigate).toHaveBeenCalledWith({
+                pathname: '/beeline/chat/[channelId]',
+                params: { channelId: roomUuid, communityId: 'ws' },
+            });
+        });
         expect(work.openExternalUrl).not.toHaveBeenCalled();
     } finally { act(() => tree.unmount()); }
 });

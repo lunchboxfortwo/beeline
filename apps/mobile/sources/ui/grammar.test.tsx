@@ -167,3 +167,13 @@ it('bounds a scrolling sheet below the safe top and keeps its header outside the
         .find((node: any) => node.props.style.some((style: any) => style?.maxHeight !== undefined));
     expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
 });
+
+it('keeps modal sheets below React Native Web Modal dialogs so prompts and alerts stack in front', () => {
+    const tree = at('medium', <SheetFrame open close={vi.fn()} title="Task"><T>body</T></SheetFrame>);
+    const sheet = tree.root.findByType('Sheet');
+    const overlay = tree.root.findByType('Sheet.Overlay');
+    expect(sheet.props.zIndex).toBeLessThan(9999);
+    expect(sheet.props.portalProps?.zIndex).toBeLessThan(9999);
+    expect(overlay.props.zIndex).toBeLessThan(sheet.props.zIndex);
+    expect(overlay.props.zIndex).toBeGreaterThan(2000);
+});

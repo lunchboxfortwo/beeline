@@ -3,7 +3,6 @@ import { readIdentity } from './phone-guards.js';
 import type { AttachmentReference, NeedsYouItemView, RoomViewIdentity } from './phone-types.js';
 
 const BEELINE_HASH_LINK = /^#beeline\/[^\s/()<>]+(?:\/[0-9a-f]{64})?$/;
-const WORK_LINK_MAX_LENGTH = 2048;
 
 /**
  * Validate a work-item link attachment: web http(s) URLs, `beeline://` deep links,
@@ -12,7 +11,7 @@ const WORK_LINK_MAX_LENGTH = 2048;
 export function normalizeWorkItemLinkUrl(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const value = raw.trim();
-  if (!value || value.length > WORK_LINK_MAX_LENGTH) return null;
+  if (!value) return null;
   if (/[\u0000-\u001f\u007f\s]/.test(value)) return null;
   if (BEELINE_HASH_LINK.test(value)) return value;
   if (parseChatLinkToken(value)) return value;

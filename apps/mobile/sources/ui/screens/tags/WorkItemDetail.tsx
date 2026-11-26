@@ -4,6 +4,7 @@ import { FileText, Link as LinkIcon, Plus } from 'lucide-react-native';
 import {
   normalizeWorkItemLinkUrl,
   parseChatLinkToken,
+  threadLinkToken,
   workItemLinkLabel,
   type WorkItemView,
   type WorkState,
@@ -11,7 +12,7 @@ import {
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { mediaIdFromUrl } from '@/buzz/artifact';
-import { cornerHref } from '@/buzz/corner-navigation';
+import { cornerHref, roomHref } from '@/buzz/corner-navigation';
 import { messageLinkId, openChatMessageLink, openMessageLink } from '@/buzz/message-link';
 import { loadWorkBoard } from '@/buzz/work-board-store';
 import {
@@ -228,7 +229,47 @@ export function WorkItemDetail({
                             router.navigate(href);
                           });
                       })().catch(() => undefined);
-                    else if (/^(?:https?|beeline):/i.test(attachment.url))
+                    else if (/^#beeline\/([^\s/()<>]+)$/.test(attachment.url)) {
+                      const place = /^#beeline\/([^\s/()<>]+)$/.exec(attachment.url)![1]!;
+                      void (async () => {
+                        const { router } = await import('expo-router');
+                        if (
+                          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                            place,
+                          )
+                        ) {
+                          router.navigate(roomHref(place, workspaceId));
+                          return;
+                        }
+                        const [
+                          { loadBuzzIdentity, getEffectiveRelayUrl },
+                          { RoomViewClient },
+                        ] = await Promise.all([
+                          import('@/auth/buzz-identity-storage'),
+                          import('@/sync/transport/room-view-client'),
+                        ]);
+                        const identity = await loadBuzzIdentity();
+                        if (!identity) return;
+                        const client = new RoomViewClient({
+                          identity,
+                          baseUrl: await getEffectiveRelayUrl(),
+                        });
+                        const resolved = (
+                          await client.resolveChatLinks(item.roomId, [threadLinkToken(place)])
+                        ).links[0];
+                        if (resolved?.kind === 'thread') {
+                          router.navigate(
+                            cornerHref(resolved.roomId, resolved.parentRoomId, resolved.name),
+                          );
+                          return;
+                        }
+                        const list = await client.chats(workspaceId);
+                        const chat = list.chats.find(
+                          (entry) => entry.room.name.toLowerCase() === place.toLowerCase(),
+                        );
+                        if (chat) router.navigate(roomHref(chat.room.id, workspaceId));
+                      })().catch(() => undefined);
+                    } else if (/^(?:https?|beeline):/i.test(attachment.url))
                       void openExternalUrl(attachment.url);
                   }}
                 >
