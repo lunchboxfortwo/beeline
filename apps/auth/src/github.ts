@@ -72,7 +72,7 @@ export function responseRetryAfter(response: Response): string | null {
 
 export function transientGitHubError(error: unknown): boolean {
   if (error instanceof GitHubHttpError) return error.rateLimited || error.status === 429 || (error.status >= 500 && error.status < 600);
-  if (error instanceof TypeError || (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name))) return true;
+  if (error instanceof ExternalServiceTimeoutError || error instanceof TypeError || (error instanceof Error && ['TimeoutError', 'AbortError', 'ExternalServiceTimeoutError'].includes(error.name))) return true;
   const code = (error as { code?: string; cause?: { code?: string } } | null);
   return ['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNREFUSED', 'UND_ERR_SOCKET'].includes(code?.code ?? code?.cause?.code ?? '');
 }

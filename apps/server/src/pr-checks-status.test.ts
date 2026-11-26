@@ -559,6 +559,50 @@ describe('PR-scoped check gate', () => {
   });
 
 
+  it('reports pending and failing check states truthfully after a review wake was dispatched', async () => {
+    rootFixture.requiredContexts = ['test'];
+    await ownPr();
+    await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
+    // First dispatch review while checks are passing.
+    rootFixture.rollupState = 'SUCCESS';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS',
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    expect(await gate(AUTHOR)).toMatchObject({
+      checks: 'passed',
+      reviewerWake: {
+        status: 'dispatched',
+        detail: 'The checks-passed transition woke @reviewer.',
+      },
+    });
+    // When checks re-run to pending on the same head, reviewerWake must not claim checks passed.
+    rootFixture.rollupState = 'PENDING';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'IN_PROGRESS', conclusion: null,
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    const whilePending = await gate(AUTHOR);
+    expect(whilePending.reviewerWake).toEqual({
+      status: 'dispatched',
+      detail: 'Review started for @reviewer while checks were pending.',
+    });
+    expect(whilePending.reviewerWake.detail).not.toContain('checks-passed');
+    // When checks are failing on the same head, reviewerWake states checks were failing.
+    rootFixture.rollupState = 'FAILURE';
+    rootFixture.rollupContexts = { totalCount: 1, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'FAILURE',
+        checkSuite: { app: { databaseId: 15368 } } },
+    ] };
+    const whileFailing = await gate(AUTHOR);
+    expect(whileFailing.reviewerWake).toEqual({
+      status: 'dispatched',
+      detail: 'Review started for @reviewer while checks were failing.',
+    });
+    expect(whileFailing.reviewerWake.detail).not.toContain('checks-passed');
+  });
+
+
   it('refuses other repositories and nonmembers before accessing PR data', async () => {
     await expect(gate(C, 'https://github.com/other/private/pull/614')).rejects.toThrow(
       'chat repository',

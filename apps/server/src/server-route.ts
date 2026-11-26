@@ -776,21 +776,23 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof delivery !== 'string' || typeof event !== 'string')
       throw new Error('GitHub delivery headers are required');
     const parsed = JSON.parse(payload.toString('utf8')) as unknown;
-    const completed = await options.database.query(
-      `SELECT 1 FROM github_webhook_deliveries WHERE delivery_id=$1`,
-      [delivery],
-    );
-    if (completed.rowCount) {
-      json(response, 200, { accepted: false, duplicate: true });
-      return;
-    }
-    if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery);
     const inserted = await options.database.query(
       `INSERT INTO github_webhook_deliveries(delivery_id) VALUES($1) ON CONFLICT DO NOTHING`,
       [delivery],
     );
-    const accepted = Boolean(inserted.rowCount);
-    if (accepted && ++webhookWritesSincePrune % 64 === 1) {
+    if (!inserted.rowCount) {
+      json(response, 200, { accepted: false, duplicate: true });
+      return;
+    }
+    try {
+      if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery);
+    } catch (error) {
+      await options.database
+        .query(`DELETE FROM github_webhook_deliveries WHERE delivery_id=$1`, [delivery])
+        .catch(() => undefined);
+      throw error;
+    }
+    if (++webhookWritesSincePrune % 64 === 1) {
       try {
         await options.database.query(
           `DELETE FROM github_webhook_deliveries delivery
@@ -803,9 +805,9 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
         console.warn('[github-webhook] retention prune failed', error);
       }
     }
-    json(response, accepted ? 202 : 200, {
-      accepted,
-      duplicate: !accepted,
+    json(response, 202, {
+      accepted: true,
+      duplicate: false,
     });
     return;
   }

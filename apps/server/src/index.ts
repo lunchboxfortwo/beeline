@@ -356,7 +356,7 @@ async function main() {
     github ? (cornerId) => github!.refreshStaleMergeability(cornerId) : undefined,
     github ? (cornerId, onBlocked) => github!.landCornerOutcome(cornerId, onBlocked) : undefined,
     github ? (cornerId) => github!.closeCornerPullRequest(cornerId) : undefined,
-    github ? (cornerId) => github!.readCornerPullRequest(cornerId) : undefined,
+    github ? (cornerId, options) => github!.readCornerPullRequest(cornerId, options) : undefined,
     `${publicOrigin}/v1/connectors/events/composio`,
     github,
   );

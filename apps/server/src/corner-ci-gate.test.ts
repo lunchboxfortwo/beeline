@@ -52,10 +52,28 @@ describe('CI gate from base-branch protection', () => {
     expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);
     expect(await gate()).toMatchObject({
       checks: 'pending', checkCount: 0, mergeAllowed: false,
-      blockedReason: 'no yes on this head', reviewerWake: { status: 'dispatched' },
+      blockedReason: 'no yes on this head',
+      reviewerWake: {
+        status: 'dispatched',
+        detail: 'Review started for @reviewer while checks were pending (this branch has no required checks).',
+      },
     });
     rootFixture.rollupState = 'PENDING';
-    expect(await gate()).toMatchObject({ checks: 'pending', reviewerWake: { status: 'dispatched' } });
+    expect(await gate()).toMatchObject({
+      checks: 'pending',
+      reviewerWake: {
+        status: 'dispatched',
+        detail: 'Review started for @reviewer while checks were pending (this branch has no required checks).',
+      },
+    });
+    rootFixture.rollupState = 'FAILURE';
+    expect(await gate()).toMatchObject({
+      checks: 'failed',
+      reviewerWake: {
+        status: 'dispatched',
+        detail: 'Review started for @reviewer while checks were failing (this branch has no required checks).',
+      },
+    });
     expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);
     rootFixture.rollupState = 'SUCCESS';
     await opened();

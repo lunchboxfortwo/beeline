@@ -12,7 +12,8 @@ import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import { GITHUB_SUBJECT, systemLine } from './system-line.js';
 import { moveStoredCornerHead } from './github-operations-begin-identity.js';
-import { recordCornerGithubFact, advanceCorner, cornerReviewWokenSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
+import { CornerAccessDatabase } from './corner-access-database.js';
+import { recordCornerGithubFact, advanceCorner, cornerReviewWokenSql, cornerReviewWakeCauseSql, confirmCornerMergeAuthority, lockCornerLifecycle, lockCornerArchivalAuthority, cornerMergeGate, cornerMergeability } from './corner-lifecycle.js';
 import { queueCornerMergeConflict, reconcileCornerMergeBlockers } from './agent-command.js';
 import { ciGateChecks, cornerCiGate, storedCornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, CornerWebhookTarget, record, mergeConflictKey, hash, text } from './github-operations.js';
@@ -27,6 +28,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         lifecycle: CornerLifecycleView;
         archived: boolean;
         review_woken: boolean;
+        review_wake_cause: string | null;
         configured_reviewer_id: string | null;
         reviewer_handle: string | null;
         author_id: string;
@@ -36,6 +38,7 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
                 COALESCE(${cornerOwnerSql('r.id')},r.created_by,parent.created_by) author_id,r.name corner_name,
                 r.archived_at IS NOT NULL archived,
                 ${cornerReviewWokenSql('r.id')} review_woken,
+                ${cornerReviewWakeCauseSql('r.id')} review_wake_cause,
                 ${cornerReviewerSql('r')} configured_reviewer_id,
                 beeline_room_handle(reviewer_identity.id,$1) reviewer_handle
          FROM rooms r
@@ -146,10 +149,12 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
         summary: '', has_pr: true, pr_number: String(number) }, target.repository,
       { name: 'Pull request checks', status: 'pending', headSha: pr.headSha }, ctx.database,
       { quiet: true, snapshot: { rollup, pr, fetchStartedAt, token: target.token } });
-      corner.review_woken = (await ctx.database.query<{ review_woken: boolean }>(
-        `SELECT ${cornerReviewWokenSql('$1::uuid')} review_woken`,
+      const refreshedWake = (await ctx.database.query<{ review_woken: boolean; review_wake_cause: string | null }>(
+        `SELECT ${cornerReviewWokenSql('$1::uuid')} review_woken, ${cornerReviewWakeCauseSql('$1::uuid')} review_wake_cause`,
         [input.cornerId],
-      )).rows[0]?.review_woken ?? false;
+      )).rows[0];
+      corner.review_woken = refreshedWake?.review_woken ?? false;
+      corner.review_wake_cause = refreshedWake?.review_wake_cause ?? null;
     }
     corner.archived = (await ctx.database.query<{ archived: boolean }>(
       `SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1`, [input.cornerId],
@@ -165,8 +170,10 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
     let reviewerWake = reviewerWakeFromFacts({
       configuredReviewerId,
       reviewerHandle: corner.reviewer_handle,
-      checks: rollup.required ? gateChecks : checks,
+      checks,
+      gateChecks: rollup.required ? gateChecks : checks,
       reviewWoken: corner.review_woken,
+      wakeCause: corner.review_wake_cause,
     });
     const mergeDecision = cornerMergeability({
       checks: gateChecks,
@@ -431,22 +438,99 @@ import { GitHubOperations, reviewerWakeFromFacts, Input, LandCornerOutcome, Corn
   }
 
 
-  /** Caller is authorized by DaemonService: it reaches the corner. */
-  export async function gitHubOperationsReadCornerPullRequest(ctx: GitHubOperations, cornerId: string): Promise<CornerPullRequestResult> {
-    const corner = (
-      await ctx.database.query<{ parent_id: string; number: number | null }>(
-        `SELECT corner.parent_id,(fact.lifecycle->'pr'->>'number')::int number
-         FROM rooms corner JOIN corner_github_cache fact ON fact.corner_id=corner.id
-         WHERE corner.id=$1 AND corner.parent_id IS NOT NULL`,
-        [cornerId],
-      )
-    ).rows[0];
-    if (!corner) return { status: 'blocked', blocker: 'thread not found' };
-    if (!corner.number) return { status: 'blocked', blocker: 'the thread has no pull request' };
-    const target = await ctx.roomWorkflowTarget(corner.parent_id);
+  /** Caller is authorized by DaemonService: it reaches the corner or parent chat. */
+  export async function gitHubOperationsReadCornerPullRequest(
+    ctx: GitHubOperations,
+    cornerId: string,
+    options?: { pullRequest?: number | string; callerId?: string },
+  ): Promise<CornerPullRequestResult> {
+    let parentId: string;
+    let number: number;
+    let target: Awaited<ReturnType<GitHubOperations['roomWorkflowTarget']>> | undefined;
+    if (options?.pullRequest !== undefined) {
+      const origin = (
+        await ctx.database.query<{ parent_id: string }>(
+          `SELECT COALESCE(parent_id,id) parent_id FROM rooms WHERE id=$1`,
+          [cornerId],
+        )
+      ).rows[0];
+      if (!origin) return { status: 'blocked', blocker: 'thread not found' };
+      parentId = origin.parent_id;
+      const requested = options.pullRequest;
+      let requestedNumber: number | undefined;
+      if (typeof requested === 'number') {
+        if (!Number.isSafeInteger(requested) || requested <= 0)
+          return { status: 'blocked', blocker: `pull request ${requested} is not a valid pull request number` };
+        requestedNumber = requested;
+      } else if (typeof requested === 'string') {
+        const trimmed = requested.trim();
+        const plain = trimmed.match(/^#?(\d+)$/);
+        if (plain) {
+          const parsed = Number(plain[1]);
+          if (!Number.isSafeInteger(parsed) || parsed <= 0)
+            return { status: 'blocked', blocker: `pull request ${requested} is not a valid pull request number` };
+          requestedNumber = parsed;
+        } else {
+          const match = trimmed.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)\/?$/i);
+          if (!match)
+            return { status: 'blocked', blocker: `pull request ${requested} is not a valid pull request number or URL` };
+          target = await ctx.roomWorkflowTarget(parentId);
+          if (match[1]!.toLowerCase() !== target.repository.toLowerCase())
+            return { status: 'blocked', blocker: `pull request ${requested} does not belong to this chat's repository` };
+          const parsed = Number(match[2]);
+          if (!Number.isSafeInteger(parsed) || parsed <= 0)
+            return { status: 'blocked', blocker: `pull request ${requested} is not a valid pull request number` };
+          requestedNumber = parsed;
+        }
+      } else {
+        return { status: 'blocked', blocker: `pull request ${String(requested)} is not a valid pull request number` };
+      }
+      if (!options.callerId) {
+        return { status: 'blocked', blocker: `no reachable thread in this chat has pull request #${requestedNumber}` };
+      }
+      const accessDb = new CornerAccessDatabase(ctx.database);
+      const matched = (
+        await accessDb.query<{ parent_id: string; number: number }>(
+          `SELECT corner.parent_id,(fact.lifecycle->'pr'->>'number')::int number
+           FROM rooms corner
+           JOIN corner_github_cache fact ON fact.corner_id=corner.id
+           WHERE corner.parent_id=$1
+             AND fact.lifecycle->'pr'->>'number' ~ '^[1-9][0-9]*$'
+             AND (fact.lifecycle->'pr'->>'number')::int=$2
+             AND EXISTS(
+               SELECT 1 FROM memberships member
+               WHERE member.room_id IN (corner.id,corner.parent_id)
+                 AND member.identity_id=$3
+                 AND member.removed_at IS NULL
+             )
+           ORDER BY (corner.archived_at IS NULL) DESC, corner.created_at DESC, corner.id DESC
+           LIMIT 1`,
+          [parentId, requestedNumber, options.callerId],
+        )
+      ).rows[0];
+      if (!matched) {
+        return { status: 'blocked', blocker: `no reachable thread in this chat has pull request #${requestedNumber}` };
+      }
+      parentId = matched.parent_id;
+      number = matched.number;
+    } else {
+      const corner = (
+        await ctx.database.query<{ parent_id: string; number: number | null }>(
+          `SELECT corner.parent_id,(fact.lifecycle->'pr'->>'number')::int number
+           FROM rooms corner JOIN corner_github_cache fact ON fact.corner_id=corner.id
+           WHERE corner.id=$1 AND corner.parent_id IS NOT NULL`,
+          [cornerId],
+        )
+      ).rows[0];
+      if (!corner) return { status: 'blocked', blocker: 'thread not found' };
+      if (!corner.number) return { status: 'blocked', blocker: 'the thread has no pull request' };
+      parentId = corner.parent_id;
+      number = corner.number;
+    }
+    target ??= await ctx.roomWorkflowTarget(parentId);
     const [pr, discussion] = await Promise.all([
-      ctx.app.readPullRequest(target.token, target.repository, corner.number),
-      ctx.app.readPullRequestDiscussion(target.token, target.repository, corner.number),
+      ctx.app.readPullRequest(target.token, target.repository, number),
+      ctx.app.readPullRequestDiscussion(target.token, target.repository, number),
     ]);
     return {
       status: 'ok',

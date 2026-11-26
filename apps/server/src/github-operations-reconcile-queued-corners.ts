@@ -255,7 +255,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
   }
 
 
-  export async function gitHubOperationsProcessCornerEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number) {
+  export async function gitHubOperationsProcessCornerEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number, deliveryId?: string) {
     const database = ctx.database;
     const repository = repositoryName(body);
     const branch = branchForEvent(event, body);
@@ -401,8 +401,8 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
           if (mergeability === 'unknown' || mergeability === 'dirty')
             await ctx.refreshStaleMergeability(target.corner_id);
           if (body.action === 'opened' || body.action === 'synchronize' || body.action === 'reopened')
-            await ctx.refreshCheckRollup({ ...target, has_pr: true, pr_number: String(number) }, repository,
-              { name: 'Pull request checks', status: 'pending', headSha, url }, database);
+            await ctx.refreshWebhookCheckRollup({ ...target, has_pr: true, pr_number: String(number) }, repository,
+              { name: 'Pull request checks', status: 'pending', headSha, url }, database, deliveryId);
         }
         if (merged && url) {
           await ctx.mergeCorner(
@@ -485,6 +485,6 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         continue;
       }
       const check = checkFact(event, body);
-      if (check?.headSha) await ctx.refreshCheckRollup(target, repository, check, database);
+      if (check?.headSha) await ctx.refreshWebhookCheckRollup(target, repository, check, database, deliveryId);
     }
   }

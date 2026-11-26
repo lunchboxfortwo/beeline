@@ -1,6 +1,6 @@
 import { phoneFetch } from '../../../../packages/test-helpers/helpers/phone-operation.js';
 import { createHmac } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TokenAuth } from '.././auth.js';
 import { PhoneService } from '.././phone-service.js';
 import { GitHubHttpError } from '@beeline/auth/github';
@@ -332,5 +332,109 @@ const fixture = monolithFixture();
         )
       ).rows,
     ).toEqual([{ received: true }]);
+  });
+
+  it('accepts a check webhook with 202 when the summary read fails and updates checks on background retry once per delivery', async () => {
+    fixture.processWebhook.mockImplementation((event, payload, deliveryId) =>
+      fixture.githubOperations.processWebhook(event, payload, deliveryId),
+    );
+    await fixture.database.query(
+      `INSERT INTO github_installations(
+         installation_id,owner_id,account_id,account_login,account_type,repository_selection,status
+       ) VALUES(77,$1,'42','owner','User','selected','active')`,
+      [HUMAN],
+    );
+    await fixture.database.query(
+      `INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch)
+       VALUES(101,77,'owner/widgets','main')`,
+    );
+    await fixture.database.query(
+      `UPDATE rooms SET repository_key='owner/widgets',
+         repository_remote='https://github.com/owner/widgets.git',
+         repository_resolution='repository',github_installation_id=77 WHERE id=$1`,
+      [ROOM],
+    );
+    const created = await fixture.daemonOperation('createCorner', {
+      roomId: ROOM,
+      requestId: 'webhook-retry-corner',
+      name: 'Retry-checks',
+      objective: 'Retry failed check rollup reads',
+      repository: 'owner/widgets',
+      targetBranch: 'main',
+    });
+    expect(created.status).toBe(200);
+    const { cornerId } = (await created.json()) as { cornerId: string };
+    const branch = `feature/corner-${cornerId.replaceAll('-', '').slice(0, 12)}`;
+    const headSha = 'a'.repeat(40);
+    await fixture.database.query(
+      `UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+      [
+        cornerId,
+        JSON.stringify({
+          lifecycle: 'in-review',
+          checks: 'pending',
+          pr: {
+            number: 55,
+            url: 'https://github.com/owner/widgets/pull/55',
+            title: 'Retry checks',
+            targetBranch: 'main',
+            headSha,
+            mergeability: 'clean',
+          },
+        }),
+      ],
+    );
+    Object.assign(fixture.githubApp, {
+      readPullRequest: vi.fn(async () => ({
+        number: 55,
+        url: 'https://github.com/owner/widgets/pull/55',
+        headSha,
+        headRef: branch,
+        baseRef: 'main',
+        merged: false,
+        mergeability: 'clean',
+        state: 'open',
+      })),
+    });
+    fixture.githubApp.readCommitCheckRollup.mockRejectedValueOnce(new GitHubHttpError('Checks', 502));
+    fixture.githubRollupState = 'passed';
+    const checkPayload = {
+      installation: { id: 77 },
+      repository: { id: 101, full_name: 'owner/widgets' },
+      action: 'completed',
+      check_run: {
+        id: 88,
+        name: 'typecheck',
+        status: 'completed',
+        conclusion: 'success',
+        head_sha: headSha,
+        check_suite: { head_branch: branch, head_sha: headSha },
+      },
+    };
+    const refreshSpy = vi.spyOn(fixture.githubOperations, 'refreshCheckRollup');
+    try {
+      const first = await fixture.webhook('check_run', 'delivery-rollup-retry-1', checkPayload);
+      expect(first.status).toBe(202);
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      // Redelivering the same delivery ID must return duplicate (200) and never run a second retry.
+      const duplicate = await fixture.webhook('check_run', 'delivery-rollup-retry-1', checkPayload);
+      expect(duplicate.status).toBe(200);
+      expect(((await duplicate.json()) as { duplicate: boolean }).duplicate).toBe(true);
+      await vi.waitFor(
+        async () => {
+          const row = (
+            await fixture.database.query<{ checks: string }>(
+              `SELECT lifecycle->>'checks' checks FROM corner_facts WHERE corner_id=$1`,
+              [cornerId],
+            )
+          ).rows[0];
+          expect(row?.checks).toBe('passing');
+        },
+        { timeout: 5_000, interval: 50 },
+      );
+      expect(refreshSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      await fixture.githubOperations.stopCheckRefreshes();
+    }
   });
 });

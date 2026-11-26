@@ -2,11 +2,12 @@ import { githubProviderKey } from './providers/index.js';
 import type { CornerCiGate } from './corner-ci-gate.js';
 import { beginGitHubStarAuthorization, completeGitHubStarAuthorization } from './github-star-authorization.js';
 import { NotificationWork } from './notification-work.js';
+import { OwnerScheduleClock } from './owner-schedule-clock.js';
 import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { RepositorySignals } from './repository-onboarding.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
+import { GitHubAppClient, GitHubHttpError, GitHubOAuthClient, githubRetryDelay, transientGitHubError } from '@beeline/auth/github';
 import type { CornerLifecycleView, PhoneOperationMap } from '@beeline/api-contract/phone';
 import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
@@ -27,12 +28,19 @@ export class GitHubOperations {
 
   readonly #checkWork = new Set<Promise<unknown>>();
 
+  readonly #checkRetryAbort = new AbortController();
+
+  readonly #webhookCheckDeliveries = new Set<string>();
+
+  readonly #activeCheckRetries = new Map<string, Promise<void>>();
+
   #stoppingChecks = false;
 
 
   /** HTTP close cannot drain work left alive by a caller's transaction deadline. */
   async stopCheckRefreshes(): Promise<void> {
     this.#stoppingChecks = true;
+    this.#checkRetryAbort.abort();
     await Promise.allSettled(this.#checkWork);
   }
 
@@ -43,6 +51,95 @@ export class GitHubOperations {
     const work = run();
     this.#checkWork.add(work);
     return work.finally(() => this.#checkWork.delete(work));
+  }
+
+  /**
+   * Refreshes the commit check rollup for a webhook event. Transient GitHub
+   * failures do not fail the webhook with 500; instead the server accepts the
+   * delivery (202) and retries the rollup read in the background, deduplicated
+   * per delivery and per corner head.
+   */
+  async refreshWebhookCheckRollup(
+    target: CornerWebhookTarget & { has_pr?: boolean; pr_number?: string | null },
+    repository: string,
+    check: NonNullable<ReturnType<typeof checkFact>>,
+    database: SqlDatabase,
+    deliveryId?: string,
+  ): Promise<void> {
+    const headSha = check.headSha;
+    const deliveryKey = deliveryId && headSha ? `${deliveryId}:${target.corner_id}:${headSha}` : undefined;
+    if (deliveryKey) {
+      if (this.#webhookCheckDeliveries.has(deliveryKey)) return;
+      this.#webhookCheckDeliveries.add(deliveryKey);
+      if (this.#webhookCheckDeliveries.size > 1_024) {
+        const oldest = this.#webhookCheckDeliveries.values().next().value;
+        if (oldest !== undefined) this.#webhookCheckDeliveries.delete(oldest);
+      }
+    }
+    try {
+      await this.refreshCheckRollup(target, repository, check, database);
+    } catch (error) {
+      if (!transientGitHubError(error)) {
+        if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
+        throw error;
+      }
+      const rateLimited = error instanceof GitHubHttpError && (error.rateLimited || error.status === 429);
+      const firstDelay = githubRetryDelay(error, WEBHOOK_CHECK_RETRY_DELAYS_MS[0]!);
+      if (rateLimited && firstDelay > MAX_WEBHOOK_CHECK_RETRY_DELAY_MS) return;
+      if (headSha) this.scheduleWebhookCheckRetry(target, repository, check, database, firstDelay);
+    }
+  }
+
+  private scheduleWebhookCheckRetry(
+    target: CornerWebhookTarget & { has_pr?: boolean; pr_number?: string | null },
+    repository: string,
+    check: NonNullable<ReturnType<typeof checkFact>>,
+    database: SqlDatabase,
+    firstDelayMs: number,
+  ): void {
+    if (this.#stoppingChecks) return;
+    const retryKey = `${target.corner_id}:${check.headSha!}`;
+    if (this.#activeCheckRetries.has(retryKey)) return;
+    const work = this.ownCheckWork(async () => {
+      let delayMs = firstDelayMs;
+      for (let attempt = 0; attempt < WEBHOOK_CHECK_RETRY_DELAYS_MS.length; attempt++) {
+        if (!(await sleepAbortable(delayMs, this.#checkRetryAbort.signal))) return;
+        if (this.#stoppingChecks) return;
+        try {
+          await this.refreshCheckRollup(target, repository, check, database);
+          return;
+        } catch (error) {
+          if (!transientGitHubError(error) || this.#stoppingChecks) {
+            console.error(
+              `[server] background check rollup refresh failed for thread ${target.corner_id}:`,
+              error instanceof Error ? error.message : String(error),
+            );
+            return;
+          }
+          const nextBase = WEBHOOK_CHECK_RETRY_DELAYS_MS[attempt + 1];
+          if (nextBase === undefined) {
+            console.error(
+              `[server] background check rollup refresh exhausted retries for thread ${target.corner_id}:`,
+              error instanceof Error ? error.message : String(error),
+            );
+            return;
+          }
+          const rateLimited = error instanceof GitHubHttpError && (error.rateLimited || error.status === 429);
+          delayMs = githubRetryDelay(error, nextBase);
+          if (rateLimited && delayMs > MAX_WEBHOOK_CHECK_RETRY_DELAY_MS) return;
+        }
+      }
+    }).catch((error) => {
+      if (!this.#stoppingChecks) {
+        console.error(
+          `[server] background check rollup retry aborted for thread ${target.corner_id}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }).finally(() => {
+      if (this.#activeCheckRetries.get(retryKey) === work) this.#activeCheckRetries.delete(retryKey);
+    });
+    this.#activeCheckRetries.set(retryKey, work);
   }
 
 
@@ -234,7 +331,7 @@ async closeCornerPullRequest(cornerId: string): Promise<{
 /** PR association and run state move together for tool calls and GitHub facts. */
 async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database): Promise<boolean> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database); }
 /** Caller is authorized by DaemonService: it reaches the corner. */
-async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId); }
+async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number | string; callerId?: string }): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId, options); }
 
 
   async processWebhook(event: string, payload: unknown, deliveryId?: string) {
@@ -278,7 +375,7 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
         event === 'status'
       ) {
         await this.processRepositoryEvent(event, body, install.id);
-        await this.processCornerEvent(event, body, install.id);
+        await this.processCornerEvent(event, body, install.id, deliveryId);
         if (event === 'push') await this.processBaseBranchPush(body, install.id);
         if (event === 'push') {
           const iconRepository = await repositoryIconPushTarget(this.database, body);
@@ -379,7 +476,7 @@ async processBaseBranchPush(body: GitHubRecord, installationId: number): Promise
  * same repository events; CI stays on processCornerEvent.
  */
 async processRepositoryEvent(event: string, body: GitHubRecord, installationId: number) { return gitHubOperationsProcessRepositoryEvent(this, event, body, installationId); }
-async processCornerEvent(event: string, body: GitHubRecord, installationId: number) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId); }
+async processCornerEvent(event: string, body: GitHubRecord, installationId: number, deliveryId?: string) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId, deliveryId); }
 async refreshCheckRollup(target: CornerWebhookTarget & {
     has_pr?: boolean;
     pr_number?: string | null;
@@ -657,6 +754,25 @@ export function challenge(value: string): string {
 }
 
 
+const WEBHOOK_CHECK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as const;
+const MAX_WEBHOOK_CHECK_RETRY_DELAY_MS = 60_000;
+
+function sleepAbortable(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const clock = new OwnerScheduleClock(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(true);
+    });
+    const onAbort = () => {
+      clock.stop();
+      resolve(false);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    clock.arm(ms);
+  });
+}
+
 export type ReviewerWakeStatus = 'unconfigured' | 'waiting' | 'dispatched';
 
 
@@ -664,10 +780,14 @@ export type ReviewerWakeStatus = 'unconfigured' | 'waiting' | 'dispatched';
 export function reviewerWakeFromFacts(input: {
   configuredReviewerId: string | null;
   reviewerHandle: string | null;
-  /** The live GitHub verdict reported beside this status, never the stored lifecycle. */
+  /** The live GitHub check verdict for this head, never the stored lifecycle. */
   checks: string | undefined;
-  /** The run sits in `review` after a green head woke the reviewer. */
+  /** The live CI gate verdict for this head (equals `checks` when no base-branch rule exists). */
+  gateChecks?: string | undefined;
+  /** A review request was dispatched to the configured reviewer for this head. */
   reviewWoken: boolean;
+  /** The stored cause recorded on the review wake command, when known. */
+  wakeCause?: string | null;
 }): { status: ReviewerWakeStatus; detail: string } {
   const label = input.reviewerHandle ? `@${input.reviewerHandle}` : 'the configured reviewer';
   if (!input.configuredReviewerId) {
@@ -677,15 +797,66 @@ export function reviewerWakeFromFacts(input: {
     };
   }
   if (input.reviewWoken) {
+    const cause = input.wakeCause ?? undefined;
+    if (input.checks === 'pending' || input.checks === 'failed') {
+      const stateWord = input.checks === 'failed' ? 'failing' : 'pending';
+      if (cause === 'no-required-checks') {
+        return {
+          status: 'dispatched',
+          detail: `Review started for ${label} while checks were ${stateWord} (this branch has no required checks).`,
+        };
+      }
+      if (cause === 'required-checks-passed') {
+        return {
+          status: 'dispatched',
+          detail: `Review started for ${label} while checks were ${stateWord} (required checks passed).`,
+        };
+      }
+      if (cause === 'brief-revised') {
+        return {
+          status: 'dispatched',
+          detail: `Review started for ${label} after a brief revision while checks were ${stateWord}.`,
+        };
+      }
+      return {
+        status: 'dispatched',
+        detail: `Review started for ${label} while checks were ${stateWord}.`,
+      };
+    }
+    if (input.checks === 'passed') {
+      if (cause === 'brief-revised') {
+        return {
+          status: 'dispatched',
+          detail: `A brief revision woke ${label} on this passing head.`,
+        };
+      }
+      if (cause === 'no-required-checks') {
+        return {
+          status: 'dispatched',
+          detail: `Review started for ${label} (this branch has no required checks); checks are passing.`,
+        };
+      }
+      return {
+        status: 'dispatched',
+        detail: `The checks-passed transition woke ${label}.`,
+      };
+    }
     return {
       status: 'dispatched',
-      detail: `The checks-passed transition woke ${label}.`,
+      detail: `Review started for ${label} while checks were not passing.`,
     };
   }
-  if (input.checks === 'pending') {
+  const waitingChecks = input.gateChecks ?? input.checks;
+  if (waitingChecks === 'pending' || input.checks === 'pending') {
     return {
       status: 'waiting',
       detail: `Checks are still pending, so ${label} has not been woken yet.`,
+    };
+  }
+  if (waitingChecks === 'failed' || input.checks === 'failed') {
+    return {
+      status: 'waiting',
+      detail: `Checks are failing, so ${label} has not been woken yet.`,
     };
   }
   return {

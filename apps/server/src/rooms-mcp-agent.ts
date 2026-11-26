@@ -535,7 +535,10 @@ export class RoomsMcpAgentTools {
         return { ...status, ...(verdict ? { verdict } : {}) };
       }
       case 'checks': return exec('getPrChecksStatus', { cornerId: at, pullRequest: args.pullRequest });
-      case 'pr': return exec('readCornerPullRequest', { cornerId: at });
+      case 'pr': return exec('readCornerPullRequest', {
+        cornerId: at,
+        ...(args.pullRequest !== undefined ? { pullRequest: args.pullRequest } : {}),
+      });
       case 'procedure':
         if (!text(args.slug)) throw new McpToolError('read: slug is required for facet procedure');
         return turn((_, context) => exec('loadWorkspaceSkill', { ...context, agentId: member, roomId: context.roomId, slug: args.slug }), at);

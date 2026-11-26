@@ -643,20 +643,24 @@ const scope1 = fixtureScope1();
   });
 
 
-  it('R-GH-403-WEBHOOK: rate-limited confirmation waits for a new event', async () => {
+  it('R-GH-403-WEBHOOK: rate-limited confirmation accepts the webhook and waits for a new event', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
     app.readPullRequest.mockRejectedValueOnce(new GitHubHttpError('PR', 429, '120'));
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ status: 429 });
-    const stored = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
-      `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!.lifecycle;
-    expect(stored.checks).toBe('pending');
-    expect(stored.checkRefreshRetry).toBeUndefined();
-    expect(app.readPullRequest).toHaveBeenCalledOnce();
-    await operations.processWebhook('check_run', payload);
-    expect(app.readPullRequest).toHaveBeenCalledTimes(2);
-    expect(app.mergePullRequest).not.toHaveBeenCalled();
+    try {
+      await expect(operations.processWebhook('check_run', payload)).resolves.toBeUndefined();
+      const stored = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
+        `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!.lifecycle;
+      expect(stored.checks).toBe('pending');
+      expect(stored.checkRefreshRetry).toBeUndefined();
+      expect(app.readPullRequest).toHaveBeenCalledOnce();
+      await operations.processWebhook('check_run', payload);
+      expect(app.readPullRequest).toHaveBeenCalledTimes(2);
+      expect(app.mergePullRequest).not.toHaveBeenCalled();
+    } finally {
+      await operations.stopCheckRefreshes();
+    }
   });
 
 
@@ -680,7 +684,7 @@ const scope1 = fixtureScope1();
 
 
   it.each(['primary', 'secondary'])('R-GH-403: %s rate limit keeps the gate closed until an explicit read', async kind => {
-    const { corners, headSha, app, payload } = await scope1.checksFixture();
+    const { corners, app, payload } = await scope1.checksFixture();
     const reset = Math.floor(Date.now() / 1000) + 600;
     const headers = kind === 'primary'
       ? { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) }
@@ -691,77 +695,111 @@ const scope1 = fixtureScope1();
     const error = await client.readPullRequest('fake', 'owner/widgets', 1).catch(error => error);
     app.readCommitCheckRollup.mockRejectedValue(error);
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await expect(operations.processWebhook('check_run', payload)).rejects.toBe(error);
-    const stored = (await scope1.database.query<{ lifecycle: { checks: string; checkRefreshRetry: { headSha: string; after: number } } }>(
-      `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!.lifecycle;
-    expect(stored.checks).toBe('pending');
-    expect(stored.checkRefreshRetry).toBeUndefined();
-    await expect(operations.prChecksStatus({ cornerId: corners[0]! })).rejects.toThrow('GitHub rate limit; checks readable again at');
-    expect(app.mergePullRequest).not.toHaveBeenCalled();
-    app.readCommitCheckRollup.mockResolvedValue({ state: 'passed', total: 1, failing: [], checks: [] });
-    await operations.prChecksStatus({ cornerId: corners[0]! });
-    const recovered = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
-      `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!.lifecycle;
-    expect(recovered.checks).toBe('passing');
-    expect(recovered.checkRefreshRetry).toBeUndefined();
+    try {
+      await expect(operations.processWebhook('check_run', payload)).resolves.toBeUndefined();
+      const stored = (await scope1.database.query<{ lifecycle: { checks: string; checkRefreshRetry: { headSha: string; after: number } } }>(
+        `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!.lifecycle;
+      expect(stored.checks).toBe('pending');
+      expect(stored.checkRefreshRetry).toBeUndefined();
+      await expect(operations.prChecksStatus({ cornerId: corners[0]! })).rejects.toThrow('GitHub rate limit; checks readable again at');
+      expect(app.mergePullRequest).not.toHaveBeenCalled();
+      app.readCommitCheckRollup.mockResolvedValue({ state: 'passed', total: 1, failing: [], checks: [] });
+      await operations.prChecksStatus({ cornerId: corners[0]! });
+      const recovered = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
+        `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!.lifecycle;
+      expect(recovered.checks).toBe('passing');
+      expect(recovered.checkRefreshRetry).toBeUndefined();
+    } finally {
+      await operations.stopCheckRefreshes();
+    }
   });
 
 
-  it('R-GH-RETRY: a failed webhook returns 502 and a new event updates the visible checks', async () => {
+  it('R-GH-RETRY: a failed summary read accepts the webhook and updates checks on a background retry', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
     app.readCommitCheckRollup.mockRejectedValueOnce(new GitHubHttpError('Checks', 502));
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ status: 502 });
-    expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
-    await operations.processWebhook('check_run', payload);
-    expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
-    const { lifecycle } = (await scope1.database.query<{ lifecycle: { checks: string; checksSummary: { total: number } } }>(
-      `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!;
-    expect(lifecycle).toMatchObject({ checks: 'passing', checksSummary: { total: 1 } });
-    expect(checkStatusLine(lifecycle)).toBe('PR #1 · all 1 test passed');
+    vi.useFakeTimers();
+    try {
+      await expect(operations.processWebhook('check_run', payload, 'delivery-502')).resolves.toBeUndefined();
+      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+      // Duplicate delivery for the same event must not start a second background retry.
+      await expect(operations.processWebhook('check_run', payload, 'delivery-502')).resolves.toBeUndefined();
+      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
+      const { lifecycle } = (await scope1.database.query<{ lifecycle: { checks: string; checksSummary: { total: number } } }>(
+        `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!;
+      expect(lifecycle).toMatchObject({ checks: 'passing', checksSummary: { total: 1 } });
+      expect(checkStatusLine(lifecycle)).toBe('PR #1 · all 1 test passed');
+    } finally {
+      await operations.stopCheckRefreshes();
+      vi.useRealTimers();
+    }
   });
 
 
-  it('R-GH-RETRY: one failed 5xx read blocks stale checks and restart waits for a new event', async () => {
-    const { corners, headSha, app, payload } = await scope1.checksFixture();
+  it('R-GH-RETRY: persistent 5xx keeps checks pending across retries and restart recovers on a new event', async () => {
+    const { corners, app, payload } = await scope1.checksFixture();
     const error = new GitHubHttpError('Checks', 503);
     app.readCommitCheckRollup.mockRejectedValue(error);
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await expect(operations.processWebhook('check_run', payload)).rejects.toBe(error);
-    expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
-    const stored = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
-      `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!.lifecycle;
-    expect(stored).toMatchObject({ checks: 'pending', checksSummary: { status: 'pending' } });
-    expect(stored.checkRefreshRetry).toBeUndefined();
-    expect(checkStatusLine(stored)).toBe('PR #1 · tests running');
-    await expect(operations.prChecksStatus({ cornerId: corners[0]! })).rejects.toBe(error);
-    expect(app.mergePullRequest).not.toHaveBeenCalled();
-    app.readCommitCheckRollup.mockResolvedValue({ state: 'passed', total: 1, failing: [], checks: [] });
-    const restarted = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
-    await restarted.processWebhook('check_run', payload);
-    expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(3);
-    const recovered = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
-      `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!.lifecycle;
-    expect(recovered.checks).toBe('passing');
-    expect(recovered.checkRefreshRetry).toBeUndefined();
+    vi.useFakeTimers();
+    try {
+      await expect(operations.processWebhook('check_run', payload, 'delivery-503')).resolves.toBeUndefined();
+      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+      const stored = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
+        `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!.lifecycle;
+      expect(stored).toMatchObject({ checks: 'pending', checksSummary: { status: 'pending' } });
+      expect(stored.checkRefreshRetry).toBeUndefined();
+      expect(checkStatusLine(stored)).toBe('PR #1 · tests running');
+      await expect(operations.prChecksStatus({ cornerId: corners[0]! })).rejects.toBe(error);
+      expect(app.mergePullRequest).not.toHaveBeenCalled();
+      await operations.stopCheckRefreshes();
+      app.readCommitCheckRollup.mockResolvedValue({ state: 'passed', total: 1, failing: [], checks: [] });
+      const restarted = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
+      try {
+        expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
+        await restarted.processWebhook('check_run', payload, 'delivery-503-after-restart');
+        expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(3);
+        const recovered = (await scope1.database.query<{ lifecycle: Record<string, unknown> }>(
+          `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+        )).rows[0]!.lifecycle;
+        expect(recovered.checks).toBe('passing');
+        expect(recovered.checkRefreshRetry).toBeUndefined();
+      } finally {
+        await restarted.stopCheckRefreshes();
+      }
+    } finally {
+      await operations.stopCheckRefreshes();
+      vi.useRealTimers();
+    }
   }, 30_000);
 
 
   it.each([new TypeError('fetch failed'), Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }), new GitHubHttpError('Checks', 504)])(
-    'R-GH-RETRY: returns transient transport failure %s', async error => {
-      const { app, payload } = await scope1.checksFixture();
+    'R-GH-RETRY: retries transient transport failure %s in the background', async error => {
+      const { corners, app, payload } = await scope1.checksFixture();
       app.readCommitCheckRollup.mockRejectedValueOnce(error);
       const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-      await expect(operations.processWebhook('check_run', payload)).rejects.toBe(error);
-      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
-      await operations.processWebhook('check_run', payload);
-      expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
+      vi.useFakeTimers();
+      try {
+        await expect(operations.processWebhook('check_run', payload)).resolves.toBeUndefined();
+        expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
+        const { lifecycle } = (await scope1.database.query<{ lifecycle: { checks: string } }>(
+          `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+        )).rows[0]!;
+        expect(lifecycle.checks).toBe('passing');
+      } finally {
+        await operations.stopCheckRefreshes();
+        vi.useRealTimers();
+      }
     },
   );
 
@@ -770,15 +808,19 @@ const scope1 = fixtureScope1();
     const { corners, app, payload } = await scope1.checksFixture();
     app.readCommitCheckRollup.mockRejectedValue(new GitHubHttpError('Checks', 429, '120'));
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ status: 429, retryAfter: '120' });
-    const retry = (await scope1.database.query<{ retry: unknown }>(
-      `SELECT lifecycle->'checkRefreshRetry' retry FROM corner_facts WHERE corner_id=$1`, [corners[0]],
-    )).rows[0]!.retry;
-    expect(retry).toBeNull();
-    vi.useFakeTimers();
-    try { await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); }
-    finally { vi.useRealTimers(); }
-    expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+    try {
+      await expect(operations.processWebhook('check_run', payload)).resolves.toBeUndefined();
+      const retry = (await scope1.database.query<{ retry: unknown }>(
+        `SELECT lifecycle->'checkRefreshRetry' retry FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!.retry;
+      expect(retry).toBeNull();
+      vi.useFakeTimers();
+      try { await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); }
+      finally { vi.useRealTimers(); }
+      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+    } finally {
+      await operations.stopCheckRefreshes();
+    }
   });
 
 
@@ -786,11 +828,15 @@ const scope1 = fixtureScope1();
     const { corners, app, payload } = await scope1.checksFixture();
     app.readCommitCheckRollup.mockRejectedValueOnce(new GitHubHttpError('Checks', 429, '120'));
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
-    await expect(operations.processWebhook('check_run', payload)).rejects.toMatchObject({ status: 429 });
-    await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(
-      lifecycle,'{pr,headSha}',to_jsonb($2::text)) WHERE corner_id=$1`, [corners[0], '2'.repeat(40)]);
-    await operations.processWebhook('check_run', payload);
-    expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+    try {
+      await expect(operations.processWebhook('check_run', payload)).resolves.toBeUndefined();
+      await scope1.database.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(
+        lifecycle,'{pr,headSha}',to_jsonb($2::text)) WHERE corner_id=$1`, [corners[0], '2'.repeat(40)]);
+      await operations.processWebhook('check_run', payload);
+      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+    } finally {
+      await operations.stopCheckRefreshes();
+    }
   });
 
 

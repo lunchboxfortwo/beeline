@@ -475,7 +475,12 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
       );
     case 'read_pull_request':
       return JSON.stringify(
-        await daemonExecute('readCornerPullRequest', { cornerId: targetCornerId(args) }),
+        await daemonExecute('readCornerPullRequest', {
+          cornerId: targetCornerId(args),
+          ...(args.pullRequest !== undefined
+            ? { pullRequest: args.pullRequest as number | string }
+            : {}),
+        }),
       );
     case 'write_scratch_file':
       return writeScratchFile(args);
