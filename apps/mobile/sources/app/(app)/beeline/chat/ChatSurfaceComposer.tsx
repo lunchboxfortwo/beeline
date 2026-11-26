@@ -212,11 +212,15 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
     const contentHeight = Math.ceil(event.nativeEvent.contentSize.height);
     setComposerHeight(Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, contentHeight)));
   }, [setComposerHeight]);
-  // "Message #beeline" in a chat, "Reply in thread" in a corner; a DM keeps its own hint.
   const roomName = roomSurface?.room?.name?.trim();
-  const composerPlaceholder = isCorner
-    ? 'Reply in thread'
-    : !isDirectMessage && roomName ? `Message #${roomName}` : undefined;
+  const hasAgentMembers = Boolean(roomSurface?.members.some(member => member.identity.kind === 'agent'));
+  let composerPlaceholder: string | undefined;
+  if (isCorner) {
+    composerPlaceholder = 'Reply in thread';
+  } else if (!isDirectMessage) {
+    if (!desktopExperience && hasAgentMembers) composerPlaceholder = '@agent #chat /skill';
+    else if (roomName) composerPlaceholder = `Message #${roomName}`;
+  }
   const mentionPlace = isCorner ? 'this thread' : !isDirectMessage && roomName ? `#${roomName}` : undefined;
   // Keep the hanging line and every gap around the field above the scrolling
   // transcript, on the same opaque canvas (`buzz/room-bottom-chrome.ts`).
@@ -450,8 +454,8 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
                     <ConversationComposer
                       isDirectMessage={isDirectMessage}
                       placeholder={composerPlaceholder}
-                      hasAgentMembers={Boolean(roomSurface?.members.some(member => member.identity.kind === 'agent'))}
-                      voice={isDirectMessage && !isCorner && roomSurface?.members.some(member => member.identity.kind === 'agent') ? voice : undefined}
+                      hasAgentMembers={hasAgentMembers}
+                      voice={isDirectMessage && !isCorner && hasAgentMembers ? voice : undefined}
                       onStop={
                         composerAck?.stop ? () => handleStopTurn(composerAck.stop!) : undefined
                       }
