@@ -433,8 +433,8 @@ export async function prepareWorkspace(input: {
       throw error;
     }
   }
-  const ready = () =>
-    readyCheckout({
+  const ready = async () => {
+    const notReady = await readyCheckout({
       path,
       config: input.config,
       supervisorRoot: input.supervisorRoot,
@@ -442,17 +442,26 @@ export async function prepareWorkspace(input: {
       ...(gitCommonDir ? { gitCommonDir } : {}),
       ...(brief ? { brief } : {}),
     });
+    const indexed = await prepareCodegraphIndex(input.config, path, {
+      readonly: !input.parentRoomId,
+    });
+    return { notReady, indexed };
+  };
   // The two workspace entry points can prepare the same checkout concurrently.
   let notReady: string | undefined;
+  let indexed: boolean;
   try {
-    notReady = await withKernelLock(`${input.parentRoomId ? 'thread' : 'room'}-checkout:${path}`, ready, {
-      step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the checkout`,
-    });
+    ({ notReady, indexed } = await withKernelLock(
+      `${input.parentRoomId ? 'thread' : 'room'}-checkout:${path}`,
+      ready,
+      {
+        step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the checkout`,
+      },
+    ));
   } catch (error) {
     if (error instanceof KernelLockBusyError) return checkoutBusy(path, error);
     throw error;
   }
-  const indexed = await prepareCodegraphIndex(input.config, path, { readonly: !input.parentRoomId });
   const where = input.parentRoomId
     ? `branch ${branch} (target ${targetBranch})`
     : `${targetBranch} (read-only)`;

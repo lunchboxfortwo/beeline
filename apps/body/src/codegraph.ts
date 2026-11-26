@@ -1,37 +1,64 @@
 import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, appendFile, mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
+import { access, appendFile, mkdir, readFile, realpath, rename, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
+import { withKernelLockWhenFree } from './kernel-lock.js';
 import { runOwned, runOwnedFile } from './wait.js';
 
 const CODEGRAPH_INDEX_PATH = '.codegraph/codegraph.db';
+const CODEGRAPH_READONLY_SNAPSHOT_NAME = 'codegraph.readonly.db';
 
 /**
  * ESM preload injected via `NODE_OPTIONS` for read-only CodeGraph MCP sessions.
  *
  * Read-only checkouts cannot create SQLite `-wal`/`-shm` side files next to
- * `.codegraph/codegraph.db`. Opening file-backed databases as immutable
- * read-only SQLite URIs avoids side files and write PRAGMAs, while extending
- * `DatabaseConnection.isReplacedOnDisk()` to check size and timestamps ensures
- * CodeGraph reopens the immutable handle after any reindex.
+ * `.codegraph/codegraph.db`. Opening the published immutable snapshot at
+ * `.codegraph/codegraph.readonly.db` (falling back to `codegraph.db` when no
+ * snapshot exists yet) as an immutable read-only SQLite URI avoids side files
+ * and write PRAGMAs while leaving the live database and its WAL/SHM untouched.
+ * Extending `DatabaseConnection.isReplacedOnDisk()` to track the resolved
+ * target path, inode, size, and timestamps ensures CodeGraph reopens after
+ * every snapshot publication.
  */
 const READONLY_SQLITE_PRELOAD_SOURCE = `
 import Module from 'node:module';
-import { statSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { existsSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
+const LIVE_DB_NAME = 'codegraph.db';
+const SNAPSHOT_DB_NAME = '${CODEGRAPH_READONLY_SNAPSHOT_NAME}';
 const origLoad = Module._load;
 const dbFingerprints = new WeakMap();
 let patchedSqlite;
 
+function resolveReadonlyTarget(filePath) {
+  if (typeof filePath !== 'string' || filePath === '' || filePath === ':memory:') return filePath;
+  let diskPath = filePath;
+  if (filePath.startsWith('file:')) {
+    try {
+      diskPath = fileURLToPath(new URL(filePath));
+    } catch {
+      return filePath;
+    }
+  }
+  if (basename(diskPath) === LIVE_DB_NAME) {
+    const snapshotPath = join(dirname(diskPath), SNAPSHOT_DB_NAME);
+    if (existsSync(snapshotPath)) return snapshotPath;
+  }
+  return diskPath;
+}
+
 function dbFingerprint(filePath) {
+  const target = resolveReadonlyTarget(filePath);
+  if (!target || target === ':memory:') return null;
   try {
-    const stat = statSync(filePath, { bigint: true });
-    return stat.dev + ':' + stat.ino + ':' + stat.size + ':' + stat.mtimeNs + ':' + stat.ctimeNs;
+    const stat = statSync(target, { bigint: true });
+    return target + '|' + stat.dev + ':' + stat.ino + ':' + stat.size + ':' + stat.mtimeNs + ':' + stat.ctimeNs;
   } catch {
     return null;
   }
@@ -45,13 +72,14 @@ Module._load = function (request, parent, isMain) {
       class ImmutableDatabaseSync extends OrigDatabaseSync {
         constructor(location, options) {
           if (typeof location === 'string' && location !== '' && location !== ':memory:') {
+            const target = resolveReadonlyTarget(location);
             let uri;
-            if (location.startsWith('file:')) {
-              const url = new URL(location);
+            if (target.startsWith('file:')) {
+              const url = new URL(target);
               url.searchParams.set('immutable', '1');
               uri = url.href;
             } else {
-              uri = pathToFileURL(location).href + '?immutable=1';
+              uri = pathToFileURL(target).href + '?immutable=1';
             }
             const nextOptions =
               options && typeof options === 'object'
@@ -174,6 +202,7 @@ interface SqliteStatementLike {
 }
 
 interface SqliteDatabaseLike {
+  exec(sql: string): void;
   prepare(sql: string): SqliteStatementLike;
   close(): void;
 }
@@ -183,15 +212,16 @@ type SqliteModuleLike = {
 };
 
 /**
- * Merge any committed WAL frames into the main SQLite database file so
- * immutable read-only connections see the latest index even when another
- * SQLite connection remained open during reindexing. If a concurrent reader
- * blocks WAL truncation, publish a self-contained snapshot via `VACUUM INTO`.
+ * Publish a self-contained immutable read-only snapshot at a separate path
+ * (`.codegraph/codegraph.readonly.db`) via `VACUUM INTO` + atomic `rename`.
+ *
+ * The live `.codegraph/codegraph.db` and its `-wal`/`-shm` sidecars are never
+ * replaced or removed, so concurrent connections keep writing safely while
+ * immutable readers always see every committed update with a fresh inode.
  */
-async function checkpointCodegraphIndex(command: string, indexPath: string): Promise<void> {
-  const walPath = `${indexPath}-wal`;
-  const shmPath = `${indexPath}-shm`;
-  const snapshotPath = `${indexPath}.checkpoint-${process.pid}-${randomUUID()}`;
+async function publishReadonlySnapshot(command: string, indexPath: string): Promise<void> {
+  const snapshotPath = resolve(dirname(indexPath), CODEGRAPH_READONLY_SNAPSHOT_NAME);
+  const stagingPath = `${snapshotPath}.tmp-${process.pid}-${randomUUID()}`;
   let sqlite: SqliteModuleLike | undefined;
   try {
     const require = createRequire(import.meta.url);
@@ -202,36 +232,25 @@ async function checkpointCodegraphIndex(command: string, indexPath: string): Pro
 
   if (sqlite) {
     const db = new sqlite.DatabaseSync(indexPath);
-    let publishedSnapshot = false;
+    let created = false;
     try {
-      const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as
-        | { busy?: number; log?: number; checkpointed?: number }
-        | undefined;
-      const walSize = await stat(walPath).then(
-        (info) => info.size,
-        () => 0,
-      );
-      const incomplete =
-        (result?.busy ?? 0) !== 0 ||
-        ((result?.log ?? 0) > 0 && (result?.checkpointed ?? 0) < (result?.log ?? 0)) ||
-        walSize > 0;
-      if (incomplete) {
-        db.prepare('VACUUM INTO ?').run(snapshotPath);
-        publishedSnapshot = true;
+      db.exec('PRAGMA busy_timeout = 5000');
+      try {
+        db.prepare('PRAGMA wal_checkpoint(PASSIVE)').get();
+      } catch {
+        // Best-effort checkpoint; VACUUM INTO still reads all committed WAL frames.
       }
+      db.prepare('VACUUM INTO ?').run(stagingPath);
+      created = true;
     } finally {
       db.close();
-      if (!publishedSnapshot) await rm(snapshotPath, { force: true }).catch(() => undefined);
+      if (!created) await rm(stagingPath, { force: true }).catch(() => undefined);
     }
-    if (publishedSnapshot) {
-      try {
-        await rename(snapshotPath, indexPath);
-      } catch (error) {
-        await rm(snapshotPath, { force: true }).catch(() => undefined);
-        throw error;
-      }
-      await rm(walPath, { force: true }).catch(() => undefined);
-      await rm(shmPath, { force: true }).catch(() => undefined);
+    try {
+      await rename(stagingPath, snapshotPath);
+    } catch (error) {
+      await rm(stagingPath, { force: true }).catch(() => undefined);
+      throw error;
     }
     return;
   }
@@ -257,34 +276,33 @@ async function checkpointCodegraphIndex(command: string, indexPath: string): Pro
   const script = `
 const fs = require('node:fs');
 const { DatabaseSync } = require('node:sqlite');
-const [indexPath, snapshotPath] = process.argv.slice(1);
-const walPath = indexPath + '-wal';
-const shmPath = indexPath + '-shm';
+const [indexPath, stagingPath, snapshotPath] = process.argv.slice(1);
 const db = new DatabaseSync(indexPath);
-let publishedSnapshot = false;
+let created = false;
 try {
-  const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() || {};
-  let walSize = 0;
-  try { walSize = fs.statSync(walPath).size; } catch {}
-  const incomplete = (result.busy || 0) !== 0 || ((result.log || 0) > 0 && (result.checkpointed || 0) < result.log) || walSize > 0;
-  if (incomplete) {
-    db.prepare('VACUUM INTO ?').run(snapshotPath);
-    publishedSnapshot = true;
-  }
+  db.exec('PRAGMA busy_timeout = 5000');
+  try { db.prepare('PRAGMA wal_checkpoint(PASSIVE)').get(); } catch {}
+  db.prepare('VACUUM INTO ?').run(stagingPath);
+  created = true;
 } finally {
   db.close();
-  if (!publishedSnapshot) { try { fs.rmSync(snapshotPath, { force: true }); } catch {} }
+  if (!created) { try { fs.rmSync(stagingPath, { force: true }); } catch {} }
 }
-if (publishedSnapshot) {
-  fs.renameSync(snapshotPath, indexPath);
-  try { fs.rmSync(walPath, { force: true }); } catch {}
-  try { fs.rmSync(shmPath, { force: true }); } catch {}
+try {
+  fs.renameSync(stagingPath, snapshotPath);
+} catch (error) {
+  try { fs.rmSync(stagingPath, { force: true }); } catch {}
+  throw error;
 }
 `.trim();
-  await runOwnedFile(bundledNode, ['--disable-warning=ExperimentalWarning', '-e', script, indexPath, snapshotPath], {
-    cwd: dirname(indexPath),
-    maxBuffer: 1024 * 1024,
-  });
+  await runOwnedFile(
+    bundledNode,
+    ['--disable-warning=ExperimentalWarning', '-e', script, indexPath, stagingPath, snapshotPath],
+    {
+      cwd: dirname(indexPath),
+      maxBuffer: 1024 * 1024,
+    },
+  );
 }
 
 /** Verify the index opens and answers a real MCP query before claiming it is ready. */
@@ -398,34 +416,47 @@ export async function prepareCodegraphIndex(
 ): Promise<boolean> {
   const command = config.codegraphCommand;
   if (!command || !(await isGitWorktree(cwd))) return false;
-  const indexPath = resolve(cwd, CODEGRAPH_INDEX_PATH);
-  const indexed = await access(indexPath).then(
+  const canonicalCwd = await realpath(cwd).catch(() => resolve(cwd));
+  const indexPath = resolve(canonicalCwd, CODEGRAPH_INDEX_PATH);
+  const indexedBefore = await access(indexPath).then(
     () => true,
     () => false,
   );
-  const canWrite = await access(indexed ? dirname(indexPath) : cwd, constants.W_OK).then(
+  const canWrite = await access(indexedBefore ? dirname(indexPath) : canonicalCwd, constants.W_OK).then(
     () => true,
     () => false,
   );
   const readonly = options.readonly ?? !canWrite;
   if (canWrite) {
-    await excludeIndexFromGitStatus(cwd);
-    const args = indexed ? ['sync', '--quiet', cwd] : ['init', '--yes', cwd];
-    try {
-      await runOwnedFile(command, args, {
-        cwd,
-        env: { ...process.env, CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DAEMON: '1' },
-        maxBuffer: 4 * 1024 * 1024,
-      });
-      if (readonly) await checkpointCodegraphIndex(command, indexPath);
-    } catch (error) {
-      console.warn(
-        `[body] CodeGraph ${args[0]} failed for ${cwd}; continuing with Beeline read tools:`,
-        error,
-      );
-      return false;
-    }
-  } else if (!indexed) {
+    const built = await withKernelLockWhenFree(
+      `codegraph-index:${canonicalCwd}`,
+      async () => {
+        await excludeIndexFromGitStatus(canonicalCwd);
+        const indexed = await access(indexPath).then(
+          () => true,
+          () => false,
+        );
+        const args = indexed ? ['sync', '--quiet', canonicalCwd] : ['init', '--yes', canonicalCwd];
+        try {
+          await runOwnedFile(command, args, {
+            cwd: canonicalCwd,
+            env: { ...process.env, CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DAEMON: '1' },
+            maxBuffer: 4 * 1024 * 1024,
+          });
+          if (readonly) await publishReadonlySnapshot(command, indexPath);
+          return true;
+        } catch (error) {
+          console.warn(
+            `[body] CodeGraph ${args[0]} failed for ${cwd}; continuing with Beeline read tools:`,
+            error,
+          );
+          return false;
+        }
+      },
+      { step: `indexing CodeGraph at ${canonicalCwd}` },
+    );
+    if (!built) return false;
+  } else if (!indexedBefore) {
     console.warn(
       `[body] CodeGraph index missing on read-only checkout ${cwd}; continuing with Beeline read tools.`,
     );

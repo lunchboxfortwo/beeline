@@ -15,10 +15,10 @@ const children: ChildProcess[] = [];
 
 async function unlockTree(dir: string): Promise<void> {
   const cgDir = join(dir, '.codegraph');
-  const dbPath = join(cgDir, 'codegraph.db');
   await chmod(dir, 0o755).catch(() => undefined);
   await chmod(cgDir, 0o755).catch(() => undefined);
-  await chmod(dbPath, 0o644).catch(() => undefined);
+  await chmod(join(cgDir, 'codegraph.db'), 0o644).catch(() => undefined);
+  await chmod(join(cgDir, 'codegraph.readonly.db'), 0o644).catch(() => undefined);
 }
 
 afterEach(async () => {
@@ -113,10 +113,12 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
     // Build and verify in read-only mode.
     expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(true);
 
-    // Lock down the directory and database to read-only so SQLite cannot create -wal/-shm side files.
+    // Lock down the directory and database files to read-only so SQLite cannot create -wal/-shm side files.
     const cgDir = join(dir, '.codegraph');
     const dbPath = join(cgDir, 'codegraph.db');
+    const snapshotPath = join(cgDir, 'codegraph.readonly.db');
     await chmod(dbPath, 0o444);
+    await chmod(snapshotPath, 0o444);
     await chmod(cgDir, 0o555);
     await chmod(dir, 0o555);
 
@@ -140,7 +142,11 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
       expect(first.result?.isError).not.toBe(true);
       const firstText = (first.result?.content ?? []).map((entry) => entry.text ?? '').join('\n');
       expect(firstText).toContain('alphaHelper');
-      expect(await readdir(cgDir)).toEqual(['.gitignore', 'codegraph.db']);
+      expect((await readdir(cgDir)).sort()).toEqual([
+        '.gitignore',
+        'codegraph.db',
+        'codegraph.readonly.db',
+      ]);
 
       // Simulate a host reindex while the read-only MCP session remains open.
       await unlockTree(dir);
@@ -150,6 +156,7 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
       );
       expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(true);
       await chmod(dbPath, 0o444);
+      await chmod(snapshotPath, 0o444);
       await chmod(cgDir, 0o555);
       await chmod(dir, 0o555);
 
@@ -160,7 +167,11 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
       expect(second.result?.isError).not.toBe(true);
       const secondText = (second.result?.content ?? []).map((entry) => entry.text ?? '').join('\n');
       expect(secondText).toContain('betaReindexedSymbol');
-      expect(await readdir(cgDir)).toEqual(['.gitignore', 'codegraph.db']);
+      expect((await readdir(cgDir)).sort()).toEqual([
+        '.gitignore',
+        'codegraph.db',
+        'codegraph.readonly.db',
+      ]);
     } finally {
       client.close();
     }
@@ -179,11 +190,13 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
 
     expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(true);
 
-    // Corrupt the database and lock the directory read-only so sync cannot rewrite it.
+    // Corrupt the published snapshot and lock the directory read-only so sync cannot rewrite it.
     const cgDir = join(dir, '.codegraph');
     const dbPath = join(cgDir, 'codegraph.db');
-    await writeFile(dbPath, 'corrupt sqlite header');
+    const snapshotPath = join(cgDir, 'codegraph.readonly.db');
+    await writeFile(snapshotPath, 'corrupt sqlite header');
     await chmod(dbPath, 0o444);
+    await chmod(snapshotPath, 0o444);
     await chmod(cgDir, 0o555);
     await chmod(dir, 0o555);
 
@@ -193,7 +206,7 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
 );
 
 it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
-  'checkpoints committed WAL updates into the main index even while another connection stays open',
+  'preserves live WAL commits on an existing connection after a busy snapshot publication',
   async () => {
     const dir = await mkdtemp(join(tmpdir(), 'beeline-codegraph-wal-'));
     roots.push(dir);
@@ -212,11 +225,11 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
     const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
       DatabaseSync: new (location: string) => {
         exec(sql: string): void;
-        prepare(sql: string): { get(...params: unknown[]): unknown };
+        prepare(sql: string): { get(...params: unknown[]): unknown; run(...params: unknown[]): unknown };
         close(): void;
       };
     };
-    const openReader = new DatabaseSync(dbPath);
+    const oldConnection = new DatabaseSync(dbPath);
     try {
       await client.send('initialize', {
         protocolVersion: '2024-11-05',
@@ -234,10 +247,11 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
         'initialWalSymbol',
       );
 
-      // Hold an active WAL read transaction open during the reindex so codegraph sync
-      // leaves committed frames in SQLite's WAL instead of checkpointing on close.
-      openReader.exec('BEGIN');
-      openReader.prepare('SELECT count(*) FROM nodes').get();
+      // Hold an active WAL read transaction open during reindex + snapshot publication
+      // so WAL checkpointing is busy and frames stay in the live WAL.
+      oldConnection.exec('CREATE TABLE IF NOT EXISTS beeline_wal_probe (tag TEXT PRIMARY KEY)');
+      oldConnection.exec('BEGIN');
+      oldConnection.prepare('SELECT count(*) FROM nodes').get();
 
       await writeFile(
         join(dir, 'updated.ts'),
@@ -245,11 +259,21 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
       );
       expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(true);
 
-      await chmod(dbPath, 0o444);
-      await chmod(cgDir, 0o555);
-      await chmod(dir, 0o555);
+      // End the read transaction and commit a new write on the old live connection.
+      // Because snapshot publication never replaces codegraph.db or deletes its WAL/SHM,
+      // a fresh live connection must see this commit.
+      oldConnection.exec('COMMIT');
+      oldConnection.prepare('INSERT INTO beeline_wal_probe (tag) VALUES (?)').run('kept-commit');
+      const freshLive = new DatabaseSync(dbPath);
+      try {
+        expect(
+          freshLive.prepare('SELECT tag FROM beeline_wal_probe WHERE tag = ?').get('kept-commit'),
+        ).toEqual({ tag: 'kept-commit' });
+      } finally {
+        freshLive.close();
+      }
 
-      // Both the existing read-only MCP session and a fresh immutable connection must see the update.
+      // Both the existing read-only MCP session and a fresh immutable MCP session must see the reindexed symbol.
       const reopened = (await client.send('tools/call', {
         name: 'codegraph_explore',
         arguments: { query: 'updatedWhileReaderOpen', projectPath: dir },
@@ -278,10 +302,62 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
       } finally {
         freshClient.close();
       }
-      expect(await readdir(cgDir)).toEqual(['.gitignore', 'codegraph.db']);
+      // Snapshot itself must never create its own WAL/SHM side files.
+      const files = await readdir(cgDir);
+      expect(files).not.toContain('codegraph.readonly.db-wal');
+      expect(files).not.toContain('codegraph.readonly.db-shm');
     } finally {
-      openReader.close();
+      oldConnection.close();
       client.close();
+    }
+  },
+  25_000,
+);
+
+it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
+  'serializes overlapping prepares into one consistent read-only snapshot',
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'beeline-codegraph-overlap-'));
+    roots.push(dir);
+    await exec('git', ['init', '-q', dir]);
+    await writeFile(join(dir, 'one.ts'), 'export function overlapFirst() { return 1; }\n');
+    await writeFile(join(dir, 'two.ts'), 'export function overlapSecond() { return 2; }\n');
+    const config = { codegraphCommand: codegraphBin } as BodyConfig;
+
+    const results = await Promise.all([
+      prepareCodegraphIndex(config, dir, { readonly: true }),
+      prepareCodegraphIndex(config, dir, { readonly: true }),
+    ]);
+    expect(results).toEqual([true, true]);
+
+    const cgDir = join(dir, '.codegraph');
+    const files = (await readdir(cgDir)).sort();
+    expect(files.filter((name) => name.includes('.tmp-'))).toEqual([]);
+    expect(files).toContain('codegraph.readonly.db');
+
+    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+      DatabaseSync: new (
+        location: string,
+        options?: { readOnly?: boolean },
+      ) => {
+        prepare(sql: string): { get(...params: unknown[]): unknown };
+        close(): void;
+      };
+    };
+    const snapshot = new DatabaseSync(
+      `file://${join(cgDir, 'codegraph.readonly.db')}?immutable=1`,
+      { readOnly: true },
+    );
+    try {
+      expect(snapshot.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+      expect(snapshot.prepare('SELECT name FROM nodes WHERE name = ?').get('overlapFirst')).toEqual(
+        { name: 'overlapFirst' },
+      );
+      expect(
+        snapshot.prepare('SELECT name FROM nodes WHERE name = ?').get('overlapSecond'),
+      ).toEqual({ name: 'overlapSecond' });
+    } finally {
+      snapshot.close();
     }
   },
   25_000,
