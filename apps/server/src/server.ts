@@ -4,6 +4,7 @@ import { WallRefusal } from '@beeline/api-contract/daemon';
 import { finishLiveClose } from './shutdown.js';
 import { type Server, createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { runnableOrigin, serveRunnableArtifact } from "./runnable-artifact.js";
+import type { GitHubWebhookClaim } from "./github-webhook-claim.js";
 import type { LiveEvent, LiveHub } from "./live.js";
 import { type RoomLiveDelta, type MessageBookmarkView, PHONE_READ_OPERATIONS } from "@beeline/api-contract/phone";
 import type { PhoneService } from "./phone-service.js";
@@ -115,7 +116,7 @@ export interface GitHubServerHooks {
   roomToken?: (identityId: string, roomId: string) => Promise<{ token: string; expiresAt: number }>;
   /** Resolves and stores chat pictures for linked repositories that have none stored yet. */
   resolveRepositoryIcons?: () => Promise<void>;
-  onWebhook?: (eventType: string, payload: unknown, deliveryId?: string) => Promise<void>;
+  onWebhook?: (eventType: string, payload: unknown, deliveryId?: string, claim?: GitHubWebhookClaim) => Promise<void>;
   completeInstallation?: (state: string, installationId: number) => Promise<string>;
 }
 

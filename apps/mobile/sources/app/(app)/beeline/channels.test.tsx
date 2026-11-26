@@ -739,7 +739,7 @@ describe('Room deck live path', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('lists three waiting threads, opens every thread from more, waiting first, and opens one', async () => {
+  it('expands and collapses the waiting threads for one chat and lets a waiting thread open', async () => {
     deck.renderRows = true;
     deck.chatsResponse = listOf([
       room('room-a', 10, {
@@ -791,21 +791,22 @@ describe('Room deck live path', () => {
     expect(threads()).toEqual(
       ['four', 'five', 'six'].map((name) => `Thread ${name}, waiting on you`),
     );
-    const more = () =>
+    const controls = (action: 'more' | 'less') =>
       renderer.root.findAll(
-        (node: any) => node.type === 'ListItem' && node.props.testID === 'more-room-a',
+        (node: any) => node.type === 'ListItem' && node.props.testID === `${action}-room-a`,
       );
-    expect(more()[0]!.props['aria-label']).toBe('Show 5 more threads');
-    act(() => more()[0]!.props.onPress());
-    expect(threads().slice(0, 5)).toEqual(
+    expect(controls('more')[0]!.props['aria-label']).toBe('Show 2 more threads');
+    act(() => controls('more')[0]!.props.onPress());
+    expect(threads()).toEqual(
       ['four', 'five', 'six', 'seven', 'eight'].map((name) => `Thread ${name}, waiting on you`),
     );
-    expect(
-      threads()
-        .slice(5)
-        .map((label: string) => label.split(',')[0]),
-    ).toEqual(['Thread one', 'Thread two', 'Thread three']);
-    expect(more()).toHaveLength(0);
+    expect(controls('more')).toHaveLength(0);
+    act(() => controls('less')[0]!.props.onPress());
+    expect(threads()).toEqual(
+      ['four', 'five', 'six'].map((name) => `Thread ${name}, waiting on you`),
+    );
+    expect(controls('less')).toHaveLength(0);
+    expect(controls('more')[0]!.props['aria-label']).toBe('Show 2 more threads');
     act(() =>
       renderer.root
         .find(
