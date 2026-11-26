@@ -3,7 +3,7 @@ import React from 'react';
 import { Modal, BackHandler, Platform, type TextInput } from 'react-native';
 import { Easing, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { Input, XStack, YStack, styled, useThemeName, type InputProps, type YStackProps } from 'tamagui';
+import { Input, Theme, XStack, YStack, styled, useThemeName, type InputProps, type YStackProps } from 'tamagui';
 import { space, typeRoles } from '@/buzz/groknight';
 import { clearModalNavigationBarScrim } from '@/buzz/android-modal-navigation-bar';
 import { HEIGHT, MotionLayer, T } from '@/ui/grammar';
@@ -275,6 +275,7 @@ const StableHullModal = React.memo(function StableHullModal({
   visible,
   withinScreen = false,
 }: HullModalProps) {
+  const themeName = useThemeName();
   React.useLayoutEffect(() => {
     if (!withinScreen || Platform.OS !== 'android' || !visible) return;
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -351,7 +352,11 @@ const StableHullModal = React.memo(function StableHullModal({
       transparent
       visible={visible}
     >
-      {body}
+      {/* On web, Modal portals into document.body outside the app's Tamagui Theme DOM class;
+          forceClassName re-emits the active theme class inside the portal so CSS tokens resolve. */}
+      <Theme name={themeName} forceClassName>
+        {body}
+      </Theme>
     </Modal>
   );
 });
