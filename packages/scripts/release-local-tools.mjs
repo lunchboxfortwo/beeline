@@ -2,7 +2,7 @@
 // resource slice as their release worker. No daemon configuration is changed.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 export function localToolPlan(tool, args, config) {
   const docker = values => {
@@ -24,15 +24,20 @@ export function localToolPlan(tool, args, config) {
     if (arg === '--build-arg') values.buildArgs.push('--build-arg', value);
     else values[arg.slice(2)] = value;
   }
-  // Fly resolves a config's dockerfile relative to that config.
-  const configured = values.config && readFileSync(values.config, 'utf8').match(/^\s*dockerfile = "([^"]+)"$/m)?.[1];
-  values.dockerfile ??= configured && join(dirname(values.config), configured);
+  // Fly resolves relative Dockerfile paths against the config directory when
+  // --config is provided, and accepts absolute paths directly.
+  const configured = !values.dockerfile && values.config
+    ? readFileSync(values.config, 'utf8').match(/^\s*dockerfile = "([^"]+)"$/m)?.[1]
+    : undefined;
+  const dockerfileInput = values.dockerfile ?? configured;
   const files = { 'beeline-server': 'apps/server/Dockerfile', 'beeline-free-agents': 'apps/infra/free-agent/Dockerfile' };
-  if (files[values.app] !== values.dockerfile || !values['image-label'] || !args.includes('--push')) throw new Error('Local Fly build requires the known image, explicit Dockerfile, label and push');
+  const expected = files[values.app];
+  const dockerfile = dockerfileInput && resolve(values.config ? dirname(values.config) : '.', dockerfileInput);
+  if (!expected || dockerfile !== resolve(expected) || !values['image-label'] || !args.includes('--push')) throw new Error('Local Fly build requires the known image, explicit Dockerfile, label and push');
   const image = `registry.fly.io/${values.app}:${values['image-label']}`;
   return [
     { command: config.flyctl, args: ['auth', 'docker'] },
-    { command: config.docker, args: docker(['build', '--file', values.dockerfile, '--tag', image, ...values.buildArgs, '.']), legacy: true },
+    { command: config.docker, args: docker(['build', '--file', expected, '--tag', image, ...values.buildArgs, '.']), legacy: true },
     { command: config.docker, args: ['push', image] },
   ];
 }
