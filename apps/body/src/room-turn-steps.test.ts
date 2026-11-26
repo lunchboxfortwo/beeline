@@ -119,6 +119,25 @@ describe('roomReplySteps', () => {
     });
   });
 
+  it('preserves newlines in multiline shell commands while redacting secrets', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          id: 'multi',
+          kind: 'execute',
+          title: 'exec_command',
+          rawInput: { cmd: 'ls\nAPI_KEY=planted-secret mkdir scratch' },
+        },
+      },
+    ]);
+    expect(rows[0]!.command).toContain('\n');
+    expect(rows[0]!.command!.split('\n')[0]).toBe('ls');
+    expect(rows[0]!.command!.split('\n')[1]).toContain('mkdir scratch');
+    expect(rows[0]!.command).toContain('[REDACTED]');
+    expect(JSON.stringify(rows[0])).not.toContain('planted-secret');
+  });
+
   it('suppresses command, input, files, and output on credential paths', () => {
     const rows = roomReplySteps([
       {

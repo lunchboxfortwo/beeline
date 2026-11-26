@@ -82,6 +82,10 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function preserveLines(value: string): string {
+  return value.replace(/\r\n?/g, '\n').trim();
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -178,9 +182,9 @@ function extractCommand(call: ToolCallEntry): string | undefined {
   const outer = parseJsonObject(call.rawInput);
   const unwrapped = unwrapRawInput(call.rawInput);
   const direct = readFromRecord(unwrapped) ?? readFromRecord(outer);
-  if (direct) return oneLine(redactToolDetail(direct)).slice(0, MAX_STEP_COMMAND_LENGTH) || undefined;
+  if (direct) return preserveLines(redactToolDetail(direct)).slice(0, MAX_STEP_COMMAND_LENGTH) || undefined;
   if (typeof call.rawInput === 'string' && !call.rawInput.trim().startsWith('{')) {
-    const trimmed = oneLine(redactToolDetail(call.rawInput));
+    const trimmed = preserveLines(redactToolDetail(call.rawInput));
     if (trimmed) return trimmed.slice(0, MAX_STEP_COMMAND_LENGTH);
   }
   return undefined;

@@ -1,8 +1,7 @@
 import type { ActionWeight, TurnActivityAction } from '@/buzz/activity-timeline';
+import { displayFilePath, peelShellCommand } from './tool-call-classify';
 import {
-  displayFilePath,
   formatToolCallDuration,
-  peelShellCommand,
   TOOL_CALL_DURATION_FLOOR_MS,
   toolCallLabel,
   toolCallVerb,

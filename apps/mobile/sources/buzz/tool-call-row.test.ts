@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { TurnActivityAction } from './activity-timeline';
 import {
   displayFilePath,
-  formatToolCallDuration,
   isReadOnlyShellCommand,
-  middleTruncate,
   peelShellCommand,
+} from './tool-call-classify';
+import {
+  formatToolCallDuration,
+  middleTruncate,
   toolCallLabel,
   toolCallOutput,
   toolCallVerb,
@@ -230,10 +232,24 @@ describe('toolCallLabel', () => {
 });
 
 describe('shell wrapper peeling and read-only classification', () => {
-  it('unwraps env, bash -lc, and leading cd wrappers', () => {
+  it('unwraps env, bash -lc, and leading cd wrappers while preserving multiline commands', () => {
     expect(peelShellCommand(`env CI=1 bash -lc 'cd /repo && rg -n "wake" apps/server/src'`)).toBe(
       'rg -n "wake" apps/server/src',
     );
+    expect(peelShellCommand(`bash -lc 'ls\nmkdir scratch'`)).toBe('ls\nmkdir scratch');
+  });
+
+  it('keeps multiline commands distinct on the one-line ledger label', () => {
+    expect(
+      toolCallLabel(
+        step({
+          id: 'multi',
+          toolKind: 'execute',
+          command: 'ls\nmkdir scratch',
+          title: 'exec_command',
+        }),
+      ),
+    ).toBe('ls; mkdir scratch');
   });
 
   it.each([
@@ -246,13 +262,21 @@ describe('shell wrapper peeling and read-only classification', () => {
     `git log -n 5 --oneline`,
     `git show HEAD:package.json`,
     `find apps/mobile -name '*.test.ts'`,
+    `ls\nrg -n "wake" apps/server/src`,
   ])('classifies strictly read-only command as observational: %s', (command) => {
     expect(isReadOnlyShellCommand(command)).toBe(true);
   });
 
   it.each([
     `rg foo && rm bar`,
+    `rg --pre=sh foo apps/`,
     `git diff > out.patch`,
+    `git diff --output=out.patch`,
+    `git diff --output out.patch`,
+    `git log --output=history.txt`,
+    `git show --output=show.txt HEAD`,
+    `git diff --ext-diff`,
+    `git -c diff.external=sh diff`,
     `git status >> log.txt`,
     `sed -i 's/a/b/' file.ts`,
     `find . -name '*.tmp' -delete`,
@@ -262,6 +286,8 @@ describe('shell wrapper peeling and read-only classification', () => {
     `npm test`,
     `git commit -m "fix"`,
     `git branch -D old-branch`,
+    `ls\nmkdir scratch`,
+    `bash -lc 'ls\nmkdir scratch'`,
   ])('never classifies mutating or redirecting command as read-only: %s', (command) => {
     expect(isReadOnlyShellCommand(command)).toBe(false);
   });

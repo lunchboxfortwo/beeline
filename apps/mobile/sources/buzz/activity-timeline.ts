@@ -6,7 +6,7 @@ import {
   parseMcpTool,
   peelShellCommand,
   redactDisplayPaths,
-} from './tool-call-row';
+} from './tool-call-classify';
 
 /**
  * How a single tool call reaches the reader.
