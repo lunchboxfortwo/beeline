@@ -30,7 +30,7 @@ export function redactToolDetail(value: string): string {
       '$1[REDACTED]',
     )
     .replace(
-      /(^|[\s;|&])((?:export\s+)?[A-Z_][A-Z0-9_]*)=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;|&"']+)/g,
+      /(^|[\s;|&])((?:export\s+)?[A-Z_][A-Z0-9_]*)=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;|&"']+)(?:(?:"(?![,\s}\];|&]|$)(?:\\.|[^"\\])*"|'(?![,\s}\];|&]|$)(?:\\.|[^'\\])*'|[^\s;|&"']+))*/g,
       (match, prefix: string, name: string, offset: number, source: string) => {
         if (prefix === '&') {
           const tokenStart =

@@ -22,6 +22,16 @@ describe('redactToolDetail', () => {
     );
     expect(redactToolDetail('echo hi&FOO_KEY=planted-val')).toBe('echo hi&FOO_KEY=[REDACTED]');
     expect(redactToolDetail('echo hi &FOO_KEY=planted-val')).toBe('echo hi &FOO_KEY=[REDACTED]');
+    expect(redactToolDetail('SERVICE_ENV=prefix"synthetic-suffix" run')).toBe(
+      'SERVICE_ENV=[REDACTED] run',
+    );
+    expect(redactToolDetail(`SERVICE_ENV="prefix"middle'synthetic-tail' run`)).toBe(
+      'SERVICE_ENV=[REDACTED] run',
+    );
+    const wrappedJson = redactToolDetail(
+      JSON.stringify({ cmd: 'export FOO_BAR=planted-val', status: 'ok' }),
+    );
+    expect(JSON.parse(wrappedJson)).toEqual({ cmd: 'export FOO_BAR=[REDACTED]', status: 'ok' });
     expect(redactToolDetail('Bearer secret-bearer-value')).toBe('Bearer [REDACTED]');
     expect(redactToolDetail('Authorization: Bearer secret-bearer-value')).not.toContain(
       'secret-bearer-value',
