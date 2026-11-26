@@ -3,7 +3,6 @@ import { modelText } from './message-origin.js';
 import { refreshCornerAttention } from './corner-attention.js';
 import type { SqlDatabase } from './database.js';
 import { CommandRefusalError } from './command-refusal.js';
-import { cornerCommanderIdSql } from './corner-commander.js';
 
 /** Blocks use the existing message and ask closure, independently of Tasks marks. */
 export const IMPLEMENTER_BLOCKS_SCHEMA = `
@@ -37,20 +36,19 @@ export async function blockReminder(db: SqlDatabase, agent: string, room: string
   ].join('\n');
 }
 
-/** A takeover changes authority immediately; the original author retains no special rights. */
+/** Any person or agent who is a member of the thread's chat may clear its block; ask_closed_by records who did. */
 export async function closeBlock(db:SqlDatabase,actor:string,id:string,reason:string):Promise<boolean> {
-  const block=(await db.query<{corner:string;worker:string;commander:string;workspace:string;parent:string}>(`
-    SELECT room.id corner,CASE WHEN message.block_corner_id IS NULL THEN message.author_id ELSE fact.implementer_agent_id END worker,${cornerCommanderIdSql('room')} commander,
-      room.workspace_id workspace,room.parent_id parent
+  const block=(await db.query<{corner:string;workspace:string;parent:string}>(`
+    SELECT room.id corner,room.workspace_id workspace,room.parent_id parent
     FROM messages message LEFT JOIN messages parent_block ON parent_block.id=message.block_parent_id
     JOIN rooms room ON room.id=COALESCE(message.block_corner_id,parent_block.block_corner_id)
     JOIN corner_facts fact ON fact.corner_id=room.id WHERE message.id=$1 FOR UPDATE OF message,room,fact`,[id])).rows[0];
   if(!block) return false;
-  const member=(await db.query<{kind:string;role:string}>(`SELECT person.kind,member.role FROM identities person
+  const member=(await db.query(`SELECT 1 FROM identities person
     JOIN memberships member ON member.identity_id=person.id AND member.workspace_id=$2 AND member.room_id IS NULL AND member.removed_at IS NULL
     WHERE person.id=$1 AND EXISTS(SELECT 1 FROM room_access access WHERE access.room_id=$3 AND access.identity_id=$1 AND access.removed_at IS NULL)`,[actor,block.workspace,block.parent])).rows[0];
-  if(!member || (actor!==block.worker && actor!==block.commander && member.kind!=='human'))
-    throw new CommandRefusalError('Only the current implementer, its commander, or a person with higher standing can clear this block.',403);
+  if(!member)
+    throw new CommandRefusalError('Only a member of this thread can clear this block.',403);
   await db.query(`UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2),ask_closed_by=COALESCE(ask_closed_by,$3) WHERE id=$1`,[id,reason,actor]);
   await refreshCornerAttention(db,block.corner);
   return true;
