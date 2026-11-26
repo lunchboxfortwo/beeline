@@ -16,17 +16,41 @@ test('routine delivery runs next once and does not promote or authorize stores',
   assert.equal(calls[0]['release-sha'], sha);
   assert.equal(calls[0]['store-track'], 'none');
 });
-test('promotion dispatches only the metadata workflow and waits for its verdict', () => {
-  const calls = [];
-  dispatchPromotion(spec.dispatchedBy, {}, (command, args) => {
-    calls.push([command, ...args]);
-    return 'https://github.com/lunchboxfortwo/beeline/actions/runs/42';
-  });
-  assert.deepEqual(calls, [
-    ['gh', 'workflow', 'run', 'unified-release.yml', '-R', 'lunchboxfortwo/beeline', '--ref', 'main',
-      '-f', 'channel=latest', '-f', `dispatched_by=${JSON.stringify(spec.dispatchedBy)}`],
-    ['gh', 'run', 'watch', '42', '-R', 'lunchboxfortwo/beeline', '--exit-status'],
-  ]);
+test('promotion watches the dispatched run through a startup 404 and uses its final verdict', async () => {
+  for (const conclusion of ['success', 'failure']) {
+    const calls = [];
+    const status = ['missing', 'in_progress', 'completed'];
+    const promotion = dispatchPromotion(spec.dispatchedBy, {}, (command, args) => {
+      calls.push([command, ...args]);
+      if (args[0] === 'workflow') return 'https://github.com/lunchboxfortwo/beeline/actions/runs/42';
+      const state = status.shift();
+      if (state === 'missing') throw Object.assign(new Error('gh failed'), { stderr: 'gh: Not Found (HTTP 404)\n' });
+      assert.ok(state, 'unexpected additional run lookup');
+      return JSON.stringify({ status: state, conclusion: state === 'completed' ? conclusion : null });
+    }, async () => {});
+    if (conclusion === 'success') await promotion;
+    else await assert.rejects(promotion, /completed with failure/);
+    assert.deepEqual(calls, [
+      ['gh', 'workflow', 'run', 'unified-release.yml', '-R', 'lunchboxfortwo/beeline', '--ref', 'main',
+        '-f', 'channel=latest', '-f', `dispatched_by=${JSON.stringify(spec.dispatchedBy)}`],
+      ...Array.from({ length: 3 }, () => ['gh', 'api', 'repos/lunchboxfortwo/beeline/actions/runs/42']),
+    ]);
+  }
+});
+test('promotion stops on other lookup errors and on a 404 after the run is visible', async () => {
+  for (const visible of [false, true]) {
+    const error = Object.assign(new Error('gh failed'), {
+      stderr: visible ? 'gh: Not Found (HTTP 404)\n' : 'gh: Forbidden (HTTP 403)\n',
+    });
+    let reads = 0, pauses = 0;
+    await assert.rejects(dispatchPromotion(spec.dispatchedBy, {}, (_command, args) => {
+      if (args[0] === 'workflow') return 'https://github.com/lunchboxfortwo/beeline/actions/runs/42';
+      if (++reads === 1 && visible) return '{"status":"in_progress"}';
+      throw error;
+    }, async () => { assert.equal(++pauses, 1); }), caught => caught === error);
+    assert.equal(reads, visible ? 2 : 1);
+    assert.equal(pauses, visible ? 1 : 0);
+  }
 });
 test('promotion accepts owner attribution and rejects build and test options', async () => {
   assert.deepEqual(releaseArguments(['--skip-full-checks', 'owner-message-42']), { skipFullChecks: 'owner-message-42' });

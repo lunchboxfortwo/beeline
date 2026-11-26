@@ -6,6 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { githubRunNotFound } from './release-github-run.mjs';
 
 const MAC_HELPERS_WORKFLOW = 'mac-helpers.yml';
 const MAC_DESKTOP_WORKFLOW = 'mac-desktop.yml';
@@ -70,7 +71,7 @@ async function githubRun({
       `${name}=${value}`,
     ]),
   ]);
-  let run;
+  let run, readRun = false;
   try {
     while (true) {
       if (now() > deadline)
@@ -87,8 +88,13 @@ async function githubRun({
         if (run) processes.log(`${building} on GitHub: ${run.html_url}`);
       }
       if (run) {
-        run = await api(`repos/${repository}/actions/runs/${run.id}`);
-        if (run.status === 'completed') break;
+        try {
+          run = await api(`repos/${repository}/actions/runs/${run.id}`);
+          readRun = true;
+          if (run.status === 'completed') break;
+        } catch (error) {
+          if (readRun || !githubRunNotFound(error)) throw error;
+        }
       }
       await (sleep ?? wait(what))(poll, signal);
     }

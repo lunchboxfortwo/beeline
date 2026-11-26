@@ -330,7 +330,7 @@ test('the dispatched Mac workflow builds exactly what unified-release helper_mac
   assert.deepEqual(Object.keys(read('mac-helpers.yml').permissions), ['contents']);
 });
 
-function fakeGithub({ conclusions = { 'darwin-arm64': 'success', 'darwin-x64': 'success' }, pending = 1 } = {}) {
+function fakeGithub({ conclusions = { 'darwin-arm64': 'success', 'darwin-x64': 'success' }, pending = 1, startup404 = false } = {}) {
   const calls = [];
   let requestId, polls = 0;
   const run = { id: 77, html_url: 'https://github.com/fixture/repo/actions/runs/77' };
@@ -350,7 +350,11 @@ function fakeGithub({ conclusions = { 'darwin-arm64': 'success', 'darwin-x64': '
       { id: 5, display_title: 'Mac helpers v1.2.3-rc.1 · another-request' }, { ...run, display_title: `Mac helpers v1.2.3-rc.1 · ${requestId}` }] });
     if (path.endsWith('/jobs?per_page=10')) return JSON.stringify({ jobs: Object.entries(conclusions).map(([platform, conclusion]) =>
       ({ name: `HELPER BUILD (${platform})`, conclusion, html_url: `${run.html_url}/job/${platform}` })) });
-    if (path.endsWith('/runs/77')) return JSON.stringify({ ...run, status: ++polls > pending ? 'completed' : 'in_progress' });
+    if (path.endsWith('/runs/77')) {
+      polls++;
+      if (startup404 && polls === 1) throw Object.assign(new Error('gh failed (1)'), { stderr: 'gh: Not Found (HTTP 404)\n' });
+      return JSON.stringify({ ...run, status: polls > pending ? 'completed' : 'in_progress' });
+    }
     throw new Error(`unexpected gh call ${args.join(' ')}`);
   };
   return { calls, processes };
@@ -393,7 +397,7 @@ test('Mac helper dry-run signals cancel the remote run and release their listene
 test('one GitHub run builds both Mac helpers and hands their artifacts to the helper join', async () => {
   const directory = temporary();
   try {
-    const { calls, processes } = fakeGithub({ pending: 2 }), artifacts = new Map(), records = new Map(), sha = 'a'.repeat(40);
+    const { calls, processes } = fakeGithub({ pending: 2, startup404: true }), artifacts = new Map(), records = new Map(), sha = 'a'.repeat(40);
     const results = await githubMacHelpers({ processes, token: 'fixture-gh-token', repository: 'fixture/repo', sha, version: 'v1.2.3-rc.1',
       directory, artifacts, records, sleep: async () => {} });
     assert.deepEqual(results, { 'darwin-arm64': { result: 'success', outputs: { shipped: 'false' } }, 'darwin-x64': { result: 'success', outputs: { shipped: 'false' } } });
@@ -401,6 +405,7 @@ test('one GitHub run builds both Mac helpers and hands their artifacts to the he
     assert.equal(dispatches.length, 1);
     assert.deepEqual(dispatches[0].args.slice(0, 10), ['workflow', 'run', 'mac-helpers.yml', '-R', 'fixture/repo', '--ref', 'main', '-f', `release_sha=${sha}`, '-f']);
     assert.equal(dispatches[0].options.env.GH_TOKEN, 'fixture-gh-token');
+    assert.equal(calls.filter(call => call.args[1] === 'repos/fixture/repo/actions/runs/77').length, 3);
     for (const platform of ['darwin-arm64', 'darwin-x64']) {
       const name = `daemon-${platform}-v1.2.3-rc.1-${sha}`;
       assert.equal(artifacts.get(name), join(directory, 'artifacts', name));

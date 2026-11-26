@@ -121,7 +121,7 @@ test('rc versions sort numerically, below their final, and drafts reserve rc cou
 });
 
 // A stub for npm and gh that records each call; gh answers the local hand-off.
-const recordingTools = (directory, conclusion = 'success') => {
+const recordingTools = (directory, conclusion = 'success', startup404 = false) => {
   const calls = join(directory, 'calls.jsonl');
   writeFileSync(calls, '');
   for (const tool of ['npm', 'gh']) writeFileSync(join(directory, tool), `#!${process.execPath}
@@ -143,7 +143,15 @@ if (${JSON.stringify(tool)} === 'gh') {
     if (process.env.DOWNLOAD_DIGEST) fs.writeFileSync(output + '.sha256', process.env.DOWNLOAD_DIGEST);
   }
   if (args[0] === 'workflow') console.log('https://github.com/fixture/repo/actions/runs/42');
-  if (args[0] === 'run') process.exit(${JSON.stringify(conclusion)} === 'success' ? 0 : 1);
+  if (args[0] === 'api') {
+    if (${startup404} && !fs.existsSync(process.env.CALLS + '.looked-up')) {
+      fs.writeFileSync(process.env.CALLS + '.looked-up', '');
+      console.error('gh: Not Found (HTTP 404)');
+      process.exit(1);
+    }
+    console.log(JSON.stringify({ status: 'completed', conclusion: ${JSON.stringify(conclusion)} }));
+  }
+  if (args[0] === 'run') process.exit(1);
 }
 `, { mode: 0o755 });
   return { calls, read: () => readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse) };
@@ -174,18 +182,22 @@ test('a local release hands its exact tarball to the publish-only job and fails 
   const env = { ...process.env, GHR_MAX_ATTEMPTS: '1', BEELINE_LOCAL_RELEASE: 'true', PATH: `${directory}:${process.env.PATH}`, GITHUB_REPOSITORY: 'fixture/repo',
     CHANNEL: 'next', RELEASE_VERSION: 'v0.1.184-rc.10', HELPER_TARBALL: tarball, DISPATCHED_BY: '{"handle":"fixture"}' };
   const digest = createHash('sha256').update('exact smoked bytes').digest('hex');
-  let tools = recordingTools(directory);
+  let tools = recordingTools(directory, 'success', true);
   execFileSync('bash', ['-c', publish.run], { env: { ...env, CALLS: tools.calls } });
   const commands = tools.read();
   assert.deepEqual(commands.find(c => c[1] === 'release' && c[2] === 'upload'), ['gh', 'release', 'upload', 'v0.1.184-rc.10', tarball, tarball + '.sha256', '--clobber']);
   assert.equal(readFileSync(tarball + '.sha256', 'utf8').trim(), digest);
   assert.deepEqual(commands.find(c => c[1] === 'workflow'), ['gh', 'workflow', 'run', 'unified-release.yml', '-R', 'fixture/repo', '--ref', 'main',
     '-f', 'selection=npm-publish', '-f', 'channel=next', '-f', 'release_version=v0.1.184-rc.10', '-f', 'dispatched_by={"handle":"fixture"}']);
-  assert.deepEqual(commands.find(c => c[1] === 'run'), ['gh', 'run', 'watch', '42', '-R', 'fixture/repo', '--exit-status']);
+  assert.deepEqual(commands.filter(c => c[1] === 'api'), [
+    ['gh', 'api', 'repos/fixture/repo/actions/runs/42'],
+    ['gh', 'api', 'repos/fixture/repo/actions/runs/42'],
+  ]);
   assert.equal(commands.some(c => c[0] === 'npm'), false);
   tools = recordingTools(directory, 'failure');
   const failed = spawnSync('bash', ['-c', publish.run], { env: { ...env, CALLS: tools.calls }, encoding: 'utf8' });
   assert.notEqual(failed.status, 0);
+  assert.match(failed.stderr, /GitHub run 42 completed with failure/);
   assert.match(failed.stderr, /npm publish failed: https:\/\/github\.com\/fixture\/repo\/actions\/runs\/42/);
 
   const job = workflow.jobs.npm_publish;
