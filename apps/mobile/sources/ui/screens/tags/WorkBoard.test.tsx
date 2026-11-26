@@ -397,3 +397,101 @@ it('resolves phone long-press drag in window coordinates and always clears drag 
         expect(scroll().props.scrollEnabled).toBe(true);
     } finally { act(() => tree.unmount()); }
 });
+
+it('auto-scrolls near viewport edges on phone, refreshes drop bounds, and drops onto an initially offscreen section', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.useFakeTimers();
+    const person = { pubkey: 'human', kind: 'human' as const, name: 'Ada' };
+    const backlogTask = {
+        id: 't-offscreen', roomId: 'chat-1', chatId: 'chat-1', chatName: 'beeline',
+        threadName: 'offscreen-drag', title: 'offscreen-drag', state: 'backlog' as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'human',
+        chats: [{ id: 'chat-1', name: 'beeline' }],
+        people: [person],
+        items: [backlogTask],
+    };
+    const move = vi.fn(async () => true);
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), move, clear: vi.fn(), clearAll: vi.fn() };
+
+    // Viewport spans window Y 100..700 (height 600). Done starts offscreen at window Y 920..1020.
+    let currentScrollY = 0;
+    const scrollTo = vi.fn(({ y }: { y: number }) => {
+        currentScrollY = y;
+    });
+    const baseWindowY: Record<string, { y: number; height: number }> = {
+        'work-sections': { y: 100, height: 1100 },
+        'work-drop-progress': { y: 120, height: 120 },
+        'work-drop-backlog': { y: 260, height: 120 },
+        'work-drop-done': { y: 920, height: 100 },
+    };
+
+    let tree: any;
+    act(() => {
+        tree = create(
+            <WorkBoard board={board} desktop={false} actions={actions} initialChatId="chat-1" />,
+            {
+                createNodeMock: (element: any) => {
+                    const id = element?.props?.testID;
+                    if (id === 'work-phone-scroll') {
+                        return {
+                            scrollTo,
+                            measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => cb(0, 100, 390, 600),
+                        };
+                    }
+                    const base = baseWindowY[id];
+                    if (base) {
+                        return {
+                            measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) =>
+                                cb(0, base.y - currentScrollY, 390, base.height),
+                        };
+                    }
+                    return {};
+                },
+            },
+        );
+    });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    try {
+        act(() => {
+            host('work-phone-scroll').props.onContentSizeChange(390, 1100);
+            host('work-drop-progress').props.onLayout({ nativeEvent: { layout: { y: 20, height: 120 } } });
+            host('work-drop-backlog').props.onLayout({ nativeEvent: { layout: { y: 160, height: 120 } } });
+            host('work-drop-done').props.onLayout({ nativeEvent: { layout: { y: 820, height: 100 } } });
+        });
+
+        // Start drag while Done is offscreen (920..1020 > viewport bottom 700).
+        act(() => { host('work-item-t-offscreen').props.onLongPress(); });
+        expect(currentScrollY).toBe(0);
+
+        // Hold finger near bottom edge (pageY=680): triggers edge auto-scroll downward.
+        act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { pageY: 680 } }); });
+        act(() => { vi.advanceTimersByTime(32 * 15); });
+        expect(scrollTo).toHaveBeenCalled();
+        expect(currentScrollY).toBeGreaterThanOrEqual(240);
+
+        // Done has scrolled into view under pageY=680 (920 - currentScrollY <= 680 <= 1020 - currentScrollY).
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { pageY: 680 } }); });
+        expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'done');
+        expect(host('work-row-t-offscreen').props.opacity).toBe(1);
+
+        // Auto-scroll stops completely after release.
+        const scrollCountAfterRelease = scrollTo.mock.calls.length;
+        act(() => { vi.advanceTimersByTime(32 * 5); });
+        expect(scrollTo).toHaveBeenCalledTimes(scrollCountAfterRelease);
+
+        // Now start scrolled down and drag near top edge (pageY=110) to reach offscreen In progress above.
+        move.mockClear();
+        act(() => { host('work-item-t-offscreen').props.onLongPress(); });
+        act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { pageY: 110 } }); });
+        act(() => { vi.advanceTimersByTime(32 * 20); });
+        expect(currentScrollY).toBe(0);
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { pageY: 160 } }); });
+        expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'in-progress');
+    } finally {
+        act(() => tree.unmount());
+        vi.useRealTimers();
+    }
+});

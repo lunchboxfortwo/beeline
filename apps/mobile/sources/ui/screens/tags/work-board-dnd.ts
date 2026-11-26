@@ -36,6 +36,9 @@ export function shouldMoveWorkItem(
   return itemColumnKey(item) !== target;
 }
 
+export const DRAG_SCROLL_EDGE_PX = 72;
+export const DRAG_SCROLL_STEP_PX = 24;
+
 export function resolveDropSectionAtY(
   layouts: Partial<Record<DropSectionKey, SectionBounds>>,
   y: number,
@@ -69,6 +72,56 @@ export function resolveDropSectionForTouch({
     return resolveDropSectionAtY(boardLayouts, pageY - boardWindowY);
   }
   return null;
+}
+
+/** Compute vertical scroll delta when a dragged touch approaches the top or bottom viewport edge. */
+export function edgeAutoScrollDelta({
+  pageY,
+  viewport,
+  edgePx = DRAG_SCROLL_EDGE_PX,
+  stepPx = DRAG_SCROLL_STEP_PX,
+}: {
+  pageY: number | null | undefined;
+  viewport: SectionBounds | null;
+  edgePx?: number;
+  stepPx?: number;
+}): number {
+  if (typeof pageY !== 'number' || Number.isNaN(pageY) || !viewport || viewport.height <= 0) {
+    return 0;
+  }
+  const effectiveEdge = Math.min(edgePx, viewport.height / 3);
+  if (effectiveEdge <= 0) return 0;
+  const topZone = viewport.y + effectiveEdge;
+  const bottomZone = viewport.y + viewport.height - effectiveEdge;
+  if (pageY < topZone) {
+    const ratio = Math.min(1, Math.max(0.25, (topZone - pageY) / effectiveEdge));
+    return -Math.round(stepPx * ratio);
+  }
+  if (pageY > bottomZone) {
+    const ratio = Math.min(1, Math.max(0.25, (pageY - bottomZone) / effectiveEdge));
+    return Math.round(stepPx * ratio);
+  }
+  return 0;
+}
+
+export function clampScrollOffset(
+  nextY: number,
+  contentHeight: number,
+  viewportHeight: number,
+): number {
+  const maxScroll = Math.max(0, contentHeight - viewportHeight);
+  return Math.min(maxScroll, Math.max(0, nextY));
+}
+
+export function shiftSectionBounds(
+  bounds: Partial<Record<DropSectionKey, SectionBounds>>,
+  deltaY: number,
+): void {
+  if (!deltaY) return;
+  for (const key of ['progress', 'backlog', 'done'] as const) {
+    const box = bounds[key];
+    if (box) bounds[key] = { y: box.y + deltaY, height: box.height };
+  }
 }
 
 type WebDragEvent = {

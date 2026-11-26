@@ -17,8 +17,11 @@ import { WorkSheet } from './WorkItemDetail';
 import { WorkStateMark } from './WorkMarks';
 import {
   canDragWorkItem,
+  clampScrollOffset,
+  edgeAutoScrollDelta,
   resolveDropSectionForTouch,
   sectionTargetState,
+  shiftSectionBounds,
   shouldMoveWorkItem,
   webDragSourceProps,
   webDropTargetProps,
@@ -314,6 +317,12 @@ type MeasurableHost = {
   measureInWindow?: (cb: (x: number, y: number, width: number, height: number) => void) => void;
 };
 
+type ScrollableHost = MeasurableHost & {
+  scrollTo?: (options: { y: number; animated?: boolean }) => void;
+};
+
+const AUTO_SCROLL_INTERVAL_MS = 32;
+
 /** The Tasks screen: only what needs you on top, then the work in flight. On a
  * phone the other sections start collapsed; desktop columns always stay open. */
 export function WorkBoard({
@@ -341,7 +350,14 @@ export function WorkBoard({
   const [creating, setCreating] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<DropSectionKey | null>(null);
+  const draggingIdRef = useRef<string | null>(null);
   const dragOverRef = useRef<DropSectionKey | null>(null);
+  const scrollRef = useRef<ScrollableHost | null>(null);
+  const scrollViewport = useRef<SectionBounds | null>(null);
+  const scrollOffsetY = useRef(0);
+  const scrollContentHeight = useRef(0);
+  const lastTouchPageY = useRef<number | null>(null);
+  const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardRef = useRef<MeasurableHost | null>(null);
   const boardWindowY = useRef<number | null>(null);
   const sectionRefs = useRef<Partial<Record<DropSectionKey, MeasurableHost | null>>>({});
@@ -354,16 +370,98 @@ export function WorkBoard({
     setDragOver((current) => (current === next ? current : next));
   };
 
+  const stopAutoScroll = () => {
+    if (autoScrollTimer.current !== null) {
+      clearInterval(autoScrollTimer.current);
+      autoScrollTimer.current = null;
+    }
+  };
+
+  useEffect(() => () => stopAutoScroll(), []);
+
+  const refreshHoverTarget = (pageY: number | null) => {
+    if (typeof pageY !== 'number') return;
+    const target = resolveDropSectionForTouch({
+      pageY,
+      windowBounds: sectionWindowBounds.current,
+      boardLayouts: sectionLayouts.current,
+      boardWindowY: boardWindowY.current,
+    });
+    updateDragOver(target);
+  };
+
   const measureDropTargets = () => {
-    sectionWindowBounds.current = {};
-    boardWindowY.current = null;
+    scrollRef.current?.measureInWindow?.((_x, y, _width, height) => {
+      if (height > 0) scrollViewport.current = { y, height };
+    });
     boardRef.current?.measureInWindow?.((_x, y) => {
       boardWindowY.current = y;
+      refreshHoverTarget(lastTouchPageY.current);
     });
     for (const key of ['progress', 'backlog', 'done'] as const) {
       sectionRefs.current[key]?.measureInWindow?.((_x, y, _width, height) => {
         sectionWindowBounds.current[key] = { y, height };
+        refreshHoverTarget(lastTouchPageY.current);
       });
+    }
+  };
+
+  const applyScrollDelta = (nextY: number) => {
+    const prevY = scrollOffsetY.current;
+    const diff = nextY - prevY;
+    if (!diff) return;
+    scrollOffsetY.current = nextY;
+    if (boardWindowY.current !== null) boardWindowY.current -= diff;
+    shiftSectionBounds(sectionWindowBounds.current, -diff);
+    measureDropTargets();
+    refreshHoverTarget(lastTouchPageY.current);
+  };
+
+  const stepAutoScroll = () => {
+    if (!draggingIdRef.current) {
+      stopAutoScroll();
+      return;
+    }
+    const viewport = scrollViewport.current;
+    const delta = edgeAutoScrollDelta({ pageY: lastTouchPageY.current, viewport });
+    if (!delta || !viewport) {
+      stopAutoScroll();
+      return;
+    }
+    const contentHeight = Math.max(
+      scrollContentHeight.current,
+      ...(['progress', 'backlog', 'done'] as const).map((key) => {
+        const box = sectionLayouts.current[key];
+        return box ? box.y + box.height : 0;
+      }),
+    );
+    const nextY = clampScrollOffset(scrollOffsetY.current + delta, contentHeight, viewport.height);
+    if (nextY === scrollOffsetY.current) {
+      stopAutoScroll();
+      return;
+    }
+    scrollRef.current?.scrollTo?.({ y: nextY, animated: false });
+    applyScrollDelta(nextY);
+  };
+
+  const syncAutoScroll = (pageY: number | undefined) => {
+    lastTouchPageY.current = typeof pageY === 'number' ? pageY : null;
+    const delta = edgeAutoScrollDelta({
+      pageY: lastTouchPageY.current,
+      viewport: scrollViewport.current,
+    });
+    if (!delta) {
+      stopAutoScroll();
+      return;
+    }
+    if (autoScrollTimer.current === null) {
+      stepAutoScroll();
+      if (
+        draggingIdRef.current &&
+        edgeAutoScrollDelta({ pageY: lastTouchPageY.current, viewport: scrollViewport.current })
+      ) {
+        autoScrollTimer.current = setInterval(stepAutoScroll, AUTO_SCROLL_INTERVAL_MS);
+      }
     }
   };
 
@@ -377,16 +475,24 @@ export function WorkBoard({
   const enableWebDrag = desktop || Platform.OS === 'web';
   const draggedItem = draggingId ? board.items.find((item) => item.id === draggingId) ?? null : null;
   const finishDrag = () => {
+    stopAutoScroll();
+    lastTouchPageY.current = null;
+    draggingIdRef.current = null;
     setDraggingId(null);
     updateDragOver(null);
   };
   const startDrag = (item: WorkItemView) => {
     if (!canDragWorkItem(item, canMove)) return;
-    if (!desktop) measureDropTargets();
+    draggingIdRef.current = item.id;
+    if (!desktop) {
+      sectionWindowBounds.current = {};
+      boardWindowY.current = null;
+      measureDropTargets();
+    }
     setDraggingId(item.id);
   };
   const dropOn = (target: DropSectionKey, transferredId?: string) => {
-    const id = transferredId || draggingId;
+    const id = transferredId || draggingIdRef.current || draggingId;
     finishDrag();
     if (!id || !actions.move) return;
     const item = board.items.find((entry) => entry.id === id);
@@ -628,11 +734,26 @@ export function WorkBoard({
         )
       ) : (
         <ScrollView
+          ref={(node: ScrollableHost | null) => {
+            scrollRef.current = node;
+          }}
           flex={1}
           minHeight={0}
           keyboardShouldPersistTaps="handled"
           scrollEnabled={!draggedItem}
+          testID="work-phone-scroll"
           {...scrollProps}
+          onContentSizeChange={(_width: number, height: number) => {
+            scrollContentHeight.current = height;
+          }}
+          onScroll={(event: { nativeEvent?: { contentOffset?: { y?: number } } }) => {
+            scrollProps.onScroll?.(event as never);
+            const nextY = event?.nativeEvent?.contentOffset?.y;
+            if (typeof nextY === 'number') {
+              if (draggingIdRef.current) applyScrollDelta(nextY);
+              else scrollOffsetY.current = nextY;
+            }
+          }}
         >
           <YStack
             ref={(node: MeasurableHost | null) => {
@@ -646,19 +767,16 @@ export function WorkBoard({
             onTouchMove={
               draggedItem
                 ? (event: { nativeEvent?: { pageY?: number } }) => {
-                    const target = resolveDropSectionForTouch({
-                      pageY: event?.nativeEvent?.pageY,
-                      windowBounds: sectionWindowBounds.current,
-                      boardLayouts: sectionLayouts.current,
-                      boardWindowY: boardWindowY.current,
-                    });
-                    updateDragOver(target);
+                    const pageY = event?.nativeEvent?.pageY;
+                    refreshHoverTarget(typeof pageY === 'number' ? pageY : null);
+                    syncAutoScroll(pageY);
                   }
                 : undefined
             }
             onTouchEnd={
               draggedItem
                 ? (event: { nativeEvent?: { pageY?: number } }) => {
+                    stopAutoScroll();
                     const pageY = event?.nativeEvent?.pageY;
                     const target =
                       typeof pageY === 'number'
