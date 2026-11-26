@@ -46,22 +46,22 @@ export function LedgerDisclosure({
       onPress={onPress}
       minHeight={HEIGHT.control}
       minWidth={44}
-      justifyContent="center"
+      justifyContent="flex-start"
       alignItems="center"
-      gap="2"
+      gap="1"
       testID={rowTestID}
     >
+      <T v="meta" color="secondary" flexShrink={1} minWidth={0}>
+        {children}
+      </T>
       <YStack width={CHEVRON_ROW_SIZE} flexShrink={0} justifyContent="center">
         <Inked
           color="secondary"
           glyph={ChevronGlyph}
-          direction={expanded ? 'down' : 'right'}
+          direction={expanded ? 'up' : 'down'}
           size={CHEVRON_ROW_SIZE}
         />
       </YStack>
-      <T v="meta" color="secondary" flex={1} minWidth={0}>
-        {children}
-      </T>
     </XStack>
   );
 }

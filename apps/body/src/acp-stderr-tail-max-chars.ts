@@ -539,13 +539,65 @@ export type AgentTurnStep =
   | { kind: 'tool'; call: ToolCallEntry };
 
 
+function normalizePlanEntries(update: Record<string, unknown>): Array<{ step: string; status: 'pending' | 'in_progress' | 'completed' }> {
+  const raw = Array.isArray(update.entries)
+    ? update.entries
+    : Array.isArray(update.items)
+      ? update.items
+      : [];
+  const items: Array<{ step: string; status: 'pending' | 'in_progress' | 'completed' }> = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    const step =
+      (typeof rec.content === 'string' && rec.content.trim()) ||
+      (typeof rec.step === 'string' && rec.step.trim()) ||
+      (typeof rec.title === 'string' && rec.title.trim()) ||
+      '';
+    if (!step) continue;
+    const rawStatus = typeof rec.status === 'string' ? rec.status.toLowerCase() : '';
+    const status: 'pending' | 'in_progress' | 'completed' =
+      rawStatus === 'completed' || rawStatus === 'done'
+        ? 'completed'
+        : rawStatus === 'in_progress' || rawStatus === 'in-progress' || rawStatus === 'working'
+          ? 'in_progress'
+          : 'pending';
+    items.push({ step, status });
+  }
+  return items;
+}
+
+function planSpans(updates: readonly SessionUpdate[]): { at: number; call: ToolCallEntry }[] {
+  let latest: { at: number; call: ToolCallEntry } | undefined;
+  for (const [index, { update }] of updates.entries()) {
+    if (update.sessionUpdate !== 'plan') continue;
+    const items = normalizePlanEntries(update);
+    if (!items.length) continue;
+    const objective =
+      typeof update.objective === 'string' && update.objective.trim()
+        ? update.objective.trim()
+        : undefined;
+    const call: ToolCallEntry = {
+      id: 'acp-plan',
+      name: 'plan',
+      title: 'Updated plan',
+      kind: 'plan',
+      status: 'completed',
+      rawInput: { ...(objective ? { objective } : {}), items },
+    };
+    if (latest) latest.call = call;
+    else latest = { at: index, call };
+  }
+  return latest ? [latest] : [];
+}
+
 /**
  * Everything a turn did besides its reply, in the order it happened: every
  * text run except the final one (`finalAgentMessageText`) as a note, and
- * every tool call. A Room posts the final run as the reply and these as the
- * reply's steps, so text written before a tool call is kept without leading
- * the answer. Retry narration is harness noise, not the agent's text, and is
- * dropped.
+ * every tool call (plus any ACP plan update). A Room posts the final run as
+ * the reply and these as the reply's steps, so text written before a tool call
+ * is kept without leading the answer. Retry narration is harness noise, not
+ * the agent's text, and is dropped.
  */
 export function agentTurnSteps(
   updates: readonly SessionUpdate[],
@@ -553,6 +605,7 @@ export function agentTurnSteps(
 ): AgentTurnStep[] {
   const runs = agentMessageRunSpans(updates, agentLabel);
   const calls = toolCallSpans(updates);
+  const plans = planSpans(updates);
   const final = finalMessageRunIndex(updates, runs, calls);
   const steps: { at: number; step: AgentTurnStep }[] = runs.flatMap((run, index) =>
     index === final || !run.text.trim() || isPureRetryNarration(run.text)
@@ -560,6 +613,7 @@ export function agentTurnSteps(
       : [{ at: run.at, step: { kind: 'note' as const, text: run.text.trim() } }],
   );
   for (const { at, call } of calls) steps.push({ at, step: { kind: 'tool', call } });
+  for (const { at, call } of plans) steps.push({ at, step: { kind: 'tool', call } });
   return steps.sort((left, right) => left.at - right.at).map(({ step }) => step);
 }
 

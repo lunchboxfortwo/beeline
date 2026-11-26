@@ -131,3 +131,64 @@ it('keeps interleaved call openings and notes in order when a result follows the
   } }])).toBe('');
   expect(readPayload).not.toHaveBeenCalled();
 });
+
+it('defaults async_task_progress without state to in_progress and preserves stopped reason', () => {
+  expect(
+    asyncTaskCall({
+      sessionUpdate: 'async_task_progress',
+      asyncTaskId: 'bg-1',
+      description: 'Run integration suite',
+      output: 'Running 4 of 12',
+    }),
+  ).toEqual({
+    id: 'async:bg-1',
+    title: 'Run integration suite',
+    status: 'in_progress',
+    rawOutput: { output: 'Running 4 of 12' },
+  });
+
+  expect(
+    asyncTaskCall({
+      sessionUpdate: 'async_task_state_update',
+      asyncTaskId: 'bg-1',
+      state: 'stopped',
+    }),
+  ).toEqual({
+    id: 'async:bg-1',
+    status: 'failed',
+    rawOutput: { error: 'Stopped (background task)' },
+  });
+});
+
+it('projects ACP plan session updates into agentTurnSteps', () => {
+  const steps = agentTurnSteps([
+    {
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'plan',
+        entries: [
+          { content: 'Audit wire guards', status: 'completed' },
+          { content: 'Update ToolOutputSheet', status: 'in_progress' },
+        ],
+      },
+    },
+  ]);
+  expect(steps).toEqual([
+    {
+      kind: 'tool',
+      call: {
+        id: 'acp-plan',
+        name: 'plan',
+        title: 'Updated plan',
+        kind: 'plan',
+        status: 'completed',
+        rawInput: {
+          items: [
+            { step: 'Audit wire guards', status: 'completed' },
+            { step: 'Update ToolOutputSheet', status: 'in_progress' },
+          ],
+        },
+      },
+    },
+  ]);
+});

@@ -16,7 +16,11 @@ export type ActivityItem = {
   readonly output?: string;
   /** The identity whose message triggered the turn this row belongs to ("at Alex's request"). */
   readonly requestedBy?: { readonly pubkey: string; readonly name?: string };
-  readonly files?: readonly { readonly path: string; readonly status?: string }[];
+  readonly files?: readonly {
+    readonly path: string;
+    readonly status?: string;
+    readonly diff?: string;
+  }[];
   /**
    * On a `note`: this text carries on the previous note. One text run longer
    * than a note may be is split across consecutive notes, never cut.

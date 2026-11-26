@@ -133,12 +133,23 @@ describe('one-line tool ledger', () => {
     expect(renderedText(renderer)).not.toContain('FAILED');
   });
 
-  it('keeps the steps disclosure borderless with a full-height tap target', () => {
+  it('keeps the steps disclosure borderless with down-closed / up-open chevron and left guide bar', () => {
     const renderer = render(<TurnStepsLine items={TOOLS} />);
     const [row] = hostNodes(renderer, /^tool-run-group-read$/);
     expect(row.props.minHeight).toBeGreaterThanOrEqual(44);
     expect(row.props.borderTopWidth ?? 0).toBe(0);
+    const closedChevron = renderer.root.findByProps({ testID: 'tool-run-group-read' }).findAll(
+      (node: any) => node.props?.direction === 'down' || node.props?.direction === 'up',
+    )[0];
+    expect(closedChevron.props.direction).toBe('down');
     expandRun(renderer, 'read');
+    const openChevron = renderer.root.findByProps({ testID: 'tool-run-group-read' }).findAll(
+      (node: any) => node.props?.direction === 'down' || node.props?.direction === 'up',
+    )[0];
+    expect(openChevron.props.direction).toBe('up');
+    const list = renderer.root.findByProps({ testID: 'tool-run-list-read' });
+    expect(list.props.borderLeftColor).toBe('strongStroke');
+    expect(list.props.borderLeftWidth).toBe(1.5);
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(2);
     expandRun(renderer, 'read');
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
@@ -153,7 +164,7 @@ describe('one-line tool ledger', () => {
     expect(text).not.toContain('pnpm: not found');
   });
 
-  it('a transport envelope opens the empty output state', () => {
+  it('a transport envelope with a command opens the terminal-empty state', () => {
     const renderer = render(
       <ActivityTimeline
         items={[
@@ -182,11 +193,14 @@ describe('one-line tool ledger', () => {
             node.type === 'Text' && node.props.ellipsizeMode === 'middle',
         ),
     ).toHaveLength(1);
-    expect(
-      renderer.root.findByProps({ testID: 'tool-ledger-line-shell' }).props.onPress,
-    ).toBeTypeOf('function');
-    act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-shell' }).props.onPress());
-    expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toBe('No output saved');
+    const pressable = renderer.root
+      .findByProps({ testID: 'tool-ledger-line-shell' })
+      .findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0];
+    expect(pressable.props.onPress).toBeTypeOf('function');
+    act(() => pressable.props.onPress());
+    expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toBe(
+      'Ran in terminal (no text output)',
+    );
   });
 
   it('names failed steps in brass and omits settled verdict glyphs', () => {
@@ -220,28 +234,42 @@ describe('one-line tool ledger', () => {
     expect(spinner.type).toBe(Spinner);
   });
 
-  it('every line is a 44-minimum tap target and opens its output state', () => {
+  it('omits chevron and onPress on zero-detail rows while inspectable rows remain 44pt buttons', () => {
     const renderer = render(
       <ActivityTimeline
         active={false}
         items={[
           TOOLS[0]!,
           { kind: 'tool', id: 'bare', title: 'Ran project task', toolKind: 'execute' },
+          { kind: 'note', id: 'note1', title: 'Note', text: 'Interim note prose.' },
+          { kind: 'summary', title: 'Summary', rollup: { read: 4 } },
+          {
+            kind: 'tool',
+            id: 'term-empty',
+            title: 'exec_command',
+            toolKind: 'execute',
+            output: '[{"type":"terminal","terminalId":"exec-1"}]',
+          },
         ]}
       />,
     );
     expandRun(renderer, 'read');
-    for (const id of ['read', 'bare']) {
-      const [row] = hostNodes(renderer, new RegExp(`^tool-ledger-line-${id}$`));
-      expect(row.findAll((node: any) => typeof node.type === 'string' && node.props.minHeight >= 44).length > 0).toBe(true);
+    const inspectablePress = renderer.root
+      .findByProps({ testID: 'tool-ledger-line-read' })
+      .findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function');
+    expect(inspectablePress).toHaveLength(1);
+    expect(inspectablePress[0].props.accessibilityRole).toBe('button');
+
+    for (const id of ['bare', 'note1', 'summary-0', 'term-empty']) {
+      const row = renderer.root.findByProps({ testID: `tool-ledger-line-${id}` });
+      expect(row.props.onPress).toBeUndefined();
+      expect(
+        row.findAll((node: any) => typeof node.props?.onPress === 'function'),
+      ).toHaveLength(0);
+      expect(
+        row.findAll((node: any) => node.props?.direction === 'right'),
+      ).toHaveLength(0);
     }
-    expect(renderer.root.findByProps({ testID: 'tool-ledger-line-read' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0].props.accessibilityRole).toBe('button');
-    expect(
-      renderer.root.findByProps({ testID: 'tool-ledger-line-bare' }).props.onPress,
-    ).toBeTypeOf('function');
-    act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-bare' }).props.onPress());
-    expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toBe('No output saved');
-    expect(renderedText(renderer)).toContain('project task');
   });
 
   it('does not synthesize ledger rows from thought receipts', () => {
@@ -312,19 +340,28 @@ describe('grouping consecutive steps', () => {
     ).toBeTruthy();
   });
 
-  it('a group expands in place into the same ledger lines, and collapses again', () => {
+  it('a group expands in place into all flat ledger lines, uses scroll box past 5 rows, and collapses again', () => {
     const renderer = render(
       <ActivityTimeline active={false} items={[call('a'), call('b'), call('c'), call('d')]} />,
     );
     act(() => renderer.root.findByProps({ testID: 'tool-run-group-a' }).props.onPress());
-    expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(2);
-    act(() => renderer.root.findByProps({ testID: 'tool-run-more-a' }).props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(4);
+    expect(renderer.root.findAllByProps({ testID: 'tool-run-scroll-a' })).toHaveLength(0);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-a' }).props.accessibilityState,
     ).toEqual({ expanded: true });
     act(() => renderer.root.findByProps({ testID: 'tool-run-group-a' }).props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
+
+    const longRenderer = render(
+      <ActivityTimeline
+        active={false}
+        items={[call('a'), call('b'), call('c'), call('d'), call('e'), call('f')]}
+      />,
+    );
+    act(() => longRenderer.root.findByProps({ testID: 'tool-run-group-a' }).props.onPress());
+    expect(longRenderer.root.findByProps({ testID: 'tool-run-scroll-a' }).props.nestedScrollEnabled).toBe(true);
+    expect(hostNodes(longRenderer, /^tool-ledger-line-/)).toHaveLength(6);
   });
 
   it('thought timing does not change tool grouping', () => {
@@ -375,7 +412,6 @@ describe('a reply’s steps line', () => {
   it('expands to every note in full, in order, between the tool lines', () => {
     const renderer = render(<TurnStepsLine items={STEPS} />);
     expandRun(renderer, 'n1');
-    act(() => renderer.root.findByProps({ testID: 'tool-run-more-n1' }).props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/).map((node: { props: { testID?: string } }) => node.props.testID)).toEqual([
       'tool-ledger-line-n1',
       'tool-ledger-line-t1',
@@ -758,10 +794,10 @@ describe('folded historical transcripts', () => {
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-tool-1' }).props.accessibilityLabel,
-    ).toBe('Inspected code · 6 steps, expandable');
+    ).toBe('6 steps, expandable');
 
     expandRun(renderer, 'tool-1');
-    act(() => renderer.root.findByProps({ testID: 'tool-observation-fold-obs-tool-1' }).props.onPress());
+    expect(hostNodes(renderer, /^tool-observation-fold-/)).toHaveLength(0);
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(6);
     expect(
       renderer.root.findByProps({ testID: 'tool-ledger-line-tool-8' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0]?.props.onPress,
@@ -802,7 +838,7 @@ describe('folded historical transcripts', () => {
       hostNodes(renderer, /^tool-run-group-/).map(
         (node: { props: { accessibilityLabel?: string } }) => node.props.accessibilityLabel,
       ),
-    ).toEqual(['Inspected code · 7 steps, expandable']);
+    ).toEqual(['7 steps, expandable']);
   });
 
   it('drops thinking-only rows while retaining summary tool lines', () => {
@@ -865,7 +901,7 @@ it('keeps MCP machine labels without duplicating or recasing the tool name', () 
 });
 
 
-it('retains Failed and a brass cross for a failed named MCP tool', () => {
+it('retains uniform brass Failed with no duplicate cross for a failed named MCP tool', () => {
   const renderer = render(<TurnStepsLine items={[{
     kind: 'tool', id: 'mcp-failure', title: 'mcp__example__read_file',
     command: 'mcp__example__read_file example.ts', input: 'example.ts',
@@ -876,11 +912,9 @@ it('retains Failed and a brass cross for a failed named MCP tool', () => {
   const texts = row.findAll((node: any) => node.type === 'Text');
   expect(texts.map((node: any) => node.props.children)).toContain('read_file example.ts');
   const failed = texts.find((node: any) => node.props.children === 'Failed');
-  const cross = texts.find((node: any) => node.props.testID === 'activity-verdict-mcp-failure');
   expect(failed).toBeDefined();
   expect(failed.props.color).toBe('needsYou');
-  expect(cross.props.children).toBe('✗');
-  expect(cross.props.color).toBe('needsYou');
+  expect(renderedText(renderer)).not.toContain('✗');
   expect(texts.map((node: any) => node.props.children)).not.toContain('Read_file');
 });
 
@@ -913,15 +947,20 @@ it.each([ActivityTimeline, TurnStepsLine].flatMap(Component => [
 });
 
 
-it.each([ActivityTimeline, TurnStepsLine])('shows a requested failed tool reason in the sheet (%s)', (Component) => {
+it.each([ActivityTimeline, TurnStepsLine])('shows a requested failed tool reason in the sheet and folds command under Raw (%s)', (Component) => {
   const renderer = render(<Component items={[{
     kind: 'tool', id: 'requested-failure', title: 'Bash', toolKind: 'execute',
     command: 'pnpm fast-gate', status: 'failed', output: 'sh: 1: pnpm: not found',
     requestedBy: { pubkey: 'abc123', name: 'lunchbox' },
   }]} />);
   expandRun(renderer, 'requested-failure');
-  act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-requested-failure' }).props.onPress());
+  const rowPress = renderer.root
+    .findByProps({ testID: 'tool-ledger-line-requested-failure' })
+    .findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0];
+  act(() => rowPress.props.onPress());
   expect(renderer.root.findByType('HullActionSheetModal').props.subtitle).toBe('command not found: pnpm');
-  expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toContain('command not found: pnpm');
+  expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toContain('pnpm: not found');
+  expect(renderer.root.findAllByProps({ testID: 'tool-output-command' })).toHaveLength(0);
+  act(() => renderer.root.findByProps({ testID: 'tool-output-raw-toggle' }).props.onPress());
   expect(renderer.root.findByProps({ testID: 'tool-output-command' })).toBeTruthy();
 });

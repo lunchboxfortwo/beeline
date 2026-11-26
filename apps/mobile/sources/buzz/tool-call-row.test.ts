@@ -359,4 +359,76 @@ describe('beeline-agent structured receipts and output', () => {
     });
     expect(toolCallOutput(terminalOnly.output)).toEqual([]);
   });
+
+  it('resolves agentId@placeId, pubkeys, and thread UUIDs without ever showing raw hex/UUIDs', () => {
+    const agentHex = '784c9656dbf5b4ca97f1ffc471981766a88e86ae2c965df213c6bbe1421146f4';
+    const threadUuid = 'b71a2a24-3d77-4b74-abb9-d6584d6fa119';
+    const lookup = {
+      participants: [{ pubkey: agentHex, handle: 'crayon', name: 'Crayon' }],
+      channelIndex: {
+        rooms: [{ channelId: '11111111-1111-4111-8111-111111111111', name: 'beeline' }],
+        corners: [
+          {
+            channelId: threadUuid,
+            parentChannelId: '11111111-1111-4111-8111-111111111111',
+            name: 'helper-index-flake',
+            roomName: 'beeline',
+          },
+        ],
+      },
+      speakerName: 'Ruby',
+    };
+    const msgStep = step({
+      id: 'handoff',
+      toolKind: 'other',
+      title: 'mcp__beeline-agent__message',
+      input: JSON.stringify({
+        type: 'normal',
+        address: `${agentHex}@${threadUuid}`,
+        text: 'Please push after adding tests.',
+      }),
+    });
+    expect(toolCallVerb(msgStep, lookup)).toBe('sent');
+    expect(toolCallLabel(msgStep, lookup)).toBe('message to @crayon in #helper-index-flake');
+    // Without lookup, falls back to plain nouns, never raw hex/UUIDs
+    const unresolved = toolCallLabel(msgStep);
+    expect(unresolved).toBe('message to agent');
+    expect(unresolved).not.toContain('784c96');
+    expect(unresolved).not.toContain('b71a2a24');
+  });
+
+  it('maps ToolSearch, TodoWrite/plan, humanized app_tool, and cleans markdown fences/OSC/CR', () => {
+    const toolSearch = step({
+      id: 'ts',
+      title: 'ToolSearch',
+      input: JSON.stringify({ query: 'wake' }),
+    });
+    expect(toolCallVerb(toolSearch)).toBe('loaded');
+    expect(toolCallLabel(toolSearch)).toBe('tools · wake');
+
+    const planStep = step({
+      id: 'pl',
+      title: 'TodoWrite',
+      plan: {
+        items: [
+          { step: 'Fix guard', status: 'completed' },
+          { step: 'Render sheet', status: 'in_progress' },
+        ],
+      },
+    });
+    expect(toolCallVerb(planStep)).toBe('updated');
+    expect(toolCallLabel(planStep)).toBe('plan · 1/2 done');
+
+    const squireLookup = step({
+      id: 'sq',
+      title: 'mcp.beeline-agent.app_tool',
+      input: JSON.stringify({ app: 'registry-mcp:squire', query: 'operate_drive' }),
+    });
+    expect(toolCallVerb(squireLookup)).toBe('searched');
+    expect(toolCallLabel(squireLookup)).toBe('Trusty Squire tools');
+
+    const fenced = '```console\n\u001b]8;;https://example.com\u0007{"date":"2026-11-25","status":"ok"}\u001b]8;;\u0007\n```';
+    expect(toolCallOutput(fenced).join('\n')).toContain('"date": "2026-11-25"');
+    expect(toolCallOutput('loading 10%\rloading 50%\rDone!').join('\n')).toBe('Done!');
+  });
 });

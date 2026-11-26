@@ -346,7 +346,8 @@ export function readActivity(value: unknown): RoomViewActivity | null {
     (item.kind !== 'thinking' &&
       item.kind !== 'tool' &&
       item.kind !== 'output' &&
-      item.kind !== 'summary') ||
+      item.kind !== 'summary' &&
+      item.kind !== 'note') ||
     typeof item.title !== 'string'
   ) {
     return null;
@@ -361,6 +362,7 @@ export function readActivity(value: unknown): RoomViewActivity | null {
     ...field('toolOutput',readToolReference(item.toolOutput)&&typeof record(item.toolOutput)?.messageId==='string'
       ?{...readToolReference(item.toolOutput)!,messageId:String(record(item.toolOutput)!.messageId)}:undefined),
     ...field('text', typeof item.text === 'string' ? item.text : undefined),
+    ...field('continues', item.continues === true ? true : undefined),
     ...field('operation', typeof item.operation === 'string' ? item.operation : undefined),
     ...field('status', typeof item.status === 'string' ? item.status : undefined),
     ...field('command', typeof item.command === 'string' ? item.command : undefined),
@@ -394,6 +396,7 @@ export function readActivity(value: unknown): RoomViewActivity | null {
         return {
           path: file.path,
           ...field('status', typeof file.status === 'string' ? file.status : undefined),
+          ...field('diff', typeof file.diff === 'string' ? file.diff : undefined),
         };
       }),
     ),
