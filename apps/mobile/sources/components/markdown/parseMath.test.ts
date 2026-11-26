@@ -184,6 +184,24 @@ describe('markdown math blocks and inline spans', () => {
       { styles: ['bold'], text: 'bold', url: null },
     ]);
 
+    expect(parseMarkdownSpans('https://example.com/*italic*', false)).toEqual([
+      { styles: [], text: 'https://example.com/', url: 'https://example.com/' },
+      { styles: ['italic'], text: 'italic', url: null },
+    ]);
+
+    expect(parseMarkdownSpans('**https://example.com/foo**', false)).toEqual([
+      { styles: ['bold'], text: 'https://example.com/foo', url: 'https://example.com/foo' },
+    ]);
+
+    // Complete inline math takes precedence over emphasis delimiters like `*`
+    expect(parseMarkdownSpans('\\(a * b * c\\)', false)).toEqual([
+      { styles: ['math'], text: 'a ∗ b ∗ c', url: null },
+    ]);
+
+    expect(parseMarkdownSpans('\\(x^* + y^*\\)', false)).toEqual([
+      { styles: ['math'], text: 'x^∗ + y^∗', url: null },
+    ]);
+
     // An unfinished `\(` before a later closed `\( ... \)` leaves the first plain and parses the second
     expect(parseMarkdownSpans('\\(unfinished then \\(x + 1\\)', false)).toEqual([
       { styles: [], text: '\\(unfinished then ', url: null },
