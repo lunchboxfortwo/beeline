@@ -1,5 +1,48 @@
+import { parseChatLinkToken } from './chat-links.js';
 import { readIdentity } from './phone-guards.js';
 import type { AttachmentReference, NeedsYouItemView, RoomViewIdentity } from './phone-types.js';
+
+const BEELINE_HASH_LINK = /^#beeline\/[^\s/()<>]+(?:\/[0-9a-f]{64})?$/;
+const WORK_LINK_MAX_LENGTH = 2048;
+
+/**
+ * Validate a work-item link attachment: web http(s) URLs, `beeline://` deep links,
+ * `#beeline/<place>` / `#beeline/<place>/<messageId>` links, and `↳thread` / `¶author-N` tokens.
+ */
+export function normalizeWorkItemLinkUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (!value || value.length > WORK_LINK_MAX_LENGTH) return null;
+  if (/[\u0000-\u001f\u007f\s]/.test(value)) return null;
+  if (BEELINE_HASH_LINK.test(value)) return value;
+  if (parseChatLinkToken(value)) return value;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return value;
+    if (
+      parsed.protocol === 'beeline:' &&
+      (parsed.host.length > 0 || parsed.pathname.replace(/^\/+/, '').length > 0)
+    )
+      return value;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Human-readable default label for a validated work-item link attachment. */
+export function workItemLinkLabel(url: string): string {
+  if (parseChatLinkToken(url)) return url;
+  const hashPlace = /^#beeline\/([^\s/()<>]+)(?:\/[0-9a-f]{64})?$/.exec(url);
+  if (hashPlace) return `#${hashPlace[1]}`;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'beeline:') return parsed.hostname || 'Beeline';
+    return parsed.hostname || url;
+  } catch {
+    return url;
+  }
+}
 
 export const WORK_STATES = ['needs-you', 'in-progress', 'in-review', 'backlog', 'done'] as const;
 export type WorkState = (typeof WORK_STATES)[number];
@@ -174,7 +217,7 @@ function readWorkAttachment(value: unknown): WorkItemAttachment[] {
   )
     return [];
   const base = { id: v.id, name: v.name, addedBy, createdAt: v.createdAt };
-  if (v.kind === 'link' && typeof v.url === 'string' && /^https?:\/\//i.test(v.url))
+  if (v.kind === 'link' && typeof v.url === 'string' && normalizeWorkItemLinkUrl(v.url))
     return [{ ...base, kind: 'link', url: v.url }];
   if (v.kind !== 'file' || !v.file || typeof v.file !== 'object') return [];
   const f = v.file as Record<string, unknown>;

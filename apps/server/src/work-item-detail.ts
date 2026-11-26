@@ -1,8 +1,9 @@
-import type {
-  AddWorkNoteInput,
-  AttachToWorkItemInput,
-  WorkItemView,
-  WorkItemAddress,
+import {
+  normalizeWorkItemLinkUrl,
+  type AddWorkNoteInput,
+  type AttachToWorkItemInput,
+  type WorkItemView,
+  type WorkItemAddress,
 } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
@@ -134,10 +135,10 @@ export async function attachToWorkItem(
   actor: string,
 ): Promise<void> {
   const attachment = input.attachment;
+  let linkUrl: string | null = null;
   if (attachment.kind === 'link') {
-    const url = new URL(attachment.url);
-    if (!['http:', 'https:'].includes(url.protocol))
-      throw new CommandRefusalError('invalid attachment', 400);
+    linkUrl = normalizeWorkItemLinkUrl(attachment.url);
+    if (!linkUrl) throw new CommandRefusalError('invalid attachment link', 400);
   }
   await db.transaction(async (tx) => {
     const id = await detailItem(tx, input, actor);
@@ -149,7 +150,7 @@ export async function attachToWorkItem(
         id,
         attachment.kind,
         attachment.name,
-        attachment.kind === 'link' ? attachment.url : null,
+        linkUrl,
         attachment.kind === 'file' ? attachment.objectId : null,
         actor,
       ],

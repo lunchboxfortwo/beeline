@@ -74,10 +74,12 @@ async function installationDeviceId(): Promise<string> {
  */
 /** The identity and update this JS context already reported; the bytes cannot change under it. */
 let reportedRunningUpdate: string | null = null;
+let reportingRunningUpdate: { key: string; promise: Promise<void> } | null = null;
 
 export async function reportRunningUpdateReceipt(identity: Identity): Promise<void> {
   const reportKey = `${identity.publicKey}:${Updates.updateId ?? ''}`;
   if (reportedRunningUpdate === reportKey) return;
+  if (reportingRunningUpdate?.key === reportKey) return reportingRunningUpdate.promise;
   const platform = runningUpdatePlatform(
     Platform.OS,
     isTauri(),
@@ -87,18 +89,24 @@ export async function reportRunningUpdateReceipt(identity: Identity): Promise<vo
   // Desktop has no push receipt path; its observation is a phone
   // operation through the same authenticated monolith boundary.
   const release = loadAppConfig();
-  await monolithPhoneOperation('reportRunningUpdate', {
-    deviceId: await installationDeviceId(),
-    ...(previousDeviceId ? { previousDeviceId } : {}),
-    platform,
-    ...(Updates.updateId ? { updateId: Updates.updateId } : {}),
-    ...(Updates.channel ? { channel: Updates.channel } : {}),
-    ...(runningUpdateGroup(Updates.manifest)
-      ? { group: runningUpdateGroup(Updates.manifest)! }
-      : {}),
-    ...(Updates.runtimeVersion ? { runtimeVersion: Updates.runtimeVersion } : {}),
-    ...(release.releaseVersion ? { releaseVersion: release.releaseVersion } : {}),
-    ...(release.releaseSha ? { sourceSha: release.releaseSha } : {}),
+  const promise = (async () => {
+    await monolithPhoneOperation('reportRunningUpdate', {
+      deviceId: await installationDeviceId(),
+      ...(previousDeviceId ? { previousDeviceId } : {}),
+      platform,
+      ...(Updates.updateId ? { updateId: Updates.updateId } : {}),
+      ...(Updates.channel ? { channel: Updates.channel } : {}),
+      ...(runningUpdateGroup(Updates.manifest)
+        ? { group: runningUpdateGroup(Updates.manifest)! }
+        : {}),
+      ...(Updates.runtimeVersion ? { runtimeVersion: Updates.runtimeVersion } : {}),
+      ...(release.releaseVersion ? { releaseVersion: release.releaseVersion } : {}),
+      ...(release.releaseSha ? { sourceSha: release.releaseSha } : {}),
+    });
+    reportedRunningUpdate = reportKey;
+  })().finally(() => {
+    if (reportingRunningUpdate?.promise === promise) reportingRunningUpdate = null;
   });
-  reportedRunningUpdate = reportKey;
+  reportingRunningUpdate = { key: reportKey, promise };
+  return promise;
 }

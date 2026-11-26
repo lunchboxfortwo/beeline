@@ -1,12 +1,24 @@
 import React, { useRef, useState } from 'react';
 import { Input, XStack, YStack } from 'tamagui';
 import { FileText, Link as LinkIcon, Plus } from 'lucide-react-native';
-import type { WorkItemView, WorkState } from '@beeline/api-contract/phone';
+import {
+  normalizeWorkItemLinkUrl,
+  parseChatLinkToken,
+  workItemLinkLabel,
+  type WorkItemView,
+  type WorkState,
+} from '@beeline/api-contract/phone';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { compactRelativeTime } from '@/buzz/relative-time';
 import { mediaIdFromUrl } from '@/buzz/artifact';
+import { cornerHref } from '@/buzz/corner-navigation';
+import { messageLinkId, openChatMessageLink, openMessageLink } from '@/buzz/message-link';
 import { loadWorkBoard } from '@/buzz/work-board-store';
-import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
+import {
+  MonolithPhoneOperationError,
+  monolithPhoneOperation,
+  phoneOperationFailureReason,
+} from '@/sync/transport/monolith-operation';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { Btn, Glyph, SheetFrame, SheetScroll, T } from '@/ui/grammar';
 import { WorkStateMark } from './WorkMarks';
@@ -104,20 +116,29 @@ export function WorkItemDetail({
       } else {
         const { Modal } = await import('@/modal');
         const entered = await Modal.prompt('Add link', undefined, {
-          placeholder: 'https://',
+          placeholder: 'https:// or Beeline link',
           confirmText: 'Add',
         });
         if (!entered?.trim()) return;
-        const url = new URL(entered.trim());
-        if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+        const url = normalizeWorkItemLinkUrl(entered);
+        if (!url) {
+          Modal.alert(
+            'Invalid link',
+            'Enter an http(s) URL or a Beeline place or message link.',
+          );
+          return;
+        }
         await monolithPhoneOperation('attachToWorkItem', {
           ...address,
-          attachment: { kind: 'link', name: url.hostname, url: url.href },
+          attachment: { kind: 'link', name: workItemLinkLabel(url), url },
         });
       }
       await refresh();
-    } catch {
-      /* Existing connection feedback owns failures. */
+    } catch (error) {
+      if (error instanceof MonolithPhoneOperationError) {
+        const { Modal } = await import('@/modal');
+        Modal.alert('Could not attach link', phoneOperationFailureReason(error));
+      }
     } finally {
       busy.current.attachment = false;
       setAttaching(false);
@@ -177,7 +198,38 @@ export function WorkItemDetail({
                       void import('@/components/buzz/ArtifactCard').then(({ openArtifactViewer }) =>
                         openArtifactViewer(attachment.file, desktop),
                       );
-                    else void openExternalUrl(attachment.url);
+                    else if (messageLinkId(attachment.url))
+                      void openMessageLink(attachment.url).catch(() => undefined);
+                    else if (parseChatLinkToken(attachment.url))
+                      void (async () => {
+                        const [
+                          { loadBuzzIdentity, getEffectiveRelayUrl },
+                          { RoomViewClient },
+                          { router },
+                        ] = await Promise.all([
+                          import('@/auth/buzz-identity-storage'),
+                          import('@/sync/transport/room-view-client'),
+                          import('expo-router'),
+                        ]);
+                        const identity = await loadBuzzIdentity();
+                        if (!identity) return;
+                        const view = await new RoomViewClient({
+                          identity,
+                          baseUrl: await getEffectiveRelayUrl(),
+                        }).resolveChatLinks(item.roomId, [attachment.url]);
+                        const resolved = view.links[0];
+                        if (!resolved || resolved.kind === 'private') return;
+                        if (resolved.kind === 'thread')
+                          router.navigate(
+                            cornerHref(resolved.roomId, resolved.parentRoomId, resolved.name),
+                          );
+                        else
+                          openChatMessageLink(resolved, (href) => {
+                            router.navigate(href);
+                          });
+                      })().catch(() => undefined);
+                    else if (/^(?:https?|beeline):/i.test(attachment.url))
+                      void openExternalUrl(attachment.url);
                   }}
                 >
                   <Glyph

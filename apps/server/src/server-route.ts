@@ -1,3 +1,4 @@
+import { ClientAbortError } from './command-refusal.js';
 import { githubProviderKey, isProviderService } from './providers/index.js';
 import { readPersonDiagnostics, renderPersonDiagnostics } from './operator-diagnostics.js';
 import { ingestDiagnostics } from './diagnostics.js';
@@ -53,7 +54,7 @@ export async function route(
   if (method === 'POST' && url.pathname === '/v1/sentry/webhook') {
     let raw: Buffer;
     try { raw = await bytes(request, MAX_JSON_BYTES); }
-    catch { json(response, 413, { error: 'sentry_payload_too_large' }); return; }
+    catch (error) { if (error instanceof ClientAbortError) throw error; json(response, 413, { error: 'sentry_payload_too_large' }); return; }
     const status = await receiveSentryWake(options.database, raw, request.headers, options.sentryWakeSecret, options.sentryWakeAgentId);
     json(response, status, status < 300 ? { accepted: true } : { error: 'invalid_sentry_webhook' });
     return;
@@ -375,7 +376,7 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (method !== 'POST') { json(response, 405, { error: 'method_not_allowed' }); return; }
     let input: unknown;
     try { input = JSON.parse((await bytes(request, 256)).toString('utf8')); }
-    catch { json(response, 400, { error: 'invalid_download_tap' }); return; }
+    catch (error) { if (error instanceof ClientAbortError) throw error; json(response, 400, { error: 'invalid_download_tap' }); return; }
     const tap = parseSiteDownloadTap(input);
     if (!tap) { json(response, 400, { error: 'invalid_download_tap' }); return; }
     if (!await recordSiteDownloadTap(options.database, tap)) {
@@ -567,7 +568,7 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (!funnelRateLimit.allow(clientKey(request))) { json(response,429,{error:'too_many_requests'}); return; }
     let input: unknown;
     try { input = JSON.parse((await bytes(request, 32768)).toString('utf8')); }
-    catch { json(response,400,{error:'invalid_funnel_event'}); return; }
+    catch (error) { if (error instanceof ClientAbortError) throw error; json(response,400,{error:'invalid_funnel_event'}); return; }
     if (input && typeof input === 'object' && 'schemaVersion' in input) {
       try { json(response,200,await ingestDiagnostics(options.databasePools?.diagnostics ?? options.database,input)); }
       catch { json(response,400,{error:'invalid_diagnostic_batch'}); }

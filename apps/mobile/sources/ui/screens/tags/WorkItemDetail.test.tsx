@@ -12,10 +12,34 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 34, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
-const work = vi.hoisted(() => ({ loadWorkBoard: vi.fn(async () => undefined), monolithPhoneOperation: vi.fn(async () => undefined) }));
+const work = vi.hoisted(() => ({
+  loadWorkBoard: vi.fn(async () => undefined),
+  monolithPhoneOperation: vi.fn(async () => undefined),
+  openExternalUrl: vi.fn(async () => undefined),
+  openMessageLink: vi.fn(async () => undefined),
+  prompt: vi.fn(async (): Promise<string | null> => null),
+  alert: vi.fn(),
+  actionSheet: vi.fn(),
+}));
 vi.mock('@/buzz/work-board-store', () => ({ loadWorkBoard: work.loadWorkBoard }));
-vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: work.monolithPhoneOperation }));
-vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn() }));
+vi.mock('@/sync/transport/monolith-operation', () => ({
+  MonolithPhoneOperationError: class MonolithPhoneOperationError extends Error {
+    constructor(readonly operation: string, readonly status: number, readonly code: string) {
+      super(code);
+    }
+  },
+  monolithPhoneOperation: work.monolithPhoneOperation,
+  phoneOperationFailureReason: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+}));
+vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: work.openExternalUrl }));
+vi.mock('@/buzz/message-link', () => ({
+  messageLinkId: (url: string) => /^#beeline\/[^\s/()<>]+\/([0-9a-f]{64})$/.exec(url)?.[1] ?? null,
+  openMessageLink: work.openMessageLink,
+  openChatMessageLink: vi.fn(),
+}));
+vi.mock('@/modal', () => ({
+  Modal: { prompt: work.prompt, alert: work.alert, actionSheet: work.actionSheet },
+}));
 import { KeyboardBody } from '@/ui/grammar';
 import { WorkItemDetail, WorkSheet } from './WorkItemDetail';
 
@@ -74,4 +98,51 @@ it.each([false, true])('hides archived task transitions on desktop=%s', async (d
     await act(async () => { choice.props.onPress(); });
     expect(work.monolithPhoneOperation).toHaveBeenCalledExactlyOnceWith('updateWorkItem', { roomId: 'thread', id: 'archived', state: 'backlog' });
     act(() => tree.unmount());
+});
+
+it('attaches pasted Beeline links, refuses invalid links clearly, and opens message links in-app', async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    work.monolithPhoneOperation.mockClear();
+    work.alert.mockClear();
+    work.actionSheet.mockClear();
+    work.openMessageLink.mockClear();
+    work.openExternalUrl.mockClear();
+    const messageUrl = `#beeline/beeline/${'a'.repeat(64)}`;
+    const item = {
+        id: 'task-links',
+        roomId: 'room',
+        title: 'Task links',
+        state: 'backlog',
+        entries: [],
+        attachments: [
+            { id: 'att-1', kind: 'link', name: '#beeline', url: messageUrl, addedBy: { pubkey: 'viewer', kind: 'human', name: 'Ada' }, createdAt: 1 },
+        ],
+    } as unknown as WorkItemView;
+    let tree: any;
+    act(() => { tree = create(<WorkItemDetail item={item} workspaceId="ws" viewerId="viewer" desktop={false} now={0} />); });
+    try {
+        const addBtn = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'work-attachment-add');
+        // Invalid link shows a clear alert and sends no operation.
+        work.prompt.mockResolvedValueOnce('not a valid link');
+        await act(async () => { addBtn.props.onPress(); });
+        const linkOption = work.actionSheet.mock.calls[0]![1].find((o: any) => o.text === 'Link');
+        await act(async () => { linkOption.onPress(); });
+        expect(work.alert).toHaveBeenCalledWith('Invalid link', expect.any(String));
+        expect(work.monolithPhoneOperation).not.toHaveBeenCalled();
+
+        // Beeline message token attaches cleanly.
+        work.prompt.mockResolvedValueOnce('¶ada-42');
+        await act(async () => { linkOption.onPress(); });
+        expect(work.monolithPhoneOperation).toHaveBeenCalledWith('attachToWorkItem', {
+            roomId: 'room',
+            id: 'task-links',
+            attachment: { kind: 'link', name: '¶ada-42', url: '¶ada-42' },
+        });
+
+        // Tapping an attached Beeline message link opens it in-app instead of externally.
+        const attBtn = tree.root.find((node: any) => node.props['aria-label'] === '#beeline');
+        await act(async () => { attBtn.props.onPress(); });
+        expect(work.openMessageLink).toHaveBeenCalledWith(messageUrl);
+        expect(work.openExternalUrl).not.toHaveBeenCalled();
+    } finally { act(() => tree.unmount()); }
 });

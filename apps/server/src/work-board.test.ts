@@ -5,6 +5,8 @@ import { PhoneService } from './phone-service.js';
 import { replyToMessage, sendMessage } from './agent-messaging.js';
 import { askOwnerQuestion } from './work-questions.js';
 import { readWorkBoard, readWorkThread, updateWorkItem } from './work-board.js';
+import { readWorkItem } from '@beeline/api-contract/phone';
+import { CommandRefusalError } from './command-refusal.js';
 
 const person = 'a'.repeat(64),
   agent = 'b'.repeat(64),
@@ -168,6 +170,62 @@ describe('work item detail', () => {
       ),
     ).rejects.toThrow();
     expect((await read()).items.find((i) => i.id === address.id)?.attachments).toEqual([]);
+  });
+  it('accepts Beeline place and message links and refuses invalid links with 400', async () => {
+    await create();
+    const messageId = 'd'.repeat(64);
+    const accepted = [
+      { name: 'Message hash link', url: `#beeline/beeline/${messageId}` },
+      { name: 'Place hash link', url: '#beeline/beeline' },
+      { name: 'Message token', url: '¶ada-42' },
+      { name: 'Thread token', url: '↳latency-coverage' },
+      { name: 'Deep link', url: `beeline://beeline/chat/${chat}?communityId=${workspace}` },
+    ];
+    for (const link of accepted) {
+      await phone.execute(
+        'attachToWorkItem',
+        { ...address, attachment: { kind: 'link', name: link.name, url: `  ${link.url}  ` } },
+        person,
+      );
+    }
+    const item = (await read()).items.find((i) => i.id === address.id)!;
+    expect(item.attachments?.map((a) => (a.kind === 'link' ? [a.name, a.url] : null))).toEqual(
+      accepted.map((link) => [link.name, link.url]),
+    );
+    // Client contract deserialization retains every accepted Beeline link.
+    const parsed = readWorkItem(item);
+    expect(parsed?.attachments?.map((a) => (a.kind === 'link' ? a.url : null))).toEqual(
+      accepted.map((link) => link.url),
+    );
+    for (const bad of [
+      '',
+      '   ',
+      'not a url',
+      'relative/path',
+      'javascript:alert(1)',
+      'beeline://',
+      '#beeline/',
+      '#beeline/beeline/not-a-64-hex-id',
+      'ftp://example.org/file',
+    ]) {
+      await expect(
+        phone.execute(
+          'attachToWorkItem',
+          { ...address, attachment: { kind: 'link', name: 'Bad', url: bad } },
+          person,
+        ),
+      ).rejects.toMatchObject({ status: 400, message: 'invalid attachment link' });
+      await expect(
+        phone.execute(
+          'attachToWorkItem',
+          { ...address, attachment: { kind: 'link', name: 'Bad', url: bad } },
+          person,
+        ),
+      ).rejects.toBeInstanceOf(CommandRefusalError);
+    }
+    expect((await read()).items.find((i) => i.id === address.id)?.attachments).toHaveLength(
+      accepted.length,
+    );
   });
   it('keeps asking-item notes on that item rather than the thread task', async () => {
     const posted = await askOwnerQuestion(
