@@ -12,7 +12,7 @@ import type { SqlDatabase } from './database.js';
 import { closeRunChoices } from './room-choice.js';
 import { identitySubject, systemLine } from './system-line.js';
 import { liveWorkflowRun, scheduleTriggerPeriod, validateWorkflowBindings, roleAgentList } from './workflow-runs-repeated-result.js';
-import { loadIdentityRow, resolveRoleBinding, WORKFLOW_HANDOFF_CARD_TYPE, workflowRequester, resolveRunOwner, openRun, mentionsFor, workflowRunRequester, loadRun, loadPinnedContract, saveRunStatus, claimRun } from './workflow-runs.js';
+import { loadIdentityRow, resolveRoleBinding, workflowHandoffRecord, workflowRequester, resolveRunOwner, openRun, mentionsFor, workflowRunRequester, loadRun, loadPinnedContract, saveRunStatus, claimRun } from './workflow-runs.js';
 import { dispatchState, authorizeRunControl, moveRole } from './workflow-runs-cancel-run-timers.js';
 
 
@@ -123,13 +123,8 @@ export async function startWorkflow(
       kind: 'workflow-handoff',
       ...(!exhausted && !isGate ? { wakes: [(resolution as { agentId: string }).agentId] } : {}),
       presentation: 'card',
-      cardType: WORKFLOW_HANDOFF_CARD_TYPE,
-      card: {
-        runId,
-        seq: 0,
+      ...workflowHandoffRecord({ runId, workflowSlug: contract.name, workflowVersion: skill.current_version }, contract.start, roleBindings, {
         runStatus: 'live',
-        workflowSlug: contract.name,
-        workflowVersion: skill.current_version,
         requesterId: await workflowRequester(db, command),
         ownerId: await resolveRunOwner(db, command),
         startKind:
@@ -138,12 +133,10 @@ export async function startWorkflow(
             : command.reason === 'schedule'
               ? 'schedule'
               : 'direct',
-        roleBindings,
         ...(Object.keys(roleAgents).length ? { roleAgents } : {}),
-        toState: contract.start,
         ...(startState.hint ? { receiptHint: startState.hint } : {}),
         ...(trigger ? { trigger } : {}),
-      },
+      }),
     });
     if (!started.inserted) {
       const current = await liveWorkflowRun(db,command.room_id,input.name);

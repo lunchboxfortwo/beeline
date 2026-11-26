@@ -78,6 +78,23 @@ export type WorkflowRunCard = {
 };
 
 
+export function workflowHandoffRecord(
+  run: Pick<WorkflowRunCard, 'runId' | 'workflowSlug' | 'workflowVersion'> & { seq?: number },
+  toState: string,
+  roleBindings: WorkflowRunCard['roleBindings'],
+  details: Record<string, unknown>,
+) {
+  const { runId, workflowSlug, workflowVersion, seq } = run;
+  return {
+    cardType: WORKFLOW_HANDOFF_CARD_TYPE,
+    card: {
+      ...details, runId, workflowSlug, workflowVersion, roleBindings, toState,
+      ...(seq === undefined ? { seq: 0 } : { seq: seq + 1, answers: seq }),
+    },
+  };
+}
+
+
 export type IdentityRow = { id: string; kind: 'human' | 'agent'; name: string; handle?: string | null };
 
 
