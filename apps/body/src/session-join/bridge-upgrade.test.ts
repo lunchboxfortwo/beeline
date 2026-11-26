@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import {
+import fs, {
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -45,7 +45,7 @@ function changedFile(path: string, ready: () => boolean, signal?: AbortSignal): 
       signal?.removeEventListener('abort', aborted);
       resolve();
     };
-    const watcher = watch(path, { recursive: true, signal }, check);
+    const watcher = watch(path, { signal }, check);
     signal?.addEventListener('abort', aborted, { once: true });
     check();
   });
@@ -434,3 +434,42 @@ it('wakes Claude’s authenticated in-session receiver on a committed durable de
     await new Promise<void>((done) => server.close(() => done()));
   }
 }, 20_000);
+
+it('watches the parent state directory without failing when a transient lock directory vanishes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-lock-watch-'));
+  folders.push(dir);
+  const lockDir = join(dir, 'state.lock');
+  const origReaddirSync = fs.readdirSync;
+  fs.readdirSync = ((target: Parameters<typeof fs.readdirSync>[0], ...args: unknown[]) => {
+    if (String(target) === lockDir) rmSync(lockDir, { recursive: true, force: true });
+    return (origReaddirSync as (...params: unknown[]) => unknown)(target, ...args);
+  }) as typeof fs.readdirSync;
+  try {
+    const waiting = changedFile(
+      dir,
+      () => readState(dir).sessions[0]?.deliveredWakes.includes('pending') === true,
+      AbortSignal.timeout(5_000),
+    );
+    mkdirSync(lockDir);
+    rmSync(lockDir, { recursive: true, force: true });
+    await updateState(dir, (state) => {
+      state.sessions = [
+        {
+          key: `claude-code:${dir}`,
+          agent: 'claude-code',
+          cwd: dir,
+          name: 'Claude',
+          server: 'https://synthetic.invalid',
+          clientId: 'client',
+          cursor: '0',
+          deliveredWakes: ['pending'],
+          joinedAt: '',
+        },
+      ];
+    });
+    await waiting;
+    expect(readState(dir).sessions[0]?.deliveredWakes).toEqual(['pending']);
+  } finally {
+    fs.readdirSync = origReaddirSync;
+  }
+});

@@ -452,7 +452,7 @@ export async function prepareWorkspace(input: {
     if (error instanceof KernelLockBusyError) return checkoutBusy(path, error);
     throw error;
   }
-  const indexed = await prepareCodegraphIndex(input.config, path);
+  const indexed = await prepareCodegraphIndex(input.config, path, { readonly: !input.parentRoomId });
   const where = input.parentRoomId
     ? `branch ${branch} (target ${targetBranch})`
     : `${targetBranch} (read-only)`;
