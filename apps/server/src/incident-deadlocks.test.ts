@@ -254,23 +254,27 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
     expect((await db.query(`SELECT id FROM agent_commands WHERE room_id=$1 AND reason='subscribed_event'`, [triage])).rowCount).toBe(1);
   });
 
-  it('logs the deadlocked call site and safe advisory keys from earlier statements in the transaction', async () => {
+  it('logs the deadlocked call site, distinct advisory keys and a fingerprint without private SQL values', async () => {
     const isolated = new URL(url!); isolated.pathname = `/${databaseName}`;
     const app = new PostgresDatabase(isolated.toString(), 1, { lockDiagnostics: new DatabaseLockDiagnostics(db) });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const privateLiteral = 'private message literal';
     const privateParameter = 'private bound parameter';
-    const expectedKeys = ['agent-place:<agent>:<room>', ROUTER_AUTHORITY_LOCK];
+    const fingerprints = new Set<string>();
+    const agentPlaceKeys = new Set<string>();
     try {
-      // The pool has one client. The second deadlock must start with fresh
-      // transaction metadata even though it reuses the same connection.
-      for (const acquireAdvisoryLocks of [true, false]) {
+      // A different agent takes a different lock for the same room. The last
+      // transaction reuses the client but takes neither advisory lock.
+      for (const [agentId, privateLiteral] of [
+        [A, 'first private message literal'],
+        [B, 'second private message literal'],
+        [undefined, 'third private message literal'],
+      ] as const) {
         warn.mockClear();
         const victimLocked = deferred(), contenderLocked = deferred();
         const victim = app.transaction(async tx => {
           await tx.query("SET LOCAL deadlock_timeout='600ms'");
-          if (acquireAdvisoryLocks) {
-            await lockAgentPlace(tx, A, C);
+          if (agentId) {
+            await lockAgentPlace(tx, agentId, C);
             // A room change takes the router authority lock inside its trigger.
             await tx.query('UPDATE rooms SET archived_at=now() WHERE id=$1', [C]);
           } else {
@@ -293,17 +297,22 @@ describe.skipIf(!url)('production incident deadlocks on real PostgreSQL', () => 
         const deadlocks = warn.mock.calls.filter(([message]) => message === '[database] deadlock');
         expect(deadlocks).toHaveLength(1);
         const [, fields] = deadlocks[0]!;
-        expect(JSON.parse(fields)).toMatchObject({
+        const log = JSON.parse(fields);
+        expect(log).toMatchObject({
           code: '40P01',
           operation: expect.stringMatching(/^incident-deadlocks\.test\.ts:\d+:\d+$/),
           statementFingerprint: expect.stringMatching(/^[a-f0-9]{16}$/),
-          advisoryLockKeys: acquireAdvisoryLocks ? expectedKeys : [],
+          advisoryLockKeys: agentId ? [expect.stringMatching(/^agent-place:/), ROUTER_AUTHORITY_LOCK] : [],
         });
+        fingerprints.add(log.statementFingerprint);
+        if (agentId) agentPlaceKeys.add(log.advisoryLockKeys[0]);
         const output = JSON.stringify(warn.mock.calls);
-        for (const privateValue of [privateLiteral, privateParameter, A, C, R]) {
+        for (const privateValue of [privateLiteral, privateParameter, A, B, C, R]) {
           expect(output).not.toContain(privateValue);
         }
       }
+      expect.soft(agentPlaceKeys.size).toBe(2);
+      expect(fingerprints.size).toBe(1);
     } finally {
       warn.mockRestore();
       await app.close();

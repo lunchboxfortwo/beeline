@@ -1,4 +1,4 @@
-import type { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
+import { diagnosticSql, type DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
 import { noticeAdvisoryLockKey, statementAdvisoryLockKey } from './database-advisory-locks.js';
 import { DIAGNOSTICS_SCHEMA } from './diagnostics-schema.js';
 import { postgresCallSite, recordPostgresStatementError } from './postgres-error.js';
@@ -432,7 +432,7 @@ export class PostgresDatabase implements ClosableDatabase {
       return result;
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === '40P01') {
-        const statementFingerprint = queryFingerprint(sql);
+        const statementFingerprint = queryFingerprint(diagnosticSql(sql));
         const keys = new Set(advisoryLockKeys);
         if (requestedKey) keys.add(requestedKey);
         console.warn('[database] deadlock', JSON.stringify({

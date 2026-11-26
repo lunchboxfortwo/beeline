@@ -1,13 +1,24 @@
+import { createHmac, randomBytes } from 'node:crypto';
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
 export const AGENT_PLACE_LOCK_SQL =
   "SELECT pg_advisory_xact_lock(hashtextextended('agent-place:' || $1 || ':' || $2, 0))";
 export const ROUTER_AUTHORITY_LOCK_SQL = 'SELECT pg_advisory_xact_lock(hashtextextended($1,0))';
 
-type AdvisoryLockKey = typeof ROUTER_AUTHORITY_LOCK | 'agent-place:<agent>:<room>';
+type AdvisoryLockKey = typeof ROUTER_AUTHORITY_LOCK | `agent-place:${string}`;
+
+// Correlate lock reports within this process using an in-memory key.
+const agentPlaceLogKey = randomBytes(32);
 
 export function statementAdvisoryLockKey(sql: string, values: unknown[]): AdvisoryLockKey | undefined {
-  if (sql === AGENT_PLACE_LOCK_SQL) return 'agent-place:<agent>:<room>';
+  if (sql === AGENT_PLACE_LOCK_SQL) {
+    const [agentId, roomId] = values;
+    if (typeof agentId === 'string' && typeof roomId === 'string') {
+      const identifier = createHmac('sha256', agentPlaceLogKey)
+        .update(`agent-place:${agentId}:${roomId}`).digest('hex').slice(0, 32);
+      return `agent-place:${identifier}`;
+    }
+  }
   if (sql === ROUTER_AUTHORITY_LOCK_SQL && values[0] === ROUTER_AUTHORITY_LOCK) return ROUTER_AUTHORITY_LOCK;
 }
 
