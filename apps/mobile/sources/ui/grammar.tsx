@@ -688,6 +688,30 @@ export function RingOutset({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * One overlapping tile in a compact row of working agent avatars: a 24 pt
+ * canvas-backed rounded frame tucked two steps (`-STEP['2']`, 8 pt) after the
+ * first tile so each subsequent mark paints cleanly over the previous one.
+ */
+export function OverlapAvatarFrame({ index, children }: { index: number; children: React.ReactNode }) {
+    return (
+        <YStack
+            position="relative"
+            zIndex={index}
+            width={24}
+            height={24}
+            flexShrink={0}
+            marginLeft={index === 0 ? 0 : -STEP['2']}
+            backgroundColor="canvas"
+            borderWidth={2}
+            borderColor="canvas"
+            borderRadius="md"
+        >
+            {children}
+        </YStack>
+    );
+}
+
+/**
  * A run of prose over a body style its caller owns (MonoMarkdown and the live
  * draft take `textStyle` from TypedView): draws `body`, then the named `marks`
  * in order, then a document heading `level`'s type style, then `fade` (the

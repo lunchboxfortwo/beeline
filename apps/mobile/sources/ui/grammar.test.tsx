@@ -10,7 +10,7 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const insets = vi.hoisted(() => ({ top: 24, bottom: 48, left: 0, right: 0 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => insets }));
-import { Btn, ChatName, HEIGHT, Indent, PlaceHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
+import { Btn, ChatName, HEIGHT, Indent, OverlapAvatarFrame, PlaceHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
 
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; });
 
@@ -166,4 +166,33 @@ it('bounds a scrolling sheet below the safe top and keeps its header outside the
     const body = tree.root.findAll((node: any) => node.type === 'View' && Array.isArray(node.props.style))
         .find((node: any) => node.props.style.some((style: any) => style?.maxHeight !== undefined));
     expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
+});
+
+it('frames overlapping agent avatars with a 24 pt canvas tile and -8 pt tuck after the first', () => {
+    const first = at('medium', <OverlapAvatarFrame index={0}><T>a</T></OverlapAvatarFrame>);
+    const second = at('medium', <OverlapAvatarFrame index={1}><T>b</T></OverlapAvatarFrame>);
+    expect(first.root.findByType('YStack').props).toMatchObject({
+        position: 'relative',
+        zIndex: 0,
+        width: 24,
+        height: 24,
+        flexShrink: 0,
+        marginLeft: 0,
+        backgroundColor: 'canvas',
+        borderWidth: 2,
+        borderColor: 'canvas',
+        borderRadius: 'md',
+    });
+    expect(second.root.findByType('YStack').props).toMatchObject({
+        position: 'relative',
+        zIndex: 1,
+        width: 24,
+        height: 24,
+        flexShrink: 0,
+        marginLeft: -8,
+        backgroundColor: 'canvas',
+        borderWidth: 2,
+        borderColor: 'canvas',
+        borderRadius: 'md',
+    });
 });

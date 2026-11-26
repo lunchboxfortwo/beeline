@@ -3,8 +3,14 @@ import React from 'react';
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import { TurnProgressLine, TurnSettledLine } from './TurnProgressLine';
+vi.mock('react-native', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
+vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
+vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack', ListItem: 'ListItem', ScrollView: 'ScrollView' }));
-vi.mock('@/ui/grammar', () => ({ useStep: () => () => 8, T: (props: any) => React.createElement('T', props), Spinner: 'Spinner' }));
+vi.mock('@/ui/grammar', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/ui/grammar')>();
+  return { ...actual, useStep: () => () => 8, T: (props: any) => React.createElement('T', props), Spinner: 'Spinner' };
+});
 vi.mock('./TurnLineFrame', () => ({ TurnLineBar: (props: any) => React.createElement('Bar', props), TurnBandSlot: 'Slot' }));
 
 vi.mock('./IdentityMark', () => ({ IdentityMark: 'IdentityMark' }));
@@ -106,8 +112,8 @@ it.each([1, 2, 3, 4])('keeps full-size avatar wrappers and the compact footprint
       });
     });
     if (count > 3) {
-      const stack = marks[2].parent.parent;
-      expect(stack.children.slice(0, 3)).toEqual(marks.map((mark: any) => mark.parent));
+      const stack = marks[2].parent.parent.parent;
+      expect(stack.children.slice(0, 3)).toEqual(marks.map((mark: any) => mark.parent.parent));
       expect(stack.children[3].props).toMatchObject({ children: ['+', 1], marginLeft: '1' });
     }
   } finally {

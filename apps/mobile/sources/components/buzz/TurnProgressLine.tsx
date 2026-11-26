@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ListItem, ScrollView, XStack, YStack } from 'tamagui';
-import { T, Spinner } from '@/ui/grammar';
+import { OverlapAvatarFrame, Spinner, T } from '@/ui/grammar';
 import { IdentityMark } from './IdentityMark';
 import { Button } from './Button';
 import type { ComposerWorkingAgent } from '@/buzz/room-indicators';
@@ -99,11 +99,11 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   const workingAvatars = agents?.length ? (
     <XStack alignItems="center" flexShrink={0}>
       {/* Each rounded canvas backing paints with its mark, over the previous tile. */}
-      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.turnKey ?? agent.pubkey}
-        position="relative" zIndex={index} width={24} height={24} flexShrink={0} marginLeft={index === 0 ? 0 : -8}
-        backgroundColor="canvas" borderWidth={2} borderColor="canvas" borderRadius="md">
-        <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
-      </YStack>)}
+      {agents.slice(0, 3).map((agent, index) => (
+        <OverlapAvatarFrame key={agent.turnKey ?? agent.pubkey} index={index}>
+          <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
+        </OverlapAvatarFrame>
+      ))}
       {agents.length > 3 ? <T v="meta" color="secondary" marginLeft="1">+{agents.length - 3}</T> : null}
     </XStack>
   ) : null;
