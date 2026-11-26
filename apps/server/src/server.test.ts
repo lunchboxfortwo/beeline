@@ -1,4 +1,5 @@
 import { phoneFetch, AddressInfo, WebSocket, describe, expect, it, vi, PostgresDatabase, LiveHub, createBeelineServer, databaseConnectionBudget, canReadRoomsFrom, nextSocketMessage, fixtureScope1, fixtureScope2, type Pool, type SqlDatabase, type TokenAuth, type PhoneService, type DaemonService } from './test-support-server.test-support.js';
+import { stubClient } from './test-support-database.test-support.js';
 
 describe('server readiness', () => {
 const scope1 = fixtureScope1();
@@ -252,12 +253,7 @@ const scope1 = fixtureScope1();
     const timeout = new Error('timeout exceeded when trying to connect');
     const connect = vi.fn()
       .mockRejectedValueOnce(timeout)
-      .mockResolvedValueOnce({
-        query: vi.fn(async () => ({ rows: [], rowCount: 0 })),
-        release: vi.fn(),
-        once: vi.fn(),
-        removeListener: vi.fn(),
-      });
+      .mockResolvedValueOnce(stubClient());
     const pool = {
       connect,
       query: vi.fn(),
