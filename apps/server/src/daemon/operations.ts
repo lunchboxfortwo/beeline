@@ -61,14 +61,19 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         await attachToWorkItem(ctx.database,{...input as Input<'attachToWorkItem'>,roomId:(input as Input<'attachToWorkItem'>).targetRoomId},authenticatedAgentId);
         return daemonWriteResult(ctx) as Output<Name>;
       case 'updateWorkItem': {
-        const update={...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId};
+        const raw = input as Input<'updateWorkItem'>;
+        const update={...raw,roomId:raw.targetRoomId};
         const itemId = update.id ?? update.roomId;
         const existed = (await ctx.database.query('SELECT 1 FROM work_items WHERE id=$1', [itemId])).rowCount > 0;
         let archivedReceipt: string | undefined;
         // Done on a thread is the agent's existing close (PR closed, branch deleted, locked refused).
         await updateWorkItem(ctx.database,update,authenticatedAgentId,authenticatedAgentId,
           async () => {
-            const archived = await daemonArchiveCorner(ctx,{cornerId:update.roomId},authenticatedAgentId);
+            const archived = await daemonArchiveCorner(
+              ctx,
+              { cornerId: update.roomId, roomId: raw.roomId, requestId: raw.requestId },
+              authenticatedAgentId,
+            );
             archivedReceipt = archived.receipt;
             return archived;
           });

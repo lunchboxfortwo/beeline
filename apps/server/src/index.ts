@@ -195,9 +195,14 @@ async function main() {
     () => new Date(),
     (ticket) => mountedAuth.verifyGoogleTicket(ticket),
   );
-  const processGitHubWebhook = async (event: string, payload: unknown, deliveryId?: string) => {
+  const processGitHubWebhook = async (
+    event: string,
+    payload: unknown,
+    deliveryId?: string,
+    signal?: AbortSignal,
+  ) => {
     if (!github) throw new Error('GitHub webhook processor is unavailable');
-    await github.processWebhook(event, payload, deliveryId);
+    await github.processWebhook(event, payload, deliveryId, signal);
   };
   const webAppOrigins = (process.env.BEELINE_WEB_APP_ORIGINS ?? '')
     .split(',')

@@ -1,3 +1,4 @@
+import { ClientAbortError } from './command-refusal.js';
 import { githubProviderKey, isProviderService } from './providers/index.js';
 import { readPersonDiagnostics, renderPersonDiagnostics } from './operator-diagnostics.js';
 import { ingestDiagnostics } from './diagnostics.js';
@@ -32,11 +33,7 @@ import { serveEmailImage } from "./email-images.js";
 import { ServerOptions, exactPath, bytes, MAX_JSON_BYTES, json, body, appSignInWebOrigin, appSignInReturnCookie, bearerSecretMatches, clientKey, publicJson, funnelRateLimit, signatureMatches } from './server.js';
 import { PhoneHttpOperation, daemonIdentity, refuseDaemon, phoneIdentity } from './server-create-beeline-server.js';
 import { routeAuthenticated } from './server-authenticated-routes.js';
-import { OwnerScheduleClock } from './owner-schedule-clock.js';
-
-let webhookWritesSincePrune = 0;
-const WEBHOOK_CLAIM_RENEW_MS = 30_000;
-const WEBHOOK_CLAIM_RENEW_RETRY_MS = 5_000;
+import { runClaimedGitHubWebhook } from './github-webhook-claim.js';
 
 
 
@@ -56,7 +53,7 @@ export async function route(
   if (method === 'POST' && url.pathname === '/v1/sentry/webhook') {
     let raw: Buffer;
     try { raw = await bytes(request, MAX_JSON_BYTES); }
-    catch { json(response, 413, { error: 'sentry_payload_too_large' }); return; }
+    catch (error) { if (error instanceof ClientAbortError) throw error; json(response, 413, { error: 'sentry_payload_too_large' }); return; }
     const status = await receiveSentryWake(options.database, raw, request.headers, options.sentryWakeSecret, options.sentryWakeAgentId);
     json(response, status, status < 300 ? { accepted: true } : { error: 'invalid_sentry_webhook' });
     return;
@@ -378,7 +375,7 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (method !== 'POST') { json(response, 405, { error: 'method_not_allowed' }); return; }
     let input: unknown;
     try { input = JSON.parse((await bytes(request, 256)).toString('utf8')); }
-    catch { json(response, 400, { error: 'invalid_download_tap' }); return; }
+    catch (error) { if (error instanceof ClientAbortError) throw error; json(response, 400, { error: 'invalid_download_tap' }); return; }
     const tap = parseSiteDownloadTap(input);
     if (!tap) { json(response, 400, { error: 'invalid_download_tap' }); return; }
     if (!await recordSiteDownloadTap(options.database, tap)) {
@@ -570,7 +567,7 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (!funnelRateLimit.allow(clientKey(request))) { json(response,429,{error:'too_many_requests'}); return; }
     let input: unknown;
     try { input = JSON.parse((await bytes(request, 32768)).toString('utf8')); }
-    catch { json(response,400,{error:'invalid_funnel_event'}); return; }
+    catch (error) { if (error instanceof ClientAbortError) throw error; json(response,400,{error:'invalid_funnel_event'}); return; }
     if (input && typeof input === 'object' && 'schemaVersion' in input) {
       try { json(response,200,await ingestDiagnostics(options.databasePools?.diagnostics ?? options.database,input)); }
       catch { json(response,400,{error:'invalid_diagnostic_batch'}); }
@@ -779,84 +776,12 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof delivery !== 'string' || typeof event !== 'string')
       throw new Error('GitHub delivery headers are required');
     const parsed = JSON.parse(payload.toString('utf8')) as unknown;
-    // Database-backed ownership: claim with a renewable lease so concurrent or
-    // redelivered webhooks across any server instance stay exclusive while the
-    // handler runs, and only become reclaimable if the owning server is gone.
-    const claimed = await options.database.query<{ claim_expires_at: string }>(
-      `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
-       VALUES($1,clock_timestamp()+interval '2 minutes')
-       ON CONFLICT (delivery_id) DO UPDATE
-         SET received_at=clock_timestamp(),
-             claim_expires_at=clock_timestamp()+interval '2 minutes'
-         WHERE github_webhook_deliveries.claim_expires_at IS NOT NULL
-           AND github_webhook_deliveries.claim_expires_at<=clock_timestamp()
-       RETURNING claim_expires_at::text claim_expires_at`,
-      [delivery],
-    );
-    let claimToken = claimed.rows[0]?.claim_expires_at;
-    if (!claimToken) {
+    const outcome = await runClaimedGitHubWebhook(options.database, delivery, async (signal) => {
+      if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery, signal);
+    });
+    if (outcome === 'duplicate') {
       json(response, 200, { accepted: false, duplicate: true });
       return;
-    }
-    let handlerAlive = true;
-    let renewWrite: Promise<void> = Promise.resolve();
-    const renewClock = new OwnerScheduleClock(() => {
-      if (!handlerAlive || !claimToken) return;
-      const expectedToken = claimToken;
-      renewWrite = renewWrite.then(async () => {
-        if (!handlerAlive || claimToken !== expectedToken) return;
-        try {
-          const renewed = await options.database.query<{ claim_expires_at: string }>(
-            `UPDATE github_webhook_deliveries
-             SET claim_expires_at=clock_timestamp()+interval '2 minutes'
-             WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz
-             RETURNING claim_expires_at::text claim_expires_at`,
-            [delivery, expectedToken],
-          );
-          if (renewed.rows[0]?.claim_expires_at) {
-            claimToken = renewed.rows[0].claim_expires_at;
-            if (handlerAlive) renewClock.arm(WEBHOOK_CLAIM_RENEW_MS);
-          }
-        } catch (error) {
-          console.warn('[github-webhook] delivery claim renewal failed', error);
-          if (handlerAlive) renewClock.arm(WEBHOOK_CLAIM_RENEW_RETRY_MS);
-        }
-      });
-    });
-    renewClock.arm(WEBHOOK_CLAIM_RENEW_MS);
-    try {
-      try {
-        if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery);
-      } finally {
-        handlerAlive = false;
-        renewClock.stop();
-        await renewWrite;
-      }
-      await options.database.query(
-        `UPDATE github_webhook_deliveries SET claim_expires_at=NULL WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
-        [delivery, claimToken],
-      );
-    } catch (error) {
-      await options.database
-        .query(
-          `DELETE FROM github_webhook_deliveries WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
-          [delivery, claimToken],
-        )
-        .catch(() => undefined);
-      throw error;
-    }
-    if (++webhookWritesSincePrune % 64 === 1) {
-      try {
-        await options.database.query(
-          `DELETE FROM github_webhook_deliveries delivery
-           WHERE delivery.delivery_id IN (
-             SELECT delivery_id FROM github_webhook_deliveries
-             WHERE received_at<now()-interval '30 days'
-             ORDER BY received_at,delivery_id LIMIT 1024 FOR UPDATE SKIP LOCKED)`,
-        );
-      } catch (error) {
-        console.warn('[github-webhook] retention prune failed', error);
-      }
     }
     json(response, 202, {
       accepted: true,

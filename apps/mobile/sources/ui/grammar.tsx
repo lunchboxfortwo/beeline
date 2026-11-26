@@ -327,8 +327,8 @@ export function KeyboardBody({ children, maxHeight }: { children?: React.ReactNo
 const KEYBOARD_BODY = { flex: 1 } as const;
 
 /** The one sheet frame: scrim, handle, title, one step deep with Back. */
-export function SheetFrame({ open, close, title, testID, children, back, scrollable = false }: {
-    open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void; scrollable?: boolean;
+export function SheetFrame({ open, close, title, testID, children, back, scrollable = false, belowModals = false }: {
+    open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void; scrollable?: boolean; belowModals?: boolean;
 }) {
     const theme = useThemeName();
     // Android's 3-button bar and the iOS home indicator sit over the sheet's foot.
@@ -342,10 +342,13 @@ export function SheetFrame({ open, close, title, testID, children, back, scrolla
     if (open) opened.current = true;
     // Retain an opened sheet for native dismissal; unopened sheets have no body to lay out.
     if (!opened.current) return null;
+    // Sheets that open RN Web Modal prompts/alerts opt in to stack below Modal (zIndex 9999) and above page chrome (<= 2000).
+    const sheetStack = belowModals ? { zIndex: 5000, portalProps: { zIndex: 5000 } } : {};
+    const overlayStack = belowModals ? { zIndex: 4999 } : {};
     return (
         <Theme name={theme}>
-            <Sheet modal open={open} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>
-                <Sheet.Overlay backgroundColor={SCRIM} />
+            <Sheet modal open={open} {...sheetStack} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>
+                <Sheet.Overlay {...overlayStack} backgroundColor={SCRIM} />
                 <Sheet.Container maxWidth={480} width="100%" alignSelf="center" testID={testID}>
                     <Sheet.Background backgroundColor="raised" borderTopLeftRadius="lg" borderTopRightRadius="lg" borderWidth={1} borderColor="stroke" />
                     {/* The grip sits on the sheet's own edge; the whole sheet is the drag surface. */}

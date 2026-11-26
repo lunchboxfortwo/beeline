@@ -38,8 +38,15 @@ export async function closeCornerPullRequestBestEffort(
 }
 
 /** A close adapter emits its authorized event; the machine executes cleanup. */
-export async function closeCornerState(database: SqlDatabase, cornerId: string) {
-  const outcome = await advanceCorner(database, cornerId, { kind: 'closed' });
+export async function closeCornerState(
+  database: SqlDatabase,
+  cornerId: string,
+  preserveTurn?: { agentId: string; requestId?: string },
+) {
+  const outcome = await advanceCorner(database, cornerId, {
+    kind: 'closed',
+    ...(preserveTurn ? { preserveTurn } : {}),
+  });
   const corner = (await database.query<{ parent_id: string }>('SELECT parent_id FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [cornerId])).rows[0];
   if (!corner) throw new Error('thread not found');
   return { parentId: corner.parent_id, archived: outcome.archived === true };

@@ -65,7 +65,9 @@ export class GitHubOperations {
     check: NonNullable<ReturnType<typeof checkFact>>,
     database: SqlDatabase,
     deliveryId?: string,
+    signal?: AbortSignal,
   ): Promise<void> {
+    if (signal?.aborted) throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
     const headSha = check.headSha;
     const deliveryKey = deliveryId && headSha ? `${deliveryId}:${target.corner_id}:${headSha}` : undefined;
     if (deliveryKey) {
@@ -79,6 +81,10 @@ export class GitHubOperations {
     try {
       await this.refreshCheckRollup(target, repository, check, database);
     } catch (error) {
+      if (signal?.aborted) {
+        if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
+        throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
+      }
       if (!transientGitHubError(error)) {
         if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
         throw error;
@@ -330,15 +336,20 @@ async recordClosedCornerPullRequest(cornerId: string, number: number, database: 
 async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number | string; callerId?: string }): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId, options); }
 
 
-  async processWebhook(event: string, payload: unknown, deliveryId?: string) {
+  async processWebhook(event: string, payload: unknown, deliveryId?: string, signal?: AbortSignal) {
     if (this.#stoppingChecks)
       throw new CommandRefusalError('GitHub check service is shutting down', 409);
+    const assertActive = () => {
+      if (signal?.aborted) throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
+    };
+    assertActive();
     let finish!: () => void;
     const work = new Promise<void>((resolve) => { finish = resolve; });
     this.#checkWork.add(work);
     let release: (() => void) | undefined;
     try {
-      release = await this.#webhooks.acquire();
+      release = await this.#webhooks.acquire(signal);
+      assertActive();
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
       const body = payload as Record<string, unknown>;
       // The authenticated phone route uses this internal signal after a human message commits.
@@ -361,6 +372,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         const changed = await fireRepositorySubscriptions(this.database, install.id, event, body, deliveryId);
         for (const roomId of new Set(changed)) this.onRoomChanged?.(roomId);
       }
+      assertActive();
       if (
         event === 'push' ||
         event === 'issues' ||
@@ -371,12 +383,17 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
         event === 'status'
       ) {
         await this.processRepositoryEvent(event, body, install.id);
-        await this.processCornerEvent(event, body, install.id, deliveryId);
+        assertActive();
+        await this.processCornerEvent(event, body, install.id, deliveryId, signal);
+        assertActive();
         if (event === 'push') await this.processBaseBranchPush(body, install.id);
+        assertActive();
         if (event === 'push') {
           const iconRepository = await repositoryIconPushTarget(this.database, body);
+          assertActive();
           if (iconRepository) await this.resolveRepositoryIcons([iconRepository]);
         }
+        assertActive();
         await this.reconcileQueuedCorners();
         return;
       }
@@ -426,6 +443,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
           ).rows[0]?.identity_id;
       }
       if (!owner) return;
+      assertActive();
       if (event === 'installation_repositories') {
         const removed = Array.isArray(body.repositories_removed) ? body.repositories_removed : [];
         const removedIds = removed.flatMap((entry) => {
@@ -440,6 +458,7 @@ async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number |
           );
         }
       }
+      assertActive();
       await this.syncInstallation(owner, install.id);
     } finally {
       release?.();
@@ -472,7 +491,7 @@ async processBaseBranchPush(body: GitHubRecord, installationId: number): Promise
  * same repository events; CI stays on processCornerEvent.
  */
 async processRepositoryEvent(event: string, body: GitHubRecord, installationId: number) { return gitHubOperationsProcessRepositoryEvent(this, event, body, installationId); }
-async processCornerEvent(event: string, body: GitHubRecord, installationId: number, deliveryId?: string) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId, deliveryId); }
+async processCornerEvent(event: string, body: GitHubRecord, installationId: number, deliveryId?: string, signal?: AbortSignal) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId, deliveryId, signal); }
 async refreshCheckRollup(target: CornerWebhookTarget & {
     has_pr?: boolean;
     pr_number?: string | null;

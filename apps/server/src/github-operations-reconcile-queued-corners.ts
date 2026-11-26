@@ -255,7 +255,11 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
   }
 
 
-  export async function gitHubOperationsProcessCornerEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number, deliveryId?: string) {
+  export async function gitHubOperationsProcessCornerEvent(ctx: GitHubOperations, event: string, body: GitHubRecord, installationId: number, deliveryId?: string, signal?: AbortSignal) {
+    const assertActive = () => {
+      if (signal?.aborted) throw signal.reason ?? new Error('GitHub webhook delivery claim expired');
+    };
+    assertActive();
     const database = ctx.database;
     const repository = repositoryName(body);
     const branch = branchForEvent(event, body);
@@ -311,6 +315,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
     const actor = (login?: string) =>
       login ? { kind: githubProviderKey, name: login } : GITHUB_SUBJECT;
     for (const target of targets) {
+      assertActive();
       if (!target.author_id) continue;
       if (event === 'pull_request') {
         const pullRequest = record(body.pull_request);
@@ -402,7 +407,7 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
             await ctx.refreshStaleMergeability(target.corner_id);
           if (body.action === 'opened' || body.action === 'synchronize' || body.action === 'reopened')
             await ctx.refreshWebhookCheckRollup({ ...target, has_pr: true, pr_number: String(number) }, repository,
-              { name: 'Pull request checks', status: 'pending', headSha, url }, database, deliveryId);
+              { name: 'Pull request checks', status: 'pending', headSha, url }, database, deliveryId, signal);
         }
         if (merged && url) {
           await ctx.mergeCorner(
@@ -485,6 +490,6 @@ import { GitHubOperations, CornerWebhookTarget, GitHubRecord, repositoryName, br
         continue;
       }
       const check = checkFact(event, body);
-      if (check?.headSha) await ctx.refreshWebhookCheckRollup(target, repository, check, database, deliveryId);
+      if (check?.headSha) await ctx.refreshWebhookCheckRollup(target, repository, check, database, deliveryId, signal);
     }
   }

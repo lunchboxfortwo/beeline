@@ -207,7 +207,32 @@ describe('PillRow', () => {
             { id: 'as1', system: true, stop: true, from: ruby, to: claude, time: '09:43', body: null },
             { id: 'as2', from: claude, to: jelly, time: '09:44', body: null },
         ] },
+        { id: 'sys-stack', system: true, from: beeline, time: '09:31', body: null, run: [
+            { id: 'removed', system: true, from: beeline, time: '09:30', body: React.createElement('Text', { testID: 'removed-body' }, '@lunchboxfortwo removed @emberus') },
+            { id: 'joined', system: true, from: beeline, time: '09:31', body: React.createElement('Text', { testID: 'joined-body' }, '@crayon joined · invited by @lunchboxfortwo') },
+        ] },
     ];
+
+    it('renders consecutive plain system notices as one folded pill and opens them in order', () => {
+        let tree: any;
+        const sysStack = fixtures.find((item) => item.id === 'sys-stack')!;
+        act(() => { tree = create(<PillRow items={[sysStack]} />); });
+        const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+        expect(pill().findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+        expect(pill().findAll((node: any) => node.type === 'IdentityMark').map((face: any) => face.props.seed)).toEqual([SYSTEM_IDENTITY_PUBKEY]);
+        expect(text(pill())).toEqual(['2 messages']);
+        expect(pill().props['aria-label']).toBe('Read 2 system messages, 09:31');
+        expect(tree.root.findAllByProps({ testID: 'pill-open' })).toHaveLength(0);
+        act(() => pill().props.onPress());
+        expect(pill().props['aria-label']).toBe('Hide 2 system messages, 09:31');
+        const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+        const entries = open.findAll((node: any) => node.type === 'YStack' && String(node.props.testID).startsWith('pill-run-entry-'));
+        expect(entries.map((entry: any) => entry.props.testID)).toEqual(['pill-run-entry-removed', 'pill-run-entry-joined']);
+        expect(text(entries[0])).toEqual(['· 09:30', '@lunchboxfortwo removed @emberus']);
+        expect(text(entries[1])).toEqual(['· 09:31', '@crayon joined · invited by @lunchboxfortwo']);
+        act(() => pill().props.onPress());
+        expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open')).toHaveLength(0);
+    });
 
     it.each(fixtures.map((item) => [item.id, item] as const))('folds run %s to faces its opened headings draw', (_id, item) => {
         let tree: any;

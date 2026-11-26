@@ -517,9 +517,16 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
     };
     await ctx.database.transaction(authorize);
     await closeCornerPullRequestBestEffort(ctx.database, cornerId, ctx.closePullRequest);
+    const preserveTurn =
+      input.roomId === undefined || input.roomId === cornerId
+        ? {
+            agentId,
+            ...(typeof input.requestId === 'string' && input.requestId ? { requestId: input.requestId } : {}),
+          }
+        : undefined;
     const closed = await ctx.database.transaction(async database => {
       await authorize(database);
-      return closeCornerState(database, cornerId);
+      return closeCornerState(database, cornerId, preserveTurn);
     });
     if (closed.archived) await deleteCornerBranchBestEffort(cornerId, ctx.github ? id => ctx.github!.deleteCornerBranch(id) : undefined);
     return daemonWriteResult(ctx, {

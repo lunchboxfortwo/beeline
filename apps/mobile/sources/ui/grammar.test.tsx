@@ -167,3 +167,20 @@ it('bounds a scrolling sheet below the safe top and keeps its header outside the
         .find((node: any) => node.props.style.some((style: any) => style?.maxHeight !== undefined));
     expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
 });
+
+it('preserves default SheetFrame stacking for other sheets and stacks below modals only when opted in', () => {
+    const defaultTree = at('medium', <SheetFrame open close={vi.fn()} title="Attach"><T>body</T></SheetFrame>);
+    const defaultSheet = defaultTree.root.findByType('Sheet');
+    const defaultOverlay = defaultTree.root.findByType('Sheet.Overlay');
+    expect(defaultSheet.props.zIndex).toBeUndefined();
+    expect(defaultSheet.props.portalProps).toBeUndefined();
+    expect(defaultOverlay.props.zIndex).toBeUndefined();
+
+    const optedInTree = at('medium', <SheetFrame open close={vi.fn()} title="Task" belowModals><T>body</T></SheetFrame>);
+    const optedInSheet = optedInTree.root.findByType('Sheet');
+    const optedInOverlay = optedInTree.root.findByType('Sheet.Overlay');
+    expect(optedInSheet.props.zIndex).toBeLessThan(9999);
+    expect(optedInSheet.props.portalProps?.zIndex).toBeLessThan(9999);
+    expect(optedInOverlay.props.zIndex).toBeLessThan(optedInSheet.props.zIndex);
+    expect(optedInOverlay.props.zIndex).toBeGreaterThan(2000);
+});

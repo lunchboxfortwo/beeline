@@ -1,4 +1,4 @@
-import { CommandRefusalError } from './command-refusal.js';
+import { ClientAbortError, CommandRefusalError } from './command-refusal.js';
 import { commandLogField, helperLogPath, helperRequestAgent, helperRequestCommand } from './helper-requests.js';
 import { WallRefusal } from '@beeline/api-contract/daemon';
 import { finishLiveClose } from './shutdown.js';
@@ -115,7 +115,7 @@ export interface GitHubServerHooks {
   roomToken?: (identityId: string, roomId: string) => Promise<{ token: string; expiresAt: number }>;
   /** Resolves and stores chat pictures for linked repositories that have none stored yet. */
   resolveRepositoryIcons?: () => Promise<void>;
-  onWebhook?: (eventType: string, payload: unknown, deliveryId?: string) => Promise<void>;
+  onWebhook?: (eventType: string, payload: unknown, deliveryId?: string, signal?: AbortSignal) => Promise<void>;
   completeInstallation?: (state: string, installationId: number) => Promise<string>;
 }
 
@@ -285,15 +285,32 @@ export function publicJson(response: ServerResponse, status: number, body: unkno
 
 
 
+function isClientRequestAbort(error: unknown, request: IncomingMessage): boolean {
+  if (error instanceof ClientAbortError) return true;
+  if (!(error instanceof Error)) return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return (
+    code === 'ECONNRESET' ||
+    code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+    (error.message === 'aborted' && (request.destroyed || request.aborted || !request.complete))
+  );
+}
+
 export async function bytes(request: IncomingMessage, maximum: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > maximum) throw new Error('request body too large');
-    chunks.push(buffer);
+  try {
+    for await (const chunk of request) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > maximum) throw new Error('request body too large');
+      chunks.push(buffer);
+    }
+  } catch (error) {
+    if (isClientRequestAbort(error, request)) throw new ClientAbortError();
+    throw error;
   }
+  if (request.destroyed && !request.complete) throw new ClientAbortError();
   return Buffer.concat(chunks);
 }
 
@@ -637,6 +654,7 @@ export function createBeelineServer(options: ServerOptions): Server {
         `status=${status}`,
         ...(helper ? attribution() : [error instanceof Error ? error.stack || error.message : String(error)]),
       );
+      if (response.destroyed || response.writableEnded) return;
       json(response, status, error instanceof PhoneOperationError || error instanceof WallRefusal ? error.payload : { error: message });
     });
   }));

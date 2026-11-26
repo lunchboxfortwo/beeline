@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   type PhoneResponseFrame,
 } from '@beeline/api-contract/phone';
-import type { TokenAuth } from './auth.js';
+import { TokenAuth } from './auth.js';
 import type { DaemonService } from './daemon-service.js';
 import { migrate, type SqlDatabase } from './database.js';
 import { LiveHub } from './live.js';
@@ -751,5 +751,93 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(warn.mock.calls)).not.toContain('private-value');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('?private=yes');
+  });
+
+  it('stores device_update_receipts and phone_update_devices after /v1/auth/refresh over the live socket while HTTP stays 404', async () => {
+    const realAuth = new TokenAuth(db, async () => ({
+      subject: 'refresh-receipt-user',
+      login: 'refresh-user',
+      name: 'Refresh User',
+    }));
+    const issued = await realAuth.exchangeGitHubOidc('ticket');
+    const authServer = createBeelineServer({
+      database: db,
+      phone,
+      live,
+      auth: realAuth,
+      daemon: {} as DaemonService,
+      mediaMaximumBytes: 1,
+    });
+    authServer.listen(0, '127.0.0.1');
+    await once(authServer, 'listening');
+    const authOrigin = `http://127.0.0.1:${(authServer.address() as AddressInfo).port}`;
+    try {
+      const refreshed = await fetch(`${authOrigin}/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refreshToken: issued.refreshToken }),
+      });
+      expect(refreshed.status).toBe(200);
+      const tokens = (await refreshed.json()) as { accessToken: string; identityId: string };
+      const payload = {
+        deviceId: '44444444-4444-4444-8444-444444444444',
+        platform: 'android',
+        updateId: 'update-after-refresh',
+        channel: 'production',
+        runtimeVersion: '44',
+      };
+      // HTTP write allowlist must remain closed for reportRunningUpdate.
+      const httpAttempt = await fetch(`${authOrigin}/v1/phone/operations/reportRunningUpdate`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      expect(httpAttempt.status).toBe(404);
+      expect(await httpAttempt.json()).toEqual({ error: 'not_found' });
+      expect(
+        (await db.query(`SELECT 1 FROM device_update_receipts WHERE identity_id=$1`, [tokens.identityId])).rowCount,
+      ).toBe(0);
+      expect(
+        (await db.query(`SELECT 1 FROM phone_update_devices WHERE identity_id=$1`, [tokens.identityId])).rowCount,
+      ).toBe(0);
+
+      const socket = new WebSocket(`${authOrigin.replace('http:', 'ws:')}/v1/phone/live`, [
+        `bearer.${tokens.accessToken}`,
+      ]);
+      sockets.push(socket);
+      await once(socket, 'open');
+      expect(await request(socket, 'reportRunningUpdate', payload)).toMatchObject({ ok: true });
+
+      const receipts = (
+        await db.query<{ device_id: string; receipt: Record<string, unknown> }>(
+          `SELECT device_id, receipt FROM device_update_receipts WHERE identity_id=$1`,
+          [tokens.identityId],
+        )
+      ).rows;
+      expect(receipts).toEqual([
+        {
+          device_id: payload.deviceId,
+          receipt: expect.objectContaining({
+            deviceId: payload.deviceId,
+            platform: 'android',
+            updateId: 'update-after-refresh',
+          }),
+        },
+      ]);
+      const families = (
+        await db.query<{ family_id: string; device_id: string }>(
+          `SELECT family_id::text, device_id FROM phone_update_devices WHERE identity_id=$1`,
+          [tokens.identityId],
+        )
+      ).rows;
+      expect(families).toEqual([
+        { family_id: expect.stringMatching(/^[0-9a-f-]{36}$/), device_id: payload.deviceId },
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => authServer.close(() => resolve()));
+    }
   });
 });

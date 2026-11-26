@@ -78,6 +78,14 @@ it('Reproduction SERVER-4K: workflow unavailable and already-ended refusals stay
     await expectRefusal('cancelWorkflowRun', { ...ended, reason: 'Again' }, 'this workflow run has already ended');
     await expectRefusal('assignWorkflowRole', { ...ended, role: 'worker', targetAgentId: agent }, 'this workflow run has already ended');
 
+    // Reproduction BEELINE-SERVER-5Y: invalid task link returns 400 without Sentry; Beeline links succeed.
+    expect((await post('updateWorkItem', { ...turn, targetRoomId: room, id: 'task-links', title: 'Link check' })).status).toBe(200);
+    await expectRefusal('attachToWorkItem', { ...turn, targetRoomId: room, id: 'task-links', attachment: { kind: 'link', name: 'Bad', url: 'not a link' } }, 'invalid attachment link');
+    expect((await post('attachToWorkItem', { ...turn, targetRoomId: room, id: 'task-links', attachment: { kind: 'link', name: 'Msg', url: `#beeline/beeline/${'a'.repeat(64)}` } })).status).toBe(200);
+    expect((await post('attachToWorkItem', { ...turn, targetRoomId: room, id: 'task-links', attachment: { kind: 'link', name: 'Token', url: '¶owner-1' } })).status).toBe(200);
+    expect((await post('attachToWorkItem', { ...turn, targetRoomId: room, id: 'task-links', attachment: { kind: 'link', name: 'Thread', url: '↳fix-thread' } })).status).toBe(200);
+    expect(captureException).not.toHaveBeenCalled();
+
     const fault = new Error('Unexpected workflow fault');
     vi.mocked(captureException).mockClear();
     vi.spyOn(daemon, 'execute').mockRejectedValueOnce(fault);

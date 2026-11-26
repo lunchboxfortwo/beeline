@@ -54,7 +54,7 @@ it.each(['message', 'reply'] as const)('renders an addressed %s with the recorde
   act(() => tree.unmount());
 });
 
-it('folds agent messages and stops in a row into one PillRow pill, in send order, and a system notice ends it', () => {
+it('folds agent messages, stops and system notices in a row into one PillRow pill, in send order, and a human message ends it', () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const resolve = (id: string, name: string, kind?: 'agent' | 'human') => ({ kind: kind ?? 'agent', seed: id, name });
   const base = (id: string, fields: Partial<ChatDisplayMessage>): ChatDisplayMessage =>
@@ -68,16 +68,18 @@ it('folds agent messages and stops in a row into one PillRow pill, in send order
     stop('s2', 'owner', 'person', 'ruby'),
     say('m3', 'ruby', 'jelly'), say('m4', 'jelly', 'ruby'),
     base('joined', { isSystemNotice: true, text: 'Nerd joined' }),
+    base('human', { pubkey: 'owner', text: 'Hold on' }),
     say('m5', 'ruby', 'nerd'),
   ]);
   expect(rows.map(row => [row.id, row.pillRun?.map(entry => entry.id) ?? null])).toEqual([
-    ['m1', ['m1', 's1', 'm2', 's2', 'm3', 'm4']], ['joined', null], ['m5', null]]);
+    ['m1', ['m1', 's1', 'm2', 's2', 'm3', 'm4', 'joined']], ['human', null], ['m5', null]]);
   const items = pillItems(rows[0]!.pillRun!, resolve, {});
   expect(items.map(item => [item.id, item.system, item.run?.map(entry => entry.id) ?? null])).toEqual([
-    ['m1', false, ['m1', 's1', 'm2', 's2', 'm3', 'm4']]]);
+    ['m1', false, ['m1', 's1', 'm2', 's2', 'm3', 'm4', 'joined']]]);
   const entries = items[0]!.run!;
   expect(entries[1]).toMatchObject({ stop: true, from: { seed: 'ruby' }, to: { seed: 'claude' } });
   expect(entries[3]).toMatchObject({ stop: true, from: { kind: 'human', seed: 'owner' }, to: { seed: 'ruby' } });
+  expect(entries[6]).toMatchObject({ system: true, from: { kind: 'system', name: 'Beeline' } });
   // Every opened pill reads as a run row: the heading names the recipient, so the body drops the @mention and reads quieter.
   expect(entries[0]!.body).toMatchObject({ props: { markdown: 'm1', color: 'secondary' } });
   expect(pillItems([say('m5', 'ruby', 'nerd')], resolve, {})[0]!.body).toMatchObject({ props: { markdown: 'm5', color: 'secondary' } });
@@ -457,5 +459,41 @@ it('renders one phone pill for an anchored thread opening followed by a PR openi
     { id: marker.id, event: { source: 'beeline', mark: 'thread' } },
     { id: opened.id, event: { source: 'github', mark: 'opened' } },
   ]);
+  act(() => tree.unmount());
+});
+
+it.each([false, true])('stacks consecutive membership system notices into one pill and opens both in order (desktop=%s)', desktop => {
+  const removed = display(10, {
+    presentation: 'system',
+    systemTranscript: notice,
+    text: '@lunchboxfortwo removed @emberus',
+  });
+  const joined = display(11, {
+    presentation: 'system',
+    systemTranscript: notice,
+    text: '@crayon joined · invited by @lunchboxfortwo',
+  });
+  const folded = foldTranscriptRows([removed, joined], null);
+  expect(folded.rows).toHaveLength(1);
+  expect(folded.rows[0]!.foldedIds).toEqual([removed.id, joined.id]);
+  expect(folded.hostIds.get(removed.id)).toBe(removed.id);
+  expect(folded.hostIds.get(joined.id)).toBe(removed.id);
+  let tree: any;
+  act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={desktop} />); });
+  const pills = tree.root.findAllByType(PillRow);
+  expect(pills).toHaveLength(1);
+  const [item] = pills[0].props.items;
+  expect(item).toMatchObject({ id: removed.id, system: true, from: { kind: 'system', name: 'Beeline' } });
+  expect(item.run.map((entry: { id: string }) => entry.id)).toEqual([removed.id, joined.id]);
+  expect(runCountLabel(item.run)).toBe('2 messages');
+  expect(tree.root.findAll((node: any) => typeof node.type === 'string' && node.props.testID === `system-line-${removed.id}`)).toHaveLength(0);
+  act(() => pills[0].findByType('Button').props.onPress());
+  const lines = tree.root.findAll((node: any) => typeof node.type === 'string' && String(node.props.testID).startsWith('system-line-'));
+  expect(lines.map((node: any) => [node.props.testID, node.props.children])).toEqual([
+    [`system-line-${removed.id}`, '@lunchboxfortwo removed @emberus'],
+    [`system-line-${joined.id}`, '@crayon joined · invited by @lunchboxfortwo'],
+  ]);
+  act(() => pills[0].findByType('Button').props.onPress());
+  expect(tree.root.findAll((node: any) => typeof node.type === 'string' && String(node.props.testID).startsWith('system-line-'))).toHaveLength(0);
   act(() => tree.unmount());
 });

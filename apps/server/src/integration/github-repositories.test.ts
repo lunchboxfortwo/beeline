@@ -494,7 +494,7 @@ const fixture = monolithFixture();
     expect(fixture.processWebhook).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps database-backed ownership exclusive across separate server instances after a missed renewal and recovers after the owner exits', async () => {
+  it('keeps database-backed ownership exclusive across separate server instances across missed, stalled, and abandoned renewals', async () => {
     const payload = { action: 'opened' };
     const server2Webhook = vi.fn(async () => undefined);
     const server2 = createBeelineServer({
@@ -539,12 +539,26 @@ const fixture = monolithFixture();
     const originalQuery = fixture.database.query.bind(fixture.database);
     let failFirstRenewal = true;
     let renewalAttempts = 0;
+    let holdRenewalDelivery: string | undefined;
+    let releaseHeldRenewal: (() => void) | undefined;
+    let heldRenewalPromise: Promise<void> | undefined;
+    let heldRenewalStarted: (() => void) | undefined;
+    const heldRenewalEntered = new Promise<void>((resolve) => { heldRenewalStarted = resolve; });
     const querySpy = vi.spyOn(fixture.database, 'query').mockImplementation((sql, values, preparedName) => {
       if (
         typeof sql === 'string' &&
         sql.includes('UPDATE github_webhook_deliveries') &&
         sql.includes("interval '2 minutes'")
       ) {
+        if (holdRenewalDelivery && values?.[0] === holdRenewalDelivery) {
+          holdRenewalDelivery = undefined;
+          heldRenewalStarted?.();
+          const gated = new Promise<void>((resolve) => { releaseHeldRenewal = resolve; }).then(() =>
+            originalQuery(sql, values, preparedName),
+          );
+          heldRenewalPromise = gated.then(() => undefined);
+          return gated;
+        }
         renewalAttempts++;
         if (failFirstRenewal) {
           failFirstRenewal = false;
@@ -606,6 +620,81 @@ const fixture = monolithFixture();
         ).rows,
       ).toEqual([{ claim_expires_at: null }]);
 
+      // Stalled renewal held past lease expiry: server1 must abort and stop its handler before
+      // the 2-minute DB lease can expire, so server2 never runs concurrently with server1.
+      holdRenewalDelivery = 'stalled-renewal-delivery';
+      let stalledEntered!: () => void;
+      const stalledReady = new Promise<void>((resolve) => { stalledEntered = resolve; });
+      const stalledClaimStart = Date.now();
+      let server1Running = false;
+      let server1StoppedAt: number | undefined;
+      let server2SawServer1Running = false;
+      fixture.processWebhook.mockImplementationOnce(async (_event, _payload, _deliveryId, signal?: AbortSignal) => {
+        server1Running = true;
+        stalledEntered();
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              server1Running = false;
+              server1StoppedAt = Date.now();
+              reject(signal.reason ?? new Error('aborted'));
+            },
+            { once: true },
+          );
+        });
+      });
+      server2Webhook.mockImplementationOnce(async () => {
+        server2SawServer1Running = server1Running;
+      });
+
+      const stalledFirstPromise = sendTo(fixture.origin, 'stalled-renewal-delivery');
+      await stalledReady;
+      expect(server1Running).toBe(true);
+
+      // Trigger the renewal at 30s and hold it open past the 2-minute lease expiry.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await heldRenewalEntered;
+      expect(server1Running).toBe(true);
+
+      // While the lease is still well before expiry, server2 must still reject redelivery as duplicate.
+      await vi.advanceTimersByTimeAsync(30_000);
+      const whileStalledBeforeExpiry = await sendTo(server2Origin, 'stalled-renewal-delivery');
+      expect(whileStalledBeforeExpiry.status).toBe(200);
+      expect(await whileStalledBeforeExpiry.json()).toEqual({ accepted: false, duplicate: true });
+      expect(server1Running).toBe(true);
+
+      // Advance past the pre-expiry guard (110s) and past the 2-minute lease expiry (125s) while
+      // the renewal query is still hung. Server1 must abort its handler before 120s and fail cleanly.
+      await vi.advanceTimersByTimeAsync(65_000);
+      const stalledFirst = await stalledFirstPromise;
+      expect(stalledFirst.status).toBe(500);
+      expect(server1Running).toBe(false);
+      expect(server1StoppedAt).toBeDefined();
+      expect(server1StoppedAt!).toBeLessThan(stalledClaimStart + 120_000);
+
+      // Server2 can now take over with zero overlap against server1.
+      const server2Takeover = await sendTo(server2Origin, 'stalled-renewal-delivery');
+      expect(server2Takeover.status).toBe(202);
+      expect(await server2Takeover.json()).toEqual({ accepted: true, duplicate: false });
+      expect(server2SawServer1Running).toBe(false);
+      expect(server2Webhook).toHaveBeenCalledTimes(1);
+
+      // Releasing the hung renewal query after takeover must not overwrite server2's completed delivery.
+      releaseHeldRenewal?.();
+      await heldRenewalPromise;
+      expect(
+        (
+          await originalQuery<{ claim_expires_at: string | null }>(
+            `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+            ['stalled-renewal-delivery'],
+          )
+        ).rows,
+      ).toEqual([{ claim_expires_at: null }]);
+      const afterTakeoverDuplicate = await sendTo(server2Origin, 'stalled-renewal-delivery');
+      expect(afterTakeoverDuplicate.status).toBe(200);
+      expect(await afterTakeoverDuplicate.json()).toEqual({ accepted: false, duplicate: true });
+
       // Recovery after the owning server exits: an expired unfinished claim is reclaimed by server2.
       await originalQuery(
         `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
@@ -615,7 +704,7 @@ const fixture = monolithFixture();
       const recovered = await sendTo(server2Origin, 'owner-exited-delivery');
       expect(recovered.status).toBe(202);
       expect(await recovered.json()).toEqual({ accepted: true, duplicate: false });
-      expect(server2Webhook).toHaveBeenCalledTimes(1);
+      expect(server2Webhook).toHaveBeenCalledTimes(2);
       expect(
         (
           await originalQuery<{ claim_expires_at: string | null }>(
@@ -625,6 +714,7 @@ const fixture = monolithFixture();
         ).rows,
       ).toEqual([{ claim_expires_at: null }]);
     } finally {
+      releaseHeldRenewal?.();
       querySpy.mockRestore();
       vi.useRealTimers();
       await new Promise<void>((resolve) => server2.close(() => resolve()));

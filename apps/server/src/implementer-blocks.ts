@@ -56,6 +56,35 @@ export async function closeBlock(db:SqlDatabase,actor:string,id:string,reason:st
   return true;
 }
 
+/** Close an agent's prior open blocks in a thread when a new block replaces them. */
+export async function supersedeOpenBlocks(
+  db: SqlDatabase,
+  cornerId: string,
+  agent: string,
+  replacementId: string,
+  openIds: readonly string[],
+): Promise<string[]> {
+  const replaced = openIds.filter((id) => id !== replacementId);
+  if (!replaced.length) return [];
+  const note = `superseded by ${replacementId}`;
+  await db.query(
+    `UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2),ask_closed_by=COALESCE(ask_closed_by,$3)
+     WHERE id=ANY($1::text[]) AND ask_closed_reason IS NULL`,
+    [replaced, note, agent],
+  );
+  await db.query(
+    `UPDATE room_choices SET status='closed' WHERE message_id=ANY($1::text[]) AND mode='question' AND status='open'`,
+    [replaced],
+  );
+  await db.query(
+    `UPDATE needs_you_marks SET cleared_at=now(),cleared_reason='superseded'
+     WHERE message_id=ANY($1::text[]) AND cleared_at IS NULL`,
+    [replaced],
+  );
+  await refreshCornerAttention(db, cornerId);
+  return replaced;
+}
+
 /** A plain answer is a command for the block owner, even without a typed tag. */
 export async function wakeBlockAnswer(db:SqlDatabase,replyId:string,room:string,author:string):Promise<CommandRow|undefined> {
   const block=(await db.query<{worker:string;place:string;text:string}>(`

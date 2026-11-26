@@ -7,6 +7,7 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
 import { createAgentCommand,currentCornerCommandTargetSql,hasPendingCornerReview,type CommandRow } from './agent-command.js';
+import { activeClosingCornerCommands } from './agent-invocation.js';
 import { reportAgentAttention } from './commander.js';
 import { releaseArchivedCornerHolds } from './corner-holds.js';
 import { cornerIdleSql,type CornerIdleRow } from './corner-idle.js';
@@ -150,15 +151,34 @@ export async function setCornerReviewerFact(
  * Take command locks before the room's archival UPDATE/FOR UPDATE lock:
  * command output already holds its command when dispatch locks rooms FOR SHARE.
  */
-export async function cancelCornerAgentCommands(database: SqlDatabase, cornerId: string): Promise<void> {
+export async function cancelCornerAgentCommands(
+  database: SqlDatabase,
+  cornerId: string,
+  preserveTurn?: { agentId: string; requestId?: string },
+): Promise<void> {
   await lockCornerArchivalAuthority(database);
+  // Only the active invocation owned by an agent closing this thread mid-turn
+  // may finish publishing its closing answer and queued attachments.
+  const preserved = preserveTurn ? await activeClosingCornerCommands(database, cornerId, preserveTurn) : [];
+  const preservedIds = preserved.map(row => row.id);
+  const preservedRequests = [...new Set(preserved.map(row => row.turn_request_id))];
   // Cancelling is the stop: a helper running one of these items sees it
   // leave its queue and cancels that session's turn.
   await database.query(
-    `SELECT (terminal.ended).* FROM (SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','corner_close',NULL) ended FROM agent_commands WHERE room_id=$1 AND state='pending' ORDER BY created_at DESC,id DESC) terminal`,
-    [cornerId],
+    `SELECT (terminal.ended).* FROM (
+       SELECT beeline_finish_agent_command(agent_commands.id,'cancelled','corner_close',NULL) ended
+       FROM agent_commands
+       WHERE room_id=$1 AND state='pending' AND NOT (id=ANY($2::text[]))
+       ORDER BY created_at DESC,id DESC
+     ) terminal`,
+    [cornerId, preservedIds],
   );
-  await database.query(`DELETE FROM agent_pending_attachments WHERE room_id=$1`, [cornerId]);
+  await database.query(
+    `DELETE FROM agent_pending_attachments
+     WHERE room_id=$1
+       AND NOT ($2::text IS NOT NULL AND agent_id=$2 AND request_id=ANY($3::text[]))`,
+    [cornerId, preserved.length ? preserveTurn!.agentId : null, preservedRequests],
+  );
 }
 
 
@@ -181,13 +201,17 @@ export async function archiveCornerState(database: SqlDatabase, cornerId: string
 }
 
 
-export async function archiveCorner(database: SqlDatabase, cornerId: string): Promise<boolean> {
+export async function archiveCorner(
+  database: SqlDatabase,
+  cornerId: string,
+  preserveTurn?: { agentId: string; requestId?: string },
+): Promise<boolean> {
   return database.transaction(async database => {
     await lockCornerLifecycle(database, cornerId);
     await lockCornerArchivalAuthority(database);
     if (!(await database.query(`SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL FOR KEY SHARE`, [cornerId])).rowCount)
       throw new Error('thread not found');
-    await cancelCornerAgentCommands(database, cornerId);
+    await cancelCornerAgentCommands(database, cornerId, preserveTurn);
     // Match command output: command locks precede the Room archival write lock.
     const changed = await database.query(
       `UPDATE rooms SET archived_at=now(),updated_at=now() WHERE id=$1 AND archived_at IS NULL`, [cornerId]);
@@ -459,7 +483,7 @@ async function writeCornerAdvance(
     if (plan.suppression) return { state: prior.state, accepted: false };
     const archived = plan.state.state === 'archived' && !corner.archived &&
       (event.kind === 'closed' || event.kind === 'merged' || corner.lifecycle.outcome === 'landed' || corner.lifecycle.pr?.mergedAt)
-      ? await archiveCorner(db, cornerId) : false;
+      ? await archiveCorner(db, cornerId, event.kind === 'closed' ? event.preserveTurn : undefined) : false;
     if (archived) await settleThreadWorkItems(db, cornerId, event.kind === 'merged' ||
       corner.lifecycle.outcome === 'landed' || Boolean(corner.lifecycle.pr?.mergedAt));
     if (event.kind === 'closed') await db.query(
@@ -832,41 +856,25 @@ export async function queueReviewerCommand(
     };
   }
 }
-export { CORNER_LIFECYCLE_SLUG } from './corner-lifecycle-values.js';
-
-export { lockCornerLifecycle } from './corner-lifecycle-review-state.js';
-
-export type { CornerMachine } from './corner-machine.js';
-
-export type { CornerMachineFacts } from './corner-machine.js';
-
-export { transitionCorner } from './corner-machine.js';
-
-export { planCornerCheckObservation } from './corner-machine.js';
-
-export { checksSettled } from './corner-machine.js';
-
-export { actionsJobId } from './corner-machine.js';
-
-export type { CornerEvent } from './corner-lifecycle-values.js';
-
-export { CORNER_MACHINE_SCHEMA } from './corner-lifecycle-values.js';
-
-
-
-export { lockCornerArchivalAuthority } from './corner-lifecycle-review-state.js';
-
-
-
-export { cornerReviewWokenSql, cornerReviewWakeCauseSql } from './corner-lifecycle-review-state.js';
-
-export { cornerMergeability } from './corner-lifecycle-review-state.js';
-
-export { cornerMergeGate } from './corner-lifecycle-review-state.js';
-
-export { confirmCornerMergeAuthority } from './corner-lifecycle-review-state.js';
-
-export { deleteStoredCornerWorkflows } from './corner-lifecycle-review-state.js';
+export { CORNER_LIFECYCLE_SLUG, CORNER_MACHINE_SCHEMA, type CornerEvent } from './corner-lifecycle-values.js';
+export {
+  lockCornerLifecycle,
+  lockCornerArchivalAuthority,
+  cornerReviewWokenSql,
+  cornerReviewWakeCauseSql,
+  cornerMergeability,
+  cornerMergeGate,
+  confirmCornerMergeAuthority,
+  deleteStoredCornerWorkflows,
+} from './corner-lifecycle-review-state.js';
+export {
+  type CornerMachine,
+  type CornerMachineFacts,
+  transitionCorner,
+  planCornerCheckObservation,
+  checksSettled,
+  actionsJobId,
+} from './corner-machine.js';
 
 /** The one router for GitHub/helper facts. Callers retain their existing lifecycle
  * locks and emit observations; this owner decides the guarded cache transition.

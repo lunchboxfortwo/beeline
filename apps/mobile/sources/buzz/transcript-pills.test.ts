@@ -30,16 +30,54 @@ describe('transcript pills', () => {
     expect(isSystemLine(row('m', { pubkey: 'dan' }))).toBe(false);
   });
 
-  it('keeps a plain system notice in its own pill between agent runs', () => {
-    const offline = row('host', { isSystemNotice: true, text: '@grunt joined',
+  it('stacks consecutive plain system notices into one pillRun and preserves read boundaries', () => {
+    const removed = row('removed', {
+      isSystemNotice: true,
+      timestamp: 1_800_000_000,
+      text: '@lunchboxfortwo removed @emberus',
+      systemEvent: {
+        subject: { kind: 'person', id: 'lunchboxfortwo', name: '@lunchboxfortwo' },
+        verb: 'removed',
+        object: { id: 'emberus', text: '@emberus' },
+      },
+    });
+    const joined = row('joined', {
+      isSystemNotice: true,
+      timestamp: 1_800_000_060,
+      text: '@crayon joined · invited by @lunchboxfortwo',
+      systemEvent: {
+        subject: { kind: 'agent', id: 'crayon', name: '@crayon' },
+        verb: 'joined',
+        consequence: 'invited by @lunchboxfortwo',
+      },
+    });
+    const rows = foldPillRuns([removed, joined]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe('removed');
+    expect(rows[0]!.timestamp).toBe(1_800_000_060);
+    expect(rows[0]!.pillRun?.map(message => message.id)).toEqual(['removed', 'joined']);
+    expect(rows[0]!.foldedIds).toEqual(['removed', 'joined']);
+    expect(rows[0]!.foldedReadBoundaries).toEqual([
+      { id: 'removed', orderAtMs: 1_800_000_000_000 },
+      { id: 'joined', orderAtMs: 1_800_000_060_000 },
+    ]);
+    // A lone system notice stays unstacked; an anchored corner marker still breaks runs.
+    expect(foldPillRuns([removed])[0]!.pillRun).toBeUndefined();
+    const anchored = row('anchored', { isSystemNotice: true, hasAnchoredCornerMarkers: true });
+    expect(foldPillRuns([removed, anchored, joined]).map(message => [message.id, message.pillRun?.map(entry => entry.id) ?? null]))
+      .toEqual([['removed', null], ['anchored', null], ['joined', null]]);
+  });
+
+  it('folds plain system notices with adjacent agent pill runs', () => {
+    const joined = row('host', { isSystemNotice: true, text: '@grunt joined',
       systemEvent: { subject: { kind: 'agent', id: 'grunt', name: 'Grunt' }, verb: 'joined' } });
-    const rows = foldPillRuns([say('m1'), say('m2'), offline, say('m3')]);
-    expect(rows.map(message => message.id)).toEqual(['m1', 'host', 'm3']);
-    expect(rows[0]!.pillRun?.map(message => message.id)).toEqual(['m1', 'm2']);
-    expect(rows[1]!.pillRun).toBeUndefined();
-    expect(isPillMessage(rows[1]!)).toBe(true);
+    const rows = foldPillRuns([say('m1'), say('m2'), joined, say('m3')]);
+    expect(rows.map(message => message.id)).toEqual(['m1']);
+    expect(rows[0]!.pillRun?.map(message => message.id)).toEqual(['m1', 'm2', 'host', 'm3']);
+    expect(rows[0]!.foldedIds).toEqual(['m1', 'm2', 'host', 'm3']);
+    expect(rows[0]!.foldedReadBoundaries?.map(boundary => boundary.id)).toEqual(['m1', 'm2', 'host', 'm3']);
     // A lone agent message stays a single row with no folded run.
-    expect(rows[2]!.pillRun).toBeUndefined();
+    expect(foldPillRuns([say('m3')])[0]!.pillRun).toBeUndefined();
   });
 
   it.each(['human', undefined] as const)('UAR-1 keeps %s recipients readable and breaks pill runs', (kind) => {
@@ -119,9 +157,11 @@ describe('transcript pills', () => {
     expect(runIds(only)).toEqual([['e1', null]]);
     expect(isPillMessage(only[0]!)).toBe(true);
     expect(isGitHubEventRun(only[0]!)).toBe(true);
-    // A system line still ends the run.
+    // Plain system notices fold into the surrounding pill run; a human message still ends it.
     expect(runIds(fold([say('m1'), merged('e1', 1), system('joined'), say('m2')])))
-      .toEqual([['m1', ['m1', 'e1']], ['joined', null], ['m2', null]]);
+      .toEqual([['m1', ['m1', 'e1', 'joined', 'm2']]]);
+    expect(runIds(fold([say('m1'), merged('e1', 1), row('human', { pubkey: 'dan' }), say('m2')])))
+      .toEqual([['m1', ['m1', 'e1']], ['human', null], ['m2', null]]);
   });
 
   it('keeps payment runs as their own rows, apart from GitHub events and agent pills', () => {

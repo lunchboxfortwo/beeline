@@ -58,6 +58,18 @@ export async function readAgentQueueRows(db:SqlDatabase,agentId:string,options: 
        SELECT item.id,'cancelled','stale_review_head',NULL FROM queued item
        WHERE ${staleReviewWakeSql('item')}
        UNION ALL
+       SELECT item.id,'cancelled','corner_close',NULL FROM queued item
+       JOIN rooms room ON room.id=item.room_id AND room.parent_id IS NOT NULL AND room.archived_at IS NOT NULL
+       WHERE NOT EXISTS(
+         SELECT 1 FROM agent_turns turn
+         JOIN agent_commands first ON first.agent_id=item.agent_id AND first.room_id=item.room_id
+           AND first.turn_request_id=turn.request_id
+         JOIN agent_invocations inv ON inv.command_id=first.id AND inv.invocation_id=turn.invocation_id
+         WHERE turn.agent_id=item.agent_id AND turn.room_id=item.room_id
+           AND turn.status='working' AND NOT inv.ended
+           AND (item.id=first.id OR item.id=ANY(inv.batched_command_ids))
+       )
+       UNION ALL
        SELECT item.id,'complete',NULL,report.id FROM queued item
        JOIN LATERAL (
          SELECT message.id FROM messages message

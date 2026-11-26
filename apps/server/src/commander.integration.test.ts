@@ -399,7 +399,14 @@ it('an ordered corner turn keeps live work and progress in the corner', async ()
   await watched.execute('postRoomMessage', { ...authority(turn), text: 'private final output' }, WORKER);
   await watched.execute('postAgentTurnReceipt', { ...authority(turn), agentId: WORKER, status: 'complete', completionKind: 'no-reply' }, WORKER);
   expect((await rootFixture.db.query(`SELECT room_id FROM messages WHERE text='private final output'`)).rows).toEqual([{ room_id: opened.cornerId }]);
-  expect((await commands(DM, RUBY)).filter(c => c.reason === 'reply')).toEqual([]);
+  expect((await commands(DM, RUBY)).filter(c => c.reason === 'reply')).toEqual([
+    expect.objectContaining({
+      reason: 'reply',
+      roomId: DM,
+      from: { agent: WORKER, place: opened.cornerId },
+      source: expect.objectContaining({ body: 'private final output' }),
+    }),
+  ]);
   expect((await rootFixture.db.query(`SELECT id FROM messages`)).rows).toHaveLength(before + 2);
   expect((await commands(opened.cornerId, WORKER))).toEqual([]);
 });
