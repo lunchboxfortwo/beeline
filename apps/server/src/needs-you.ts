@@ -22,14 +22,15 @@ import type { SqlDatabase } from './database.js';
 /**
  * The "Needs you" tray, owned here and nowhere else.
  *
- * Needs you holds an exact personal tag from another person, a question-builder
- * ask assigned to them (`work_questions`), a blocked or needs-decision report
- * addressed to them as
- * commander (`card.reportToId`), and a pending approval card they can decide
- * (`approvalBranches`), shown as text (`NeedsYouApprovalView`). Agent mentions
- * and untargeted wording never qualify.
+ * Needs you holds a question-builder ask assigned to the viewer
+ * (`work_questions` or `room_choices` with `mode='question'`), a blocked or
+ * needs-decision report addressed to them as commander (`card.reportToId`),
+ * and a pending approval card they can decide (`approvalBranches`), shown as
+ * text (`NeedsYouApprovalView`). Ordinary chat messages — including
+ * human-to-human `@mentions`, `@channel`, agent mentions, and untargeted
+ * wording — never qualify.
  *
- * Open report/person-tag records are written with the message; reads join
+ * Open report and question records are written with the message; reads join
  * only the viewer’s uncleared marks. A record leaves, keeping its
  * `cleared_reason`, only on an event, in that event's transaction: its source
  * thread closes, the same agent sends that person a newer report from that

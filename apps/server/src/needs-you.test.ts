@@ -123,18 +123,20 @@ describe('PhoneService Needs-you tray', () => {
     expect((await phone.readWorkspaces(VIEWER)).workspaces[0]?.attention).toBe(true);
   });
 
-  it('holds person tags and addressed reports, never plain agent mentions', async () => {
-    const personTag = await post(ROOM, PEER, '@ada can you confirm the review note?', 30);
+  it('holds addressed reports, never plain human or agent mentions', async () => {
+    await post(ROOM, PEER, '@ada can you confirm the review note?', 30);
+    await post(ROOM, PEER, '@ada @hoots can you look at this?', 29);
+    await post(ROOM, PEER, '@channel what do you think?', 28);
     await post(CORNER, AGENT, 'The release check needs a grant — @ada please approve it.', 25);
-    const taggedReport = await post(ROOM, PEER, 'blocked: an untargeted report @ada', 24);
+    await post(ROOM, PEER, 'blocked: an untargeted report @ada', 24);
     const question = await report(ROOM, PEER, 'Can you confirm the review note?', 22);
     const blocked = await report(CORNER, AGENT, 'The release check needs a grant.', 20);
     await report(OTHER_ROOM, PEER, 'a Room the reader cannot see.', 5);
 
     const { items } = await read();
     // Oldest first.
-    expect(items.map((item) => item.messageId)).toEqual([personTag, taggedReport, question, blocked]);
-    expect(items[3]).toMatchObject({
+    expect(items.map((item) => item.messageId)).toEqual([question, blocked]);
+    expect(items[1]).toMatchObject({
       roomId: CORNER,
       roomName: 'release-ios-signing',
       roomKind: 'corner',
@@ -142,7 +144,7 @@ describe('PhoneService Needs-you tray', () => {
       text: 'The release check needs a grant.',
       author: { name: 'Hoots' },
     });
-    expect(items[2]).toMatchObject({
+    expect(items[0]).toMatchObject({
       roomKind: 'room',
       roomName: 'Launch room',
       text: 'Can you confirm the review note?',

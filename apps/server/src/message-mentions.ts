@@ -244,7 +244,7 @@ async function resolveChannelMentionMembers(
  */
 function handleWrittenIn(textExpr: string, handleExpr: string, sanitized = false): string {
   return `${sanitized ? textExpr : withoutForwardCaptionSql(textExpr)} ~ ('(^|[^[:alnum:]_.-])@' ||
-    regexp_replace(btrim(ltrim(${handleExpr},'@')),'([.-])','\\&','g') ||
+    regexp_replace(btrim(ltrim(${handleExpr},'@')),'([.-])','\\\\\\&','g') ||
     '[.-]*($|[^[:alnum:]_.-])')`;
 }
 
