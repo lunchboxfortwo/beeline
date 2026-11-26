@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readAgentUsage, usageSummary } from '@beeline/api-contract/daemon';
+import { delimiter } from 'node:path';
 import { parseAcpUsage } from './acp.js';
 import { HarnessQuotaReader, invalidateQuotaReads, quotaAxiArgs, quotaAxiLaunch, quotaAxiProvider, quotaAxiUsage } from './harness-quota.js';
-import { QUOTA_AXI_CLAUDE_REPORT, QUOTA_AXI_CODEX_CURSOR_REPORT } from '../../../packages/test-helpers/helpers/helper.js';
+import { QUOTA_AXI_AGY_REPORT, QUOTA_AXI_CLAUDE_REPORT, QUOTA_AXI_CODEX_CURSOR_REPORT } from '../../../packages/test-helpers/helpers/helper.js';
 
 // Claude, Codex and Grok read the machine proxy's current login.
 vi.mock('./cliproxy.js', async (original) => {
@@ -102,6 +104,8 @@ describe('quota-axi plan usage (Reproduction R2)', () => {
     expect(quotaAxiProvider('grok', false)).toBe('grok');
     expect(quotaAxiProvider('opencode', false)).toBe('opencode-go');
     expect(quotaAxiProvider('opencode', true)).toBeUndefined();
+    expect(quotaAxiProvider('antigravity', false)).toBe('agy');
+    expect(quotaAxiProvider('antigravity', true)).toBeUndefined();
     expect(quotaAxiProvider('claude', false)).toBe('claude');
     expect(quotaAxiProvider('claude', true)).toBeUndefined();
     expect(quotaAxiProvider('pi', false)).toBeUndefined();
@@ -407,4 +411,138 @@ it('discards an older in-flight quota read after provider invalidation', async (
   expect(post.mock.calls[0]![0]).toMatchObject({ windows: [{ utilization: 0.1 }] });
   await reader.publish('cursor', {});
   expect(run).toHaveBeenCalledTimes(2);
+});
+
+describe('Antigravity quota-axi reporting (Reproduction R-AGY-USAGE)', () => {
+  const agyNow = Date.parse(QUOTA_AXI_AGY_REPORT.generatedAt) / 1000;
+  const agyEntry = QUOTA_AXI_AGY_REPORT.providers[0]!;
+
+  it('treats a live agy report whose only past resets are the 1970 epoch sentinel as fresh', () => {
+    const usage = quotaAxiUsage(QUOTA_AXI_AGY_REPORT, 'agy', agyNow)!;
+    expect(usage.read).toEqual({ status: 'fresh', at: agyNow });
+    expect(usage.windows).toEqual([
+      {
+        rateLimitType: 'gemini_h',
+        status: 'allowed',
+        utilization: 0.88,
+        resetsAt: Date.parse('2026-11-26T18:48:36.000Z') / 1000,
+        updatedAt: agyNow,
+        label: 'Gemini 5-hour',
+      },
+      {
+        rateLimitType: 'gemini_weekly',
+        status: 'allowed',
+        utilization: 0.23,
+        resetsAt: Date.parse('2026-12-03T13:48:36.000Z') / 1000,
+        updatedAt: agyNow,
+        label: 'Gemini weekly',
+      },
+      {
+        rateLimitType: 'claude_gpt_h',
+        status: 'allowed',
+        utilization: 0,
+        updatedAt: agyNow,
+        label: 'Claude/GPT 5-hour',
+      },
+      {
+        rateLimitType: 'claude_gpt_weekly',
+        status: 'allowed',
+        utilization: 0,
+        updatedAt: agyNow,
+        label: 'Claude/GPT weekly',
+      },
+    ]);
+    const validated = readAgentUsage({
+      ...usage,
+      account: { provider: 'agy', key: `local:${'a'.repeat(32)}` },
+    });
+    expect(validated).toBeDefined();
+    const summary = usageSummary(validated, agyNow);
+    expect(summary).toContain('gemini 5-hour 88% (resets ');
+    expect(summary).toContain('gemini weekly 23% (resets ');
+    expect(summary).toContain('claude/gpt 5-hour 0%, claude/gpt weekly 0%');
+    expect(summary).not.toContain("couldn't read");
+    expect(summary).not.toContain('1970');
+  });
+
+  it('keeps genuinely stale agy reports stale (cache, real expired reset, error, or failed attempts)', () => {
+    const earlier = new Date((agyNow - 3600) * 1000).toISOString();
+
+    const cached = quotaAxiUsage({
+      ...QUOTA_AXI_AGY_REPORT,
+      providers: [{
+        ...agyEntry,
+        source: 'cache',
+        attempts: [{ source: 'cli', status: 'failed', error: 'timed out' }],
+        state: { status: 'stale', stale: true, refreshedAt: earlier, error: 'timed out', sourcesTried: ['cli', 'cache'] },
+      }],
+    }, 'agy', agyNow)!;
+    expect(cached.read).toEqual({ status: 'stale', at: agyNow, reason: 'timed out' });
+    expect(cached.updatedAt).toBe(agyNow - 3600);
+
+    const realExpired = quotaAxiUsage({
+      ...QUOTA_AXI_AGY_REPORT,
+      providers: [{
+        ...agyEntry,
+        windows: [
+          { ...agyEntry.windows[0]!, resetsAt: earlier },
+          ...agyEntry.windows.slice(1),
+        ],
+      }],
+    }, 'agy', agyNow)!;
+    expect(realExpired.read).toEqual({ status: 'stale', at: agyNow });
+
+    const withError = quotaAxiUsage({
+      ...QUOTA_AXI_AGY_REPORT,
+      providers: [{
+        ...agyEntry,
+        state: { ...agyEntry.state, error: 'upstream degraded' },
+      }],
+    }, 'agy', agyNow)!;
+    expect(withError.read).toEqual({ status: 'stale', at: agyNow, reason: 'upstream degraded' });
+
+    const noSuccessAttempt = quotaAxiUsage({
+      ...QUOTA_AXI_AGY_REPORT,
+      providers: [{
+        ...agyEntry,
+        attempts: [{ source: 'cli', status: 'failed', error: 'exit 1' }],
+      }],
+    }, 'agy', agyNow)!;
+    expect(noSuccessAttempt.read).toEqual({ status: 'stale', at: agyNow });
+
+    const noEpochSentinel = quotaAxiUsage({
+      ...QUOTA_AXI_AGY_REPORT,
+      providers: [{
+        ...agyEntry,
+        windows: agyEntry.windows.slice(0, 2),
+      }],
+    }, 'agy', agyNow)!;
+    expect(noEpochSentinel.read).toEqual({ status: 'stale', at: agyNow });
+  });
+
+  it('augments PATH for agy reads so quota-axi finds agy in non-interactive helper environments', async () => {
+    const posts: Array<import('@beeline/api-contract/daemon').AgentUsage> = [];
+    const run = vi.fn(async () => JSON.stringify(QUOTA_AXI_AGY_REPORT));
+    const reader = new HarnessQuotaReader({
+      agentId: 'crayon',
+      slots: new Map(),
+      run,
+      post: async (usage) => { posts.push(usage); },
+      now: () => agyNow * 1000,
+      launch: () => ({ command: 'node', args: ['q.mjs'] }),
+    });
+    const outcome = await reader.publish('agy', { HOME: '/home/operator', PATH: '/usr/bin:/bin' }, true);
+    expect(outcome).toEqual({ status: 'fresh' });
+    expect(run).toHaveBeenCalledWith(
+      { command: 'node', args: ['q.mjs', '--provider', 'agy', '--json', '--full', '--no-credential-refresh'] },
+      expect.objectContaining({ HOME: '/home/operator' }),
+    );
+    const passedPath = run.mock.calls[0]![1].PATH!.split(delimiter);
+    expect(passedPath.slice(0, 2)).toEqual(['/usr/bin', '/bin']);
+    expect(passedPath).toContain('/home/operator/.local/bin');
+    expect(posts[0]).toMatchObject({
+      read: { status: 'fresh', at: agyNow },
+      account: { provider: 'agy', key: expect.stringMatching(/^local:[0-9a-f]{32}$/) },
+    });
+  });
 });

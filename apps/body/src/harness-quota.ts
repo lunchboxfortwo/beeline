@@ -1,11 +1,12 @@
 /**
  * Plan quota for every harness quota-axi can read (Claude, Codex, Cursor,
- * Grok, OpenCode Go). After a turn the helper runs the pinned quota-axi CLI
- * and turns its report into the `AgentUsage` windows the owner's Profile
- * shows. Cursor and OpenCode Go read the agent's own environment. Claude,
- * Codex and Grok logins live in the machine's CLIProxyAPI: quota-axi reads a
- * private, access-token-only copy of the proxy's current login, which it
- * cannot refresh, so the proxy stays the only refresher.
+ * Grok, OpenCode Go, Antigravity). After a turn the helper runs the pinned
+ * quota-axi CLI and turns its report into the `AgentUsage` windows the owner's
+ * Profile shows. Cursor, OpenCode Go and Antigravity read the agent's own
+ * environment. Claude, Codex and Grok logins live in the machine's
+ * CLIProxyAPI: quota-axi reads a private, access-token-only copy of the
+ * proxy's current login, which it cannot refresh, so the proxy stays the only
+ * refresher.
  *
  * quota-axi never refreshes credentials here (`--no-credential-refresh`). It
  * prompts no keychain and spends no Claude inference, because neither
@@ -16,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir, hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import {
   usageReason,
   type AgentUsage,
@@ -24,7 +25,7 @@ import {
   type UsageRefreshOutcome,
   type UsageWindow,
 } from '@beeline/api-contract/daemon';
-import { agentBehavior, type AgentKind } from './agent-command.js';
+import { agentBehavior, augmentedSearchDirectories, type AgentKind } from './agent-command.js';
 import { writePrivateFileAtomically } from './atomic-private-file.js';
 import { cliProxyDir, machineCliProxy, type CliProxy, type ProxiedProvider } from './cliproxy.js';
 import { runOwned } from './wait.js';
@@ -57,6 +58,8 @@ export function quotaAxiProvider(
       return kind;
     case 'opencode':
       return 'opencode-go';
+    case 'antigravity':
+      return 'agy';
     default:
       return;
   }
@@ -81,8 +84,56 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/**
+ * quota-axi marks any `agy` report stale when any window has `resetsAt <= now`.
+ * Antigravity emits the Unix epoch (`1970-01-01T00:00:00.000Z`) for untouched
+ * quota buckets, so a live successful read with an unused bucket gets marked
+ * stale even though its numbers are current.
+ *
+ * Treat it as fresh only when the read came from a live successful attempt
+ * (never cache, no error/reason/auth/retryAfter) and every expired `resetsAt`
+ * is the epoch sentinel (`<= 0`).
+ */
+function isAgyEpochSentinelStale(
+  entry: Record<string, unknown>,
+  state: Record<string, unknown> | undefined,
+  report: Record<string, unknown> | undefined,
+  now: number,
+): boolean {
+  if (entry.provider !== 'agy' || state?.status !== 'stale') return false;
+  if (entry.source !== 'cli' && entry.source !== 'cli-rpc') return false;
+  if (
+    usageReason(state.error) ||
+    state.reason !== undefined ||
+    state.authStatus === 'unusable' ||
+    typeof state.retryAfter === 'string' ||
+    (Array.isArray(state.sourcesTried) && state.sourcesTried.includes('cache'))
+  )
+    return false;
+  const attempts = Array.isArray(entry.attempts) ? entry.attempts : [];
+  if (!attempts.some((attempt) => record(attempt)?.status === 'success')) return false;
+  const generatedAt =
+    typeof report?.generatedAt === 'string' ? Date.parse(report.generatedAt) : NaN;
+  const referenceMs = Number.isFinite(generatedAt) ? generatedAt : now * 1000;
+  const windows = Array.isArray(entry.windows) ? entry.windows : [];
+  let sawEpochSentinel = false;
+  for (const raw of windows) {
+    const resetsAt = record(raw)?.resetsAt;
+    if (typeof resetsAt !== 'string') continue;
+    const ms = Date.parse(resetsAt);
+    if (!Number.isFinite(ms)) continue;
+    if (ms <= 0) sawEpochSentinel = true;
+    else if (ms <= referenceMs) return false;
+  }
+  return sawEpochSentinel;
+}
+
 /** quota-axi's provider state as the read Beeline shows; unknown states count as failed. */
-function quotaAxiRead(state: Record<string, unknown> | undefined, at: number): UsageRead {
+function quotaAxiRead(
+  state: Record<string, unknown> | undefined,
+  at: number,
+  epochSentinelStale = false,
+): UsageRead {
   const status = state?.status;
   const reason = usageReason(state?.error);
   const retryAfter =
@@ -96,6 +147,7 @@ function quotaAxiRead(state: Record<string, unknown> | undefined, at: number): U
     return { status: 'signed_out', at };
   if (status === 'rate_limited' || Number.isFinite(retryAfter))
     return { status: 'rate_limited', at, ...(Number.isFinite(retryAfter) ? { retryAfter } : {}) };
+  if (epochSentinelStale) return { status: 'fresh', at };
   if (status === 'stale') return { status: 'stale', at, ...(reason ? { reason } : {}) };
   return { status: 'failed', at, reason: reason ?? usageReason(status) ?? 'no reading' };
 }
@@ -156,7 +208,7 @@ export function quotaAxiUsage(
     credits.remaining >= 0
       ? credits.remaining
       : undefined;
-  const read = quotaAxiRead(state, now);
+  const read = quotaAxiRead(state, now, isAgyEpochSentinelStale(entry, state, record(report), now));
   // A provider with nothing to show and nothing wrong is not reported.
   if (!windows.size && creditsLeft === undefined && read.status === 'fresh') return;
   const plan = typeof entry.plan === 'string' ? entry.plan.trim().slice(0, 40) : '';
@@ -426,6 +478,11 @@ export class HarnessQuotaReader {
         await mkdir(cliProxyDir(env.HOME || homedir()), { recursive: true, mode: 0o700 });
         home = await mkdtemp(join(cliProxyDir(env.HOME || homedir()), 'quota-'));
         runEnv = { ...env, ...(await proxiedQuotaHome(proxied, login, home)) };
+      } else if (provider === 'agy') {
+        // quota-axi invokes `agy` via PATH; helper services may omit user bin
+        // directories that Beeline's own harness resolver searches.
+        const searchDirs = augmentedSearchDirectories({ ...process.env, ...runEnv });
+        if (searchDirs.length) runEnv = { ...runEnv, PATH: searchDirs.join(delimiter) };
       }
       const launch = (this.options.launch ?? quotaAxiLaunch)();
       const stdout = await (this.options.run ?? runQuotaAxi)(
