@@ -28,7 +28,7 @@ async function answeredInThread(agentId: string, reason: string) {
 
 }
 
-it('a reviewer report wakes the implementer with its findings in the thread', async () => {
+it('a completed review wakes the implementer with its findings in the thread once', async () => {
   await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
   await lifecycle('passing');
   await github('passed a check', 'check-passed');
@@ -36,17 +36,21 @@ it('a reviewer report wakes the implementer with its findings in the thread', as
   expect(review).toMatchObject({ reason: 'corner_review_dispatch', returnRoomId: C });
   const findings = 'FAIL: [P1] Keep the table anchored when quiet defaults change.';
   const before = (await commands(A, C)).map(command => command.id);
-  const sent = await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:findings,transportRequestId:review!.id},B);
+  const postVerdict = () => rootFixture.daemon.execute('postRoomMessage', {
+    roomId: C, requestId: review!.turnRequestId, text: findings, harnessEnded: true,
+  }, B);
+  const sent = await postVerdict();
+  await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
   const replies = (await commands(A, C)).filter(command => !before.includes(command.id));
-  expect(replies).toEqual([expect.objectContaining({ roomId: C, agentId: A, reason: 'message',
-    source: expect.objectContaining({ body: findings,
-      route: { from: { agent: B, place: C }, to: { agent: A, place: C } } }) })]);
-  await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:findings,transportRequestId:review!.id},B);
+  expect(replies).toEqual([expect.objectContaining({ roomId: C, agentId: A, reason: 'corner_review_needed',
+    source: expect.objectContaining({ body: findings }) })]);
+  expect(await postVerdict()).toMatchObject({ id: sent.id });
+  await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
   expect((await commands(A, C)).filter(command => !before.includes(command.id)).map(command => command.id))
     .toEqual(replies.map(command => command.id));
   expect(await commands(A, R)).toEqual([]);
   expect((await rootFixture.phone.readRoom(C, H))!.messages.find(message => message.id === sent.id))
-    .toMatchObject({ agentCommand: { kind: 'message', recipient: { id: A, kind: 'agent' }, text: findings } });
+    .toMatchObject({ author: { pubkey: B }, text: findings });
   expect((await rootFixture.phone.readRoom(R, H))!.messages.some(message => message.id === sent.id)).toBe(false);
   expect((await rootFixture.db.query('SELECT 1 FROM corner_merge_approvals WHERE corner_id=$1', [C])).rowCount).toBe(0);
 });

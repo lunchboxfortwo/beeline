@@ -13,6 +13,8 @@ export { TurnBandSlot };
 /** The stop word sits in the row's own height; hit slop makes up the 44pt target. */
 export const STOP_HIT_SLOP = (44 - TURN_LINE_ROW_MIN_HEIGHT) / 2;
 const SLOP = { top: STOP_HIT_SLOP, bottom: STOP_HIT_SLOP, left: 8, right: 8 };
+const WORKING_AVATAR_SIZE = 24;
+const WORKING_AVATAR_STEP = 16;
 
 /**
  * The status line (decision 16): one small line above the composer while an
@@ -96,14 +98,19 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   }, [startedAt]);
   const counter = startedAt != null ? formatWorkingCounter(startedAt * 1_000, now, stopping ? 'stopping' : 'thinking') : undefined;
   const stateLabel = [counter, received ? 'received' : undefined].filter(Boolean).join(' · ');
+  const shownAgents = agents?.slice(0, 3) ?? [];
   const workingAvatars = agents?.length ? (
     <XStack alignItems="center" flexShrink={0}>
-      {/* Each rounded canvas backing paints with its mark, over the previous tile. */}
-      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.turnKey ?? agent.pubkey}
-        position="relative" zIndex={index} width={24} height={24} flexShrink={0} marginLeft={index === 0 ? 0 : -8}
-        backgroundColor="canvas" borderWidth={2} borderColor="canvas" borderRadius="md">
-        <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
-      </YStack>)}
+      <XStack position="relative" width={WORKING_AVATAR_SIZE + (shownAgents.length - 1) * WORKING_AVATAR_STEP}
+        height={WORKING_AVATAR_SIZE} flexShrink={0}>
+        {/* Each rounded canvas backing paints with its mark, over the previous tile. */}
+        {shownAgents.map((agent, index) => <YStack key={agent.turnKey ?? agent.pubkey}
+          position="absolute" left={index * WORKING_AVATAR_STEP} top={0} zIndex={index}
+          width={WORKING_AVATAR_SIZE} height={WORKING_AVATAR_SIZE}
+          backgroundColor="canvas" borderWidth={2} borderColor="canvas" borderRadius="md">
+          <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
+        </YStack>)}
+      </XStack>
       {agents.length > 3 ? <T v="meta" color="secondary" marginLeft="1">+{agents.length - 3}</T> : null}
     </XStack>
   ) : null;

@@ -31,9 +31,9 @@ export async function inbox() {
 export const settle = () => db.query("UPDATE agent_commands SET state='complete' WHERE state='pending'");
 
 /** The System wakes the corner machine queues for thread workers. */
-export const SYSTEM_WAKES = ['corner_check', 'corner_merge_conflict', 'corner_merge_refused', 'corner_review_needed', 'corner_review_dispatch'] as const;
-export async function systemWake(reason: typeof SYSTEM_WAKES[number], agentId = B) {
-  return (await queueMessage(db, { roomId: THREAD, agentId, sourceMessageId: null, reason,
+export const SYSTEM_WAKES = ['corner_check', 'corner_merge_conflict', 'corner_merge_refused', 'corner_review_needed'] as const;
+export async function systemWake(reason: typeof SYSTEM_WAKES[number]) {
+  return (await queueMessage(db, { roomId: THREAD, agentId: B, sourceMessageId: null, reason,
     privatePayload: { kind: 'lifecycle', authorId: SYSTEM_AUTHOR_ID, fromRoomId: THREAD, text: systemText(`${reason} fact`) } }))!;
 }
 

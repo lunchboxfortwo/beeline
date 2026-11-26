@@ -174,7 +174,7 @@ Bugfix briefs need a real-target Reproduction <id> or why infeasible and the clo
 Follow beeline-triage. Before PR, prove the user path in the built app/service or, if unavailable, the narrowest script for that path. Inner-function tests/logs/code reads prove no visible result. The PR body needs ## Reproduced and ## Demonstrated: steps, wrong/passing results, same Reproduction <id>, why real-target proof is unavailable and its stand-in. Features: "not a defect report".
 Non-repo work: post_artifact. End awaiting messages/checks/review; committed wakes resume. Landing archives this thread, cancels its work and abandons saved runs. The surviving commander owns follow-up at its address. Claim others' progress only from durable commands, this prompt or tool evidence. No unrequested features or refactors.`;
 
-const REVIEW_VERDICT_INSTRUCTION = 'Write your verdict and findings as your turn text, starting with PASS or FAIL. On PASS, call approve_merge with the exact reviewed head SHA and your verdict as text, then end silently. The server wakes the implementer with the review result. During review, send only replies with the message tool.';
+const REVIEW_VERDICT_INSTRUCTION = 'Write your verdict and findings as your turn text, starting with PASS or FAIL. On PASS, call approve_merge with the exact reviewed head SHA and your verdict as text, then end silently. The server wakes the implementer with the review result.';
 
 export const CORNER_REVIEWER_SESSION_INSTRUCTION =
   `As configured reviewer, review the assigned green head with beeline-review. Demand available proof. ${REVIEW_VERDICT_INSTRUCTION} The server merges when its gate opens.`;

@@ -4,6 +4,7 @@ import { createHash,randomBytes } from 'node:crypto';
 import { currentAgentInvocation, currentInvocationCommand } from '../agent-invocation.js';
 import { assertAgentPlaceReset } from '../agent-place-reset.js';
 import { authorizeCommandOutput } from '../agent-command-route-agent-result.js';
+import { assertCanSendNewMessage } from '../agent-messaging.js';
 import { CornerAccessDatabase } from '../corner-access-database.js';
 import { lockCornerLifecycle } from '../corner-lifecycle.js';
 import { createDaemonCommandService } from '../daemon-service.js';
@@ -11,6 +12,7 @@ import { queueDatabaseWork } from '../database-work-queue.js';
 import type { AfterCommit } from '../institutional-memory-embeddings.js';
 import { precomputeInstitutionalQueryEmbedding } from '../institutional-memory-shadow.js';
 import { LiveHub,type LiveEvent } from '../live.js';
+import { replyableWake } from '../message-route.js';
 import { cleanVoiceReply } from '../voice-reply.js';
 import { daemonAccess,daemonReviewSourceAccess } from './access.js';
 import type { DaemonContext } from './context.js';
@@ -329,6 +331,8 @@ export async function daemonExecute<Name extends keyof DaemonOperationMap>(ctx: 
         reply ? { quote: request.quoteMsgId } : undefined)
         ?? (!reply && request.requestId
           ? await authorizeCommandOutput(db,request.roomId,agentId,request.requestId) : undefined);
+      if (!reply || request.address !== undefined || !replyableWake(parent))
+        assertCanSendNewMessage(reply ? await currentInvocationCommand(db,agentId,request.roomId) : parent);
       return sendSessionMessage(db,agentId,request,parent,messageId);
     }) as Promise<Output<Name>>;
   }

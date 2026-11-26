@@ -93,22 +93,23 @@ it.each([1, 2, 3, 4])('keeps full-size avatar wrappers and the compact footprint
     marks.forEach((mark: any, index: number) => {
       expect(mark.props.size).toBe(20);
       expect(mark.parent.props).toMatchObject({
-        position: 'relative',
+        position: 'absolute',
+        left: index * 16,
+        top: 0,
         zIndex: index,
         width: 24,
         height: 24,
-        flexShrink: 0,
-        marginLeft: index === 0 ? 0 : -8,
         backgroundColor: 'canvas',
         borderWidth: 2,
         borderColor: 'canvas',
         borderRadius: 'md',
       });
     });
+    const stack = marks[0].parent.parent;
+    expect(stack.props).toMatchObject({ position: 'relative', width: 24 + (marks.length - 1) * 16, height: 24, flexShrink: 0 });
+    expect(stack.children).toEqual(marks.map((mark: any) => mark.parent));
     if (count > 3) {
-      const stack = marks[2].parent.parent;
-      expect(stack.children.slice(0, 3)).toEqual(marks.map((mark: any) => mark.parent));
-      expect(stack.children[3].props).toMatchObject({ children: ['+', 1], marginLeft: '1' });
+      expect(stack.parent.children[1].props).toMatchObject({ children: ['+', 1], marginLeft: '1' });
     }
   } finally {
     act(() => tree.unmount());

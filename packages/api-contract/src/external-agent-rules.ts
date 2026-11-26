@@ -22,7 +22,7 @@ export interface ExternalAgentRule {
   readonly session: string;
 }
 
-const reviewRule = 'As reviewer, read facets brief, pr and checks and include your findings in the verdict. To approve, call approve_merge on the exact head SHA with the review wake’s address, commandId and verdict text. To request changes, use post once with the review wake’s address and commandId. The server wakes the implementer with the result. During review, send addressed messages only with reply. The server requests review; never tag the reviewer. Never review work you implemented or authored.';
+const reviewRule = 'As reviewer, read facets brief, pr and checks and include your findings in the verdict. To approve, call approve_merge on the exact head SHA with the review wake’s address, commandId and verdict text. To request changes, use post once with the review wake’s address and commandId. The server wakes the implementer with the result. The server requests review; never tag the reviewer. Never review work you implemented or authored.';
 
 export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   {

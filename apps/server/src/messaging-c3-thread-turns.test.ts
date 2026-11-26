@@ -37,8 +37,10 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     await greenHead(thread, 7, SHA);
     const review = (await pendingFor(thread, B)).find(row => row.reason === 'corner_review_dispatch')!;
     expect(review).toBeDefined();
-    await rootFixture.daemon.execute('message', { roomId: thread, type:'normal', address:`${A}@${thread}`, text: 'FAIL: add the missing test' }, B);
-    await rootFixture.daemon.execute('postRoomMessage', { roomId:thread, requestId: review.id, text: 'Findings sent to the implementer' }, B);
+    const findings = 'FAIL: add the missing test';
+    await rootFixture.daemon.execute('postRoomMessage', { roomId:thread, requestId: review.id, text: findings }, B);
+    await advanceCorner(db, thread, { kind: 'reconcile' });
+    expect((await pendingFor(thread, A)).map(row => row.reason)).toContain('corner_review_needed');
     await settle();
     // Merge gate wakes: a provider refusal and a live conflict.
     await advanceCorner(db, thread, { kind: 'merge-refused', headSha: SHA, reason: 'Provider refused the merge' });
@@ -50,7 +52,7 @@ describe('C3: thread work never takes a turn in the parent chat', () => {
     // Every event above reached a thread worker, so the empty result is not vacuous.
     const inThread = (await db.query<{ reason: string }>(`SELECT DISTINCT reason FROM agent_commands
       WHERE room_id=$1 AND agent_id=ANY($2::text[]) AND NOT (id=ANY($3::text[])) ORDER BY reason`, [thread, [A, B], before])).rows.map(row => row.reason);
-    expect(inThread).toEqual(expect.arrayContaining(['corner_check', 'corner_merge_conflict', 'corner_merge_refused', 'corner_review_dispatch', 'message']));
+    expect(inThread).toEqual(expect.arrayContaining(['corner_check', 'corner_merge_conflict', 'corner_merge_refused', 'corner_review_dispatch', 'corner_review_needed']));
     expect(await outsideThread(thread, before)).toEqual([]);
   });
 });
