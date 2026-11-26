@@ -1,6 +1,8 @@
 import type { ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, appendFile, mkdir, readFile, realpath } from 'node:fs/promises';
+import { access, appendFile, mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import type { McpServerWire } from './acp.js';
 import type { BodyConfig } from './config.js';
@@ -166,6 +168,125 @@ async function excludeIndexFromGitStatus(cwd: string): Promise<void> {
   }
 }
 
+interface SqliteStatementLike {
+  get(...params: unknown[]): unknown;
+  run(...params: unknown[]): unknown;
+}
+
+interface SqliteDatabaseLike {
+  prepare(sql: string): SqliteStatementLike;
+  close(): void;
+}
+
+type SqliteModuleLike = {
+  DatabaseSync: new (location: string, options?: { readOnly?: boolean }) => SqliteDatabaseLike;
+};
+
+/**
+ * Merge any committed WAL frames into the main SQLite database file so
+ * immutable read-only connections see the latest index even when another
+ * SQLite connection remained open during reindexing. If a concurrent reader
+ * blocks WAL truncation, publish a self-contained snapshot via `VACUUM INTO`.
+ */
+async function checkpointCodegraphIndex(command: string, indexPath: string): Promise<void> {
+  const walPath = `${indexPath}-wal`;
+  const shmPath = `${indexPath}-shm`;
+  const snapshotPath = `${indexPath}.checkpoint-${process.pid}-${randomUUID()}`;
+  let sqlite: SqliteModuleLike | undefined;
+  try {
+    const require = createRequire(import.meta.url);
+    sqlite = require('node:sqlite') as SqliteModuleLike;
+  } catch {
+    sqlite = undefined;
+  }
+
+  if (sqlite) {
+    const db = new sqlite.DatabaseSync(indexPath);
+    let publishedSnapshot = false;
+    try {
+      const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() as
+        | { busy?: number; log?: number; checkpointed?: number }
+        | undefined;
+      const walSize = await stat(walPath).then(
+        (info) => info.size,
+        () => 0,
+      );
+      const incomplete =
+        (result?.busy ?? 0) !== 0 ||
+        ((result?.log ?? 0) > 0 && (result?.checkpointed ?? 0) < (result?.log ?? 0)) ||
+        walSize > 0;
+      if (incomplete) {
+        db.prepare('VACUUM INTO ?').run(snapshotPath);
+        publishedSnapshot = true;
+      }
+    } finally {
+      db.close();
+      if (!publishedSnapshot) await rm(snapshotPath, { force: true }).catch(() => undefined);
+    }
+    if (publishedSnapshot) {
+      try {
+        await rename(snapshotPath, indexPath);
+      } catch (error) {
+        await rm(snapshotPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+      await rm(walPath, { force: true }).catch(() => undefined);
+      await rm(shmPath, { force: true }).catch(() => undefined);
+    }
+    return;
+  }
+
+  // Fallback for Node < 22.5 hosts: use CodeGraph's bundled Node runtime.
+  const resolvedCommand = await realpath(command).catch(() => resolve(command));
+  const candidates = [
+    resolve(dirname(resolvedCommand), '..', 'node'),
+    resolve(dirname(resolvedCommand), '..', 'lib', 'beeline', 'codegraph', 'node'),
+  ];
+  let bundledNode = candidates[0]!;
+  for (const candidate of candidates) {
+    if (
+      await access(candidate, constants.X_OK).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      bundledNode = candidate;
+      break;
+    }
+  }
+  const script = `
+const fs = require('node:fs');
+const { DatabaseSync } = require('node:sqlite');
+const [indexPath, snapshotPath] = process.argv.slice(1);
+const walPath = indexPath + '-wal';
+const shmPath = indexPath + '-shm';
+const db = new DatabaseSync(indexPath);
+let publishedSnapshot = false;
+try {
+  const result = db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get() || {};
+  let walSize = 0;
+  try { walSize = fs.statSync(walPath).size; } catch {}
+  const incomplete = (result.busy || 0) !== 0 || ((result.log || 0) > 0 && (result.checkpointed || 0) < result.log) || walSize > 0;
+  if (incomplete) {
+    db.prepare('VACUUM INTO ?').run(snapshotPath);
+    publishedSnapshot = true;
+  }
+} finally {
+  db.close();
+  if (!publishedSnapshot) { try { fs.rmSync(snapshotPath, { force: true }); } catch {} }
+}
+if (publishedSnapshot) {
+  fs.renameSync(snapshotPath, indexPath);
+  try { fs.rmSync(walPath, { force: true }); } catch {}
+  try { fs.rmSync(shmPath, { force: true }); } catch {}
+}
+`.trim();
+  await runOwnedFile(bundledNode, ['--disable-warning=ExperimentalWarning', '-e', script, indexPath, snapshotPath], {
+    cwd: dirname(indexPath),
+    maxBuffer: 1024 * 1024,
+  });
+}
+
 /** Verify the index opens and answers a real MCP query before claiming it is ready. */
 async function verifyCodegraphIndex(
   config: BodyConfig,
@@ -286,6 +407,7 @@ export async function prepareCodegraphIndex(
     () => true,
     () => false,
   );
+  const readonly = options.readonly ?? !canWrite;
   if (canWrite) {
     await excludeIndexFromGitStatus(cwd);
     const args = indexed ? ['sync', '--quiet', cwd] : ['init', '--yes', cwd];
@@ -295,6 +417,7 @@ export async function prepareCodegraphIndex(
         env: { ...process.env, CODEGRAPH_TELEMETRY: '0', CODEGRAPH_NO_DAEMON: '1' },
         maxBuffer: 4 * 1024 * 1024,
       });
+      if (readonly) await checkpointCodegraphIndex(command, indexPath);
     } catch (error) {
       console.warn(
         `[body] CodeGraph ${args[0]} failed for ${cwd}; continuing with Beeline read tools:`,
@@ -308,5 +431,5 @@ export async function prepareCodegraphIndex(
     );
     return false;
   }
-  return verifyCodegraphIndex(config, cwd, { readonly: options.readonly ?? !canWrite });
+  return verifyCodegraphIndex(config, cwd, { readonly });
 }

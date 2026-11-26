@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -189,4 +190,99 @@ it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
     expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(false);
   },
   20_000,
+);
+
+it.runIf(Boolean(codegraphBin) && process.platform !== 'win32')(
+  'checkpoints committed WAL updates into the main index even while another connection stays open',
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'beeline-codegraph-wal-'));
+    roots.push(dir);
+    await exec('git', ['init', '-q', dir]);
+    await writeFile(join(dir, 'initial.ts'), 'export function initialWalSymbol() { return 1; }\n');
+    const config = { codegraphCommand: codegraphBin } as BodyConfig;
+
+    expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(true);
+
+    const cgDir = join(dir, '.codegraph');
+    const dbPath = join(cgDir, 'codegraph.db');
+
+    // Open an immutable read-only MCP session before reindexing.
+    const server = codegraphMcpServer(config, dir, { readonly: true })!;
+    const client = startMcpClient(server.command, server.args, dir, server.env ?? []);
+    const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+      DatabaseSync: new (location: string) => {
+        exec(sql: string): void;
+        prepare(sql: string): { get(...params: unknown[]): unknown };
+        close(): void;
+      };
+    };
+    const openReader = new DatabaseSync(dbPath);
+    try {
+      await client.send('initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'codegraph-wal-test', version: '1.0.0' },
+      });
+      client.notify('notifications/initialized', {});
+
+      const before = (await client.send('tools/call', {
+        name: 'codegraph_explore',
+        arguments: { query: 'initialWalSymbol', projectPath: dir },
+      })) as { result?: { isError?: boolean; content?: Array<{ text?: string }> } };
+      expect(before.result?.isError).not.toBe(true);
+      expect((before.result?.content ?? []).map((entry) => entry.text ?? '').join('\n')).toContain(
+        'initialWalSymbol',
+      );
+
+      // Hold an active WAL read transaction open during the reindex so codegraph sync
+      // leaves committed frames in SQLite's WAL instead of checkpointing on close.
+      openReader.exec('BEGIN');
+      openReader.prepare('SELECT count(*) FROM nodes').get();
+
+      await writeFile(
+        join(dir, 'updated.ts'),
+        'export function updatedWhileReaderOpen() { return 2; }\n',
+      );
+      expect(await prepareCodegraphIndex(config, dir, { readonly: true })).toBe(true);
+
+      await chmod(dbPath, 0o444);
+      await chmod(cgDir, 0o555);
+      await chmod(dir, 0o555);
+
+      // Both the existing read-only MCP session and a fresh immutable connection must see the update.
+      const reopened = (await client.send('tools/call', {
+        name: 'codegraph_explore',
+        arguments: { query: 'updatedWhileReaderOpen', projectPath: dir },
+      })) as { result?: { isError?: boolean; content?: Array<{ text?: string }> } };
+      expect(reopened.result?.isError).not.toBe(true);
+      expect(
+        (reopened.result?.content ?? []).map((entry) => entry.text ?? '').join('\n'),
+      ).toContain('updatedWhileReaderOpen');
+
+      const freshClient = startMcpClient(server.command, server.args, dir, server.env ?? []);
+      try {
+        await freshClient.send('initialize', {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'codegraph-wal-fresh', version: '1.0.0' },
+        });
+        freshClient.notify('notifications/initialized', {});
+        const fresh = (await freshClient.send('tools/call', {
+          name: 'codegraph_explore',
+          arguments: { query: 'updatedWhileReaderOpen', projectPath: dir },
+        })) as { result?: { isError?: boolean; content?: Array<{ text?: string }> } };
+        expect(fresh.result?.isError).not.toBe(true);
+        expect((fresh.result?.content ?? []).map((entry) => entry.text ?? '').join('\n')).toContain(
+          'updatedWhileReaderOpen',
+        );
+      } finally {
+        freshClient.close();
+      }
+      expect(await readdir(cgDir)).toEqual(['.gitignore', 'codegraph.db']);
+    } finally {
+      openReader.close();
+      client.close();
+    }
+  },
+  25_000,
 );

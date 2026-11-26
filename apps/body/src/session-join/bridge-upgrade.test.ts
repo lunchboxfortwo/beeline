@@ -46,6 +46,11 @@ function changedFile(path: string, ready: () => boolean, signal?: AbortSignal): 
       resolve();
     };
     const watcher = watch(path, { signal }, check);
+    watcher.on('error', (error) => {
+      watcher.close();
+      signal?.removeEventListener('abort', aborted);
+      reject(error);
+    });
     signal?.addEventListener('abort', aborted, { once: true });
     check();
   });
@@ -438,10 +443,14 @@ it('wakes Claude’s authenticated in-session receiver on a committed durable de
 it('watches the parent state directory without failing when a transient lock directory vanishes', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-lock-watch-'));
   folders.push(dir);
-  const lockDir = join(dir, 'state.lock');
+  const seededLock = join(dir, 'seeded.lock');
+  const transientLock = join(dir, 'transient.lock');
+  mkdirSync(seededLock);
   const origReaddirSync = fs.readdirSync;
   fs.readdirSync = ((target: Parameters<typeof fs.readdirSync>[0], ...args: unknown[]) => {
-    if (String(target) === lockDir) rmSync(lockDir, { recursive: true, force: true });
+    if (String(target) === seededLock || String(target) === transientLock) {
+      rmSync(String(target), { recursive: true, force: true });
+    }
     return (origReaddirSync as (...params: unknown[]) => unknown)(target, ...args);
   }) as typeof fs.readdirSync;
   try {
@@ -450,8 +459,17 @@ it('watches the parent state directory without failing when a transient lock dir
       () => readState(dir).sessions[0]?.deliveredWakes.includes('pending') === true,
       AbortSignal.timeout(5_000),
     );
-    mkdirSync(lockDir);
-    rmSync(lockDir, { recursive: true, force: true });
+    // Let the kernel deliver the mkdir event to any recursive watcher before writing state.json.
+    const observedLock = new Promise<void>((resolve) => {
+      const probe = watch(dir, (_event, name) => {
+        if (String(name) !== 'transient.lock') return;
+        probe.close();
+        resolve();
+      });
+      mkdirSync(transientLock);
+    });
+    await observedLock;
+    await new Promise((resolve) => setImmediate(resolve));
     await updateState(dir, (state) => {
       state.sessions = [
         {
