@@ -428,3 +428,292 @@ it('does not wake on empty helper turns or review-context repair turns, and wake
   await daemon.execute('postRoomMessage', { roomId: THREAD, requestId: repair.id, text: 'Pushed fix, waiting for checks.', harnessEnded: true }, B);
   expect((await readAgentCommands(db, C, THREAD)).commands).toEqual([]);
 });
+
+async function seedReadyMedia(ownerId: string, name: string) {
+  const { createHash } = await import('node:crypto');
+  const id = crypto.randomUUID();
+  const sha = createHash('sha256').update(`${ownerId}:${id}:${name}`).digest('hex');
+  await db.query(
+    `INSERT INTO objects(id,owner_id,kind,key,mime,title,size,sha256,state,expires_at)
+     VALUES($1,$2,'media',$3,'text/markdown',$4,42,$5,'ready',now()+interval '1 hour')`,
+    [id, ownerId, `media/${ownerId}/${id}`, name, sha],
+  );
+  return {
+    url: `http://test.invalid/v1/media/${id}`,
+    name,
+    mimeType: 'text/markdown',
+    size: 42,
+  };
+}
+
+async function seedCommanderTurn(withRepo: boolean) {
+  if (withRepo) {
+    await db.query(
+      `UPDATE rooms SET repository_key='owner/beeline',repository_resolution='repository' WHERE id=$1`,
+      [CHAT],
+    );
+  }
+  const sourceMessageId = '1'.repeat(64);
+  await db.query(
+    `INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@ruby run the audit')`,
+    [sourceMessageId, CHAT, H],
+  );
+  const commanderCmd = await sendMessage(db, {
+    route: { from: { agent: H, place: CHAT }, to: { agent: A, place: CHAT } },
+    text: '@ruby run the audit',
+  });
+  await db.query(`UPDATE agent_commands SET source_message_id=$2,root_source_message_id=$2 WHERE id=$1`, [
+    commanderCmd.id, sourceMessageId,
+  ]);
+  await daemon.execute('startAgentTurn', { roomId: CHAT, requestId: commanderCmd.id, invocationId: crypto.randomUUID() }, A);
+  return { commanderCmd, sourceMessageId };
+}
+
+it.each([
+  ['repo-chat-repositoryWork-false-open', true, false, 'leave-open'],
+  ['repo-chat-repositoryWork-false-close_thread', true, false, 'close_thread'],
+  ['repo-chat-repositoryWork-false-update_work', true, false, 'update_work'],
+  ['non-repo-chat-open', false, undefined, 'leave-open'],
+  ['non-repo-chat-close_thread', false, undefined, 'close_thread'],
+] as const)(
+  'Reproduction fb_4ebd722ad04b9cc6d25a5fc7 (%s): repo-less corner_objective publishes attachments and wakes commander once without ping-pong',
+  async (_label, withRepo, repositoryWork, closeMode) => {
+    const { commanderCmd, sourceMessageId } = await seedCommanderTurn(withRepo);
+    const opened = await daemon.execute('createCorner', {
+      roomId: CHAT,
+      targetRoomId: CHAT,
+      requestId: commanderCmd.id,
+      name: 'acp-tool-audit',
+      objective: 'Audit ACP outputs',
+      implementer: 'jellybean',
+      ...(withRepo ? { repository: 'owner/beeline' } : {}),
+      brief: {
+        spec: 'Audit ACP tool outputs and post report.',
+        ...(repositoryWork !== undefined ? { repositoryWork } : {}),
+        approval: { sourceMessageId },
+      },
+    }, A);
+    await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [commanderCmd.id]);
+
+    const [opening] = (await readAgentCommands(db, B, opened.cornerId)).commands;
+    expect(opening?.reason).toBe('corner_objective');
+    const invocation = { id: crypto.randomUUID(), requestId: opening!.turnRequestId };
+    await daemon.execute('startAgentTurn', { roomId: opened.cornerId, requestId: opening!.turnRequestId, invocationId: invocation.id }, B);
+
+    const attachment = await seedReadyMedia(B, 'acp-audit.md');
+    await daemon.execute('postAgentAttachment', {
+      roomId: opened.cornerId, requestId: opening!.turnRequestId, attachment,
+    }, B);
+
+    if (closeMode === 'close_thread') {
+      await daemon.execute('archiveCorner', {
+        cornerId: opened.cornerId, roomId: opened.cornerId, requestId: opening!.turnRequestId,
+      }, B);
+    } else if (closeMode === 'update_work') {
+      await daemon.execute('updateWorkItem', {
+        roomId: opened.cornerId,
+        targetRoomId: opened.cornerId,
+        requestId: opening!.turnRequestId,
+        state: 'done',
+      }, B);
+    }
+
+    const report = 'Audit complete: attached full ACP tool output report.';
+    const final = await daemon.execute('postRoomMessage', {
+      roomId: opened.cornerId, requestId: opening!.turnRequestId, text: report, harnessEnded: true, invocation,
+    }, B);
+    expect(final.completed).toBe(true);
+    expect(final.published).toBe(true);
+
+    // Replay does not double-wake.
+    await daemon.execute('postRoomMessage', {
+      roomId: opened.cornerId, requestId: opening!.turnRequestId, text: report, harnessEnded: true, invocation,
+    }, B);
+
+    expect((await db.query('SELECT text,attachments FROM messages WHERE room_id=$1 AND author_id=$2', [opened.cornerId, B])).rows)
+      .toEqual([{ text: report, attachments: [attachment] }]);
+
+    const wakes = (await readAgentCommands(db, A, CHAT)).commands;
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]).toMatchObject({
+      reason: 'reply',
+      roomId: CHAT,
+      from: { agent: B, place: opened.cornerId },
+      source: { body: report, attachments: [attachment] },
+    });
+
+    if (closeMode !== 'leave-open') {
+      expect((await db.query('SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1', [opened.cornerId])).rows)
+        .toEqual([{ archived: true }]);
+      // Archived thread refuses new commands.
+      await expect(daemon.execute('message', {
+        roomId: CHAT, type: 'normal', address: `${B}@${opened.cornerId}`, text: 'Follow up',
+      }, A)).rejects.toThrow('archived');
+    }
+
+    // Commander responds in CHAT -> never wakes B back (zero ping-pong).
+    const cmdInv = { id: crypto.randomUUID(), requestId: wakes[0]!.turnRequestId };
+    await daemon.execute('startAgentTurn', { roomId: CHAT, requestId: wakes[0]!.turnRequestId, invocationId: cmdInv.id }, A);
+    await daemon.execute('postRoomMessage', {
+      roomId: CHAT, requestId: wakes[0]!.turnRequestId, text: 'Thanks, sharing the audit now.', harnessEnded: true, invocation: cmdInv,
+    }, A);
+    expect(await queued()).toEqual([]);
+  },
+);
+
+it.each(['with-turn-context', 'without-turn-context'] as const)(
+  'delegated message(type:normal) self-close (%s) publishes final reply + attachments and wakes commander once',
+  async contextMode => {
+    const delegated = await daemon.execute('message', {
+      roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Inspect the config and close when done.',
+    }, A);
+    const invocation = { id: crypto.randomUUID(), requestId: delegated.id };
+    await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: invocation.id }, B);
+    const attachment = await seedReadyMedia(B, 'config-check.md');
+    await daemon.execute('postAgentAttachment', { roomId: THREAD, requestId: delegated.id, attachment }, B);
+
+    await daemon.execute('archiveCorner', contextMode === 'with-turn-context'
+      ? { cornerId: THREAD, roomId: THREAD, requestId: delegated.id }
+      : { cornerId: THREAD }, B);
+
+    const answer = 'Config verified; thread closed.';
+    const final = await daemon.execute('postRoomMessage', {
+      roomId: THREAD, requestId: delegated.id, text: answer, harnessEnded: true, invocation,
+    }, B);
+    expect(final.completed).toBe(true);
+    expect(final.published).toBe(true);
+
+    const wakes = (await readAgentCommands(db, A, CHAT)).commands;
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0]).toMatchObject({
+      reason: 'reply',
+      roomId: CHAT,
+      from: { agent: B, place: THREAD },
+      source: { body: answer, attachments: [attachment] },
+    });
+  },
+);
+
+it('zero-answer self-close with queued artifact or prior message still wakes commander cleanly without duplicates', async () => {
+  // Artifact-only self-close with empty closing text.
+  const { commanderCmd, sourceMessageId } = await seedCommanderTurn(true);
+  const opened = await daemon.execute('createCorner', {
+    roomId: CHAT, targetRoomId: CHAT, requestId: commanderCmd.id,
+    name: 'artifact-only', objective: 'Produce artifact', implementer: 'jellybean',
+    brief: { spec: 'Upload artifact and close.', repositoryWork: false, approval: { sourceMessageId } },
+  }, A);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [commanderCmd.id]);
+  const [opening] = (await readAgentCommands(db, B, opened.cornerId)).commands;
+  const inv1 = { id: crypto.randomUUID(), requestId: opening!.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: opened.cornerId, requestId: opening!.turnRequestId, invocationId: inv1.id }, B);
+  const attachment = await seedReadyMedia(B, 'deliverable.md');
+  await daemon.execute('postAgentAttachment', { roomId: opened.cornerId, requestId: opening!.turnRequestId, attachment }, B);
+  await daemon.execute('archiveCorner', { cornerId: opened.cornerId, roomId: opened.cornerId, requestId: opening!.turnRequestId }, B);
+  const final1 = await daemon.execute('postRoomMessage', {
+    roomId: opened.cornerId, requestId: opening!.turnRequestId, text: '', harnessEnded: true, invocation: inv1,
+  }, B);
+  expect(final1.completed).toBe(true);
+  const wakes1 = (await readAgentCommands(db, A, CHAT)).commands;
+  expect(wakes1).toHaveLength(1);
+  expect(wakes1[0]).toMatchObject({
+    reason: 'reply',
+    roomId: CHAT,
+    source: { body: '(shared attachments)', attachments: [attachment] },
+  });
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE state='pending'`);
+
+  // Prior posted message + self-close + empty closing text wakes once with prior text and leaves no dangling pending item.
+  const delegated = await daemon.execute('message', {
+    roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Post findings and close.',
+  }, A);
+  const inv2 = { id: crypto.randomUUID(), requestId: delegated.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: inv2.id }, B);
+  await db.query(
+    `INSERT INTO messages(id,room_id,author_id,text,request_id) VALUES($1,$2,$3,'Earlier findings posted.',$4)`,
+    ['2'.repeat(64), THREAD, B, delegated.id],
+  );
+  await daemon.execute('archiveCorner', { cornerId: THREAD, roomId: THREAD, requestId: delegated.id }, B);
+  const final2 = await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: '', harnessEnded: true, invocation: inv2,
+  }, B);
+  expect(final2.completed).toBe(true);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [delegated.id])).rows)
+    .toEqual([{ state: 'complete' }]);
+  const wakes2 = (await readAgentCommands(db, A, CHAT)).commands;
+  expect(wakes2).toHaveLength(1);
+  expect(wakes2[0]).toMatchObject({ reason: 'reply', roomId: CHAT, source: { body: 'Earlier findings posted.' } });
+});
+
+it('external close cancels worker turn without waking commander, and repo-work corner_objective does not emit premature peer-reply wakes', async () => {
+  const { commanderCmd, sourceMessageId } = await seedCommanderTurn(true);
+
+  // 1) Repository-work thread (repositoryWork omitted on repository-backed chat): no premature wake on postRoomMessage.
+  const repoThread = await daemon.execute('createCorner', {
+    roomId: CHAT, targetRoomId: CHAT, requestId: commanderCmd.id,
+    name: 'pr-work', objective: 'Implement PR', implementer: 'jellybean',
+    repository: 'owner/beeline',
+    brief: { spec: 'Implement the fix and open a PR.', approval: { sourceMessageId } },
+  }, A);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [commanderCmd.id]);
+  const [repoOpening] = (await readAgentCommands(db, B, repoThread.cornerId)).commands;
+  const repoInv = { id: crypto.randomUUID(), requestId: repoOpening!.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: repoThread.cornerId, requestId: repoOpening!.turnRequestId, invocationId: repoInv.id }, B);
+  await daemon.execute('postRoomMessage', {
+    roomId: repoThread.cornerId, requestId: repoOpening!.turnRequestId, text: 'Opened PR, waiting for checks.', harnessEnded: true, invocation: repoInv,
+  }, B);
+  expect((await readAgentCommands(db, A, CHAT)).commands).toEqual([]);
+
+  // 2) External close_thread by commander A cancels B's active turn + deletes pending attachments without waking A.
+  const delegated = await daemon.execute('message', {
+    roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Audit slice.',
+  }, A);
+  const inv = { id: crypto.randomUUID(), requestId: delegated.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: inv.id }, B);
+  const attachment = await seedReadyMedia(B, 'draft.md');
+  await daemon.execute('postAgentAttachment', { roomId: THREAD, requestId: delegated.id, attachment }, B);
+
+  await daemon.execute('archiveCorner', { cornerId: THREAD, roomId: CHAT, requestId: commanderCmd.id }, A);
+  expect((await db.query('SELECT state,cancellation_reason FROM agent_commands WHERE id=$1', [delegated.id])).rows)
+    .toEqual([{ state: 'cancelled', cancellation_reason: 'corner_close' }]);
+  expect((await db.query('SELECT id FROM agent_pending_attachments WHERE room_id=$1', [THREAD])).rowCount).toBe(0);
+  await expect(daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: 'Late reply', harnessEnded: true, invocation: inv,
+  }, B)).rejects.toThrow('cancelled');
+  expect((await readAgentCommands(db, A, CHAT)).commands).toEqual([]);
+});
+
+it('explicit reply before self-close avoids double-wake, and interrupted self-close retires orphaned command without post-close turns', async () => {
+  // Explicit reply + self-close + closing text => single wake, no 409 on closing text.
+  const delegated = await daemon.execute('message', {
+    roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Check logs.',
+  }, A);
+  const inv = { id: crypto.randomUUID(), requestId: delegated.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: inv.id }, B);
+  await daemon.execute('message', {
+    roomId: THREAD, requestId: delegated.id, type: 'reply', quoteMsgId: delegated.id, text: 'Explicit report.',
+  }, B);
+  await daemon.execute('archiveCorner', { cornerId: THREAD, roomId: THREAD, requestId: delegated.id }, B);
+  const final = await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: 'Closing note.', harnessEnded: true, invocation: inv,
+  }, B);
+  expect(final.published).toBe(true);
+  expect((await readAgentCommands(db, A, CHAT)).commands).toHaveLength(1);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE state='pending'`);
+
+  // Interrupted self-close (helper drops before postRoomMessage): readAgentCommands retires orphaned pending command.
+  const { commanderCmd, sourceMessageId } = await seedCommanderTurn(true);
+  const dropped = await daemon.execute('createCorner', {
+    roomId: CHAT, targetRoomId: CHAT, requestId: commanderCmd.id,
+    name: 'dropped-close', objective: 'Audit', implementer: 'jellybean',
+    brief: { spec: 'Audit.', repositoryWork: false, approval: { sourceMessageId } },
+  }, A);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [commanderCmd.id]);
+  const [opening] = (await readAgentCommands(db, B, dropped.cornerId)).commands;
+  await daemon.execute('startAgentTurn', { roomId: dropped.cornerId, requestId: opening!.turnRequestId, invocationId: crypto.randomUUID() }, B);
+  await daemon.execute('archiveCorner', { cornerId: dropped.cornerId, roomId: dropped.cornerId, requestId: opening!.turnRequestId }, B);
+  // Simulate helper disconnect interrupting the working turn.
+  await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)', [B, dropped.cornerId, opening!.turnRequestId]);
+  expect((await readAgentCommands(db, B, dropped.cornerId)).commands).toEqual([]);
+  expect((await db.query('SELECT state,cancellation_reason FROM agent_commands WHERE id=$1', [opening!.id])).rows)
+    .toEqual([{ state: 'cancelled', cancellation_reason: 'corner_close' }]);
+});

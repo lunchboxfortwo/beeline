@@ -13,9 +13,12 @@ export async function beginAgentInvocation(database: SqlDatabase, agent: string,
         AND EXISTS(SELECT 1 FROM rooms_mcp_members member WHERE member.member_id=command.agent_id)
       ORDER BY command.id FOR UPDATE OF command`, [agent,room,request]);
     const saved = await db.query(`INSERT INTO agent_invocations(command_id,invocation_id,batched_command_ids,reset_id)
-      SELECT id,$4,ARRAY(SELECT batch.id FROM agent_commands batch WHERE batch.room_id=$2 AND batch.agent_id=$1
-        AND batch.action='input' AND batch.state='pending' AND batch.id=ANY($5::text[])),$6 FROM agent_commands WHERE agent_id=$1 AND room_id=$2 AND turn_request_id=$3 AND state='pending'
-      ORDER BY created_at DESC,id DESC LIMIT 1 ON CONFLICT DO NOTHING RETURNING command_id`, [agent,room,request,id,batchedCommandIds,resetId]);
+      SELECT command.id,$4,ARRAY(SELECT batch.id FROM agent_commands batch WHERE batch.room_id=$2 AND batch.agent_id=$1
+        AND batch.action='input' AND batch.state='pending' AND batch.id=ANY($5::text[])),$6
+      FROM agent_commands command
+      JOIN rooms room ON room.id=command.room_id AND room.archived_at IS NULL
+      WHERE command.agent_id=$1 AND command.room_id=$2 AND command.turn_request_id=$3 AND command.state='pending'
+      ORDER BY command.created_at DESC,command.id DESC LIMIT 1 ON CONFLICT DO NOTHING RETURNING command_id`, [agent,room,request,id,batchedCommandIds,resetId]);
     if (!saved.rowCount && !(await db.query(`SELECT 1 FROM agent_invocations invocation JOIN agent_commands command ON command.id=invocation.command_id
       WHERE command.agent_id=$1 AND command.room_id=$2 AND command.turn_request_id=$3 AND invocation.invocation_id=$4
         AND invocation.reset_id IS NOT DISTINCT FROM $5`,[agent,room,request,id,resetId])).rowCount)
@@ -59,6 +62,58 @@ export async function currentInvocationCommand(db: SqlDatabase, agent: string, r
     ORDER BY (NOT $3 AND wake.reason='corner_review_dispatch') DESC,(wake.id=first.id) DESC,wake.inbox_sequence
     LIMIT 1 FOR UPDATE OF receipt,wake`,
     [agent,room,Boolean(reply),reply?.quote ?? null])).rows[0];
+}
+
+/** Pending commands belonging to an agent's active invocation when it closes its own thread. */
+export async function activeClosingCornerCommands(
+  db: SqlDatabase,
+  cornerId: string,
+  preserveTurn: { agentId: string; requestId?: string },
+): Promise<Array<{ id: string; turn_request_id: string }>> {
+  return (
+    await db.query<{ id: string; turn_request_id: string }>(
+      preserveTurn.requestId
+        ? `WITH active AS (
+             SELECT command.id, inv.batched_command_ids
+             FROM agent_commands command
+             JOIN agent_invocations inv ON inv.command_id=command.id AND NOT inv.ended
+             WHERE command.room_id=$1 AND command.agent_id=$2 AND command.state='pending'
+               AND (command.turn_request_id=$3 OR EXISTS(
+                 SELECT 1 FROM agent_commands batched
+                 WHERE batched.room_id=$1 AND batched.agent_id=$2
+                   AND batched.turn_request_id=$3 AND batched.id=ANY(inv.batched_command_ids)
+               ))
+             ORDER BY command.created_at DESC, command.id DESC
+             LIMIT 1
+           )
+           SELECT item.id, item.turn_request_id
+           FROM agent_commands item
+           JOIN active ON item.id=active.id OR item.id=ANY(active.batched_command_ids)
+           WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state='pending'`
+        : `WITH current_turn AS (
+             SELECT request_id, invocation_id, status
+             FROM agent_turns
+             WHERE agent_id=$2 AND room_id=$1
+             ORDER BY started_at DESC, version DESC
+             LIMIT 1
+           ), active AS (
+             SELECT first.id, receipt.batched_command_ids
+             FROM current_turn turn
+             JOIN agent_commands first ON first.agent_id=$2 AND first.room_id=$1 AND first.turn_request_id=turn.request_id
+             JOIN agent_invocations receipt ON receipt.command_id=first.id AND receipt.invocation_id=turn.invocation_id
+             WHERE turn.status='working' AND NOT receipt.ended AND first.state='pending'
+             ORDER BY first.created_at DESC, first.id DESC
+             LIMIT 1
+           )
+           SELECT item.id, item.turn_request_id
+           FROM agent_commands item
+           JOIN active ON item.id=active.id OR item.id=ANY(active.batched_command_ids)
+           WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state='pending'`,
+      preserveTurn.requestId
+        ? [cornerId, preserveTurn.agentId, preserveTurn.requestId]
+        : [cornerId, preserveTurn.agentId],
+    )
+  ).rows;
 }
 
 /** Close the recorded execution and publish only if it has not been replaced. */

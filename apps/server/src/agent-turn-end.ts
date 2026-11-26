@@ -193,7 +193,7 @@ export async function failHostedAgentTurn(db: SqlDatabase,
     requestId: command.turn_request_id, commandId: command.id, durableFact: 'failure',
   });
   const completed = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [command.id])).rows[0];
-  if (completed?.reason === 'message') {
+  if (completed && (completed.reason === 'message' || completed.reason === 'corner_objective')) {
     const { wakePeerMessageSender } = await import('./agent-command.js');
     await wakePeerMessageSender(db, completed, {
       kind: 'failed',

@@ -21,18 +21,20 @@ export type PeerReplyWakeOutput =
 
 /**
  * Build one informational `reply` wake for the sending agent when a thread turn
- * triggered by another agent's `message(type:"normal")` finishes with normal
- * turn output (or a hosted failure) and did not already send a reply, blocker,
- * or message back to that sender.
+ * triggered by another agent's `message(type:"normal")` or repo-less
+ * `open_thread` (`corner_objective`) finishes with normal turn output (or a
+ * hosted failure) and did not already send a reply, blocker, or message back
+ * to that sender.
  */
 export async function peerReplyWakeInput(
   db: SqlDatabase,
   item: CommandRow,
   output: PeerReplyWakeOutput,
-): Promise<(AgentCommandInput & { audienceId: string }) | undefined> {
+): Promise<(AgentCommandInput & { audienceId: string; allowArchivedOrigin: true }) | undefined> {
   const payload = item.private_payload;
+  const isCornerObjective = item.reason === 'corner_objective';
   if (
-    item.reason !== 'message' ||
+    (item.reason !== 'message' && !isCornerObjective) ||
     payload?.kind !== 'message' ||
     payload.reportStatus ||
     payload.automatic ||
@@ -58,13 +60,31 @@ export async function peerReplyWakeInput(
   const eligible = (await db.query<{ ok: boolean }>(
     `SELECT true ok
      FROM rooms origin
+     JOIN rooms parent ON parent.id=origin.parent_id
      JOIN rooms destination ON destination.id=$2 AND destination.archived_at IS NULL
      JOIN identities sender ON sender.id=$3 AND sender.kind='agent'
      JOIN memberships member
        ON member.room_id=COALESCE(destination.parent_id,destination.id)
        AND member.identity_id=sender.id
        AND member.removed_at IS NULL
-     WHERE origin.id=$1 AND origin.parent_id IS NOT NULL AND origin.archived_at IS NULL
+     LEFT JOIN LATERAL (
+       SELECT brief.approval_basis->>'repositoryWork' repository_work
+       FROM corner_brief_revisions brief
+       WHERE brief.corner_id=origin.id
+       ORDER BY brief.revision DESC
+       LIMIT 1
+     ) latest_brief ON true
+     WHERE origin.id=$1
+       AND (
+         NOT $7::boolean
+         OR latest_brief.repository_work='false'
+         OR (
+           COALESCE(latest_brief.repository_work,'')<>'true'
+           AND origin.repository_key IS NULL
+           AND parent.repository_key IS NULL
+           AND parent.repository_resolution IS DISTINCT FROM 'repository'
+         )
+       )
        AND NOT EXISTS(
          SELECT 1 FROM agent_commands child
          WHERE child.agent_id=$3
@@ -81,7 +101,7 @@ export async function peerReplyWakeInput(
            )
        )
      LIMIT 1`,
-    [item.room_id, sender.place, sender.agent, batchIds, item.id, invocationId],
+    [item.room_id, sender.place, sender.agent, batchIds, item.id, invocationId, isCornerObjective],
   )).rows[0];
   if (!eligible) return undefined;
   if (output.kind === 'failed') await ensureSystemIdentity(db);
@@ -103,6 +123,7 @@ export async function peerReplyWakeInput(
     agentId: sender.agent,
     sourceMessageId: null,
     audienceId: sender.agent,
+    allowArchivedOrigin: true,
     reason: 'reply',
     parent: item,
     privatePayload: {
