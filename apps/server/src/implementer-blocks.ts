@@ -50,6 +50,8 @@ export async function closeBlock(db:SqlDatabase,actor:string,id:string,reason:st
   if(!member)
     throw new CommandRefusalError('Only a member of this thread can clear this block.',403);
   await db.query(`UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2),ask_closed_by=COALESCE(ask_closed_by,$3) WHERE id=$1`,[id,reason,actor]);
+  // Close the block's own question card before the refresh so the thread state sees both closed.
+  await db.query("UPDATE room_choices SET status='closed' WHERE message_id=$1 AND mode='question' AND status='open'",[id]);
   await refreshCornerAttention(db,block.corner);
   return true;
 }

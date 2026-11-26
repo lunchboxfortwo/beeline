@@ -256,6 +256,19 @@ it.each([['member agent',WORKER],['report author',REVIEWER]])('BLOCK-MEMBER R1: 
   expect((await phone.readCorners(ROOM,HUMAN))!.corners[0]).toMatchObject({state:'idle'});
 });
 
+it('BLOCK-MEMBER: a member clears the last block and its question card in the same thread, and the thread leaves waiting',async()=>{
+  const {sendMessage}=await import('./agent-messaging.js');
+  await sendMessage(db,{id:'choice-block',type:'blocked',route:{from:{agent:WORKER,place:C},to:{agent:HUMAN,place:C}},
+    text:'blocked: Need access',ask:{question:'Which access?',options:['One','Two']}});
+  expect((await db.query("SELECT room_id,status FROM room_choices WHERE message_id='choice-block'")).rows).toEqual([{room_id:C,status:'open'}]);
+  expect(await state()).toBe('waiting');
+  await closeAgentAsk(db,REVIEWER,{messageId:'choice-block',reason:'answered'});
+  // Read the stored state first: state() refreshes it again and would hide a stale write.
+  expect((await phone.readCorners(ROOM,HUMAN))!.corners[0]).toMatchObject({state:'idle'});
+  expect((await db.query("SELECT status FROM room_choices WHERE message_id='choice-block'")).rows).toEqual([{status:'closed'}]);
+  expect(await loadCornerWaiting(db,C)).toBeUndefined();
+});
+
 it('BLOCK-MEMBER: an agent outside the thread is refused and the block stays open',async()=>{
   const OUTSIDER='e'.repeat(64);
   await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Outsider','outsider') ON CONFLICT DO NOTHING`,[OUTSIDER]);
