@@ -550,4 +550,28 @@ describe('Antigravity quota-axi reporting (Reproduction R-AGY-USAGE)', () => {
       account: { provider: 'agy', key: expect.stringMatching(/^local:[0-9a-f]{32}$/) },
     });
   });
+
+  it('keeps an agy read stale through reader.publish when a real Gemini window expires before stdout returns', async () => {
+    let clock = agyNow * 1000;
+    const expiredClock = Date.parse('2026-11-26T18:49:00.000Z');
+    const posts: Array<import('@beeline/api-contract/daemon').AgentUsage> = [];
+    const run = vi.fn(async () => {
+      clock = expiredClock;
+      return JSON.stringify(QUOTA_AXI_AGY_REPORT);
+    });
+    const reader = new HarnessQuotaReader({
+      agentId: 'crayon',
+      slots: new Map(),
+      run,
+      post: async (usage) => { posts.push(usage); },
+      now: () => clock,
+      launch: () => ({ command: 'node', args: ['q.mjs'] }),
+    });
+    const outcome = await reader.publish('agy', { HOME: '/home/operator', PATH: '/usr/bin:/bin' }, true);
+    expect(outcome).toEqual({ status: 'stale' });
+    expect(posts[0]).toMatchObject({
+      updatedAt: agyNow,
+      read: { status: 'stale', at: expiredClock / 1000 },
+    });
+  });
 });

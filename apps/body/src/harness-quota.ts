@@ -490,13 +490,14 @@ export class HarnessQuotaReader {
         { command: launch.command, args: [...launch.args, ...quotaAxiArgs(provider)] },
         runEnv,
       );
+      const consumedAt = (this.options.now?.() ?? Date.now()) / 1000;
       const report: unknown = JSON.parse(stdout);
       const accountKey = quotaAxiAccountKey(report, provider);
       if (accountKey) slot.accountKey = accountKey;
-      usage = quotaAxiUsage(report, provider, now) ?? {
-        updatedAt: now,
+      usage = quotaAxiUsage(report, provider, consumedAt) ?? {
+        updatedAt: consumedAt,
         windows: [],
-        read: { status: 'failed', at: now, reason: 'no plan numbers' },
+        read: { status: 'failed', at: consumedAt, reason: 'no plan numbers' },
       };
     } catch (error) {
       if (error instanceof SignedOut)
