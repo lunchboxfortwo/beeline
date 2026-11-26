@@ -8,7 +8,7 @@ import { compactRelativeTime } from '@/buzz/relative-time';
 import { roomRowName } from '@/buzz/room-list-row';
 import { IdentityMark } from '@/components/buzz/IdentityMark';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
-import { AtMark, Glyph, HEIGHT, MARK, StatusMark, T, typeStyle, useStep, useTextSize } from '@/ui/grammar';
+import { AtMark, Glyph, HEIGHT, MARK, StatusMark, T, typeStyle, useTextSize } from '@/ui/grammar';
 import { threadWorkState } from '@beeline/api-contract/phone';
 import { useFinePointer } from '@/utils/use-fine-pointer';
 import { NEW_THREAD_HOLD_MS, PIN_HOLD_MS, useHold } from './ChatTree';
@@ -49,13 +49,13 @@ function Dot({ unread, tagged }: { unread: boolean; tagged: boolean }) {
 
 /**
  * One list row. A fine pointer takes the row's natural height; touch keeps
- * the 44 pt control height. The open chat takes the highlight and its brass edge.
+ * the 44 pt control height. The open chat takes the rounded highlight pill,
+ * matching SidePlaces and ChatListHeader gutters.
  */
 function Row({ selected = false, twoLine = false, label, onPressIn, onPress, testID, children }: {
   selected?: boolean; twoLine?: boolean; label: string; testID: string; children: React.ReactNode;
   onPressIn?: (event?: any) => void; onPress: (event?: any) => void;
 }) {
-  const step = useStep();
   const fine = useFinePointer();
   return (
     // ListItem renders a list item and drops accessibilityRole on web; the role,
@@ -69,17 +69,13 @@ function Row({ selected = false, twoLine = false, label, onPressIn, onPress, tes
         onPress();
       }}
       minHeight={fine ? undefined : HEIGHT.control}
-      padding="0"
-      paddingLeft={step('5')}
-      paddingRight={step('6')}
-      paddingVertical={twoLine ? step('1') : fine ? step('1') : '0'}
-      gap={step('2')}
+      paddingHorizontal="2"
+      paddingVertical={twoLine ? '1' : fine ? '1' : '0'}
+      gap="2"
       alignItems={twoLine ? 'flex-start' : 'center'}
       justifyContent="flex-start"
       backgroundColor={selected ? 'highlight' : 'transparent'}
-      borderRadius={0}
-      borderLeftWidth={1}
-      borderColor={selected ? 'needsYou' : 'transparent'}
+      borderRadius="md"
       onPressIn={onPressIn}
       onPress={onPress}
       aria-label={label}
@@ -94,11 +90,10 @@ function Row({ selected = false, twoLine = false, label, onPressIn, onPress, tes
 
 /** A section's quiet label and count, on the rows' left edge; a hairline above all but the first. */
 function SectionLabel({ title, count, rule }: { title: string; count: number; rule: boolean }) {
-  const step = useStep();
   return (
-    <XStack borderTopWidth={rule ? 1 : 0} borderColor="stroke" marginTop={rule ? step('2') : '0'}
-      paddingLeft={step('5')} paddingRight={step('6')} paddingTop={step('3')} paddingBottom={step('1')} gap={step('2')} alignItems="center">
-      <T v="meta" color="secondary" flex={1}>{title}</T>
+    <XStack borderTopWidth={rule ? 1 : 0} borderColor="stroke" marginTop={rule ? '2' : '0'}
+      paddingHorizontal="2" paddingTop="3" paddingBottom="1" gap="2" alignItems="center">
+      <T v="metaStrong" color="secondary" flex={1}>{title}</T>
       <XStack minWidth={TRAIL} justifyContent="center"><T v="meta" color="secondary">{String(count)}</T></XStack>
     </XStack>
   );
@@ -111,14 +106,14 @@ function WaitingRow({ item, corner, now, onOpenThread }: {
   const title = threadTitle(item, corner);
   const where = corner.reason ? `${corner.reason} · ${chatTitle(item)}` : chatTitle(item);
   // ↳ and the mark centre on the title's line.
-  const line = typeStyle('metaStrong', useTextSize()).lineHeight;
+  const line = typeStyle('heading', useTextSize()).lineHeight;
   return (
     <Row twoLine label={`Thread ${title} in ${chatTitle(item)}, waiting on you`}
       onPress={() => onOpenThread(item.room.id, corner.id, corner.name)} testID={`thread-row-${corner.id}`}>
       <XStack width={LEAD} height={line} alignItems="center" justifyContent="center"><Glyph icon={CornerDownRight} size={16} /></XStack>
       <YStack flex={1} minWidth={0}>
         <XStack gap="2" alignItems="center">
-          <T v="metaStrong" color="ink" flex={1} numberOfLines={1}>{title}</T>
+          <T v="heading" color="ink" flex={1} numberOfLines={1}>{title}</T>
           <T v="meta" color="secondary">{age(corner.waitingSince ?? corner.lastActivityAt ?? item.room.updatedAt, now)}</T>
         </XStack>
         <T v="meta" color="secondary" numberOfLines={1}>{where}</T>
@@ -154,7 +149,7 @@ const ChatLine = React.memo(function ChatLine({ item, now, selected, pinned, onO
             : <IdentityMark kind="human" seed={peer.pubkey} name={peer.name} avatarUrl={peer.avatar} face={peer.face} size={LEAD} />
         ) : <RepositoryMark homepageIconUrl={item.room.homepageIcon} size={LEAD} fallback={<Glyph icon={Hash} size={16} />} />}
       </XStack>
-      <T v={unread ? 'metaStrong' : 'meta'} color={unread ? 'ink' : 'secondary'} flex={1} numberOfLines={1}
+      <T v={unread || selected ? 'heading' : 'body'} color={unread || selected ? 'ink' : 'secondary'} flex={1} numberOfLines={1}
         testID={`room-${item.room.id}-title`}>{roomRowName(item).name}</T>
       {pinned ? <Glyph icon={Pin} size={14} /> : null}
       <T v="meta" color="secondary" testID={`room-${item.room.id}-age`}>{chatAge(item, now)}</T>
@@ -184,7 +179,7 @@ function CappedSection({ title, items, cap, rule, props }: {
   const hiddenUnread = hidden.some((item) => item.unread === true);
   const hiddenTagged = hidden.some(chatTagged);
   return (
-    <YStack testID={`section-${title}`}>
+    <YStack gap="0.5" testID={`section-${title}`}>
       <SectionLabel title={title} count={items.length} rule={rule} />
       {(all ? ordered : capped).map((item) => (
         <ChatLine key={item.room.id} item={item} now={props.now} selected={props.selected === item.room.id}
@@ -212,9 +207,9 @@ export function DesktopChatList(props: Props) {
   const chats = props.chats.filter((item) => !item.directMessage);
   const dms = props.chats.filter((item) => item.directMessage);
   return (
-    <YStack paddingBottom="2" testID="desktop-chat-sections">
+    <YStack paddingHorizontal="2" paddingBottom="2" testID="desktop-chat-sections">
       {waiting.length ? (
-        <YStack testID="section-Waiting on you">
+        <YStack gap="0.5" testID="section-Waiting on you">
           <SectionLabel title="Waiting on you" count={waiting.length} rule={false} />
           {waiting.map(({ item, corner }) => (
             <WaitingRow key={corner.id} item={item} corner={corner} now={props.now} onOpenThread={props.onOpenThread} />

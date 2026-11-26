@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isTauri } from '@/utils/isTauri';
-import { useHeaderHeight } from '@/utils/responsive';
+import { isMacTauri, MAC_TAURI_TITLEBAR_HEIGHT } from '@/utils/macTitlebar';
+import { useHeaderHeight, useIsDesktop } from '@/utils/responsive';
 
 const INTERACTIVE_TAGS = new Set(['button', 'a', 'input', 'textarea', 'select']);
 const INTERACTIVE_ROLES = new Set(['button', 'link', 'textbox', 'menuitem', 'tab', 'switch', 'checkbox', 'radio']);
@@ -20,22 +21,18 @@ const DESKTOP_CSS = `
         -webkit-user-drag: none;
         user-drag: none;
     }
-    /* Text fields match :focus-visible on every focus and draw their own focus
-       border (composer, search), so the ring would double inside it. */
-    :focus-visible:not(input, textarea, [contenteditable="true"], [contenteditable=""]) {
-        outline: 2px solid #d7af5f !important;
-        outline-offset: 2px !important;
-    }
 `;
 
 // Tauri's built-in drag.js only inspects e.target directly, so clicks on header
 // children (text/icons/Pressables) silently fail. We drag when the click lands
-// in the top strip (safe-area + header height) and isn't on an interactive element.
+// in the top titlebar strip (safe-area + macOS titlebar height on desktop, or
+// header height on compact windows) and isn't on an interactive element.
 export function useTauriDrag() {
     const safeArea = useSafeAreaInsets();
     const headerHeight = useHeaderHeight();
+    const isDesktop = useIsDesktop();
     const dragZoneRef = useRef(0);
-    dragZoneRef.current = safeArea.top + headerHeight;
+    dragZoneRef.current = safeArea.top + (isMacTauri() && isDesktop ? MAC_TAURI_TITLEBAR_HEIGHT : headerHeight);
 
     useEffect(() => {
         if (!isTauri()) return;

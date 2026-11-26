@@ -217,11 +217,29 @@ export function Row({ label, value, detail, icon, leading, onPress, last, right,
  * and every page it opens share this frame, so entering one never shifts the
  * title. Takes the device's top inset on phones.
  */
-export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark, meta, right, safeTop = true, testID }: {
+export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark, meta, right, safeTop = true, desktop = false, testID }: {
     title: React.ReactNode; back?: () => void; backLabel?: string; backTestID?: string; mark?: React.ReactNode; meta?: React.ReactNode;
-    right?: React.ReactNode; safeTop?: boolean; testID?: string;
+    right?: React.ReactNode; safeTop?: boolean; desktop?: boolean; testID?: string;
 }) {
     const step = useStep();
+    if (desktop) {
+        return (
+            <YStack backgroundColor="canvas">
+                <XStack height={HEIGHT.tabBar} paddingHorizontal="4" paddingVertical="0" gap="2" alignItems="center" testID={testID}>
+                    {back ? <Btn kind="icon" label={backLabel} onPress={back} testID={backTestID}><Glyph icon={ArrowLeft} /></Btn> : null}
+                    <XStack flex={1} minWidth={0} gap="3" alignItems="center">
+                        {mark}
+                        <YStack flex={1} minWidth={0}>
+                            {typeof title === 'string' ? <T v="listTitle" numberOfLines={1}>{title}</T> : title}
+                            {meta}
+                        </YStack>
+                    </XStack>
+                    {right}
+                </XStack>
+                <Separator borderColor="stroke" />
+            </YStack>
+        );
+    }
     return (
         <YStack backgroundColor="canvas">
             {safeTop ? <SafeTop /> : null}
@@ -275,10 +293,10 @@ export function ChatMark({ size = 36 }: { size?: 36 | 28 }) {
 }
 
 /** A chat's name in a title style, its leading # in brass. */
-export function ChatName({ name, v = 'title', testID }: { name: string; v?: 'title' | 'listTitle'; testID?: string }) {
+export function ChatName({ name, v = 'title', numberOfLines, testID }: { name: string; v?: 'title' | 'listTitle'; numberOfLines?: number; testID?: string }) {
     const hash = name.startsWith('#');
     return (
-        <T v={v} testID={testID}>
+        <T v={v} numberOfLines={numberOfLines} testID={testID}>
             {hash ? <T v={v} color="needsYou">#</T> : null}
             {hash ? name.slice(1) : name}
         </T>

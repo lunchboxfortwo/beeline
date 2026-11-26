@@ -19,10 +19,8 @@ import { DesktopWorkspaceRail } from '@/components/buzz/DesktopWorkspaceRail';
 import { messageSearchHref, useMessageSearch } from '@/buzz/use-message-search';
 import { BuzzRigTransport } from '@/sync/transport';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
-import { useHeaderHeight, useIsDesktop } from '@/utils/responsive';
-import { isTauri } from '@/utils/isTauri';
-import { Copy, SafeTop, TextSizeContext } from '@/ui/grammar';
-import { useFinePointer } from '@/utils/use-fine-pointer';
+import { useIsDesktop } from '@/utils/responsive';
+import { Copy, SafeTop } from '@/ui/grammar';
 import { SIDE_PLACES, SidePlaceRow, type SidePlace } from '@/ui/screens/chats/SidePlaces';
 import { ChatListHeader, CLOSED_SEARCH, type ChatSearch } from '@/ui/screens/chats/ChatListHeader';
 import { JoinableChats } from '@/ui/screens/chats/ChatTree';
@@ -61,11 +59,6 @@ export const SidebarView = React.memo(function SidebarView() {
     if (Platform.OS === 'web') warmRoomRouteCode();
   }, []);
   const { showRoomList } = useDesktopLayout();
-  const headerHeight = useHeaderHeight();
-  const macTitlebarInset =
-    isTauri() && typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
-      ? headerHeight
-      : 0;
   const isDesktop = useIsDesktop();
   const router = useRouter();
   const pathname = usePathname();
@@ -340,14 +333,8 @@ export const SidebarView = React.memo(function SidebarView() {
   );
 
   const canStartChat = Boolean(workspaceId) && canCreateRoom;
-  // Under a mouse the sidebar's narrow column runs at the Small preset, so its
-  // type and spacing shrink together; touch keeps the reader's own Text size.
-  const finePointer = useFinePointer();
-  const textSize = React.useContext(TextSizeContext);
   return (
-    <TextSizeContext.Provider value={finePointer ? 'small' : textSize}>
     <YStack flex={1} minHeight={0}>
-      {macTitlebarInset ? <YStack height={macTitlebarInset} /> : null}
       {(!isDesktop || showRoomList) && (
         <YStack flex={1} minHeight={0} borderRightWidth={1} borderColor="stroke" backgroundColor="canvas" testID="desktop-navigation-pane">
           {isDesktop ? null : <SafeTop />}
@@ -360,7 +347,8 @@ export const SidebarView = React.memo(function SidebarView() {
             search={search}
             onSearch={setSearch}
           />
-          <YStack paddingHorizontal="2" paddingVertical="2" gap="1">
+          {isDesktop ? <Separator borderColor="stroke" /> : null}
+          <YStack paddingHorizontal="2" paddingVertical="2" gap="0.5">
             {SIDE_PLACES.map((place) => (
               <SidePlaceRow
                 key={place.key}
@@ -434,6 +422,5 @@ export const SidebarView = React.memo(function SidebarView() {
         </YStack>
       )}
     </YStack>
-    </TextSizeContext.Provider>
   );
 });
