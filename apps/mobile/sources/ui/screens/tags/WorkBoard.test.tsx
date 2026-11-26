@@ -472,6 +472,11 @@ it('auto-scrolls near viewport edges on phone, refreshes drop bounds, and drops 
         expect(scrollTo).toHaveBeenCalled();
         expect(currentScrollY).toBeGreaterThanOrEqual(240);
 
+        // A delayed native onScroll carrying an earlier offset must NOT rewind the authoritative drag offset or corrupt drop bounds.
+        act(() => {
+            host('work-phone-scroll').props.onScroll({ nativeEvent: { contentOffset: { y: 48 } } });
+        });
+
         // Done has scrolled into view under pageY=680 (920 - currentScrollY <= 680 <= 1020 - currentScrollY).
         act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { pageY: 680 } }); });
         expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'done');
@@ -482,12 +487,16 @@ it('auto-scrolls near viewport edges on phone, refreshes drop bounds, and drops 
         act(() => { vi.advanceTimersByTime(32 * 5); });
         expect(scrollTo).toHaveBeenCalledTimes(scrollCountAfterRelease);
 
-        // Now start scrolled down and drag near top edge (pageY=110) to reach offscreen In progress above.
+        // Now start scrolled down and drag near top edge (pageY=110) to reach offscreen In progress above,
+        // even if a stale delayed onScroll from the previous scrolled-down position arrives mid-drag.
         move.mockClear();
         act(() => { host('work-item-t-offscreen').props.onLongPress(); });
         act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { pageY: 110 } }); });
         act(() => { vi.advanceTimersByTime(32 * 20); });
         expect(currentScrollY).toBe(0);
+        act(() => {
+            host('work-phone-scroll').props.onScroll({ nativeEvent: { contentOffset: { y: 260 } } });
+        });
         act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { pageY: 160 } }); });
         expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'in-progress');
     } finally {

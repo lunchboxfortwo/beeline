@@ -19,9 +19,9 @@ import {
   canDragWorkItem,
   clampScrollOffset,
   edgeAutoScrollDelta,
+  projectBoundsForScroll,
   resolveDropSectionForTouch,
   sectionTargetState,
-  shiftSectionBounds,
   shouldMoveWorkItem,
   webDragSourceProps,
   webDropTargetProps,
@@ -354,14 +354,16 @@ export function WorkBoard({
   const dragOverRef = useRef<DropSectionKey | null>(null);
   const scrollRef = useRef<ScrollableHost | null>(null);
   const scrollViewport = useRef<SectionBounds | null>(null);
+  /** Authoritative vertical scroll offset: owned by onScroll at rest and by auto-scroll during drag. */
   const scrollOffsetY = useRef(0);
+  const dragStartScrollY = useRef(0);
   const scrollContentHeight = useRef(0);
   const lastTouchPageY = useRef<number | null>(null);
   const autoScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const boardRef = useRef<MeasurableHost | null>(null);
-  const boardWindowY = useRef<number | null>(null);
+  const dragStartBoardWindowY = useRef<number | null>(null);
   const sectionRefs = useRef<Partial<Record<DropSectionKey, MeasurableHost | null>>>({});
-  const sectionWindowBounds = useRef<Partial<Record<DropSectionKey, SectionBounds>>>({});
+  const dragStartSectionBounds = useRef<Partial<Record<DropSectionKey, SectionBounds>>>({});
   const sectionLayouts = useRef<Partial<Record<DropSectionKey, SectionBounds>>>({});
   const { scrolled, scrollProps } = useScrolledUnder();
 
@@ -379,42 +381,42 @@ export function WorkBoard({
 
   useEffect(() => () => stopAutoScroll(), []);
 
-  const refreshHoverTarget = (pageY: number | null) => {
-    if (typeof pageY !== 'number') return;
-    const target = resolveDropSectionForTouch({
+  const resolveCurrentTouchTarget = (pageY: number | null | undefined): DropSectionKey | null => {
+    if (typeof pageY !== 'number') return null;
+    const scrolledSinceStart = scrollOffsetY.current - dragStartScrollY.current;
+    return resolveDropSectionForTouch({
       pageY,
-      windowBounds: sectionWindowBounds.current,
+      windowBounds: projectBoundsForScroll(dragStartSectionBounds.current, scrolledSinceStart),
       boardLayouts: sectionLayouts.current,
-      boardWindowY: boardWindowY.current,
+      boardWindowY:
+        dragStartBoardWindowY.current !== null
+          ? dragStartBoardWindowY.current - scrolledSinceStart
+          : null,
     });
-    updateDragOver(target);
   };
 
-  const measureDropTargets = () => {
+  const refreshHoverTarget = (pageY: number | null) => {
+    if (typeof pageY !== 'number') return;
+    updateDragOver(resolveCurrentTouchTarget(pageY));
+  };
+
+  const measureDropTargetsAtDragStart = () => {
+    dragStartScrollY.current = scrollOffsetY.current;
+    dragStartSectionBounds.current = {};
+    dragStartBoardWindowY.current = null;
     scrollRef.current?.measureInWindow?.((_x, y, _width, height) => {
       if (height > 0) scrollViewport.current = { y, height };
     });
     boardRef.current?.measureInWindow?.((_x, y) => {
-      boardWindowY.current = y;
+      dragStartBoardWindowY.current = y;
       refreshHoverTarget(lastTouchPageY.current);
     });
     for (const key of ['progress', 'backlog', 'done'] as const) {
       sectionRefs.current[key]?.measureInWindow?.((_x, y, _width, height) => {
-        sectionWindowBounds.current[key] = { y, height };
+        dragStartSectionBounds.current[key] = { y, height };
         refreshHoverTarget(lastTouchPageY.current);
       });
     }
-  };
-
-  const applyScrollDelta = (nextY: number) => {
-    const prevY = scrollOffsetY.current;
-    const diff = nextY - prevY;
-    if (!diff) return;
-    scrollOffsetY.current = nextY;
-    if (boardWindowY.current !== null) boardWindowY.current -= diff;
-    shiftSectionBounds(sectionWindowBounds.current, -diff);
-    measureDropTargets();
-    refreshHoverTarget(lastTouchPageY.current);
   };
 
   const stepAutoScroll = () => {
@@ -440,8 +442,9 @@ export function WorkBoard({
       stopAutoScroll();
       return;
     }
+    scrollOffsetY.current = nextY;
     scrollRef.current?.scrollTo?.({ y: nextY, animated: false });
-    applyScrollDelta(nextY);
+    refreshHoverTarget(lastTouchPageY.current);
   };
 
   const syncAutoScroll = (pageY: number | undefined) => {
@@ -484,11 +487,7 @@ export function WorkBoard({
   const startDrag = (item: WorkItemView) => {
     if (!canDragWorkItem(item, canMove)) return;
     draggingIdRef.current = item.id;
-    if (!desktop) {
-      sectionWindowBounds.current = {};
-      boardWindowY.current = null;
-      measureDropTargets();
-    }
+    if (!desktop) measureDropTargetsAtDragStart();
     setDraggingId(item.id);
   };
   const dropOn = (target: DropSectionKey, transferredId?: string) => {
@@ -748,11 +747,10 @@ export function WorkBoard({
           }}
           onScroll={(event: { nativeEvent?: { contentOffset?: { y?: number } } }) => {
             scrollProps.onScroll?.(event as never);
+            // Ignore delayed native scroll echoes while auto-scroll owns the drag offset.
+            if (draggingIdRef.current) return;
             const nextY = event?.nativeEvent?.contentOffset?.y;
-            if (typeof nextY === 'number') {
-              if (draggingIdRef.current) applyScrollDelta(nextY);
-              else scrollOffsetY.current = nextY;
-            }
+            if (typeof nextY === 'number') scrollOffsetY.current = nextY;
           }}
         >
           <YStack
@@ -780,12 +778,7 @@ export function WorkBoard({
                     const pageY = event?.nativeEvent?.pageY;
                     const target =
                       typeof pageY === 'number'
-                        ? resolveDropSectionForTouch({
-                            pageY,
-                            windowBounds: sectionWindowBounds.current,
-                            boardLayouts: sectionLayouts.current,
-                            boardWindowY: boardWindowY.current,
-                          })
+                        ? resolveCurrentTouchTarget(pageY)
                         : dragOverRef.current;
                     if (target) dropOn(target);
                     else finishDrag();

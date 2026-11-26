@@ -113,15 +113,17 @@ export function clampScrollOffset(
   return Math.min(maxScroll, Math.max(0, nextY));
 }
 
-export function shiftSectionBounds(
-  bounds: Partial<Record<DropSectionKey, SectionBounds>>,
-  deltaY: number,
-): void {
-  if (!deltaY) return;
+export function projectBoundsForScroll(
+  baseline: Partial<Record<DropSectionKey, SectionBounds>>,
+  scrollDeltaY: number,
+): Partial<Record<DropSectionKey, SectionBounds>> {
+  if (!scrollDeltaY) return baseline;
+  const projected: Partial<Record<DropSectionKey, SectionBounds>> = {};
   for (const key of ['progress', 'backlog', 'done'] as const) {
-    const box = bounds[key];
-    if (box) bounds[key] = { y: box.y + deltaY, height: box.height };
+    const box = baseline[key];
+    if (box) projected[key] = { y: box.y - scrollDeltaY, height: box.height };
   }
+  return projected;
 }
 
 type WebDragEvent = {
