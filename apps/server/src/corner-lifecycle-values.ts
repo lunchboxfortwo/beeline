@@ -64,7 +64,7 @@ export type CornerEvent =
   | { kind: 'approval'; headSha: string; by: 'reviewer' }
   | { kind: 'merge-refused'; headSha: string; reason: string; confirmedUnmerged?: boolean }
   | { kind: 'merged'; contents: Record<string, unknown> }
-  | { kind: 'closed' }
+  | { kind: 'closed'; preserveTurn?: { agentId: string; requestId?: string } }
   /** update_work moved the thread into (true) or out of (false) Backlog. */
   | { kind: 'backlog'; backlog: boolean }
   | { kind: 'merge-conflict'; sourceMessageId: string }
