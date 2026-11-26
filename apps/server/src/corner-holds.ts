@@ -5,6 +5,7 @@ import { CommandRefusalError } from './command-refusal.js';
 import { systemLine, restateSystemLine, ensureSystemIdentity } from './system-line.js';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import type { CornerHoldInput, CornerMergeHold } from '@beeline/api-contract/phone';
+import type { ThreadApproverLink } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import { advanceCorner, lockCornerLifecycle } from './corner-lifecycle.js';
 
@@ -50,8 +51,8 @@ export async function setCornerHold(db: SqlDatabase, input: CornerHoldInput, act
   if (citation) actorId = citation.approvedBy;
   await lockCornerLifecycle(db, input.cornerId);
   const actor = (
-    await db.query<{ role: CornerMergeHold['standing'] }>(
-      `SELECT workspace_member.role FROM rooms corner
+    await db.query<{ role: CornerMergeHold['standing']; corner_name: string }>(
+      `SELECT workspace_member.role,corner.name corner_name FROM rooms corner
      JOIN corner_facts fact ON fact.corner_id=corner.id
      JOIN memberships room_member ON room_member.room_id=corner.parent_id AND room_member.identity_id=$2
        AND room_member.removed_at IS NULL
@@ -87,7 +88,12 @@ export async function setCornerHold(db: SqlDatabase, input: CornerHoldInput, act
       agentId ?? actorId,
     ]);
     await advanceCorner(db, input.cornerId, { kind: 'hold-released' });
-    return { holdId: input.releaseHoldId, roomId: input.cornerId };
+    return {
+      holdId: input.releaseHoldId,
+      roomId: input.cornerId,
+      released: true,
+      receipt: `Released merge hold on #${actor.corner_name}`,
+    };
   }
   const row = (
     await db.query<{ id: string }>(
@@ -100,7 +106,23 @@ export async function setCornerHold(db: SqlDatabase, input: CornerHoldInput, act
     )
   ).rows[0]!;
   await writeHoldMessage(db, input.cornerId, row.id, agentId ?? actorId);
-  return { holdId: row.id, roomId: input.cornerId };
+  const citedName = citation
+    ? (await db.query<{ name: string | null }>('SELECT NULLIF(name,\'\') name FROM identities WHERE id=$1', [citation.approvedBy])).rows[0]?.name ?? undefined
+    : undefined;
+  const approvedBy: ThreadApproverLink | undefined = citation
+    ? {
+        identityId: citation.approvedBy,
+        ...(citedName ? { name: citedName } : {}),
+        ...(citation.sourceMessageId ? { sourceMessageId: citation.sourceMessageId } : {}),
+        ...(citation.kind ? { kind: citation.kind } : {}),
+      }
+    : undefined;
+  return {
+    holdId: row.id,
+    roomId: input.cornerId,
+    ...(approvedBy ? { approvedBy } : {}),
+    receipt: `Set merge hold on #${actor.corner_name}${citation ? ` · cited ${citedName ?? citation.approvedBy.slice(0, 8)}` : ''}`,
+  };
 }
 
 async function writeHoldMessage(

@@ -630,7 +630,7 @@ async function executeResourceTool(
       if (Object.keys(args).some((key) => !allowed.has(key)))
         throw new Error('wake only manages this agent’s own wake sources');
       const roomId = agentScheduleRoomId();
-      const deps = { ...agentScheduleDepsFromEnv(), selfOnly: true };
+      const deps = { ...agentScheduleDepsFromEnv(), selfOnly: true, structured: true };
       if (args.action === 'pause' || args.action === 'resume') {
         return JSON.stringify(
           await daemonExecute('setAgentWakePaused', {

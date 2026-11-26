@@ -4,7 +4,9 @@ import { buildBwrapArgv, sandboxMountPlan } from './bwrap-sandbox.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { approveMerge, openCorner } from './read-only-mcp-open-corner.js';
+import { approveMerge, closeCorner, openCorner } from './read-only-mcp-open-corner.js';
+import { listSchedules } from './read-only-mcp-download-attachment.js';
+import { callAgentTool } from './read-only-mcp-open-poll.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const roots: string[] = [];
@@ -75,4 +77,125 @@ it('submits native review text and exact-head approval through the active sessio
     placeId: 'thread', action: 'operation', operation: 'approveCornerMerge', commandId: 'review-item',
     input: { ...authority, cornerId: 'thread', headSha, text },
   });
+});
+
+it('forwards structured receipts and provenance from openCorner, closeCorner, wake, and listSchedules', async () => {
+  vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'parent', requestId: 'req-1' });
+  for (const [key, value] of Object.entries({
+    BEELINE_DAEMON_ROOM_ID: 'parent',
+    BEELINE_DAEMON_BASE_URL: 'http://daemon.test',
+    BEELINE_DAEMON_TOKEN: 'fixture',
+  })) vi.stubEnv(key, value);
+
+  const scheduleReceipt = {
+    scheduleId: 'sched-1',
+    nextRunAt: Date.parse('2026-11-26T14:00:00Z'),
+    repliesTo: { identityId: 'u1', handle: 'lunchboxfortwo', name: 'Lunchbox' },
+    approvedBy: { identityId: 'u1', handle: 'lunchboxfortwo', sourceMessageId: 'msg-1' },
+    receipt: 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo',
+  };
+
+  vi.stubGlobal('fetch', async (url: URL) => {
+    const op = new URL(url).pathname.split('/').at(-1)!;
+    if (op === 'getRoomRepositoryState') return Response.json({ resolution: 'none' });
+    if (op === 'createCorner') {
+      return Response.json({
+        cornerId: 'corner-1',
+        name: 'mcp-state-receipts',
+        implementer: 'crayon',
+        approvedBy: { identityId: 'u1', name: 'lunchboxfortwo', sourceMessageId: 'msg-1' },
+        receipt: 'Opened thread "mcp-state-receipts" · implementer @crayon · approved by @lunchboxfortwo',
+      });
+    }
+    if (op === 'archiveCorner') {
+      return Response.json({
+        ok: true,
+        receipt: 'Closed thread "mcp-state-receipts"',
+      });
+    }
+    if (op === 'updateAgentSchedule') return Response.json(scheduleReceipt);
+    if (op === 'setEventSubscriptions') {
+      return Response.json({
+        kinds: ['check-failed'],
+        receipt: 'Replaced chat event subscriptions · active: check-failed',
+      });
+    }
+    if (op === 'setAgentWakePaused') {
+      return Response.json({
+        paused: true,
+        repliesTo: scheduleReceipt.repliesTo,
+        receipt: 'Paused "Morning card" · replies to @lunchboxfortwo',
+      });
+    }
+    return Response.json({ ok: true });
+  });
+
+  const opened = JSON.parse(
+    await openCorner({ name: 'mcp-state-receipts', implementer: 'crayon', brief: { spec: 'Add receipts' } }, 'call-open'),
+  );
+  expect(opened).toMatchObject({
+    address: 'corner-1',
+    status: 'created',
+    implementer: 'crayon',
+    approvedBy: { identityId: 'u1', name: 'lunchboxfortwo', sourceMessageId: 'msg-1' },
+    receipt: 'Opened thread "mcp-state-receipts" · implementer @crayon · approved by @lunchboxfortwo',
+  });
+
+  const closed = JSON.parse(await closeCorner({ cornerId: 'corner-1' }));
+  expect(closed).toEqual({
+    cornerId: 'corner-1',
+    status: 'closed',
+    receipt: 'Closed thread "mcp-state-receipts"',
+  });
+
+  const updated = JSON.parse(
+    await callAgentTool(
+      'wake',
+      {
+        action: 'update',
+        trigger: 'schedule',
+        scheduleId: 'sched-1',
+        title: 'Morning card',
+        cadence: { kind: 'interval', everyMinutes: 60 },
+      },
+      'call-wake-update',
+    ),
+  );
+  expect(updated).toEqual(scheduleReceipt);
+
+  const paused = JSON.parse(
+    await callAgentTool('wake', { action: 'pause', scheduleId: 'sched-1' }, 'call-wake-pause'),
+  );
+  expect(paused.receipt).toBe('Paused "Morning card" · replies to @lunchboxfortwo');
+
+  const replaced = JSON.parse(
+    await callAgentTool(
+      'wake',
+      { action: 'replace_events', kinds: ['check-failed'] },
+      'call-wake-events',
+    ),
+  );
+  expect(replaced.receipt).toBe('Replaced chat event subscriptions · active: check-failed');
+
+  const listedText = await listSchedules({
+    roomId: 'parent',
+    execute: async () => ({
+      schedules: [
+        {
+          scheduleId: 'sched-1',
+          roomId: 'parent',
+          roomName: '#beeline',
+          title: 'Morning card',
+          agentId: 'a1',
+          cadence: { kind: 'interval', everyMinutes: 60 },
+          prompt: 'Post morning card',
+          nextRunAt: Math.floor(Date.parse('2026-11-26T14:00:00Z') / 1000),
+          repliesTo: { identityId: 'u1', handle: 'lunchboxfortwo' },
+          approvedBy: { identityId: 'u1', handle: 'lunchboxfortwo', sourceMessageId: 'msg-1' },
+        },
+      ],
+    }),
+  });
+  expect(listedText).toContain('replies to @lunchboxfortwo');
+  expect(listedText).toContain('approved by @lunchboxfortwo (msg-1)');
 });

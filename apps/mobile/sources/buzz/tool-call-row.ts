@@ -18,6 +18,8 @@ import {
 export const TOOL_CALL_OBJECT_MAX = 56;
 /** The ledger line's label cap (owner-approved tool-ledger design, 2026-08-24). */
 const TOOL_CALL_LABEL_MAX = 40;
+/** Structured MCP receipts keep enough room for target, timing, and causal provenance. */
+const TOOL_CALL_RECEIPT_LABEL_MAX = 120;
 /** A duration is only worth a column when the call was slow enough to notice. */
 export const TOOL_CALL_DURATION_FLOOR_MS = 1000;
 
@@ -67,6 +69,13 @@ const GENERIC_LEDGER_VERBS = new Set([
   'requested',
   'stopped',
   'dispatched',
+  'set',
+  'released',
+  'revised',
+  'installed',
+  'renamed',
+  'cleared',
+  'asked',
 ]);
 
 /** A folded rollup row from an older transcript: `reading 8` is 8 read calls. */
@@ -201,18 +210,53 @@ function legacyTruncatedText(raw: string): string | undefined {
   });
 }
 
+function isTerminalOnlyEnvelope(value: unknown): boolean {
+  const items = Array.isArray(value) ? value : [value];
+  return (
+    items.length > 0 &&
+    items.every(
+      (entry) =>
+        Boolean(entry) &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        (entry as Record<string, unknown>).type === 'terminal' &&
+        !('text' in (entry as Record<string, unknown>)) &&
+        !('output' in (entry as Record<string, unknown>)) &&
+        !('content' in (entry as Record<string, unknown>)),
+    )
+  );
+}
+
 /**
  * The call's real output, or nothing.
  *
  * A terminal-backed execute returns `[{"type":"terminal","terminalId":"exec-…"}]`
  * — a machine identifier the reader can do nothing with. Showing nothing is the
- * honest rendering of "we were handed a handle, not a result".
+ * honest rendering of "we were handed a handle, not a result". Structured JSON
+ * results (such as Beeline MCP state receipts and schedule lists) are formatted
+ * cleanly rather than discarded.
  */
 export function toolCallOutput(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
   const envelope = parsed(raw);
-  const text =
-    envelope === undefined ? (legacyTruncatedText(raw) ?? raw) : textLeaves(envelope).join('\n');
+  let text: string;
+  if (envelope === undefined) {
+    text = legacyTruncatedText(raw) ?? raw;
+  } else {
+    const leaves = textLeaves(envelope);
+    if (leaves.length) {
+      const joined = leaves.join('\n');
+      const inner = parsed(joined);
+      text =
+        inner !== undefined && typeof inner === 'object' && inner !== null
+          ? JSON.stringify(inner, null, 2)
+          : joined;
+    } else if (isTerminalOnlyEnvelope(envelope)) {
+      return [];
+    } else {
+      text = JSON.stringify(envelope, null, 2);
+    }
+  }
   if (!text.trim()) return [];
   return text
     .split(/\r?\n/)
@@ -235,8 +279,13 @@ function verbAndObject(step: TurnActivityAction, output: readonly string[]) {
     field(parsed(step.input), ['path', 'file_path', 'filePath', 'filename']);
 
   if (mcp) {
-    const described = describeMcpCall(mcp, step.input, step.command);
-    return { verb: described.verb, object: described.object, namedTool: described.namedTool };
+    const described = describeMcpCall(mcp, step.input, step.command, step.output);
+    return {
+      verb: described.verb,
+      object: described.object,
+      namedTool: described.namedTool,
+      hasReceipt: Boolean(described.receipt),
+    };
   }
 
   if (step.command) {
@@ -301,8 +350,9 @@ export function toolCallVerb(step: TurnActivityAction): string {
  */
 export function toolCallLabel(step: TurnActivityAction): string {
   const output = toolCallOutput(step.output);
-  const { verb, object, namedTool } = verbAndObject(step, output);
+  const { verb, object, namedTool, hasReceipt } = verbAndObject(step, output);
   const generic = !namedTool && GENERIC_LEDGER_VERBS.has(verb);
   const label = generic ? object : `${verb} ${object}`;
-  return middleTruncate(oneLine(label) || 'tool call', TOOL_CALL_LABEL_MAX);
+  const limit = hasReceipt ? TOOL_CALL_RECEIPT_LABEL_MAX : TOOL_CALL_LABEL_MAX;
+  return middleTruncate(oneLine(label) || 'tool call', limit);
 }

@@ -67,8 +67,11 @@ export async function openCorner(args: JsonObject, toolCallId: string): Promise<
   }
   return JSON.stringify({
     address: created.cornerId,
-    name,
+    name: typeof created.name === 'string' ? created.name : name,
     objective,
+    ...(typeof created.implementer === 'string' ? { implementer: created.implementer } : {}),
+    ...(created.approvedBy ? { approvedBy: created.approvedBy } : {}),
+    ...(typeof created.receipt === 'string' ? { receipt: created.receipt } : {}),
     ...(notes?.length ? { notes } : {}),
     ...(args.brief ? { briefRevision: 1 } : {}),
     ...(created.watch ? { watch: created.watch } : {}),
@@ -144,8 +147,12 @@ export function targetCornerId(args: JsonObject): string {
  */
 export async function closeCorner(args: JsonObject): Promise<string> {
   const cornerId = targetCornerId(args);
-  await daemonExecute('archiveCorner', { cornerId });
-  return JSON.stringify({ cornerId, status: 'closed' });
+  const closed = await daemonExecute('archiveCorner', { cornerId });
+  return JSON.stringify({
+    cornerId,
+    status: 'closed',
+    ...(typeof closed.receipt === 'string' ? { receipt: closed.receipt } : {}),
+  });
 }
 
 

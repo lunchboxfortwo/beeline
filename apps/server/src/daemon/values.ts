@@ -183,14 +183,14 @@ export function daemonTranscriptVisibilitySql(alias: string): string {
 export const conversationColumns = `SELECT id,author_id,created_at,presentation,text,
         EXISTS(SELECT 1 FROM identities author
                WHERE author.id=messages.author_id AND author.kind='agent') agent_author,
-        reply_to_message_id,
-        (SELECT parent.author_id FROM messages parent WHERE parent.id=messages.reply_to_message_id) reply_to_author_id,
+        CASE WHEN EXISTS(SELECT 1 FROM messages parent WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) THEN reply_to_message_id END reply_to_message_id,
+        (SELECT parent.author_id FROM messages parent WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) reply_to_author_id,
         (SELECT author.name FROM messages parent JOIN identities author ON author.id=parent.author_id
-         WHERE parent.id=messages.reply_to_message_id) reply_to_author_name,
+         WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) reply_to_author_name,
         (SELECT left(parent.text,16001) FROM messages parent
-         WHERE parent.id=messages.reply_to_message_id) reply_to_excerpt,
+         WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) reply_to_excerpt,
         root_message_id,request_id,
-        (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id) request_author_id,
+        (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id AND request.deleted_at IS NULL) request_author_id,
         agent_hop_count,attachments,system_event,
         CASE WHEN chat_seq IS NOT NULL THEN '¶'||beeline_room_handle(author_id,room_id)||'-'||chat_seq END message_link,
         ${MESSAGE_CURSOR_MS_SQL} cursor_ms,

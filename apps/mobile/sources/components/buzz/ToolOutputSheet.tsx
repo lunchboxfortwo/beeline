@@ -28,6 +28,7 @@ export type ToolOutputSheetProps = {
   subtitle?: string;
   command?: string | null;
   input?: string | null;
+  receipt?: string | null;
   detail: string | null | undefined;
   error?: string | null;
   outputHidden?: boolean;
@@ -63,6 +64,7 @@ export function ToolOutputSheet({
   subtitle,
   command,
   input,
+  receipt,
   detail,
   outputHidden,
   error,
@@ -95,10 +97,11 @@ export function ToolOutputSheet({
   const canCopy = Boolean(detail && !outputHidden && detail !== 'Loading…' && !error);
   const highlight = language !== undefined;
   const shownCommand = !outputHidden && command?.trim() ? command.trim() : undefined;
+  const shownReceipt = !outputHidden && receipt?.trim() ? receipt.trim() : undefined;
   const formattedInput = !outputHidden ? formatToolInput(input) : undefined;
   const shownInput =
     formattedInput && (!shownCommand || formattedInput !== shownCommand) ? formattedInput : undefined;
-  const hasInvocation = Boolean(shownCommand || shownInput);
+  const hasInvocation = Boolean(shownReceipt || shownCommand || shownInput);
   return (
     <HullActionSheetModal
       contentMaxWidth={TOOL_OUTPUT_SHEET_MAX_WIDTH}
@@ -116,6 +119,14 @@ export function ToolOutputSheet({
         testID="tool-output-scroll"
       >
         <YStack paddingHorizontal="6" gap="4">
+          {shownReceipt ? (
+            <YStack gap="1" testID="tool-output-receipt">
+              <T v="meta" color="secondary">Receipt</T>
+              <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1}>
+                {shownReceipt}
+              </T>
+            </YStack>
+          ) : null}
           {shownCommand ? (
             <YStack gap="1" testID="tool-output-command">
               <T v="meta" color="secondary">Command</T>

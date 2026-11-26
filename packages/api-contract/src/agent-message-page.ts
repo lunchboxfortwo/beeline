@@ -44,8 +44,20 @@ export function normalizeMessagePage(input: Readonly<MessagePageInput>) {
 
 export type MessagePageLimits = { items: number; bodyChars?: number; responseChars?: number };
 
+export const MESSAGE_PAGE_REPLY_EXCERPT_MAX = 160;
+
+function boundPageReplyExcerpt(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= MESSAGE_PAGE_REPLY_EXCERPT_MAX) return clean;
+  return `${clean.slice(0, MESSAGE_PAGE_REPLY_EXCERPT_MAX - 1).trimEnd()}…`;
+}
+
 type ConversationItem = RoomConversationResult['items'][number];
 function messageRow(item: ConversationItem, offset: number) {
+  const excerpt =
+    typeof item.replyToExcerpt === 'string' && item.replyToExcerpt.trim()
+      ? boundPageReplyExcerpt(item.replyToExcerpt)
+      : undefined;
   return {
     id: item.id,
     messageId: item.id,
@@ -55,6 +67,18 @@ function messageRow(item: ConversationItem, offset: number) {
     createdAt: item.createdAt,
     type: item.type,
     ...(offset ? { bodyOffset: offset } : {}),
+    ...(item.replyToMessageId
+      ? {
+          repliesTo: {
+            messageId: item.replyToMessageId,
+            ...(item.replyToAuthorId ? { authorId: item.replyToAuthorId } : {}),
+            ...(item.replyToAuthorName ? { authorName: item.replyToAuthorName } : {}),
+            ...(excerpt ? { excerpt } : {}),
+          },
+        }
+      : {}),
+    ...(item.rootMessageId ? { rootMessageId: item.rootMessageId } : {}),
+    ...(item.requestAuthorId ? { requestAuthorId: item.requestAuthorId } : {}),
     ...(item.attachments.length ? { attachmentCount: item.attachments.length, attachments: item.attachments } : {}),
     ...(item.messageLink ? { messageLink: item.messageLink } : {}),
   };

@@ -1,12 +1,49 @@
 import { CommandRefusalError } from '../command-refusal.js';
-import type { DaemonAttachment, RoomAttachmentResult, RoomMessageResult } from '@beeline/api-contract/daemon';
+import { MESSAGE_PAGE_REPLY_EXCERPT_MAX, type DaemonAttachment, type RoomAttachmentResult, type RoomMessageResult } from '@beeline/api-contract/daemon';
 import { roomAudienceCanReadSourceSql } from '../institutional-history.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
 import type { DaemonContext } from './context.js';
-import { Input, AccessDeniedError, daemonTranscriptVisibilitySql, markExpiredAttachments } from './values.js';
+import { Input, AccessDeniedError, daemonTranscriptVisibilitySql, markExpiredAttachments, seconds } from './values.js';
 import { agentRoomMembershipJoins } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { deliveredMessage } from '../corner-brief.js';
+
+function boundMessageReplyExcerpt(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= MESSAGE_PAGE_REPLY_EXCERPT_MAX) return clean;
+  return `${clean.slice(0, MESSAGE_PAGE_REPLY_EXCERPT_MAX - 1).trimEnd()}…`;
+}
+
+type ReadableMessageRow = {
+  body: string;
+  attachments: DaemonAttachment[];
+  author_id?: string | null;
+  author_handle?: string | null;
+  created_at?: Date | null;
+  reply_to_message_id?: string | null;
+  reply_to_author_id?: string | null;
+  reply_to_author_name?: string | null;
+  reply_to_excerpt?: string | null;
+  root_message_id?: string | null;
+  request_author_id?: string | null;
+};
+
+const messageMetadataColumns = `
+  message.author_id,
+  beeline_room_handle(message.author_id,message.room_id) author_handle,
+  message.created_at,
+  CASE WHEN EXISTS(SELECT 1 FROM messages parent
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL)
+   THEN message.reply_to_message_id END reply_to_message_id,
+  (SELECT parent.author_id FROM messages parent
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL) reply_to_author_id,
+  (SELECT author.name FROM messages parent JOIN identities author ON author.id=parent.author_id
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL) reply_to_author_name,
+  (SELECT left(parent.text,16001) FROM messages parent
+   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL) reply_to_excerpt,
+  message.root_message_id,
+  (SELECT request.author_id FROM messages request
+   WHERE request.id=message.request_id AND request.room_id=message.room_id AND request.deleted_at IS NULL) request_author_id`;
 
 const readableMessage = daemonTranscriptVisibilitySql('message');
 // A borrowed review source grants access only to the addressed transcript.
@@ -57,10 +94,13 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
     if (handoff && (borrowedSource || !handoff.accessible ||
         (handoff.agent_id !== agentId && handoff.author_id !== agentId)))
       throw new CommandRefusalError('message access denied: private hand-off', 403);
-    let row = handoff ?? (
-      await ctx.database.query<{ body: string; attachments: DaemonAttachment[] }>(
+    let row: ReadableMessageRow | undefined = handoff
+      ? { body: handoff.body, attachments: handoff.attachments, author_id: handoff.author_id }
+      : (
+      await ctx.database.query<ReadableMessageRow>(
         `SELECT CASE WHEN card_type='agent-command' THEN COALESCE(card->>'text',text) ELSE text END body,
-                attachments
+                attachments,
+                ${messageMetadataColumns}
          FROM messages message
          WHERE message.id=$2 AND ${readableScope}`,
         [input.roomId, input.messageId, agentId, borrowedSource],
@@ -69,8 +109,9 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
     if (!row && !borrowedSource) {
       // A dispatched review lends access to current brief citations only.
       // Keep this separate from Room access and requester-derived authority.
-      row = (await ctx.database.query<{ body: string; attachments: DaemonAttachment[] }>(
-        `SELECT message.text body,message.attachments
+      row = (await ctx.database.query<ReadableMessageRow>(
+        `SELECT message.text body,message.attachments,
+                ${messageMetadataColumns}
          FROM messages message
          JOIN rooms corner ON corner.id=$1 AND corner.archived_at IS NULL
          JOIN rooms source ON source.id=message.room_id AND source.workspace_id=corner.workspace_id
@@ -127,10 +168,29 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
       row.attachments ?? [],
       await ctx.expiredMediaIds(row.attachments ?? []),
     );
+    const replyExcerpt =
+      typeof row.reply_to_excerpt === 'string' && row.reply_to_excerpt.trim()
+        ? boundMessageReplyExcerpt(row.reply_to_excerpt)
+        : undefined;
     return {
       messageId: input.messageId,
       body,
       attachments: await ctx.withStoredDigests(attachments),
+      ...(row.author_id ? { authorId: row.author_id } : {}),
+      ...(row.author_handle ? { authorHandle: row.author_handle } : {}),
+      ...(row.created_at ? { createdAt: seconds(row.created_at) } : {}),
+      ...(row.reply_to_message_id
+        ? {
+            repliesTo: {
+              messageId: row.reply_to_message_id,
+              ...(row.reply_to_author_id ? { authorId: row.reply_to_author_id } : {}),
+              ...(row.reply_to_author_name ? { authorName: row.reply_to_author_name } : {}),
+              ...(replyExcerpt ? { excerpt: replyExcerpt } : {}),
+            },
+          }
+        : {}),
+      ...(row.root_message_id ? { rootMessageId: row.root_message_id } : {}),
+      ...(row.request_author_id ? { requestAuthorId: row.request_author_id } : {}),
     };
   }
 

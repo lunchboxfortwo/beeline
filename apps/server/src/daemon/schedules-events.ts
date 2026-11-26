@@ -15,6 +15,14 @@ import { activeWorkflowRunIds, humanRoomAdmin, scheduleWorkflowName } from '../w
 import type { DaemonContext } from './context.js';
 import { Input, Output, id } from './values.js';
 import { daemonWriteResult } from './corner-messages.js';
+import {
+  formatScheduleReceipt,
+  projectScheduleProvenance,
+  readScheduleProvenance,
+  scheduleProvenanceJoinsSql,
+  scheduleProvenanceSelectSql,
+  type ScheduleProvenanceColumns,
+} from '../wake-receipts.js';
 
 
   /** Agent-driven schedules (beeline-agent create_schedule) run through the
@@ -75,6 +83,7 @@ import { daemonWriteResult } from './corner-messages.js';
       input.cadence.kind === 'cron' && !input.cadence.timeZone && owner?.time_zone
       ? { ...input.cadence, timeZone: owner.time_zone } : input.cadence;
     const nextRunAt = nextScheduleOccurrence(cadence, new Date());
+    const savedTitle = title ?? scheduleDisplayTitle({ workflow: workflowName, prompt: input.prompt });
     await db.query(
       `INSERT INTO agent_schedules(
          id,workspace_id,room_id,agent_id,creator_id,cadence,message,max_runs,next_run_at,workflow_slug,owner_id,title
@@ -90,11 +99,27 @@ import { daemonWriteResult } from './corner-messages.js';
         nextRunAt,
         workflowName ?? null,
         ownerId ?? null,
-        title ?? scheduleDisplayTitle({ workflow: workflowName, prompt: input.prompt }),
+        savedTitle,
       ],
     );
     await daemonRecordScheduleAuthorization(ctx, db, scheduleId, input.roomId, agentId, requestId);
-    return { scheduleId, nextRunAt: Math.floor(nextRunAt.getTime() / 1_000) };
+    const provenance = await readScheduleProvenance(db, scheduleId);
+    const receipt = formatScheduleReceipt({
+      verb: 'Created',
+      title: provenance?.title ?? savedTitle,
+      nextRunAt,
+      cadence,
+      repliesTo: provenance?.repliesTo,
+      approvedBy: provenance?.approvedBy,
+    });
+    return {
+      scheduleId,
+      nextRunAt: Math.floor(nextRunAt.getTime() / 1_000),
+      title: provenance?.title ?? savedTitle,
+      ...(provenance?.repliesTo ? { repliesTo: provenance.repliesTo } : {}),
+      ...(provenance?.approvedBy ? { approvedBy: provenance.approvedBy } : {}),
+      receipt,
+    };
   }
 
   export async function daemonRecordScheduleAuthorization(ctx: DaemonContext,
@@ -148,7 +173,11 @@ import { daemonWriteResult } from './corner-messages.js';
       );
     }
     const kinds = [...new Set(requested)] as EventSubscriptionsResult['kinds'];
-    return { kinds: await setRoomEventSubscriptions(ctx.database, input.roomId, agentId, kinds) };
+    const saved = await setRoomEventSubscriptions(ctx.database, input.roomId, agentId, kinds);
+    const receipt = saved.length
+      ? `Updated event subscriptions · ${saved.join(', ')}`
+      : 'Cleared event subscriptions · no room events active';
+    return { kinds: saved, receipt };
   }
 
   export async function daemonListEventSubscriptions(ctx: DaemonContext, input: Input<'listEventSubscriptions'>, agentId: string) {
@@ -246,26 +275,30 @@ import { daemonWriteResult } from './corner-messages.js';
    * stays that person's.
    */
   export async function daemonListAgentSchedules(ctx: DaemonContext, input: Input<'listAgentSchedules'>, agentId: string) {
-    const rows = await ctx.database.query<{
-      id: string;
-      title: string | null;
-      workflow_slug: string | null;
-      agent_id: string;
-      agent_handle: string | null;
-      room_id: string;
-      room_name: string;
-      cadence: import('@beeline/api-contract/phone').RoomScheduleCadence;
-      message: string;
-      max_runs: number | null;
-      run_count: number;
-      next_run_at: Date;
-      paused_at: Date | null;
-    }>(
+    const rows = await ctx.database.query<
+      ScheduleProvenanceColumns & {
+        id: string;
+        title: string | null;
+        workflow_slug: string | null;
+        agent_id: string;
+        agent_handle: string | null;
+        room_id: string;
+        room_name: string;
+        cadence: import('@beeline/api-contract/phone').RoomScheduleCadence;
+        message: string;
+        max_runs: number | null;
+        run_count: number;
+        next_run_at: Date;
+        paused_at: Date | null;
+      }
+    >(
       `SELECT schedule.title,schedule.workflow_slug,schedule.id,schedule.agent_id,beeline_room_handle(agent.id,schedule.room_id) agent_handle,schedule.cadence,
          schedule.room_id,room.name room_name,
-         schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,schedule.paused_at
+         schedule.message,schedule.max_runs,schedule.run_count,schedule.next_run_at,schedule.paused_at,
+         ${scheduleProvenanceSelectSql('schedule')}
        FROM agent_schedules schedule JOIN identities agent ON agent.id=schedule.agent_id
        JOIN rooms room ON room.id=schedule.room_id
+       ${scheduleProvenanceJoinsSql('schedule', 'room')}
        WHERE (schedule.room_id=$1 OR ($3::boolean AND EXISTS (
            SELECT 1 FROM memberships self_membership
            WHERE self_membership.room_id=schedule.room_id
@@ -283,6 +316,7 @@ import { daemonWriteResult } from './corner-messages.js';
           : [];
         const scheduleRunIds = await activeRunIdsForSchedule(ctx.database, row.room_id, row.id);
         const activeRunIds = [...new Set([...workflowRunIds, ...scheduleRunIds])];
+        const provenance = projectScheduleProvenance(row);
         return {
           ...(row.workflow_slug ? { workflowName: row.workflow_slug } : {}),
           title: scheduleDisplayTitle({ title: row.title, workflow: row.workflow_slug, prompt: row.message }),
@@ -296,6 +330,7 @@ import { daemonWriteResult } from './corner-messages.js';
           ...(row.max_runs !== null ? { maxRuns: row.max_runs } : {}),
           runCount: row.run_count,
           nextRunAt: Math.floor(row.next_run_at.getTime() / 1_000),
+          ...provenance,
           ...(row.workflow_slug || activeRunIds.length ? { activeRunIds } : {}),
         };
       }),
@@ -330,16 +365,18 @@ import { daemonWriteResult } from './corner-messages.js';
   }
 
   export async function daemonDeleteAgentSchedule(ctx: DaemonContext, input: Input<'deleteAgentSchedule'>, agentId: string) {
-    const target = (await ctx.database.query<{ room_id: string }>(
-      `SELECT room_id FROM agent_schedules
-       WHERE id=$1
-         AND (room_id=$2 OR ($4::boolean AND EXISTS (
+    const target = (await ctx.database.query<{ room_id: string; room_name: string; title: string | null; workflow_slug: string | null; message: string }>(
+      `SELECT schedule.room_id,room.name room_name,schedule.title,schedule.workflow_slug,schedule.message
+       FROM agent_schedules schedule
+       JOIN rooms room ON room.id=schedule.room_id
+       WHERE schedule.id=$1
+         AND (schedule.room_id=$2 OR ($4::boolean AND EXISTS (
            SELECT 1 FROM memberships self_membership
-           WHERE self_membership.room_id=agent_schedules.room_id
+           WHERE self_membership.room_id=schedule.room_id
              AND self_membership.identity_id=$3 AND self_membership.removed_at IS NULL)))
 
-         AND (agent_id=$3 OR creator_id=agent_id)
-         AND (NOT $4::boolean OR agent_id=$3)`,
+         AND (schedule.agent_id=$3 OR schedule.creator_id=schedule.agent_id)
+         AND (NOT $4::boolean OR schedule.agent_id=$3)`,
       [input.scheduleId, input.roomId, agentId, input.selfOnly === true],
     )).rows[0];
     if (!target) throw new Error('schedule not found');
@@ -357,7 +394,14 @@ import { daemonWriteResult } from './corner-messages.js';
       [input.scheduleId, input.roomId, agentId, input.selfOnly === true],
     );
     if (!deleted.rowCount) throw new Error('schedule not found');
-    return daemonWriteResult(ctx);
+    const displayTitle = scheduleDisplayTitle({ title: target.title, workflow: target.workflow_slug, prompt: target.message });
+    return daemonWriteResult(ctx, {
+      receipt: formatScheduleReceipt({
+        verb: 'Deleted',
+        title: displayTitle,
+        note: target.room_name ? `in #${target.room_name}` : undefined,
+      }),
+    });
   }
 
   /**
@@ -441,8 +485,23 @@ import { daemonWriteResult } from './corner-messages.js';
     if (!row) throw new Error('schedule not found');
     await daemonRecordScheduleAuthorization(ctx, db, input.scheduleId, input.roomId, agentId,
       (input as { requestId?: unknown }).requestId);
+    const provenance = await readScheduleProvenance(db, input.scheduleId);
+    const receipt = provenance
+      ? formatScheduleReceipt({
+          verb: 'Updated',
+          title: provenance.title,
+          nextRunAt: row.next_run_at,
+          cadence: provenance.cadence,
+          repliesTo: provenance.repliesTo,
+          approvedBy: provenance.approvedBy,
+        })
+      : undefined;
     return {
       scheduleId: input.scheduleId,
       nextRunAt: Math.floor(row.next_run_at.getTime() / 1_000),
+      ...(provenance?.title ? { title: provenance.title } : {}),
+      ...(provenance?.repliesTo ? { repliesTo: provenance.repliesTo } : {}),
+      ...(provenance?.approvedBy ? { approvedBy: provenance.approvedBy } : {}),
+      ...(receipt ? { receipt } : {}),
     };
   }

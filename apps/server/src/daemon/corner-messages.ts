@@ -111,8 +111,12 @@ import { modelText } from '../message-origin.js';
     return daemonWriteResult(ctx);
   }
 
-  export function daemonWriteResult(ctx: DaemonContext, extra?: {
-    failureReportDelivered?: boolean;
-  }) {
+  export function daemonWriteResult<T extends Record<string, unknown> = Record<string, never>>(
+    ctx: DaemonContext,
+    extra?: {
+      failureReportDelivered?: boolean;
+      receipt?: string;
+    } & T,
+  ) {
     return { id: id(), createdAt: Math.floor(Date.now() / 1000), ...extra };
   }

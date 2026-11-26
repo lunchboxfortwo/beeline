@@ -255,4 +255,42 @@ describe('Reproduction tool-ledger-32233', () => {
       'ls\nmkdir scratch',
     );
   });
+
+  it('surfaces structured beeline-agent receipts on step rows and renders Receipt plus JSON output in ToolOutputSheet', () => {
+    const receipt = 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo';
+    const renderer = render(
+      <TurnStepsLine
+        items={[
+          {
+            kind: 'tool',
+            id: 'wake-upd',
+            title: 'mcp.beeline-agent.wake',
+            toolKind: 'other',
+            status: 'completed',
+            input: JSON.stringify({ action: 'update', trigger: 'schedule', scheduleId: 's1' }),
+            output: JSON.stringify({
+              scheduleId: 's1',
+              receipt,
+              repliesTo: { identityId: 'u1', handle: 'lunchboxfortwo' },
+              approvedBy: { identityId: 'u1', handle: 'lunchboxfortwo', sourceMessageId: 'm1' },
+            }),
+          },
+        ]}
+      />,
+    );
+    expandRun(renderer, 'wake-upd');
+    const row = renderer.root.findByProps({ testID: 'tool-ledger-line-wake-upd' });
+    const rowTexts = row.findAllByType('Text').map((n: any) => n.props.children);
+    expect(rowTexts).toContain('Updated');
+    expect(rowTexts.join(' ')).toContain('Morning card');
+    expect(rowTexts.join(' ')).toContain('replies to @lunchboxfortwo');
+
+    act(() => row.props.onPress());
+    const receiptBlock = renderer.root.findByProps({ testID: 'tool-output-receipt' });
+    expect(receiptBlock.findAllByType('Text').map((n: any) => n.props.children)).toContain(receipt);
+    const sheetText = renderedText(renderer);
+    expect(sheetText).not.toContain('No output saved');
+    expect(sheetText).toContain('lunchboxfortwo');
+    expect(sheetText).toContain('sourceMessageId');
+  });
 });

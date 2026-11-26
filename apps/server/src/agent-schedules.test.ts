@@ -790,7 +790,7 @@ describe('agent tool schedule daemon operations', () => {
         (await daemon.execute('listAgentSchedules', { agentId: AGENT, roomId: ROOM }, AGENT))
           .schedules,
       ).toEqual([
-        {
+        expect.objectContaining({
           title: 'Scheduled check',
           scheduleId: created.scheduleId,
           agentId: AGENT,
@@ -799,7 +799,7 @@ describe('agent tool schedule daemon operations', () => {
           maxRuns: 2,
           runCount: 0,
           nextRunAt: updated.nextRunAt,
-        },
+        }),
       ]);
       await expect(
         daemon.execute(

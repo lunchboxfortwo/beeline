@@ -1,5 +1,5 @@
 import type { ActionWeight, TurnActivityAction } from '@/buzz/activity-timeline';
-import { displayFilePath, peelShellCommand } from './tool-call-classify';
+import { displayFilePath, extractMcpReceipt, peelShellCommand } from './tool-call-classify';
 import {
   formatToolCallDuration,
   TOOL_CALL_DURATION_FLOOR_MS,
@@ -67,6 +67,8 @@ export type ToolLedgerLine = {
   /** Redacted shell command or tool invocation arguments for ToolOutputSheet. */
   command?: string;
   input?: string;
+  /** Structured post-condition receipt surfaced from a completed beeline-agent result. */
+  receipt?: string;
   /** The sheet body: full raw output, files, reason. Undefined = not pressable. */
   detail?: string;
   outputHidden?: boolean;
@@ -94,6 +96,7 @@ export function toolLedgerLines(
       step.durationMs && step.durationMs >= TOOL_CALL_DURATION_FLOOR_MS
         ? step.durationMs
         : undefined;
+    const receipt = step.kind === 'tool' ? extractMcpReceipt(step.output) : undefined;
     return {
       id: step.id,
       ...(step.toolGroup ? { toolGroup: step.toolGroup } : {}),
@@ -112,6 +115,7 @@ export function toolLedgerLines(
       ...(durationMs ? { durationMs } : {}),
       ...(step.command ? { command: step.command } : {}),
       ...(step.input ? { input: step.input } : {}),
+      ...(receipt ? { receipt } : {}),
       ...(step.files?.length ? { files: step.files } : {}),
       ...detailOf(step),
     };
@@ -195,7 +199,8 @@ export function formatObservationFoldLabel(lines: readonly ToolLedgerLine[]): st
 
   for (const line of lines) {
     if (line.verb === 'listed' && line.label && !/^(?:files|\d+\s+calls)$/i.test(line.label)) {
-      const phrase = `listed ${line.label}`;
+      const target = line.label.startsWith('schedules · ') ? 'schedules' : line.label;
+      const phrase = `listed ${target}`;
       if (!seenMcp.has(phrase)) {
         seenMcp.add(phrase);
         mcpPhrases.push(phrase);
@@ -359,12 +364,19 @@ export function toolRunProvenance(lines: readonly ToolLedgerLine[]): string | un
         'updated',
         'paused',
         'resumed',
+        'cleared',
         'replied',
         'reported',
         'sent',
+        'asked',
         'opened',
+        'revised',
+        'installed',
+        'renamed',
         'closed',
         'claimed',
+        'set',
+        'released',
         'approved',
         'saved',
         'posted',
@@ -378,7 +390,8 @@ export function toolRunProvenance(lines: readonly ToolLedgerLine[]): string | un
       line.label &&
       !/^(?:files|\d+\s+calls)$/i.test(line.label)
     ) {
-      pushPrimary(`${verb} ${line.label}`);
+      const compactTarget = line.label.includes(' · ') ? line.label.split(' · ')[0]!.trim() : line.label;
+      pushPrimary(`${verb} ${compactTarget || line.label}`);
       continue;
     }
     if (verb === 'read' && /^(?:chat messages|message|thread brief|pull request|attachment|procedure)/i.test(line.label)) {

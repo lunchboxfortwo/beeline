@@ -1,4 +1,4 @@
-import { fixCornerText } from '@beeline/api-contract/daemon';
+import { fixCornerText, type ThreadApproverLink } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { authorizeCommandOutput,type CommandRow } from '../agent-command.js';
 import { CommandRefusalError } from '../commander.js';
@@ -127,6 +127,8 @@ import { id,Input,Output } from './values.js';
     const fixedObjective = input.objective === undefined ? undefined : fixCornerText('objective', input.objective);
     let name = fixedName?.text;
     const objective = fixedObjective?.text;
+    let approvedBy: ThreadApproverLink | undefined;
+    let installedBrief = false;
     if (input.brief) validateCornerBrief(input.brief);
     await daemonReach(ctx, input.cornerId, agentId);
     await ctx.database.transaction(async (db) => {
@@ -181,6 +183,15 @@ import { id,Input,Output } from './values.js';
           const authority = await resolveCornerBriefApproval(
             db, sourceRoomIds, brief, attachments, command.private_payload ? command.id : command.root_source_message_id,
           );
+          installedBrief = true;
+          const approverName =
+            (await db.query<{ name: string | null }>('SELECT NULLIF(name,\'\') name FROM identities WHERE id=$1', [authority.approvalBasis.approvedBy])).rows[0]?.name ?? undefined;
+          approvedBy = {
+            identityId: authority.approvalBasis.approvedBy,
+            ...(approverName ? { name: approverName } : {}),
+            ...(authority.approvalBasis.sourceMessageId ? { sourceMessageId: authority.approvalBasis.sourceMessageId } : {}),
+            ...(authority.approvalBasis.kind ? { kind: authority.approvalBasis.kind } : {}),
+          };
           await db.query(
             `INSERT INTO corner_brief_revisions(
                corner_id,revision,spec,approval_basis,revision_hash,change,author_id,
@@ -194,7 +205,20 @@ import { id,Input,Output } from './values.js';
       }
       if (name !== undefined) await writeCornerTitle(db, input.cornerId, name);
     });
-    return { cornerId: input.cornerId, name: name! };
+    const reviewerTag = input.reviewer?.trim() ? `@${input.reviewer.trim().replace(/^@/, '')}` : undefined;
+    const receipt = installedBrief
+      ? `Installed brief on #${name!} (r1)${approvedBy ? ` · approved by ${approvedBy.name || approvedBy.identityId.slice(0, 8)}` : ''}`
+      : input.name === undefined && reviewerTag
+        ? `Updated thread #${name!} reviewer to ${reviewerTag}`
+        : reviewerTag
+          ? `Updated thread #${name!} · reviewer ${reviewerTag}`
+          : `Renamed thread to #${name!}`;
+    return {
+      cornerId: input.cornerId,
+      name: name!,
+      ...(approvedBy ? { approvedBy } : {}),
+      receipt,
+    };
   }
 
   export async function daemonTargetProposal(ctx: DaemonContext, input: Input<'postTargetBranchProposal'>, agentId: string) {

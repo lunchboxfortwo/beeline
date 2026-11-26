@@ -295,6 +295,16 @@ export function extractToolOutputText(value: unknown): string {
     }
   };
   walk(value, 0);
+  if (!parts.length && value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    if (record.type !== 'terminal' && Object.keys(record).length > 0) {
+      try {
+        return JSON.stringify(record);
+      } catch {
+        return '';
+      }
+    }
+  }
   return parts.join('\n');
 }
 

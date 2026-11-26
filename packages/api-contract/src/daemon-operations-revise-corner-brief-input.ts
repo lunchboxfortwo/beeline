@@ -17,8 +17,19 @@ export type ReviseCornerBriefInput = TurnOutputAuthority &
     readonly brief: CornerBriefDraft;
   };
 
+export type ThreadApproverLink = {
+  readonly identityId: string;
+  readonly name?: string;
+  readonly sourceMessageId?: string;
+  readonly kind?: import('./daemon-operations-room-conversation-window.js').CornerBriefApproval['kind'];
+};
+
 export type CornerResult = {
   readonly cornerId: string;
+  readonly name?: string;
+  readonly implementer?: string;
+  readonly approvedBy?: ThreadApproverLink;
+  readonly receipt?: string;
   readonly warnings?: readonly string[];
   /** The opener's merge watch, absent when the opener opted out. */
   readonly watch?: { readonly roomId: string; readonly kinds: readonly CornerWatchKind[] };

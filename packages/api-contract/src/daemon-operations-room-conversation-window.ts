@@ -156,10 +156,23 @@ export type DaemonAttachment = {
   readonly sha256?: string;
 };
 
+export type MessageReplyProvenance = {
+  readonly messageId: string;
+  readonly authorId?: string;
+  readonly authorName?: string;
+  readonly excerpt?: string;
+};
+
 export type RoomMessageResult = {
   readonly messageId: string;
   readonly body: string;
   readonly attachments: readonly DaemonAttachment[];
+  readonly authorId?: string;
+  readonly authorHandle?: string;
+  readonly createdAt?: number;
+  readonly repliesTo?: MessageReplyProvenance;
+  readonly rootMessageId?: string;
+  readonly requestAuthorId?: string;
   /** Legacy servers can return an offset for a partial message. */
   readonly nextOffset?: number;
 };
@@ -434,6 +447,7 @@ export type WriteResult = {
   readonly createdAt: number;
   /** Whether the terminal failure reached its recorded commander; false preserves the failed turn. */
   readonly failureReportDelivered?: boolean;
+  readonly receipt?: string;
 };
 
 export type MessageSendResult = {
@@ -443,6 +457,19 @@ export type MessageSendResult = {
   readonly createdAt?: number;
   readonly queued?: boolean;
   readonly destination?: import('./agent-messaging.js').MessageAddress;
+  readonly to?: {
+    readonly identityId: string;
+    readonly handle?: string;
+    readonly name?: string;
+    readonly place?: string;
+    readonly placeName?: string;
+  };
+  readonly repliesTo?: {
+    readonly messageId: string;
+    readonly authorId?: string;
+    readonly authorHandle?: string;
+    readonly authorName?: string;
+  };
   readonly stored?: boolean;
   readonly visible?: boolean;
   readonly receipt?: string;
