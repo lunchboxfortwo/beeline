@@ -30,7 +30,7 @@ export class PhoneOperationError extends ExpectedRefusalError {
 
 const quiet = new Set<string>([
   ...PHONE_READ_OPERATIONS, 'reopenChat', 'updateRoomPushState',
-  'reportSigninFunnel', 'reportDiagnostics', 'markRead', 'markUnread', 'reportClientError', 'reportPageLoad',
+  'reportSigninFunnel', 'reportDiagnostics', 'markRead', 'markUnread', 'reportClientError', 'reportPageLoad', 'reportRunningUpdate',
   // These services publish their own precise changes.
   'voiceJoin', 'voiceLeave', 'voiceIdle', 'voiceResume',
   'saveAgentVoice', 'previewAgentVoice',

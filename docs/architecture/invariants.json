@@ -3,7 +3,7 @@
     {
       "id": "phone.write-door",
       "module": "Phone socket",
-      "invariant": "Mobile writes use the existing live socket; HTTP shares only reads and documented non-phone tool operations.",
+      "invariant": "Mobile writes use the existing live socket. HTTP shares reads, documented non-phone tool operations, and running-update receipts from shipped builds.",
       "pattern": "\\b(?:phone\\.(?:execute|markRead|markUnread|stopScheduledWorkCommand|uploadMedia)|options\\.voice\\.(?:join|leave|idle|resume|nativeStop|profiles\\.(?:save|preview))|dispatchPhoneOperation|requestCommand)\\s*\\(|\\bt\\s*:\\s*[\\'\"]req[\\'\"]",
       "scope": ["apps/mobile/sources", "apps/server/src"],
       "owners": [
@@ -25,7 +25,7 @@
       "ownerSites": 14,
       "strict": true,
       "total": 0,
-      "fix": "Send phone operations through LiveConnection.request. Keep HTTP limited to its documented non-phone tool commands; do not add another sender. Rooms MCP retains its separate authenticated tool boundary."
+      "fix": "Send phone operations through LiveConnection.request. Keep HTTP writes limited to documented non-phone tool commands and legacy running-update receipts. Rooms MCP retains its separate authenticated tool boundary."
     },
     {
       "id": "work.command-creation",

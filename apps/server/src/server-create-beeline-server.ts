@@ -94,5 +94,5 @@ export async function refuseDaemon(
 export const NON_PHONE_HTTP_WRITES = ['createWorkspace', 'deleteWorkspace', 'sendRoomMessage', 'requestCornerClose'] as const;
 
 
-export type PhoneHttpOperation = (name: (typeof PHONE_READ_OPERATIONS)[number] | (typeof NON_PHONE_HTTP_WRITES)[number], input: Record<string, unknown>,
+export type PhoneHttpOperation = (name: (typeof PHONE_READ_OPERATIONS)[number] | (typeof NON_PHONE_HTTP_WRITES)[number] | 'reportRunningUpdate', input: Record<string, unknown>,
   viewerId: string, familyId?: string) => Promise<unknown>;
