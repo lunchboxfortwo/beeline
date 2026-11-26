@@ -33,6 +33,14 @@ body {
     padding: 0;
 }
 
+/* Shared neutral Stone keyboard focus indicator across Web and Tauri desktop.
+   Uses Tamagui's active theme outline/stroke tokens; skips text fields that
+   already draw their own focus border (composer, search). */
+:focus-visible:not(input, textarea, [contenteditable="true"], [contenteditable=""]) {
+    outline: 2px solid var(--outline-color, var(--strongStroke, currentColor)) !important;
+    outline-offset: 2px !important;
+}
+
 /* Theme-aware scrollbar styles using Unistyles CSS variables.
    Use text-secondary for the thumb so it stays visible on all
    surface colors (divider == surfaceHighest in dark theme). */

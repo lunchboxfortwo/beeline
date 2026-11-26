@@ -457,6 +457,7 @@ export function BuzzChatSurface({
           <ChatSurfaceHeader
   isCorner={isCorner}
   isDirectMessage={isDirectMessage}
+  desktop={isDesktop}
   showBack={!isDesktop || isCorner}
   handleBack={handleBack}
   title={displayHeaderTitle}
@@ -478,9 +479,11 @@ export function BuzzChatSurface({
 />
 
           {!isCorner && !isDirectMessage && (
-            <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} viewer={viewerPubkey ?? undefined} openThread={openCorner}
-              onNewThread={() => void handleOpenRandomCorner()}
-              newThreadDisabled={viewerIsAgent || isArchived} />
+            <YStack paddingTop={isDesktop ? '2' : '0'}>
+              <ThreadsDropdown roomId={decodedId} chatName={resolvedChannelName} viewer={viewerPubkey ?? undefined} openThread={openCorner}
+                onNewThread={() => void handleOpenRandomCorner()}
+                newThreadDisabled={viewerIsAgent || isArchived} />
+            </YStack>
           )}
 
           <RoomReviewerSurfaceNotice
