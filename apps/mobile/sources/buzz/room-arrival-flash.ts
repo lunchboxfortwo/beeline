@@ -5,7 +5,7 @@
  *
  * It is a transient state on an existing row — a ground fill in `bgHighlight`,
  * the token that already means "this is the thing", already contrast-tested in
- * `groknight.test.ts`. No new token, no new colour, no stroke: the area is the
+ * `@beeline/design-tokens`. No new token, no new colour, no stroke: the area is the
  * signal, which is what that token's own comment specifies.
  */
 

@@ -24,7 +24,7 @@
     "prebuild": "rm -rf android ios && expo prebuild",
     "typecheck": "node scripts/generate-typed-routes.cjs && tsc --noEmit",
     "postinstall": "patch-package --error-on-fail && node scripts/patch-livekit-abort.cjs && node scripts/patch-livekit-owned.cjs && ((command -v setup-skia-web >/dev/null && setup-skia-web public) || true)",
-    "eas-build-post-install": "tsc -p scripts/tsconfig.eas-nostr.json && tsc -p scripts/tsconfig.eas-api-contract.json && tsc -p scripts/tsconfig.eas-buzz-client.json && tsc -p scripts/tsconfig.eas-net.json",
+    "eas-build-post-install": "tsc -p scripts/tsconfig.eas-nostr.json && tsc -p scripts/tsconfig.eas-api-contract.json && tsc -p scripts/tsconfig.eas-buzz-client.json && tsc -p scripts/tsconfig.eas-net.json && tsc -p scripts/tsconfig.eas-design-tokens.json",
     "web:test": "expo start --web --non-interactive",
     "// ==== macOS Desktop (Tauri) Variants ====": "echo comment",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",

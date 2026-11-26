@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { beelineThemes } from './groknight';
+import { beelineThemes } from '@beeline/design-tokens';
 import { selectComposerAckPresentation, type PendingComposerAck } from './room-indicators';
 import { useComposerAckExpiry } from './use-composer-ack-expiry';
 import { isAgentTurnActive } from './agent-presence';

@@ -29,6 +29,7 @@ for (const path of [
   'apps/mobile/assets/icon.png',
   'packages/api-contract/src/index.ts',
   'packages/buzz-client/src/index.ts',
+  'packages/design-tokens/src/index.ts',
   'packages/nostr/src/index.ts',
   'packages/net/src/route-codecs.ts',
   'apps/mobile/index.ts',

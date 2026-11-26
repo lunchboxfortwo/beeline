@@ -59,8 +59,16 @@ const sameHashesVersion = fs.existsSync(path.join(rootHashesPath, 'package.json'
   fs.existsSync(path.join(mobileHashesPath, 'package.json')) &&
   require(path.join(rootHashesPath, 'package.json')).version ===
     require(path.join(mobileHashesPath, 'package.json')).version;
+const designTokensDistEntry = path.resolve(__dirname, '../../packages/design-tokens/dist/index.js');
+const designTokensSrcEntry = path.resolve(__dirname, '../../packages/design-tokens/src/index.ts');
 const baseResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === '@beeline/design-tokens') {
+    return {
+      filePath: fs.existsSync(designTokensDistEntry) ? designTokensDistEntry : designTokensSrcEntry,
+      type: 'sourceFile',
+    };
+  }
   if (moduleName === 'preact') {
     return { filePath: preactCjsPath, type: 'sourceFile' };
   }

@@ -470,5 +470,8 @@
     "packages/buzz-client": {
       "entry": ["src/index.ts"],
     },
+    "packages/design-tokens": {
+      "entry": ["src/index.ts"],
+    },
   },
 }

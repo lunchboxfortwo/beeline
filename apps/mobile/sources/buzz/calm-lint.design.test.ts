@@ -122,7 +122,7 @@ describe('Borrowing Calm lint', () => {
     // raw-number property elsewhere in the same object (ordinary layout
     // geometry, not a role bypass) never taints an unrelated one.
     const source = [
-      "import { typeRoles } from './groknight';",
+      "import { typeRoles } from '@beeline/design-tokens';",
       'const SIZE_ROLE = { large: typeRoles.hero, small: typeRoles.meta };',
       'const LAYOUT = { padding: 12, titleLineHeight: typeRoles.bodyStrong.lineHeight };',
       'const s = StyleSheet.create({',

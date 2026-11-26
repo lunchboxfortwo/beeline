@@ -61,7 +61,7 @@ vi.mock('expo-clipboard', () => ({
 }));
 
 import * as Clipboard from 'expo-clipboard';
-import { groknight } from '@/buzz/groknight';
+import { brass } from '@beeline/design-tokens';
 import { ActivityTimeline, TurnStepsLine } from './ActivityTimeline';
 import { foldSettledActivityRuns } from '@/buzz/room-view-presentation';
 
@@ -335,7 +335,7 @@ describe('grouping consecutive steps', () => {
         (node: { type: unknown; props: { style?: unknown } }) =>
           node.type === 'Text' &&
           Array.isArray(node.props.style) &&
-          node.props.style.includes(groknight.accent) === false,
+          node.props.style.includes(brass.obsidian.accent) === false,
       ),
     ).toBeTruthy();
   });

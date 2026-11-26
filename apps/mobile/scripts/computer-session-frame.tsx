@@ -3,7 +3,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { View } from 'react-native';
 import { ComputerSessionCard, ComputerSessionViewer } from '../sources/components/buzz/ComputerSession';
-import { beelineThemes } from '../sources/buzz/groknight';
+import { beelineThemes } from '@beeline/design-tokens';
 import { observeArtifactRows, setArtifactViewportActive } from '../sources/buzz/artifact-viewport';
 
 // @ts-expect-error esbuild embeds the font as a data URL.

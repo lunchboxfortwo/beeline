@@ -2,7 +2,7 @@ import React from 'react';
 import type * as Native from 'react-native';
 import { View, Text as NativeText, TextInput as NativeTextInput, type ViewProps } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { canvasColor } from '@/buzz/groknight';
+import { canvasColor } from '@beeline/design-tokens';
 import { useTheme } from 'tamagui';
 import { typeStyle, useTextSize, type ColorToken, type TextSize, type Variant } from './grammar';
 

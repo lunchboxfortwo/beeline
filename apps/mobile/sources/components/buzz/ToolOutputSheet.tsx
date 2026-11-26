@@ -4,7 +4,7 @@ import { useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView, XStack, YStack } from 'tamagui';
 import { T } from '@/ui/grammar';
-import { typeRoles } from '@/buzz/groknight';
+import { typeRoles } from '@beeline/design-tokens';
 import type { ToolIdentityLookup } from '@/buzz/tool-identity-lookup';
 import { buildToolSheetPresentation } from '@/buzz/tool-output-format';
 import { HULL_SHEET_INSET, HullActionSheetModal } from './HullActionSheet';

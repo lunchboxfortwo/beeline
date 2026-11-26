@@ -3,7 +3,7 @@ import { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { XStack, YStack } from 'tamagui';
 import { Motion, STEP, T } from '@/ui/grammar';
-import { layout } from '@/buzz/groknight';
+import { layout } from '@beeline/design-tokens';
 
 /** How long a copy confirmation stays up before it dismisses itself. */
 export const COPIED_TOAST_MS = 2000;

@@ -1,6 +1,6 @@
 import beelineMark from './beeline-mark.json';
 import brand from './brand.json';
-import { beelineThemes } from './groknight';
+import { beelineThemes } from '@beeline/design-tokens';
 
 /** Compact brand-mark framing; loading and working indicators belong to the grammar Spinner. */
 export const MARK_CELL = 18;

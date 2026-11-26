@@ -25,7 +25,7 @@ import React from 'react';
 import { G } from 'react-native-svg';
 import { BONE, FACES, INK, type FaceId } from './animals';
 import { recolorEdge } from './edge';
-import { IDENTITY_ART, stonePalette } from '@/buzz/groknight';
+import { IDENTITY_ART, stone } from '@beeline/design-tokens';
 
 export type FaceMode = 'dark' | 'light';
 
@@ -38,7 +38,7 @@ export const PERSON_PLATE: Record<FaceMode, string> = { dark: IDENTITY_ART.plate
  *  outline. The letter keeps its own hue in both. */
 export function personMarkInks(mode: FaceMode, palette: 'brass' | 'stone'): { plate: string; outline: string } {
   if (palette === 'stone') {
-    return { plate: stonePalette[mode].bgRaised!, outline: stonePalette.light.textPrimary! };
+    return { plate: stone[mode].bgRaised, outline: stone.light.textPrimary };
   }
   return { plate: PERSON_PLATE[mode], outline: INK };
 }
