@@ -557,7 +557,7 @@
       "scope": ["apps/mobile/sources/ui/screens", "apps/mobile/sources/app"],
       "owners": [],
       "strict": true,
-      "total": 96,
+      "total": 97,
       "fix": "Keep Platform.OS, useIsDesktop, isDesktopShell, isTauri, and useFinePointer inside apps/mobile/sources/ui/shell/, ui/grammar*, or shared components; do not add new platform branches in screens or routes."
     }
   ],

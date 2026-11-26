@@ -805,6 +805,14 @@
       "DeviceSection",
       "YouSettings"
     ],
+    "ui/screens/tags/NewTaskSheet.tsx": [
+      "NewTaskSheet"
+    ],
+    "ui/screens/tags/work-board-dnd.ts": [],
+    "ui/screens/tags/WorkAssigneePicker.tsx": [
+      "WorkAssigneePicker",
+      "WorkAvatar"
+    ],
     "ui/screens/tags/WorkBoard.tsx": [
       "AskCard",
       "SectionHead",
@@ -815,7 +823,7 @@
       "chip",
       "choose",
       "desktopColumns",
-      "filter",
+      "headerActions",
       "needsBody",
       "needsHead",
       "rows"

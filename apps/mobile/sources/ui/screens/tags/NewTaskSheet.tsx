@@ -78,7 +78,7 @@ export function NewTaskSheet({
   };
 
   return (
-    <SheetFrame open={open} close={close} title="New task" testID="new-task-sheet" belowModals>
+    <SheetFrame open={open} close={close} title="New task" testID="new-task-sheet">
       <YStack gap="3" flexShrink={1} minHeight={0}>
         <SheetScroll>
           <YStack gap="3">
