@@ -17,7 +17,7 @@ import { WorkSheet } from './WorkItemDetail';
 import { WorkStateMark } from './WorkMarks';
 import {
   canDragWorkItem,
-  resolveDropSectionAtY,
+  resolveDropSectionForTouch,
   sectionTargetState,
   shouldMoveWorkItem,
   webDragSourceProps,
@@ -310,6 +310,10 @@ function SectionHead({
 type Menu = null | 'filter' | 'chat' | 'assignee';
 /** A thread's own row opens that thread; Backlog and other stored tasks open the sheet. */
 const hasThread = (item: WorkItemView) => item.roomKind === 'corner' && item.id === item.roomId;
+type MeasurableHost = {
+  measureInWindow?: (cb: (x: number, y: number, width: number, height: number) => void) => void;
+};
+
 /** The Tasks screen: only what needs you on top, then the work in flight. On a
  * phone the other sections start collapsed; desktop columns always stay open. */
 export function WorkBoard({
@@ -337,8 +341,31 @@ export function WorkBoard({
   const [creating, setCreating] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<DropSectionKey | null>(null);
+  const dragOverRef = useRef<DropSectionKey | null>(null);
+  const boardRef = useRef<MeasurableHost | null>(null);
+  const boardWindowY = useRef<number | null>(null);
+  const sectionRefs = useRef<Partial<Record<DropSectionKey, MeasurableHost | null>>>({});
+  const sectionWindowBounds = useRef<Partial<Record<DropSectionKey, SectionBounds>>>({});
   const sectionLayouts = useRef<Partial<Record<DropSectionKey, SectionBounds>>>({});
   const { scrolled, scrollProps } = useScrolledUnder();
+
+  const updateDragOver = (next: DropSectionKey | null) => {
+    dragOverRef.current = next;
+    setDragOver((current) => (current === next ? current : next));
+  };
+
+  const measureDropTargets = () => {
+    sectionWindowBounds.current = {};
+    boardWindowY.current = null;
+    boardRef.current?.measureInWindow?.((_x, y) => {
+      boardWindowY.current = y;
+    });
+    for (const key of ['progress', 'backlog', 'done'] as const) {
+      sectionRefs.current[key]?.measureInWindow?.((_x, y, _width, height) => {
+        sectionWindowBounds.current[key] = { y, height };
+      });
+    }
+  };
 
   useEffect(() => {
     if (!initialChatId) return;
@@ -351,7 +378,12 @@ export function WorkBoard({
   const draggedItem = draggingId ? board.items.find((item) => item.id === draggingId) ?? null : null;
   const finishDrag = () => {
     setDraggingId(null);
-    setDragOver(null);
+    updateDragOver(null);
+  };
+  const startDrag = (item: WorkItemView) => {
+    if (!canDragWorkItem(item, canMove)) return;
+    if (!desktop) measureDropTargets();
+    setDraggingId(item.id);
   };
   const dropOn = (target: DropSectionKey, transferredId?: string) => {
     const id = transferredId || draggingId;
@@ -467,7 +499,7 @@ export function WorkBoard({
           dragging={draggingId === item.id}
           enableWebDrag={enableWebDrag}
           onDragStart={() => {
-            if (draggable) setDraggingId(item.id);
+            startDrag(item);
           }}
           onDragEnd={finishDrag}
         />
@@ -595,8 +627,17 @@ export function WorkBoard({
           </ScrollView>
         )
       ) : (
-        <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...scrollProps}>
+        <ScrollView
+          flex={1}
+          minHeight={0}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={!draggedItem}
+          {...scrollProps}
+        >
           <YStack
+            ref={(node: MeasurableHost | null) => {
+              boardRef.current = node;
+            }}
             width="100%"
             maxWidth={720}
             alignSelf="center"
@@ -604,19 +645,36 @@ export function WorkBoard({
             testID="work-sections"
             onTouchMove={
               draggedItem
-                ? (event: { nativeEvent?: { locationY?: number } }) => {
-                    const y = event?.nativeEvent?.locationY;
-                    if (typeof y === 'number') setDragOver(resolveDropSectionAtY(sectionLayouts.current, y));
+                ? (event: { nativeEvent?: { pageY?: number } }) => {
+                    const target = resolveDropSectionForTouch({
+                      pageY: event?.nativeEvent?.pageY,
+                      windowBounds: sectionWindowBounds.current,
+                      boardLayouts: sectionLayouts.current,
+                      boardWindowY: boardWindowY.current,
+                    });
+                    updateDragOver(target);
                   }
                 : undefined
             }
             onTouchEnd={
               draggedItem
-                ? () => {
-                    if (dragOver) dropOn(dragOver);
+                ? (event: { nativeEvent?: { pageY?: number } }) => {
+                    const pageY = event?.nativeEvent?.pageY;
+                    const target =
+                      typeof pageY === 'number'
+                        ? resolveDropSectionForTouch({
+                            pageY,
+                            windowBounds: sectionWindowBounds.current,
+                            boardLayouts: sectionLayouts.current,
+                            boardWindowY: boardWindowY.current,
+                          })
+                        : dragOverRef.current;
+                    if (target) dropOn(target);
+                    else finishDrag();
                   }
                 : undefined
             }
+            onTouchCancel={draggedItem ? finishDrag : undefined}
           >
             {needs.length ? needsHead : null}
             {needsBody}
@@ -624,10 +682,10 @@ export function WorkBoard({
               const dropProps = webDropTargetProps(
                 canMove && enableWebDrag,
                 () => {
-                  if (dragOver !== section.key) setDragOver(section.key);
+                  if (dragOver !== section.key) updateDragOver(section.key);
                 },
                 () => {
-                  if (dragOver === section.key) setDragOver(null);
+                  if (dragOver === section.key) updateDragOver(null);
                 },
                 (transferredId) => dropOn(section.key, transferredId),
               );
@@ -636,6 +694,9 @@ export function WorkBoard({
               return (
                 <YStack
                   key={section.key}
+                  ref={(node: MeasurableHost | null) => {
+                    sectionRefs.current[section.key] = node;
+                  }}
                   borderWidth={highlighted ? 1 : 0}
                   borderColor="needsYou"
                   borderRadius="md"

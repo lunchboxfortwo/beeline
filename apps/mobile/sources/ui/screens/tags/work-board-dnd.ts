@@ -47,6 +47,30 @@ export function resolveDropSectionAtY(
   return null;
 }
 
+/**
+ * Resolve a touch `pageY` (window coordinate space) against measured section window bounds,
+ * falling back to board-relative `onLayout` bounds shifted by the board's window origin.
+ */
+export function resolveDropSectionForTouch({
+  pageY,
+  windowBounds,
+  boardLayouts,
+  boardWindowY,
+}: {
+  pageY: number | undefined;
+  windowBounds: Partial<Record<DropSectionKey, SectionBounds>>;
+  boardLayouts: Partial<Record<DropSectionKey, SectionBounds>>;
+  boardWindowY: number | null;
+}): DropSectionKey | null {
+  if (typeof pageY !== 'number' || Number.isNaN(pageY)) return null;
+  const fromWindow = resolveDropSectionAtY(windowBounds, pageY);
+  if (fromWindow) return fromWindow;
+  if (typeof boardWindowY === 'number' && !Number.isNaN(boardWindowY)) {
+    return resolveDropSectionAtY(boardLayouts, pageY - boardWindowY);
+  }
+  return null;
+}
+
 type WebDragEvent = {
   preventDefault?: () => void;
   stopPropagation?: () => void;

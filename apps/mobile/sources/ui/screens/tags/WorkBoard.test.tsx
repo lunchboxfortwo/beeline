@@ -322,3 +322,78 @@ it('drags non-archived tasks between desktop columns, blocks dragging archived t
         expect(host('work-section-backlog').props['aria-expanded']).toBe(true);
     } finally { act(() => tree.unmount()); }
 });
+
+it('resolves phone long-press drag in window coordinates and always clears drag state on release or cancel', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const person = { pubkey: 'human', kind: 'human' as const, name: 'Ada' };
+    const backlogTask = {
+        id: 't-phone', roomId: 'chat-1', chatId: 'chat-1', chatName: 'beeline',
+        threadName: 'phone-drag', title: 'phone-drag', state: 'backlog' as const,
+        openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+    };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'human',
+        chats: [{ id: 'chat-1', name: 'beeline' }],
+        people: [person],
+        items: [backlogTask],
+    };
+    const move = vi.fn(async () => true);
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), move, clear: vi.fn(), clearAll: vi.fn() };
+    const windowRects: Record<string, [number, number, number, number]> = {
+        'work-sections': [0, 120, 390, 600],
+        'work-drop-progress': [0, 200, 390, 100],
+        'work-drop-backlog': [0, 320, 390, 100],
+        'work-drop-done': [0, 440, 390, 100],
+    };
+    let tree: any;
+    act(() => {
+        tree = create(
+            <WorkBoard board={board} desktop={false} actions={actions} initialChatId="chat-1" />,
+            {
+                createNodeMock: (element: any) => {
+                    const rect = windowRects[element?.props?.testID];
+                    return rect
+                        ? { measureInWindow: (cb: (x: number, y: number, w: number, h: number) => void) => cb(...rect) }
+                        : {};
+                },
+            },
+        );
+    });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    const scroll = () => tree.root.findByType('ScrollView');
+    try {
+        // Record board-relative layouts that intentionally differ from window Y coordinates.
+        act(() => {
+            host('work-drop-progress').props.onLayout({ nativeEvent: { layout: { y: 80, height: 100 } } });
+            host('work-drop-backlog').props.onLayout({ nativeEvent: { layout: { y: 200, height: 100 } } });
+            host('work-drop-done').props.onLayout({ nativeEvent: { layout: { y: 320, height: 100 } } });
+        });
+
+        // 1. Long-press, drag using pageY into In progress (while child-relative locationY points elsewhere), and release.
+        act(() => { host('work-item-t-phone').props.onLongPress(); });
+        expect(host('work-row-t-phone').props.opacity).toBe(0.5);
+        expect(scroll().props.scrollEnabled).toBe(false);
+        act(() => { host('work-sections').props.onTouchMove({ nativeEvent: { locationY: 12, pageY: 240 } }); });
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { locationY: 12, pageY: 240 } }); });
+        expect(move).toHaveBeenCalledExactlyOnceWith(backlogTask, 'in-progress');
+        expect(host('work-row-t-phone').props.opacity).toBe(1);
+        expect(scroll().props.scrollEnabled).toBe(true);
+
+        // 2. Releasing outside any section clears drag state without moving.
+        move.mockClear();
+        act(() => { host('work-item-t-phone').props.onLongPress(); });
+        expect(host('work-row-t-phone').props.opacity).toBe(0.5);
+        act(() => { host('work-sections').props.onTouchEnd({ nativeEvent: { locationY: 5, pageY: 40 } }); });
+        expect(move).not.toHaveBeenCalled();
+        expect(host('work-row-t-phone').props.opacity).toBe(1);
+        expect(scroll().props.scrollEnabled).toBe(true);
+
+        // 3. Touch cancel clears drag state without moving.
+        act(() => { host('work-item-t-phone').props.onLongPress(); });
+        expect(host('work-row-t-phone').props.opacity).toBe(0.5);
+        act(() => { host('work-sections').props.onTouchCancel(); });
+        expect(move).not.toHaveBeenCalled();
+        expect(host('work-row-t-phone').props.opacity).toBe(1);
+        expect(scroll().props.scrollEnabled).toBe(true);
+    } finally { act(() => tree.unmount()); }
+});

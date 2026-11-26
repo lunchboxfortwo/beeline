@@ -117,6 +117,43 @@ export async function recordBacklogAddedFact(
     if (commandSource) sourceMessageId = commandSource.source_message_id;
   }
 
+  const mergeIntoExisting = async (existing: {
+    id: string;
+    card: Record<string, unknown> | null;
+  }) => {
+    const priorCard = existing.card ?? {};
+    const priorItems = Array.isArray(priorCard.items)
+      ? (priorCard.items as BacklogAddedItem[]).filter(
+          (entry) =>
+            entry &&
+            typeof entry.id === 'string' &&
+            entry.id.trim().length > 0 &&
+            typeof entry.name === 'string' &&
+            entry.name.trim().length > 0,
+        )
+      : [];
+    const items = priorItems.some((entry) => entry.id === input.itemId)
+      ? priorItems
+      : [...priorItems, { id: input.itemId, name: input.name }];
+    const objectText =
+      items.length > 1 ? `${items[0]!.name} +${items.length - 1}` : items[0]!.name;
+    const keptSource =
+      typeof priorCard.sourceMessageId === 'string' && priorCard.sourceMessageId
+        ? priorCard.sourceMessageId
+        : sourceMessageId;
+    await restateSystemLine(
+      tx,
+      existing.id,
+      { subject, verb: 'added', object: objectText, consequence: 'View backlog' },
+      {
+        type: 'backlog-added',
+        roomId: input.roomId,
+        items,
+        ...(keptSource ? { sourceMessageId: keptSource } : {}),
+      },
+    );
+  };
+
   const coalescedId = input.requestId
     ? createHash('sha256').update(`backlog-added:${input.roomId}:${input.requestId}`).digest('hex')
     : undefined;
@@ -128,43 +165,13 @@ export async function recordBacklogAddedFact(
       )
     ).rows[0];
     if (existing) {
-      const priorCard = existing.card ?? {};
-      const priorItems = Array.isArray(priorCard.items)
-        ? (priorCard.items as BacklogAddedItem[]).filter(
-            (entry) =>
-              entry &&
-              typeof entry.id === 'string' &&
-              entry.id.trim().length > 0 &&
-              typeof entry.name === 'string' &&
-              entry.name.trim().length > 0,
-          )
-        : [];
-      const items = priorItems.some((entry) => entry.id === input.itemId)
-        ? priorItems
-        : [...priorItems, { id: input.itemId, name: input.name }];
-      const objectText =
-        items.length > 1 ? `${items[0]!.name} +${items.length - 1}` : items[0]!.name;
-      const keptSource =
-        typeof priorCard.sourceMessageId === 'string' && priorCard.sourceMessageId
-          ? priorCard.sourceMessageId
-          : sourceMessageId;
-      await restateSystemLine(
-        tx,
-        existing.id,
-        { subject, verb: 'added', object: objectText, consequence: 'View backlog' },
-        {
-          type: 'backlog-added',
-          roomId: input.roomId,
-          items,
-          ...(keptSource ? { sourceMessageId: keptSource } : {}),
-        },
-      );
+      await mergeIntoExisting(existing);
       return;
     }
   }
 
   const items: BacklogAddedItem[] = [{ id: input.itemId, name: input.name }];
-  await systemLine(tx, {
+  const written = await systemLine(tx, {
     ...(coalescedId ? { id: coalescedId } : {}),
     roomId: input.roomId,
     authorId: input.actorId,
@@ -184,6 +191,17 @@ export async function recordBacklogAddedFact(
     ...(input.requestId ? { requestId: input.requestId } : {}),
     ...(sourceMessageId ? { afterMessageId: sourceMessageId } : {}),
   });
+
+  // If a concurrent capture in the same agent turn won the initial insert, lock that row and merge into it.
+  if (coalescedId && !written.inserted) {
+    const winner = (
+      await tx.query<{ id: string; card: Record<string, unknown> | null }>(
+        `SELECT id,card FROM messages WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,
+        [coalescedId],
+      )
+    ).rows[0];
+    if (winner) await mergeIntoExisting(winner);
+  }
 }
 
 /** Resolve an identity ID or @handle against current workspace/chat members. */

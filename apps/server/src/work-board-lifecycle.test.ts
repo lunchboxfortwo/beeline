@@ -649,4 +649,110 @@ describe('unified work lifecycle', () => {
       sourceMessageId: reqMsgId,
     });
   });
+
+  it('merges concurrent backlog-added captures from the same agent turn without dropping items on insert conflict', async () => {
+    const reqMsgId = '3'.repeat(64);
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,'@ruby file parallel tasks','message')`,
+      [reqMsgId, chat, lunchbox],
+    );
+    await createAgentCommand(db, {
+      roomId: chat,
+      agentId: ruby,
+      sourceMessageId: reqMsgId,
+      reason: 'human_tag',
+    });
+    const turnRequestId = (await readAgentCommands(db, ruby, chat)).commands[0]!.turnRequestId;
+    const taskA = randomUUID();
+    const taskB = randomUUID();
+    const taskC = randomUUID();
+
+    // 1. Concurrent Promise.all captures in the same agent turn retain both items.
+    await Promise.all([
+      daemon.execute(
+        'updateWorkItem',
+        { roomId: chat, targetRoomId: chat, requestId: turnRequestId, id: taskA, title: 'parallel-one', state: 'backlog' },
+        ruby,
+      ),
+      daemon.execute(
+        'updateWorkItem',
+        { roomId: chat, targetRoomId: chat, requestId: turnRequestId, id: taskB, title: 'parallel-two', state: 'backlog' },
+        ruby,
+      ),
+    ]);
+
+    // 2. Deterministic race reproduction: simulate two captures both seeing no initial row
+    // so the second hits ON CONFLICT DO NOTHING on systemLine and must lock & merge into the winner.
+    const raceReqMsgId = '4'.repeat(64);
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,'@ruby file racing tasks','message')`,
+      [raceReqMsgId, chat, lunchbox],
+    );
+    await createAgentCommand(db, {
+      roomId: chat,
+      agentId: ruby,
+      sourceMessageId: raceReqMsgId,
+      reason: 'human_tag',
+    });
+    const raceRequestId = (await readAgentCommands(db, ruby, chat))
+      .commands.find((c) => c.sourceMessageId === raceReqMsgId)!.turnRequestId;
+    const raceFirst = randomUUID();
+    const raceSecond = randomUUID();
+
+    // First capture writes the initial coalesced row.
+    await updateWorkItem(
+      db,
+      { roomId: chat, id: raceFirst, title: 'race-winner', state: 'backlog' },
+      ruby,
+      ruby,
+      { requestId: raceRequestId, turnRoomId: chat },
+    );
+
+    // Second capture sees an empty initial SELECT FOR UPDATE (as if both raced before either inserted),
+    // forcing systemLine's ON CONFLICT DO NOTHING (inserted=false) recovery path.
+    let missedInitialSelect = false;
+    const wrapTx = (inner: typeof db): typeof db => ({
+      ...inner,
+      query: async (sql: string, params?: unknown[], label?: string) => {
+        if (!missedInitialSelect && sql.includes('SELECT id,card FROM messages WHERE id=$1')) {
+          missedInitialSelect = true;
+          return { rows: [], rowCount: 0 };
+        }
+        return inner.query(sql, params, label);
+      },
+      transaction: async (fn) => inner.transaction(async (tx) => fn(wrapTx(tx as typeof db))),
+      close: () => inner.close(),
+    });
+    await updateWorkItem(
+      wrapTx(db),
+      { roomId: chat, id: raceSecond, title: 'race-loser', state: 'backlog' },
+      ruby,
+      ruby,
+      { requestId: raceRequestId, turnRoomId: chat },
+    );
+    expect(missedInitialSelect).toBe(true);
+
+    // Also verify a third task in the first turn still appends cleanly.
+    await daemon.execute(
+      'updateWorkItem',
+      { roomId: chat, targetRoomId: chat, requestId: turnRequestId, id: taskC, title: 'parallel-three', state: 'backlog' },
+      ruby,
+    );
+
+    const messages = (await phone.readRoom(chat, lunchbox))?.messages ?? [];
+    const parallelNotice = messages.find((m) => m.daemonFact?.sourceMessageId === reqMsgId)?.daemonFact;
+    expect(parallelNotice?.type).toBe('backlog-added');
+    expect(parallelNotice?.items?.map((i) => i.id).sort()).toEqual([taskA, taskB, taskC].sort());
+
+    const raceNotice = messages.find((m) => m.daemonFact?.sourceMessageId === raceReqMsgId)?.daemonFact;
+    expect(raceNotice).toEqual({
+      type: 'backlog-added',
+      roomId: chat,
+      items: [
+        { id: raceFirst, name: 'race-winner' },
+        { id: raceSecond, name: 'race-loser' },
+      ],
+      sourceMessageId: raceReqMsgId,
+    });
+  });
 });
