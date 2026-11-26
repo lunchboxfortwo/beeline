@@ -409,7 +409,9 @@ it.each([false, true])('keeps a human opening static with a resident source=%s',
   await phone.execute('createHumanCorner', input, H);
   expect((await db.query('SELECT machine FROM corner_facts WHERE corner_id=$1', [input.cornerId])).rows[0].machine)
     .toEqual({ state: 'idle' });
+  expect((await db.query('SELECT corner_id FROM corner_github_cache WHERE corner_id=$1', [input.cornerId])).rowCount).toBe(1);
   expect((await db.query('SELECT id FROM agent_commands WHERE room_id=$1', [input.cornerId])).rows).toEqual([]);
+  expect((await facts(input.cornerId))[0]?.card.sourceMessageId).toBe(command?.sourceMessageId);
   const row = (await phone.readRoom(R, OUTSIDER))!.messages.filter(m => m.daemonFact?.cornerId === input.cornerId);
   expect(row).toHaveLength(1);
   expect(created.messageId).toBe(row[0].id);
@@ -425,4 +427,15 @@ it('returns the new thread with its creation when asked, read as the opening scr
   expect(created.roomView).toEqual(await phone.readRoom(input.cornerId, H));
   const without = await phone.execute('createHumanCorner', { roomId: R, title: 'opened-alone', cornerId: randomUUID() }, H);
   expect(without).not.toHaveProperty('roomView');
+});
+
+it('opens an empty direct chat without looking up message tags', async () => {
+  const query = vi.spyOn(db, 'query');
+  try {
+    const view = await phone.readRoom(DM, H);
+    expect(view).toMatchObject({ room: { id: DM }, messages: [] });
+    expect(query.mock.calls.some(([sql]) => /FROM messages m WHERE m\.id=ANY\(\$1::text\[\]\)/.test(sql))).toBe(false);
+  } finally {
+    query.mockRestore();
+  }
 });

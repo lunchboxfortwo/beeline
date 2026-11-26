@@ -139,6 +139,7 @@ async function main() {
     await healthDatabase.close();
     throw error;
   }
+  await database.warmPool(budget.app);
   const enrichmentDatabase = new PostgresDatabase(connectionString, budget.enrichment, {
     mode: 'enrichment',
     lockDiagnostics,

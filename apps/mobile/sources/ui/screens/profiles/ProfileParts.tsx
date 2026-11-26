@@ -19,8 +19,10 @@ export function ProfileHead({ mark, title, line, testID }: { mark: React.ReactNo
     );
 }
 
-/** Chats as rows: #name, opening the chat. */
-export function ChatRows({ title, rooms }: { title: string; rooms: readonly { id: string; name: string }[] }) {
+/** Profile refreshes can replace the Room list without changing its rows. */
+export const ChatRows = React.memo(function ChatRows({ title, rooms }: {
+    title: string; rooms: readonly { id: string; name: string }[];
+}) {
     if (!rooms.length) return null;
     return (
         <Section title={title} testID="profile-chats">
@@ -30,7 +32,10 @@ export function ChatRows({ title, rooms }: { title: string; rooms: readonly { id
             ))}
         </Section>
     );
-}
+}, (previous, next) => previous.title === next.title && (
+    previous.rooms === next.rooms || (previous.rooms.length === next.rooms.length &&
+        previous.rooms.every((room, index) => room.id === next.rooms[index]?.id && room.name === next.rooms[index]?.name))
+));
 
 /**
  * What the access switch means right now, naming the owner by @handle. This

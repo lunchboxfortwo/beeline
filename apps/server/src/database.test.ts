@@ -277,6 +277,56 @@ describe('named prepared Room reads', () => {
   });
 });
 describe('pool checkout telemetry', () => {
+  it('keeps the app pool checked out until every connection has warmed', async () => {
+    const first = stubClient();
+    const last = stubClient();
+    const pool = poolHandingOut([first, last]);
+    const database = new PostgresDatabase('', 2, { pool });
+    let lastStarted!: () => void;
+    const started = new Promise<void>((resolve) => { lastStarted = resolve; });
+    let finishLast!: () => void;
+    last.query.mockImplementationOnce(() => new Promise((resolve) => {
+      finishLast = () => resolve(result([{ pid: 2 }]));
+      lastStarted();
+    }));
+    const warmed = database.warmPool(2);
+    await started;
+    expect(first.query).toHaveBeenCalledOnce();
+    expect(first.release).not.toHaveBeenCalled();
+    expect(last.release).not.toHaveBeenCalled();
+    finishLast();
+    await warmed;
+    expect(first.release).toHaveBeenCalledOnce();
+    expect(last.release).toHaveBeenCalledOnce();
+    await database.close();
+  });
+
+  it.each(['checkout', 'query'])('continues when a warmup %s fails', async (failure) => {
+    const healthy = stubClient();
+    const failing = stubClient();
+    const error = new Error('warmup failed');
+    const connect = vi.fn().mockResolvedValueOnce(healthy);
+    if (failure === 'checkout') connect.mockRejectedValueOnce(error);
+    else {
+      connect.mockResolvedValueOnce(failing);
+      failing.query.mockRejectedValueOnce(error);
+    }
+    const pool = { connect, on: vi.fn(), end: vi.fn() } as unknown as Pool;
+    const database = new PostgresDatabase('', 2, { pool });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(database.warmPool(2)).resolves.toBeUndefined();
+      expect(healthy.release).toHaveBeenCalledOnce();
+      if (failure === 'query') {
+        expect(failing.release.mock.calls).toEqual([[error]]);
+      }
+      expect(warn.mock.calls).toEqual([['[startup] application pool warmup incomplete; continuing', error]]);
+    } finally {
+      warn.mockRestore();
+      await database.close();
+    }
+  });
+
   it('separates queued checkout time from checked-out query time and releases on failure', async () => {
     const client = stubClient();
     let grant!: (client: typeof client) => void;

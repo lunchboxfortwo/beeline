@@ -54,18 +54,14 @@ CREATE TRIGGER corner_github_cache_mirror AFTER INSERT OR UPDATE OF lifecycle ON
 
 /**
  * The corner's own row: created once with the corner, then changed only by
- * this module (its lock, implementer and reviewer). Its GitHub display cache row starts
- * with it; every GitHub and helper observation is committed by this owner.
+ * this module (its lock, implementer and reviewer). The lifecycle mirror creates
+ * its GitHub display cache row.
  * The machine starts idle; the opening order, if any, is its first event.
  */
 export async function createCornerFacts(db: SqlDatabase, cornerId: string): Promise<void> {
   await db.query(
     `INSERT INTO corner_facts(corner_id,lifecycle,machine)
      VALUES($1,'{"lifecycle":"working","checks":"unknown"}','{"state":"idle"}') ON CONFLICT(corner_id) DO NOTHING`,
-    [cornerId],
-  );
-  await db.query(
-    `INSERT INTO corner_github_cache(corner_id) VALUES($1) ON CONFLICT(corner_id) DO NOTHING`,
     [cornerId],
   );
 }

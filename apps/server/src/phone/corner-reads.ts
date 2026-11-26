@@ -381,14 +381,14 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
           [roomId], 'phone-room-2',
         ),
       ),
-      ctx.optionalEnrichment(
+      row.transcript.length ? ctx.optionalEnrichment(
         'message-tags',
         ctx.enrichmentDatabase.query<{ id: string; tagged_ids: string[] }>(
           `SELECT m.id,${roomMessageTagsSql('m')} tagged_ids
            FROM messages m WHERE m.id=ANY($1::text[])`,
           [row.transcript.map((message) => message.id)], 'phone-room-3',
         ),
-      ),
+      ) : undefined,
       repositoryId
         ? ctx.optionalEnrichment(
             'repository-auto-merge',
