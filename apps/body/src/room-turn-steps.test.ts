@@ -11,16 +11,131 @@ const noteText = (rows: ReturnType<typeof roomReplySteps>) =>
   rows.filter((row) => row.kind === 'note').map((row) => row.text).join('');
 
 describe('roomReplySteps', () => {
-  it('saves redacted output within a UTF-8 byte cap with a cut-off marker', () => {
+  it('saves redacted head-plus-tail output within a UTF-8 byte cap with an omission marker', () => {
     const step: AgentTurnStep = { kind: 'tool', call: {
-      title: 'exec_command', content: [{ type: 'text', text: 'token=planted-secret\n-----BEGIN PRIVATE KEY-----\nplanted-pem\n-----END PRIVATE KEY-----\n' + '😀'.repeat(2000) }],
+      title: 'exec_command', content: [{ type: 'text', text: 'token=planted-secret\n-----BEGIN PRIVATE KEY-----\nplanted-pem\n-----END PRIVATE KEY-----\n' + '😀'.repeat(2000) + '\nexit code 1: final summary' }],
     } };
     const output = roomReplySteps([step])[0]!.output!;
     expect(output).not.toContain('planted-secret');
     expect(output).not.toContain('planted-pem');
     expect(output).toContain('[REDACTED]');
+    expect(output).toContain('[… omitted …]');
+    expect(output).toContain('exit code 1: final summary');
+    expect(output).not.toContain('\ufffd');
     expect(Buffer.byteLength(output)).toBeLessThanOrEqual(4096);
-    expect(output).toMatch(/\[cut off\]$/);
+  });
+
+  it('preserves line breaks across multi-part tool content and skips terminal handles', () => {
+    const parts = [
+      { type: 'terminal', terminalId: 'exec-123' },
+      ...Array.from({ length: 12 }, (_, index) => ({
+        type: 'content',
+        content: { type: 'text', text: `line-${index + 1}` },
+      })),
+    ];
+    const output = roomReplySteps([{ kind: 'tool', call: { title: 'exec_command', content: parts } }])[0]!.output!;
+    expect(output).toBe(Array.from({ length: 12 }, (_, index) => `line-${index + 1}`).join('\n'));
+  });
+
+  it('extracts redacted command, bounded input, files, and normalizes MCP dialects', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          id: 'c1',
+          kind: 'execute',
+          title: 'exec_command',
+          rawInput: { cmd: 'API_KEY=planted-secret rg -n wake apps/server/src' },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          id: 'c2',
+          kind: 'other',
+          title: 'mcp.beeline-agent.wake',
+          rawInput: {
+            server: 'beeline-agent',
+            tool: 'wake',
+            arguments: { action: 'update', title: 'Morning card', toolSummary: 'Update schedule' },
+          },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          id: 'c3',
+          kind: 'other',
+          title: 'use_tool',
+          rawInput: {
+            tool_name: 'beeline-agent__read',
+            tool_input: { facet: 'messages', toolSummary: 'Read chat messages' },
+          },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          id: 'c4',
+          kind: 'other',
+          name: 'mcp_beeline-agent_wake',
+          title: 'wake',
+          rawInput: { action: 'list' },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          id: 'c5',
+          kind: 'read',
+          title: 'Read',
+          locations: [{ path: '/repo/skills/waiting-and-wakes/SKILL.md' }],
+          rawInput: { path: '/repo/skills/waiting-and-wakes/SKILL.md' },
+        },
+      },
+    ]);
+
+    expect(rows[0]!.command).toContain('[REDACTED]');
+    expect(rows[0]!.command).toContain('rg -n wake apps/server/src');
+    expect(JSON.stringify(rows[0])).not.toContain('planted-secret');
+
+    expect(rows[1]).toMatchObject({
+      title: 'mcp.beeline-agent.wake',
+      input: JSON.stringify({ action: 'update', title: 'Morning card', toolSummary: 'Update schedule' }),
+    });
+
+    expect(rows[2]).toMatchObject({
+      title: 'mcp.beeline-agent.read',
+      input: JSON.stringify({ facet: 'messages', toolSummary: 'Read chat messages' }),
+    });
+
+    expect(rows[3]).toMatchObject({
+      title: 'mcp.beeline-agent.wake',
+      input: JSON.stringify({ action: 'list' }),
+    });
+
+    expect(rows[4]).toMatchObject({
+      files: [{ path: '/repo/skills/waiting-and-wakes/SKILL.md' }],
+    });
+  });
+
+  it('suppresses command, input, files, and output on credential paths', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'exec_command',
+          rawInput: { cmd: 'echo planted-secret > /tmp/.env', path: '/tmp/.env' },
+          locations: [{ path: '/tmp/.env' }],
+          content: 'planted-secret',
+        },
+      },
+    ]);
+    expect(rows[0]!.output).toBe('Output hidden: contains a secret.');
+    expect(rows[0]!.command).toBeUndefined();
+    expect(rows[0]!.input).toBeUndefined();
+    expect(rows[0]!.files).toBeUndefined();
+    expect(JSON.stringify(rows)).not.toContain('planted-secret');
   });
 
   it.each([

@@ -758,10 +758,10 @@ describe('folded historical transcripts', () => {
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-tool-1' }).props.accessibilityLabel,
-    ).toBe('6 steps, expandable');
+    ).toBe('Inspected code · 6 steps, expandable');
 
     expandRun(renderer, 'tool-1');
-    act(() => renderer.root.findByProps({ testID: 'tool-run-more-tool-1' }).props.onPress());
+    act(() => renderer.root.findByProps({ testID: 'tool-observation-fold-obs-tool-1' }).props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(6);
     expect(
       renderer.root.findByProps({ testID: 'tool-ledger-line-tool-8' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0]?.props.onPress,
@@ -802,7 +802,7 @@ describe('folded historical transcripts', () => {
       hostNodes(renderer, /^tool-run-group-/).map(
         (node: { props: { accessibilityLabel?: string } }) => node.props.accessibilityLabel,
       ),
-    ).toEqual(['7 steps, expandable']);
+    ).toEqual(['Inspected code · 7 steps, expandable']);
   });
 
   it('drops thinking-only rows while retaining summary tool lines', () => {
@@ -923,4 +923,126 @@ it.each([ActivityTimeline, TurnStepsLine])('shows a requested failed tool reason
   act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-requested-failure' }).props.onPress());
   expect(renderer.root.findByType('HullActionSheetModal').props.subtitle).toBe('command not found: pnpm');
   expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toContain('command not found: pnpm');
+  expect(renderer.root.findByProps({ testID: 'tool-output-command' })).toBeTruthy();
+});
+
+describe('Reproduction tool-ledger-32233', () => {
+  const ITEMS_32233 = [
+    {
+      kind: 'tool' as const,
+      id: 'boot-warn',
+      title: 'codex-acp',
+      toolKind: 'other',
+      status: 'failed',
+      output: '[codex-acp forwarded startup stderr] optional mcp server timed out',
+    },
+    {
+      kind: 'tool' as const,
+      id: 'read-skill',
+      title: 'Read /home/lunchbox/skills/waiting-and-wakes/SKILL.md',
+      toolKind: 'read',
+      files: [{ path: '/home/lunchbox/skills/waiting-and-wakes/SKILL.md' }],
+      status: 'completed',
+      output: '# Waiting and wakes',
+    },
+    {
+      kind: 'tool' as const,
+      id: 'rg-1',
+      title: 'exec_command',
+      toolKind: 'execute',
+      command: `bash -lc 'cd /repo && rg -n "schedule" apps/server/src'`,
+      status: 'completed',
+      output: 'apps/server/src/wake.ts:14:export function listSchedules()',
+    },
+    {
+      kind: 'tool' as const,
+      id: 'wake-list',
+      title: 'mcp.beeline-agent.wake',
+      toolKind: 'other',
+      input: JSON.stringify({ action: 'list' }),
+      status: 'completed',
+      output: '{"schedules":[{"title":"Morning card"}]}',
+    },
+    {
+      kind: 'tool' as const,
+      id: 'cat-1',
+      title: 'exec_command',
+      toolKind: 'execute',
+      command: 'cat apps/server/src/index.ts',
+      status: 'completed',
+      output: 'export {}',
+    },
+    {
+      kind: 'tool' as const,
+      id: 'rg-2',
+      title: 'exec_command',
+      toolKind: 'execute',
+      command: 'rg -n "repliesTo" apps/server/src',
+      status: 'completed',
+      output: 'no matches',
+    },
+  ];
+
+  it('demotes startup warning, folds consecutive read-only inspections, shows real targets, and shows command/input in sheet', () => {
+    const renderer = render(<TurnStepsLine items={ITEMS_32233} />);
+    const group = renderer.root.findByProps({ testID: 'tool-run-group-boot-warn' });
+    expect(group.props.accessibilityLabel).toBe(
+      'Listed schedules · inspected skill & server code · 5 steps, expandable',
+    );
+    expect(renderedText(renderer)).not.toContain('failed');
+
+    expandRun(renderer, 'boot-warn');
+    const expandedText = renderedText(renderer);
+    expect(expandedText).toContain('Startup note');
+    expect(expandedText).not.toContain('Action failed');
+    expect(expandedText).not.toContain('the code');
+    expect(expandedText).not.toContain('a file');
+    expect(expandedText).not.toContain('mcp.beeline-agent.wake');
+
+    // Expand folded read-only observations to verify individual unwrapped rows & sheet inputs.
+    act(() =>
+      renderer.root.findByProps({ testID: 'tool-observation-fold-obs-read-skill' }).props.onPress(),
+    );
+    const fullText = renderedText(renderer);
+    expect(fullText).toContain('waiting-and-wakes/SKILL.md');
+    expect(
+      renderer.root.findByProps({ testID: 'tool-ledger-line-rg-1' }).findAllByType('Text').map((n: any) => n.props.children),
+    ).toContain('rg -n "schedule" apps/server/src');
+    expect(fullText).toContain('Listed');
+    expect(fullText).toContain('schedules');
+
+    act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-wake-list' }).props.onPress());
+    const inputBlock = renderer.root.findByProps({ testID: 'tool-output-input' });
+    expect(inputBlock).toBeTruthy();
+    expect(inputBlock.findAllByType('Text').map((n: any) => n.props.children).join('\n')).toContain(
+      '"action": "list"',
+    );
+  });
+
+  it('keeps Failed intact on line one with flexShrink=0 and places the failure reason on line two', () => {
+    const renderer = render(
+      <TurnStepsLine
+        items={[
+          {
+            kind: 'tool',
+            id: 'real-fail',
+            title: 'exec_command',
+            toolKind: 'execute',
+            command: 'npm run typecheck --workspace apps/server',
+            status: 'failed',
+            output: 'src/index.ts(12,5): error TS2322: Type string is not assignable to number',
+          },
+        ]}
+      />,
+    );
+    expandRun(renderer, 'real-fail');
+    const row = renderer.root.findByProps({ testID: 'tool-ledger-line-real-fail' });
+    const failedText = row.findAllByType('Text').find((node: any) => node.props.children === 'Failed');
+    expect(failedText.props.flexShrink).toBe(0);
+    expect(failedText.props.numberOfLines).toBe(1);
+    const reason = renderer.root.findByProps({ testID: 'activity-reason-real-fail' });
+    expect(reason.props.children).toContain('error TS2322');
+    // Line 1 XStack does not contain the reason node; reason sits on its own second line.
+    expect(reason.parent.type).toBe('YStack');
+  });
 });

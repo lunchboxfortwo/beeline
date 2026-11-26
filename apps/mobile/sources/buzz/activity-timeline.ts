@@ -1,4 +1,12 @@
 import type { AgentActivityItem } from '@/sync/transport/rig-transport';
+import {
+  describeMcpCall,
+  displayFilePath,
+  isReadOnlyShellCommand,
+  parseMcpTool,
+  peelShellCommand,
+  redactDisplayPaths,
+} from './tool-call-row';
 
 /**
  * How a single tool call reaches the reader.
@@ -24,6 +32,8 @@ export type TurnActivityAction = {
   id: string;
   /** `note` is an earlier text run of the turn, shown in full between tools. */
   kind: 'tool' | 'thought' | 'note';
+  /** True when a non-fatal harness startup warning was demoted to a quiet note. */
+  startupWarning?: true;
   weight: ActionWeight;
   title: string;
   /** The transcript's compact verb-object copy. Always <= 40 characters. */
@@ -87,7 +97,7 @@ export type TurnActivity = {
   plan?: NonNullable<AgentActivityItem['plan']>;
 };
 
-const MAX_ACTION_TITLE = 72;
+const MAX_ACTION_TITLE = 160;
 export const MAX_LEDGER_LABEL = 40;
 
 function oneLine(value: string): string {
@@ -105,36 +115,16 @@ function cleanTitle(value: string): string {
     .replace(/^\*\*|\*\*$/g, '');
 }
 
-/**
- * A path collapses to its last segment — the WHOLE path, including a leading
- * bare segment. Matching only the slashed tail left the head behind and glued
- * it to the file name: `node_modules/.bin/prettier` came out as
- * `node_modulesprettier` (captain report C88).
- */
+/** Preserve disambiguating parent segments for generic basenames while hiding host prefixes. */
 function redactPaths(value: string): string {
-  return value.replace(/(?:file:\/\/)?(?:[\w.@~+%=,:-]+)?(?:\/[\w.@~+%=,:-]+)+/g, (path) => {
-    const parts = path
-      .replace(/^file:\/\//, '')
-      .split('/')
-      .filter(Boolean);
-    return parts.at(-1) ?? path;
-  });
+  return redactDisplayPaths(value);
 }
 
 function firstFileName(value: string): string | undefined {
   const match = redactPaths(value).match(
-    /\b[\w.-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml|css|html|py|go|rs|java)\b/i,
+    /(?:[\w.-]+\/)?[\w.-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml|css|html|py|go|rs|java)\b/i,
   );
   return match?.[0];
-}
-
-function fileCount(value: string): number | undefined {
-  const explicit = value.match(/\b(\d+)\s+files?\b/i);
-  if (explicit) return Number(explicit[1]);
-  const files = redactPaths(value).match(
-    /\b[\w.-]+\.(?:[cm]?[jt]sx?|json|md|ya?ml|css|html|py|go|rs|java)\b/gi,
-  );
-  return files && files.length > 1 ? new Set(files).size : undefined;
 }
 
 function searchTerms(value: string): string | undefined {
@@ -153,6 +143,19 @@ function isFailure(item: AgentActivityItem): boolean {
   // contains phrases such as "0 errors" and must not be reclassified by copy.
   if (/\b(?:completed|complete|success|succeeded|passed|done)\b/i.test(status)) return false;
   return /\b(?:failed|error|unavailable|not available|cannot|can't)\b/i.test(item.text ?? '');
+}
+
+/** True when a failed row is non-fatal harness boot/startup telemetry rather than a tool failure. */
+export function isHarnessStartupWarning(item: AgentActivityItem): boolean {
+  if (!isFailure(item)) return false;
+  const source = `${item.title ?? ''}\n${item.text ?? ''}\n${item.output ?? ''}`;
+  return (
+    /\[?(?:codex-acp|claude-(?:agent|code)-acp|pi-acp)\s+forwarded\s+startup\b/i.test(source) ||
+    /\b(?:codex-acp|claude-(?:agent|code)-acp|pi-acp)\b[^\n]*\bstartup\s+(?:stderr|warning|error|notice|log)\b/i.test(
+      source,
+    ) ||
+    /\bmcp\s+servers?\s+need\s+attention\b/i.test(source)
+  );
 }
 
 /**
@@ -228,10 +231,7 @@ function activityOutcome(item: AgentActivityItem): TurnActivityAction['outcome']
 }
 
 function commandLabel(command: string): string | undefined {
-  const clean = oneLine(command)
-    .replace(/^(?:env\s+\S+=\S+\s+)*/, '')
-    .replace(/^(?:bash|sh|zsh)\s+-[lc]+\s+['"]?/, '')
-    .replace(/["']$/, '');
+  const clean = peelShellCommand(command);
   if (/\b(?:typecheck|tsc\b)/i.test(clean)) return 'type checks';
   if (
     /\b(?:vitest|jest|mocha|playwright|npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test|yarn\s+test)\b/i.test(
@@ -254,10 +254,15 @@ function commandLabel(command: string): string | undefined {
 export function ledgerStepLabel(item: AgentActivityItem): string {
   const kind = item.toolKind?.toLowerCase();
   const source = `${item.title} ${item.command ?? ''} ${item.input ?? ''}`;
-  const file = item.files?.[0]?.path.split('/').filter(Boolean).at(-1) ?? firstFileName(source);
+  const file = item.files?.[0]?.path ? displayFilePath(item.files[0].path) : firstFileName(source);
   const genericTitle = /^(?:tool|execute|command|shell|bash|result|output|action)$/i.test(
     cleanTitle(item.title),
   );
+  const mcp = parseMcpTool(item.title, item.command, item.input);
+  if (mcp) {
+    const described = describeMcpCall(mcp, item.input, item.command);
+    return clamp(redactPaths(`${described.verb} ${described.object}`), MAX_LEDGER_LABEL);
+  }
   let label: string | undefined;
   if (kind === 'read' || /^(?:read|open|cat)\b/i.test(item.title)) {
     label = file ? `read ${file}` : 'read files';
@@ -288,54 +293,24 @@ export function ledgerStepLabel(item: AgentActivityItem): string {
   return clamp(redactPaths(label || 'tool step'), MAX_LEDGER_LABEL);
 }
 
-function failureTitle(item: AgentActivityItem): string {
-  const source = `${item.title} ${item.text ?? ''}`.toLowerCase();
-  if (source.includes('search') || source.includes('grep') || source.includes('rg ')) {
-    return source.includes('unavailable') || source.includes('not available')
-      ? 'Code search unavailable'
-      : 'Code search failed';
-  }
-  if (source.includes('read') || source.includes('file')) return 'Could not read file';
-  if (source.includes('git') || source.includes('bash') || source.includes('shell')) {
-    return 'Project task failed';
-  }
-  return 'Action failed';
-}
-
 function actionTitle(item: AgentActivityItem): string | undefined {
   const title = cleanTitle(item.title);
   const text = item.text ?? '';
-  const source = `${title}\n${text}`;
   const normalized = title.toLowerCase();
-  if (isFailure(item)) return failureTitle(item);
-  if (/^(?:result|action|output)$/i.test(title) && !text.trim()) return undefined;
-  if (/^tool$/i.test(title)) return text.trim() ? 'Completed an action' : undefined;
-  if (/\b(read|open|cat)\b/i.test(source)) {
-    const count = fileCount(source);
-    if (count && count > 1) return `Reviewed ${count} files`;
-    const file = firstFileName(source);
-    return file ? `Reviewed ${file}` : 'Reviewed a file';
-  }
-  if (/\b(search|grep|\brg\b|find)\b/i.test(source)) {
-    const terms = searchTerms(title) ?? searchTerms(text);
-    return terms ? `Searched the code for ${terms}` : 'Searched the code';
-  }
-  if (/\bgit\s+(?:status|diff|log|show)\b/i.test(source)) return 'Reviewed the current changes';
-  if (/\bgit\s+(?:branch|add|commit|checkout)\b/i.test(source)) return 'Prepared the change';
-  if (
-    /\b(?:npm|pnpm|yarn|bun|node|npx|python|cargo|make|gradle|docker|kubectl|curl|wget|chmod|rm|cp|mv)\b/i.test(
-      source,
-    )
-  ) {
-    return 'Completed a project task';
-  }
-  if (/\b(bash|shell|execute|run)\b/i.test(source)) return 'Completed a project task';
-  if (/\b(edit|write|replace|patch|create)\b/i.test(source)) {
-    const file = firstFileName(source);
-    return file ? `Updated ${file}` : 'Updated a file';
+  if (/^(?:result|action|output)$/i.test(title) && !text.trim() && !item.command && !item.files?.length) {
+    return undefined;
   }
   if (normalized === 'output' || item.kind === 'output') return 'Agent update';
-  return clamp(redactPaths(title || 'Completed an action'), MAX_ACTION_TITLE);
+  if (title && !/^tool$/i.test(title)) {
+    return clamp(redactPaths(title), MAX_ACTION_TITLE);
+  }
+  if (item.command) {
+    return clamp(redactPaths(peelShellCommand(item.command)), MAX_ACTION_TITLE);
+  }
+  if (item.files?.[0]?.path) {
+    return clamp(displayFilePath(item.files[0].path), MAX_ACTION_TITLE);
+  }
+  return title ? clamp(redactPaths(title), MAX_ACTION_TITLE) : undefined;
 }
 
 function mergeToolActivity(
@@ -394,38 +369,61 @@ function observedCallTitle(verb: string, target?: string): string {
   return target ? `${label} ${clamp(target, MAX_ACTION_TITLE)}` : label;
 }
 
+const GENERIC_EXECUTE_TITLE =
+  /^(?:bash|sh|zsh|shell|terminal|execute|command|exec_command|run_command|tool)$/i;
+
 /**
  * Did this call change state, or only look at it?
  *
  * Mutation and execution are the payload of a turn and keep their own line;
- * everything observational folds into the counted note. A failure is pulled out
- * of that fold unconditionally — a failed read still outranks a successful one.
+ * read-only inspections (including read-only shell commands after wrapper
+ * peeling) fold into the observation disclosure. A failure is pulled out
+ * unconditionally — a failed read still outranks a successful one.
  */
 function actionWeight(item: AgentActivityItem): ActionWeight {
   if (isFailure(item)) return 'failure';
-  if (item.files?.length) return 'mutation';
+  const mcp = parseMcpTool(item.title, item.command, item.input);
+  if (mcp) {
+    return describeMcpCall(mcp, item.input, item.command).observational ? 'observation' : 'command';
+  }
   const kind = item.toolKind?.toLowerCase();
   if (kind) {
     if (kind === 'edit' || kind === 'delete' || kind === 'move' || kind === 'write') {
       return 'mutation';
     }
-    if (kind === 'execute') return 'command';
     if (kind === 'read' || kind === 'search' || kind === 'fetch' || kind === 'think') {
       return 'observation';
     }
+    if (kind === 'execute') {
+      const shellCandidate =
+        item.command ??
+        (item.title && !GENERIC_EXECUTE_TITLE.test(cleanTitle(item.title))
+          ? cleanTitle(item.title)
+          : undefined);
+      if (shellCandidate && isReadOnlyShellCommand(shellCandidate)) return 'observation';
+      return 'command';
+    }
   }
-  if (item.command) return 'command';
-  // No declared kind (an older body, or a harness that omits it): fall back to
-  // what the label says it did. Inspection verbs stay observational; anything
-  // that names a write is treated as the payload.
-  const source = `${cleanTitle(item.title)} ${item.command ?? ''}`;
-  if (/\b(edit|write|replace|patch|create|delete|remove|move|rename)\b/i.test(source)) {
+  if (item.command) {
+    return isReadOnlyShellCommand(item.command) ? 'observation' : 'command';
+  }
+  if (item.files?.length) {
+    if (item.files.some((file) => file.status && /^[MADRCU]/i.test(file.status))) return 'mutation';
+    if (/\b(read|open|cat|view|inspect)\b/i.test(cleanTitle(item.title))) return 'observation';
     return 'mutation';
   }
-  if (/\b(read|open|cat|search|grep|\brg\b|find|list|ls|glob|fetch|think)\b/i.test(source)) {
+  const cleaned = cleanTitle(item.title);
+  if (isReadOnlyShellCommand(cleaned)) return 'observation';
+  // No declared kind (an older body, or a harness that omits it): fall back to
+  // what the label says it did. Inspection verbs stay observational; unknown
+  // non-read actions stay visible as commands.
+  if (/\b(edit|write|replace|patch|create|delete|remove|move|rename|close|open|order|send|reply|approve|update)\b/i.test(cleaned)) {
+    return 'mutation';
+  }
+  if (/\b(read|open|cat|search|grep|\brg\b|find|list|ls|glob|fetch|think)\b/i.test(cleaned)) {
     return 'observation';
   }
-  return 'observation';
+  return 'command';
 }
 
 /**
@@ -492,9 +490,13 @@ function liveNoteText(total: number, verbs: ReadonlyMap<string, number>): string
  * source for those calls' own review-sheet rows, since the calls themselves
  * never reach the wire.
  */
-export function buildTurnActivity(items: readonly AgentActivityItem[]): TurnActivity {
+export function buildTurnActivity(
+  items: readonly AgentActivityItem[],
+  options?: { settled?: boolean },
+): TurnActivity {
   type OrderedStep = { kind: 'tool'; id: string } | { kind: 'projected'; step: TurnActivityAction };
 
+  const settled = options?.settled ?? true;
   const narration: string[] = [];
   const tools = new Map<string, AgentActivityItem>();
   const ordered: OrderedStep[] = [];
@@ -594,19 +596,44 @@ export function buildTurnActivity(items: readonly AgentActivityItem[]): TurnActi
     tools.set(id, mergeToolActivity(tools.get(id), item));
   }
 
+  const toolEntries = [...tools.entries()];
   const toolSteps = new Map<string, TurnActivityAction>();
   const actions: TurnActivityAction[] = [];
   const observations: TurnActivityAction[] = [];
   const localVerbs = new Map<string, number>();
-  for (const [id, tool] of tools) {
+  toolEntries.forEach(([id, tool], entryIndex) => {
+    const recoveredAfter = toolEntries
+      .slice(entryIndex + 1)
+      .some(([, later]) => !isFailure(later));
+    if ((settled || recoveredAfter) && isHarnessStartupWarning(tool)) {
+      const summary = clamp(
+        oneLine(failureReason(tool) ?? redactPaths(cleanTitle(tool.title))) ||
+          'Harness startup warning',
+        120,
+      );
+      const row: TurnActivityAction = {
+        id,
+        kind: 'note',
+        startupWarning: true,
+        weight: 'observation',
+        title: summary,
+        label: summary,
+        outcome: 'success',
+        ...(tool.toolOutput ? { toolOutput: tool.toolOutput } : {}),
+        ...((tool.output ?? tool.text) ? { output: tool.output ?? tool.text } : {}),
+        ...(tool.requestedBy ? { requestedBy: { ...tool.requestedBy } } : {}),
+      };
+      toolSteps.set(id, row);
+      return;
+    }
     const weight = actionWeight(tool);
     const title = actionTitle(tool) ?? cleanTitle(tool.title) ?? 'Tool';
     const reason = weight === 'failure' ? failureReason(tool) : undefined;
     const row: TurnActivityAction = {
       id,
       kind: 'tool',
-      ...(tool.toolGroup?{toolGroup:tool.toolGroup}:{}),
-      ...(tool.toolOutput?{toolOutput:tool.toolOutput}:{}),
+      ...(tool.toolGroup ? { toolGroup: tool.toolGroup } : {}),
+      ...(tool.toolOutput ? { toolOutput: tool.toolOutput } : {}),
       weight,
       title,
       label: ledgerStepLabel(tool),
@@ -628,7 +655,7 @@ export function buildTurnActivity(items: readonly AgentActivityItem[]): TurnActi
     } else {
       actions.push(row);
     }
-  }
+  });
 
   const steps = ordered.flatMap((entry) => {
     if (entry.kind === 'projected') return [entry.step];

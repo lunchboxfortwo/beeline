@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnActivityAction } from './activity-timeline';
 import {
+  displayFilePath,
   formatToolCallDuration,
+  isReadOnlyShellCommand,
   middleTruncate,
+  peelShellCommand,
   toolCallLabel,
   toolCallOutput,
+  toolCallVerb,
   TOOL_CALL_OBJECT_MAX,
 } from './tool-call-row';
 
@@ -172,5 +176,93 @@ describe('toolCallLabel', () => {
     expect(label.length).toBeLessThanOrEqual(40);
     expect(label).toContain('…');
     expect(label).toContain('--reporter=json');
+  });
+
+  it('keeps parent directory context for generic filenames', () => {
+    expect(displayFilePath('/home/user/skills/waiting-and-wakes/SKILL.md')).toBe(
+      'waiting-and-wakes/SKILL.md',
+    );
+    expect(displayFilePath('apps/server/index.ts')).toBe('server/index.ts');
+    expect(displayFilePath('apps/server/src/index.ts')).toBe('server/src/index.ts');
+    expect(displayFilePath('apps/mobile/Ledger.tsx')).toBe('Ledger.tsx');
+  });
+
+  it('formats Beeline MCP calls cleanly across harness dialects without raw mcp prefixes', () => {
+    const listWake = step({
+      id: 'w1',
+      toolKind: 'other',
+      title: 'mcp.beeline-agent.wake',
+      input: JSON.stringify({ action: 'list' }),
+    });
+    expect(toolCallVerb(listWake)).toBe('listed');
+    expect(toolCallLabel(listWake)).toBe('schedules');
+
+    const updateWake = step({
+      id: 'w2',
+      toolKind: 'other',
+      title: 'mcp__beeline-agent__wake',
+      input: JSON.stringify({ action: 'update', title: 'Morning card' }),
+    });
+    expect(toolCallVerb(updateWake)).toBe('updated');
+    expect(toolCallLabel(updateWake)).toBe('schedule · Morning card');
+
+    const readMessages = step({
+      id: 'r1',
+      toolKind: 'other',
+      title: 'mcp_beeline-agent_read',
+      input: JSON.stringify({ facet: 'messages' }),
+    });
+    expect(toolCallVerb(readMessages)).toBe('read');
+    expect(toolCallLabel(readMessages)).toBe('chat messages');
+
+    const grokSummary = step({
+      id: 'g1',
+      toolKind: 'other',
+      title: 'use_tool',
+      input: JSON.stringify({
+        tool_name: 'beeline-agent__wake',
+        tool_input: { toolSummary: 'List active schedules' },
+      }),
+    });
+    expect(toolCallVerb(grokSummary)).toBe('listed');
+    expect(toolCallLabel(grokSummary)).toBe('active schedules');
+  });
+});
+
+describe('shell wrapper peeling and read-only classification', () => {
+  it('unwraps env, bash -lc, and leading cd wrappers', () => {
+    expect(peelShellCommand(`env CI=1 bash -lc 'cd /repo && rg -n "wake" apps/server/src'`)).toBe(
+      'rg -n "wake" apps/server/src',
+    );
+  });
+
+  it.each([
+    `rg -n "schedule" apps/server/src`,
+    `env FOO=bar bash -lc 'cd /repo && rg -n "wake" apps/ | head -n 20'`,
+    `cat apps/mobile/sources/buzz/tool-ledger.ts`,
+    `sed -n '1,40p' apps/body/src/room-turn-steps.ts`,
+    `git status --short`,
+    `git -C /repo diff --stat 2>/dev/null`,
+    `git log -n 5 --oneline`,
+    `git show HEAD:package.json`,
+    `find apps/mobile -name '*.test.ts'`,
+  ])('classifies strictly read-only command as observational: %s', (command) => {
+    expect(isReadOnlyShellCommand(command)).toBe(true);
+  });
+
+  it.each([
+    `rg foo && rm bar`,
+    `git diff > out.patch`,
+    `git status >> log.txt`,
+    `sed -i 's/a/b/' file.ts`,
+    `find . -name '*.tmp' -delete`,
+    `find . -exec rm {} \\;`,
+    `rg $(rm -rf /tmp/x) apps/`,
+    `cat foo | tee out.txt`,
+    `npm test`,
+    `git commit -m "fix"`,
+    `git branch -D old-branch`,
+  ])('never classifies mutating or redirecting command as read-only: %s', (command) => {
+    expect(isReadOnlyShellCommand(command)).toBe(false);
   });
 });

@@ -22,9 +22,22 @@ export async function readRoomTools(database: SqlDatabase, input: RoomToolRefere
       SELECT id,created_at,author_id,request_id,turn_id FROM messages WHERE id=$2 AND room_id=$1 AND presentation='activity' AND deleted_at IS NULL
     ), cursor AS (SELECT created_at,id FROM messages WHERE id=$3 AND room_id=$1), page AS (
       SELECT message.id,message.author_id,message.created_at,message.request_id,
-        ${full ? `(SELECT jsonb_agg(item) FROM jsonb_array_elements(message.activity) item WHERE item->>'kind'='tool')` : `(SELECT jsonb_agg(jsonb_build_object('kind','tool','title',left(item->>'title',128),
-          'operation',left(item->>'operation',64),'status',left(item->>'status',32),
-          'toolOutput',jsonb_build_object('roomId',$1::text,'anchor',$2::text,'messageId',message.id)))
+        ${full ? `(SELECT jsonb_agg(item) FROM jsonb_array_elements(message.activity) item WHERE item->>'kind'='tool')` : `(SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+          'kind','tool',
+          'title',left(item->>'title',240),
+          'operation',left(item->>'operation',64),
+          'status',left(item->>'status',32),
+          'command',left(item->>'command',500),
+          'input',left(item->>'input',500),
+          'files',CASE WHEN jsonb_typeof(item->'files')='array' THEN (
+            SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+              'path',left(file->>'path',260),
+              'status',left(file->>'status',32)
+            )))
+            FROM (SELECT value AS file FROM jsonb_array_elements(item->'files') LIMIT 8) bounded_files
+            WHERE file ? 'path'
+          ) ELSE NULL END,
+          'toolOutput',jsonb_build_object('roomId',$1::text,'anchor',$2::text,'messageId',message.id))))
           FROM jsonb_array_elements(message.activity) item WHERE item->>'kind'='tool')`} activity
       FROM messages message JOIN anchor ON message.author_id=anchor.author_id
         AND message.request_id IS NOT DISTINCT FROM anchor.request_id AND message.turn_id IS NOT DISTINCT FROM anchor.turn_id
