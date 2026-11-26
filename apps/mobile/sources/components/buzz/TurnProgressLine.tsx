@@ -98,8 +98,10 @@ const TurnProgressLineBody = React.memo(function TurnProgressLineBody({
   const stateLabel = [counter, received ? 'received' : undefined].filter(Boolean).join(' · ');
   const workingAvatars = agents?.length ? (
     <XStack alignItems="center" flexShrink={0}>
-      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.turnKey ?? agent.pubkey} width={index === Math.min(agents.length, 3) - 1 ? 24 : 16} flexShrink={0}
-        borderWidth={2} borderColor="canvas" borderRadius="sm">
+      {/* Each rounded canvas backing paints with its mark, over the previous tile. */}
+      {agents.slice(0, 3).map((agent, index) => <YStack key={agent.turnKey ?? agent.pubkey}
+        position="relative" zIndex={index} width={24} height={24} flexShrink={0} marginLeft={index === 0 ? 0 : -8}
+        backgroundColor="canvas" borderWidth={2} borderColor="canvas" borderRadius="md">
         <IdentityMark kind="agent" seed={agent.pubkey} name={agent.name} avatarUrl={agent.avatar} face={agent.face} size={20} />
       </YStack>)}
       {agents.length > 3 ? <T v="meta" color="secondary" marginLeft="1">+{agents.length - 3}</T> : null}
