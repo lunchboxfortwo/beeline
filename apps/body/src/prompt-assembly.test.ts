@@ -805,7 +805,6 @@ const scope9 = fixtureScope9();
       beelineReviewSkillMarkdown('test'),
     ]) {
       expect(text).toContain('Write your verdict and findings as your turn text');
-      expect(text).toContain('send only replies with the message tool');
       expect(text).toContain('The server wakes the implementer with the review result');
       expect(text).toContain('call approve_merge with the exact reviewed head SHA and your verdict as text, then end silently');
       expect(text).not.toMatch(/message\(type:(normal|blocked)\)/);

@@ -1,3 +1,4 @@
+import { legacyReviewMessage } from './test-fixtures/queued-turn.test-support.js';
 import { randomBytes, describe, expect, it, vi, assignCornerWorker, PhoneService, DaemonService, GitHubOperations, LiveHub, systemLine, advanceCorner, cornerMergeGate, createAgentCommand, queueCornerMergeConflict, reconcileCornerMergeBlockers, CORNER_LIFECYCLE_CARD_TYPE, cornerOwnerSql, RecordingDatabase, H, A, B, R, db, phone, daemon, github, githubRollupState, githubHead, githubApp, implementersMerge, cards, currentState, commissioned, brief, open, claim, pushToCorner, greenHead, redHead, resumeWorker, commands, result, terminalResult, orderRepairsFromRoom, SHA, branchOf, reasons, projected, inReview, approve, approved, mergedWebhook, say, revise, F, fallback, rootFixture, fixtureScope14, fixtureScope18, fixtureScope19, fixtureScope20, type GitHubAppClient, type GitHubOAuthClient } from './test-support-corner-lifecycle.test-support.js';
 
 describe('Reproduction S-07: every reviewer waits for a quiet corner', () => {
@@ -205,7 +206,7 @@ describe('each transition wakes the next role exactly once (AC-2)', () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
-    await rootFixture.daemon.execute('message',{roomId:review!.roomId,requestId:review!.turnRequestId,type:'normal',address:`${A}@${review!.roomId}`,text:'@hoots attach the production proof.'},review!.agentId);
+    await legacyReviewMessage(rootFixture.db, review!, A, '@hoots attach the production proof.');
     await advanceCorner(rootFixture.db, cornerId, { kind: 'checks', result: 'passing', sourceMessageId: review!.sourceMessageId });
     expect(await reasons(cornerId, A)).not.toContain('corner_review_needed');
   });

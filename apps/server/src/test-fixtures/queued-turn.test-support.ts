@@ -3,6 +3,14 @@ import type { AgentCommand } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from '../database.js';
 import type { DaemonService } from '../daemon-service.js';
 import type { CommandRow } from '../agent-command.js';
+import { sendMessage } from '../agent-messaging.js';
+
+/** Seed a previously delivered review message for rollout compatibility tests. */
+export async function legacyReviewMessage(db: SqlDatabase, review: AgentCommand, recipient: string, text: string) {
+  const parent = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [review.id])).rows[0]!;
+  const place = review.roomId;
+  return sendMessage(db, { type:'normal', parent, text, route:{from:{agent:review.agentId,place},to:{agent:recipient,place}} });
+}
 
 /** Publish delivery status for an existing item; the item remains pending. */
 export async function startQueuedTurn(db: SqlDatabase, roomId: string, agentId: string, commandId: string) {

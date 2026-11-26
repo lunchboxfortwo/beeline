@@ -466,13 +466,14 @@ const scope9 = fixtureScope9();
   });
 
 
-  it('a reviewer privately orders repairs from its corner on a green head and it stays in review', async () => {
+  it('a reviewer cannot order repairs on a green head and can still approve', async () => {
     const cornerId = await scope9.toReview();
     const [review] = await commands(B, cornerId);
     await claim(review!, 'review-generation');
-    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId, type:'normal',address:`${A}@${cornerId}`, text: 'Fix the race condition' }, B);
-    expect((await commands(A, cornerId)).some(c => c.reason === 'message')).toBe(true);
-    expect(await currentState(cornerId)).toBe('working');
+    await expect(rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId, type:'normal',address:`${A}@${cornerId}`, text: 'Fix the race condition' }, B))
+      .rejects.toThrow('Put review findings in your turn text.');
+    expect((await commands(A, cornerId)).some(c => c.reason === 'message')).toBe(false);
+    expect(await currentState(cornerId)).toBe('review');
     await rootFixture.daemon.execute('approveCornerMerge', { cornerId, headSha: '7'.repeat(40) }, B);
     // The PASS is landed by the server, not handed to the implementer.
     expect(await reasons(cornerId, A)).not.toContain('corner_land');

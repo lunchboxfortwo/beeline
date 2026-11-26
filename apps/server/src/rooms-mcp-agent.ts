@@ -3,7 +3,7 @@ import { Check, Errors } from 'typebox/value';
 import type { TSchema } from 'typebox';
 import { normalizePlaceAddresses } from './daemon/place-address.js';
 import { commandAddress } from './commander.js';
-import { messageAsk,sendMessage,replyToMessage,validateAskInput } from './agent-messaging.js';
+import { assertCanSendNewMessage,messageAsk,sendMessage,replyToMessage,validateAskInput } from './agent-messaging.js';
 import type { MessageAddress,MessageAsk } from '@beeline/api-contract/daemon';
 import { beginAgentInvocation } from './agent-invocation.js';
 import { queuedContextText } from './agent-command-context.js';
@@ -398,11 +398,12 @@ export class RoomsMcpAgentTools {
       }
       return this.db.transaction(async db => {
         const parent = commandId ? await selectMcpMessage(db,member,commandId,args.address === undefined ? undefined : target) : undefined;
-        await commandAddress(db,target,member);
+        assertCanSendNewMessage(parent);
         const roomId = parent?.room_id ?? target;
+        const origin = await commandAddress(db,roomId,member);
         if (parent) await beginAgentInvocation(db, member, roomId, parent.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
         const {to} = normalizePlaceAddresses('message',{roomId,to:args.to as MessageAddress});
-        return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to}});
+        return sendMessage(db,{...content,parent,route:{from:{agent:member,place:roomId},to},fromThread:Boolean(origin.parent_id)});
       });
     }
     return this.callTool(member,name,args);
