@@ -74,7 +74,50 @@ export async function sendMessage(db: SqlDatabase, input: {
     // Its recipient still belongs there; the responder belongs at its own origin.
     const route = { from: input.route.from, to };
     const id = input.id ?? randomBytes(32).toString('hex');
-    const human = (await tx.query("SELECT 1 FROM identities WHERE id=$1 AND kind='human'",[to.agent])).rowCount > 0;
+    const targetInfo = (
+      await tx.query<{
+        kind: string;
+        name: string | null;
+        handle: string | null;
+        place_name: string | null;
+      }>(
+        `SELECT recipient.kind,NULLIF(recipient.name,'') name,
+                beeline_room_handle(recipient.id,$2) handle,
+                NULLIF(place.name,'') place_name
+         FROM identities recipient
+         LEFT JOIN rooms place ON place.id=$2
+         WHERE recipient.id=$1`,
+        [to.agent, to.place],
+      )
+    ).rows[0];
+    const human = targetInfo?.kind === 'human';
+    const recipientTag = targetInfo?.handle
+      ? `@${targetInfo.handle.replace(/^@/, '')}`
+      : targetInfo?.name ?? to.agent.slice(0, 8);
+    const placeTag = targetInfo?.place_name ? `#${targetInfo.place_name}` : to.place.slice(0, 8);
+    const toMeta = {
+      identityId: to.agent,
+      ...(targetInfo?.handle ? { handle: targetInfo.handle } : {}),
+      ...(targetInfo?.name ? { name: targetInfo.name } : {}),
+      place: to.place,
+      ...(targetInfo?.place_name ? { placeName: targetInfo.place_name } : {}),
+    };
+    const repliesToMeta = input.replyTo
+      ? {
+          messageId: input.replyTo,
+          authorId: to.agent,
+          ...(targetInfo?.handle ? { authorHandle: targetInfo.handle } : {}),
+          ...(targetInfo?.name ? { authorName: targetInfo.name } : {}),
+        }
+      : undefined;
+    const actionReceipt =
+      input.type === 'blocked'
+        ? `Reported blocker to ${recipientTag} in ${placeTag}`
+        : input.replyTo
+          ? `Replied to ${recipientTag} in ${placeTag} quoting ${input.replyTo.slice(0, 8)}`
+          : input.ask
+            ? `Asked ${recipientTag} in ${placeTag}`
+            : `Sent message to ${recipientTag} in ${placeTag}`;
     if (!human) {
       // Self-addressed speech and acknowledgements of informational replies
       // stay in the transcript without authorizing another agent turn.
@@ -112,9 +155,13 @@ export async function sendMessage(db: SqlDatabase, input: {
       [command?.id ?? id,to.place,route.from.agent,input.text,input.replyTo ? 'reply' : 'message',command?.created_at ?? null,to.agent,reportStatus ?? null,route.from.place,input.replyTo ?? (reportStatus ? input.parent?.id : undefined) ?? null]);
       const saved = recorded.rows[0] ?? (await tx.query<{id:string;created_at:Date}>(
         'SELECT id,created_at FROM messages WHERE id=$1',[command?.id ?? id])).rows[0]!;
-      return { id:saved.id, messageId: saved.id, commandId: command?.id, destination: to, queued: Boolean(command), stored: true, visible: true, createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
-        ...(transcriptOnly ? { receipt: notWokenReceipt(to.agent === route.from.agent ? 'You addressed yourself; do the work in this turn.'
-          : 'An acknowledgement of an informational reply wakes no one; add ask or use message() to reach them.') } : {}) };
+      return { id:saved.id, messageId: saved.id, commandId: command?.id, destination: to, to: toMeta,
+        ...(repliesToMeta ? { repliesTo: repliesToMeta } : {}),
+        queued: Boolean(command), stored: true, visible: true, createdAt:Math.floor(new Date(saved.created_at).getTime()/1000),
+        receipt: transcriptOnly
+          ? notWokenReceipt(to.agent === route.from.agent ? 'You addressed yourself; do the work in this turn.'
+            : 'An acknowledgement of an informational reply wakes no one; add ask or use message() to reach them.')
+          : actionReceipt };
     }
     if (input.ask) {
       const choice = await postRoomChoice(tx, {
@@ -134,7 +181,10 @@ export async function sendMessage(db: SqlDatabase, input: {
         [id,to.place,JSON.stringify(about),
           input.ask.question,input.ask.brief ?? null,options.find(option=>option.label===input.ask!.recommended)?.optionId ?? null]);
       await updateWorkItem(tx,{id,roomId:to.place,state:'needs-you',assigneeId:to.agent},route.from.agent,input.replyTo ? to.agent : undefined);
-      return { id, messageId: id, destination: to, queued: false, stored: true, visible: true, createdAt: Math.floor(Date.now()/1000) };
+      return { id, messageId: id, destination: to, to: toMeta,
+        ...(repliesToMeta ? { repliesTo: repliesToMeta } : {}),
+        queued: false, stored: true, visible: true, createdAt: Math.floor(Date.now()/1000),
+        receipt: actionReceipt };
     }
     const sourceRoomId = reportStatus && input.parent?.private_payload?.reportStatus === 'blocked'
       ? (await tx.query<{origin:string}>("SELECT card->>'sourceRoomId' origin FROM messages WHERE id=$1",[input.parent.id])).rows[0]?.origin
@@ -144,8 +194,15 @@ export async function sendMessage(db: SqlDatabase, input: {
       attachments:input.attachments,parent:input.parent,replyTo:input.replyTo ?? input.parent?.source_message_id ?? (reportStatus ? input.parent?.id : undefined),
       requestId:input.parent?.turn_request_id,commandRoomId:input.parent?.room_id});
     const messageId = saved.stored ? saved.id : undefined;
-    return { id: messageId, messageId, destination: to, queued: false, stored: saved.stored, visible: saved.visible,
-      createdAt: saved.stored ? saved.createdAt : undefined, receipt: saved.receipt };
+    const receipt = !saved.stored
+      ? saved.receipt
+      : saved.receipt && saved.receipt !== 'Message stored and visible.'
+        ? `${actionReceipt} · ${saved.receipt}`
+        : actionReceipt;
+    return { id: messageId, messageId, destination: to, to: toMeta,
+      ...(repliesToMeta ? { repliesTo: repliesToMeta } : {}),
+      queued: false, stored: saved.stored, visible: saved.visible,
+      createdAt: saved.stored ? saved.createdAt : undefined, receipt };
   });
 }
 

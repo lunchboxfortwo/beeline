@@ -28,6 +28,7 @@ export type RoomSubscriptionView = {
   readonly createdAt: number;
   readonly lastFiredAt?: number;
   readonly corner?: { readonly id: string; readonly name: string };
+  readonly receipt?: string;
 };
 export type RoomSubscriptionListResult = { readonly subscriptions: readonly RoomSubscriptionView[] };
 

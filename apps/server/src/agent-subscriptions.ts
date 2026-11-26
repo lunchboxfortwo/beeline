@@ -291,7 +291,12 @@ async function createAgentSubscriptionInDb(
   if (webhookOwner) await createWebhookCredentials(db, rows.rows[0]!.id, webhookOwner);
   if (providerConnectorId) await notifyConnectorHelper(db, providerConnectorId);
   if (providerStatus) rows.rows[0]!.provider_status = providerStatus;
-  return view(rows.rows[0]!);
+  const created = view(rows.rows[0]!);
+  const statusText = created.registrationStatus === 'registering' ? 'registering webhook' : 'active';
+  return {
+    ...created,
+    receipt: `Created subscription "${title}" · ${created.source} ${created.event} · ${statusText}`,
+  };
 }
 
 export async function listAgentSubscriptions(db: SqlDatabase, roomId: string, agentId: string) {
@@ -317,23 +322,35 @@ async function removeUnusedTrigger(db: SqlDatabase, composio: ComposioApps | und
 }
 
 export async function deleteAgentSubscription(db: SqlDatabase, roomId: string, agentId: string, id: string,
-  composio?: ComposioApps) {
+  composio?: ComposioApps): Promise<{ receipt: string }> {
   const legacy = legacyId(id);
   if (legacy) {
     if (legacy.roomId !== roomId || legacy.agentId !== agentId) throw new Error('subscription not found');
     await deleteRoomSubscription(db, roomId, id, composio);
-    return;
+    return { receipt: `Deleted subscription (${legacy.event})` };
   }
-  if (await removeRoomEventSubscription(db, roomId, agentId, {id})) return;
-  const deleted = await db.query<{ trigger_id: string | null }>(
+  const existing = (await db.query<{ title: string | null; source: string; event: string }>(
+    `SELECT title,source,event FROM agent_subscriptions WHERE id=$1 AND room_id=$2 AND agent_id=$3`,
+    [id, roomId, agentId],
+  )).rows[0];
+  if (await removeRoomEventSubscription(db, roomId, agentId, {id})) {
+    const label = existing?.title?.trim() ? `"${existing.title.trim()}" (${existing.source} ${existing.event})` : id;
+    return { receipt: `Deleted subscription ${label}` };
+  }
+  const deleted = await db.query<{ trigger_id: string | null; title: string | null; source: string; event: string }>(
     `DELETE FROM agent_subscriptions subscription USING room_access member
      WHERE subscription.id=$1 AND subscription.room_id=$2 AND subscription.agent_id=$3
        AND member.room_id=subscription.room_id AND member.identity_id=$3 AND member.removed_at IS NULL
-     RETURNING subscription.trigger_id`,
+     RETURNING subscription.trigger_id,subscription.title,subscription.source,subscription.event`,
     [id, roomId, agentId],
   );
   if (!deleted.rowCount) throw new Error('subscription not found');
   await removeUnusedTrigger(db, composio, deleted.rows[0]!.trigger_id);
+  const removed = deleted.rows[0]!;
+  const label = removed.title?.trim()
+    ? `"${removed.title.trim()}" (${removed.source} ${removed.event})`
+    : `${removed.source} ${removed.event}`;
+  return { receipt: `Deleted subscription ${label}` };
 }
 
 export async function listRoomSubscriptions(db: SqlDatabase, roomId: string) {

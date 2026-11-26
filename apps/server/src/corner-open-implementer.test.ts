@@ -120,7 +120,7 @@ it('Reproduction O1-1: naming Beta assigns the work to Beta and keeps Alpha as a
   expect((await db.query(`SELECT agent_id FROM agent_commands WHERE room_id=$1 AND reason='corner_objective'`, [cornerId])).rows)
     .toEqual([{ agent_id: B }]);
   const beforeReplay = await openingCounts();
-  expect(await daemon.execute('createCorner', request, A)).toEqual({
+  expect(await daemon.execute('createCorner', request, A)).toMatchObject({
     cornerId,
   });
   expect(await openingCounts()).toEqual(beforeReplay);
@@ -235,7 +235,7 @@ it.each([undefined, 'alpha'])('keeps caller assignment for implementer %s', asyn
       )
     ).rows,
   ).toEqual([{ agent_id: A }]);
-  expect(await daemon.execute('createCorner', { ...request, implementer: 'alpha' }, A)).toEqual({
+  expect(await daemon.execute('createCorner', { ...request, implementer: 'alpha' }, A)).toMatchObject({
     cornerId,
   });
 });

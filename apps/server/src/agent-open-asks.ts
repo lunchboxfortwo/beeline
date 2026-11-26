@@ -93,7 +93,7 @@ export async function closeAgentAsk(
   db: SqlDatabase,
   agentId: string,
   input: { messageId?: unknown; reason?: unknown },
-): Promise<{ closed: number }> {
+): Promise<{ closed: number; reason: AgentAskCloseReason; receipt: string }> {
   if (typeof input.messageId !== 'string' || !input.messageId)
     throw new CommandRefusalError('close_ask: id is required', 400);
   if (!AGENT_ASK_CLOSE_REASONS.includes(input.reason as AgentAskCloseReason))
@@ -101,21 +101,32 @@ export async function closeAgentAsk(
       `close_ask: reason must be one of ${AGENT_ASK_CLOSE_REASONS.join(', ')}`,
       400,
     );
+  const messageId = input.messageId;
   return db.transaction(async (tx) => {
-    const blockClosed = await closeBlock(tx, agentId, input.messageId as string, input.reason as string);
-    if (blockClosed) await tx.query("UPDATE room_choices SET status='closed' WHERE message_id=$1 AND mode='question' AND status='open'",[input.messageId]);
+    const blockClosed = await closeBlock(tx, agentId, messageId, input.reason as string);
+    if (blockClosed) await tx.query("UPDATE room_choices SET status='closed' WHERE message_id=$1 AND mode='question' AND status='open'",[messageId]);
     const question = await tx.query<{ ask_closed_reason: string }>(
       `UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2)
        WHERE id=$1 AND (author_id=$3 OR $4) RETURNING ask_closed_reason`,
-      [input.messageId, input.reason, agentId, blockClosed],
+      [messageId, input.reason, agentId, blockClosed],
     );
     if (!question.rowCount)
       throw new CommandRefusalError('close_ask: that id is not one of your asks', 404);
+    const reason = question.rows[0]!.ask_closed_reason as AgentAskCloseReason;
     const closed = await tx.query(
       `UPDATE needs_you_marks SET cleared_at=now(),cleared_reason=$2
        WHERE message_id=$1 AND cleared_at IS NULL`,
-      [input.messageId, question.rows[0]!.ask_closed_reason],
+      [messageId, reason],
     );
-    return { closed: closed.rowCount ?? 0 };
+    const closedCount = closed.rowCount ?? 0;
+    const kind = blockClosed ? 'block' : 'ask';
+    const clearedNote = closedCount
+      ? `cleared ${closedCount} ${closedCount === 1 ? 'mark' : 'marks'}`
+      : 'already cleared';
+    return {
+      closed: closedCount,
+      reason,
+      receipt: `Closed ${kind} ${messageId.slice(0, 8)} (${reason}) · ${clearedNote}`,
+    };
   });
 }

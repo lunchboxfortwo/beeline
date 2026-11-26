@@ -521,7 +521,18 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...(args.brief !== undefined ? { brief: await bindBriefFiles(asObject(args.brief)) } : {}),
       });
       const notes = [fixedName?.note, fixedObjective?.note].filter(Boolean).join('; ');
-      return args.name === undefined ? 'updated the thread reviewer' : `renamed the thread to ${String(result.name)}${notes ? `. ${notes}` : ''}`;
+      const baseReceipt =
+        typeof result.receipt === 'string' && result.receipt
+          ? result.receipt
+          : args.name === undefined
+            ? 'Updated thread reviewer'
+            : `Renamed thread to #${String(result.name)}`;
+      return JSON.stringify({
+        cornerId,
+        name: result.name,
+        ...(result.approvedBy ? { approvedBy: result.approvedBy } : {}),
+        receipt: notes ? `${baseReceipt} (${notes})` : baseReceipt,
+      });
     }
     case 'create_subscription': {
       const source = stringArg(args, 'source');
@@ -539,15 +550,21 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
         ...(typeof args.channelName === 'string' ? { channelName: args.channelName } : {}),
         ...(typeof args.workflowName === 'string' ? { workflowName: args.workflowName } : {}),
       });
-      return result.registrationStatus === 'registering'
-        ? `Subscription ${String(result.id)} created for ${source} ${event}. The connected helper is registering its webhook; it runs your action once registration completes.`
-        : `Subscription ${String(result.id)} created for ${source} ${event}. It runs your action when the event arrives.`;
+      const receipt =
+        typeof result.receipt === 'string' && result.receipt
+          ? result.receipt
+          : `Created subscription ${String(result.id)} · ${source} ${event} · ${result.registrationStatus === 'registering' ? 'registering webhook' : 'active'}`;
+      return JSON.stringify({ ...result, receipt });
     }
     case 'delete_subscription': {
       const subscriptionId = stringArg(args, 'subscriptionId');
       if (!subscriptionId) throw new Error('subscriptionId is required');
-      await daemonExecute('deleteAgentSubscription', { roomId: agentScheduleRoomId(), subscriptionId });
-      return `Subscription ${subscriptionId} stopped.`;
+      const deleted = await daemonExecute('deleteAgentSubscription', { roomId: agentScheduleRoomId(), subscriptionId });
+      const receipt =
+        typeof deleted.receipt === 'string' && deleted.receipt
+          ? deleted.receipt
+          : `Deleted subscription ${subscriptionId}`;
+      return JSON.stringify({ ...deleted, subscriptionId, receipt });
     }
     case 'request_grant':
       return requestGrant(args);

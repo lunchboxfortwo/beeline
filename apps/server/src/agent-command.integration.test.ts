@@ -410,7 +410,7 @@ it('lets the corner agent retitle its corner during its turn', async () => {
 
   await expect(rename('too many words for a title')).resolves.toMatchObject({ cornerId: C, name: 'too-many-words' });
   await expect(rename('  Launch\n plan ')).resolves.toMatchObject({ cornerId: C, name: 'Launch-plan' });
-  await expect(rename('Launch-plan')).resolves.toEqual({ cornerId: C, name: 'Launch-plan' });
+  await expect(rename('Launch-plan')).resolves.toMatchObject({ cornerId: C, name: 'Launch-plan' });
   expect((await rootFixture.phone.readRoom(C, H))?.room.name).toBe('Launch-plan');
   await result(command!, 'Renamed.');
   await expect(rename('Follow-up title')).resolves.toMatchObject({name:'Follow-up-title'});

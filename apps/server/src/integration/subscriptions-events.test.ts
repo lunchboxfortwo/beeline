@@ -105,7 +105,7 @@ const fixture = monolithFixture();
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toEqual({
       schedules: [
-        {
+        expect.objectContaining({
           title: 'Scheduled check',
           scheduleId,
           agentId: AGENT,
@@ -115,7 +115,7 @@ const fixture = monolithFixture();
           maxRuns: 5,
           runCount: 0,
           nextRunAt,
-        },
+        }),
       ],
     });
     // The daemon token's agent cannot be impersonated and cannot delete...
@@ -285,7 +285,7 @@ const fixture = monolithFixture();
       kinds: ['joined', 'joined'],
     });
     expect(set.status).toBe(200);
-    expect(await set.json()).toEqual({ kinds: ['joined'] });
+    expect(await set.json()).toMatchObject({ kinds: ['joined'] });
     expect(
       await (await fixture.daemonOperation('listEventSubscriptions', { roomId: ROOM })).json(),
     ).toEqual({ kinds: ['joined'] });

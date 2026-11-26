@@ -255,4 +255,32 @@ describe('roomReplySteps', () => {
     expect(rows.filter((row) => row.kind === 'note')).toHaveLength(MAX_REPLY_STEPS + 1);
     expect(rows.filter((row) => row.kind === 'tool')).toHaveLength(0);
   });
+
+  it('preserves structured JSON receipt objects in tool output while ignoring terminal-only envelopes', () => {
+    const receiptPayload = {
+      scheduleId: 'sched-1',
+      nextRunAt: 1_780_000_000_000,
+      repliesTo: { identityId: 'u1', handle: 'lunchboxfortwo', name: 'Lunchbox' },
+      approvedBy: { identityId: 'u1', handle: 'lunchboxfortwo', sourceMessageId: 'm1' },
+      receipt: 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo',
+    };
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'mcp.beeline-agent.wake',
+          rawOutput: receiptPayload,
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'exec_command',
+          content: [{ type: 'terminal', terminalId: 'term-1' }],
+        },
+      },
+    ]);
+    expect(JSON.parse(rows[0]!.output!)).toEqual(receiptPayload);
+    expect(rows[1]!.output).toBeUndefined();
+  });
 });

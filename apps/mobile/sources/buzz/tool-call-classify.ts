@@ -525,7 +525,178 @@ export type McpCallDescription = {
   object: string;
   observational?: boolean;
   namedTool?: boolean;
+  /** Structured post-condition receipt from a completed beeline-agent tool result. */
+  receipt?: string;
 };
+
+const STRUCTURED_RECEIPT_VERBS: Readonly<Record<string, string>> = {
+  created: 'created',
+  updated: 'updated',
+  deleted: 'deleted',
+  paused: 'paused',
+  resumed: 'resumed',
+  cleared: 'cleared',
+  opened: 'opened',
+  revised: 'revised',
+  installed: 'installed',
+  renamed: 'renamed',
+  closed: 'closed',
+  claimed: 'claimed',
+  set: 'set',
+  released: 'released',
+  sent: 'sent',
+  replied: 'replied',
+  reported: 'reported',
+  asked: 'asked',
+  listed: 'listed',
+  approved: 'approved',
+  stopped: 'stopped',
+};
+
+function unwrapMcpOutputObject(output: string | undefined): Record<string, unknown> | undefined {
+  let current: unknown = parsedJson(output);
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (Array.isArray(current)) {
+      const textItem = current.find(
+        (entry) =>
+          entry &&
+          typeof entry === 'object' &&
+          !Array.isArray(entry) &&
+          (typeof (entry as Record<string, unknown>).text === 'string' ||
+            ((entry as Record<string, unknown>).content &&
+              typeof (entry as Record<string, unknown>).content === 'object')),
+      ) as Record<string, unknown> | undefined;
+      if (!textItem) return undefined;
+      if (typeof textItem.text === 'string') {
+        current = parsedJson(textItem.text);
+        continue;
+      }
+      current = textItem.content;
+      continue;
+    }
+    if (current && typeof current === 'object' && !Array.isArray(current)) {
+      const rec = current as Record<string, unknown>;
+      if (
+        typeof rec.text === 'string' &&
+        !('receipt' in rec) &&
+        !('schedules' in rec) &&
+        !('scheduleId' in rec)
+      ) {
+        const inner = parsedJson(rec.text);
+        if (inner !== undefined) {
+          current = inner;
+          continue;
+        }
+      }
+      return rec;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+function formatSchedulePerson(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.handle === 'string' && rec.handle.trim()) {
+    return `@${rec.handle.trim().replace(/^@/, '')}`;
+  }
+  if (typeof rec.name === 'string' && rec.name.trim()) return rec.name.trim();
+  if (typeof rec.identityId === 'string' && rec.identityId.trim()) {
+    return rec.identityId.trim().slice(0, 8);
+  }
+  return undefined;
+}
+
+function formatShortNextRun(nextRunAt: unknown, cadence: unknown): string | undefined {
+  if (typeof nextRunAt !== 'number' || !Number.isFinite(nextRunAt)) return undefined;
+  const date = new Date(nextRunAt * 1_000);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const timeZone =
+    cadence &&
+    typeof cadence === 'object' &&
+    !Array.isArray(cadence) &&
+    (cadence as Record<string, unknown>).kind === 'cron' &&
+    typeof (cadence as Record<string, unknown>).timeZone === 'string' &&
+    (cadence as Record<string, unknown>).timeZone
+      ? String((cadence as Record<string, unknown>).timeZone)
+      : 'UTC';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone,
+      timeZoneName: 'short',
+    }).format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function describeScheduleListOutput(
+  outputObj: Record<string, unknown>,
+): McpCallDescription | undefined {
+  if (!Array.isArray(outputObj.schedules)) return undefined;
+  const entries = outputObj.schedules.filter(
+    (entry): entry is Record<string, unknown> =>
+      Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)),
+  );
+  if (!entries.length) return { verb: 'listed', object: 'schedules', observational: true };
+  const first = entries[0]!;
+  const title = readField(first, ['title', 'workflowName', 'scheduleId']);
+  if (!title) return { verb: 'listed', object: 'schedules', observational: true };
+  const details: string[] = [];
+  const nextRun = formatShortNextRun(first.nextRunAt, first.cadence);
+  if (nextRun) details.push(`next ${nextRun}`);
+  const repliesTo = formatSchedulePerson(first.repliesTo);
+  if (repliesTo) details.push(`replies to ${repliesTo}`);
+  const summary = details.length ? `${title} (${details.join(' · ')})` : title;
+  const more = entries.length > 1 ? ` +${entries.length - 1} more` : '';
+  return {
+    verb: 'listed',
+    object: `schedules · ${summary}${more}`,
+    observational: true,
+    receipt: `${summary}${more}`,
+  };
+}
+
+function describeStructuredReceipt(
+  outputObj: Record<string, unknown>,
+  fallback: McpCallDescription,
+): McpCallDescription | undefined {
+  const rawReceipt = readField(outputObj, ['receipt']);
+  if (!rawReceipt) return undefined;
+  const firstLine = oneLine(rawReceipt.split('\n')[0] ?? rawReceipt);
+  if (!firstLine) return undefined;
+  const space = firstLine.indexOf(' ');
+  if (space > 0) {
+    const leadWord = firstLine.slice(0, space).toLowerCase();
+    const mappedVerb = STRUCTURED_RECEIPT_VERBS[leadWord];
+    const rest = firstLine.slice(space + 1).trim();
+    if (mappedVerb && rest) {
+      return {
+        ...fallback,
+        verb: mappedVerb,
+        object: rest,
+        receipt: firstLine,
+      };
+    }
+  }
+  return {
+    ...fallback,
+    object: firstLine,
+    receipt: firstLine,
+  };
+}
+
+/** Extract structured receipt text from a completed beeline-agent MCP JSON output. */
+export function extractMcpReceipt(output: string | undefined): string | undefined {
+  const outputObj = unwrapMcpOutputObject(output);
+  if (!outputObj) return undefined;
+  const raw = readField(outputObj, ['receipt']);
+  return raw ? oneLine(raw.split('\n')[0] ?? raw) : undefined;
+}
 
 function mcpArgs(input?: string): Record<string, unknown> | undefined {
   const data = parsedJson(input);
@@ -600,6 +771,7 @@ export function describeMcpCall(
   mcp: { server: string; tool: string },
   input?: string,
   command?: string,
+  output?: string,
 ): McpCallDescription {
   const server = normalizedServer(mcp.server);
   const tool = mcp.tool.toLowerCase();
@@ -613,30 +785,41 @@ export function describeMcpCall(
   const target = readField(args, ['target', 'address', 'service', 'recipient']);
 
   if (server === 'beeline-agent') {
+    const outputObj = unwrapMcpOutputObject(output);
+    const withOutput = (fallback: McpCallDescription): McpCallDescription => {
+      if (!outputObj) return fallback;
+      const fromReceipt = describeStructuredReceipt(outputObj, fallback);
+      if (fromReceipt) return fromReceipt;
+      if (tool === 'wake' && action === 'list') {
+        const fromList = describeScheduleListOutput(outputObj);
+        if (fromList) return fromList;
+      }
+      return fallback;
+    };
     if (tool === 'wake') {
-      if (action === 'list') return { verb: 'listed', object: 'schedules', observational: true };
+      if (action === 'list') return withOutput({ verb: 'listed', object: 'schedules', observational: true });
       if (action === 'events') return { verb: 'listed', object: 'wake events', observational: true };
       if (action === 'create') {
-        return { verb: 'created', object: title ? `schedule · ${title}` : 'schedule' };
+        return withOutput({ verb: 'created', object: title ? `schedule · ${title}` : 'schedule' });
       }
       if (action === 'update') {
-        return { verb: 'updated', object: title ? `schedule · ${title}` : 'schedule' };
+        return withOutput({ verb: 'updated', object: title ? `schedule · ${title}` : 'schedule' });
       }
       if (action === 'delete') {
-        return { verb: 'deleted', object: title ? `schedule · ${title}` : 'schedule' };
+        return withOutput({ verb: 'deleted', object: title ? `schedule · ${title}` : 'schedule' });
       }
       if (action === 'pause') {
-        return { verb: 'paused', object: title ? `schedule · ${title}` : 'schedule' };
+        return withOutput({ verb: 'paused', object: title ? `schedule · ${title}` : 'schedule' });
       }
       if (action === 'resume') {
-        return { verb: 'resumed', object: title ? `schedule · ${title}` : 'schedule' };
+        return withOutput({ verb: 'resumed', object: title ? `schedule · ${title}` : 'schedule' });
       }
       if (action === 'replace_events') {
-        return { verb: 'updated', object: 'event subscriptions' };
+        return withOutput({ verb: 'updated', object: 'event subscriptions' });
       }
       const summary = describeToolSummary(args);
-      if (summary) return { ...summary, observational: summary.verb === 'listed' || summary.verb === 'checked' };
-      return { verb: 'checked', object: 'schedules', observational: true };
+      if (summary) return withOutput({ ...summary, observational: summary.verb === 'listed' || summary.verb === 'checked' });
+      return withOutput({ verb: 'checked', object: 'schedules', observational: true });
     }
     if (tool === 'read') {
       const map: Record<string, McpCallDescription> = {
@@ -676,42 +859,45 @@ export function describeMcpCall(
     }
     if (tool === 'message') {
       const type = readField(args, ['type'])?.toLowerCase();
-      if (type === 'reply') return { verb: 'replied', object: target || 'message' };
-      if (type === 'blocked') return { verb: 'reported', object: 'blocker' };
-      return { verb: 'sent', object: target || 'message' };
+      if (type === 'reply') return withOutput({ verb: 'replied', object: target || 'message' });
+      if (type === 'blocked') return withOutput({ verb: 'reported', object: 'blocker' });
+      return withOutput({ verb: 'sent', object: target || 'message' });
+    }
+    if (tool === 'reply') {
+      return withOutput({ verb: 'replied', object: target || 'message' });
     }
     if (tool === 'open_thread') {
-      return { verb: 'opened', object: title ? `thread · ${title}` : 'thread' };
+      return withOutput({ verb: 'opened', object: title ? `thread · ${title}` : 'thread' });
     }
     if (tool === 'revise_thread') {
-      return { verb: 'updated', object: title ? `thread · ${title}` : 'thread' };
+      return withOutput({ verb: 'updated', object: title ? `thread · ${title}` : 'thread' });
     }
-    if (tool === 'close_thread') return { verb: 'closed', object: 'thread' };
-    if (tool === 'claim_thread') return { verb: 'claimed', object: 'thread' };
-    if (tool === 'approve_merge') return { verb: 'approved', object: 'merge' };
-    if (tool === 'set_thread_hold') return { verb: 'updated', object: 'merge hold' };
+    if (tool === 'close_thread') return withOutput({ verb: 'closed', object: 'thread' });
+    if (tool === 'claim_thread') return withOutput({ verb: 'claimed', object: 'thread' });
+    if (tool === 'approve_merge') return withOutput({ verb: 'approved', object: 'merge' });
+    if (tool === 'set_thread_hold') return withOutput({ verb: 'updated', object: 'merge hold' });
     if (tool === 'create_work_item') {
-      return { verb: 'created', object: title ? `task · ${title}` : 'task' };
+      return withOutput({ verb: 'created', object: title ? `task · ${title}` : 'task' });
     }
     if (tool === 'update_work') {
-      return { verb: 'updated', object: title ? `task · ${title}` : 'task' };
+      return withOutput({ verb: 'updated', object: title ? `task · ${title}` : 'task' });
     }
-    if (tool === 'close_ask') return { verb: 'closed', object: 'ask' };
+    if (tool === 'close_ask') return withOutput({ verb: 'closed', object: 'ask' });
     if (tool === 'remember') {
       const kind = readField(args, ['kind'])?.toLowerCase();
       const item = kind === 'procedure' ? (slug ? `procedure · ${slug}` : 'procedure') : 'memory';
       if (action === 'used') return { verb: 'used', object: item, observational: true };
-      if (action === 'update') return { verb: 'updated', object: item };
-      if (action === 'delete') return { verb: 'deleted', object: item };
-      return { verb: 'saved', object: item };
+      if (action === 'update') return withOutput({ verb: 'updated', object: item });
+      if (action === 'delete') return withOutput({ verb: 'deleted', object: item });
+      return withOutput({ verb: 'saved', object: item });
     }
     if (tool === 'post_artifact') {
-      return { verb: 'posted', object: title || (path ? displayFilePath(path) : 'artifact') };
+      return withOutput({ verb: 'posted', object: title || (path ? displayFilePath(path) : 'artifact') });
     }
     if (tool === 'connect') {
       const mode = readField(args, ['mode'])?.toLowerCase();
       const service = readField(args, ['service', 'query']);
-      if (mode === 'ensure') return { verb: 'connected', object: service || 'service' };
+      if (mode === 'ensure') return withOutput({ verb: 'connected', object: service || 'service' });
       return { verb: 'checked', object: service || 'connections', observational: true };
     }
     if (tool === 'app_tool') {
@@ -720,25 +906,25 @@ export function describeMcpCall(
       if (!subTool) {
         return { verb: 'listed', object: app ? `${app} tools` : 'app tools', observational: true };
       }
-      return { verb: 'ran', object: [app, subTool].filter(Boolean).join(' · ') };
+      return withOutput({ verb: 'ran', object: [app, subTool].filter(Boolean).join(' · ') });
     }
     if (tool === 'workspace') return { verb: 'prepared', object: 'workspace' };
     if (tool === 'request_grant') {
       const mode = readField(args, ['mode'])?.toLowerCase();
       if (mode === 'list') return { verb: 'listed', object: 'grants', observational: true };
-      return { verb: 'requested', object: readField(args, ['action', 'target']) || 'grant' };
+      return withOutput({ verb: 'requested', object: readField(args, ['action', 'target']) || 'grant' });
     }
     if (tool === 'run_granted_command') return { verb: 'ran', object: target || 'granted command' };
-    if (tool === 'report_feedback') return { verb: 'reported', object: 'feedback' };
-    if (tool === 'stop') return { verb: 'stopped', object: target || 'agent' };
-    if (tool === 'dispatch_release') return { verb: 'dispatched', object: 'release' };
+    if (tool === 'report_feedback') return withOutput({ verb: 'reported', object: 'feedback' });
+    if (tool === 'stop') return withOutput({ verb: 'stopped', object: target || 'agent' });
+    if (tool === 'dispatch_release') return withOutput({ verb: 'dispatched', object: 'release' });
     if (tool === 'scratch_io') {
       return {
         verb: action === 'image' ? 'fetched' : 'wrote',
         object: path ? displayFilePath(path) : 'scratch file',
       };
     }
-    return describeToolSummary(args) ?? { verb: 'ran', object: mcp.tool.replace(/_/g, ' ') };
+    return withOutput(describeToolSummary(args) ?? { verb: 'ran', object: mcp.tool.replace(/_/g, ' ') });
   }
 
   if (server === 'beeline-readonly-mcp') {

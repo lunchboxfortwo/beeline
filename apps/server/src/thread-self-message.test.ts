@@ -9,7 +9,8 @@ it('queues one self-addressed turn in a thread the sender implements, and that t
   const task = (await commands(B, C))[0]!;
   await claim(task);
   const sent = await selfMessage(B, C, task.turnRequestId, C, 'Continue with step two');
-  expect(sent).not.toHaveProperty('receipt');
+  expect(sent.receipt).toContain('Sent message');
+  expect(sent.receipt).not.toContain('You addressed yourself');
   const queued = (await commands(B, C)).filter(item => item.id !== task.id);
   expect(queued).toHaveLength(1);
   expect(queued[0]).toMatchObject({ id: sent.id, reason: 'message' });
@@ -41,7 +42,8 @@ it('queues a turn in the thread for its commander writing from the parent chat',
     const chat = (await commands(A, R))[0]!;
     await claim(chat);
     const sent = await selfMessage(A, R, chat.turnRequestId, C, 'Resume the thread');
-    expect(sent).not.toHaveProperty('receipt');
+    expect(sent.receipt).toContain('Sent message');
+    expect(sent.receipt).not.toContain('You addressed yourself');
     expect((await commands(A, C)).map(item => item.id)).toEqual([sent.id]);
   } finally {
     await rootFixture.db.query('UPDATE rooms SET created_by=NULL WHERE id=$1', [C]);

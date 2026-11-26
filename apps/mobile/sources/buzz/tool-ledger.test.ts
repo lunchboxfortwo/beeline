@@ -347,4 +347,44 @@ describe('observation folding, startup warning demotion, and legacy rows', () =>
     expect(lines[2]!.label).toBe('schedules');
     expect(lines[2]!.label).not.toContain('mcp.beeline-agent');
   });
+
+  it('carries structured beeline-agent receipts onto ToolLedgerLine and keeps collapsed provenance concise', () => {
+    const receipt = 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo';
+    const turn = buildTurnActivity([
+      {
+        kind: 'tool',
+        id: 'wake-update',
+        title: 'mcp.beeline-agent.wake',
+        toolKind: 'other',
+        status: 'completed',
+        input: JSON.stringify({ action: 'update', trigger: 'schedule', scheduleId: 's1' }),
+        output: JSON.stringify({ scheduleId: 's1', receipt }),
+      },
+      {
+        kind: 'tool',
+        id: 'open-thread',
+        title: 'mcp.beeline-agent.open_thread',
+        toolKind: 'other',
+        status: 'completed',
+        input: JSON.stringify({ name: 'mcp-state-receipts', implementer: 'crayon' }),
+        output: JSON.stringify({
+          address: 'c1',
+          receipt: 'Opened thread "mcp-state-receipts" · implementer @crayon · approved by @lunchboxfortwo',
+        }),
+      },
+    ]);
+    const lines = toolLedgerLines(turn.steps);
+    expect(lines[0]).toMatchObject({
+      verb: 'updated',
+      receipt,
+      label: '"Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo',
+    });
+    expect(lines[1]).toMatchObject({
+      verb: 'opened',
+      receipt: 'Opened thread "mcp-state-receipts" · implementer @crayon · approved by @lunchboxfortwo',
+    });
+    const group = groupToolLedgerRuns(lines)[0]!;
+    if (group.kind !== 'group') throw new Error('expected group');
+    expect(group.provenance).toBe('Updated "Morning card" · opened thread "mcp-state-receipts"');
+  });
 });

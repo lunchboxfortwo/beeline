@@ -21,9 +21,27 @@ export type CreateAgentScheduleInput = AgentRoomInput & {
   readonly maxRuns?: number;
 };
 
+export type WakeProvenanceLink = {
+  readonly identityId: string;
+  readonly handle?: string;
+  readonly name?: string;
+  readonly sourceMessageId?: string;
+};
+
+export type WakeReplyLink = {
+  readonly identityId: string;
+  readonly handle?: string;
+  readonly name?: string;
+  readonly messageId?: string;
+};
+
 export type AgentScheduleResult = {
   readonly scheduleId: string;
   readonly nextRunAt: number;
+  readonly title?: string;
+  readonly repliesTo?: WakeReplyLink;
+  readonly approvedBy?: WakeProvenanceLink;
+  readonly receipt?: string;
 };
 
 export type AgentScheduleEntry = {
@@ -42,6 +60,10 @@ export type AgentScheduleEntry = {
   readonly maxRuns?: number;
   readonly runCount: number;
   readonly nextRunAt: number;
+  /** Human recipient who receives scheduled escalation/context. */
+  readonly repliesTo?: WakeReplyLink;
+  /** Human message authorization provenance bound to this schedule. */
+  readonly approvedBy?: WakeProvenanceLink;
   /** Still-active runs this schedule has started, of any saved workflow (requirement: duplicate-run visibility). */
   readonly activeRunIds?: readonly string[];
 };
@@ -75,7 +97,10 @@ export type SetEventSubscriptionsInput = RoomInput & {
   readonly kinds: readonly string[];
 };
 
-export type EventSubscriptionsResult = { readonly kinds: readonly ServerEventKind[] };
+export type EventSubscriptionsResult = {
+  readonly kinds: readonly ServerEventKind[];
+  readonly receipt?: string;
+};
 
 /**
  * One event this agent emits into the Room it is answering in.
@@ -210,7 +235,7 @@ export type { DaemonBootstrapResult } from './daemon-operations-room-conversatio
 export type { WorkspaceRosterResult } from './daemon-operations-room-conversation-window.js';
 export type { RoomInboxResult } from './daemon-operations-room-conversation-window.js';
 export type { DaemonAttachment } from './daemon-operations-room-conversation-window.js';
-export type { RoomMessageResult, RoomAttachmentResult, MessageSendResult } from './daemon-operations-room-conversation-window.js';
+export type { RoomMessageResult, RoomAttachmentResult, MessageSendResult, MessageReplyProvenance } from './daemon-operations-room-conversation-window.js';
 export type { RoomConversationResult } from './daemon-operations-room-conversation-window.js';
 export type { RoomAuthorityResult } from './daemon-operations-room-conversation-window.js';
 export type { AuthorityDecisionResult } from './daemon-operations-room-conversation-window.js';
@@ -264,7 +289,7 @@ export type { CornerBriefDraft } from './daemon-operations-room-conversation-win
 export type { CornerBriefApproval } from './daemon-operations-room-conversation-window.js';
 export type { CornerBrief } from './daemon-operations-room-conversation-window.js';
 export type { ReviseCornerBriefInput } from './daemon-operations-revise-corner-brief-input.js';
-export type { CornerResult } from './daemon-operations-revise-corner-brief-input.js';
+export type { CornerResult, ThreadApproverLink } from './daemon-operations-revise-corner-brief-input.js';
 export type { ChoiceOptionArg } from './daemon-operations-revise-corner-brief-input.js';
 export type { AskRoomChoiceInput } from './daemon-operations-revise-corner-brief-input.js';
 export type { OpenRoomPollInput } from './daemon-operations-revise-corner-brief-input.js';

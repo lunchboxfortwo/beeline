@@ -272,7 +272,7 @@ it('keeps reviewer subscriptions mandatory and reconciles an unreviewed green he
   for (const roomId of [R, C]) {
     await expect(
       rootFixture.daemon.execute('setEventSubscriptions', { roomId, kinds: [] }, A),
-    ).resolves.toEqual({ kinds: ['check-passed'] });
+    ).resolves.toMatchObject({ kinds: ['check-passed'] });
   }
   await rootFixture.db.query(`DELETE FROM agent_subscriptions WHERE source='room' AND agent_id=$1`, [
     A,

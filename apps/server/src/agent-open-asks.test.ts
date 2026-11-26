@@ -67,11 +67,13 @@ describe("an agent's open asks", () => {
     const later = await agentOpenAsks(db, AGENT, ROOM, Date.now() + 86_400_000);
     expect(later.version).toBe(listed.version);
     expect(later.text).toContain('5d ago in Launch, to @ada: Reworded?');
-    expect(await closeAgentAsk(db, AGENT, { messageId: ids[0], reason: 'answered' })).toEqual({
+    expect(await closeAgentAsk(db, AGENT, { messageId: ids[0], reason: 'answered' })).toMatchObject({
       closed: 1,
+      reason: 'answered',
     });
-    expect(await closeAgentAsk(db, AGENT, { messageId: ids[0], reason: 'answered' })).toEqual({
+    expect(await closeAgentAsk(db, AGENT, { messageId: ids[0], reason: 'answered' })).toMatchObject({
       closed: 0,
+      reason: 'answered',
     });
     const closed = await agentOpenAsks(db, AGENT, ROOM);
     expect(closed.version).not.toBe(listed.version);

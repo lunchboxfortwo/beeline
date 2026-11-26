@@ -292,3 +292,71 @@ describe('shell wrapper peeling and read-only classification', () => {
     expect(isReadOnlyShellCommand(command)).toBe(false);
   });
 });
+
+describe('beeline-agent structured receipts and output', () => {
+  it('surfaces structured post-condition receipt directly on completed beeline-agent steps without prose regexes', () => {
+    const updated = step({
+      id: 'wake-upd',
+      toolKind: 'other',
+      title: 'mcp.beeline-agent.wake',
+      status: 'completed',
+      input: JSON.stringify({ action: 'update', trigger: 'schedule', scheduleId: 's1' }),
+      output: JSON.stringify({
+        scheduleId: 's1',
+        receipt: 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo',
+        repliesTo: { identityId: 'u1', handle: 'lunchboxfortwo' },
+      }),
+    });
+    expect(toolCallVerb(updated)).toBe('updated');
+    expect(toolCallLabel(updated)).toBe(
+      '"Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo',
+    );
+    const output = toolCallOutput(updated.output);
+    expect(output.length).toBeGreaterThan(0);
+    expect(output.join('\n')).toContain('"scheduleId": "s1"');
+    expect(output.join('\n')).toContain('"repliesTo"');
+
+    const held = step({
+      id: 'hold-set',
+      toolKind: 'other',
+      title: 'mcp.beeline-agent.set_thread_hold',
+      status: 'completed',
+      input: JSON.stringify({ address: 'c1', sourceMessageId: 'm1' }),
+      output: JSON.stringify({
+        holdId: 'h1',
+        approvedBy: { identityId: 'u1', name: 'lunchboxfortwo', sourceMessageId: 'm1' },
+        receipt: 'Set merge hold on "mcp-state-receipts" · approved by @lunchboxfortwo',
+      }),
+    });
+    expect(toolCallVerb(held)).toBe('set');
+    expect(toolCallLabel(held)).toBe('merge hold on "mcp-state-receipts" · approved by @lunchboxfortwo');
+  });
+
+  it('summarizes wake(list) structured JSON schedules and omits terminal-only envelopes from output', () => {
+    const listed = step({
+      id: 'wake-list-2',
+      toolKind: 'other',
+      title: 'mcp.beeline-agent.wake',
+      status: 'completed',
+      input: JSON.stringify({ action: 'list' }),
+      output: JSON.stringify({
+        schedules: [
+          { scheduleId: 's1', title: 'Morning card', repliesTo: { handle: 'lunchboxfortwo' } },
+          { scheduleId: 's2', title: 'Nightly audit', repliesTo: { handle: 'carbon' } },
+        ],
+      }),
+    });
+    expect(toolCallVerb(listed)).toBe('listed');
+    expect(toolCallLabel(listed)).toBe('schedules · Morning card (replies to @lunchboxfortwo) +1 more');
+    expect(toolCallOutput(listed.output).join('\n')).toContain('"Morning card"');
+
+    const terminalOnly = step({
+      id: 'term-only',
+      toolKind: 'execute',
+      title: 'exec_command',
+      status: 'completed',
+      output: JSON.stringify([{ type: 'terminal', terminalId: 't1' }]),
+    });
+    expect(toolCallOutput(terminalOnly.output)).toEqual([]);
+  });
+});

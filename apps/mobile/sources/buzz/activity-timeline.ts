@@ -260,7 +260,7 @@ export function ledgerStepLabel(item: AgentActivityItem): string {
   );
   const mcp = parseMcpTool(item.title, item.command, item.input);
   if (mcp) {
-    const described = describeMcpCall(mcp, item.input, item.command);
+    const described = describeMcpCall(mcp, item.input, item.command, item.output);
     return clamp(redactPaths(`${described.verb} ${described.object}`), MAX_LEDGER_LABEL);
   }
   let label: string | undefined;
@@ -384,7 +384,9 @@ function actionWeight(item: AgentActivityItem): ActionWeight {
   if (isFailure(item)) return 'failure';
   const mcp = parseMcpTool(item.title, item.command, item.input);
   if (mcp) {
-    return describeMcpCall(mcp, item.input, item.command).observational ? 'observation' : 'command';
+    return describeMcpCall(mcp, item.input, item.command, item.output).observational
+      ? 'observation'
+      : 'command';
   }
   const kind = item.toolKind?.toLowerCase();
   if (kind) {

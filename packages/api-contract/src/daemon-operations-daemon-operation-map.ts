@@ -11,9 +11,9 @@ import type { WorkflowRoleBinding, WorkflowReceiptInput, WorkflowRunReadResult }
 import type { DeleteInstitutionalMemoryInput, InstitutionalContextSnapshot, InstitutionalMemoryTurnStats, InstitutionalMemoryWriteResult, LoadWorkspaceSkillInput, LoadWorkspaceSkillResult, ReportInstitutionalMemoryUsedInput, ReportInstitutionalMemoryUsedResult, SaveInstitutionalMemoryInput, SearchInstitutionalHistoryInput, SearchInstitutionalHistoryResult, SearchInstitutionalMemoryInput, SearchInstitutionalMemoryResult, UpdateInstitutionalMemoryInput } from './institutional-memory.js';
 import type { NotifyFeedbackFixedInput, NotifyFeedbackFixedResult, ReportFeedbackInput, ReportFeedbackResult } from './feedback.js';
 import type { WalletPayInput, WalletContractCallInput, WalletSendOutcome, WalletSwapInput, WalletSwapResult, WalletToolBalanceInput, WalletToolBalanceResult, WalletToolChainsInput, WalletToolChainsResult, WalletToolHistoryInput, WalletToolHistoryResult, WalletToolQuoteInput, WalletToolQuoteResult, WalletToolState, WalletToolStateInput, WalletSignTypedDataInput, WalletSignTypedDataResult } from './wallet.js';
-import { TurnOutputAuthority, AgentCommand, AgentPlaceReset, StopAgentTurnResult, CreateAgentScheduleInput, AgentScheduleResult, SetEventSubscriptionsInput, EventSubscriptionsResult, PostRoomEventInput, AgentScheduleListResult, DeleteAgentScheduleInput, UpdateAgentScheduleInput } from './daemon-operations.js';
+import { TurnOutputAuthority, AgentCommand, AgentPlaceReset, StopAgentTurnResult, CreateAgentScheduleInput, AgentScheduleResult, SetEventSubscriptionsInput, EventSubscriptionsResult, PostRoomEventInput, AgentScheduleListResult, DeleteAgentScheduleInput, UpdateAgentScheduleInput, WakeProvenanceLink, WakeReplyLink } from './daemon-operations.js';
 import { WriteResult, DaemonBootstrapInput, DaemonBootstrapResult, WorkspaceRosterInput, WorkspaceRosterResult, RoomInboxResult, RoomConversationInput, RoomConversationResult, DaemonAttachment, RoomPrincipalInput, RoomAuthorityResult, PermissionAuthorityInput, AuthorityDecisionResult, MissionAuthorityInput, CornerWatchKind, CornerWatchResult, WorkScheduleAuthorityInput, AgentToolMandateResult, TargetAgentAuthorityInput, CornerListResult, CornerRestoreResult, CornerBrief, CornerCursorInput, RoomRepositoryStateResult, RoomGitHubTokenResult, RoomTargetBranchResult, IdentitySuccessionResult, AgentConfigurationResult, AgentPresenceResult, RequestCompletionResult, PostRoomMessageInput, PostRoomMessageResult, ReactToRoomMessageInput, PostAgentAttachmentInput, PostLiveOutputInput, RetractLiveOutputInput, PostTurnReceiptInput, PostAgentActivityInput, PostPermissionRequestInput, PostPermissionExecutionInput, PostAgentToolMandateInput, PostAgentCommandsInput, PostAgentModelCatalogInput, PostAgentRunningModelInput, PostCornerRemoteStateInput, PostCornerPlanInput, CornerBriefDraft, PostTargetBranchProposalInput, SearchMcpRegistryInput, SearchMcpRegistryResult, ConnectMcpServerInput, ConnectMcpServerResult, ConnectAppInput, ConnectAppResult, ConnectInput, ConnectResult, ConnectorSearchMatch, CreateCornerInput } from './daemon-operations-room-conversation-window.js';
-import { ReviseCornerBriefInput, PostSquireApprovalInput, PostSquireLoginWallInput, PostSquireLoginWallResult, PostSquireApprovalDecisionInput, RequestAgentGrantInput, RequestAgentGrantResult, AskRoomChoiceResult, AskRoomChoiceInput, OpenRoomPollInput, AgentGrantListResult, AgentGrantRequestListResult, ConsumeAgentGrantInput, AuthorizeSquireCallInput, AuthorizeSquireCallResult, AgentWorkbenchView, OfferConnectorInput, OfferConnectorResult, InstallConnectorInput, PostConnectorStatusInput, PostConnectorVaultInput, GetConnectorStatusInput, ConnectorStatus, ConnectorVaultListResult, ConnectionRefInput, ConnectionDetail, ConnectionGrantRevokeResult, PostConnectionUsageInput, ConnectorAssignmentsResult, CornerResult } from './daemon-operations-revise-corner-brief-input.js';
+import { ReviseCornerBriefInput, PostSquireApprovalInput, PostSquireLoginWallInput, PostSquireLoginWallResult, PostSquireApprovalDecisionInput, RequestAgentGrantInput, RequestAgentGrantResult, AskRoomChoiceResult, AskRoomChoiceInput, OpenRoomPollInput, AgentGrantListResult, AgentGrantRequestListResult, ConsumeAgentGrantInput, AuthorizeSquireCallInput, AuthorizeSquireCallResult, AgentWorkbenchView, OfferConnectorInput, OfferConnectorResult, InstallConnectorInput, PostConnectorStatusInput, PostConnectorVaultInput, GetConnectorStatusInput, ConnectorStatus, ConnectorVaultListResult, ConnectionRefInput, ConnectionDetail, ConnectionGrantRevokeResult, PostConnectionUsageInput, ConnectorAssignmentsResult, CornerResult, ThreadApproverLink } from './daemon-operations-revise-corner-brief-input.js';
 
 
 
@@ -21,7 +21,7 @@ export type DaemonOperationMap = {
   addWorkNote: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').AddWorkNoteInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
   attachToWorkItem: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').AttachToWorkItemInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
   /** The asking agent closes its own open ask on every person's Needs you list, keeping the reason. */
-  closeAgentAsk: Operation<RoomInput & TurnOutputAuthority & { readonly messageId: string; readonly reason: 'answered' | 'withdrawn' | 'superseded' }, { readonly closed: number }>;
+  closeAgentAsk: Operation<RoomInput & TurnOutputAuthority & { readonly messageId: string; readonly reason: 'answered' | 'withdrawn' | 'superseded' }, { readonly closed: number; readonly reason?: 'answered' | 'withdrawn' | 'superseded'; readonly receipt?: string }>;
   updateWorkItem: Operation<RoomInput & TurnOutputAuthority & Omit<import('./work-board.js').UpdateWorkItemInput,'roomId'> & { readonly targetRoomId: string }, WriteResult>;
   askOwnerQuestion: Operation<RoomInput & TurnOutputAuthority & import('./work-board.js').AskOwnerQuestionInput, WriteResult>;
   postVaultSaveCard: Operation<RoomInput & TurnOutputAuthority & import('./vault-save.js').VaultSaveRequest, WriteResult>;
@@ -188,7 +188,7 @@ export type DaemonOperationMap = {
     channelId?: string; channelName?: string; title?: string; when?: string; prompt: string; workflowName?: string }, RoomSubscriptionView>;
   listServiceSubscriptionEvents: Operation<RoomInput, SubscriptionEventCatalog>;
   listAgentSubscriptions: Operation<RoomInput, RoomSubscriptionListResult>;
-  setAgentWakePaused: Operation<RoomInput & { scheduleId?: string; subscriptionId?: string; paused: boolean }, WriteResult>;
+  setAgentWakePaused: Operation<RoomInput & { scheduleId?: string; subscriptionId?: string; paused: boolean }, WriteResult & { readonly paused?: boolean; readonly nextRunAt?: number; readonly repliesTo?: WakeReplyLink; readonly approvedBy?: WakeProvenanceLink }>;
   deleteAgentSubscription: Operation<RoomInput & { subscriptionId: string }, WriteResult>;
   watchCorner: Operation<
     TurnOutputAuthority & RoomInput & { readonly cornerId: string; readonly kinds: readonly CornerWatchKind[] },
@@ -219,7 +219,7 @@ export type DaemonOperationMap = {
   >;
   reviseCornerBrief: Operation<
     ReviseCornerBriefInput,
-    CornerBrief & { readonly warnings?: readonly string[]; readonly wake: { readonly queued: boolean; readonly agentId?: string; readonly reason?: string } }
+    CornerBrief & { readonly warnings?: readonly string[]; readonly wake: { readonly queued: boolean; readonly agentId?: string; readonly reason?: string }; readonly approvedBy?: ThreadApproverLink; readonly receipt?: string }
   >;
   getPrChecksStatus: Operation<
     CornerInput & { pullRequest?: number | string },
@@ -389,7 +389,7 @@ export type DaemonOperationMap = {
       readonly objective?: string;
       readonly brief?: CornerBriefDraft;
     },
-    { readonly cornerId: string; readonly name: string }
+    { readonly cornerId: string; readonly name: string; readonly approvedBy?: ThreadApproverLink; readonly receipt?: string }
   >;
   postTargetBranchProposal: Operation<PostTargetBranchProposalInput, WriteResult>;
   requestAgentGrant: Operation<RequestAgentGrantInput, RequestAgentGrantResult>;
@@ -548,7 +548,7 @@ export type DaemonOperationMap = {
   createCorner: Operation<CreateCornerInput, CornerResult>;
   setCornerHold: Operation<
     CornerHoldInput & TurnOutputAuthority & RoomInput & { requestId: string },
-    { holdId: string; roomId: string }
+    { holdId: string; roomId: string; released?: boolean; approvedBy?: ThreadApproverLink; receipt?: string }
   >;
   sendOperatorSystemDm: Operation<
     AgentRoomInput & TurnOutputAuthority & { requestId: string; recipients: string | readonly string[]; text: string },

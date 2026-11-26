@@ -372,6 +372,7 @@ export function parseScheduleCadence(args: JsonObject): {
 export interface AgentScheduleDeps {
   roomId: string;
   selfOnly?: boolean;
+  structured?: boolean;
   execute: (name: string, input: JsonObject) => Promise<JsonObject>;
 }
 
@@ -417,12 +418,37 @@ export async function createSchedule(
   const floorNote = floored
     ? ` The minimum cadence is ${MIN_SCHEDULE_MINUTES} minute; created every ${MIN_SCHEDULE_MINUTES} minute.`
     : '';
+  if (deps.structured) {
+    const receipt =
+      typeof created.receipt === 'string' && created.receipt
+        ? created.receipt
+        : `Created ${typeof args.title === 'string' && args.title.trim() ? `"${args.title.trim()}"` : `schedule ${scheduleId}`} · ${describe()}`;
+    return JSON.stringify({
+      ...created,
+      scheduleId,
+      receipt,
+      ...(floorNote ? { note: floorNote.trim() } : {}),
+    });
+  }
+  const receiptSuffix = typeof created.receipt === 'string' && created.receipt ? ` ${created.receipt}.` : '';
   return (
     `Schedule ${scheduleId} created: ${describe()}` +
     `; the prompt runs as a mention to you in this chat.` +
+    receiptSuffix +
     floorNote +
     ' Use wake(action:delete, scheduleId) to remove it.'
   );
+}
+
+function formatProvenanceTarget(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.handle === 'string' && rec.handle.trim()) {
+    return `@${rec.handle.trim().replace(/^@/, '')}`;
+  }
+  if (typeof rec.name === 'string' && rec.name.trim()) return rec.name.trim();
+  if (typeof rec.identityId === 'string' && rec.identityId.trim()) return rec.identityId.trim();
+  return undefined;
 }
 
 export async function listSchedules(
@@ -451,8 +477,22 @@ export async function listSchedules(
         typeof schedule.nextRunAt === 'number'
           ? `, next run ${new Date(schedule.nextRunAt * 1_000).toISOString()}`
           : '';
+      const title =
+        typeof schedule.title === 'string' && schedule.title.trim()
+          ? ` "${schedule.title.trim()}"`
+          : '';
+      const repliesTo = formatProvenanceTarget(schedule.repliesTo);
+      const approvedBy = formatProvenanceTarget(schedule.approvedBy);
+      const approvedSource =
+        schedule.approvedBy &&
+        typeof schedule.approvedBy === 'object' &&
+        typeof (schedule.approvedBy as Record<string, unknown>).sourceMessageId === 'string'
+          ? ` (${String((schedule.approvedBy as Record<string, unknown>).sourceMessageId).slice(0, 8)})`
+          : '';
       return [
-        `${String(schedule.scheduleId)} (${typeof schedule.agentHandle === 'string' ? `@${schedule.agentHandle}` : `agent ${String(schedule.agentId)}`}): ${cadenceText}${runs}${nextRunAt} — ${String(schedule.prompt)}` +
+        `${String(schedule.scheduleId)}${title} (${typeof schedule.agentHandle === 'string' ? `@${schedule.agentHandle}` : `agent ${String(schedule.agentId)}`}): ${cadenceText}${runs}${nextRunAt} — ${String(schedule.prompt)}` +
+          (repliesTo ? ` · replies to ${repliesTo}` : '') +
+          (approvedBy ? ` · approved by ${approvedBy}${approvedSource}` : '') +
           (schedule.workflowName ? ` · Workflow ${String(schedule.workflowName)}` : '') +
           (Array.isArray(schedule.activeRunIds)
             ? ` · Active run IDs: ${schedule.activeRunIds.join(', ') || 'none'}`
@@ -493,6 +533,16 @@ export async function subscribeEvents(
     roomId: deps.roomId,
     kinds: requested as string[],
   });
+  if (deps.structured) {
+    const kinds = (Array.isArray(result.kinds) ? result.kinds : []).map(String);
+    const receipt =
+      typeof result.receipt === 'string' && result.receipt
+        ? result.receipt
+        : kinds.length
+          ? `Updated event subscriptions · ${kinds.join(', ')}`
+          : 'Cleared event subscriptions · no room events active';
+    return JSON.stringify({ ...result, kinds, receipt });
+  }
   return describeSubscriptions(result, 'You now react to');
 }
 
@@ -587,6 +637,16 @@ export async function updateSchedule(
     typeof updated.nextRunAt === 'number'
       ? ` Next run ${new Date(updated.nextRunAt * 1_000).toISOString()}.`
       : '';
+  if (deps.structured) {
+    const receipt =
+      typeof updated.receipt === 'string' && updated.receipt
+        ? updated.receipt
+        : `Updated schedule ${scheduleId}${nextRunAt ? ` ·${nextRunAt.slice(0, -1)}` : ''}`;
+    return JSON.stringify({ ...updated, scheduleId, receipt });
+  }
+  if (typeof updated.receipt === 'string' && updated.receipt) {
+    return `${updated.receipt}.${nextRunAt}`;
+  }
   return `Schedule ${scheduleId} updated.${nextRunAt}`;
 }
 
@@ -596,10 +656,20 @@ export async function deleteSchedule(
 ): Promise<string> {
   const scheduleId = stringArg(args, 'scheduleId')?.trim();
   if (!scheduleId) throw new Error('scheduleId must be a non-empty string');
-  await deps.execute('deleteAgentSchedule', {
+  const deleted = await deps.execute('deleteAgentSchedule', {
     roomId: deps.roomId,
     scheduleId,
     ...(deps.selfOnly ? { selfOnly: true } : {}),
   });
+  if (deps.structured) {
+    const receipt =
+      typeof deleted.receipt === 'string' && deleted.receipt
+        ? deleted.receipt
+        : `Deleted schedule ${scheduleId}`;
+    return JSON.stringify({ ...deleted, scheduleId, receipt });
+  }
+  if (typeof deleted.receipt === 'string' && deleted.receipt) {
+    return `${deleted.receipt}.`;
+  }
   return `Schedule ${scheduleId} deleted.`;
 }

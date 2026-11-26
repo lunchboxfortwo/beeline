@@ -216,6 +216,9 @@ function useToolOutput() {
       const full = toolPageLines(page).find(item => item.id === next.id);
       setLine({
         ...next,
+        label: full?.label ?? next.label,
+        verb: full?.verb ?? next.verb,
+        receipt: full?.receipt ?? next.receipt,
         detail: full?.detail,
         requester: full?.requester,
         reason: full?.reason,
@@ -371,6 +374,7 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
       <ToolOutputSheet
         command={sheetLine?.command}
         input={sheetLine?.input}
+        receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
         outputHidden={sheetLine?.outputHidden}
         error={sheetError}
@@ -446,6 +450,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
       <ToolOutputSheet
         command={sheetLine?.command}
         input={sheetLine?.input}
+        receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
         outputHidden={sheetLine?.outputHidden}
         error={sheetError}

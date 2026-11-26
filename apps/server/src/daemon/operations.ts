@@ -62,10 +62,43 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return daemonWriteResult(ctx) as Output<Name>;
       case 'updateWorkItem': {
         const update={...input as Input<'updateWorkItem'>,roomId:(input as Input<'updateWorkItem'>).targetRoomId};
+        const itemId = update.id ?? update.roomId;
+        const existed = (await ctx.database.query('SELECT 1 FROM work_items WHERE id=$1', [itemId])).rowCount > 0;
+        let archivedReceipt: string | undefined;
         // Done on a thread is the agent's existing close (PR closed, branch deleted, locked refused).
         await updateWorkItem(ctx.database,update,authenticatedAgentId,authenticatedAgentId,
-          () => daemonArchiveCorner(ctx,{cornerId:update.roomId},authenticatedAgentId));
-        return daemonWriteResult(ctx) as Output<Name>;
+          async () => {
+            const archived = await daemonArchiveCorner(ctx,{cornerId:update.roomId},authenticatedAgentId);
+            archivedReceipt = archived.receipt;
+            return archived;
+          });
+        const saved = (await ctx.database.query<{
+          title: string | null;
+          state: string | null;
+          room_name: string | null;
+          assignee_handle: string | null;
+          assignee_name: string | null;
+        }>(
+          `SELECT w.title,w.state,r.name room_name,
+                  CASE WHEN w.assignee_id IS NOT NULL THEN beeline_room_handle(w.assignee_id,w.room_id) END assignee_handle,
+                  a.name assignee_name
+           FROM work_items w
+           JOIN rooms r ON r.id=w.room_id
+           LEFT JOIN identities a ON a.id=w.assignee_id
+           WHERE w.id=$1`,
+          [itemId],
+        )).rows[0];
+        const verb = !existed && update.id && update.id !== update.roomId ? 'Created' : 'Updated';
+        const label = saved?.title?.trim() || update.title?.trim() || (saved?.room_name ? `#${saved.room_name}` : itemId.slice(0, 8));
+        const parts = [`${verb} task "${label}"`];
+        const stateText = update.state ?? saved?.state ?? undefined;
+        if (stateText) parts.push(stateText);
+        if (saved?.assignee_handle) parts.push(`assigned @${saved.assignee_handle.replace(/^@/, '')}`);
+        else if (saved?.assignee_name) parts.push(`assigned ${saved.assignee_name}`);
+        else if (Object.hasOwn(update, 'assigneeId') && update.assigneeId === null) parts.push('unassigned');
+        if (update.note?.trim()) parts.push('added note');
+        if (update.attachments?.length) parts.push(`attached ${update.attachments.length} ${update.attachments.length === 1 ? 'item' : 'items'}`);
+        return daemonWriteResult(ctx, { receipt: archivedReceipt ?? parts.join(' · ') }) as Output<Name>;
       }
       case 'closeAgentAsk':
         return await closeAgentAsk(ctx.database,authenticatedAgentId,input as Input<'closeAgentAsk'>) as Output<Name>;
@@ -240,13 +273,13 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         return await listAgentSubscriptions(ctx.database,
           (input as Input<'listAgentSubscriptions'>).roomId, authenticatedAgentId) as Output<Name>;
       case 'setAgentWakePaused': {
-        await setAgentWakePaused(ctx.database, authenticatedAgentId, input as Input<'setAgentWakePaused'>);
-        return daemonWriteResult(ctx) as Output<Name>;
+        const result = await setAgentWakePaused(ctx.database, authenticatedAgentId, input as Input<'setAgentWakePaused'>);
+        return daemonWriteResult(ctx, result) as Output<Name>;
       }
       case 'deleteAgentSubscription': {
         const i = input as Input<'deleteAgentSubscription'>;
-        await deleteAgentSubscription(ctx.database, i.roomId, authenticatedAgentId, i.subscriptionId, ctx.composio);
-        return daemonWriteResult(ctx) as Output<Name>;
+        const deleted = await deleteAgentSubscription(ctx.database, i.roomId, authenticatedAgentId, i.subscriptionId, ctx.composio);
+        return daemonWriteResult(ctx, deleted) as Output<Name>;
       }
       case 'setEventSubscriptions':
         return (await daemonSetEventSubscriptions(ctx,
@@ -377,15 +410,19 @@ export async function daemonExecuteOperation<Name extends keyof DaemonOperationM
         const claim = input as Input<'becomeImplementer'>;
         const cornerId = claim.cornerId ?? claim.roomId;
         if (cornerId !== claim.roomId) await daemonAccess(ctx, cornerId, authenticatedAgentId);
-        const thread = (await ctx.database.query<{ reviewer: boolean }>(
-          `SELECT ${cornerReviewerSql('corner', 'parent')} IS NOT DISTINCT FROM $2 reviewer
+        const thread = (await ctx.database.query<{ reviewer: boolean; name: string; handle: string | null }>(
+          `SELECT ${cornerReviewerSql('corner', 'parent')} IS NOT DISTINCT FROM $2 reviewer,
+                  corner.name,
+                  beeline_room_handle($2,corner.id) handle
            FROM rooms corner JOIN corner_facts fact ON fact.corner_id=corner.id
            LEFT JOIN rooms parent ON parent.id=corner.parent_id WHERE corner.id=$1`,
           [cornerId, authenticatedAgentId])).rows[0];
         if (!thread) throw new CommandRefusalError('claim_thread needs a thread address.', 400);
         if (thread.reviewer) throw new CommandRefusalError('The thread reviewer cannot claim the implementer role.', 403);
         await becomeThreadImplementer(ctx.database, cornerId, authenticatedAgentId);
-        return daemonWriteResult(ctx) as Output<Name>;
+        return daemonWriteResult(ctx, {
+          receipt: `Claimed thread #${thread.name}${thread.handle ? ` as @${thread.handle.replace(/^@/, '')}` : ''}`,
+        }) as Output<Name>;
       }
       case 'getRoomGitHubToken':
         return getRoomGitHubTokenOperation(ctx, name, input, authenticatedAgentId, candidate, scopedRoom);

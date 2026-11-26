@@ -1,4 +1,4 @@
-import { fixCornerText } from '@beeline/api-contract/daemon';
+import { fixCornerText, type ThreadApproverLink } from '@beeline/api-contract/daemon';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { randomUUID } from 'node:crypto';
 import { authorizeCommandOutput } from '../agent-command.js';
@@ -77,6 +77,8 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
     if (repositoryWork && !input.brief)
       throw new Error('a brief is required for repository threads');
     let cornerId: string = randomUUID();
+    let approvedBy: ThreadApproverLink | undefined;
+    let implementerHandle: string | undefined;
     const opener = await daemonIdentity(ctx, agentId);
     await ctx.database.transaction(async (db) => {
       await lockCornerLifecycle(db, cornerId);
@@ -178,6 +180,18 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           );
         }
         cornerId = existing.corner_id;
+        const current = await currentCornerBrief(db, cornerId);
+        if (current?.approval) {
+          approvedBy = {
+            identityId: current.approval.approvedBy,
+            ...(current.approval.approverName ? { name: current.approval.approverName } : {}),
+            ...(current.approval.sourceMessageId ? { sourceMessageId: current.approval.sourceMessageId } : {}),
+            ...(current.approval.kind ? { kind: current.approval.kind } : {}),
+          };
+        }
+        implementerHandle =
+          (await db.query<{ handle: string | null }>('SELECT beeline_room_handle($1,$2) handle', [existing.owner_agent_id, roomId])).rows[0]?.handle ??
+          input.implementer;
         return;
       }
       if (input.implementer !== undefined) {
@@ -248,6 +262,14 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           undefined,
           { agentId, roomId },
         );
+        const approverName =
+          (await db.query<{ name: string | null }>('SELECT NULLIF(name,\'\') name FROM identities WHERE id=$1', [authority.approvalBasis.approvedBy])).rows[0]?.name ?? undefined;
+        approvedBy = {
+          identityId: authority.approvalBasis.approvedBy,
+          ...(approverName ? { name: approverName } : {}),
+          ...(authority.approvalBasis.sourceMessageId ? { sourceMessageId: authority.approvalBasis.sourceMessageId } : {}),
+          ...(authority.approvalBasis.kind ? { kind: authority.approvalBasis.kind } : {}),
+        };
         await db.query(
           `INSERT INTO corner_brief_revisions(
              corner_id,revision,spec,approval_basis,revision_hash,change,author_id,
@@ -313,11 +335,23 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
           afterMessageId: destination.sourceMessageId,
         });
       }
-
+      implementerHandle =
+        (await db.query<{ handle: string | null }>('SELECT beeline_room_handle($1,$2) handle', [implementerAgentId, roomId])).rows[0]?.handle ??
+        input.implementer;
 
     });
     const warnings = [...textNotes, ...(input.brief ? validateCornerBrief(input.brief, repositoryWork) : [])];
-    return { cornerId, ...(warnings.length ? { warnings } : {}) };
+    const receiptParts = [`Opened thread ${name}`];
+    if (implementerHandle) receiptParts.push(`assigned @${implementerHandle.replace(/^@/, '')}`);
+    if (approvedBy) receiptParts.push(`approved by ${approvedBy.name || approvedBy.identityId.slice(0, 8)}`);
+    return {
+      cornerId,
+      name,
+      ...(implementerHandle ? { implementer: implementerHandle } : {}),
+      ...(approvedBy ? { approvedBy } : {}),
+      receipt: receiptParts.join(' · '),
+      ...(warnings.length ? { warnings } : {}),
+    };
   }
 
   export async function daemonReviseCornerBrief(ctx: DaemonContext, input: Input<'reviseCornerBrief'>, agentId: string) {
@@ -328,13 +362,14 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
       await lockCornerLifecycle(db, input.cornerId);
       const corner = (
         await db.query<{
+          name: string;
           parent_id: string;
           repository_backed: boolean;
           owner_agent_id: string | null;
           implementer_agent_id: string | null;
           kind: string;
         }>(
-          `SELECT room.parent_id,${cornerOwnerSql('room.id')} owner_agent_id,${cornerImplementerSql('fact', 'room')} implementer_agent_id,
+          `SELECT room.name,room.parent_id,${cornerOwnerSql('room.id')} owner_agent_id,${cornerImplementerSql('fact', 'room')} implementer_agent_id,
              ${cornerKindSql('room.id')} kind,EXISTS(SELECT 1 FROM rooms parent WHERE parent.id=room.parent_id
                AND (parent.repository_resolution='repository' OR parent.repository_key IS NOT NULL)) repository_backed FROM rooms room
          JOIN corner_facts fact ON fact.corner_id=room.id
@@ -434,21 +469,46 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
         command,
       });
       const warnings = validateCornerBrief(draft, corner.repository_backed);
-      return { ...(await currentCornerBrief(db, input.cornerId))!, ...(warnings.length ? { warnings } : {}), wake: outcome.wake ?? {
-        queued: false, reason: 'No lifecycle wake queued',
-      } };
+      const savedBrief = (await currentCornerBrief(db, input.cornerId))!;
+      const wake = outcome.wake ?? { queued: false, reason: 'No lifecycle wake queued' };
+      const approvedBy: ThreadApproverLink | undefined = savedBrief.approval
+        ? {
+            identityId: savedBrief.approval.approvedBy,
+            ...(savedBrief.approval.approverName ? { name: savedBrief.approval.approverName } : {}),
+            ...(savedBrief.approval.sourceMessageId ? { sourceMessageId: savedBrief.approval.sourceMessageId } : {}),
+            ...(savedBrief.approval.kind ? { kind: savedBrief.approval.kind } : {}),
+          }
+        : undefined;
+      const wokenHandle =
+        wake.queued && wake.agentId
+          ? (await db.query<{ handle: string | null }>('SELECT beeline_room_handle($1,$2) handle', [wake.agentId, input.cornerId])).rows[0]?.handle
+          : undefined;
+      const wakeLabel = wake.queued
+        ? `woke @${(wokenHandle ?? wake.agentId ?? 'worker').replace(/^@/, '')}`
+        : 'no wake';
+      const receiptParts = [`Revised thread ${corner.name} brief (r${revision})`, wakeLabel];
+      if (approvedBy) receiptParts.push(`approved by ${approvedBy.name || approvedBy.identityId.slice(0, 8)}`);
+      return {
+        ...savedBrief,
+        ...(warnings.length ? { warnings } : {}),
+        wake,
+        ...(approvedBy ? { approvedBy } : {}),
+        receipt: receiptParts.join(' · '),
+      };
     });
     return brief!;
   }
 
   export async function daemonArchiveCorner(ctx: DaemonContext, input: Input<'archiveCorner'>, agentId: string) {
     const { cornerId } = input;
+    let cornerName: string | undefined;
     const authorize = async (database: SqlDatabase) => {
       await lockCornerLifecycle(database, cornerId);
       await lockCornerArchivalAuthority(database);
       // Closing is lifecycle cleanup, not command output. A completed turn or
       // an unrelated source place cannot revoke current parent Room access.
       await daemonReach(ctx, cornerId, agentId, database);
+      cornerName ??= (await database.query<{ name: string }>('SELECT name FROM rooms WHERE id=$1', [cornerId])).rows[0]?.name;
       if ((await database.query(
         `SELECT 1 FROM corner_facts WHERE corner_id=$1 AND locked`, [cornerId],
       )).rowCount) {
@@ -462,7 +522,9 @@ import { linkThreadWorkItems,normalizedThreadWorkItems } from '../work-item-thre
       return closeCornerState(database, cornerId);
     });
     if (closed.archived) await deleteCornerBranchBestEffort(cornerId, ctx.github ? id => ctx.github!.deleteCornerBranch(id) : undefined);
-    return daemonWriteResult(ctx);
+    return daemonWriteResult(ctx, {
+      receipt: cornerName ? `Closed thread #${cornerName}` : `Closed thread ${cornerId.slice(0, 8)}`,
+    });
   }
 
   export async function daemonEnsureMembership(ctx: DaemonContext, input: Input<'ensureAgentMembership'>, agentId: string) {

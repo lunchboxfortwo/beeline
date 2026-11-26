@@ -615,10 +615,18 @@ export class RoomsMcpAgentTools {
         implementer, sourceMessageId: args.sourceMessageId, hold: args.hold === true ? true : undefined, brief: briefDraft(args.brief),
         ...(Array.isArray(args.workItems) && args.workItems.length ? { workItems: args.workItems.map(String) } : {}),
         ...(repository.resolution === 'repository' ? { repository: repository.key, targetBranch: repository.targetBranch } : {}),
-      }) as { cornerId?: string; watch?: unknown; warnings?: unknown };
+      }) as { cornerId?: string; name?: string; implementer?: string; approvedBy?: unknown; receipt?: string; watch?: unknown; warnings?: unknown };
       // Creation is a receipt, not evidence that a helper or checkout started.
-      return { address: created.cornerId, ...(created.watch ? { watch: created.watch } : {}),
-        ...(Array.isArray(created.warnings) ? { warnings: created.warnings } : {}), status: 'created' };
+      return {
+        address: created.cornerId,
+        ...(created.name ? { name: created.name } : {}),
+        ...(created.implementer ? { implementer: created.implementer } : {}),
+        ...(created.approvedBy ? { approvedBy: created.approvedBy } : {}),
+        ...(created.receipt ? { receipt: created.receipt } : {}),
+        ...(created.watch ? { watch: created.watch } : {}),
+        ...(Array.isArray(created.warnings) ? { warnings: created.warnings } : {}),
+        status: 'created',
+      };
     });
   }
 

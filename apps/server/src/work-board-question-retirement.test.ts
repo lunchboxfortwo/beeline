@@ -70,8 +70,9 @@ describe('question retirement', () => {
       );
       expect(await tasks()).toEqual([messageId]);
       expect((await agentOpenAsks(db, agent, chat)).text).toContain(messageId);
-      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({
+      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toMatchObject({
         closed: 1,
+        reason: 'withdrawn',
       });
       expect(await retirement(messageId)).toEqual([{ cleared_reason: 'withdrawn', cleared: true }]);
       expect(await tasks()).toEqual([]);
@@ -274,7 +275,7 @@ describe('question retirement', () => {
           ])
         ).rowCount,
       ).toBe(0);
-      expect(await closeAgentAsk(db, agent, { messageId, reason })).toEqual({ closed: 1 });
+      expect(await closeAgentAsk(db, agent, { messageId, reason })).toMatchObject({ closed: 1, reason });
       await updateWorkItem(db, { id: messageId, roomId: thread, assigneeId: other }, person);
       expect(
         (await phone.execute('readNeedsYou', { workspaceId: workspace }, other)).items,
@@ -295,7 +296,7 @@ describe('question retirement', () => {
         { identity_id: person, cleared_reason: reason, cleared: true },
         { identity_id: other, cleared_reason: reason, cleared: true },
       ]);
-      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toEqual({
+      expect(await closeAgentAsk(db, agent, { messageId, reason: 'withdrawn' })).toMatchObject({
         closed: 0,
       });
       expect(
