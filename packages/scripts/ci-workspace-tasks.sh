@@ -42,7 +42,7 @@ typecheck() {
   # Check no script, workflow, unit or skill names a deleted file
   npm run lint:referenced-paths
   # Check CI routing, partitioning and build provenance
-  node --test --test-concurrency=1  packages/scripts/run-workspace-tests.test.mjs packages/scripts/report-main-checks.test.mjs packages/scripts/architecture-invariants.test.mjs packages/scripts/integration-shards.test.mjs packages/scripts/mobile-ui-policy-moves.test.mjs packages/scripts/mobile-grammar-policy.test.mjs packages/scripts/connection-ui-policy.test.mjs packages/scripts/server-timers.test.mjs packages/scripts/helper-waits.test.mjs packages/scripts/machine-connection-boundaries.test.mjs packages/scripts/corner-machine-boundary.test.mjs packages/scripts/system-transcript-boundary.test.mjs packages/scripts/legal-pages.test.mjs
+  node --test --test-concurrency=1  packages/scripts/run-workspace-tests.test.mjs packages/scripts/report-main-checks.test.mjs packages/scripts/architecture-invariants.test.mjs packages/scripts/integration-shards.test.mjs packages/scripts/mobile-ui-policy-moves.test.mjs packages/scripts/mobile-grammar-policy.test.mjs packages/scripts/connection-ui-policy.test.mjs packages/scripts/server-timers.test.mjs packages/scripts/helper-waits.test.mjs packages/scripts/machine-connection-boundaries.test.mjs packages/scripts/corner-machine-boundary.test.mjs packages/scripts/system-transcript-boundary.test.mjs packages/scripts/legal-pages.test.mjs packages/scripts/ui-surface-proof.test.mjs
   # Test nightly Checks orchestration
 }
 
@@ -74,19 +74,36 @@ native_fingerprint() {
 
 
 mobile_export_reachability() {
+  local android_out="${RUNNER_TEMP:?RUNNER_TEMP is required}/mobile-export"
+  local web_out="${RUNNER_TEMP}/mobile-web-export"
+  trap 'rm -rf "${RUNNER_TEMP}/mobile-export" "${RUNNER_TEMP}/mobile-web-export"' EXIT
+
   # Export Android bundle
   ( cd "apps/mobile"
-    npx expo export --max-workers 1 --platform android --output-dir "$RUNNER_TEMP/mobile-export" --clear
+    npx expo export --max-workers 1 --platform android --output-dir "$android_out" --clear
   )
   # Prove the export produced an Android bundle
-  set -euo pipefail
-  test -n "$(find "$RUNNER_TEMP/mobile-export/_expo/static/js/android" -name '*.hbc' -o -name '*.js' | head -n 1)"
-  # Reject transcript measurement code in the normal bundle
-  set -euo pipefail
-  if grep -aREl 'transcript-speed/|__transcriptSpeed|__transcriptBuild' "$RUNNER_TEMP/mobile-export/_expo/static/js/android"; then
+  test -n "$(find "$android_out/_expo/static/js/android" -name '*.hbc' -o -name '*.js' | head -n 1)"
+  # Reject transcript measurement code in the normal Android bundle
+  if grep -aREl 'transcript-speed/|__transcriptSpeed|__transcriptBuild' "$android_out/_expo/static/js/android"; then
     echo 'Normal Android bundle contains transcript measurement code'
     exit 1
   fi
+  rm -rf "$android_out"
+
+  # Export Web bundle sequentially after Android so peak RSS stays bounded
+  ( cd "apps/mobile"
+    npx expo export --max-workers 1 --platform web --output-dir "$web_out" --clear
+  )
+  # Prove the export produced static Web HTML and JS output
+  test -n "$(find "$web_out" -maxdepth 2 -name '*.html' | head -n 1)"
+  test -n "$(find "$web_out/_expo/static/js/web" -name '*.js' | head -n 1)"
+  # Reject transcript measurement code in the normal Web bundle
+  if grep -aREl 'transcript-speed/|__transcriptSpeed|__transcriptBuild' "$web_out/_expo/static/js/web"; then
+    echo 'Normal Web bundle contains transcript measurement code'
+    exit 1
+  fi
+  rm -rf "$web_out"
 }
 
 
