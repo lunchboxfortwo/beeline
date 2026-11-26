@@ -717,3 +717,23 @@ it('explicit reply before self-close avoids double-wake, and interrupted self-cl
   expect((await db.query('SELECT state,cancellation_reason FROM agent_commands WHERE id=$1', [opening!.id])).rows)
     .toEqual([{ state: 'cancelled', cancellation_reason: 'corner_close' }]);
 });
+
+it('refuses a late final callback after an explicit reply completes the command and another actor archives the thread', async () => {
+  const { commanderCmd } = await seedCommanderTurn(false);
+  const delegated = await daemon.execute('message', {
+    roomId: CHAT, type: 'normal', address: `${B}@${THREAD}`, text: 'Inspect logs.',
+  }, A);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [commanderCmd.id]);
+  const inv = { id: crypto.randomUUID(), requestId: delegated.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: inv.id }, B);
+  await replyToMessage(db, B, { roomId: THREAD, id: delegated.id, text: 'Explicit reply sent.', invocation: inv });
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [delegated.id])).rows)
+    .toEqual([{ state: 'complete' }]);
+  // Another actor externally archives the thread after B's command already completed.
+  await daemon.execute('archiveCorner', { cornerId: THREAD, roomId: CHAT, requestId: commanderCmd.id }, A);
+  await expect(daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: 'Late closing note after external close.', harnessEnded: true, invocation: inv,
+  }, B)).rejects.toThrow('archived');
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2', [THREAD, B])).rows).toEqual([]);
+  expect((await readAgentCommands(db, A, CHAT)).commands).toHaveLength(1);
+});

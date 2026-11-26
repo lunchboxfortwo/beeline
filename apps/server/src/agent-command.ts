@@ -855,15 +855,17 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   let completedNow = false;
   const published = await database.transaction<AnswerReceipt>(async db => {
     const item = (await db.query<CommandRow & { public_reply_id: string | null;
-      name: string; stop_requested_at: Date | null; public_reply_at: Date | null; room_archived: boolean }>(
+      name: string; stop_requested_at: Date | null; public_reply_at: Date | null; room_archived: boolean; self_closed: boolean }>(
       `SELECT item.*,identity.name,posted.id public_reply_id,posted.created_at public_reply_at,
-         room.archived_at IS NOT NULL room_archived
+         room.archived_at IS NOT NULL room_archived,
+         EXISTS(SELECT 1 FROM agent_invocations inv WHERE inv.self_closed AND (inv.command_id=item.id OR item.id=ANY(inv.batched_command_ids))
+           AND ($4::text IS NOT NULL AND inv.invocation_id=$4 OR $4::text IS NULL AND item.state='pending' AND NOT inv.ended)) self_closed
        FROM agent_commands item JOIN identities identity ON identity.id=item.agent_id
        JOIN rooms room ON room.id=item.room_id
        LEFT JOIN messages posted ON posted.id=COALESCE(item.result_message_id,item.posted_reply_id) AND posted.deleted_at IS NULL
          AND posted.author_id=item.agent_id
        WHERE item.agent_id=$1 AND item.room_id::text=$2 AND item.id=$3 FOR UPDATE OF item`,
-      [agentId, input.roomId, input.requestId ?? null],
+      [agentId, input.roomId, input.requestId ?? null, input.invocationId ?? input.invocation?.id ?? null],
     )).rows[0];
     if (item?.state === 'pending' && item.private_payload?.automatic && item.private_payload.idleSince
       && item.private_payload.authorId === SYSTEM_IDENTITY_ID
@@ -884,7 +886,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && (payload?.automatic || isBackgroundCommand(item.reason))) return receipt;
         if (!input.publicPost && !messageText && !files.length && !input.sharedReplyId) {
           if (item.state === 'complete') return receipt;
-          if (item.room_archived) {
+          if (item.room_archived && item.self_closed) {
             const prior = (await db.query<{ id: string; text: string; attachments: Attachment[] }>(
               `SELECT id,text,attachments FROM messages
                WHERE room_id=$1 AND author_id=$2 AND deleted_at IS NULL AND presentation='message'
@@ -893,22 +895,12 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
               [item.room_id, agentId, item.public_reply_id ?? '', item.turn_request_id],
             )).rows[0];
             const ended = await endAgentTurn(db, item, 'complete', null, prior?.id ?? item.public_reply_id ?? undefined);
-            if (ended) {
-              await wakePeerMessageSender(db, item, {
-                kind: 'answer',
-                outputId: prior?.id ?? `closed:${item.id}`,
-                text: prior?.text ?? 'Closed the thread.',
-                attachments: prior?.attachments,
-                batchCommandIds: input.batchCommandIds,
-                invocationId: input.invocationId ?? input.invocation?.id,
-              });
-            }
+            if (ended) await wakePeerMessageSender(db, item, {
+              kind: 'answer', outputId: prior?.id ?? `closed:${item.id}`, text: prior?.text ?? 'Closed the thread.',
+              attachments: prior?.attachments, batchCommandIds: input.batchCommandIds, invocationId: input.invocationId ?? input.invocation?.id,
+            });
             completedNow = true;
-            return {
-              ...receipt,
-              ...(prior ? { id: prior.id, messageId: prior.id, published: true, stored: true, visible: true, delivered: true } : {}),
-              completed: true,
-            };
+            return { ...receipt, ...(prior ? { id: prior.id, messageId: prior.id, published: true, stored: true, visible: true, delivered: true } : {}), completed: true };
           }
           if (!item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
             if (input.harnessEnded) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)',[agentId,item.room_id,item.turn_request_id]);
@@ -927,7 +919,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         const saved = existing ? {id: existing, stored: true, visible: true} : await queueMessage(db,{
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
           id:outputId,parent:item,requestId:item.turn_request_id,commandRoomId:item.room_id,attachments:files,
-          allowArchivedPost: item.room_archived && (item.state === 'pending' || Boolean(input.invocationId)),
+          allowArchivedPost: item.room_archived && item.self_closed,
           // Native closing output quotes the recorded wake. An addressed post can choose its quote.
           replyTo:(input.publicPost ? input.replyToMessageId : undefined) ?? item.source_message_id ?? item.id,
         });

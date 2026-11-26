@@ -64,7 +64,7 @@ export async function currentInvocationCommand(db: SqlDatabase, agent: string, r
     [agent,room,Boolean(reply),reply?.quote ?? null])).rows[0];
 }
 
-/** Pending commands belonging to an agent's active invocation when it closes its own thread. */
+/** Mark the calling agent's active self-closing invocation and return its pending commands to spare. */
 export async function activeClosingCornerCommands(
   db: SqlDatabase,
   cornerId: string,
@@ -74,10 +74,10 @@ export async function activeClosingCornerCommands(
     await db.query<{ id: string; turn_request_id: string }>(
       preserveTurn.requestId
         ? `WITH active AS (
-             SELECT command.id, inv.batched_command_ids
+             SELECT command.id, inv.invocation_id, inv.batched_command_ids
              FROM agent_commands command
              JOIN agent_invocations inv ON inv.command_id=command.id AND NOT inv.ended
-             WHERE command.room_id=$1 AND command.agent_id=$2 AND command.state='pending'
+             WHERE command.room_id=$1 AND command.agent_id=$2 AND command.state IN ('pending','complete')
                AND (command.turn_request_id=$3 OR EXISTS(
                  SELECT 1 FROM agent_commands batched
                  WHERE batched.room_id=$1 AND batched.agent_id=$2
@@ -85,10 +85,15 @@ export async function activeClosingCornerCommands(
                ))
              ORDER BY command.created_at DESC, command.id DESC
              LIMIT 1
+           ), marked AS (
+             UPDATE agent_invocations inv SET self_closed=true
+             FROM active
+             WHERE inv.command_id=active.id AND inv.invocation_id=active.invocation_id
+             RETURNING active.id, active.batched_command_ids
            )
            SELECT item.id, item.turn_request_id
            FROM agent_commands item
-           JOIN active ON item.id=active.id OR item.id=ANY(active.batched_command_ids)
+           JOIN marked ON item.id=marked.id OR item.id=ANY(marked.batched_command_ids)
            WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state='pending'`
         : `WITH current_turn AS (
              SELECT request_id, invocation_id, status
@@ -97,17 +102,22 @@ export async function activeClosingCornerCommands(
              ORDER BY started_at DESC, version DESC
              LIMIT 1
            ), active AS (
-             SELECT first.id, receipt.batched_command_ids
+             SELECT first.id, receipt.invocation_id, receipt.batched_command_ids
              FROM current_turn turn
              JOIN agent_commands first ON first.agent_id=$2 AND first.room_id=$1 AND first.turn_request_id=turn.request_id
              JOIN agent_invocations receipt ON receipt.command_id=first.id AND receipt.invocation_id=turn.invocation_id
              WHERE turn.status='working' AND NOT receipt.ended AND first.state='pending'
              ORDER BY first.created_at DESC, first.id DESC
              LIMIT 1
+           ), marked AS (
+             UPDATE agent_invocations inv SET self_closed=true
+             FROM active
+             WHERE inv.command_id=active.id AND inv.invocation_id=active.invocation_id
+             RETURNING active.id, active.batched_command_ids
            )
            SELECT item.id, item.turn_request_id
            FROM agent_commands item
-           JOIN active ON item.id=active.id OR item.id=ANY(active.batched_command_ids)
+           JOIN marked ON item.id=marked.id OR item.id=ANY(marked.batched_command_ids)
            WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state='pending'`,
       preserveTurn.requestId
         ? [cornerId, preserveTurn.agentId, preserveTurn.requestId]
