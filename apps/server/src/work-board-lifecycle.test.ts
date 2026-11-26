@@ -290,6 +290,16 @@ describe('unified work lifecycle', () => {
       [chat, juniper, lunchbox],
     );
     await db.query(`INSERT INTO work_item_threads(work_item_id,thread_id) VALUES('legacy-linked',$1)`, [existingThread]);
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event)
+       VALUES('open-card-legacy',$1,$2,'@ruby opened a corner legacy-thread','card','daemon-fact',$3::jsonb,$4::jsonb)`,
+      [
+        chat,
+        ruby,
+        JSON.stringify({ type: 'corner-open', cornerId: existingThread, name: 'legacy-thread' }),
+        JSON.stringify({ kind: 'corner-opened', object: { text: 'legacy-thread', id: existingThread } }),
+      ],
+    );
     await db.query(`INSERT INTO work_item_entries(work_item_id,author_id,kind,text) VALUES('legacy-linked',$1,'note','Linked note'),('legacy-standalone',$1,'note','Standalone note')`, [lunchbox]);
     await db.query(
       `INSERT INTO work_item_attachments(work_item_id,kind,name,url,added_by)
@@ -401,32 +411,56 @@ describe('unified work lifecycle', () => {
       [lunchbox],
     );
     const unrelatedThread = randomUUID();
-    // Record the original opening card, then rename the linked thread before migration.
+    const cardlessRenamed = randomUUID();
     await db.query(
-      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event)
-       VALUES('open-card-1',$1,$2,'@ruby opened a corner verify-provider-recovery','card','daemon-fact',$3::jsonb,$4::jsonb)`,
+      `INSERT INTO rooms(id,workspace_id,parent_id,name,created_by,archived_at) VALUES($1,$2,$3,'private-old-name',$4,now())`,
+      [cardlessRenamed, workspace, chat, ruby],
+    );
+    await db.query(`INSERT INTO corner_facts(corner_id,machine) VALUES($1,'{"state":"archived"}'::jsonb)`, [cardlessRenamed]);
+    await db.query(
+      `INSERT INTO work_items(id,room_id,state,title,objective,assignee_id,opened_by)
+       VALUES('private-cardless',$1,'done','private-old-name',NULL,$2,$3)`,
+      [chat, ruby, lunchbox],
+    );
+    await db.query(
+      `INSERT INTO work_item_threads(work_item_id,thread_id,landed) VALUES('private-cardless',$1,true)`,
+      [cardlessRenamed],
+    );
+    // Rename the cardless thread (no opening card) before migration; a custom bookmark using its current name must survive.
+    await db.query(`UPDATE rooms SET name='private-new-name' WHERE id=$1`, [cardlessRenamed]);
+
+    // Record verified opening cards, then rename archivedUnmerged before migration.
+    await db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,system_event) VALUES
+         ('open-card-1',$1,$2,'@ruby opened a corner verify-provider-recovery','card','daemon-fact',$3::jsonb,$4::jsonb),
+         ('open-card-2',$1,$2,'@ruby opened a corner ship-queue-fix','card','daemon-fact',$5::jsonb,$6::jsonb)`,
       [
         chat,
         ruby,
         JSON.stringify({ type: 'corner-open', cornerId: archivedUnmerged, name: 'verify-provider-recovery' }),
         JSON.stringify({ kind: 'corner-opened', object: { text: 'verify-provider-recovery', id: archivedUnmerged } }),
+        JSON.stringify({ type: 'corner-open', cornerId: landedThread, name: 'ship-queue-fix' }),
+        JSON.stringify({ kind: 'corner-opened', object: { text: 'ship-queue-fix', id: landedThread } }),
       ],
     );
     await db.query(`UPDATE rooms SET name='provider-recovery-renamed' WHERE id=$1`, [archivedUnmerged]);
     await db.query(
       `INSERT INTO work_item_attachments(work_item_id,kind,name,url,added_by) VALUES
          ('emberus-unfinished','link','Thread: verify-provider-recovery',$1,$3),
+         ('emberus-unfinished','link','Thread: provider-recovery-renamed',$1,$3),
          ('emberus-unfinished','link','Thread: custom-bookmark',$1,$3),
          ('emberus-unfinished','link','Thread: unrelated-design',$4,$3),
          ('emberus-unfinished','link','Prior thread note',$1,$3),
          ('emberus-unfinished','link','Runbook','https://example.org/runbook',$3),
          ('emberus-landed','link','Thread: ship-queue-fix',$2,$3),
-         ('emberus-landed','link','Thread: custom-private-bookmark',$2,$3)`,
+         ('emberus-landed','link','Thread: custom-private-bookmark',$2,$3),
+         ('private-cardless','link','Thread: private-new-name',$5,$3)`,
       [
         `https://web.usebeeline.app/beeline/chat/${archivedUnmerged}?communityId=${workspace}`,
         `https://web.usebeeline.app/beeline/chat/${landedThread}?communityId=${workspace}`,
         lunchbox,
         `https://web.usebeeline.app/beeline/chat/${unrelatedThread}?communityId=${workspace}`,
+        `https://web.usebeeline.app/beeline/chat/${cardlessRenamed}?communityId=${workspace}`,
       ],
     );
     // Standalone task with a user-added Thread: link to an unrelated thread must also keep its link.
@@ -468,6 +502,7 @@ describe('unified work lifecycle', () => {
       'Prior thread note',
       'Runbook',
       'Thread: custom-bookmark',
+      'Thread: provider-recovery-renamed',
       'Thread: unrelated-design',
     ]);
     expect(
@@ -484,9 +519,11 @@ describe('unified work lifecycle', () => {
       roomArchived: true,
     });
     expect(landed[0]!.entries?.some((e) => e.kind === 'note' && e.text === 'Merged cleanly')).toBe(true);
-    // landedThread had no opening card (private-order open): its exact generated link was removed,
-    // while a custom "Thread: ..." bookmark pointing to the same URL survived.
     expect(landed[0]!.attachments?.map((a) => a.name)).toEqual(['Thread: custom-private-bookmark']);
+
+    // Cardless renamed thread has no verified opening name: custom bookmark using its current name survives.
+    const cardlessItem = board.items.find((i) => i.id === cardlessRenamed);
+    expect(cardlessItem?.attachments?.map((a) => a.name)).toEqual(['Thread: private-new-name']);
   });
 
   it('settles a repo-less promoted thread cleanly to Done on close_thread without bouncing back to Backlog', async () => {
