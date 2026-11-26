@@ -134,7 +134,7 @@ it('migration leaves legacy opening provenance empty and preserves new provenanc
 });
 
 
-it.each(['primary reviewer', 'commander'])('Reproduction reviewer-handback-2471: %s orders its corner worker', async (role) => {
+it.each(['primary reviewer', 'commander'])('Reproduction reviewer-handback-2471: %s can order its corner worker during an ordinary assignment', async (role) => {
   const opened = await open();
   if (role !== 'commander') {
     await rootFixture.db.query(`UPDATE rooms SET created_by=$2 WHERE id=$1`, [opened.cornerId, WORKER]);
@@ -142,13 +142,13 @@ it.each(['primary reviewer', 'commander'])('Reproduction reviewer-handback-2471:
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [ROOM, RUBY]);
   }
   const queued = await createAgentCommand(rootFixture.db, { roomId: opened.cornerId, agentId: RUBY,
-    sourceMessageId: null, reason: 'corner_review_dispatch',
-    privatePayload: { text: 'Review the widget', authorId: HUMAN, fromRoomId: ROOM, kind: 'order' } });
+    sourceMessageId: null, reason: 'order',
+    privatePayload: { text: 'Coordinate the widget repair', authorId: HUMAN, fromRoomId: ROOM, kind: 'order' } });
   const turn = (await commands(opened.cornerId, RUBY)).find(c => c.id === queued!.id)!;
   await claim(turn);
-  await rootFixture.daemon.execute('message', { ...authority(turn), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'FAIL: repair the widget' }, RUBY);
+  await rootFixture.daemon.execute('message', { ...authority(turn), type: 'normal', address: `${WORKER}@${opened.cornerId}`, text: 'Repair the widget' }, RUBY);
   expect((await commands(opened.cornerId, WORKER)).find(c => c.reason === 'message'))
-    .toMatchObject({ private: true, source: { authorId: RUBY, body: 'FAIL: repair the widget' } });
+    .toMatchObject({ private: true, source: { authorId: RUBY, body: 'Repair the widget' } });
   console.log(`[reviewer-handback-2471] ${role} → own corner worker: repair order delivered privately`);
 });
 

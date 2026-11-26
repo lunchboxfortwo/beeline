@@ -52,7 +52,7 @@ async function messageAddress(db: SqlDatabase, to: MessageAddress, sender: strin
   if (fromThread) {
     if (!target) refuseMessageMembership();
     if (!place.parent_id || target.kind !== 'agent')
-      throw new CommandRefusalError('A thread must address a thread agent session.', 400);
+      refuseMessageMembership('A thread must address a thread agent session.');
   }
   return { agent: target?.id ?? to.agent, place: place.id };
 }
