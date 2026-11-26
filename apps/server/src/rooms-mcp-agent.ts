@@ -230,8 +230,9 @@ export const MCP_AGENT_TOOLS: Tool[] = [
     summary: { type: 'string', minLength: 1, maxLength: 500 }, detail: { type: 'string', maxLength: 4000 },
     tool_name: { type: 'string', maxLength: 120 }, error_excerpt: { type: 'string', maxLength: 1000 },
   }, ['address']),
-  tool('approve_merge', 'As the thread\'s configured reviewer, record PASS on the exact head SHA; the server lands the PR at once when checks are green and no hold stands. You cannot review a thread you implement or authored. This never releases a hold.', {
+  tool('approve_merge', 'As the thread\'s configured reviewer, approve the exact head SHA. Provide the review commandId and verdict text to publish and approve in one call. The server lands the PR when checks are green and no hold stands. You cannot review a thread you implement or authored. This never releases a hold.', {
     address: address('Thread id.'), headSha: { type: 'string', pattern: '^[0-9a-fA-F]{40}$' },
+    text: { type: 'string', minLength: 1, maxLength: 16000 },
   }, ['address', 'headSha']),
   tool('set_thread_hold', 'Set a merge hold citing a readable person’s request in sourceMessageId, or release releaseHoldId without a citation. Read hold ids with read facet status.', {
     address: address('Thread id.'), sourceMessageId: { type: 'string' }, releaseHoldId: { type: 'string', format: 'uuid' },
@@ -466,7 +467,11 @@ export class RoomsMcpAgentTools {
       case 'approve_merge': {
         const headSha = typeof args.headSha === 'string' ? args.headSha.toLowerCase() : '';
         if (!/^[0-9a-f]{40}$/.test(headSha)) throw new McpToolError('headSha must be a full 40-character SHA');
-        return exec('approveCornerMerge', { cornerId: addressArg(args.address), headSha });
+        const cornerId = addressArg(args.address);
+        if (args.text === undefined) return exec('approveCornerMerge', { cornerId, headSha });
+        const review = this.boundTurn.getStore();
+        if (!review) throw new McpToolError('commandId from the review wake is required with verdict text');
+        return exec('approveCornerMerge', { cornerId, headSha, roomId: review.roomId, requestId: review.requestId, text: args.text });
       }
       case 'set_thread_hold': return turn((_, context) => exec('setCornerHold', { ...context, cornerId: addressArg(args.address), releaseHoldId: args.releaseHoldId, sourceMessageId: args.sourceMessageId }));
       case 'close_thread': return exec('archiveCorner', { cornerId: addressArg(args.address) });

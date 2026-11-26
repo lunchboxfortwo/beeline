@@ -606,11 +606,11 @@ async function writeCornerAdvance(
           );
           break;
         case 'review-findings': {
-          const text = `FAIL: ${facts.reviewEnded?.findings ?? 'Review failed'}`;
+          const { id, findings } = facts.reviewEnded!;
           const command = corner.worker_agent_id ? await createAgentCommand(db,{
-            id:reviewHandbackId(cornerId, head!, facts.reviewEnded!.id),
+            id:reviewHandbackId(cornerId, head!, id),
             roomId:cornerId,agentId:corner.worker_agent_id,sourceMessageId:null,reason:'corner_review_needed',
-            privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:cornerId,text:systemText(text)},
+            privatePayload:{kind:'lifecycle',authorId:SYSTEM_AUTHOR_ID,fromRoomId:cornerId,text:systemText(findings!)},
           }) : undefined;
           result={ok:true,wake:{queued:Boolean(command),...(command?{agentId:command.agent_id}:{})}};
           break;

@@ -114,18 +114,23 @@ it('Reproduction REVIEW-ORDER: ordering the listed reviewer works and an archive
   await expect(rootFixture.daemon.execute('message',{...args,address:`${B}@${archived}`},A)).rejects.toThrow('archived');
 });
 
-it.each(['decline','silent'])('Reproduction REVIEW-EMPTY: a %s review ends until the next green event', async ending => {
+it.each(['decline','silent'])('a %s review hands back any turn text and waits for the next green event', async ending => {
   await rootFixture.phone.execute('updateRoom',{roomId:R,reviewerAgentId:B},H);
   await greenHead(108,'8'.repeat(40));
   const [review]=await commands(B,C);
   await claim(review!);
-  if(ending==='decline') {
-    await rootFixture.daemon.execute('postRoomMessage',{roomId:C,requestId:review!.turnRequestId,text:'I already reviewed this item.'},B);
-    expect((await commands(A,C)).filter(command=>command.reason==='message')).toEqual([]);
-  } else await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
+  const text = 'I already reviewed this item.';
+  if (ending === 'decline') await result(review!, text);
+  else await rootFixture.db.query(`SELECT beeline_finish_agent_command($1,'complete',NULL,NULL)`,[review!.id]);
   for(let replay=0;replay<3;replay++) await reconcileConfiguredCornerReviewers(rootFixture.db,R);
-  expect((await commands(A,C)).filter(command=>command.reason==='corner_review_needed')).toEqual([]);
+  const handbacks = await commands(A,C);
+  expect(handbacks).toMatchObject(ending === 'decline'
+    ? [{ reason: 'corner_review_needed', source: { body: text } }] : []);
   expect(await commands(B,C)).toEqual([]);
+  if (handbacks[0]) {
+    await claim(handbacks[0]);
+    await result(handbacks[0], 'Ready for another review.');
+  }
   await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=jsonb_set(lifecycle,'{checks}','"pending"') WHERE corner_id=$1`,[C]);
   await advanceCorner(rootFixture.db,C,{kind:'checks-pending'});
   await greenHead(108,'8'.repeat(40));

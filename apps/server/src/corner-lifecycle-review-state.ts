@@ -55,34 +55,37 @@ export async function noteReviewDispatchFailure(
 }
 
 
-/** The newest FAIL evidence for one review request: its repair, report or answer text. */
-function reviewVerdictSql(command: string, pattern: string): string {
+/** Read recorded output from an ended review. An addressed repair already delivered its findings. */
+function reviewOutputSql(command: string): string {
   return `(
-       SELECT repair.private_payload->>'text' text,true delivered FROM agent_commands repair
-       WHERE repair.parent_command_id=${command}.id AND repair.reason IN ('order','message','reply')
-         AND repair.private_payload->>'authorId'=${command}.agent_id
-         AND repair.review_context->>'purpose'='repair' AND repair.private_payload->>'text' ~* ${pattern}
-       UNION ALL
-       SELECT message.text,false FROM messages message
-       WHERE message.author_id=${command}.agent_id
-         -- Materialize recorded IDs as an array, not a hashed IN subplan.
-         -- The latter scans every message by this author before testing IDs.
-         AND (message.id=ANY(array_prepend(${command}.result_message_id,
-           ARRAY(SELECT jsonb_array_elements_text(COALESCE(${command}.review_context->'reportIds','[]'::jsonb)))))
-           OR message.request_id=${command}.turn_request_id)
-         AND message.deleted_at IS NULL AND message.text ~* ${pattern}
-       UNION ALL
-       SELECT report.private_payload->>'text',false FROM agent_commands report
-       WHERE report.id=ANY(array_prepend(${command}.result_message_id,
-         ARRAY(SELECT jsonb_array_elements_text(COALESCE(${command}.review_context->'reportIds','[]'::jsonb)))))
-         AND report.private_payload->>'authorId'=${command}.agent_id AND report.private_payload->>'text' ~* ${pattern}
-       ORDER BY delivered DESC LIMIT 1
-)`;
+    SELECT output.text,output.delivered FROM (
+      SELECT repair.private_payload->>'text' text,true delivered,repair.created_at,repair.id
+      FROM agent_commands repair
+      WHERE repair.parent_command_id=${command}.id AND repair.reason IN ('order','message','reply')
+        AND repair.private_payload->>'authorId'=${command}.agent_id
+        AND repair.review_context->>'purpose'='repair'
+      UNION ALL
+      SELECT message.text,false,message.created_at,message.id
+      FROM messages message
+      WHERE message.author_id=${command}.agent_id AND message.deleted_at IS NULL
+        -- Recorded IDs include shared answers and legacy reports. Older posts
+        -- may only carry the request ID on the thread's conversation message.
+        AND (message.id=ANY(array_prepend(${command}.result_message_id,
+          ARRAY(SELECT jsonb_array_elements_text(COALESCE(${command}.review_context->'reportIds','[]'::jsonb)))))
+          OR (message.request_id=${command}.turn_request_id AND message.room_id=${command}.room_id
+            AND message.presentation='message' AND message.system_event IS NULL))
+      UNION ALL
+      SELECT report.private_payload->>'text',false,report.created_at,report.id FROM agent_commands report
+      WHERE report.id=ANY(array_prepend(${command}.result_message_id,
+        ARRAY(SELECT jsonb_array_elements_text(COALESCE(${command}.review_context->'reportIds','[]'::jsonb)))))
+        AND report.private_payload->>'authorId'=${command}.agent_id
+    ) output
+    WHERE ${command}.state IN ('complete','cancelled') AND btrim(output.text)<>''
+    ORDER BY output.delivered DESC,
+      (output.id IS NOT DISTINCT FROM ${command}.result_message_id) DESC,
+      output.created_at DESC,output.id DESC LIMIT 1
+  )`;
 }
-
-/** FAIL findings as `loadCornerReviewState` recognizes them. */
-const REVIEW_FINDINGS_PATTERN = String.raw`(^|\n)[[:space:]>#*-]*(@[[:alnum:]_-]+[[:space:]]+)?(verdict:[[:space:]]*)?FAIL([[:space:]:*]|$)|(^|[[:space:]])F[0-9]+:|\mneeds? (a )?fix\M|\mfix (that|the|this)\M|\mbefore I can PASS\M`;
-
 
 export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, headSha: string | undefined) {
   const empty = {pending:false,requests:0,ended:undefined as undefined | {
@@ -97,7 +100,7 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
       verdict.text findings,COALESCE(verdict.delivered,false) delivered
      FROM agent_commands command JOIN rooms corner ON corner.id=command.room_id
      JOIN rooms parent ON parent.id=corner.parent_id
-     LEFT JOIN LATERAL ${reviewVerdictSql('command','$3')} verdict ON true
+     LEFT JOIN LATERAL ${reviewOutputSql('command')} verdict ON true
      WHERE command.room_id=$1 AND command.agent_id=${cornerReviewerSql()}
        AND (command.state<>'cancelled' OR EXISTS (SELECT 1 FROM agent_turns finished
          WHERE finished.room_id=command.room_id AND finished.agent_id=command.agent_id
@@ -105,12 +108,12 @@ export async function loadCornerReviewState(db: SqlDatabase, cornerId: string, h
        AND ${greenReviewRequestSql('command')} AND command.review_context->>'headSha'=$2
        AND command.review_context->'pullRequest'=(SELECT lifecycle->'pr'->'number' FROM corner_github_cache WHERE corner_id=$1)
      ORDER BY command.inbox_sequence DESC`,
-    [cornerId,headSha,REVIEW_FINDINGS_PATTERN],
+    [cornerId,headSha],
   )).rows;
   const latest=rows[0];
   // A request queued under an older brief revision is replaced, not awaited.
   return {pending:rows.some(row=>row.state==='pending'&&row.current),requests:rows.length,
-    ended:latest && (latest.ended||latest.findings) ? {id:latest.id,findings:latest.findings??undefined,
+    ended:latest?.ended ? {id:latest.id,findings:latest.findings??undefined,
       delivered:latest.delivered}:undefined};
 }
 
