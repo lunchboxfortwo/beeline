@@ -77,13 +77,18 @@ export async function activeClosingCornerCommands(
              SELECT command.id, inv.invocation_id, inv.batched_command_ids
              FROM agent_commands command
              JOIN agent_invocations inv ON inv.command_id=command.id AND NOT inv.ended
+             LEFT JOIN agent_turns turn
+               ON turn.room_id=command.room_id AND turn.agent_id=command.agent_id
+              AND turn.request_id=command.turn_request_id
              WHERE command.room_id=$1 AND command.agent_id=$2 AND command.state IN ('pending','complete')
+               AND (turn.invocation_id IS NULL OR inv.invocation_id=turn.invocation_id)
                AND (command.turn_request_id=$3 OR EXISTS(
                  SELECT 1 FROM agent_commands batched
                  WHERE batched.room_id=$1 AND batched.agent_id=$2
                    AND batched.turn_request_id=$3 AND batched.id=ANY(inv.batched_command_ids)
                ))
-             ORDER BY command.created_at DESC, command.id DESC
+             ORDER BY (turn.invocation_id=inv.invocation_id) DESC NULLS LAST,
+               turn.version DESC NULLS LAST, command.created_at DESC, command.id DESC
              LIMIT 1
            ), marked AS (
              UPDATE agent_invocations inv SET self_closed=true

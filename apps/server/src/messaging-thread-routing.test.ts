@@ -737,3 +737,54 @@ it('refuses a late final callback after an explicit reply completes the command 
   expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2', [THREAD, B])).rows).toEqual([]);
   expect((await readAgentCommands(db, A, CHAT)).commands).toHaveLength(1);
 });
+
+it('binds self-close to the restarted current invocation when an older invocation for the same command stayed unfinished', async () => {
+  const { commanderCmd, sourceMessageId } = await seedCommanderTurn(true);
+  const opened = await daemon.execute('createCorner', {
+    roomId: CHAT, targetRoomId: CHAT, requestId: commanderCmd.id,
+    name: 'restarted-audit', objective: 'Audit after restart', implementer: 'jellybean',
+    repository: 'owner/beeline',
+    brief: { spec: 'Audit and close after restart.', repositoryWork: false, approval: { sourceMessageId } },
+  }, A);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [commanderCmd.id]);
+
+  const [opening] = (await readAgentCommands(db, B, opened.cornerId)).commands;
+  const staleInv = { id: '00000000-0000-4000-8000-000000000001', requestId: opening!.turnRequestId };
+  const currentInv = { id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', requestId: opening!.turnRequestId };
+  // First worker attempt starts and drops without ending its invocation; a restarted attempt takes over.
+  await daemon.execute('startAgentTurn', { roomId: opened.cornerId, requestId: opening!.turnRequestId, invocationId: staleInv.id }, B);
+  await daemon.execute('startAgentTurn', { roomId: opened.cornerId, requestId: opening!.turnRequestId, invocationId: currentInv.id }, B);
+
+  const attachment = await seedReadyMedia(B, 'restarted-report.md');
+  await daemon.execute('postAgentAttachment', {
+    roomId: opened.cornerId, requestId: opening!.turnRequestId, attachment,
+  }, B);
+  await daemon.execute('archiveCorner', {
+    cornerId: opened.cornerId, roomId: opened.cornerId, requestId: opening!.turnRequestId,
+  }, B);
+
+  // Only the restarted current invocation is marked self_closed.
+  expect((await db.query<{ invocation_id: string; self_closed: boolean }>(
+    'SELECT invocation_id,self_closed FROM agent_invocations WHERE command_id=$1 ORDER BY invocation_id',
+    [opening!.id],
+  )).rows).toEqual([
+    { invocation_id: staleInv.id, self_closed: false },
+    { invocation_id: currentInv.id, self_closed: true },
+  ]);
+
+  const report = 'Restarted worker completed audit and attached report.';
+  const final = await daemon.execute('postRoomMessage', {
+    roomId: opened.cornerId, requestId: opening!.turnRequestId, text: report, harnessEnded: true, invocation: currentInv,
+  }, B);
+  expect(final.completed).toBe(true);
+  expect(final.published).toBe(true);
+
+  const wakes = (await readAgentCommands(db, A, CHAT)).commands;
+  expect(wakes).toHaveLength(1);
+  expect(wakes[0]).toMatchObject({
+    reason: 'reply',
+    roomId: CHAT,
+    from: { agent: B, place: opened.cornerId },
+    source: { body: report, attachments: [attachment] },
+  });
+});
