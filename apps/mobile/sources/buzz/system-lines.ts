@@ -1,6 +1,13 @@
 import { formatSystemLine, repositorySystemLine } from '@beeline/api-contract/phone';
 import type { RoomViewMessage, SystemEvent, SystemSubject } from '@beeline/api-contract/phone';
 
+export type TranscriptReadBoundary = {
+  id: string;
+  orderAtMs: number;
+  /** A corner marker moved beneath its source message for display. */
+  anchored?: true;
+};
+
 /**
  * The committed fields shared by system notice bodies and lifecycle folds.
  *
@@ -15,8 +22,8 @@ export type SystemLineMessage = {
   text: string;
   timestamp: number;
   orderAtMs?: number;
-  cornerMarkers?: readonly unknown[];
-  foldedReadBoundaries?: { id: string; orderAtMs: number }[];
+  hasAnchoredCornerMarkers?: true;
+  foldedReadBoundaries?: TranscriptReadBoundary[];
   isSystemNotice?: boolean;
   /** A deleted message's line; it holds that message's place, so it never folds. */
   deleted?: boolean;
