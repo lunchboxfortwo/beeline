@@ -39,31 +39,29 @@ export function threadTitle(item: ChatListItem, corner: ChatListCorner): string 
   return cornerShortTitle(item.room.name, corner.name, corner.id);
 }
 
-/** Chats navigate every thread: waiting ones first, the rest in server order. */
+/** Open threads waiting on the viewer, in server order. */
 export function chatThreads(
   item: ChatListItem,
   corners: readonly ChatListCorner[] | undefined,
   viewer: string | undefined,
 ): ChatListCorner[] {
   if (item.directMessage || !corners?.length) return [];
-  const waiting = (corner: ChatListCorner) => threadWorkState(corner, viewer) === 'needs-you';
-  return [...corners.filter(waiting), ...corners.filter((corner) => !waiting(corner))];
+  return corners.filter((corner) => threadWorkState(corner, viewer) === 'needs-you');
 }
 
 /** How many waiting threads a chat shows before its `more` control. */
 export const WAITING_THREADS_SHOWN = 3;
 
-/** Up to three waiting threads show under a chat and `more` counts the rest;
- * expanded, every thread shows. With none waiting, no thread shows. */
+/** Show the waiting threads inline and count those still hidden. */
 export function shownThreads(
-  threads: readonly ChatListCorner[],
+  item: ChatListItem,
+  corners: readonly ChatListCorner[] | undefined,
   expanded: boolean,
   viewer: string | undefined,
 ): { shown: readonly ChatListCorner[]; more: number } {
-  const waiting = threads.filter((corner) => threadWorkState(corner, viewer) === 'needs-you').length;
-  if (!waiting) return { shown: [], more: 0 };
-  const shown = expanded ? threads : threads.slice(0, Math.min(waiting, WAITING_THREADS_SHOWN));
-  return { shown, more: threads.length - shown.length };
+  const waiting = chatThreads(item, corners, viewer);
+  const shown = expanded ? waiting : waiting.slice(0, WAITING_THREADS_SHOWN);
+  return { shown, more: waiting.length - shown.length };
 }
 
 /** Search narrows by chat name, last message and thread titles; each chip narrows further. */
