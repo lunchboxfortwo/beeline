@@ -16,6 +16,7 @@ import { Image } from 'expo-image';
 import { Filled, Glyph } from '@/ui/grammar';
 import { PaneResizer } from '@/ui/grammar-root';
 import { isTauri } from '@/utils/isTauri';
+import { isMacTauri, MAC_TAURI_TITLEBAR_HEIGHT } from '@/utils/macTitlebar';
 import {
   canRouteForward,
   canUseRouteBack,
@@ -50,7 +51,9 @@ export const SidebarNavigator = React.memo(function SidebarNavigator() {
 
 const DesktopSidebarNavigator = React.memo(() => {
   const isTablet = useIsTablet();
+  const isDesktop = useIsDesktop();
   const inDesktopShell = isTauri();
+  const macTauri = isMacTauri();
   const desktopPlatform = isDesktopPlatform();
   const pathname = usePathname();
   const zenMode = useLocalSetting('zenMode');
@@ -165,32 +168,49 @@ const DesktopSidebarNavigator = React.memo(() => {
 
   return (
     <YStack flex={1}>
-      {/* DOM order follows the desktop's spatial reading order. */}
-      {showSessionChrome && <PersistentHeader />}
-      <XStack flex={1} alignItems="stretch">
-        {showSessionChrome && (
-          <YStack width={drawerWidth} overflow="hidden" backgroundColor="canvas">
-            <SidebarView />
-          </YStack>
-        )}
-        <YStack flex={1} minWidth={0}>
-          <Slot />
-        </YStack>
-        {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
-          <DesktopViewerPane initialShare={0.55}>
-            <DesktopArtifactPane {...document} onClose={() => setDocument(null)} />
-          </DesktopViewerPane>
-        )}
-      </XStack>
-      {desktopPlatform && showSidebar && (
-        <PaneResizer
-          {...resizePan.panHandlers}
-          accessibilityLabel="Resize navigation pane"
-          edge={drawerWidth}
-          zIndex={1200}
-          testID="desktop-navigation-resizer"
-        />
+      {/* On macOS Tauri desktop, a shared top strip clears traffic lights across both panes
+          so the sidebar and active content header sit on one baseline. Compact windows keep
+          PersistentHeader for Zen/Back/Forward controls. */}
+      {showSessionChrome && !isDesktop && <PersistentHeader />}
+      {showSessionChrome && isDesktop && macTauri && (
+        <XStack
+          height={MAC_TAURI_TITLEBAR_HEIGHT}
+          backgroundColor="raised"
+          borderBottomWidth={1}
+          borderColor="stroke"
+          alignItems="center"
+          data-tauri-drag-region="true"
+          testID="mac-tauri-titlebar"
+        >
+          <YStack width={92} />
+        </XStack>
       )}
+      <YStack flex={1} minHeight={0} position="relative">
+        <XStack flex={1} minHeight={0} alignItems="stretch">
+          {showSessionChrome && (
+            <YStack width={drawerWidth} overflow="hidden" backgroundColor="canvas">
+              <SidebarView />
+            </YStack>
+          )}
+          <YStack flex={1} minWidth={0}>
+            <Slot />
+          </YStack>
+          {document && desktopLayout.availableWidth >= DESKTOP_WORK_PANE_THRESHOLD && (
+            <DesktopViewerPane initialShare={0.55}>
+              <DesktopArtifactPane {...document} onClose={() => setDocument(null)} />
+            </DesktopViewerPane>
+          )}
+        </XStack>
+        {desktopPlatform && showSidebar && (
+          <PaneResizer
+            {...resizePan.panHandlers}
+            accessibilityLabel="Resize navigation pane"
+            edge={drawerWidth}
+            zIndex={1200}
+            testID="desktop-navigation-resizer"
+          />
+        )}
+      </YStack>
     </YStack>
   );
 });

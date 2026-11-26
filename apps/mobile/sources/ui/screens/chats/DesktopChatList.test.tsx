@@ -78,15 +78,24 @@ it('caps Chats at 8 and Direct messages at 5 behind Show all N, keeping the open
   expect(rows().filter((id) => id.startsWith('room-c'))).toHaveLength(12);
 });
 
-it('marks unread chats semibold and keeps 44 pt rows for touch', () => {
+it('uses body/heading typography, rounded pills, shared gutters, and 44 pt touch rows', () => {
   pointer.fine = false;
-  const { tree } = render([chat('a', { unread: true } as any), chat('b')]);
+  const { tree } = render([chat('a', { unread: true } as any), chat('b')], 'b');
   const title = (id: string) => tree.root.find((node: any) => node.props.testID === `room-${id}-title`);
-  expect(title('a').props.v).toBe('metaStrong');
-  expect(title('b').props.v).toBe('meta');
-  const row = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'room-a');
-  expect(row.props.minHeight).toBe(HEIGHT.control);
-  expect(row.props.role).toBe('button');
+  expect(title('a').props.v).toBe('heading');
+  expect(title('b').props.v).toBe('heading');
+  const rowA = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'room-a');
+  const rowB = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'room-b');
+  expect(rowA.props.minHeight).toBe(HEIGHT.control);
+  expect(rowA.props.role).toBe('button');
+  expect(rowA.props.borderRadius).toBe('md');
+  expect(rowA.props.paddingHorizontal).toBe('2');
+  expect(rowB.props.borderRadius).toBe('md');
+  expect(rowB.props.backgroundColor).toBe('highlight');
+
+  const { tree: unselected } = render([chat('c')]);
+  const titleC = unselected.root.find((node: any) => node.props.testID === 'room-c-title');
+  expect(titleC.props.v).toBe('body');
   pointer.fine = true;
 });
 

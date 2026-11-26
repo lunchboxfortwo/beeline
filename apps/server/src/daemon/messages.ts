@@ -27,13 +27,13 @@ import { currentAgentInvocation } from '../agent-invocation.js';
       ...(row.status ? { outcome: row.status, ...(row.failure_reason ? { failureReason: row.failure_reason } : {}) } : {}) };
   }
 
-  export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, _atomicCommandWrite = false): Promise<Output<'postRoomMessage'>> {
+  export async function daemonPostRoomMessage(ctx: DaemonContext, input: Input<'postRoomMessage'>, agentId: string, _atomicCommandWrite = false, invocationId?: string): Promise<Output<'postRoomMessage'>> {
     if (input.invocation && (!input.harnessEnded || input.presentation === 'card')) {
       const invocation = input.invocation;
       return ctx.database.transaction(async db => {
         if (!await currentAgentInvocation(db, agentId, input.roomId, invocation))
           return { commandId: invocation.requestId, completed: false, published: false, answered: false };
-        return daemonPostRoomMessage({ ...ctx, database: db }, { ...input, invocation: undefined }, agentId, _atomicCommandWrite);
+        return daemonPostRoomMessage({ ...ctx, database: db }, { ...input, invocation: undefined }, agentId, _atomicCommandWrite, invocation.id);
       });
     }
     if (input.presentation === 'card') {
@@ -44,7 +44,7 @@ import { currentAgentInvocation } from '../agent-invocation.js';
         completed:false,published:saved.stored,stored:saved.stored,visible:saved.visible,receipt:saved.receipt };
     }
     const { roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,replyToMessageId } = input;
-    return answerQueuedMessage(ctx.database,agentId,{roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,replyToMessageId});
+    return answerQueuedMessage(ctx.database,agentId,{roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,invocationId:invocationId ?? invocation?.id,replyToMessageId});
   }
 
   export async function daemonPostAgentAttachment(ctx: DaemonContext, input: Input<'postAgentAttachment'>, agentId: string) {

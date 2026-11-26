@@ -1,3 +1,4 @@
+import { legacyReviewMessage } from './test-fixtures/queued-turn.test-support.js';
 import {
   describe, expect, it, A, B, H, R, SHA, rootFixture, open, pushToCorner,
   commands, claim, terminalResult, inReview, reasons, advanceCorner, fixtureScope18,
@@ -51,7 +52,7 @@ describe('corner lifecycle recorded event sequences', () => {
       const [review] = await commands(B, cornerId);
       expect(await machine(cornerId)).toMatchObject({ state: 'review', agent: B });
       await claim(review!);
-      await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId,type:'normal', address:`${A}@${cornerId}`, text: 'FAIL: required native phone screenshots are missing. Capture the approved screens.' }, B);
+      await legacyReviewMessage(rootFixture.db, review!, A, 'FAIL: required native phone screenshots are missing. Capture the approved screens.');
       await terminalResult(review!, '');
       // Deliver the committed findings at the implementer’s thread address.
       await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
@@ -72,7 +73,7 @@ describe('corner lifecycle recorded event sequences', () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
-    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId,type:'normal', address:`${A}@${cornerId}`, text: 'FAIL: required native phone screenshots are missing.' }, B);
+    await legacyReviewMessage(rootFixture.db, review!, A, 'FAIL: required native phone screenshots are missing.');
     await terminalResult(review!,'');
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: review!.turnRequestId, status: 'complete' }, B);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
@@ -100,7 +101,7 @@ describe('corner lifecycle recorded event sequences', () => {
     const cornerId = await inReview();
     const [review] = await commands(B, cornerId);
     await claim(review!);
-    await rootFixture.daemon.execute('message', { roomId: cornerId, requestId: review!.turnRequestId,type:'normal', address:`${A}@${cornerId}`, text: 'FAIL: required native phone screenshots are missing.' }, B);
+    await legacyReviewMessage(rootFixture.db, review!, A, 'FAIL: required native phone screenshots are missing.');
     await terminalResult(review!,'');
     await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: cornerId, requestId: review!.turnRequestId, status: 'complete' }, B);
     await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });

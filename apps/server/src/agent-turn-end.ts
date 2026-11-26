@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import type { CommandRow } from './agent-command.js';
 import type { SqlDatabase } from './database.js';
+import { systemText } from './message-origin.js';
 import { systemLine } from './system-line.js';
 
 /** Every terminal write to a queue item goes through this database function:
@@ -191,6 +192,15 @@ export async function failHostedAgentTurn(db: SqlDatabase,
     consequence: systemMessage('agent-turn.failure-reason', reason),
     requestId: command.turn_request_id, commandId: command.id, durableFact: 'failure',
   });
+  const completed = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [command.id])).rows[0];
+  if (completed?.reason === 'message') {
+    const { wakePeerMessageSender } = await import('./agent-command.js');
+    await wakePeerMessageSender(db, completed, {
+      kind: 'failed',
+      outputId: `failed:${command.id}`,
+      text: systemText(`${agent.name} failed to answer: ${reason}`),
+    });
+  }
   return true;
 }
 

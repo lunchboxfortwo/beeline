@@ -2,7 +2,7 @@ import { PageLoader } from '@/ui/PageLoader';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { ScrollView, Separator, XStack, YStack } from 'tamagui';
-import { Btn, Copy, T } from '@/ui/grammar';
+import { Btn, Copy, HEIGHT, T } from '@/ui/grammar';
 import { TabHeader, TabRail, useScrolledUnder } from '@/ui/shell/TabHeader';
 import { WORKSPACE_LABEL } from '@/buzz/vocabulary';
 import { openPlace } from '@/ui/shell/panel';
@@ -71,9 +71,9 @@ export function PeopleTabScreen() {
       {desktop ? (
         <>
           <XStack
+            height={HEIGHT.tabBar}
+            alignItems="center"
             paddingHorizontal="4"
-            paddingTop="4"
-            paddingBottom="3"
             width="100%"
             maxWidth={760}
             alignSelf="center"

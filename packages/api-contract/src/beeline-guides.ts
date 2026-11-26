@@ -352,7 +352,7 @@ Block only on a behavior with no Intent match or a quoted conflicting human deci
 
 ## Report the verdict
 
-Write your verdict and findings as your turn text, starting with PASS or FAIL. The server wakes the implementer with the review result. During review, send only replies with the message tool.
+Write your verdict and findings as your turn text, starting with PASS or FAIL. The server wakes the implementer with the review result.
 
 Complete all checks before reporting. List every eligible blocker at once, each with a concrete next step for the worker. The first review must surface all confirmed blockers. Keep non-blocking notes separate from the verdict. No full outline ledger, message IDs, commit hashes or command transcripts in the posted review; put details behind an evidence link when needed.
 

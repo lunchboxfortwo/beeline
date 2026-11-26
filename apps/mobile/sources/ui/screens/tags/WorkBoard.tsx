@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Input, ListItem, ScrollView, XStack, YStack } from 'tamagui';
+import { Platform } from 'react-native';
+import { Input, ListItem, ScrollView, Separator, XStack, YStack } from 'tamagui';
 import { ChevronDown, ChevronRight, CornerDownRight, Filter, X } from 'lucide-react-native';
 import type {
   NeedsYouActionView,
@@ -93,7 +94,7 @@ function source(item: WorkItemView) {
     : `#${chat}`;
 }
 /** Each Needs you row owns one question and its answer buttons. */
-function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoardActions; now: number }) {
+function AskCard({ item, actions, now, desktop }: { item: WorkItemView; actions: WorkBoardActions; now: number; desktop: boolean }) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const ask = item.ask!;
@@ -128,7 +129,7 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
         <T v="metaStrong" flexShrink={1} numberOfLines={1}>
           {(ask.author ?? item.openedBy).name}
         </T>
-        <T v="meta" color="secondary" flex={1} numberOfLines={1}>
+        <T v="meta" color="secondary" flex={1} minWidth={desktop ? 56 : undefined} numberOfLines={1}>
           {source(item)}
         </T>
         <T v="meta" color="secondary">{compactRelativeTime(ask.createdAt, now)}</T>
@@ -437,7 +438,7 @@ export function WorkBoard({
     />
   );
   const needsBody = needs.length ? (
-    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} now={now} />)
+    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} now={now} desktop={desktop} />)
   ) : (
     <YStack paddingHorizontal="6" paddingTop="8" paddingBottom="5" gap="1" alignItems="center" testID="work-calm">
       {/* A no-break space keeps "now" off a line of its own in a narrow column. */}
@@ -449,13 +450,35 @@ export function WorkBoard({
       </T>
     </YStack>
   );
+  const desktopColumns = (
+    <XStack width="100%" minWidth={1160} gap="4" padding="4" alignItems="flex-start" testID="work-sections">
+      <YStack flex={1} minWidth={300} testID="work-column-needs-you">
+        {needsHead}
+        {needsBody}
+      </YStack>
+      {sections.map((section) => (
+        <YStack key={section.key} flex={1} minWidth={260} testID={`work-column-${section.key}`}>
+          <SectionHead
+            title={section.title}
+            count={section.list.length}
+            note={'note' in section ? section.note : undefined}
+            testID={section.testID}
+          />
+          {rows(section.list)}
+        </YStack>
+      ))}
+    </XStack>
+  );
   return (
     <YStack flex={1} minHeight={0} testID="work-board">
       {desktop ? (
-        <XStack alignItems="center" paddingHorizontal="4" paddingTop="4" paddingBottom="3">
-          <T v="title" flex={1}>Tasks</T>
-          {filter}
-        </XStack>
+        <>
+          <XStack height={HEIGHT.tabBar} alignItems="center" paddingHorizontal="4" testID="work-board-header">
+            <T v="title" flex={1}>Tasks</T>
+            {filter}
+          </XStack>
+          <Separator borderColor="stroke" />
+        </>
       ) : (
         <TabHeader workspaceName={board.workspaceName} scrolled={scrolled} actions={filter} />
       )}
@@ -474,26 +497,20 @@ export function WorkBoard({
             : null}
         </XStack>
       ) : null}
-      <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...scrollProps}>
-        {desktop ? (
-          <XStack width="100%" gap="4" padding="4" alignItems="flex-start" testID="work-sections">
-            <YStack flex={1} minWidth={0}>
-              {needsHead}
-              {needsBody}
-            </YStack>
-            {sections.map((section) => (
-              <YStack key={section.key} flex={1} minWidth={0}>
-                <SectionHead
-                  title={section.title}
-                  count={section.list.length}
-                  note={'note' in section ? section.note : undefined}
-                  testID={section.testID}
-                />
-                {rows(section.list)}
-              </YStack>
-            ))}
-          </XStack>
+      {desktop ? (
+        Platform.OS === 'web' ? (
+          <YStack flex={1} minHeight={0} overflowX="auto" overflowY="auto" testID="work-board-scroll">
+            {desktopColumns}
+          </YStack>
         ) : (
+          <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...scrollProps}>
+            <ScrollView horizontal keyboardShouldPersistTaps="handled" testID="work-board-scroll">
+              {desktopColumns}
+            </ScrollView>
+          </ScrollView>
+        )
+      ) : (
+        <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" {...scrollProps}>
           <YStack width="100%" maxWidth={720} alignSelf="center" paddingBottom="8" testID="work-sections">
             {needs.length ? needsHead : null}
             {needsBody}
@@ -514,8 +531,8 @@ export function WorkBoard({
               </React.Fragment>
             ))}
           </YStack>
-        )}
-      </ScrollView>
+        </ScrollView>
+      )}
       {menu ? (
         <YStack
           width={280}

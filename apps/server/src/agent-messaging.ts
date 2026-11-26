@@ -33,10 +33,15 @@ export function messageAsk(input: Parameters<typeof reportMessageAsk>[0] & {ask?
   return ask;
 }
 
+export function assertCanSendNewMessage(command?: CommandRow) {
+  if (command?.reason === 'corner_review_dispatch')
+    throw new CommandRefusalError('During review, reply only to messages that woke this turn. Put review findings in your turn text.', 400);
+}
+
 /** Resolve both coordinates together; a role is meaningful only at its thread. */
-export async function messageAddress(db: SqlDatabase, to: MessageAddress, sender: string): Promise<MessageAddress> {
+async function messageAddress(db: SqlDatabase, to: MessageAddress, sender: string, fromThread?: boolean): Promise<MessageAddress> {
   const place = await commandAddress(db, to.place, sender);
-  const target = (await db.query<{ id: string }>(`SELECT identity.id FROM rooms room
+  const target = (await db.query<{ id: string; kind: string }>(`SELECT identity.id,identity.kind FROM rooms room
     JOIN memberships member ON member.room_id=COALESCE(room.parent_id,room.id) AND member.removed_at IS NULL
     JOIN identities identity ON identity.id=member.identity_id
     LEFT JOIN rooms parent ON parent.id=room.parent_id
@@ -44,6 +49,11 @@ export async function messageAddress(db: SqlDatabase, to: MessageAddress, sender
       WHEN $2='reviewer' THEN identity.id=${cornerReviewerSql('room','parent')}
       ELSE identity.id=$2 OR lower(beeline_workspace_handle(identity.id,room.workspace_id))=lower(ltrim($2,'@')) END`,
     [place.id,to.agent,place.worker])).rows[0];
+  if (fromThread) {
+    if (!target) refuseMessageMembership();
+    if (!place.parent_id || target.kind !== 'agent')
+      refuseMessageMembership('A thread must address a thread agent session.');
+  }
   return { agent: target?.id ?? to.agent, place: place.id };
 }
 
@@ -53,13 +63,13 @@ export const notWokenReceipt = (reason: string) => `Message stored and visible. 
 /** Both publication paths commit their route alongside the message itself. */
 export async function sendMessage(db: SqlDatabase, input: {
   type?: 'normal' | 'blocked' | 'reply'; route: MessageRoute; text: string; ask?: MessageAsk; question?: string; brief?: string; options?: readonly string[]; id?: string;
-  parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments'];
+  parent?: CommandRow; replyTo?: string; attachments?: CommandRow['answer_attachments']; fromThread?: boolean;
 }) {
   assertMemberTranscript(input.route.from.agent);
   input = { ...input, ask: messageAsk(input) };
   return db.transaction(async tx => {
     const reportStatus = input.type === 'blocked' ? 'blocked' : undefined;
-    const to = input.replyTo || reportStatus ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent);
+    const to = input.replyTo || reportStatus ? input.route.to : await messageAddress(tx,input.route.to,input.route.from.agent,input.fromThread);
     // A recorded reply can cross a private call site the worker never joined.
     // Its recipient still belongs there; the responder belongs at its own origin.
     const route = { from: input.route.from, to };
