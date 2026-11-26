@@ -6,7 +6,7 @@ import type { DaemonAttachment, SystemEvent } from '@beeline/api-contract/daemon
 import { boundReplyExcerpt } from '@beeline/api-contract/daemon';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import type { DaemonContext } from './context.js';
-import { Input, seconds, AccessDeniedError, id, conversationColumns, daemonTranscriptVisibilitySql, laterCursor, markExpiredAttachments } from './values.js';
+import { Input, seconds, AccessDeniedError, id, conversationColumnsSql, daemonTranscriptVisibilitySql, laterCursor, markExpiredAttachments } from './values.js';
 import { daemonAccess, daemonReviewSourceAccess } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { daemonExpiredMediaIds } from './message-reads.js';
@@ -123,12 +123,15 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       name === 'getCornerCloseRequests'
         ? (input as unknown as { cornerId: string }).cornerId
         : input.roomId;
+    let borrowedSource = false;
     await ctx.access(roomId, agentId).catch((error: unknown) => {
       if (error instanceof AccessDeniedError &&
           (name === 'getRoomInbox' || name === 'getCornerCloseRequests'))
         return ctx.reach(roomId, agentId);
       if (error instanceof AccessDeniedError && name === 'getRoomConversation')
-        return ctx.reviewSourceAccess(roomId, agentId).catch((sourceError: unknown) => {
+        return ctx.reviewSourceAccess(roomId, agentId).then(() => {
+          borrowedSource = true;
+        }).catch((sourceError: unknown) => {
           if (sourceError instanceof AccessDeniedError) return ctx.reach(roomId, agentId);
           throw sourceError;
         });
@@ -167,7 +170,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
     const newestPage = name === 'getRoomConversation' && !after && input.window !== 'earliest';
     const continuityPage =
       name === 'getRoomConversation' && !after && input.window === 'continuity';
-    const transcript = `${conversationColumns},beeline_room_handle(messages.author_id,messages.room_id) author_handle FROM messages
+    const transcript = `${conversationColumnsSql('$2', '$3::boolean')},beeline_room_handle(messages.author_id,messages.room_id) author_handle FROM messages
       WHERE room_id=$1 AND ${daemonTranscriptVisibilitySql('messages')}`;
     const rows = await ctx.database.query<{
       id: string;
@@ -175,6 +178,7 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       created_at: Date;
       presentation: string;
       text: string;
+      unreadable_private_handoff: boolean;
       agent_author: boolean;
       author_handle: string | null;
       reply_to_message_id: string | null;
@@ -200,23 +204,23 @@ import { daemonExpiredMediaIds } from './message-reads.js';
            ORDER BY cursor_ms,id`
         : newestPage
           ? `SELECT newest.* FROM (${transcript}
-               ${before ? `AND (${MESSAGE_CURSOR_MS_SQL},id) < ($2::bigint,$3)` : ''}
+               ${before ? `AND (${MESSAGE_CURSOR_MS_SQL},id) < ($4::bigint,$5)` : ''}
              ORDER BY cursor_ms DESC,id DESC LIMIT ${limit}) newest
            ORDER BY cursor_ms,id`
           : `${transcript}
                ${
-                 after ? `AND (${MESSAGE_CURSOR_MS_SQL},id) > ($2::bigint,$3)` : ''
+                 after ? `AND (${MESSAGE_CURSOR_MS_SQL},id) > ($4::bigint,$5)` : ''
                }
              ORDER BY cursor_ms,id LIMIT ${limit + 1}`,
       after
-        ? [roomId, after[1], after[2]]
+        ? [roomId, agentId, borrowedSource, after[1], after[2]]
         : before
-          ? [roomId, before[1], before[2]]
-          : [roomId],
+          ? [roomId, agentId, borrowedSource, before[1], before[2]]
+          : [roomId, agentId, borrowedSource],
     );
     const page = newestPage ? rows.rows : rows.rows.slice(0, limit);
     const expiredMedia = await ctx.expiredMediaIds(
-      page.flatMap((row) => row.attachments ?? []),
+      page.flatMap((row) => (row.unreadable_private_handoff ? [] : row.attachments ?? [])),
     );
     const savedNarration =
       name === 'getRoomConversation' && input.narrationRequestId
@@ -242,27 +246,40 @@ import { daemonExpiredMediaIds } from './message-reads.js';
       input.after,
     );
     return {
-      items: page.map((row) => ({
-        id: row.id,
-        cursor: `${row.cursor_ms},${row.id}`,
-        authorId: row.author_id,
-        ...(row.author_handle ? {authorHandle: row.author_handle} : {}),
-        createdAt: seconds(row.created_at),
-        type: row.presentation,
-        body: subscriptionPromptBody(row.text, row.system_event),
-        ...(row.agent_author ? { agentAuthor: true } : {}),
-        ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
-        ...(row.reply_to_author_id ? { replyToAuthorId: row.reply_to_author_id } : {}),
-        ...(row.reply_to_author_name ? { replyToAuthorName: row.reply_to_author_name } : {}),
-        ...(row.reply_to_excerpt !== null ? { replyToExcerpt: boundReplyExcerpt(row.reply_to_excerpt) } : {}),
-        ...(row.root_message_id ? { rootMessageId: row.root_message_id } : {}),
-        ...(row.request_id ? { requestId: row.request_id } : {}),
-        ...(row.request_author_id ? { requestAuthorId: row.request_author_id } : {}),
-        ...(row.agent_hop_count ? { agentHopCount: row.agent_hop_count } : {}),
-        ...(row.message_link ? { messageLink: row.message_link } : {}),
-        attachments: markExpiredAttachments(row.attachments ?? [], expiredMedia),
-        ...(row.system_event ? { systemEvent: row.system_event } : {}),
-      })),
+      items: page.map((row) => {
+        if (row.unreadable_private_handoff) {
+          return {
+            id: '',
+            cursor: `${row.cursor_ms},${row.id}`,
+            authorId: '',
+            createdAt: seconds(row.created_at),
+            type: 'private-handoff',
+            body: '[private hand-off]',
+            attachments: [],
+          };
+        }
+        return {
+          id: row.id,
+          cursor: `${row.cursor_ms},${row.id}`,
+          authorId: row.author_id,
+          ...(row.author_handle ? {authorHandle: row.author_handle} : {}),
+          createdAt: seconds(row.created_at),
+          type: row.presentation,
+          body: subscriptionPromptBody(row.text, row.system_event),
+          ...(row.agent_author ? { agentAuthor: true } : {}),
+          ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
+          ...(row.reply_to_author_id ? { replyToAuthorId: row.reply_to_author_id } : {}),
+          ...(row.reply_to_author_name ? { replyToAuthorName: row.reply_to_author_name } : {}),
+          ...(row.reply_to_excerpt !== null ? { replyToExcerpt: boundReplyExcerpt(row.reply_to_excerpt) } : {}),
+          ...(row.root_message_id ? { rootMessageId: row.root_message_id } : {}),
+          ...(row.request_id ? { requestId: row.request_id } : {}),
+          ...(row.request_author_id ? { requestAuthorId: row.request_author_id } : {}),
+          ...(row.agent_hop_count ? { agentHopCount: row.agent_hop_count } : {}),
+          ...(row.message_link ? { messageLink: row.message_link } : {}),
+          attachments: markExpiredAttachments(row.attachments ?? [], expiredMedia),
+          ...(row.system_event ? { systemEvent: row.system_event } : {}),
+        };
+      }),
       ...(cursor ? { cursor } : {}),
       ...(savedNarration ? { savedNarration } : {}),
       ...(closeRequested !== undefined ? { closeRequested } : {}),

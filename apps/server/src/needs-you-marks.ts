@@ -106,7 +106,8 @@ BEGIN
     FROM messages m WHERE mark.identity_id=NEW.card->>'reportToId' AND mark.cleared_at IS NULL
       AND m.id=mark.message_id AND ${supersedesSql('NEW', 'm', 'mark.identity_id')};
   END IF;
-  IF NEW.reply_to_message_id IS NOT NULL AND (NEW.presentation='message' OR NEW.card_type='agent-command') THEN
+  IF NEW.reply_to_message_id IS NOT NULL AND (NEW.presentation='message' OR NEW.card_type='agent-command')
+    AND COALESCE(NEW.card->>'reportStatus','') NOT IN ('blocked','needs-decision') THEN
     UPDATE messages block SET block_reasked_at=NEW.created_at
       FROM corner_facts fact WHERE block.id=reply_block_root(NEW.reply_to_message_id)
       AND ((fact.corner_id=block.block_corner_id AND fact.implementer_agent_id=NEW.author_id)
@@ -144,9 +145,10 @@ BEGIN
       WHERE b.id=source_block AND COALESCE(NEW.card->'route'->'from'->>'place',NEW.card->>'sourceRoomId',NEW.room_id::text)
         =COALESCE(b.block_corner_id::text,b.card->>'sourceRoomId',b.room_id::text) AND (f.implementer_agent_id=NEW.author_id
         OR (b.block_corner_id IS NULL AND b.block_parent_id IS NOT NULL AND b.author_id=NEW.author_id))) THEN
-      RETURN NEW;
-    END IF;
-    IF NEW.card->>'reportStatus' IN ('blocked','needs-decision') THEN
+      IF COALESCE(NEW.card->>'reportStatus','') NOT IN ('blocked','needs-decision') THEN
+        RETURN NEW;
+      END IF;
+    ELSIF NEW.card->>'reportStatus' IN ('blocked','needs-decision') THEN
       IF EXISTS(WITH RECURSIVE sources AS (SELECT id,author_id,block_parent_id,COALESCE(block_corner_id::text,card->>'sourceRoomId',room_id::text) place FROM messages WHERE id=source_block
         UNION SELECT b.id,b.author_id,b.block_parent_id,COALESCE(b.block_corner_id::text,b.card->>'sourceRoomId',b.room_id::text) FROM messages b JOIN sources s ON b.id=s.block_parent_id)
         SELECT 1 FROM sources WHERE author_id=NEW.card->>'reportToId' AND place=NEW.room_id::text) THEN

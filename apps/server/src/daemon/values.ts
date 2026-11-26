@@ -6,6 +6,7 @@ import { createHash,randomBytes } from 'node:crypto';
 import { MESSAGE_CURSOR_MS_SQL } from '../database.js';
 import { mediaIdFromUrl } from '../media-ttl.js';
 import { type SystemPhrase } from '../system-line.js';
+import { unreadablePrivateHandoffSql } from '../private-handoff-access.js';
 
 
 
@@ -180,21 +181,25 @@ export function daemonTranscriptVisibilitySql(alias: string): string {
 }
 
 /** The one projection an inbox or conversation row is read through. */
-export const conversationColumns = `SELECT id,author_id,created_at,presentation,text,
+export function conversationColumnsSql(agentExpr: string, borrowedSourceExpr = 'false'): string {
+  const readableParent = `parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL AND NOT ${unreadablePrivateHandoffSql('parent', agentExpr, borrowedSourceExpr)}`;
+  return `SELECT id,author_id,created_at,presentation,text,
+        ${unreadablePrivateHandoffSql('messages', agentExpr, borrowedSourceExpr)} unreadable_private_handoff,
         EXISTS(SELECT 1 FROM identities author
                WHERE author.id=messages.author_id AND author.kind='agent') agent_author,
-        CASE WHEN EXISTS(SELECT 1 FROM messages parent WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) THEN reply_to_message_id END reply_to_message_id,
-        (SELECT parent.author_id FROM messages parent WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) reply_to_author_id,
+        CASE WHEN EXISTS(SELECT 1 FROM messages parent WHERE ${readableParent}) THEN reply_to_message_id END reply_to_message_id,
+        (SELECT parent.author_id FROM messages parent WHERE ${readableParent}) reply_to_author_id,
         (SELECT author.name FROM messages parent JOIN identities author ON author.id=parent.author_id
-         WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) reply_to_author_name,
+         WHERE ${readableParent}) reply_to_author_name,
         (SELECT left(parent.text,16001) FROM messages parent
-         WHERE parent.id=messages.reply_to_message_id AND parent.deleted_at IS NULL) reply_to_excerpt,
+         WHERE ${readableParent}) reply_to_excerpt,
         root_message_id,request_id,
         (SELECT request.author_id FROM messages request WHERE request.id=messages.request_id AND request.deleted_at IS NULL) request_author_id,
         agent_hop_count,attachments,system_event,
         CASE WHEN chat_seq IS NOT NULL THEN '¶'||beeline_room_handle(author_id,room_id)||'-'||chat_seq END message_link,
         ${MESSAGE_CURSOR_MS_SQL} cursor_ms,
         floor(extract(epoch FROM now())*1000)::bigint now_ms`;
+}
 
 
 export function laterCursor(

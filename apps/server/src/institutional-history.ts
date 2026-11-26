@@ -12,6 +12,7 @@ import {
 } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import { AccessDeniedError } from './daemon/values.js';
+import { unreadablePrivateHandoffSql } from './private-handoff-access.js';
 
 type SearchRow = {
   message_id: string | null;
@@ -178,6 +179,7 @@ export async function searchInstitutionalHistory(
            AND message.deleted_at IS NULL AND message.presentation='message'
            AND length(trim(message.text))>0
            AND message.created_at>=now()-$8*interval '1 day'
+           AND NOT ${unreadablePrivateHandoffSql('message', '$4', 'false')}
          ORDER BY message.created_at DESC,message.id DESC LIMIT $6
        ), perfect_page AS MATERIALIZED (
          SELECT count(*)=$6 complete FROM perfect_matches
@@ -193,6 +195,7 @@ export async function searchInstitutionalHistory(
            AND message.room_id=ANY(ARRAY(SELECT id FROM authorized_rooms))
            AND length(trim(message.text))>0
            AND message.created_at>=now()-$8*interval '1 day'
+           AND NOT ${unreadablePrivateHandoffSql('message', '$4', 'false')}
          UNION ALL
          SELECT message.id,message.room_id,message.created_at,
                 CASE WHEN search_query.exact_count>0 THEN message.search_document END search_document,
@@ -204,6 +207,7 @@ export async function searchInstitutionalHistory(
            AND NOT (SELECT complete FROM perfect_page)
            AND length(trim(message.text))>0
            AND message.created_at>=now()-$8*interval '1 day'
+           AND NOT ${unreadablePrivateHandoffSql('message', '$4', 'false')}
            AND NOT (coalesce(message.search_document @@ search_query.exact,false)
                  OR coalesce(message.search_stem_document @@ search_query.stem,false))
        ), matches AS (

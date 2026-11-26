@@ -7,6 +7,7 @@ import { Input, AccessDeniedError, daemonTranscriptVisibilitySql, markExpiredAtt
 import { agentRoomMembershipJoins } from './access.js';
 import { daemonReach } from './corner-messages.js';
 import { deliveredMessage } from '../corner-brief.js';
+import { privateHandoffReadableSql, unreadablePrivateHandoffSql } from '../private-handoff-access.js';
 
 function boundMessageReplyExcerpt(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim();
@@ -28,19 +29,21 @@ type ReadableMessageRow = {
   request_author_id?: string | null;
 };
 
+const readableParentSql = `parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL AND NOT ${unreadablePrivateHandoffSql('parent', '$3', '$4::boolean')}`;
+
 const messageMetadataColumns = `
   message.author_id,
   beeline_room_handle(message.author_id,message.room_id) author_handle,
   message.created_at,
   CASE WHEN EXISTS(SELECT 1 FROM messages parent
-   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL)
+   WHERE ${readableParentSql})
    THEN message.reply_to_message_id END reply_to_message_id,
   (SELECT parent.author_id FROM messages parent
-   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL) reply_to_author_id,
+   WHERE ${readableParentSql}) reply_to_author_id,
   (SELECT author.name FROM messages parent JOIN identities author ON author.id=parent.author_id
-   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL) reply_to_author_name,
+   WHERE ${readableParentSql}) reply_to_author_name,
   (SELECT left(parent.text,16001) FROM messages parent
-   WHERE parent.id=message.reply_to_message_id AND parent.room_id=message.room_id AND parent.deleted_at IS NULL) reply_to_excerpt,
+   WHERE ${readableParentSql}) reply_to_excerpt,
   message.root_message_id,
   (SELECT request.author_id FROM messages request
    WHERE request.id=message.request_id AND request.room_id=message.room_id AND request.deleted_at IS NULL) request_author_id`;
@@ -112,24 +115,18 @@ const readableScope = `${readableMessage} AND (message.room_id=$1 OR (NOT $4::bo
     // Private hand-offs expose the command id as their message id. Only the
     // sender and recipient may reopen that payload, even in a shared Room.
     const handoff = (await ctx.database.query<{
-      agent_id: string; author_id: string; body: string;
-      attachments: DaemonAttachment[]; accessible: boolean;
+      author_id: string; body: string;
+      attachments: DaemonAttachment[]; readable: boolean;
     }>(
-      `SELECT command.agent_id,command.private_payload->>'authorId' author_id,
+      `SELECT command.private_payload->>'authorId' author_id,
               command.private_payload->>'text' body,
               command.private_payload->'attachments' attachments,
-              EXISTS(SELECT 1 FROM rooms handoff_room
-                     JOIN memberships member ON member.room_id=COALESCE(handoff_room.parent_id,handoff_room.id)
-                     WHERE handoff_room.id=CASE WHEN command.agent_id=$2 THEN command.room_id
-                       ELSE NULLIF(command.private_payload->>'fromRoomId','')::uuid END
-                       AND member.identity_id=$2
-                       AND member.removed_at IS NULL) accessible
+              ${privateHandoffReadableSql('command', '$2', '$3::boolean')} readable
        FROM agent_commands command
        WHERE command.id=$1 AND command.private_payload IS NOT NULL`,
-      [input.messageId, agentId],
+      [input.messageId, agentId, borrowedSource],
     )).rows[0];
-    if (handoff && (borrowedSource || !handoff.accessible ||
-        (handoff.agent_id !== agentId && handoff.author_id !== agentId)))
+    if (handoff && !handoff.readable)
       throw new CommandRefusalError('message access denied: private hand-off', 403);
     let row: ReadableMessageRow | undefined = handoff
       ? { body: handoff.body, attachments: handoff.attachments, author_id: handoff.author_id }
