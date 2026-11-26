@@ -1,4 +1,4 @@
-import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
+import { ROUTER_AUTHORITY_TRIGGER_LOCK_SQL } from './database-advisory-locks.js';
 
 /** Atomic authority epochs invalidate prepared MCP deliveries. Phone reads
  * do not use epochs or certificates. */
@@ -18,7 +18,7 @@ BEGIN
     END IF;
   END IF;
   -- Preceding serving readers need this writer fence until this release drains.
-  PERFORM pg_advisory_xact_lock(hashtextextended('${ROUTER_AUTHORITY_LOCK}',0));
+  ${ROUTER_AUTHORITY_TRIGGER_LOCK_SQL}
   INSERT INTO router_authority(scope,epoch)
     SELECT scope,count(*) FROM (
       SELECT CASE WHEN TG_TABLE_NAME='memberships' AND item->>'room_id' IS NULL

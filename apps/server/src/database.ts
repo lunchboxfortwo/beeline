@@ -1,6 +1,7 @@
 import type { DatabaseLockDiagnostics } from './database-lock-diagnostics.js';
+import { noticeAdvisoryLockKey, statementAdvisoryLockKey } from './database-advisory-locks.js';
 import { DIAGNOSTICS_SCHEMA } from './diagnostics-schema.js';
-import { recordPostgresStatementError } from './postgres-error.js';
+import { postgresCallSite, recordPostgresStatementError } from './postgres-error.js';
 export { messageSearchDocumentSql, MESSAGE_SEARCH_DOCUMENT_MAX_BYTES } from './message-search-document-sql.js';
 import { DATABASE_SCHEMA_WORKFLOW_BACKFILLS } from './database-schema-workflow-backfills.js';
 import { DATABASE_SCHEMA_INSTITUTIONAL_MEMORY_ITEMS } from './database-schema-institutional-memory-items.js';
@@ -9,7 +10,7 @@ import { DATABASE_SCHEMA_AGENT_GRANTS } from './database-schema-agent-grants.js'
 import { DATABASE_SCHEMA_TABLES } from './database-schema-tables.js';
 import { Pool, type PoolClient, type PoolConfig, type QueryResultRow } from 'pg';
 import { createHash } from 'node:crypto';
-import { QueryProfiler } from './query-profile.js';
+import { queryFingerprint, QueryProfiler } from './query-profile.js';
 import { DatabaseBackgroundWork } from './database-background-work.js';
 import { migrate, migrateData } from './database-migrate.js';
 import { backfillSquireApprovalExpiry, keywordsFromBody, retireStandingPreferences, MESSAGE_SEARCH_BACKFILL_BATCH, backfillMessageSearchDocuments, backfillConnectorMachineId, compactWebhookDeliveries, compactPushClaims, backfillInstitutionalMemoryRollout, backfillPerItemEventSubscriptions, backfillCornerOwed, measureDatabase, measureDatabaseBreakdown } from './database-backfill-squire-approval-expiry.js';
@@ -262,6 +263,11 @@ export function preparedQuery(name: string, text: string, values: unknown[]) {
   return { name: `${name}-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`, text, values };
 }
 
+type CheckedOutClient = {
+  client: PoolClient;
+  release: (error?: Error) => void;
+  advisoryLockKeys: Set<string>;
+};
 
 export class PostgresDatabase implements ClosableDatabase {
   readonly backgroundWork = new DatabaseBackgroundWork();
@@ -399,17 +405,46 @@ export class PostgresDatabase implements ClosableDatabase {
     }
   }
 
-  async #statement<T>(client: PoolClient, sql: string, work: () => Promise<T>): Promise<T> {
-    if (!this.#lockDiagnostics) return work();
-    // Neon supplies a proxy cancellation PID in BackendKeyData, even on its
-    // direct endpoint. Only pg_backend_pid() names the pg_stat_activity row.
-    let identity = this.#backendPids.get(client);
-    if (!identity) {
-      identity = client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
-        .then(result => result.rows[0]?.pid, () => undefined);
-      this.#backendPids.set(client, identity);
+  async #statement<T>(
+    { client, advisoryLockKeys }: CheckedOutClient,
+    sql: string,
+    work: () => Promise<T>,
+    caller: Error,
+    values?: unknown[],
+  ): Promise<T> {
+    const requestedKey = values && statementAdvisoryLockKey(sql, values);
+    try {
+      let result: T;
+      if (this.#lockDiagnostics) {
+        // Neon supplies a proxy cancellation PID in BackendKeyData, even on its
+        // direct endpoint. Only pg_backend_pid() names the pg_stat_activity row.
+        let identity = this.#backendPids.get(client);
+        if (!identity) {
+          identity = client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+            .then(result => result.rows[0]?.pid, () => undefined);
+          this.#backendPids.set(client, identity);
+        }
+        result = await this.#lockDiagnostics.statement(await identity, sql, work);
+      } else {
+        result = await work();
+      }
+      if (requestedKey) advisoryLockKeys.add(requestedKey);
+      return result;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '40P01') {
+        const statementFingerprint = queryFingerprint(sql);
+        const keys = new Set(advisoryLockKeys);
+        if (requestedKey) keys.add(requestedKey);
+        console.warn('[database] deadlock', JSON.stringify({
+          code: error.code,
+          operation: postgresCallSite(caller) ?? `query:${statementFingerprint}`,
+          statementFingerprint,
+          advisoryLockKeys: [...keys],
+          ...this.#lockDiagnostics?.deadlockObservation(error),
+        }));
+      }
+      throw error;
     }
-    return this.#lockDiagnostics.statement(await identity, sql, work);
   }
 
   async oldestActiveQueryAgeMs(): Promise<number | null> {
@@ -431,9 +466,12 @@ export class PostgresDatabase implements ClosableDatabase {
     values: unknown[] = [],
     preparedName?: string,
   ): Promise<QueryResult<Row>> {
+    // V8 formats the stack only if a deadlock needs the original synchronous caller.
+    const caller = new Error();
     try {
       const raw = await this.#timed(sql, async acquired => {
-        const { client, release } = await this.#connectCheckedOut();
+        const checkout = await this.#connectCheckedOut();
+        const { client, release } = checkout;
         acquired();
         try {
           // Online index builds/drops wait for old writers and snapshots via
@@ -447,9 +485,9 @@ export class PostgresDatabase implements ClosableDatabase {
             ? (await client.query<{ lock_timeout: string }>('SHOW lock_timeout')).rows[0]!.lock_timeout
             : undefined;
           if (onlineIndex) await client.query('SET lock_timeout=0');
-          const result = await this.#statement(client, sql, () => preparedName
+          const result = await this.#statement(checkout, sql, () => preparedName
             ? client.query<Row>(preparedQuery(preparedName, sql, values))
-            : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql));
+            : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql), caller, values);
           if (lockTimeout !== undefined)
             await client.query("SELECT set_config('lock_timeout',$1,false)", [lockTimeout]);
           release();
@@ -473,10 +511,7 @@ export class PostgresDatabase implements ClosableDatabase {
   // promise never settles) would stay checked out forever and wedge the pool.
   // Arm our own guard that destroys it and frees the slot. `release` is safe
   // to call more than once: later calls are no-ops after the guard fired.
-  async #connectCheckedOut(): Promise<{
-    client: PoolClient;
-    release: (error?: Error) => void;
-  }> {
+  async #connectCheckedOut(): Promise<CheckedOutClient> {
     const startedAt = performance.now();
     let client: PoolClient;
     let waiters = 0;
@@ -490,6 +525,11 @@ export class PostgresDatabase implements ClosableDatabase {
     }
     this.#recordWait(performance.now() - startedAt, waiters);
     const acquiredAt = performance.now();
+    const advisoryLockKeys = new Set<string>();
+    const onNotice = (notice: { code?: string; message?: string }) => {
+      const key = noticeAdvisoryLockKey(notice);
+      if (key) advisoryLockKeys.add(key);
+    };
     let released = false;
     const onError = (error: Error) => {
       console.error('postgres checked-out client error', error);
@@ -500,6 +540,7 @@ export class PostgresDatabase implements ClosableDatabase {
       released = true;
       this.#recordActive(performance.now() - acquiredAt);
       client.removeListener('error', onError);
+      client.removeListener('notice', onNotice);
       try {
         client.release(error);
       } catch {
@@ -507,15 +548,18 @@ export class PostgresDatabase implements ClosableDatabase {
       }
     };
     client.once('error', onError);
-    return { client, release };
+    client.on('notice', onNotice);
+    return { client, release, advisoryLockKeys };
   }
 
   async transaction<T>(work: (database: SqlDatabase) => Promise<T>): Promise<T> {
-    const { client, release } = await this.#beginTransaction().catch((error: unknown) => {
+    const caller = new Error();
+    const checkout = await this.#beginTransaction(caller).catch((error: unknown) => {
       this.#noteFailure(error);
       if (isTransientDatabaseConnectionError(error)) throw new DatabaseTransactionStartError(error);
       throw error;
     });
+    const { client, release } = checkout;
     const ticket = this.#nextTicket++;
     this.#transactions.set(ticket, Date.now());
     let releaseError: Error | undefined;
@@ -526,9 +570,10 @@ export class PostgresDatabase implements ClosableDatabase {
           values: unknown[] = [],
           preparedName?: string,
         ) => {
-          const raw = await this.#timed(sql, () => this.#statement(client, sql, () =>
+          const queryCaller = new Error();
+          const raw = await this.#timed(sql, () => this.#statement(checkout, sql, () =>
             preparedName ? client.query<Row>(preparedQuery(preparedName, sql, values))
-              : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql)));
+              : values.length ? client.query<Row>(sql, values) : client.query<Row>(sql), queryCaller, values));
           const result = Array.isArray(raw) ? raw.at(-1) : raw;
           return {
             rows: result?.rows ?? [],
@@ -539,7 +584,7 @@ export class PostgresDatabase implements ClosableDatabase {
           nested(database),
       };
       const result = await work(database);
-      await this.#statement(client, 'COMMIT', () => client.query('COMMIT'));
+      await this.#statement(checkout, 'COMMIT', () => client.query('COMMIT'), caller);
       this.#noteSuccess();
       return result;
     } catch (error) {
@@ -600,13 +645,10 @@ export class PostgresDatabase implements ClosableDatabase {
       : this.backgroundWork.drain().then(() => this.#pool.end());
   }
 
-  async #beginTransaction(): Promise<{
-    client: PoolClient;
-    release: (error?: Error) => void;
-  }> {
+  async #beginTransaction(caller: Error): Promise<CheckedOutClient> {
     const checkedOut = await this.#connectCheckedOut();
     try {
-      await this.#statement(checkedOut.client, 'BEGIN', () => checkedOut.client.query('BEGIN'));
+      await this.#statement(checkedOut, 'BEGIN', () => checkedOut.client.query('BEGIN'), caller);
       return checkedOut;
     } catch (error) {
       checkedOut.release(error instanceof Error ? error : new Error('transaction begin failed'));

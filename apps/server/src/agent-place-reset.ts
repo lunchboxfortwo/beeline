@@ -2,11 +2,11 @@ import type { AgentPlaceReset } from '@beeline/api-contract/daemon';
 import { endAgentTurn } from './agent-turn-end.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { SqlDatabase } from './database.js';
+import { AGENT_PLACE_LOCK_SQL } from './database-advisory-locks.js';
 
 /** Order restart commits with invocation starts and output for the same place. */
 export async function lockAgentPlace(db: SqlDatabase, agentId: string, roomId: string): Promise<void> {
-  await db.query("SELECT pg_advisory_xact_lock(hashtextextended('agent-place:' || $1 || ':' || $2, 0))",
-    [agentId, roomId]);
+  await db.query(AGENT_PLACE_LOCK_SQL, [agentId, roomId]);
 }
 
 export async function readAgentPlaceResets(db: SqlDatabase, agentId: string, roomId?: string): Promise<AgentPlaceReset[]> {

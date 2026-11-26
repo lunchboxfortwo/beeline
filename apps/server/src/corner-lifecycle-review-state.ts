@@ -6,6 +6,7 @@ import type { activeCornerHolds } from './corner-holds.js';
 import { cornerReviewerSql } from './corner-reviewer.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
+import { ROUTER_AUTHORITY_LOCK_SQL } from './database-advisory-locks.js';
 import { ROUTER_AUTHORITY_LOCK } from './router-authority-lock.js';
 
 import { claimCornerLand } from './corner-lifecycle.js';
@@ -23,7 +24,7 @@ export async function lockCornerLifecycle(db: SqlDatabase, cornerId: string): Pr
 /** Archival writers take lifecycle first, then authority before command or
  * Room/member locks. Acquiring only at the archival trigger is too late. */
 export async function lockCornerArchivalAuthority(database: SqlDatabase): Promise<void> {
-  await database.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [ROUTER_AUTHORITY_LOCK]);
+  await database.query(ROUTER_AUTHORITY_LOCK_SQL, [ROUTER_AUTHORITY_LOCK]);
 }
 
 
