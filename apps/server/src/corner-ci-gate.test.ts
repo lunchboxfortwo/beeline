@@ -55,7 +55,7 @@ describe('CI gate from base-branch protection', () => {
       blockedReason: 'no yes on this head',
       reviewerWake: {
         status: 'dispatched',
-        detail: 'Review started for @reviewer while checks were pending (this branch has no required checks).',
+        detail: 'Review started for @reviewer without waiting on checks (no required checks); checks are currently pending.',
       },
     });
     rootFixture.rollupState = 'PENDING';
@@ -63,7 +63,7 @@ describe('CI gate from base-branch protection', () => {
       checks: 'pending',
       reviewerWake: {
         status: 'dispatched',
-        detail: 'Review started for @reviewer while checks were pending (this branch has no required checks).',
+        detail: 'Review started for @reviewer without waiting on checks (no required checks); checks are currently pending.',
       },
     });
     rootFixture.rollupState = 'FAILURE';
@@ -71,7 +71,7 @@ describe('CI gate from base-branch protection', () => {
       checks: 'failed',
       reviewerWake: {
         status: 'dispatched',
-        detail: 'Review started for @reviewer while checks were failing (this branch has no required checks).',
+        detail: 'Review started for @reviewer without waiting on checks (no required checks); checks are currently failing.',
       },
     });
     expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);

@@ -804,22 +804,29 @@ const scope1 = fixtureScope1();
   );
 
 
-  it('R-GH-RETRY: long Retry-After creates no durable retry obligation', async () => {
+  it('R-GH-RETRY: long Retry-After honors GitHub delay without creating a durable retry obligation', async () => {
     const { corners, app, payload } = await scope1.checksFixture();
-    app.readCommitCheckRollup.mockRejectedValue(new GitHubHttpError('Checks', 429, '120'));
+    app.readCommitCheckRollup.mockRejectedValueOnce(new GitHubHttpError('Checks', 429, '120'));
     const operations = new GitHubOperations(scope1.database, {} as GitHubOAuthClient, app as unknown as GitHubAppClient, 'secret');
+    vi.useFakeTimers();
     try {
-      await expect(operations.processWebhook('check_run', payload)).resolves.toBeUndefined();
+      await expect(operations.processWebhook('check_run', payload, 'delivery-retry-after-120')).resolves.toBeUndefined();
       const retry = (await scope1.database.query<{ retry: unknown }>(
         `SELECT lifecycle->'checkRefreshRetry' retry FROM corner_facts WHERE corner_id=$1`, [corners[0]],
       )).rows[0]!.retry;
       expect(retry).toBeNull();
-      vi.useFakeTimers();
-      try { await vi.advanceTimersByTimeAsync(24 * 60 * 60_000); }
-      finally { vi.useRealTimers(); }
       expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(app.readCommitCheckRollup).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(app.readCommitCheckRollup).toHaveBeenCalledTimes(2);
+      const { lifecycle } = (await scope1.database.query<{ lifecycle: { checks: string } }>(
+        `SELECT lifecycle FROM corner_facts WHERE corner_id=$1`, [corners[0]],
+      )).rows[0]!;
+      expect(lifecycle.checks).toBe('passing');
     } finally {
       await operations.stopCheckRefreshes();
+      vi.useRealTimers();
     }
   });
 

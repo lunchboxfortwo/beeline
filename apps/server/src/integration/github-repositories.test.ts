@@ -437,4 +437,57 @@ const fixture = monolithFixture();
       await fixture.githubOperations.stopCheckRefreshes();
     }
   });
+
+  it('deduplicates concurrent webhook deliveries while letting an interrupted delivery claim recover on redelivery', async () => {
+    const payload = { action: 'opened' };
+    let releaseFirst!: () => void;
+    let firstEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { firstEntered = resolve; });
+    fixture.processWebhook.mockImplementationOnce(async () => {
+      firstEntered();
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    });
+    const firstPromise = fixture.webhook('pull_request', 'concurrent-delivery', payload);
+    await entered;
+    // Concurrent duplicate while first delivery is still running must be deduplicated.
+    const concurrent = await fixture.webhook('pull_request', 'concurrent-delivery', payload);
+    expect(concurrent.status).toBe(200);
+    expect(await concurrent.json()).toEqual({ accepted: false, duplicate: true });
+    expect(fixture.processWebhook).toHaveBeenCalledTimes(1);
+    releaseFirst();
+    const first = await firstPromise;
+    expect(first.status).toBe(202);
+    expect(
+      (
+        await fixture.database.query<{ claim_expires_at: string | null }>(
+          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+          ['concurrent-delivery'],
+        )
+      ).rows,
+    ).toEqual([{ claim_expires_at: null }]);
+
+    // An unfinished claim whose lease expired after a process crash is reclaimed on redelivery.
+    await fixture.database.query(
+      `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
+       VALUES($1,clock_timestamp()-interval '1 second')`,
+      ['interrupted-delivery'],
+    );
+    const recovered = await fixture.webhook('pull_request', 'interrupted-delivery', payload);
+    expect(recovered.status).toBe(202);
+    expect(await recovered.json()).toEqual({ accepted: true, duplicate: false });
+    expect(fixture.processWebhook).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await fixture.database.query<{ claim_expires_at: string | null }>(
+          `SELECT claim_expires_at::text claim_expires_at FROM github_webhook_deliveries WHERE delivery_id=$1`,
+          ['interrupted-delivery'],
+        )
+      ).rows,
+    ).toEqual([{ claim_expires_at: null }]);
+    // Once completed, another redelivery is suppressed as a duplicate.
+    const afterRecovery = await fixture.webhook('pull_request', 'interrupted-delivery', payload);
+    expect(afterRecovery.status).toBe(200);
+    expect(await afterRecovery.json()).toEqual({ accepted: false, duplicate: true });
+    expect(fixture.processWebhook).toHaveBeenCalledTimes(2);
+  });
 });

@@ -776,11 +776,21 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
     if (typeof delivery !== 'string' || typeof event !== 'string')
       throw new Error('GitHub delivery headers are required');
     const parsed = JSON.parse(payload.toString('utf8')) as unknown;
-    const inserted = await options.database.query(
-      `INSERT INTO github_webhook_deliveries(delivery_id) VALUES($1) ON CONFLICT DO NOTHING`,
+    // Claim with a short expiry so concurrent duplicates are skipped while an
+    // interrupted claim (process crash before completion) can be reclaimed on redelivery.
+    const claimed = await options.database.query<{ claim_expires_at: string }>(
+      `INSERT INTO github_webhook_deliveries(delivery_id,claim_expires_at)
+       VALUES($1,clock_timestamp()+interval '2 minutes')
+       ON CONFLICT (delivery_id) DO UPDATE
+         SET received_at=clock_timestamp(),
+             claim_expires_at=clock_timestamp()+interval '2 minutes'
+         WHERE github_webhook_deliveries.claim_expires_at IS NOT NULL
+           AND github_webhook_deliveries.claim_expires_at<=clock_timestamp()
+       RETURNING claim_expires_at::text claim_expires_at`,
       [delivery],
     );
-    if (!inserted.rowCount) {
+    const claimToken = claimed.rows[0]?.claim_expires_at;
+    if (!claimToken) {
       json(response, 200, { accepted: false, duplicate: true });
       return;
     }
@@ -788,10 +798,17 @@ a:focus-visible { outline: 3px solid #c8a8e8; outline-offset: 4px; }
       if (options.github?.onWebhook) await options.github.onWebhook(event, parsed, delivery);
     } catch (error) {
       await options.database
-        .query(`DELETE FROM github_webhook_deliveries WHERE delivery_id=$1`, [delivery])
+        .query(
+          `DELETE FROM github_webhook_deliveries WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
+          [delivery, claimToken],
+        )
         .catch(() => undefined);
       throw error;
     }
+    await options.database.query(
+      `UPDATE github_webhook_deliveries SET claim_expires_at=NULL WHERE delivery_id=$1 AND claim_expires_at=$2::timestamptz`,
+      [delivery, claimToken],
+    );
     if (++webhookWritesSincePrune % 64 === 1) {
       try {
         await options.database.query(

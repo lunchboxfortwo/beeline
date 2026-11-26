@@ -7,7 +7,7 @@ import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { RepositorySignals } from './repository-onboarding.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { GitHubAppClient, GitHubHttpError, GitHubOAuthClient, githubRetryDelay, transientGitHubError } from '@beeline/auth/github';
+import { GitHubAppClient, GitHubOAuthClient, githubRetryDelay, transientGitHubError } from '@beeline/auth/github';
 import type { CornerLifecycleView, PhoneOperationMap } from '@beeline/api-contract/phone';
 import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
@@ -83,9 +83,7 @@ export class GitHubOperations {
         if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
         throw error;
       }
-      const rateLimited = error instanceof GitHubHttpError && (error.rateLimited || error.status === 429);
       const firstDelay = githubRetryDelay(error, WEBHOOK_CHECK_RETRY_DELAYS_MS[0]!);
-      if (rateLimited && firstDelay > MAX_WEBHOOK_CHECK_RETRY_DELAY_MS) return;
       if (headSha) this.scheduleWebhookCheckRetry(target, repository, check, database, firstDelay);
     }
   }
@@ -124,9 +122,7 @@ export class GitHubOperations {
             );
             return;
           }
-          const rateLimited = error instanceof GitHubHttpError && (error.rateLimited || error.status === 429);
           delayMs = githubRetryDelay(error, nextBase);
-          if (rateLimited && delayMs > MAX_WEBHOOK_CHECK_RETRY_DELAY_MS) return;
         }
       }
     }).catch((error) => {
@@ -755,7 +751,6 @@ export function challenge(value: string): string {
 
 
 const WEBHOOK_CHECK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as const;
-const MAX_WEBHOOK_CHECK_RETRY_DELAY_MS = 60_000;
 
 function sleepAbortable(ms: number, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false);
@@ -798,52 +793,33 @@ export function reviewerWakeFromFacts(input: {
   }
   if (input.reviewWoken) {
     const cause = input.wakeCause ?? undefined;
-    if (input.checks === 'pending' || input.checks === 'failed') {
-      const stateWord = input.checks === 'failed' ? 'failing' : 'pending';
-      if (cause === 'no-required-checks') {
-        return {
-          status: 'dispatched',
-          detail: `Review started for ${label} while checks were ${stateWord} (this branch has no required checks).`,
-        };
-      }
-      if (cause === 'required-checks-passed') {
-        return {
-          status: 'dispatched',
-          detail: `Review started for ${label} while checks were ${stateWord} (required checks passed).`,
-        };
-      }
-      if (cause === 'brief-revised') {
-        return {
-          status: 'dispatched',
-          detail: `Review started for ${label} after a brief revision while checks were ${stateWord}.`,
-        };
-      }
+    const causeClause =
+      cause === 'checks-passed'
+        ? `The checks-passed transition woke ${label}`
+        : cause === 'required-checks-passed'
+          ? `Required checks passing woke ${label}`
+          : cause === 'no-required-checks'
+            ? `Review started for ${label} without waiting on checks (no required checks)`
+            : cause === 'brief-revised'
+              ? `A brief revision woke ${label}`
+              : `A review turn was dispatched to ${label}`;
+    if (cause === 'checks-passed' && input.checks === 'passed') {
       return {
         status: 'dispatched',
-        detail: `Review started for ${label} while checks were ${stateWord}.`,
+        detail: `${causeClause}.`,
       };
     }
-    if (input.checks === 'passed') {
-      if (cause === 'brief-revised') {
-        return {
-          status: 'dispatched',
-          detail: `A brief revision woke ${label} on this passing head.`,
-        };
-      }
-      if (cause === 'no-required-checks') {
-        return {
-          status: 'dispatched',
-          detail: `Review started for ${label} (this branch has no required checks); checks are passing.`,
-        };
-      }
-      return {
-        status: 'dispatched',
-        detail: `The checks-passed transition woke ${label}.`,
-      };
-    }
+    const currentChecks =
+      input.checks === 'passed'
+        ? 'checks are currently passing'
+        : input.checks === 'pending'
+          ? 'checks are currently pending'
+          : input.checks === 'failed'
+            ? 'checks are currently failing'
+            : 'current check state is unknown';
     return {
       status: 'dispatched',
-      detail: `Review started for ${label} while checks were not passing.`,
+      detail: `${causeClause}; ${currentChecks}.`,
     };
   }
   const waitingChecks = input.gateChecks ?? input.checks;

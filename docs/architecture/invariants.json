@@ -1442,7 +1442,8 @@
         "reason": "existing before the registry; weekly audit reviews",
         "columns": {
           "delivery_id": "existing before the registry; weekly audit reviews",
-          "received_at": "existing before the registry; weekly audit reviews"
+          "received_at": "existing before the registry; weekly audit reviews",
+          "claim_expires_at": "Marks an in-flight webhook delivery claim so concurrent duplicates are skipped while interrupted claims recover after expiry; NULL marks completion."
         }
       },
       "helper_release_notifications": {
