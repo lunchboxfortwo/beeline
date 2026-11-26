@@ -3,9 +3,11 @@ Description=Beeline production log collector for Fly app %i
 After=network-online.target
 
 [Service]
-EnvironmentFile=%h/.config/beeline-log-walk.env
-ExecStart=%h/.local/share/beeline-log-walk/checkout/packages/scripts/log-walk/collect.sh %i ${LOG_WALK_RAW}
+EnvironmentFile=%h/.config/beeline-log-walk-token.env
+LoadCredential=fly-api-token:%h/.config/beeline-log-walk/fly-api-token
+ExecStart=%h/.local/share/beeline-log-walk/token-checkout/packages/scripts/log-walk/collect.sh %i ${LOG_WALK_RAW}
 Restart=always
+RestartPreventExitStatus=77 243
 RestartSec=30
 
 [Install]
