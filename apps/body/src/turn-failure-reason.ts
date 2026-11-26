@@ -16,8 +16,9 @@ export interface DistilledTurnFailureReason {
 export function redactToolDetail(value: string): string {
   return value
     .replace(/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g, '[REDACTED]')
+    .replace(/\b(Bearer\s+)[^\s,]+/gi, '$1[REDACTED]')
     .replace(
-      /\b(["']?)(api[_-]?key|token|secret|password|passwd|authorization|credential|cookie|private[_-]?key)\1\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)/gi,
+      /(["']?)\b(api[_-]?key|token|secret|password|passwd|authorization|credential|cookie|private[_-]?key)\1\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)/gi,
       '"$2": "[REDACTED]"',
     )
     .replace(
@@ -29,14 +30,13 @@ export function redactToolDetail(value: string): string {
       '$1[REDACTED]',
     )
     .replace(
-      /\b(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)/g,
-      (assignment) => `${assignment.slice(0, assignment.indexOf('='))}=[REDACTED]`,
+      /(^|[\s;|]|&&)((?:export\s+)?[A-Z_][A-Z0-9_]*)=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;|&]+)/g,
+      '$1$2=[REDACTED]',
     )
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,})\b/gi, '[REDACTED]')
     .replace(/\b(?:bat|brt|bdt|bde|bfm)_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, '[REDACTED]')
     .replace(/\bbfmc_v1\.[a-f0-9]{32}\.[a-f0-9]{64}\b/gi, '[REDACTED]')
     .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]')
-    .replace(/\b(Bearer\s+)[^\s,]+/gi, '$1[REDACTED]')
     .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED]')
     .replace(
       /(--?(?:api[_-]?key|token|secret|password|authorization|credential|cookie)\s+)(?:"[^"]*"|'[^']*'|\S+)/gi,

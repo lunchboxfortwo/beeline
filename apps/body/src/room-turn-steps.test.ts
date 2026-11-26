@@ -283,4 +283,221 @@ describe('roomReplySteps', () => {
     expect(JSON.parse(rows[0]!.output!)).toEqual(receiptPayload);
     expect(rows[1]!.output).toBeUndefined();
   });
+
+  it('preserves app_tool metadata, message text, list_credentials metadata, and subagent fields', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'mcp.beeline-agent.app_tool',
+          rawInput: {
+            app: 'registry-mcp:squire',
+            query: 'operate_drive operate_finish use_credential',
+            tool: 'operate_drive',
+            args: { url: 'https://ads.x.com/campaigns?tab=campaigns', goal: 'Read spend' },
+          },
+          rawOutput: { tools: [] },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'mcp.beeline-agent.message',
+          rawInput: {
+            type: 'normal',
+            address: `${'7'.repeat(64)}@b71a2a24-3d77-4b74-abb9-d6584d6fa119`,
+            text: 'Write the read-only snapshot to its own file before pushing.',
+            quoteMsgId: 'msg-1',
+          },
+          rawOutput: { queued: true },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'mcp__squire__list_credentials',
+          rawInput: {},
+          rawOutput: { credentials: [{ label: 'X Ads' }] },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'invoke_subagent',
+          rawInput: { Role: 'Codebase Researcher', TypeName: 'research', Prompt: 'Audit ACP' },
+        },
+      },
+    ]);
+
+    const appInput = JSON.parse(rows[0]!.input!);
+    expect(appInput).toMatchObject({
+      app: 'registry-mcp:squire',
+      tool: 'operate_drive',
+      query: 'operate_drive operate_finish use_credential',
+      args: { url: 'https://ads.x.com/campaigns?tab=campaigns', goal: 'Read spend' },
+    });
+
+    const msgInput = JSON.parse(rows[1]!.input!);
+    expect(msgInput.text).toBe('Write the read-only snapshot to its own file before pushing.');
+    expect(msgInput.quoteMsgId).toBe('msg-1');
+
+    expect(rows[2]!.output).not.toBe('Output hidden: contains a secret.');
+    expect(rows[2]!.output).toContain('X Ads');
+
+    expect(JSON.parse(rows[3]!.input!)).toMatchObject({
+      Role: 'Codebase Researcher',
+      TypeName: 'research',
+      Prompt: 'Audit ACP',
+    });
+  });
+
+  it('extracts bounded diffs from ACP diff blocks, Edit, MultiEdit, edit_file, and apply_patch', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'Edit',
+          kind: 'edit',
+          content: [
+            {
+              type: 'diff',
+              path: 'apps/body/src/room-turn-steps.ts',
+              oldText: "  'state',\n];",
+              newText: "  'state',\n  'app',\n];",
+            },
+          ],
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'Edit',
+          kind: 'edit',
+          rawInput: {
+            file_path: 'apps/mobile/sources/a.ts',
+            old_string: 'const a = 1;',
+            new_string: 'const a = 2;',
+          },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'edit_file',
+          kind: 'edit',
+          rawInput: {
+            Path: 'apps/mobile/sources/b.ts',
+            Target: 'oldLine()',
+            Replacement: 'newLine()',
+          },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'apply_patch',
+          kind: 'edit',
+          rawInput:
+            '*** Begin Patch\n*** Update File: apps/server/src/index.ts\n@@ -1,2 +1,2 @@\n-old\n+new\n*** End Patch',
+        },
+      },
+    ]);
+
+    expect(rows[0]!.files?.[0]).toMatchObject({
+      path: 'apps/body/src/room-turn-steps.ts',
+      status: 'M',
+    });
+    expect(rows[0]!.files?.[0]?.diff).toContain("+  'app',");
+    expect(rows[1]!.files?.[0]?.diff).toContain('-const a = 1;\n+const a = 2;');
+    expect(rows[2]!.files?.[0]?.diff).toContain('-oldLine()\n+newLine()');
+    expect(rows[3]!.files?.[0]).toMatchObject({
+      path: 'apps/server/src/index.ts',
+      status: 'M',
+    });
+    expect(rows[3]!.files?.[0]?.diff).toContain('-old\n+new');
+    expect(rows[3]!.command).toBeUndefined();
+  });
+
+  it('promotes rawOutput.isError and is_error to failed, summarizes media/resources without base64, and extracts TodoWrite plans', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'mcp.beeline-agent.close_thread',
+          status: 'completed',
+          rawOutput: { isError: true, error: 'Missing sourceMessageId citation' },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'use_tool',
+          rawInput: { tool_name: 'squire__operate_drive', tool_input: {} },
+          status: 'completed',
+          rawOutput: { type: 'MCP', is_error: true, output: { Error: 'UnicodeError' } },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'screenshot',
+          content: [
+            { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg==' },
+            { type: 'resource', resource: { uri: 'file:///docs/spec.md', text: 'Spec preview' } },
+          ],
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'TodoWrite',
+          rawInput: {
+            todos: [
+              { content: 'Fix wire guard', status: 'completed' },
+              { content: 'Ship sheet', status: 'in_progress' },
+            ],
+          },
+        },
+      },
+    ]);
+
+    expect(rows[0]!.status).toBe('failed');
+    expect(rows[1]!.status).toBe('failed');
+    expect(rows[2]!.output).toContain('[Image · image/png]');
+    expect(rows[2]!.output).toContain('[Resource · file:///docs/spec.md]');
+    expect(rows[2]!.output).toContain('Spec preview');
+    expect(rows[2]!.output).not.toContain('iVBORw0KGgo');
+    expect(rows[3]!.plan).toEqual({
+      items: [
+        { step: 'Fix wire guard', status: 'completed' },
+        { step: 'Ship sheet', status: 'in_progress' },
+      ],
+    });
+  });
+
+  it('keeps >4 KiB JSON outputs valid JSON with _omittedCount within MAX_STEP_OUTPUT_BYTES', () => {
+    const schedules = Array.from({ length: 40 }, (_, index) => ({
+      scheduleId: `sched-${index + 1}`,
+      title: `Schedule number ${index + 1}`,
+      roomName: '#beeline',
+      prompt: 'Check status and report summary. '.repeat(6),
+    }));
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'mcp.beeline-agent.wake',
+          rawInput: { action: 'list' },
+          rawOutput: { schedules },
+        },
+      },
+    ]);
+    const raw = rows[0]!.output!;
+    expect(Buffer.byteLength(raw, 'utf8')).toBeLessThanOrEqual(4096);
+    const parsed = JSON.parse(raw) as { schedules: unknown[]; _omittedCount: number };
+    expect(Array.isArray(parsed.schedules)).toBe(true);
+    expect(parsed.schedules.length).toBeGreaterThan(0);
+    expect(parsed.schedules.length).toBeLessThan(40);
+    expect(parsed._omittedCount).toBe(40 - parsed.schedules.length);
+  });
 });

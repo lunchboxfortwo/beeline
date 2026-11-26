@@ -228,16 +228,10 @@ describe('toolGroupSummary', () => {
     expect(toolGroupSummary(1, 0, undefined)).toBe('1 step');
     expect(toolGroupSummary(4, 0, 500)).toBe('4 steps');
   });
-
-  it('leads with concise provenance when provided', () => {
-    expect(
-      toolGroupSummary(11, 0, undefined, 0, 'Listed schedules · inspected skill & server code'),
-    ).toBe('Listed schedules · inspected skill & server code · 11 steps');
-  });
 });
 
-describe('observation folding, startup warning demotion, and legacy rows', () => {
-  it('folds consecutive read-only observations while keeping mutations and real failures visible', () => {
+describe('flat v3 ledger, startup warning demotion, and honest tap targets', () => {
+  it('keeps every step as one flat row with zero nested observation folding or header provenance', () => {
     const turn = buildTurnActivity([
       {
         kind: 'tool',
@@ -276,12 +270,46 @@ describe('observation folding, startup warning demotion, and legacy rows', () =>
     const [group] = groupToolLedgerRuns(toolLedgerLines(turn.steps));
     expect(group!.count).toBe(4);
     expect(group!.failed).toBe(1);
-    expect(group!.lines).toHaveLength(3);
-    expect(group!.lines[0]!.folded).toHaveLength(2);
-    expect(group!.lines[0]!.label).toBe('Read waiting-and-wakes/SKILL.md, searched code (2 calls)');
-    expect(group!.lines[1]!.label).toBe('server/src/index.ts');
-    expect(group!.lines[2]!.outcome).toBe('failure');
-    expect(group!.lines[2]!.label).toBe('npm test');
+    expect(group!.lines).toHaveLength(4);
+    expect(group).not.toHaveProperty('provenance');
+    expect(group!.lines.every((line) => !('folded' in line))).toBe(true);
+    expect(group!.lines[0]!.label).toBe('waiting-and-wakes/SKILL.md');
+    expect(group!.lines[1]!.label).toBe('rg -n wake apps/server/src');
+    expect(group!.lines[2]!.label).toBe('server/src/index.ts');
+    expect(group!.lines[3]!.outcome).toBe('failure');
+    expect(group!.lines[3]!.label).toBe('npm test');
+  });
+
+  it('marks note, rollup-only, and empty terminalId-only rows as non-inspectable', () => {
+    const turn = buildTurnActivity([
+      { kind: 'note', id: 'n1', title: 'Note', text: 'Checking schedules first.' },
+      { kind: 'summary', title: 'Summary', rollup: { read: 8 } },
+      { kind: 'tool', id: 'fold', title: '12 earlier steps', status: 'completed' },
+      {
+        kind: 'tool',
+        id: 'term',
+        title: 'exec_command',
+        toolKind: 'execute',
+        status: 'completed',
+        output: '[{"type":"terminal","terminalId":"exec-123"}]',
+      },
+      {
+        kind: 'tool',
+        id: 'term-cmd',
+        title: 'exec_command',
+        toolKind: 'execute',
+        command: 'git status',
+        status: 'completed',
+        output: '[{"type":"terminal","terminalId":"exec-456"}]',
+      },
+    ]);
+    const lines = toolLedgerLines(turn.steps);
+    expect(lines[0]!.inspectable).toBe(false);
+    expect(lines[1]!.inspectable).toBe(false);
+    expect(lines[2]!.inspectable).toBe(false);
+    expect(lines[3]!.inspectable).toBe(false);
+    expect(lines[4]!.inspectable).toBe(true);
+    expect(lines[4]!.terminalOnly).toBe(true);
   });
 
   it('demotes recovered harness startup warnings to quiet notes with zero failed count', () => {
@@ -311,7 +339,7 @@ describe('observation folding, startup warning demotion, and legacy rows', () =>
     expect(group!.notes).toBe(0);
     expect(group!.count).toBe(1);
     expect(group!.lines[0]).toMatchObject({ kind: 'note', startupWarning: true, outcome: 'success' });
-    expect(group!.provenance).toBe('Listed schedules');
+    expect(group).not.toHaveProperty('provenance');
   });
 
   it('renders legacy stored rows without command or input without mangling to "the code" or "a file"', () => {
@@ -348,7 +376,7 @@ describe('observation folding, startup warning demotion, and legacy rows', () =>
     expect(lines[2]!.label).not.toContain('mcp.beeline-agent');
   });
 
-  it('carries structured beeline-agent receipts onto ToolLedgerLine and keeps collapsed provenance concise', () => {
+  it('carries structured beeline-agent receipts onto ToolLedgerLine without header provenance', () => {
     const receipt = 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo';
     const turn = buildTurnActivity([
       {
@@ -384,7 +412,24 @@ describe('observation folding, startup warning demotion, and legacy rows', () =>
       receipt: 'Opened thread "mcp-state-receipts" · implementer @crayon · approved by @lunchboxfortwo',
     });
     const group = groupToolLedgerRuns(lines)[0]!;
-    if (group.kind !== 'group') throw new Error('expected group');
-    expect(group.provenance).toBe('Updated "Morning card" · opened thread "mcp-state-receipts"');
+    expect(group).not.toHaveProperty('provenance');
+  });
+
+  it('detects rejected, timed_out, cancelled, MCP isError, and Grok output.Error as failures', () => {
+    const turn = buildTurnActivity([
+      { kind: 'tool', id: 'r', title: 'Bash', status: 'rejected', output: 'Denied by owner' },
+      { kind: 'tool', id: 't', title: 'Bash', status: 'timed_out', output: 'Timed out after 60s' },
+      { kind: 'tool', id: 'c', title: 'Bash', status: 'cancelled' },
+      {
+        kind: 'tool',
+        id: 'g',
+        title: 'mcp.squire.operate_drive',
+        status: 'completed',
+        output: JSON.stringify({ is_error: true, output: { Error: 'UnicodeEncodeError on ads tab' } }),
+      },
+    ]);
+    const lines = toolLedgerLines(turn.steps);
+    expect(lines.map((l) => l.outcome)).toEqual(['failure', 'failure', 'failure', 'failure']);
+    expect(lines[3]!.reason).toContain('UnicodeEncodeError on ads tab');
   });
 });

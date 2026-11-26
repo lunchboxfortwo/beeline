@@ -148,12 +148,10 @@ describe('Reproduction tool-ledger-32233', () => {
     },
   ];
 
-  it('demotes startup warning, folds consecutive read-only inspections, shows real targets, and shows command/input in sheet', () => {
+  it('demotes startup warning, renders flat single-item rows without observation sub-folders, and puts Raw arguments behind toggle', () => {
     const renderer = render(<TurnStepsLine items={ITEMS_32233} />);
     const group = renderer.root.findByProps({ testID: 'tool-run-group-boot-warn' });
-    expect(group.props.accessibilityLabel).toBe(
-      'Listed schedules · inspected skill & server code · 5 steps, expandable',
-    );
+    expect(group.props.accessibilityLabel).toBe('5 steps, expandable');
     expect(renderedText(renderer)).not.toContain('failed');
 
     expandRun(renderer, 'boot-warn');
@@ -163,23 +161,26 @@ describe('Reproduction tool-ledger-32233', () => {
     expect(expandedText).not.toContain('the code');
     expect(expandedText).not.toContain('a file');
     expect(expandedText).not.toContain('mcp.beeline-agent.wake');
-
-    // Expand folded read-only observations to verify individual unwrapped rows & sheet inputs.
-    act(() =>
-      renderer.root.findByProps({ testID: 'tool-observation-fold-obs-read-skill' }).props.onPress(),
-    );
-    const fullText = renderedText(renderer);
-    expect(fullText).toContain('waiting-and-wakes/SKILL.md');
+    expect(
+      renderer.root.findAllByProps({ testID: 'tool-observation-fold-obs-read-skill' }),
+    ).toHaveLength(0);
+    expect(expandedText).toContain('waiting-and-wakes/SKILL.md');
     expect(
       renderer.root
         .findByProps({ testID: 'tool-ledger-line-rg-1' })
         .findAllByType('Text')
         .map((n: any) => n.props.children),
     ).toContain('rg -n "schedule" apps/server/src');
-    expect(fullText).toContain('Listed');
-    expect(fullText).toContain('schedules');
+    expect(expandedText).toContain('Listed');
+    expect(expandedText).toContain('schedules');
 
-    act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-wake-list' }).props.onPress());
+    const wakePress = renderer.root
+      .findByProps({ testID: 'tool-ledger-line-wake-list' })
+      .findAll((n: any) => n.type === 'XStack' && typeof n.props.onPress === 'function')[0];
+    act(() => wakePress.props.onPress());
+    expect(renderer.root.findByProps({ testID: 'tool-output-array-cards' })).toBeTruthy();
+    expect(renderer.root.findAllByProps({ testID: 'tool-output-input' })).toHaveLength(0);
+    act(() => renderer.root.findByProps({ testID: 'tool-output-raw-toggle' }).props.onPress());
     const inputBlock = renderer.root.findByProps({ testID: 'tool-output-input' });
     expect(inputBlock).toBeTruthy();
     expect(inputBlock.findAllByType('Text').map((n: any) => n.props.children).join('\n')).toContain(
@@ -216,7 +217,7 @@ describe('Reproduction tool-ledger-32233', () => {
     expect(reason.parent.type).toBe('YStack');
   });
 
-  it('keeps multiline mutating commands visible and preserves newlines in ToolOutputSheet', () => {
+  it('keeps multiline mutating commands visible and preserves newlines in ToolOutputSheet Raw panel', () => {
     const renderer = render(
       <TurnStepsLine
         items={[
@@ -241,22 +242,20 @@ describe('Reproduction tool-ledger-32233', () => {
       />,
     );
     expandRun(renderer, 'read-1');
-    // Not folded into observations because the second line mutates.
-    expect(renderer.root.findAllByProps({ testID: 'tool-observation-fold-obs-read-1' })).toHaveLength(
-      0,
-    );
     const row = renderer.root.findByProps({ testID: 'tool-ledger-line-multi-write' });
     expect(row.findAllByType('Text').map((n: any) => n.props.children)).toContain(
       'ls; mkdir scratch',
     );
-    act(() => row.props.onPress());
+    const rowPress = row.findAll((n: any) => n.type === 'XStack' && typeof n.props.onPress === 'function')[0];
+    act(() => rowPress.props.onPress());
+    act(() => renderer.root.findByProps({ testID: 'tool-output-raw-toggle' }).props.onPress());
     const commandBlock = renderer.root.findByProps({ testID: 'tool-output-command' });
     expect(commandBlock.findAllByType('Text').map((n: any) => n.props.children)).toContain(
       'ls\nmkdir scratch',
     );
   });
 
-  it('surfaces structured beeline-agent receipts on step rows and renders Receipt plus JSON output in ToolOutputSheet', () => {
+  it('surfaces structured beeline-agent receipts on step rows and renders kv-card plus Receipt in ToolOutputSheet', () => {
     const receipt = 'Updated "Morning card" · next run Thu (9:00 a.m. ET) · replies to @lunchboxfortwo';
     const renderer = render(
       <TurnStepsLine
@@ -285,12 +284,70 @@ describe('Reproduction tool-ledger-32233', () => {
     expect(rowTexts.join(' ')).toContain('Morning card');
     expect(rowTexts.join(' ')).toContain('replies to @lunchboxfortwo');
 
-    act(() => row.props.onPress());
+    const rowPress = row.findAll((n: any) => n.type === 'XStack' && typeof n.props.onPress === 'function')[0];
+    act(() => rowPress.props.onPress());
     const receiptBlock = renderer.root.findByProps({ testID: 'tool-output-receipt' });
     expect(receiptBlock.findAllByType('Text').map((n: any) => n.props.children)).toContain(receipt);
     const sheetText = renderedText(renderer);
     expect(sheetText).not.toContain('No output saved');
     expect(sheetText).toContain('lunchboxfortwo');
-    expect(sheetText).toContain('sourceMessageId');
+  });
+
+  it('resolves 32269.jpg handoff names, kills duplicate trigger prose, and opens sent message card', () => {
+    const crayonHex = '784c9656dbf5b4ca97f1ffc471981766a88e86ae2c965df213c6bbe1421146f4';
+    const threadUuid = 'b71a2a24-3d77-4b74-abb9-d6584d6fa119';
+    const renderer = render(
+      <TurnStepsLine
+        lookup={{
+          participants: [{ pubkey: crayonHex, handle: 'crayon', name: 'Crayon' }],
+          channelIndex: {
+            rooms: [{ channelId: '11111111-1111-4111-8111-111111111111', name: 'beeline' }],
+            corners: [
+              {
+                channelId: threadUuid,
+                parentChannelId: '11111111-1111-4111-8111-111111111111',
+                name: 'helper-index-flake',
+                roomName: 'beeline',
+              },
+            ],
+          },
+          speakerName: 'Ruby',
+        }}
+        items={[
+          {
+            kind: 'tool',
+            id: 'handoff-1',
+            title: 'mcp__beeline-agent__message',
+            toolKind: 'other',
+            status: 'completed',
+            input: JSON.stringify({
+              type: 'normal',
+              address: `${crayonHex}@${threadUuid}`,
+              text: 'Write the read-only snapshot to its own file before pushing for Speedy.',
+            }),
+            output: JSON.stringify({ queued: true }),
+          },
+        ]}
+      />,
+    );
+    const trigger = renderer.root.findByProps({ testID: 'tool-run-group-handoff-1' });
+    expect(trigger.props.accessibilityLabel).toBe('1 step, expandable');
+    expect(renderedText(renderer)).not.toContain('784c96');
+    expect(renderedText(renderer)).not.toContain('b71a2a24');
+
+    expandRun(renderer, 'handoff-1');
+    const openText = renderedText(renderer);
+    expect(openText).toContain('@crayon');
+    expect(openText).toContain('#helper-index-flake');
+    expect(openText).not.toContain('784c96');
+
+    const rowPress = renderer.root
+      .findByProps({ testID: 'tool-ledger-line-handoff-1' })
+      .findAll((n: any) => n.type === 'XStack' && typeof n.props.onPress === 'function')[0];
+    act(() => rowPress.props.onPress());
+    const card = renderer.root.findByProps({ testID: 'tool-output-sent-message' });
+    expect(card).toBeTruthy();
+    expect(renderedText(renderer)).toContain('Ruby → Crayon');
+    expect(renderedText(renderer)).toContain('Write the read-only snapshot to its own file');
   });
 });

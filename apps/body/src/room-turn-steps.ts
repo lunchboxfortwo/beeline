@@ -26,6 +26,8 @@ const KNOWN_MCP_SERVERS = [
 ] as const;
 
 const INPUT_SUMMARY_KEYS = [
+  'app',
+  'tool',
   'action',
   'facet',
   'title',
@@ -37,12 +39,14 @@ const INPUT_SUMMARY_KEYS = [
   'file_path',
   'filePath',
   'filename',
+  'Path',
   'target',
   'url',
   'room',
+  'roomId',
   'address',
+  'agent',
   'slug',
-  'toolSummary',
   'mode',
   'scope',
   'service',
@@ -52,6 +56,16 @@ const INPUT_SUMMARY_KEYS = [
   'recipient',
   'recipients',
   'state',
+  'quoteMsgId',
+  'description',
+  'toolSummary',
+  'Role',
+  'TypeName',
+  'role',
+  'subagent_type',
+  'Prompt',
+  'prompt',
+  'text',
 ] as const;
 
 const FILE_PATH_KEYS = [
@@ -61,6 +75,7 @@ const FILE_PATH_KEYS = [
   'filename',
   'file',
   'target_file',
+  'Path',
 ] as const;
 
 const OUTPUT_TEXT_KEYS = new Set([
@@ -76,7 +91,7 @@ const OUTPUT_TEXT_KEYS = new Set([
 ]);
 
 const CREDENTIAL_IDENTITY_PATTERN =
-  /fetch_credential|read_credential|raw_credential|[._]netrc\b|\.pgpass\b|\.git-credentials\b|\.npmrc\b|\.pypirc\b|\.docker[\\/]+config\.json\b|\.aws[\\/]+credentials\b|\.env|credentials|\bid_[a-z0-9_]+\b|\.(?:pem|key)\b|private.?key/i;
+  /fetch_credential|read_credential|raw_credential|[._]netrc\b|\.pgpass\b|\.git-credentials\b|\.npmrc\b|\.pypirc\b|\.docker[\\/]+config\.json\b|\.aws[\\/]+credentials\b|\.env|(?:(?<![a-z0-9_])credentials\b|credentials\.(?:json|ya?ml|toml|txt|ini|xml|env)|[\\/]+credentials\b)|\bid_[a-z0-9_]+\b|\.(?:pem|key)\b|private.?key/i;
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
@@ -183,20 +198,24 @@ function extractCommand(call: ToolCallEntry): string | undefined {
   const unwrapped = unwrapRawInput(call.rawInput);
   const direct = readFromRecord(unwrapped) ?? readFromRecord(outer);
   if (direct) return preserveLines(redactToolDetail(direct)).slice(0, MAX_STEP_COMMAND_LENGTH) || undefined;
-  if (typeof call.rawInput === 'string' && !call.rawInput.trim().startsWith('{')) {
+  if (
+    typeof call.rawInput === 'string' &&
+    !call.rawInput.trim().startsWith('{') &&
+    !/^\*\*\*\s+(?:Begin Patch|(?:Update|Add|Delete) File:)/.test(call.rawInput.trim())
+  ) {
     const trimmed = preserveLines(redactToolDetail(call.rawInput));
     if (trimmed) return trimmed.slice(0, MAX_STEP_COMMAND_LENGTH);
   }
   return undefined;
 }
 
-function sanitizeInputValue(value: unknown): unknown {
+function sanitizeInputValue(value: unknown, key?: string): unknown {
   if (typeof value === 'string') {
-    const redacted = oneLine(redactToolDetail(value));
+    const redacted =
+      key === 'text' ? preserveLines(redactToolDetail(value)) : oneLine(redactToolDetail(value));
     if (!redacted) return undefined;
-    return redacted.length > MAX_STEP_INPUT_VALUE_LENGTH
-      ? `${redacted.slice(0, MAX_STEP_INPUT_VALUE_LENGTH - 1)}…`
-      : redacted;
+    const limit = key === 'text' ? MAX_STEP_INPUT_LENGTH - 80 : MAX_STEP_INPUT_VALUE_LENGTH;
+    return redacted.length > limit ? `${redacted.slice(0, limit - 1)}…` : redacted;
   }
   if (typeof value === 'boolean' || typeof value === 'number') return value;
   if (Array.isArray(value)) {
@@ -209,14 +228,34 @@ function sanitizeInputValue(value: unknown): unknown {
   return undefined;
 }
 
+function sanitizeScalarArgs(value: unknown): Record<string, unknown> | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  const out: Record<string, unknown> = {};
+  let count = 0;
+  for (const [key, entry] of Object.entries(record)) {
+    if (count >= 6) break;
+    const sanitized = sanitizeInputValue(entry);
+    if (sanitized !== undefined) {
+      out[key] = sanitized;
+      count += 1;
+    }
+  }
+  return count ? out : undefined;
+}
+
 function extractInputSummary(call: ToolCallEntry, command: string | undefined): string | undefined {
   const args = unwrapRawInput(call.rawInput);
   if (!args) return undefined;
   const picked: Record<string, unknown> = {};
   for (const key of INPUT_SUMMARY_KEYS) {
     if (!(key in args)) continue;
-    const sanitized = sanitizeInputValue(args[key]);
+    const sanitized = sanitizeInputValue(args[key], key);
     if (sanitized !== undefined) picked[key] = sanitized;
+  }
+  if ('args' in args) {
+    const nestedArgs = sanitizeScalarArgs(args.args);
+    if (nestedArgs) picked.args = nestedArgs;
   }
   if (!Object.keys(picked).length) return undefined;
   // Don't repeat a single path-only or empty summary if it duplicates a command identically.
@@ -228,7 +267,16 @@ function extractInputSummary(call: ToolCallEntry, command: string | undefined): 
   const trimmed: Record<string, unknown> = {};
   for (const [key, value] of entries) {
     const candidate = JSON.stringify({ ...trimmed, [key]: value });
-    if (candidate.length > MAX_STEP_INPUT_LENGTH) break;
+    if (candidate.length > MAX_STEP_INPUT_LENGTH) {
+      if (key === 'text' && typeof value === 'string') {
+        const overhead = JSON.stringify({ ...trimmed, text: '' }).length;
+        const room = MAX_STEP_INPUT_LENGTH - overhead - 4;
+        if (room > 24) {
+          trimmed.text = `${value.slice(0, room - 1)}…`;
+        }
+      }
+      break;
+    }
     trimmed[key] = value;
   }
   return Object.keys(trimmed).length ? JSON.stringify(trimmed) : undefined;
@@ -240,34 +288,219 @@ function normalizeFilePath(value: string): string | undefined {
   return clean.slice(0, MAX_STEP_FILE_PATH_LENGTH);
 }
 
-function extractFiles(call: ToolCallEntry): Array<{ path: string; status?: string }> | undefined {
-  const seen = new Set<string>();
-  const files: Array<{ path: string; status?: string }> = [];
-  const push = (rawPath: unknown, rawStatus?: unknown): void => {
-    if (files.length >= MAX_STEP_FILES || typeof rawPath !== 'string') return;
+function buildUnifiedDiff(oldText: string, newText: string): string | undefined {
+  const oldClean = redactToolDetail(oldText.replace(/\r\n?/g, '\n'));
+  const newClean = redactToolDetail(newText.replace(/\r\n?/g, '\n'));
+  if (oldClean === newClean) return undefined;
+  const oldLines = oldClean ? oldClean.split('\n') : [];
+  const newLines = newClean ? newClean.split('\n') : [];
+  let prefix = 0;
+  while (
+    prefix < oldLines.length &&
+    prefix < newLines.length &&
+    oldLines[prefix] === newLines[prefix]
+  ) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const ctxBefore = Math.min(2, prefix);
+  const ctxAfter = Math.min(2, suffix);
+  const oldStartIdx = prefix - ctxBefore;
+  const oldEndIdx = oldLines.length - suffix + ctxAfter;
+  const newStartIdx = prefix - ctxBefore;
+  const newEndIdx = newLines.length - suffix + ctxAfter;
+  const oldCount = oldEndIdx - oldStartIdx;
+  const newCount = newEndIdx - newStartIdx;
+  const out: string[] = [
+    `@@ -${oldStartIdx + 1},${oldCount} +${newStartIdx + 1},${newCount} @@`,
+  ];
+  for (let i = oldStartIdx; i < prefix; i += 1) out.push(` ${oldLines[i]}`);
+  for (let i = prefix; i < oldLines.length - suffix; i += 1) out.push(`-${oldLines[i]}`);
+  for (let i = prefix; i < newLines.length - suffix; i += 1) out.push(`+${newLines[i]}`);
+  for (let i = oldLines.length - suffix; i < oldEndIdx; i += 1) out.push(` ${oldLines[i]}`);
+  return boundStepOutputHeadTail(out.join('\n'), MAX_STEP_OUTPUT_BYTES);
+}
+
+function parseApplyPatchFiles(
+  patchText: string,
+): Array<{ path: string; status: string; diff?: string }> {
+  const lines = redactToolDetail(patchText.replace(/\r\n?/g, '\n')).split('\n');
+  const results: Array<{ path: string; status: string; diffLines: string[] }> = [];
+  let current: { path: string; status: string; diffLines: string[] } | undefined;
+  for (const line of lines) {
+    const header = line.match(/^\*\*\*\s+(Update|Add|Delete)\s+File:\s+(.+)$/);
+    if (header?.[1] && header[2]) {
+      const status = header[1] === 'Add' ? 'A' : header[1] === 'Delete' ? 'D' : 'M';
+      current = { path: header[2].trim(), status, diffLines: [] };
+      results.push(current);
+      continue;
+    }
+    if (/^\*\*\*\s+(?:Begin|End)\s+Patch/.test(line)) continue;
+    if (/^\*\*\*\s+Move to:\s+/.test(line)) {
+      if (current) current.diffLines.push(line);
+      continue;
+    }
+    if (current) current.diffLines.push(line);
+  }
+  return results.map((entry) => {
+    const diffBody = entry.diffLines.join('\n').trim();
+    return {
+      path: entry.path,
+      status: entry.status,
+      ...(diffBody ? { diff: boundStepOutputHeadTail(diffBody, MAX_STEP_OUTPUT_BYTES) } : {}),
+    };
+  });
+}
+
+function collectAcpDiffBlocks(
+  value: unknown,
+  into: Array<{ path: string; status: string; diff?: string }>,
+  depth = 0,
+): void {
+  if (depth > 4 || !value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectAcpDiffBlocks(item, into, depth + 1);
+    return;
+  }
+  const rec = value as Record<string, unknown>;
+  if (rec.type === 'diff' && typeof rec.path === 'string' && rec.path.trim()) {
+    const oldText = typeof rec.oldText === 'string' ? rec.oldText : '';
+    const newText = typeof rec.newText === 'string' ? rec.newText : '';
+    const status = oldText ? (newText ? 'M' : 'D') : 'A';
+    const diff = buildUnifiedDiff(oldText, newText);
+    into.push({ path: rec.path, status, ...(diff ? { diff } : {}) });
+    return;
+  }
+  if (rec.content) collectAcpDiffBlocks(rec.content, into, depth + 1);
+}
+
+function extractFiles(
+  call: ToolCallEntry,
+): Array<{ path: string; status?: string; diff?: string }> | undefined {
+  const byPath = new Map<string, { path: string; status?: string; diff?: string }>();
+  const upsert = (rawPath: unknown, rawStatus?: unknown, rawDiff?: string): void => {
+    if (typeof rawPath !== 'string') return;
     const path = normalizeFilePath(rawPath);
-    if (!path || seen.has(path)) return;
-    seen.add(path);
-    const status = typeof rawStatus === 'string' && rawStatus.trim() ? rawStatus.trim().slice(0, 32) : undefined;
-    files.push(status ? { path, status } : { path });
+    if (!path) return;
+    const existing = byPath.get(path);
+    if (!existing && byPath.size >= MAX_STEP_FILES) return;
+    const status =
+      typeof rawStatus === 'string' && rawStatus.trim() ? rawStatus.trim().slice(0, 32) : undefined;
+    const next = {
+      path,
+      ...(existing?.status ?? status ? { status: existing?.status ?? status } : {}),
+      ...(rawDiff ?? existing?.diff ? { diff: rawDiff ?? existing?.diff } : {}),
+    };
+    byPath.set(path, next);
   };
   if (Array.isArray(call.locations)) {
     for (const location of call.locations) {
-      if (typeof location === 'string') push(location);
+      if (typeof location === 'string') upsert(location);
       else {
         const record = asRecord(location);
-        push(record?.path ?? record?.uri, record?.status);
+        upsert(record?.path ?? record?.uri, record?.status);
       }
     }
   }
+  const acpDiffs: Array<{ path: string; status: string; diff?: string }> = [];
+  collectAcpDiffBlocks(call.content, acpDiffs);
+  collectAcpDiffBlocks(call.rawOutput, acpDiffs);
+  for (const entry of acpDiffs) upsert(entry.path, entry.status, entry.diff);
+
   const args = unwrapRawInput(call.rawInput);
   if (args) {
-    for (const key of FILE_PATH_KEYS) push(args[key]);
+    let primaryPath: string | undefined;
+    for (const key of FILE_PATH_KEYS) {
+      if (typeof args[key] === 'string' && !primaryPath) primaryPath = args[key] as string;
+      upsert(args[key]);
+    }
     if (Array.isArray(args.paths)) {
-      for (const entry of args.paths) push(entry);
+      for (const entry of args.paths) upsert(entry);
+    }
+    if (typeof args.patch === 'string' && args.patch.includes('*** ')) {
+      for (const entry of parseApplyPatchFiles(args.patch)) {
+        upsert(entry.path, entry.status, entry.diff);
+      }
+    }
+    if (
+      primaryPath &&
+      typeof args.old_string === 'string' &&
+      typeof args.new_string === 'string'
+    ) {
+      const diff = buildUnifiedDiff(args.old_string, args.new_string);
+      if (diff) upsert(primaryPath, 'M', diff);
+    }
+    if (primaryPath && Array.isArray(args.edits)) {
+      const hunks = args.edits
+        .map((entry) => {
+          const rec = asRecord(entry);
+          if (typeof rec?.old_string !== 'string' || typeof rec?.new_string !== 'string') {
+            return undefined;
+          }
+          return buildUnifiedDiff(rec.old_string, rec.new_string);
+        })
+        .filter((hunk): hunk is string => Boolean(hunk));
+      if (hunks.length) {
+        upsert(primaryPath, 'M', boundStepOutputHeadTail(hunks.join('\n'), MAX_STEP_OUTPUT_BYTES));
+      }
+    }
+    if (primaryPath && typeof args.Target === 'string' && typeof args.Replacement === 'string') {
+      const diff = buildUnifiedDiff(args.Target, args.Replacement);
+      if (diff) upsert(primaryPath, 'M', diff);
+    }
+  } else if (typeof call.rawInput === 'string' && call.rawInput.includes('*** ')) {
+    for (const entry of parseApplyPatchFiles(call.rawInput)) {
+      upsert(entry.path, entry.status, entry.diff);
     }
   }
+  const files = [...byPath.values()];
   return files.length ? files : undefined;
+}
+
+function extractPlan(
+  call: ToolCallEntry,
+): DaemonActivity['plan'] | undefined {
+  const args = unwrapRawInput(call.rawInput);
+  if (!args) return undefined;
+  const rawList = Array.isArray(args.todos)
+    ? args.todos
+    : call.kind === 'plan' || call.name === 'plan'
+      ? (Array.isArray(args.items) ? args.items : Array.isArray(args.entries) ? args.entries : [])
+      : [];
+  if (!rawList.length) return undefined;
+  const items: Array<{ step: string; status: 'pending' | 'in_progress' | 'completed' }> = [];
+  for (const entry of rawList.slice(0, 40)) {
+    const rec = asRecord(entry);
+    if (!rec) continue;
+    const rawStep =
+      (typeof rec.step === 'string' && rec.step) ||
+      (typeof rec.content === 'string' && rec.content) ||
+      (typeof rec.title === 'string' && rec.title) ||
+      '';
+    const step = oneLine(redactToolDetail(rawStep)).slice(0, 200);
+    if (!step) continue;
+    const rawStatus = typeof rec.status === 'string' ? rec.status.toLowerCase() : '';
+    const status: 'pending' | 'in_progress' | 'completed' =
+      rawStatus === 'completed' || rawStatus === 'done'
+        ? 'completed'
+        : rawStatus === 'in_progress' || rawStatus === 'in-progress' || rawStatus === 'working'
+          ? 'in_progress'
+          : 'pending';
+    items.push({ step, status });
+  }
+  if (!items.length) return undefined;
+  const objective =
+    typeof args.objective === 'string' && args.objective.trim()
+      ? oneLine(redactToolDetail(args.objective)).slice(0, 200)
+      : undefined;
+  return { ...(objective ? { objective } : {}), items };
 }
 
 /** Line-preserving text extraction over ACP tool content / rawOutput. */
@@ -288,6 +521,22 @@ export function extractToolOutputText(value: unknown): string {
     if (record.type === 'terminal' && !('text' in record) && !('output' in record) && !('content' in record)) {
       return;
     }
+    if (record.type === 'diff') return;
+    if (record.type === 'image' || record.type === 'audio') {
+      const label = record.type === 'image' ? 'Image' : 'Audio';
+      const mime = typeof record.mimeType === 'string' && record.mimeType.trim() ? record.mimeType.trim() : undefined;
+      parts.push(mime ? `[${label} · ${mime}]` : `[${label}]`);
+      return;
+    }
+    if (record.type === 'resource') {
+      const res = asRecord(record.resource) ?? record;
+      const uri = typeof res.uri === 'string' && res.uri.trim() ? res.uri.trim() : undefined;
+      parts.push(uri ? `[Resource · ${uri}]` : '[Resource]');
+      if (typeof res.text === 'string' && res.text.trim()) {
+        parts.push(res.text);
+      }
+      return;
+    }
     for (const [key, nested] of Object.entries(record)) {
       if (OUTPUT_TEXT_KEYS.has(key.toLowerCase())) {
         walk(nested, depth + 1);
@@ -297,7 +546,7 @@ export function extractToolOutputText(value: unknown): string {
   walk(value, 0);
   if (!parts.length && value && typeof value === 'object' && !Array.isArray(value)) {
     const record = value as Record<string, unknown>;
-    if (record.type !== 'terminal' && Object.keys(record).length > 0) {
+    if (record.type !== 'terminal' && record.type !== 'diff' && Object.keys(record).length > 0) {
       try {
         return JSON.stringify(record);
       } catch {
@@ -306,6 +555,109 @@ export function extractToolOutputText(value: unknown): string {
     }
   }
   return parts.join('\n');
+}
+
+function clampJsonStrings(node: unknown, maxStrLen: number, depth = 0): unknown {
+  if (depth > 8) return '[…]';
+  if (typeof node === 'string') {
+    return node.length > maxStrLen ? `${node.slice(0, Math.max(1, maxStrLen - 1))}…` : node;
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => clampJsonStrings(item, maxStrLen, depth + 1));
+  }
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      out[k] = clampJsonStrings(v, maxStrLen, depth + 1);
+    }
+    return out;
+  }
+  return node;
+}
+
+function sliceArrayHeadTail<T>(items: readonly T[], keep: number): { kept: T[]; omitted: number } {
+  if (items.length <= keep) return { kept: [...items], omitted: 0 };
+  if (keep <= 1) return { kept: items.slice(0, 1), omitted: items.length - 1 };
+  const headCount = Math.ceil(keep * 0.7);
+  const tailCount = keep - headCount;
+  return {
+    kept: [...items.slice(0, headCount), ...(tailCount > 0 ? items.slice(items.length - tailCount) : [])],
+    omitted: items.length - keep,
+  };
+}
+
+function boundJsonValue(parsed: unknown, maxBytes: number): string | undefined {
+  const fits = (candidate: unknown): string | undefined => {
+    try {
+      const json = JSON.stringify(candidate);
+      return Buffer.byteLength(json, 'utf8') <= maxBytes ? json : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  for (const strLimit of [400, 200, 100, 48]) {
+    const clamped = clampJsonStrings(parsed, strLimit);
+    const direct = fits(clamped);
+    if (direct) return direct;
+
+    if (Array.isArray(clamped)) {
+      for (let keep = Math.min(clamped.length - 1, 20); keep >= 1; keep -= 1) {
+        const { kept, omitted } = sliceArrayHeadTail(clamped, keep);
+        const attempt = fits([...kept, { _omittedCount: omitted }]);
+        if (attempt) return attempt;
+      }
+      continue;
+    }
+
+    if (clamped && typeof clamped === 'object') {
+      const obj = clamped as Record<string, unknown>;
+      const arrayKeys = Object.keys(obj).filter((k) => Array.isArray(obj[k]) && (obj[k] as unknown[]).length > 1);
+      if (arrayKeys.length > 0) {
+        const maxLen = Math.max(...arrayKeys.map((k) => (obj[k] as unknown[]).length));
+        for (let keep = Math.min(maxLen - 1, 20); keep >= 1; keep -= 1) {
+          const next: Record<string, unknown> = { ...obj };
+          let omittedTotal = 0;
+          for (const key of arrayKeys) {
+            const arr = obj[key] as unknown[];
+            const { kept, omitted } = sliceArrayHeadTail(arr, keep);
+            next[key] = kept;
+            omittedTotal += omitted;
+          }
+          if (omittedTotal > 0) next._omittedCount = omittedTotal;
+          const attempt = fits(next);
+          if (attempt) return attempt;
+        }
+      }
+      // Trim top-level keys progressively if still over budget.
+      const keys = Object.keys(obj);
+      const partial: Record<string, unknown> = {};
+      let keptKeys = 0;
+      for (const key of keys) {
+        const value = Array.isArray(obj[key])
+          ? (obj[key] as unknown[]).slice(0, 1)
+          : obj[key];
+        const omittedKeys = keys.length - (keptKeys + 1);
+        const candidate = {
+          ...partial,
+          [key]: value,
+          ...(omittedKeys > 0 ? { _omittedCount: omittedKeys } : {}),
+        };
+        if (!fits(candidate)) break;
+        partial[key] = value;
+        keptKeys += 1;
+      }
+      if (keptKeys > 0) {
+        const omittedKeys = keys.length - keptKeys;
+        const attempt = fits({
+          ...partial,
+          ...(omittedKeys > 0 ? { _omittedCount: omittedKeys } : {}),
+        });
+        if (attempt) return attempt;
+      }
+    }
+  }
+  return undefined;
 }
 
 function sliceUtf8Head(buffer: Buffer, maxBytes: number): string {
@@ -333,10 +685,26 @@ function sliceUtf8Tail(buffer: Buffer, maxBytes: number): string {
   return text;
 }
 
-/** Keep a UTF-8-safe head + omission marker + tail within `maxBytes`, preferring line boundaries. */
+/**
+ * Bound output within `maxBytes`. Valid JSON objects/arrays use structure-aware
+ * bounding (keeping valid JSON with `_omittedCount`) before falling back to
+ * UTF-8-safe head + omission marker + tail slicing.
+ */
 export function boundStepOutputHeadTail(raw: string, maxBytes = MAX_STEP_OUTPUT_BYTES): string {
   const buffer = Buffer.from(raw, 'utf8');
   if (buffer.length <= maxBytes) return raw;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (parsed && typeof parsed === 'object') {
+        const boundedJson = boundJsonValue(parsed, maxBytes);
+        if (boundedJson) return boundedJson;
+      }
+    } catch {
+      // Fall through to UTF-8 head+tail slicing for non-JSON payloads.
+    }
+  }
   const markerBytes = Buffer.byteLength(OUTPUT_OMISSION_MARKER, 'utf8');
   const budget = Math.max(0, maxBytes - markerBytes);
   const headBudget = Math.floor(budget * 0.45);
@@ -348,6 +716,24 @@ export function boundStepOutputHeadTail(raw: string, maxBytes = MAX_STEP_OUTPUT_
   const firstTailBreak = tail.indexOf('\n');
   if (firstTailBreak >= 0 && firstTailBreak < tail.length / 2) tail = tail.slice(firstTailBreak + 1);
   return `${head}${OUTPUT_OMISSION_MARKER}${tail}`;
+}
+
+function resolvedStepStatus(call: ToolCallEntry): string {
+  const rawOut = asRecord(call.rawOutput);
+  const terminalExit = asRecord(asRecord(rawOut?._meta)?.terminal_exit);
+  const exitCode =
+    typeof rawOut?.exit_code === 'number'
+      ? rawOut.exit_code
+      : typeof terminalExit?.exit_code === 'number'
+        ? terminalExit.exit_code
+        : undefined;
+  const isErrorOutput =
+    rawOut?.isError === true ||
+    rawOut?.is_error === true ||
+    (exitCode !== undefined && exitCode !== 0);
+  if (call.status && call.status !== 'completed') return call.status;
+  if (isErrorOutput) return 'failed';
+  return call.status ?? 'completed';
 }
 
 /** Split text into pieces no longer than the note bound, never inside a surrogate pair. */
@@ -418,6 +804,7 @@ export function roomReplySteps(
     const command = secret ? undefined : extractCommand(call);
     const input = secret ? undefined : extractInputSummary(call, command);
     const files = secret ? undefined : extractFiles(call);
+    const plan = secret ? undefined : extractPlan(call);
     const raw = secret
       ? ''
       : redactToolDetail(extractToolOutputText(call.content) || extractToolOutputText(call.rawOutput));
@@ -426,10 +813,11 @@ export function roomReplySteps(
       kind: 'tool',
       title: title.slice(0, 240),
       operation: operation.slice(0, 80),
-      status: call.status ?? 'completed',
+      status: resolvedStepStatus(call),
       ...(command ? { command } : {}),
       ...(input ? { input } : {}),
       ...(files ? { files } : {}),
+      ...(plan ? { plan } : {}),
       ...(output ? { output } : {}),
       ...(requestedBy ? { requestedBy } : {}),
     });
