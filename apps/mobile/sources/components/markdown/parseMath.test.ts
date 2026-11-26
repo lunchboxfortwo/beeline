@@ -172,5 +172,22 @@ describe('markdown math blocks and inline spans', () => {
       { styles: [], text: 'https://example.com/a\\', url: 'https://example.com/a\\' },
       { styles: [], text: ')', url: null },
     ]);
+
+    // Backtick code (and other Markdown spans) immediately following a bare URL stay separate
+    expect(parseMarkdownSpans('https://example.com/`literal`', false)).toEqual([
+      { styles: [], text: 'https://example.com/', url: 'https://example.com/' },
+      { styles: ['code'], text: 'literal', url: null },
+    ]);
+
+    expect(parseMarkdownSpans('https://example.com/**bold**', false)).toEqual([
+      { styles: [], text: 'https://example.com/', url: 'https://example.com/' },
+      { styles: ['bold'], text: 'bold', url: null },
+    ]);
+
+    // An unfinished `\(` before a later closed `\( ... \)` leaves the first plain and parses the second
+    expect(parseMarkdownSpans('\\(unfinished then \\(x + 1\\)', false)).toEqual([
+      { styles: [], text: '\\(unfinished then ', url: null },
+      { styles: ['math'], text: 'x + 1', url: null },
+    ]);
   });
 });
