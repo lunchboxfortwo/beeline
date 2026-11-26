@@ -1,23 +1,24 @@
 import type { ActionWeight, TurnActivityAction } from '@/buzz/activity-timeline';
-import { displayFilePath, extractMcpReceipt, peelShellCommand } from './tool-call-classify';
+import { extractMcpReceipt } from './tool-call-classify';
+import type { ToolIdentityLookup } from './tool-identity-lookup';
 import {
   formatToolCallDuration,
+  isTerminalOnlyOutput,
   TOOL_CALL_DURATION_FLOOR_MS,
   toolCallLabel,
-  toolCallVerb,
   toolCallOutput,
+  toolCallSheetTitle,
+  toolCallVerb,
 } from './tool-call-row';
 
 /**
- * The one-line tool ledger (owner-approved design, 2026-08-24).
+ * The flat one-item-per-row tool ledger (v3 — Full ACP + Handoffs).
  *
- * Every settled machine step is ONE collapsed ledger line: a leading family
- * glyph, the verb-object label, a quiet verdict mark, and — only when the step
- * actually carries one — a right-gutter duration. No cards, no chips. A failed
- * step carries its distilled failure reason on its own wrapping line; a tap
- * opens the full raw output and invocation inputs in the Hull output sheet.
- * Every machine run folds into one group line with concise provenance copy,
- * step count, real failure count, and duration.
+ * Every settled machine step is one flat row inside the turn's single
+ * step-count disclosure. No nested observation sub-folders, no repeated step
+ * prose in the trigger header. A failed step carries brass `Failed` on line 1
+ * and its distilled failure reason on line 2; rows with inspectable detail open
+ * the result-first `ToolOutputSheet`, while rows with zero detail omit `›`.
  */
 
 const GLYPH_SHELL = '>_';
@@ -39,7 +40,9 @@ const FILE_VERBS = new Set([
   'grep',
 ]);
 
-export function toolGlyph(step: Pick<TurnActivityAction, 'kind' | 'toolKind' | 'startupWarning'>): string {
+export function toolGlyph(
+  step: Pick<TurnActivityAction, 'kind' | 'toolKind' | 'startupWarning'>,
+): string {
   if (step.kind === 'thought') return GLYPH_THOUGHT;
   if (step.kind === 'note') return step.startupWarning ? GLYPH_TOOL : GLYPH_NOTE;
   const verb = step.toolKind?.toLowerCase() ?? '';
@@ -58,6 +61,8 @@ export type ToolLedgerLine = {
   weight?: ActionWeight;
   glyph: string;
   label: string;
+  /** Full un-truncated action heading for ToolOutputSheet. */
+  sheetTitle?: string;
   verb?: string;
   outcome: 'running' | 'success' | 'failure';
   /** Distilled failure reason; undefined on success. */
@@ -69,34 +74,55 @@ export type ToolLedgerLine = {
   input?: string;
   /** Structured post-condition receipt surfaced from a completed beeline-agent result. */
   receipt?: string;
-  /** The sheet body: full raw output, files, reason. Undefined = not pressable. */
+  /** The sheet body: full raw output, files, reason. Undefined = no body saved. */
   detail?: string;
+  /** Raw output text preserved for structured sheet rendering. */
+  rawOutput?: string;
   outputHidden?: boolean;
+  terminalOnly?: boolean;
   requester?: string;
-  files?: readonly { path: string; status?: string }[];
-  /** Consecutive observational steps folded behind one expandable disclosure row. */
-  folded?: ToolLedgerLine[];
+  files?: readonly { path: string; status?: string; diff?: string }[];
+  plan?: TurnActivityAction['plan'];
+  /** True only when tapping opens meaningful detail in ToolOutputSheet. */
+  inspectable: boolean;
 };
 
 /**
  * One ledger line per step, in turn order. The turn's final step on a live
- * turn reads as running — the same live override the previous renderer applied
- * — so the row the agent is inside right now carries the spinner.
+ * turn reads as running so the row the agent is inside right now carries the
+ * spinner.
  */
 export function toolLedgerLines(
   steps: readonly TurnActivityAction[],
   live = false,
+  lookup?: ToolIdentityLookup,
 ): ToolLedgerLine[] {
   return steps.map((step, index) => {
     const isCurrent = live && index === steps.length - 1;
-    const outcome: ToolLedgerLine['outcome'] = isCurrent && !step.startupWarning ? 'running' : step.outcome;
-    // A duration only earns a gutter above the floor (`tool-call-row.ts`); a
-    // faster step omits it rather than faking one.
+    const outcome: ToolLedgerLine['outcome'] =
+      isCurrent && !step.startupWarning ? 'running' : step.outcome;
     const durationMs =
       step.durationMs && step.durationMs >= TOOL_CALL_DURATION_FLOOR_MS
         ? step.durationMs
         : undefined;
-    const receipt = step.kind === 'tool' ? extractMcpReceipt(step.output) : undefined;
+    const receipt = step.kind === 'tool' ? extractMcpReceipt(step.output, lookup) : undefined;
+    const terminalOnly = isTerminalOnlyOutput(step.output);
+    const detailProps = detailOf(step);
+    const hasDetail = Boolean(
+      ('detail' in detailProps && detailProps.detail) ||
+        step.command ||
+        step.input ||
+        receipt ||
+        step.files?.length ||
+        step.toolOutput ||
+        step.plan?.items.length ||
+        ('requester' in detailProps && detailProps.requester) ||
+        outcome === 'failure',
+    );
+    const inspectable =
+      !step.rollupOnly &&
+      (step.kind === 'note' ? Boolean(step.startupWarning && hasDetail) : hasDetail);
+
     return {
       id: step.id,
       ...(step.toolGroup ? { toolGroup: step.toolGroup } : {}),
@@ -105,19 +131,21 @@ export function toolLedgerLines(
       ...(step.startupWarning ? { startupWarning: true as const } : {}),
       weight: step.weight,
       glyph: toolGlyph(step),
-      // A thought's own label already says `thought` and a note's label is its
-      // whole text; a tool's label is the call's object (tool-call-row.ts) —
-      // the glyph carries the family.
-      label: step.kind === 'tool' ? toolCallLabel(step) : step.label,
-      verb: step.kind === 'tool' ? toolCallVerb(step) : undefined,
+      label: step.kind === 'tool' ? toolCallLabel(step, lookup) : step.label,
+      ...(step.kind === 'tool' ? { sheetTitle: toolCallSheetTitle(step, lookup) } : {}),
+      verb: step.kind === 'tool' ? toolCallVerb(step, lookup) : undefined,
       outcome,
       ...(outcome === 'failure' && step.reason ? { reason: step.reason } : {}),
       ...(durationMs ? { durationMs } : {}),
       ...(step.command ? { command: step.command } : {}),
       ...(step.input ? { input: step.input } : {}),
       ...(receipt ? { receipt } : {}),
+      ...(step.output && !terminalOnly ? { rawOutput: step.output } : {}),
+      ...(terminalOnly ? { terminalOnly: true } : {}),
       ...(step.files?.length ? { files: step.files } : {}),
-      ...detailOf(step),
+      ...(step.plan ? { plan: step.plan } : {}),
+      ...detailProps,
+      inspectable,
     };
   });
 }
@@ -149,309 +177,6 @@ function detailOf(
   };
 }
 
-function isFoldableObservation(line: ToolLedgerLine): boolean {
-  return (
-    line.kind === 'tool' &&
-    line.weight === 'observation' &&
-    line.outcome === 'success' &&
-    !line.toolGroup &&
-    !line.folded
-  );
-}
-
-function observationFileTarget(line: ToolLedgerLine): string | undefined {
-  if (line.verb === 'read' && line.label && !/^\d+\s+calls$/i.test(line.label) && line.label !== 'chat messages' && line.label !== 'thread brief' && line.label !== 'session' && line.label !== 'session setup') {
-    return line.label;
-  }
-  const cmd = peelShellCommand(line.command ?? line.label);
-  const catMatch = cmd.match(/^(?:cat|head|tail|sed\s+-n|nl)\b.*?\s([^\s|;&'"`]+\.[a-z0-9]{1,8})$/i);
-  if (catMatch?.[1]) {
-    return displayFilePath(catMatch[1]);
-  }
-  return undefined;
-}
-
-function isCodeSearchLine(line: ToolLedgerLine): boolean {
-  if (line.verb === 'found') return true;
-  const cmd = peelShellCommand(line.command ?? line.label).toLowerCase();
-  return /^(?:rg|grep|egrep|fgrep|ag|ack|find)\b/.test(cmd);
-}
-
-function isGitInspectLine(line: ToolLedgerLine): boolean {
-  return line.verb === 'git';
-}
-
-function capitalize(value: string): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
-}
-
-/** Summarize a run of consecutive read-only observations for one foldable row. */
-export function formatObservationFoldLabel(lines: readonly ToolLedgerLine[]): string {
-  const readFiles: string[] = [];
-  const seenFiles = new Set<string>();
-  const mcpPhrases: string[] = [];
-  const seenMcp = new Set<string>();
-  let searchCount = 0;
-  let gitCount = 0;
-  let listCount = 0;
-  let fetchCount = 0;
-  let otherCount = 0;
-
-  for (const line of lines) {
-    if (line.verb === 'listed' && line.label && !/^(?:files|\d+\s+calls)$/i.test(line.label)) {
-      const target = line.label.startsWith('schedules · ') ? 'schedules' : line.label;
-      const phrase = `listed ${target}`;
-      if (!seenMcp.has(phrase)) {
-        seenMcp.add(phrase);
-        mcpPhrases.push(phrase);
-      }
-      continue;
-    }
-    if (line.verb === 'checked' && line.label) {
-      const phrase = `checked ${line.label}`;
-      if (!seenMcp.has(phrase)) {
-        seenMcp.add(phrase);
-        mcpPhrases.push(phrase);
-      }
-      continue;
-    }
-    if (line.verb === 'read' && /^(?:chat messages|message|thread brief|pull request|attachment|procedure|session)/i.test(line.label)) {
-      const phrase = `read ${line.label}`;
-      if (!seenMcp.has(phrase)) {
-        seenMcp.add(phrase);
-        mcpPhrases.push(phrase);
-      }
-      continue;
-    }
-    if (isCodeSearchLine(line)) {
-      searchCount += 1;
-      continue;
-    }
-    if (isGitInspectLine(line)) {
-      gitCount += 1;
-      continue;
-    }
-    if (line.verb === 'fetched') {
-      fetchCount += 1;
-      continue;
-    }
-    const file = observationFileTarget(line);
-    if (file) {
-      if (!seenFiles.has(file)) {
-        seenFiles.add(file);
-        readFiles.push(file);
-      }
-      continue;
-    }
-    if (line.verb === 'listed' || /^(?:ls|tree|dir)\b/i.test(line.command ?? line.label)) {
-      listCount += 1;
-      continue;
-    }
-    otherCount += 1;
-  }
-
-  const clauses: string[] = [];
-  if (mcpPhrases.length) {
-    clauses.push(...mcpPhrases.slice(0, 2));
-  }
-  if (readFiles.length === 1) {
-    clauses.push(`read ${readFiles[0]}`);
-  } else if (readFiles.length > 1) {
-    const rest = readFiles.length - 1;
-    clauses.push(`read ${readFiles[0]} & ${rest} ${rest === 1 ? 'file' : 'files'}`);
-  }
-  if (searchCount > 0) clauses.push('searched code');
-  if (gitCount > 0) clauses.push('checked git');
-  if (listCount > 0) clauses.push('listed files');
-  if (fetchCount > 0) clauses.push('fetched web');
-  if (!clauses.length && otherCount > 0) clauses.push('inspected details');
-
-  const body = capitalize(clauses.slice(0, 3).join(', ') || 'inspected details');
-  return `${body} (${lines.length} ${lines.length === 1 ? 'call' : 'calls'})`;
-}
-
-function foldConsecutiveObservations(lines: readonly ToolLedgerLine[]): ToolLedgerLine[] {
-  const result: ToolLedgerLine[] = [];
-  let buffer: ToolLedgerLine[] = [];
-
-  const flush = () => {
-    if (!buffer.length) return;
-    if (buffer.length === 1) {
-      result.push(buffer[0]!);
-    } else {
-      const durations = buffer
-        .map((line) => line.durationMs)
-        .filter((ms): ms is number => typeof ms === 'number');
-      const durationMs = durations.length ? durations.reduce((sum, ms) => sum + ms, 0) : undefined;
-      result.push({
-        id: `obs-${buffer[0]!.id}`,
-        kind: 'tool',
-        weight: 'observation',
-        glyph: GLYPH_FILE,
-        label: formatObservationFoldLabel(buffer),
-        outcome: 'success',
-        ...(durationMs ? { durationMs } : {}),
-        folded: [...buffer],
-      });
-    }
-    buffer = [];
-  };
-
-  for (const line of lines) {
-    if (isFoldableObservation(line)) {
-      buffer.push(line);
-    } else {
-      flush();
-      result.push(line);
-    }
-  }
-  flush();
-  return result;
-}
-
-function inferCodeArea(lines: readonly ToolLedgerLine[]): string | undefined {
-  const areas = new Set<string>();
-  for (const line of lines) {
-    const hay = `${line.command ?? ''} ${line.input ?? ''} ${line.label} ${(line.files ?? []).map((f) => f.path).join(' ')}`;
-    if (/\bapps\/server\b|\bserver\//i.test(hay)) areas.add('server');
-    if (/\bapps\/mobile\b|\bmobile\//i.test(hay)) areas.add('mobile');
-    if (/\bapps\/body\b|\bbody\//i.test(hay)) areas.add('body');
-  }
-  if (areas.size === 1) return [...areas][0];
-  return undefined;
-}
-
-/**
- * Concise provenance copy summarizing the highest-signal actions and inspections
- * in a run (e.g. `Listed schedules · inspected skill & server code`), without
- * repeating the agent's prose answer.
- */
-export function toolRunProvenance(lines: readonly ToolLedgerLine[]): string | undefined {
-  const flat: ToolLedgerLine[] = [];
-  for (const line of lines) {
-    if (line.kind !== 'tool' || line.toolGroup) continue;
-    if (line.folded?.length) flat.push(...line.folded);
-    else flat.push(line);
-  }
-  if (!flat.length) return undefined;
-
-  const primaryActions: string[] = [];
-  const seenPrimary = new Set<string>();
-  const editedFiles = new Set<string>();
-  const inspectedFiles: string[] = [];
-  let sawSkill = false;
-  let sawCodeInspect = false;
-
-  const pushPrimary = (phrase: string) => {
-    const key = phrase.toLowerCase();
-    if (!seenPrimary.has(key)) {
-      seenPrimary.add(key);
-      primaryActions.push(phrase);
-    }
-  };
-
-  for (const line of flat) {
-    const verb = line.verb?.toLowerCase();
-    if (verb === 'wrote' || verb === 'moved' || verb === 'deleted') {
-      if (line.label) editedFiles.add(line.label);
-      continue;
-    }
-    if (
-      verb &&
-      [
-        'listed',
-        'created',
-        'updated',
-        'paused',
-        'resumed',
-        'cleared',
-        'replied',
-        'reported',
-        'sent',
-        'asked',
-        'opened',
-        'revised',
-        'installed',
-        'renamed',
-        'closed',
-        'claimed',
-        'set',
-        'released',
-        'approved',
-        'saved',
-        'posted',
-        'connected',
-        'prepared',
-        'requested',
-        'stopped',
-        'dispatched',
-        'checked',
-      ].includes(verb) &&
-      line.label &&
-      !/^(?:files|\d+\s+calls)$/i.test(line.label)
-    ) {
-      const compactTarget = line.label.includes(' · ') ? line.label.split(' · ')[0]!.trim() : line.label;
-      pushPrimary(`${verb} ${compactTarget || line.label}`);
-      continue;
-    }
-    if (verb === 'read' && /^(?:chat messages|message|thread brief|pull request|attachment|procedure)/i.test(line.label)) {
-      pushPrimary(`read ${line.label}`);
-      continue;
-    }
-    if (line.weight === 'observation') {
-      const target = observationFileTarget(line);
-      if (target) {
-        if (/skill\.md$/i.test(target)) sawSkill = true;
-        else {
-          inspectedFiles.push(target);
-          sawCodeInspect = true;
-        }
-      } else if (isCodeSearchLine(line) || isGitInspectLine(line)) {
-        sawCodeInspect = true;
-      }
-      continue;
-    }
-    // Non-observational commands: surface meaningful build/test/typecheck/lint commands.
-    const cmd = (line.command ?? line.label).toLowerCase();
-    if (/\b(?:vitest|jest|mocha|playwright|npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test)\b/.test(cmd)) {
-      pushPrimary('ran tests');
-    } else if (/\b(?:typecheck|tsc)\b/.test(cmd)) {
-      pushPrimary('ran typecheck');
-    } else if (/\b(?:lint|eslint)\b/.test(cmd)) {
-      pushPrimary('ran lint');
-    } else if (/\bbuild\b/.test(cmd)) {
-      pushPrimary('ran build');
-    } else if (verb === 'git' && /\bcommit\b/.test(line.label.toLowerCase())) {
-      pushPrimary('committed changes');
-    }
-  }
-
-  const parts: string[] = [];
-  if (editedFiles.size === 1) {
-    parts.push(`edited ${[...editedFiles][0]}`);
-  } else if (editedFiles.size > 1) {
-    parts.push(`edited ${editedFiles.size} files`);
-  }
-  for (const action of primaryActions) {
-    if (parts.length >= 2) break;
-    parts.push(action);
-  }
-  if (parts.length < 2 && (sawSkill || sawCodeInspect)) {
-    const area = inferCodeArea(flat);
-    if (sawSkill && sawCodeInspect) {
-      parts.push(area ? `inspected skill & ${area} code` : 'inspected skill & code');
-    } else if (sawSkill) {
-      parts.push('read skill');
-    } else if (inspectedFiles.length === 1 && !flat.some(isCodeSearchLine)) {
-      parts.push(`read ${inspectedFiles[0]}`);
-    } else {
-      parts.push(area ? `inspected ${area} code` : 'inspected code');
-    }
-  }
-  if (!parts.length) return undefined;
-  return parts.map((part, index) => (index === 0 ? capitalize(part) : part)).join(' · ');
-}
-
 export type ToolLedgerRun = {
   kind: 'group';
   id: string;
@@ -460,16 +185,12 @@ export type ToolLedgerRun = {
   failed: number;
   notes: number;
   durationMs?: number;
-  /** Concise provenance summary leading the collapsed disclosure. */
-  provenance?: string;
   lines: ToolLedgerLine[];
 };
 
 /**
- * Fold a machine run into one group line, collapsed by default and expandable
- * in place. Consecutive read-only observations inside the run fold into a
- * single expandable summary line while mutations, external sends, and real
- * failures stay visible on their own lines.
+ * Group a machine run under one quiet step-count trigger, expanding to one
+ * flat single-item-per-row list with zero nested sub-folders.
  */
 export function groupToolLedgerRuns(lines: readonly ToolLedgerLine[]): ToolLedgerRun[] {
   if (!lines.length) return [];
@@ -483,8 +204,6 @@ export function groupToolLedgerRuns(lines: readonly ToolLedgerLine[]): ToolLedge
     (sum, line) => sum + (line.kind === 'note' ? 0 : (line.toolGroup?.count ?? 1)),
     0,
   );
-  const foldedLines = foldConsecutiveObservations(lines);
-  const provenance = toolRunProvenance(foldedLines);
   return [
     {
       kind: 'group',
@@ -493,22 +212,19 @@ export function groupToolLedgerRuns(lines: readonly ToolLedgerLine[]): ToolLedge
       failed,
       notes,
       ...(durationMs ? { durationMs } : {}),
-      ...(provenance ? { provenance } : {}),
-      lines: foldedLines,
+      lines: [...lines],
     },
   ];
 }
 
-/** The group line's copy: `[provenance · ]6 steps · 2 failed · 2 notes · 48s` — segments the run earned. */
+/** The quiet count trigger copy: `6 steps · 2 failed · 2 notes · 48.0s`. */
 export function toolGroupSummary(
   count: number,
   failed: number,
   durationMs: number | undefined,
   notes = 0,
-  provenance?: string,
 ): string {
   const segments: string[] = [];
-  if (provenance) segments.push(provenance);
   if (count > 0 || notes === 0) segments.push(`${count} ${count === 1 ? 'step' : 'steps'}`);
   if (failed > 0) segments.push(`${failed} failed`);
   if (notes > 0) segments.push(`${notes} ${notes === 1 ? 'note' : 'notes'}`);

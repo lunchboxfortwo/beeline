@@ -1,3 +1,16 @@
+import {
+  formatMessageTarget,
+  humanizeAppName,
+  isRawHex64,
+  isRawUuid,
+  parseAgentAddress,
+  resolveMemberLabel,
+  resolvePlaceLabel,
+  sanitizeIdsInText,
+  summarizeScheduleListOutput,
+  type ToolIdentityLookup,
+} from './tool-identity-lookup';
+
 /**
  * Shell command unwrapping, read-only classification, disambiguated file paths,
  * and cross-harness MCP call formatting for the mobile tool ledger.
@@ -527,6 +540,8 @@ export type McpCallDescription = {
   namedTool?: boolean;
   /** Structured post-condition receipt from a completed beeline-agent tool result. */
   receipt?: string;
+  /** Keep generous label width for resolved targets / handoffs. */
+  expandedLabel?: boolean;
 };
 
 const STRUCTURED_RECEIPT_VERBS: Readonly<Record<string, string>> = {
@@ -595,79 +610,27 @@ function unwrapMcpOutputObject(output: string | undefined): Record<string, unkno
   return undefined;
 }
 
-function formatSchedulePerson(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const rec = value as Record<string, unknown>;
-  if (typeof rec.handle === 'string' && rec.handle.trim()) {
-    return `@${rec.handle.trim().replace(/^@/, '')}`;
-  }
-  if (typeof rec.name === 'string' && rec.name.trim()) return rec.name.trim();
-  if (typeof rec.identityId === 'string' && rec.identityId.trim()) {
-    return rec.identityId.trim().slice(0, 8);
-  }
-  return undefined;
-}
-
-function formatShortNextRun(nextRunAt: unknown, cadence: unknown): string | undefined {
-  if (typeof nextRunAt !== 'number' || !Number.isFinite(nextRunAt)) return undefined;
-  const date = new Date(nextRunAt * 1_000);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const timeZone =
-    cadence &&
-    typeof cadence === 'object' &&
-    !Array.isArray(cadence) &&
-    (cadence as Record<string, unknown>).kind === 'cron' &&
-    typeof (cadence as Record<string, unknown>).timeZone === 'string' &&
-    (cadence as Record<string, unknown>).timeZone
-      ? String((cadence as Record<string, unknown>).timeZone)
-      : 'UTC';
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      weekday: 'short',
-      hour: 'numeric',
-      minute: '2-digit',
-      timeZone,
-      timeZoneName: 'short',
-    }).format(date);
-  } catch {
-    return date.toISOString();
-  }
-}
-
 function describeScheduleListOutput(
   outputObj: Record<string, unknown>,
 ): McpCallDescription | undefined {
-  if (!Array.isArray(outputObj.schedules)) return undefined;
-  const entries = outputObj.schedules.filter(
-    (entry): entry is Record<string, unknown> =>
-      Boolean(entry && typeof entry === 'object' && !Array.isArray(entry)),
-  );
-  if (!entries.length) return { verb: 'listed', object: 'schedules', observational: true };
-  const first = entries[0]!;
-  const title = readField(first, ['title', 'workflowName', 'scheduleId']);
-  if (!title) return { verb: 'listed', object: 'schedules', observational: true };
-  const details: string[] = [];
-  const nextRun = formatShortNextRun(first.nextRunAt, first.cadence);
-  if (nextRun) details.push(`next ${nextRun}`);
-  const repliesTo = formatSchedulePerson(first.repliesTo);
-  if (repliesTo) details.push(`replies to ${repliesTo}`);
-  const summary = details.length ? `${title} (${details.join(' · ')})` : title;
-  const more = entries.length > 1 ? ` +${entries.length - 1} more` : '';
+  const summary = summarizeScheduleListOutput(outputObj);
+  if (!summary) return undefined;
   return {
     verb: 'listed',
-    object: `schedules · ${summary}${more}`,
+    object: summary.object,
     observational: true,
-    receipt: `${summary}${more}`,
+    ...(summary.receipt ? { receipt: summary.receipt } : {}),
   };
 }
 
 function describeStructuredReceipt(
   outputObj: Record<string, unknown>,
   fallback: McpCallDescription,
+  lookup?: ToolIdentityLookup,
 ): McpCallDescription | undefined {
   const rawReceipt = readField(outputObj, ['receipt']);
   if (!rawReceipt) return undefined;
-  const firstLine = oneLine(rawReceipt.split('\n')[0] ?? rawReceipt);
+  const firstLine = sanitizeIdsInText(oneLine(rawReceipt.split('\n')[0] ?? rawReceipt), lookup);
   if (!firstLine) return undefined;
   const space = firstLine.indexOf(' ');
   if (space > 0) {
@@ -680,6 +643,7 @@ function describeStructuredReceipt(
         verb: mappedVerb,
         object: rest,
         receipt: firstLine,
+        expandedLabel: true,
       };
     }
   }
@@ -687,15 +651,19 @@ function describeStructuredReceipt(
     ...fallback,
     object: firstLine,
     receipt: firstLine,
+    expandedLabel: true,
   };
 }
 
 /** Extract structured receipt text from a completed beeline-agent MCP JSON output. */
-export function extractMcpReceipt(output: string | undefined): string | undefined {
+export function extractMcpReceipt(
+  output: string | undefined,
+  lookup?: ToolIdentityLookup,
+): string | undefined {
   const outputObj = unwrapMcpOutputObject(output);
   if (!outputObj) return undefined;
   const raw = readField(outputObj, ['receipt']);
-  return raw ? oneLine(raw.split('\n')[0] ?? raw) : undefined;
+  return raw ? sanitizeIdsInText(oneLine(raw.split('\n')[0] ?? raw), lookup) : undefined;
 }
 
 function mcpArgs(input?: string): Record<string, unknown> | undefined {
@@ -772,6 +740,7 @@ export function describeMcpCall(
   input?: string,
   command?: string,
   output?: string,
+  lookup?: ToolIdentityLookup,
 ): McpCallDescription {
   const server = normalizedServer(mcp.server);
   const tool = mcp.tool.toLowerCase();
@@ -782,13 +751,22 @@ export function describeMcpCall(
   const query = readField(args, ['query', 'pattern']);
   const path = readField(args, ['path', 'file_path', 'filePath', 'filename']);
   const slug = readField(args, ['slug', 'name']);
-  const target = readField(args, ['target', 'address', 'service', 'recipient']);
+  const rawTarget = readField(args, ['target', 'address', 'service', 'recipient', 'agent']);
+  const rawRoom = readField(args, ['roomId', 'room']);
+  const safePlace = resolvePlaceLabel(rawTarget, lookup) ?? resolvePlaceLabel(rawRoom, lookup);
+  const safeTarget = rawTarget
+    ? isRawHex64(rawTarget)
+      ? (resolveMemberLabel(rawTarget, lookup) ?? 'agent')
+      : isRawUuid(rawTarget)
+        ? (resolvePlaceLabel(rawTarget, lookup) ?? 'thread')
+        : sanitizeIdsInText(rawTarget, lookup)
+    : undefined;
 
   if (server === 'beeline-agent') {
     const outputObj = unwrapMcpOutputObject(output);
     const withOutput = (fallback: McpCallDescription): McpCallDescription => {
       if (!outputObj) return fallback;
-      const fromReceipt = describeStructuredReceipt(outputObj, fallback);
+      const fromReceipt = describeStructuredReceipt(outputObj, fallback, lookup);
       if (fromReceipt) return fromReceipt;
       if (tool === 'wake' && action === 'list') {
         const fromList = describeScheduleListOutput(outputObj);
@@ -823,13 +801,13 @@ export function describeMcpCall(
     }
     if (tool === 'read') {
       const map: Record<string, McpCallDescription> = {
-        messages: { verb: 'read', object: 'chat messages', observational: true },
+        messages: { verb: 'read', object: safePlace ? `messages in ${safePlace}` : 'chat messages', observational: true },
         message: { verb: 'read', object: 'message', observational: true },
         addresses: { verb: 'listed', object: 'chats', observational: true },
         threads: { verb: 'listed', object: 'threads', observational: true },
         members: { verb: 'listed', object: 'members', observational: true },
-        brief: { verb: 'read', object: 'thread brief', observational: true },
-        status: { verb: 'checked', object: 'thread status', observational: true },
+        brief: { verb: 'read', object: safePlace ? `${safePlace} brief` : 'thread brief', observational: true },
+        status: { verb: 'checked', object: safePlace ? `${safePlace} status` : 'thread status', observational: true },
         checks: { verb: 'checked', object: 'PR checks', observational: true },
         pr: { verb: 'read', object: 'pull request', observational: true },
         attachment: { verb: 'read', object: 'attachment', observational: true },
@@ -846,7 +824,7 @@ export function describeMcpCall(
         },
       };
       if (facet && map[facet]) return map[facet]!;
-      return describeToolSummary(args) ?? { verb: 'read', object: target || 'Beeline', observational: true };
+      return describeToolSummary(args) ?? { verb: 'read', object: safeTarget || 'Beeline', observational: true };
     }
     if (tool === 'search') {
       const scope = readField(args, ['scope'])?.toLowerCase();
@@ -859,23 +837,41 @@ export function describeMcpCall(
     }
     if (tool === 'message') {
       const type = readField(args, ['type'])?.toLowerCase();
-      if (type === 'reply') return withOutput({ verb: 'replied', object: target || 'message' });
       if (type === 'blocked') return withOutput({ verb: 'reported', object: 'blocker' });
-      return withOutput({ verb: 'sent', object: target || 'message' });
+      const msgTarget = formatMessageTarget(rawTarget, rawRoom, lookup);
+      if (type === 'reply') {
+        const replyObj = msgTarget.agent
+          ? msgTarget.place
+            ? `to ${msgTarget.agent} in ${msgTarget.place}`
+            : `to ${msgTarget.agent}`
+          : msgTarget.place
+            ? `in ${msgTarget.place}`
+            : 'message';
+        return withOutput({ verb: 'replied', object: replyObj, expandedLabel: true });
+      }
+      return withOutput({ verb: 'sent', object: msgTarget.object, expandedLabel: true });
     }
     if (tool === 'reply') {
-      return withOutput({ verb: 'replied', object: target || 'message' });
+      const msgTarget = formatMessageTarget(rawTarget, rawRoom, lookup);
+      const replyObj = msgTarget.agent
+        ? msgTarget.place
+          ? `to ${msgTarget.agent} in ${msgTarget.place}`
+          : `to ${msgTarget.agent}`
+        : msgTarget.place
+          ? `in ${msgTarget.place}`
+          : 'message';
+      return withOutput({ verb: 'replied', object: replyObj, expandedLabel: true });
     }
     if (tool === 'open_thread') {
       return withOutput({ verb: 'opened', object: title ? `thread · ${title}` : 'thread' });
     }
     if (tool === 'revise_thread') {
-      return withOutput({ verb: 'updated', object: title ? `thread · ${title}` : 'thread' });
+      return withOutput({ verb: 'updated', object: title ? `thread · ${title}` : safePlace || 'thread' });
     }
-    if (tool === 'close_thread') return withOutput({ verb: 'closed', object: 'thread' });
-    if (tool === 'claim_thread') return withOutput({ verb: 'claimed', object: 'thread' });
-    if (tool === 'approve_merge') return withOutput({ verb: 'approved', object: 'merge' });
-    if (tool === 'set_thread_hold') return withOutput({ verb: 'updated', object: 'merge hold' });
+    if (tool === 'close_thread') return withOutput({ verb: 'closed', object: safePlace ? `thread · ${safePlace}` : 'thread' });
+    if (tool === 'claim_thread') return withOutput({ verb: 'claimed', object: safePlace || 'thread' });
+    if (tool === 'approve_merge') return withOutput({ verb: 'approved', object: safePlace ? `merge for ${safePlace}` : 'merge' });
+    if (tool === 'set_thread_hold') return withOutput({ verb: 'updated', object: safePlace ? `merge hold on ${safePlace}` : 'merge hold' });
     if (tool === 'create_work_item') {
       return withOutput({ verb: 'created', object: title ? `task · ${title}` : 'task' });
     }
@@ -901,12 +897,21 @@ export function describeMcpCall(
       return { verb: 'checked', object: service || 'connections', observational: true };
     }
     if (tool === 'app_tool') {
-      const app = readField(args, ['app']);
+      const app = humanizeAppName(readField(args, ['app']));
       const subTool = readField(args, ['tool']);
       if (!subTool) {
-        return { verb: 'listed', object: app ? `${app} tools` : 'app tools', observational: true };
+        return {
+          verb: query ? 'searched' : 'listed',
+          object: app ? `${app} tools` : 'app tools',
+          observational: true,
+          expandedLabel: true,
+        };
       }
-      return withOutput({ verb: 'ran', object: [app, subTool].filter(Boolean).join(' · ') });
+      return withOutput({
+        verb: 'ran',
+        object: [app, subTool.replace(/_/g, ' ')].filter(Boolean).join(' · '),
+        expandedLabel: true,
+      });
     }
     if (tool === 'workspace') return { verb: 'prepared', object: 'workspace' };
     if (tool === 'request_grant') {
@@ -914,9 +919,13 @@ export function describeMcpCall(
       if (mode === 'list') return { verb: 'listed', object: 'grants', observational: true };
       return withOutput({ verb: 'requested', object: readField(args, ['action', 'target']) || 'grant' });
     }
-    if (tool === 'run_granted_command') return { verb: 'ran', object: target || 'granted command' };
+    if (tool === 'run_granted_command') return { verb: 'ran', object: safeTarget || 'granted command' };
     if (tool === 'report_feedback') return withOutput({ verb: 'reported', object: 'feedback' });
-    if (tool === 'stop') return withOutput({ verb: 'stopped', object: target || 'agent' });
+    if (tool === 'stop') {
+      const parsed = parseAgentAddress(rawTarget, lookup);
+      const who = parsed.agent ?? (safeTarget && !safeTarget.startsWith('#') ? safeTarget : 'agent');
+      return withOutput({ verb: 'stopped', object: parsed.place ? `${who} in ${parsed.place}` : who });
+    }
     if (tool === 'dispatch_release') return withOutput({ verb: 'dispatched', object: 'release' });
     if (tool === 'scratch_io') {
       return {
@@ -974,7 +983,7 @@ export function describeMcpCall(
     (path ? displayFilePath(path) : undefined) ||
     query ||
     title ||
-    target ||
+    safeTarget ||
     (input && !input.trim().startsWith('{') ? oneLine(input) : '') ||
     mcp.server;
   return { verb: mcp.tool, object: argTarget, namedTool: true };

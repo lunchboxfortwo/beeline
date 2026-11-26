@@ -63,7 +63,15 @@ const MODEL_AXIS_ID = 'model';
 
 export type AcpSessionUpdate = {
   sessionUpdate: string;
-  content?: { type: 'text'; text: string };
+  content?: { type: 'text'; text: string } | unknown;
+  toolCallId?: string;
+  title?: string;
+  name?: string;
+  kind?: string;
+  status?: string;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+  locations?: unknown;
 };
 
 export type CursorStreamEvent = {
@@ -73,6 +81,17 @@ export type CursorStreamEvent = {
   is_error?: unknown;
   result?: unknown;
   message?: unknown;
+  call_id?: unknown;
+  tool_call_id?: unknown;
+  id?: unknown;
+  name?: unknown;
+  tool?: unknown;
+  tool_call?: unknown;
+  arguments?: unknown;
+  input?: unknown;
+  output?: unknown;
+  content?: unknown;
+  error?: unknown;
 };
 
 export type CursorAcpWriter = (message: Record<string, unknown>) => void;
@@ -284,11 +303,69 @@ function chunkUpdate(
   return { sessionUpdate, content: { type: 'text', text } };
 }
 
+function cursorToolKind(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('read')) return 'read';
+  if (lower.includes('edit') || lower.includes('write') || lower.includes('patch')) return 'edit';
+  if (lower.includes('delete') || lower.includes('remove')) return 'delete';
+  if (lower.includes('shell') || lower.includes('bash') || lower.includes('exec') || lower.includes('terminal')) return 'execute';
+  if (lower.includes('search') || lower.includes('grep') || lower.includes('glob') || lower.includes('list')) return 'search';
+  return 'other';
+}
+
+function unwrapCursorToolCall(event: CursorStreamEvent): {
+  toolCallId?: string;
+  name: string;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+  isError?: boolean;
+} | undefined {
+  const callId =
+    (typeof event.call_id === 'string' && event.call_id) ||
+    (typeof event.tool_call_id === 'string' && event.tool_call_id) ||
+    (typeof event.id === 'string' && event.id) ||
+    undefined;
+  const nested = asRecord(event.tool_call);
+  if (nested) {
+    const entries = Object.entries(nested);
+    if (entries.length > 0) {
+      const [key, body] = entries[0]!;
+      const bodyRec = asRecord(body);
+      const rawName =
+        (typeof bodyRec?.name === 'string' && bodyRec.name) ||
+        (typeof bodyRec?.tool === 'string' && bodyRec.tool) ||
+        key.replace(/ToolCall$/i, '');
+      const rawInput = bodyRec?.args ?? bodyRec?.arguments ?? bodyRec?.input;
+      const resultRec = asRecord(bodyRec?.result);
+      const isError =
+        event.is_error === true ||
+        bodyRec?.is_error === true ||
+        resultRec?.is_error === true ||
+        resultRec?.isError === true ||
+        'rejected' in (resultRec ?? {}) ||
+        'error' in (resultRec ?? {});
+      const rawOutput =
+        resultRec?.success ?? resultRec?.error ?? resultRec?.rejected ?? bodyRec?.result;
+      return { toolCallId: callId, name: rawName || 'tool', rawInput, rawOutput, isError };
+    }
+  }
+  const flatName =
+    (typeof event.name === 'string' && event.name) ||
+    (typeof event.tool === 'string' && event.tool) ||
+    undefined;
+  if (!flatName && !callId) return undefined;
+  const rawInput = event.arguments ?? event.input;
+  const rawOutput = event.output ?? event.result ?? event.error ?? event.content;
+  const isError = event.is_error === true || Boolean(event.error);
+  return { toolCallId: callId, name: flatName ?? 'tool', rawInput, rawOutput, isError };
+}
+
 /**
  * Map one verified cursor-agent stream-json object onto ACP session updates.
  * `thinking` deltas become thoughts; `assistant` message content becomes the
- * durable answer stream; `result` is the turn-end signal (handled by the
- * caller). Init/user frames are ignored.
+ * durable answer stream; `tool_call`/`tool_result` become ACP tool updates;
+ * `result` is the turn-end signal (handled by the caller). Init/user frames
+ * are ignored.
  */
 export function translateCursorStreamEvent(event: CursorStreamEvent): AcpSessionUpdate[] {
   if (event.type === 'thinking') {
@@ -298,6 +375,41 @@ export function translateCursorStreamEvent(event: CursorStreamEvent): AcpSession
   }
   if (event.type === 'assistant') {
     return assistantTexts(event).map((text) => chunkUpdate('agent_message_chunk', text));
+  }
+  if (event.type === 'tool_call') {
+    const info = unwrapCursorToolCall(event);
+    if (!info) return [];
+    const completed = event.subtype === 'completed' || info.rawOutput !== undefined;
+    const status = completed ? (info.isError ? 'failed' : 'completed') : 'in_progress';
+    return [
+      {
+        sessionUpdate: completed ? 'tool_call_update' : 'tool_call',
+        ...(info.toolCallId ? { toolCallId: info.toolCallId } : {}),
+        name: info.name,
+        title: info.name,
+        kind: cursorToolKind(info.name),
+        status,
+        ...(info.rawInput !== undefined ? { rawInput: info.rawInput } : {}),
+        ...(info.rawOutput !== undefined ? { rawOutput: info.rawOutput } : {}),
+      },
+    ];
+  }
+  if (event.type === 'tool_result') {
+    const toolCallId =
+      (typeof event.call_id === 'string' && event.call_id) ||
+      (typeof event.tool_call_id === 'string' && event.tool_call_id) ||
+      (typeof event.id === 'string' && event.id) ||
+      undefined;
+    const rawOutput = event.output ?? event.result ?? event.error ?? event.content;
+    const isError = event.is_error === true || Boolean(event.error);
+    return [
+      {
+        sessionUpdate: 'tool_result',
+        ...(toolCallId ? { toolCallId } : {}),
+        status: isError ? 'failed' : 'completed',
+        ...(rawOutput !== undefined ? { rawOutput } : {}),
+      },
+    ];
   }
   return [];
 }

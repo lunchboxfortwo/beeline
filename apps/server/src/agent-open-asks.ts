@@ -104,7 +104,6 @@ export async function closeAgentAsk(
   const messageId = input.messageId;
   return db.transaction(async (tx) => {
     const blockClosed = await closeBlock(tx, agentId, messageId, input.reason as string);
-    if (blockClosed) await tx.query("UPDATE room_choices SET status='closed' WHERE message_id=$1 AND mode='question' AND status='open'",[messageId]);
     const question = await tx.query<{ ask_closed_reason: string }>(
       `UPDATE messages SET ask_closed_reason=COALESCE(ask_closed_reason,$2)
        WHERE id=$1 AND (author_id=$3 OR $4) RETURNING ask_closed_reason`,

@@ -6,6 +6,8 @@ import {
   peelShellCommand,
   redactDisplayPaths,
 } from './tool-call-classify';
+import type { ToolIdentityLookup } from './tool-identity-lookup';
+import { cleanToolOutputText } from './tool-output-format';
 
 /**
  * What a tool call *is*, for the one-line tool ledger (tool-ledger.ts).
@@ -76,6 +78,8 @@ const GENERIC_LEDGER_VERBS = new Set([
   'renamed',
   'cleared',
   'asked',
+  'loaded',
+  'searched',
 ]);
 
 /** A folded rollup row from an older transcript: `reading 8` is 8 read calls. */
@@ -182,11 +186,14 @@ function textLeaves(value: unknown): string[] {
   return [];
 }
 
-/** Older rows could be cut in the middle of a JSON string. Recover only the
- * known output field, stopping at its closing quote or the end of the row. */
+/** Older rows could be cut in the middle of a single-field JSON string wrapper.
+ * Recover only when the payload starts with that single text wrapper key so
+ * multi-key truncated JSON objects keep their full structure for the sheet. */
 function legacyTruncatedText(raw: string): string | undefined {
   const match =
-    /"(?:formatted_output|stdout|stderr|output|text|content|message|result)"\s*:\s*"/.exec(raw);
+    /^\s*\{\s*"(?:formatted_output|stdout|stderr|output|text|content|message|result)"\s*:\s*"/.exec(
+      raw,
+    );
   if (!match) return undefined;
   const start = match.index + match[0].length;
   let encoded = '';
@@ -227,6 +234,12 @@ function isTerminalOnlyEnvelope(value: unknown): boolean {
   );
 }
 
+export function isTerminalOnlyOutput(raw: string | undefined): boolean {
+  if (!raw?.trim()) return false;
+  const envelope = parsed(cleanToolOutputText(raw));
+  return envelope !== undefined && isTerminalOnlyEnvelope(envelope);
+}
+
 /**
  * The call's real output, or nothing.
  *
@@ -238,14 +251,15 @@ function isTerminalOnlyEnvelope(value: unknown): boolean {
  */
 export function toolCallOutput(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
-  const envelope = parsed(raw);
+  const cleaned = cleanToolOutputText(raw);
+  const envelope = parsed(cleaned);
   let text: string;
   if (envelope === undefined) {
-    text = legacyTruncatedText(raw) ?? raw;
+    text = legacyTruncatedText(cleaned) ?? cleaned;
   } else {
     const leaves = textLeaves(envelope);
     if (leaves.length) {
-      const joined = leaves.join('\n');
+      const joined = cleanToolOutputText(leaves.join('\n'));
       const inner = parsed(joined);
       text =
         inner !== undefined && typeof inner === 'object' && inner !== null
@@ -258,9 +272,9 @@ export function toolCallOutput(raw: string | undefined): string[] {
     }
   }
   if (!text.trim()) return [];
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').trimEnd());
+  return cleanToolOutputText(text)
+    .split('\n')
+    .map((line) => line.trimEnd());
 }
 
 /** `1.4s`, `2m 05s` — tabular, and only ever shown above the floor. */
@@ -271,20 +285,51 @@ export function formatToolCallDuration(ms: number | undefined): string | undefin
   return `${minutes}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}s`;
 }
 
-function verbAndObject(step: TurnActivityAction, output: readonly string[]) {
+function verbAndObject(
+  step: TurnActivityAction,
+  output: readonly string[],
+  lookup?: ToolIdentityLookup,
+) {
   const kind = step.toolKind?.toLowerCase();
   const mcp = parseMcpTool(step.title, step.command, step.input);
   const file =
     step.files?.[0]?.path ??
-    field(parsed(step.input), ['path', 'file_path', 'filePath', 'filename']);
+    field(parsed(step.input), ['path', 'file_path', 'filePath', 'filename', 'Path']);
+  const titleLower = oneLine(step.title).toLowerCase();
+
+  if (titleLower === 'toolsearch' || titleLower === 'tool_search') {
+    const query = field(parsed(step.input), ['query', 'pattern']);
+    return {
+      verb: 'loaded',
+      object: query ? `tools · ${query}` : 'tools',
+      expandedLabel: true,
+    };
+  }
+
+  if (
+    step.plan?.items.length ||
+    kind === 'plan' ||
+    titleLower === 'todowrite' ||
+    titleLower === 'todo_write'
+  ) {
+    const items = step.plan?.items ?? [];
+    const total = items.length;
+    const done = items.filter((item) => item.status === 'completed').length;
+    const suffix = total
+      ? done > 0
+        ? `plan · ${done}/${total} done`
+        : `plan · ${total} ${total === 1 ? 'item' : 'items'}`
+      : 'plan';
+    return { verb: 'updated', object: suffix, expandedLabel: true };
+  }
 
   if (mcp) {
-    const described = describeMcpCall(mcp, step.input, step.command, step.output);
+    const described = describeMcpCall(mcp, step.input, step.command, step.output, lookup);
     return {
       verb: described.verb,
       object: described.object,
       namedTool: described.namedTool,
-      hasReceipt: Boolean(described.receipt),
+      hasReceipt: Boolean(described.receipt || described.expandedLabel),
     };
   }
 
@@ -338,8 +383,8 @@ function titleObject(step: TurnActivityAction): string {
 }
 
 /** The action word shown beside a tool's machine text. */
-export function toolCallVerb(step: TurnActivityAction): string {
-  return verbAndObject(step, toolCallOutput(step.output)).verb;
+export function toolCallVerb(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
+  return verbAndObject(step, toolCallOutput(step.output), lookup).verb;
 }
 
 /**
@@ -348,11 +393,32 @@ export function toolCallVerb(step: TurnActivityAction): string {
  * count — cut to the label cap. The row displays the generic action separately,
  * so its label omits that word. Tool-specific names remain part of the label.
  */
-export function toolCallLabel(step: TurnActivityAction): string {
+export function toolCallLabel(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
   const output = toolCallOutput(step.output);
-  const { verb, object, namedTool, hasReceipt } = verbAndObject(step, output);
+  const { verb, object, namedTool, hasReceipt, expandedLabel } = verbAndObject(step, output, lookup);
   const generic = !namedTool && GENERIC_LEDGER_VERBS.has(verb);
   const label = generic ? object : `${verb} ${object}`;
-  const limit = hasReceipt ? TOOL_CALL_RECEIPT_LABEL_MAX : TOOL_CALL_LABEL_MAX;
+  const limit = hasReceipt || expandedLabel ? TOOL_CALL_RECEIPT_LABEL_MAX : TOOL_CALL_LABEL_MAX;
   return middleTruncate(oneLine(label) || 'tool call', limit);
+}
+
+/** Plain-English un-truncated heading for ToolOutputSheet. */
+export function toolCallSheetTitle(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
+  const output = toolCallOutput(step.output);
+  const { verb, object, namedTool } = verbAndObject(step, output, lookup);
+  const inputObj = parsed(step.input);
+  const description = field(inputObj, ['description']);
+  if (description && step.command) return description;
+  if (step.files?.some((f) => f.diff)) {
+    const file = displayFilePath(step.files[0]!.path);
+    return `Edited ${file}`;
+  }
+  if (!namedTool && GENERIC_LEDGER_VERBS.has(verb)) {
+    if (verb === 'ran' || verb === 'git') {
+      return middleTruncate(oneLine(object) || 'Command', 96);
+    }
+    const lead = verb.charAt(0).toUpperCase() + verb.slice(1);
+    return `${lead} ${oneLine(object)}`.trim();
+  }
+  return oneLine(`${verb} ${object}`) || 'Output';
 }

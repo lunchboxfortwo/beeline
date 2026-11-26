@@ -225,7 +225,7 @@ export const wireShapes: readonly WireShape[] = [
   shape({"kind":"object","properties":{"pubkey":{"node":1,"optional":false},"name":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,222]}),
   shape({"kind":"array","item":223}),
-  shape({"kind":"object","properties":{"path":{"node":1,"optional":false},"status":{"node":5,"optional":true}}}),
+  shape({"kind":"object","properties":{"path":{"node":1,"optional":false},"status":{"node":5,"optional":true},"diff":{"node":5,"optional":true}}}),
   shape({"kind":"union","choices":[6,225,226,227]}),
   shape({"kind":"literal","value":"failure"}),
   shape({"kind":"literal","value":"action"}),
