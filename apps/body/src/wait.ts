@@ -361,8 +361,9 @@ export async function tryLock(
       held: true,
       release: () =>
         new Promise<void>((done) => {
-          for (const peer of peers) peer.destroy();
+          // Close the listening handle before peers see EOF and try to bind it.
           server.close(() => done());
+          for (const peer of peers) peer.destroy();
         }),
     };
   return new Promise<LockAttempt>((resolve, reject) => {

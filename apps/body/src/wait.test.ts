@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer as httpServer } from 'node:http';
-import { createServer } from 'node:net';
+import { createServer, Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -263,6 +263,29 @@ it('ends a linked worker and its group when the owner is SIGKILLed', async () =>
     expect(alive(linked!)).toBe(false);
     expect(alive(grandchild!)).toBe(false);
   });
+});
+
+it('keeps a lock follower connected until the owner closes the listener', async () => {
+  const key = `lock-release-${process.pid}-${Math.random()}`;
+  const owner = await tryLock(key);
+  if (!owner.held) throw new Error('expected owner');
+  const follower = await tryLock(key);
+  if (follower.held) throw new Error('expected follower');
+
+  const close = Server.prototype.close;
+  let connectionsAtClose: Promise<number> | undefined;
+  const spy = vi.spyOn(Server.prototype, 'close').mockImplementationOnce(function (this: Server, callback) {
+    connectionsAtClose = new Promise((resolve, reject) => {
+      this.getConnections((error, count) => (error ? reject(error) : resolve(count)));
+    });
+    return close.call(this, callback);
+  });
+  try {
+    await Promise.all([owner.release(), follower.released()]);
+    expect(await connectionsAtClose).toBe(1);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 it('follows the recorded holder connection even if a successor binds before following', async () => {
