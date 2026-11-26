@@ -94,7 +94,7 @@ function source(item: WorkItemView) {
     : `#${chat}`;
 }
 /** Each Needs you row owns one question and its answer buttons. */
-function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoardActions; now: number }) {
+function AskCard({ item, actions, now, desktop }: { item: WorkItemView; actions: WorkBoardActions; now: number; desktop: boolean }) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const ask = item.ask!;
@@ -129,7 +129,7 @@ function AskCard({ item, actions, now }: { item: WorkItemView; actions: WorkBoar
         <T v="metaStrong" flexShrink={1} numberOfLines={1}>
           {(ask.author ?? item.openedBy).name}
         </T>
-        <T v="meta" color="secondary" flex={1} minWidth={56} numberOfLines={1}>
+        <T v="meta" color="secondary" flex={1} minWidth={desktop ? 56 : undefined} numberOfLines={1}>
           {source(item)}
         </T>
         <T v="meta" color="secondary">{compactRelativeTime(ask.createdAt, now)}</T>
@@ -438,7 +438,7 @@ export function WorkBoard({
     />
   );
   const needsBody = needs.length ? (
-    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} now={now} />)
+    needs.map((item) => <AskCard key={item.id} item={item} actions={actions} now={now} desktop={desktop} />)
   ) : (
     <YStack paddingHorizontal="6" paddingTop="8" paddingBottom="5" gap="1" alignItems="center" testID="work-calm">
       {/* A no-break space keeps "now" off a line of its own in a narrow column. */}

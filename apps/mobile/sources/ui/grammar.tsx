@@ -225,7 +225,7 @@ export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark,
     if (desktop) {
         return (
             <YStack backgroundColor="canvas">
-                <XStack minHeight={HEIGHT.tabBar} paddingHorizontal="4" paddingVertical="0" gap="2" alignItems="center" testID={testID}>
+                <XStack height={HEIGHT.tabBar} paddingHorizontal="4" paddingVertical="0" gap="2" alignItems="center" testID={testID}>
                     {back ? <Btn kind="icon" label={backLabel} onPress={back} testID={backTestID}><Glyph icon={ArrowLeft} /></Btn> : null}
                     <XStack flex={1} minWidth={0} gap="3" alignItems="center">
                         {mark}
@@ -293,10 +293,10 @@ export function ChatMark({ size = 36 }: { size?: 36 | 28 }) {
 }
 
 /** A chat's name in a title style, its leading # in brass. */
-export function ChatName({ name, v = 'title', testID }: { name: string; v?: 'title' | 'listTitle'; testID?: string }) {
+export function ChatName({ name, v = 'title', numberOfLines, testID }: { name: string; v?: 'title' | 'listTitle'; numberOfLines?: number; testID?: string }) {
     const hash = name.startsWith('#');
     return (
-        <T v={v} testID={testID}>
+        <T v={v} numberOfLines={numberOfLines} testID={testID}>
             {hash ? <T v={v} color="needsYou">#</T> : null}
             {hash ? name.slice(1) : name}
         </T>

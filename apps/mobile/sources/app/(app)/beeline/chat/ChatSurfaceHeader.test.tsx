@@ -10,8 +10,8 @@ vi.mock('@/ui/grammar', async () => {
   const { createElement } = await import('react');
   return {
     Btn: 'Btn', Glyph: 'Glyph', T: 'T', SafeTop: 'SafeTop', ChatMark: 'ChatMark',
-    ChatName: ({ name, testID }: any) => createElement('ChatName', { testID }, name),
-    PlaceHeader: (p: any) => createElement('PlaceHeader', { testID: p.testID },
+    ChatName: ({ name, v, numberOfLines, testID }: any) => createElement('ChatName', { v, numberOfLines, testID }, name),
+    PlaceHeader: (p: any) => createElement('PlaceHeader', { testID: p.testID, desktop: p.desktop },
       p.back ? createElement('Btn', { testID: p.backTestID, onPress: p.back }) : null, p.mark, p.title, p.meta, p.right),
   };
 });
@@ -88,5 +88,16 @@ it('shows the chat list\'s stored repository icon on the chat header, and nothin
   const icon = `https://api/v1/repository-icons/${'2'.repeat(8)}-2222-4222-8222-${'2'.repeat(12)}/${'a'.repeat(64)}`;
   act(() => { tree = create(<ChatSurfaceHeaderView {...base} repositoryHomepageIcon={icon} />); });
   expect(tree.root.findByType('RepositoryMark').props).toEqual({ homepageIconUrl: icon, size: 36 });
+  act(() => tree.unmount());
+});
+
+it('constrains desktop chat titles to one line while preserving multi-line phone titles', () => {
+  let tree: any;
+  act(() => { tree = create(<ChatSurfaceHeaderView {...base} desktop showBack={false} title="#very-long-room-name-that-must-not-push-the-divider" />); });
+  expect(byTestID(tree, 'chat-header')[0].props.desktop).toBe(true);
+  expect(byTestID(tree, 'chat-title')[0].props).toMatchObject({ v: 'listTitle', numberOfLines: 1 });
+  act(() => tree.update(<ChatSurfaceHeaderView {...base} desktop={false} title="#very-long-room-name-that-wraps-on-phone" />));
+  expect(byTestID(tree, 'chat-header')[0].props.desktop).toBe(false);
+  expect(byTestID(tree, 'chat-title')[0].props).toMatchObject({ v: 'title', numberOfLines: undefined });
   act(() => tree.unmount());
 });

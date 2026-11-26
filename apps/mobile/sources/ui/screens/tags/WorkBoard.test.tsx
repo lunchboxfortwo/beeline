@@ -250,5 +250,11 @@ it('gives desktop WorkBoard an aligned 52px header and min-width scrollable colu
         for (const key of ['progress', 'backlog', 'done']) {
             expect(host(`work-column-${key}`).props.minWidth).toBe(260);
         }
+        const desktopRoom = tree.root.find((n: any) => n.type === 'Text' && n.props.children === '#ai-study');
+        expect(desktopRoom.props.minWidth).toBe(56);
+
+        act(() => tree.update(<WorkBoard board={board} desktop={false} actions={actions} />));
+        const phoneRoom = tree.root.find((n: any) => n.type === 'Text' && n.props.children === '#ai-study');
+        expect(phoneRoom.props.minWidth).toBeUndefined();
     } finally { act(() => tree.unmount()); }
 });
