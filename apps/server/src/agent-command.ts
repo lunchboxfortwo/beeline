@@ -815,11 +815,12 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   batchCommandIds?: readonly string[];
   harnessEnded?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
+  invocationId?: string;
   outputFiles?: Attachment[];
   sharedReplyId?: string;
 }): Promise<AnswerReceipt> {
   if (input.harnessEnded && input.invocation && !input.explicitReply) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
-    db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
+    db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,invocationId:input.invocation!.id,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
     const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
     const items = (await db.query<CommandRow>(`SELECT * FROM agent_commands
@@ -905,7 +906,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           return {...receipt, id:existing, messageId:existing, published:true, stored:true, visible:true, delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
         const ended = await endAgentTurn(db,item,'complete',null,saved.id);
-        if (ended) await wakePeerMessageSender(db,item,{kind:'answer',outputId:saved.id,text:messageText,attachments:files,batchCommandIds:input.batchCommandIds});
+        if (ended) await wakePeerMessageSender(db,item,{kind:'answer',outputId:saved.id,text:messageText,attachments:files,batchCommandIds:input.batchCommandIds,invocationId:input.invocationId ?? input.invocation?.id});
         completedNow = true;
         return {...saved, commandId:item.id, messageId:saved.id, completed:true, published:true, delivered:true};
       }

@@ -284,6 +284,36 @@ it('avoids double-waking a commander when an earlier batched request already com
   expect((await readAgentCommands(db, A, THREAD)).commands).toHaveLength(1);
 });
 
+it('wakes the commander when a fresh invocation completes a remaining request after an earlier batched invocation was interrupted', async () => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const firstInvocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: firstInvocation.id, batchedCommandIds: [second.id],
+  }, B);
+  await replyToMessage(db, B, { roomId: THREAD, id: first.id, text: 'Part A done.', invocation: firstInvocation });
+  // Turn ends/interrupts before answering second; first wake is handled and second stays pending.
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: second.id, text: '', harnessEnded: true, invocation: firstInvocation,
+  }, B);
+  const firstWake = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(firstWake).toHaveLength(1);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [second.id])).rows).toEqual([{ state: 'pending' }]);
+  await db.query("UPDATE agent_commands SET state='complete' WHERE id=$1", [firstWake[0]!.id]);
+
+  // A fresh invocation completes the remaining pending request and must wake the commander.
+  const freshInvocation = { id: crypto.randomUUID(), requestId: second.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: second.id, invocationId: freshInvocation.id,
+  }, B);
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: second.id, text: 'Part B done.', harnessEnded: true, invocation: freshInvocation,
+  }, B);
+  const freshWakes = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(freshWakes).toHaveLength(1);
+  expect(freshWakes[0]).toMatchObject({ reason: 'reply', source: { body: 'Part B done.' } });
+});
+
 it('does not wake on empty helper turns or review-context repair turns, and wakes on hosted helper failure', async () => {
   // Silent empty turn stays owed without waking commander with empty noise.
   const silentTask = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Audit slice.' }, A);

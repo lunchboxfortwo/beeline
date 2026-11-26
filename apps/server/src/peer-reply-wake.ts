@@ -15,6 +15,7 @@ export type PeerReplyWakeOutput =
       text: string;
       attachments?: readonly Attachment[];
       batchCommandIds?: readonly string[];
+      invocationId?: string;
     }
   | { kind: 'failed'; outputId: string; text: Composed<'system'> };
 
@@ -53,6 +54,7 @@ export async function peerReplyWakeInput(
   const batchIds = [
     ...new Set([item.id, ...(output.kind === 'answer' ? (output.batchCommandIds ?? []) : [])]),
   ];
+  const invocationId = output.kind === 'answer' ? (output.invocationId ?? null) : null;
   const eligible = (await db.query<{ ok: boolean }>(
     `SELECT true ok
      FROM rooms origin
@@ -70,15 +72,16 @@ export async function peerReplyWakeInput(
            AND child.reason IN ('reply','message')
            AND (
              child.parent_command_id=ANY($4::text[])
-             OR EXISTS(
+             OR ($6::text IS NOT NULL AND EXISTS(
                SELECT 1 FROM agent_invocations inv
-               WHERE (inv.command_id=$5 OR $5=ANY(inv.batched_command_ids))
+               WHERE inv.invocation_id=$6
+                 AND (inv.command_id=$5 OR $5=ANY(inv.batched_command_ids))
                  AND (child.parent_command_id=inv.command_id OR child.parent_command_id=ANY(inv.batched_command_ids))
-             )
+             ))
            )
        )
      LIMIT 1`,
-    [item.room_id, sender.place, sender.agent, batchIds, item.id],
+    [item.room_id, sender.place, sender.agent, batchIds, item.id, invocationId],
   )).rows[0];
   if (!eligible) return undefined;
   if (output.kind === 'failed') await ensureSystemIdentity(db);
