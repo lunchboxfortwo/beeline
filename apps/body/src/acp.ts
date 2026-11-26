@@ -131,7 +131,29 @@ export function asyncTaskCall(update: Record<string, unknown>): ToolCallEntry | 
     )
   )
     return undefined;
-  const state = update.state;
+  const state = typeof update.state === 'string' ? update.state : undefined;
+  const status = state
+    ? state === 'stopped'
+      ? 'failed'
+      : state
+    : update.sessionUpdate === 'async_task_spawned' ||
+        update.sessionUpdate === 'async_task_progress'
+      ? 'in_progress'
+      : undefined;
+  const rawOutput: Record<string, unknown> = {};
+  if (typeof update.message === 'string' && update.message.trim()) rawOutput.message = update.message;
+  if (typeof update.error === 'string' && update.error.trim()) rawOutput.error = update.error;
+  if (typeof update.output === 'string' && update.output.trim()) rawOutput.output = update.output;
+  const exitCode =
+    typeof update.exitCode === 'number'
+      ? update.exitCode
+      : typeof update.exit_code === 'number'
+        ? update.exit_code
+        : undefined;
+  if (exitCode !== undefined) rawOutput.exit_code = exitCode;
+  if (state === 'stopped' && !rawOutput.error && !rawOutput.message) {
+    rawOutput.error = 'Stopped (background task)';
+  }
   return {
     id: `async:${update.asyncTaskId}`,
     ...(typeof update.name === 'string'
@@ -139,8 +161,8 @@ export function asyncTaskCall(update: Record<string, unknown>): ToolCallEntry | 
       : typeof update.description === 'string'
         ? { title: update.description }
         : {}),
-    ...(update.sessionUpdate === 'async_task_spawned' ? { status: 'in_progress' } : {}),
-    ...(typeof state === 'string' ? { status: state === 'stopped' ? 'failed' : state } : {}),
+    ...(status ? { status } : {}),
+    ...(Object.keys(rawOutput).length ? { rawOutput } : {}),
   };
 }
 

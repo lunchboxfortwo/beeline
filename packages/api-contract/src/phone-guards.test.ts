@@ -23,6 +23,17 @@ m45_describe('phone surface readers', () => {
   m45_it('preserves structured tool activity metadata and tolerates legacy rows without it', () => {
     const activity = [
       {
+        kind: 'note',
+        title: 'Note',
+        text: 'Checking active schedules first.',
+      },
+      {
+        kind: 'note',
+        title: 'Note',
+        text: ' Then updating the morning card.',
+        continues: true,
+      },
+      {
         kind: 'tool',
         title: 'mcp.beeline-agent.wake',
         operation: 'other',
@@ -30,7 +41,7 @@ m45_describe('phone surface readers', () => {
         command: 'rg -n wake apps/server/src',
         input: '{"action":"list"}',
         output: 'line 1\n[… omitted …]\nline 99',
-        files: [{ path: 'skills/waiting-and-wakes/SKILL.md' }],
+        files: [{ path: 'skills/waiting-and-wakes/SKILL.md', status: 'M', diff: '@@ -1 +1 @@\n-old\n+new' }],
       },
       {
         kind: 'tool',
@@ -40,6 +51,17 @@ m45_describe('phone surface readers', () => {
     ];
     const parsed = m45_readRoomViewMessage({ ...scope1.message, activity });
     m45_expect(parsed?.activity).toEqual(activity);
+    const invalid = m45_readRoomViewMessage({
+      ...scope1.message,
+      activity: [
+        { kind: 'note', title: 'Note', text: 'ok', continues: 'yes' },
+        { kind: 'tool', title: 'Edit', files: [{ path: 'a.ts', diff: 42 }] },
+      ],
+    });
+    m45_expect(invalid?.activity).toEqual([
+      { kind: 'note', title: 'Note', text: 'ok' },
+      { kind: 'tool', title: 'Edit', files: [{ path: 'a.ts' }] },
+    ]);
   });
 
   m45_it.each(['agent', 'human', undefined, 'invalid'])('UAR-1 preserves known command recipient kind %s', (kind) => {

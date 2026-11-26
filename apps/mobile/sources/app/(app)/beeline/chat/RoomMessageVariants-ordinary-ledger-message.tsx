@@ -247,6 +247,14 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
     },
     [onMention, participantHandles, taggedMentionPubkeys, viewerPubkey, isAgent],
   );
+  const stepLookup = useMemo(
+    () => ({
+      participants: participantHandles,
+      channelIndex,
+      speakerName: voiceName,
+    }),
+    [participantHandles, channelIndex, voiceName],
+  );
   if (message.isAgentActivity) {
     const excerpt = agentActivityReplyExcerpt(message);
     return (
@@ -266,6 +274,7 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
             active={message.isAgentLiveTurn === true}
             chronological={desktopLayout}
             handle={!continuedRun && isAgent ? voiceName : undefined}
+            lookup={stepLookup}
             mark={
               !continuedRun && isAgent
                 ? {
@@ -347,7 +356,11 @@ export const OrdinaryLedgerMessage = React.memo(function OrdinaryLedgerMessage({
   // before the answer — and shows them folded under the prose.
   const stepsLine =
     isAgent && message.activity?.length ? (
-      <TurnStepsLine items={message.activity} testID={`reply-steps-${message.id}`} />
+      <TurnStepsLine
+        items={message.activity}
+        lookup={stepLookup}
+        testID={`reply-steps-${message.id}`}
+      />
     ) : null;
   const machineNoise =
     ghostLine || stepsLine ? (

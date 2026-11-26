@@ -3,11 +3,12 @@ import { displayRoomMessage } from '@/buzz/room-view-presentation';
 import { readRoomViewMessage, type PhoneOperationMap } from '@beeline/api-contract/phone';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import React, { useEffect, useMemo, useState } from 'react';
-import { XStack, YStack } from 'tamagui';
+import { ScrollView, XStack, YStack } from 'tamagui';
 import { Spinner, T, TypedView } from '@/ui/grammar';
 import type { AgentActivityItem } from '@/sync/transport/rig-transport';
 import { buildTurnActivity } from '@/buzz/activity-timeline';
 import { formatToolCallDuration } from '@/buzz/tool-call-row';
+import type { ToolIdentityLookup } from '@/buzz/tool-identity-lookup';
 import {
   groupToolLedgerRuns,
   toolGroupSummary,
@@ -23,6 +24,9 @@ import { StreamingProse } from './StreamingProse';
 import { LedgerDisclosure, LedgerLogGroup } from './LedgerDisclosure';
 import { TranscriptNavigationRow } from './IndexRow';
 
+/** Bounded flat-list viewport height (~5 single-item rows) when a turn has >5 rows. */
+const FLAT_LEDGER_SCROLL_MAX_HEIGHT = 240;
+
 type ActivityTimelineProps = {
   active?: boolean;
   items: readonly AgentActivityItem[];
@@ -33,11 +37,11 @@ type ActivityTimelineProps = {
   testID?: string;
   messageDraft?: string;
   messageDraftKey?: string;
+  /** Loaded room roster and channel/thread index for resolving raw IDs to human names. */
+  lookup?: ToolIdentityLookup;
   /** The streaming speaker's identity mark — the SAME mark the settled row's
    *  sender line renders (`TranscriptLine`), so the draft lane carries the
-   *  agent tile and the byline never moves when the draft settles. The words
-   *  below it DO change: a draft is written in the provisional face and tone
-   *  and cross-fades into the settled reply (C98). */
+   *  agent tile and the byline never moves when the draft settles. */
   mark?: LedgerBylineMark;
 };
 
@@ -59,7 +63,7 @@ function lineAccessibilityLabel(line: ToolLedgerLine): string {
 
 /**
  * Shared transcript child row: action, machine object and recorded duration.
- * The whole row opens the output sheet when the call carries detail.
+ * The whole row opens the output sheet only when the call carries inspectable detail.
  */
 function ToolLedgerLineRow({
   line,
@@ -104,18 +108,12 @@ function ToolLedgerLineRow({
     );
   }
   if (line.kind === 'note') {
-    // Text the agent wrote before a later tool call. It is not the reply, but
-    // it is the agent's own words, so it is shown whole — never cut to a line.
+    // Interim agent prose sits inline in the flat list without a trailing chevron.
     return (
       <TranscriptNavigationRow divider={divider} testID={testID}>
-      <XStack alignItems="flex-start" gap="2">
-        <T v="code" accessibilityElementsHidden width={24} flexShrink={0} color="secondary">
-          {line.glyph}
-        </T>
         <YStack flex={1} minWidth={0}>
           <TypedView view={MonoMarkdown} v="meta" markdown={line.label} />
         </YStack>
-      </XStack>
       </TranscriptNavigationRow>
     );
   }
@@ -128,10 +126,13 @@ function ToolLedgerLineRow({
         ? 'Running'
         : action.charAt(0).toUpperCase() + action.slice(1);
   const redundantFailureLabel = line.outcome === 'failure' && /^action\s+failed$/i.test(line.label);
+  const isHumanTargetRow =
+    (action === 'sent' || action === 'replied') && /(?:^|\s)[@#][A-Za-z0-9._-]+/.test(line.label);
+  const labelSegments = isHumanTargetRow ? line.label.split(/((?:^|\s)[@#][A-Za-z0-9._-]+)/g) : null;
   return (
     <TranscriptNavigationRow
       testID={testID}
-      singleDestination
+      singleDestination={Boolean(onPress)}
       divider={divider}
       trailing={
         onPress
@@ -145,11 +146,11 @@ function ToolLedgerLineRow({
           : undefined
       }
     >
-      <YStack gap="1" minWidth={0}>
+      <YStack gap="1" flex={1} minWidth={0}>
         <XStack alignItems="center" gap="2" minWidth={0}>
-          {!hasNamedAction || line.outcome === 'failure' ? (
+          {(!hasNamedAction || line.outcome === 'failure') && !(labelSegments && labelSegments.length > 1 && line.outcome !== 'failure') ? (
             <T
-              v="meta"
+              v={line.outcome === 'failure' ? 'metaStrong' : 'meta'}
               color={line.outcome === 'failure' ? 'needsYou' : 'ink'}
               flexShrink={0}
               numberOfLines={1}
@@ -158,26 +159,31 @@ function ToolLedgerLineRow({
             </T>
           ) : null}
           {!redundantFailureLabel ? (
-            <T v="code" ellipsizeMode="middle" numberOfLines={1} flex={1} minWidth={48}>
-              {line.label}
-            </T>
+            labelSegments && labelSegments.length > 1 ? (
+              <T v="meta" color="ink" numberOfLines={2} flex={1} minWidth={48}>
+                {!hasNamedAction && line.outcome !== 'failure' ? `${verb} ` : ''}
+                {labelSegments.map((part, index) => {
+                  const match = part.match(/^(\s*)([@#][A-Za-z0-9._-]+)$/);
+                  if (!match) return <React.Fragment key={index}>{part}</React.Fragment>;
+                  return (
+                    <React.Fragment key={index}>
+                      {match[1]}
+                      <T v="metaStrong" color="needsYou">
+                        {match[2]}
+                      </T>
+                    </React.Fragment>
+                  );
+                })}
+              </T>
+            ) : (
+              <T v="code" ellipsizeMode="middle" numberOfLines={1} flex={1} minWidth={48}>
+                {line.label}
+              </T>
+            )
           ) : null}
           {duration ? (
             <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']}>
               {duration}
-            </T>
-          ) : null}
-          {showVerdict && hasNamedAction && line.outcome === 'failure' ? (
-            <T
-              v="code"
-              color="needsYou"
-              accessibilityElementsHidden
-              width={18}
-              flexShrink={0}
-              textAlign="right"
-              testID={`activity-verdict-${line.id}`}
-            >
-              ✗
             </T>
           ) : null}
           {showVerdict && line.outcome === 'running' ? (
@@ -194,95 +200,143 @@ function ToolLedgerLineRow({
   );
 }
 
-function toolPageLines(page:PhoneOperationMap['readRoomTools']['output']):ToolLedgerLine[]{
-  if(!Array.isArray(page.messages)||page.messages.length>50)throw new Error('Tool output did not match the expected format.');
-  const messages=page.messages.map(readRoomViewMessage);
-  if(messages.some(message=>!message))throw new Error('Tool output did not match the expected format.');
-  return toolLedgerLines(buildTurnActivity(messages.flatMap(message=>displayRoomMessage(message!,'').activity??[])).steps);
+function toolPageLines(
+  page: PhoneOperationMap['readRoomTools']['output'],
+  lookup?: ToolIdentityLookup,
+): ToolLedgerLine[] {
+  if (!Array.isArray(page.messages) || page.messages.length > 50)
+    throw new Error('Tool output did not match the expected format.');
+  const messages = page.messages.map(readRoomViewMessage);
+  if (messages.some((message) => !message))
+    throw new Error('Tool output did not match the expected format.');
+  return toolLedgerLines(
+    buildTurnActivity(
+      messages.flatMap((message) => displayRoomMessage(message!, '').activity ?? []),
+      { settled: true, lookup },
+    ).steps,
+    false,
+    lookup,
+  );
 }
-function useToolOutput() {
+
+function useToolOutput(lookup?: ToolIdentityLookup) {
   const [line, setLine] = useState<ToolLedgerLine | null>(null);
   const [error, setError] = useState<string | null>(null);
   const current = React.useRef(0);
-  useEffect(() => () => { current.current++; }, []);
+  useEffect(
+    () => () => {
+      current.current++;
+    },
+    [],
+  );
   const open = (next: ToolLedgerLine) => {
     const generation = ++current.current;
     setError(null);
-    if (!next.toolOutput) { setLine(next); return; }
-    setLine({ ...next, detail: 'Loading…' });
+    if (!next.toolOutput) {
+      setLine(next);
+      return;
+    }
+    setLine({ ...next, detail: 'Loading…', rawOutput: 'Loading…' });
     const request = monolithPhoneOperation('readRoomTools', next.toolOutput);
-    void request.then(page => {
-      if (generation !== current.current) return;
-      const full = toolPageLines(page).find(item => item.id === next.id);
-      setLine({
-        ...next,
-        label: full?.label ?? next.label,
-        verb: full?.verb ?? next.verb,
-        receipt: full?.receipt ?? next.receipt,
-        detail: full?.detail,
-        requester: full?.requester,
-        reason: full?.reason,
-        outputHidden: full?.outputHidden,
-        command: full?.command ?? next.command,
-        input: full?.input ?? next.input,
+    void request
+      .then((page) => {
+        if (generation !== current.current) return;
+        const full = toolPageLines(page, lookup).find((item) => item.id === next.id);
+        setLine({
+          ...next,
+          label: full?.label ?? next.label,
+          sheetTitle: full?.sheetTitle ?? next.sheetTitle,
+          verb: full?.verb ?? next.verb,
+          receipt: full?.receipt ?? next.receipt,
+          detail: full?.detail,
+          rawOutput: full?.rawOutput,
+          files: full?.files ?? next.files,
+          plan: full?.plan ?? next.plan,
+          terminalOnly: full?.terminalOnly ?? next.terminalOnly,
+          requester: full?.requester,
+          reason: full?.reason,
+          outputHidden: full?.outputHidden,
+          command: full?.command ?? next.command,
+          input: full?.input ?? next.input,
+        });
+      })
+      .catch((cause) => {
+        if (generation !== current.current) return;
+        const message = appReadErrorCopy(cause);
+        setLine({ ...next, detail: message || undefined, rawOutput: undefined });
+        setError(message || null);
       });
-    }).catch((cause) => {
-      if (generation !== current.current) return;
-      const message = appReadErrorCopy(cause);
-      setLine({ ...next, detail: message || undefined });
-      setError(message || null);
-    });
   };
-  return { line, error, open, close: () => { current.current++; setLine(null); } };
+  return {
+    line,
+    error,
+    open,
+    close: () => {
+      current.current++;
+      setLine(null);
+    },
+  };
 }
 
 /**
- * One collapsed machine-run summary — `⌄ Listed schedules · 6 steps · 2 failed · 48s` —
- * that expands in place into its individual ledger lines and folded read-only groups.
+ * One quiet step-count disclosure — `5 steps · 1 failed ⌄` — that opens into
+ * one flat single-item-per-row list behind a left guide bar (~5 visible rows
+ * scrollable when >5 rows).
  */
 function ToolRunGroupRow({
   run,
+  lookup,
   onPressLine,
 }: {
   run: Extract<ToolLedgerRun, { kind: 'group' }>;
+  lookup?: ToolIdentityLookup;
   onPressLine?: (line: ToolLedgerLine) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-  const [expandedFolds, setExpandedFolds] = useState<Record<string, boolean>>({});
-  const [loaded,setLoaded]=useState<ToolLedgerLine[]>([]);
-  const [remoteIndex,setRemoteIndex]=useState(0);
-  const [cursor,setCursor]=useState<string|undefined>();
-  const [loading,setLoading]=useState(false);
-  const [failed,setFailed]=useState(false);
-  const pending=React.useRef(false);
-  const remote=run.lines.flatMap(line=>line.toolGroup?[line.toolGroup]:[]);
-  const hasRemote=remoteIndex<remote.length;
-  const lines=remote.length?[...run.lines.filter(line=>!line.toolGroup),...loaded]:run.lines;
-  const load=()=>{
-    const group=remote[remoteIndex];if(!group||pending.current)return;
-    pending.current=true;setLoading(true);setFailed(false);
-    const request=monolithPhoneOperation('readRoomTools', {roomId:group.roomId,anchor:group.anchor,...(cursor?{before:cursor}:{})});
-    void request.then(page=>{
-      const lines=toolPageLines(page);setLoaded(previous=>[...previous,...lines]);
-      setCursor(page.next);if(!page.next)setRemoteIndex(index=>index+1);
-    }).catch(()=>setFailed(true)).finally(()=>{pending.current=false;setLoading(false);});
+  const [loaded, setLoaded] = useState<ToolLedgerLine[]>([]);
+  const [remoteIndex, setRemoteIndex] = useState(0);
+  const [cursor, setCursor] = useState<string | undefined>();
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const pending = React.useRef(false);
+  const remote = run.lines.flatMap((line) => (line.toolGroup ? [line.toolGroup] : []));
+  const hasRemote = remoteIndex < remote.length;
+  const lines = remote.length ? [...run.lines.filter((line) => !line.toolGroup), ...loaded] : run.lines;
+  const load = () => {
+    const group = remote[remoteIndex];
+    if (!group || pending.current) return;
+    pending.current = true;
+    setLoading(true);
+    setFailed(false);
+    const request = monolithPhoneOperation('readRoomTools', {
+      roomId: group.roomId,
+      anchor: group.anchor,
+      ...(cursor ? { before: cursor } : {}),
+    });
+    void request
+      .then((page) => {
+        const fetched = toolPageLines(page, lookup);
+        setLoaded((previous) => [...previous, ...fetched]);
+        setCursor(page.next);
+        if (!page.next) setRemoteIndex((index) => index + 1);
+      })
+      .catch(() => setFailed(true))
+      .finally(() => {
+        pending.current = false;
+        setLoading(false);
+      });
   };
   const duration = formatToolCallDuration(run.durationMs);
-  const summary = toolGroupSummary(run.count, run.failed, run.durationMs, run.notes, run.provenance);
+  const summary = toolGroupSummary(run.count, run.failed, run.durationMs, run.notes);
   const steps = run.count > 0 || run.notes === 0;
-  const visibleLines = remote.length || showAll || lines.length <= 3 ? lines : lines.slice(0, 2);
   const pressHandler = (item: ToolLedgerLine) =>
-    item.kind === 'tool' || item.detail || item.toolOutput ? () => onPressLine?.(item) : undefined;
+    item.inspectable ? () => onPressLine?.(item) : undefined;
   return (
     <LedgerLogGroup testID={`tool-run-container-${run.id}`}>
       <LedgerDisclosure
         expanded={expanded}
         onPress={() => {
-          if (expanded) {
-            setShowAll(false);
-            setExpandedFolds({});
-          } else if (remote.length && !loaded.length) {
+          if (!expanded && remote.length && !loaded.length) {
             load();
           }
           setExpanded((value) => !value);
@@ -291,43 +345,38 @@ function ToolRunGroupRow({
         accessibilityState={{ expanded }}
         rowTestID={`tool-run-group-${run.id}`}
       >
-        {run.provenance ? `${run.provenance} · ` : null}
         {steps ? `${run.count} ${run.count === 1 ? 'step' : 'steps'}` : null}
         {run.failed ? <T v="meta" color="needsYou">{` · ${run.failed} failed`}</T> : null}
         {run.notes ? `${steps ? ' · ' : ''}${run.notes} ${run.notes === 1 ? 'note' : 'notes'}` : null}
         {duration ? ` · ${duration}` : null}
       </LedgerDisclosure>
-      {expanded
-        ? visibleLines.map((line, index) =>
-            line.folded?.length ? (
-              <LedgerLogGroup key={line.id} testID={`tool-observation-group-${line.id}`}>
-                <LedgerDisclosure
-                  expanded={Boolean(expandedFolds[line.id])}
-                  onPress={() =>
-                    setExpandedFolds((previous) => ({
-                      ...previous,
-                      [line.id]: !previous[line.id],
-                    }))
-                  }
-                  accessibilityLabel={`${line.label}, expandable`}
-                  accessibilityState={{ expanded: Boolean(expandedFolds[line.id]) }}
-                  rowTestID={`tool-observation-fold-${line.id}`}
-                >
-                  {line.label}
-                </LedgerDisclosure>
-                {expandedFolds[line.id]
-                  ? line.folded.map((child, childIndex) => (
-                      <ToolLedgerLineRow
-                        key={child.id}
-                        line={child}
-                        divider={childIndex > 0}
-                        onPress={pressHandler(child)}
-                        testID={`tool-ledger-line-${child.id}`}
-                      />
-                    ))
-                  : null}
-              </LedgerLogGroup>
-            ) : (
+      {expanded ? (
+        <YStack
+          marginTop="1"
+          marginLeft="1"
+          paddingLeft="3"
+          borderLeftWidth={1.5}
+          borderLeftColor="strongStroke"
+          testID={`tool-run-list-${run.id}`}
+        >
+          {lines.length > 5 ? (
+            <ScrollView
+              nestedScrollEnabled
+              maxHeight={FLAT_LEDGER_SCROLL_MAX_HEIGHT}
+              testID={`tool-run-scroll-${run.id}`}
+            >
+              {lines.map((line, index) => (
+                <ToolLedgerLineRow
+                  key={line.id}
+                  line={line}
+                  divider={index > 0}
+                  onPress={pressHandler(line)}
+                  testID={`tool-ledger-line-${line.id}`}
+                />
+              ))}
+            </ScrollView>
+          ) : (
+            lines.map((line, index) => (
               <ToolLedgerLineRow
                 key={line.id}
                 line={line}
@@ -335,52 +384,70 @@ function ToolRunGroupRow({
                 onPress={pressHandler(line)}
                 testID={`tool-ledger-line-${line.id}`}
               />
-            ),
-          )
-        : null}
-      {expanded && (hasRemote||!showAll&&lines.length>3) ? <LedgerDisclosure
-        expanded={false} accessibilityState={{ expanded: false }}
-        accessibilityLabel={`${run.lines.length - 2} more steps`} onPress={() => hasRemote?load():setShowAll(true)}
-        rowTestID={`tool-run-more-${run.id}`}>
-        {loading?'Loading…':failed?'Retry':hasRemote?`${Math.max(0,run.count-loaded.length)} more`:`${lines.length-2} more`}
-      </LedgerDisclosure> : null}
+            ))
+          )}
+          {hasRemote ? (
+            <LedgerDisclosure
+              expanded={false}
+              accessibilityState={{ expanded: false }}
+              accessibilityLabel={`${Math.max(0, run.count - loaded.length)} more steps`}
+              onPress={load}
+              rowTestID={`tool-run-more-${run.id}`}
+            >
+              {loading ? 'Loading…' : failed ? 'Retry' : `${Math.max(0, run.count - loaded.length)} more`}
+            </LedgerDisclosure>
+          ) : null}
+        </YStack>
+      ) : null}
     </LedgerLogGroup>
   );
 }
 
 /**
- * A settled reply's steps line: the turn's tool calls and the text it wrote
- * before its final answer, folded into one collapsed `ToolRunGroupRow` under
- * the reply. Renders nothing when the reply carries no steps.
+ * A settled reply's steps line: the turn's tool calls and interim notes folded
+ * under one quiet step-count trigger. Renders nothing when the reply has no steps.
  */
 export const TurnStepsLine = React.memo(function TurnStepsLine({
   items,
+  lookup,
   testID,
 }: {
   items: readonly AgentActivityItem[];
+  lookup?: ToolIdentityLookup;
   testID?: string;
 }) {
   const runs = useMemo(
-    () => groupToolLedgerRuns(toolLedgerLines(buildTurnActivity(items, { settled: true }).steps)),
-    [items],
+    () =>
+      groupToolLedgerRuns(
+        toolLedgerLines(buildTurnActivity(items, { settled: true, lookup }).steps, false, lookup),
+      ),
+    [items, lookup],
   );
-  const {line:sheetLine,error:sheetError,open:openLine,close:closeLine}=useToolOutput();
+  const { line: sheetLine, error: sheetError, open: openLine, close: closeLine } =
+    useToolOutput(lookup);
   if (!runs.length) return null;
   return (
     <YStack testID={testID}>
       {runs.map((run) => (
-        <ToolRunGroupRow key={run.id} onPressLine={openLine} run={run} />
+        <ToolRunGroupRow key={run.id} lookup={lookup} onPressLine={openLine} run={run} />
       ))}
       <ToolOutputSheet
         command={sheetLine?.command}
         input={sheetLine?.input}
         receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
+        rawOutput={sheetLine?.rawOutput}
+        files={sheetLine?.files}
+        plan={sheetLine?.plan}
+        outcome={sheetLine?.outcome}
+        terminalOnly={sheetLine?.terminalOnly}
         outputHidden={sheetLine?.outputHidden}
+        requester={sheetLine?.requester}
+        lookup={lookup}
         error={sheetError}
         onClose={closeLine}
         subtitle={sheetLine?.outcome === 'failure' ? sheetLine.reason : sheetLine?.requester}
-        title={sheetLine?.label ?? 'Output'}
+        title={sheetLine?.sheetTitle ?? sheetLine?.label ?? 'Output'}
         visible={Boolean(sheetLine)}
       />
     </YStack>
@@ -388,9 +455,9 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
 });
 
 /**
- * The live conversational turn: agent prose, and beneath it the one-line tool
- * ledger — one collapsed disclosure per agent turn, expanding to a line per
- * tool call, with every line that carries output opening the output sheet.
+ * The live conversational turn: agent prose, and beneath it the flat tool
+ * ledger — one collapsed step-count disclosure per agent turn, expanding to
+ * one flat row per step.
  */
 export const ActivityTimeline = React.memo(function ActivityTimeline({
   active = false,
@@ -400,63 +467,65 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
   testID,
   messageDraft,
   messageDraftKey,
+  lookup,
   mark,
 }: ActivityTimelineProps) {
-  const turn = useMemo(() => buildTurnActivity(items, { settled: !active }), [items, active]);
-  const runs = useMemo(
-    () => groupToolLedgerRuns(toolLedgerLines(turn.steps, active)),
-    [turn, active],
+  const turn = useMemo(
+    () => buildTurnActivity(items, { settled: !active, lookup }),
+    [items, active, lookup],
   );
-  const {line:sheetLine,error:sheetError,open:openLine,close:closeLine}=useToolOutput();
-  // A lane with nothing in it at all renders nothing.
-  //
-  // A RETRACTED draft is deliberately included (C98). When a turn fails the
-  // lane stops being live but the words the reader was reading stay on the
-  // page, provisional, with the server's failure line beneath them — text a
-  // person was mid-way through must never evaporate on its own.
+  const runs = useMemo(
+    () => groupToolLedgerRuns(toolLedgerLines(turn.steps, active, lookup)),
+    [turn, active, lookup],
+  );
+  const { line: sheetLine, error: sheetError, open: openLine, close: closeLine } =
+    useToolOutput(lookup);
   if (!turn.narration.length && !runs.length && !messageDraft && !messageDraftKey) return null;
 
   return (
-    // The ledger rhythm: 4 above and 8 below make a 12 gap between one
-    // speaker's rows; a byline's 16 above makes the speaker change 24. The air
-    // sits on the incoming top edge in both list directions.
     <YStack width="100%" minWidth={0} paddingTop={handle ? '4' : '1'} paddingBottom="2" testID={testID}>
       <TranscriptLine sender={handle ? { name: handle, stamp: stamp ?? '', mark } : undefined}>
-      {turn.narration.map((narration, index) => (
-        <TypedView
-          view={MonoMarkdown}
-          v="body"
-          key={`${index}:${narration}`}
-          markdown={narration}
-          testID={`activity-narration-${index}`}
-        />
-      ))}
-      {runs.map((run) => (
-        <ToolRunGroupRow key={run.id} onPressLine={openLine} run={run} />
-      ))}
-      {messageDraft || messageDraftKey ? (
-        // The draft writes in the quiet tone and settles into the reply's ink.
-        <YStack marginTop="1">
+        {turn.narration.map((narration, index) => (
           <TypedView
-            view={StreamingProse}
+            view={MonoMarkdown}
             v="body"
-            color="secondary"
-            {...(messageDraftKey ? { streamKey: messageDraftKey } : { markdown: messageDraft! })}
-            testID="activity-message-draft"
+            key={`${index}:${narration}`}
+            markdown={narration}
+            testID={`activity-narration-${index}`}
           />
-        </YStack>
-      ) : null}
+        ))}
+        {runs.map((run) => (
+          <ToolRunGroupRow key={run.id} lookup={lookup} onPressLine={openLine} run={run} />
+        ))}
+        {messageDraft || messageDraftKey ? (
+          <YStack marginTop="1">
+            <TypedView
+              view={StreamingProse}
+              v="body"
+              color="secondary"
+              {...(messageDraftKey ? { streamKey: messageDraftKey } : { markdown: messageDraft! })}
+              testID="activity-message-draft"
+            />
+          </YStack>
+        ) : null}
       </TranscriptLine>
       <ToolOutputSheet
         command={sheetLine?.command}
         input={sheetLine?.input}
         receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
+        rawOutput={sheetLine?.rawOutput}
+        files={sheetLine?.files}
+        plan={sheetLine?.plan}
+        outcome={sheetLine?.outcome}
+        terminalOnly={sheetLine?.terminalOnly}
         outputHidden={sheetLine?.outputHidden}
+        requester={sheetLine?.requester}
+        lookup={lookup}
         error={sheetError}
         onClose={closeLine}
         subtitle={sheetLine?.outcome === 'failure' ? sheetLine.reason : sheetLine?.requester}
-        title={sheetLine?.label ?? 'Output'}
+        title={sheetLine?.sheetTitle ?? sheetLine?.label ?? 'Output'}
         visible={Boolean(sheetLine)}
       />
     </YStack>
