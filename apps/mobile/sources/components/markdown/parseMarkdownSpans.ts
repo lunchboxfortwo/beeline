@@ -1,9 +1,12 @@
 import type { MarkdownSpan } from "./parseMarkdown";
+import { formatInlineMath } from "./parseMath";
 
 // Streaming text may end in the middle of a construct. Match only completed
 // delimiters so a later chunk can turn the original plain text into Markdown
 // instead of permanently consuming its opening syntax.
-const pattern = /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)/g;
+// Inline math uses strict `\( ... \)` pairs so dollar amounts ($5, $0.15/1M)
+// and backtick code spans stay untouched.
+const pattern = /(\*\*(.*?)\*\*)|((?<!\*)\*(?!\*)(.*?)\*(?!\*))|(\[([^\]]+)\]\(([^)]+)\))|(`(.*?)`)|((?<!\\)\\\(([^\n]+?)\\\))/g;
 
 export function pushTextWithAutoLinks(spans: MarkdownSpan[], text: string, styles: MarkdownSpan['styles']) {
     const urlPattern = /https?:\/\/[^\s<]+|(?<![A-Za-z0-9_/#])#beeline\/[^\s/()<>]+\/[0-9a-f]{64}(?![A-Za-z0-9_/-])/g;
@@ -76,6 +79,14 @@ export function parseMarkdownSpans(markdown: string, header: boolean) {
         } else if (match[8]) {
             // Inline code
             spans.push({ styles: ['code'], text: match[9], url: null });
+        } else if (match[10]) {
+            // Inline math `\( ... \)`
+            const rawMath = match[11] ?? '';
+            if (rawMath.trim().length > 0) {
+                spans.push({ styles: ['math'], text: formatInlineMath(rawMath), url: null });
+            } else {
+                pushTextWithAutoLinks(spans, match[10], []);
+            }
         }
 
         lastIndex = pattern.lastIndex;

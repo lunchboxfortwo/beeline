@@ -396,6 +396,8 @@
     "components/buzz/MonoMarkdown.tsx": [
       "InlineMarkdown",
       "MarkdownTable",
+      "MathBlock",
+      "MathInlineRun",
       "MonoMarkdown",
       "ViewerMention",
       "linkLabel"
@@ -635,6 +637,7 @@
     "components/markdown/parseMarkdown.ts": [],
     "components/markdown/parseMarkdownBlock.ts": [],
     "components/markdown/parseMarkdownSpans.ts": [],
+    "components/markdown/parseMath.ts": [],
     "components/DesktopViewerPane.tsx": [
       "DesktopViewerPane"
     ]

@@ -36,10 +36,13 @@ export type MarkdownBlock = {
     type: 'image',
     alt: string,
     url: string
+} | {
+    type: 'math-block',
+    content: string
 }
 
 export type MarkdownSpan = {
-    styles: ('italic' | 'bold' | 'semibold' | 'code')[],
+    styles: ('italic' | 'bold' | 'semibold' | 'code' | 'math')[],
     text: string,
     url: string | null
 }

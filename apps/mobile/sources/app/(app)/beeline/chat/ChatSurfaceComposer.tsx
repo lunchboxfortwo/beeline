@@ -213,7 +213,7 @@ export const ChatSurfaceComposer = React.memo(function ChatSurfaceComposer({
     setComposerHeight(Math.min(COMPOSER_MAX_HEIGHT, Math.max(COMPOSER_MIN_HEIGHT, contentHeight)));
   }, [setComposerHeight]);
   // "Message #beeline" in a chat, "Reply in thread" in a corner; a DM keeps its own hint.
-  const roomName = roomSurface?.room?.name?.trim();
+  const roomName = roomSurface?.room?.name?.trim().replace(/^#+/, '').trim();
   const composerPlaceholder = isCorner
     ? 'Reply in thread'
     : !isDirectMessage && roomName ? `Message #${roomName}` : undefined;
