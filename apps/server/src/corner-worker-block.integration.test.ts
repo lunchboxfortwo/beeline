@@ -230,7 +230,6 @@ it.each([false,true])('BLOCK-CHAIN: re-ask reopens one Tasks row and takeover ow
   expect((await phone.execute('readNeedsYou',{workspaceId:WS},HUMAN)).items).toHaveLength(0);
   await db.query('UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1',[ROOM]);
   await daemon.execute('becomeImplementer',await input(REVIEWER),REVIEWER);
-  await expect(closeAgentAsk(db,WORKER,{messageId:'block',reason:'withdrawn'})).rejects.toThrow('current implementer');
   expect(await blockReminder(db,REVIEWER,C)).toContain('block');
   await closeAgentAsk(db,REVIEWER,{messageId:'block',reason:'answered'});
   expect((await db.query("SELECT ask_closed_by FROM messages WHERE id='block'")).rows[0]).toEqual({ask_closed_by:REVIEWER});
@@ -243,6 +242,42 @@ it.each([COMMANDER,HUMAN])('BLOCK-OVERRIDE: commander or higher person clears an
   if(actor===HUMAN) await phone.execute('closeAgentAsk',{messageId:'override',reason:'withdrawn'},actor);
   else await closeAgentAsk(db,actor,{messageId:'override',reason:'withdrawn'});
   expect((await db.query("SELECT ask_closed_by FROM messages WHERE id='override'")).rows[0]).toEqual({ask_closed_by:actor});
+});
+
+it.each([['member agent',WORKER],['report author',REVIEWER]])('BLOCK-MEMBER R1: a %s that is not the implementer clears the block and the thread leaves waiting',async(_,author)=>{
+  // WORKER stays the implementer; REVIEWER is a plain member agent of the chat.
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('member-block',$1,$2,'blocked: Stale question',
+    jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'))`,[C,author,HUMAN]);
+  expect(await state()).toBe('waiting');
+  expect(await closeAgentAsk(db,REVIEWER,{messageId:'member-block',reason:'answered'})).toMatchObject({reason:'answered'});
+  expect((await db.query("SELECT ask_closed_reason,ask_closed_by FROM messages WHERE id='member-block'")).rows[0])
+    .toEqual({ask_closed_reason:'answered',ask_closed_by:REVIEWER});
+  expect(await loadCornerWaiting(db,C)).toBeUndefined();
+  expect((await phone.readCorners(ROOM,HUMAN))!.corners[0]).toMatchObject({state:'idle'});
+});
+
+it('BLOCK-MEMBER: a member clears the last block and its question card in the same thread, and the thread leaves waiting',async()=>{
+  const {sendMessage}=await import('./agent-messaging.js');
+  await sendMessage(db,{id:'choice-block',type:'blocked',route:{from:{agent:WORKER,place:C},to:{agent:HUMAN,place:C}},
+    text:'blocked: Need access',ask:{question:'Which access?',options:['One','Two']}});
+  expect((await db.query("SELECT room_id,status FROM room_choices WHERE message_id='choice-block'")).rows).toEqual([{room_id:C,status:'open'}]);
+  expect(await state()).toBe('waiting');
+  await closeAgentAsk(db,REVIEWER,{messageId:'choice-block',reason:'answered'});
+  // Read the stored state first: state() refreshes it again and would hide a stale write.
+  expect((await phone.readCorners(ROOM,HUMAN))!.corners[0]).toMatchObject({state:'idle'});
+  expect((await db.query("SELECT status FROM room_choices WHERE message_id='choice-block'")).rows).toEqual([{status:'closed'}]);
+  expect(await loadCornerWaiting(db,C)).toBeUndefined();
+});
+
+it('BLOCK-MEMBER: an agent outside the thread is refused and the block stays open',async()=>{
+  const OUTSIDER='e'.repeat(64);
+  await db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Outsider','outsider') ON CONFLICT DO NOTHING`,[OUTSIDER]);
+  await db.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member')`,[WS,OUTSIDER]);
+  await db.query(`INSERT INTO messages(id,room_id,author_id,text,card) VALUES('outside-block',$1,$2,'blocked: Offline',
+    jsonb_build_object('reportToId',$3::text,'reportStatus','blocked'))`,[C,WORKER,HUMAN]);
+  await expect(closeAgentAsk(db,OUTSIDER,{messageId:'outside-block',reason:'answered'})).rejects.toThrow('member of this thread');
+  expect((await db.query("SELECT ask_closed_reason FROM messages WHERE id='outside-block'")).rows[0]).toEqual({ask_closed_reason:null});
+  expect(await state()).toBe('waiting');
 });
 
 it('BLOCK-PROMPT: every queued implementer turn includes unchanged open blocks',async()=>{

@@ -43,7 +43,7 @@ writable. Corners keep the watcher so edits are reflected as work proceeds.
 | `claim_thread`                                       | Become the recorded implementer before pushing or opening the thread's PR                                                                   |
 | `update_work`                                        | Update task state, assignee, notes and attachments in one call; Done on the thread task closes the thread                                   |
 | `create_work_item`                                   | Create a task with its title and objective                                                                                                  |
-| `close_ask`                                          | Close one of your open asks on every person's Tasks list: answered, withdrawn or superseded                                                 |
+| `close_ask`                                          | Close one of your open asks on every person's Tasks list, or any open block in a thread you are a member of: answered, withdrawn or superseded |
 | `stop`                                               | Stop the running turn of an agent you command                                                                                               |
 | `post`                                               | Post a public message at an address                                                                                                         |
 | `post_artifact`                                      | Upload one file from a session path as an attachment                                                                                        |

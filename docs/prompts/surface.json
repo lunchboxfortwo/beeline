@@ -87,7 +87,7 @@
     }
    },
    "close_ask": {
-    "description": "Explicitly clear an ask or block: answered, withdrawn or superseded. A thread block belongs to its current implementer; its commander or a higher-standing person may override. Replies clear Tasks, not blocks.",
+    "description": "Explicitly clear an ask or block: answered, withdrawn or superseded. Any member of the thread, person or agent, may clear its block; the clear records who did it. Replies clear Tasks, not blocks.",
     "inputSchema": {
      "type": "object",
      "additionalProperties": false,
@@ -3130,7 +3130,7 @@
     }
    },
    "close_ask": {
-    "description": "Explicitly clear an ask or block: answered, withdrawn or superseded. A thread block belongs to its current implementer; its commander or a higher-standing person may override. Replies clear Tasks, not blocks.",
+    "description": "Explicitly clear an ask or block: answered, withdrawn or superseded. Any member of the thread, person or agent, may clear its block; the clear records who did it. Replies clear Tasks, not blocks.",
     "inputSchema": {
      "type": "object",
      "properties": {
