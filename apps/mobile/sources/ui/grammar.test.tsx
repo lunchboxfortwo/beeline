@@ -168,12 +168,19 @@ it('bounds a scrolling sheet below the safe top and keeps its header outside the
     expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
 });
 
-it('keeps modal sheets below React Native Web Modal dialogs so prompts and alerts stack in front', () => {
-    const tree = at('medium', <SheetFrame open close={vi.fn()} title="Task"><T>body</T></SheetFrame>);
-    const sheet = tree.root.findByType('Sheet');
-    const overlay = tree.root.findByType('Sheet.Overlay');
-    expect(sheet.props.zIndex).toBeLessThan(9999);
-    expect(sheet.props.portalProps?.zIndex).toBeLessThan(9999);
-    expect(overlay.props.zIndex).toBeLessThan(sheet.props.zIndex);
-    expect(overlay.props.zIndex).toBeGreaterThan(2000);
+it('preserves default SheetFrame stacking for other sheets and stacks below modals only when opted in', () => {
+    const defaultTree = at('medium', <SheetFrame open close={vi.fn()} title="Attach"><T>body</T></SheetFrame>);
+    const defaultSheet = defaultTree.root.findByType('Sheet');
+    const defaultOverlay = defaultTree.root.findByType('Sheet.Overlay');
+    expect(defaultSheet.props.zIndex).toBeUndefined();
+    expect(defaultSheet.props.portalProps).toBeUndefined();
+    expect(defaultOverlay.props.zIndex).toBeUndefined();
+
+    const optedInTree = at('medium', <SheetFrame open close={vi.fn()} title="Task" belowModals><T>body</T></SheetFrame>);
+    const optedInSheet = optedInTree.root.findByType('Sheet');
+    const optedInOverlay = optedInTree.root.findByType('Sheet.Overlay');
+    expect(optedInSheet.props.zIndex).toBeLessThan(9999);
+    expect(optedInSheet.props.portalProps?.zIndex).toBeLessThan(9999);
+    expect(optedInOverlay.props.zIndex).toBeLessThan(optedInSheet.props.zIndex);
+    expect(optedInOverlay.props.zIndex).toBeGreaterThan(2000);
 });

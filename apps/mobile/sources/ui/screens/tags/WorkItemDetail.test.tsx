@@ -66,6 +66,11 @@ it('keeps the note and Send inside the shared keyboard body while activity can s
     try {
         const body = tree.root.findByType(KeyboardBody);
         expect(body.props.maxHeight).toBe(844 - 24 - 24);
+        const sheetNode = tree.root.findByType('Sheet');
+        const overlayNode = tree.root.findByType('Sheet.Overlay');
+        expect(sheetNode.props.zIndex).toBeLessThan(9999);
+        expect(sheetNode.props.portalProps?.zIndex).toBeLessThan(9999);
+        expect(overlayNode.props.zIndex).toBeLessThan(sheetNode.props.zIndex);
         for (const id of ['work-note-input', 'work-note-send']) {
             expect(body.findAll((node: any) => typeof node.type === 'string' && node.props.testID === id)).toHaveLength(1);
         }
