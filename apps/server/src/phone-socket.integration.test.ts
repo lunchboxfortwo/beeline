@@ -753,7 +753,7 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('?private=yes');
   });
 
-  it('stores device_update_receipts and phone_update_devices after /v1/auth/refresh over the live socket while HTTP stays 404', async () => {
+  it('R1: stores update receipts from HTTP and the socket after token refresh', async () => {
     const realAuth = new TokenAuth(db, async () => ({
       subject: 'refresh-receipt-user',
       login: 'refresh-user',
@@ -779,63 +779,73 @@ describe('SOCKET-OPS-1 phone request/reply', () => {
       });
       expect(refreshed.status).toBe(200);
       const tokens = (await refreshed.json()) as { accessToken: string; identityId: string };
+      const session = await realAuth.authenticatePhoneSession(tokens.accessToken);
+      expect(session?.familyId).toBeTruthy();
       const payload = {
         deviceId: '44444444-4444-4444-8444-444444444444',
         platform: 'android',
         updateId: 'update-after-refresh',
         channel: 'production',
         runtimeVersion: '44',
+        releaseVersion: 'v0.1.248-rc.2',
       };
-      // HTTP write allowlist must remain closed for reportRunningUpdate.
-      const httpAttempt = await fetch(`${authOrigin}/v1/phone/operations/reportRunningUpdate`, {
+      const postReceipt = (receipt: unknown, accessToken?: string) => fetch(`${authOrigin}/v1/phone/operations/reportRunningUpdate`, {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${tokens.accessToken}`,
+          ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
           'content-type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(receipt),
       });
-      expect(httpAttempt.status).toBe(404);
-      expect(await httpAttempt.json()).toEqual({ error: 'not_found' });
-      expect(
-        (await db.query(`SELECT 1 FROM device_update_receipts WHERE identity_id=$1`, [tokens.identityId])).rowCount,
-      ).toBe(0);
-      expect(
-        (await db.query(`SELECT 1 FROM phone_update_devices WHERE identity_id=$1`, [tokens.identityId])).rowCount,
-      ).toBe(0);
+      const receipts = async () => (await db.query(
+        `SELECT device_id, receipt FROM device_update_receipts WHERE identity_id=$1`,
+        [tokens.identityId],
+      )).rows;
+      const families = async () => (await db.query(
+        `SELECT family_id::text, device_id FROM phone_update_devices WHERE identity_id=$1`,
+        [tokens.identityId],
+      )).rows;
+
+      const invalid = { ...payload, deviceId: '' };
+      const unauthenticated = await postReceipt(payload);
+      expect(unauthenticated.status).toBe(401);
+      expect(await unauthenticated.json()).toEqual({ error: 'phone_token_required' });
+      const malformed = await postReceipt(invalid, tokens.accessToken);
+      expect(malformed.status).toBe(400);
+      expect(await malformed.json()).toEqual({ error: 'invalid device' });
+      expect(await receipts()).toEqual([]);
+      expect(await families()).toEqual([]);
+
+      const accepted = await postReceipt(payload, tokens.accessToken);
+      expect(accepted.status).toBe(204);
+      expect(await receipts()).toEqual([{ device_id: payload.deviceId, receipt: payload }]);
+      const expectedFamilies = [{ family_id: session?.familyId, device_id: payload.deviceId }];
+      expect(await families()).toEqual(expectedFamilies);
 
       const socket = new WebSocket(`${authOrigin.replace('http:', 'ws:')}/v1/phone/live`, [
         `bearer.${tokens.accessToken}`,
       ]);
       sockets.push(socket);
       await once(socket, 'open');
-      expect(await request(socket, 'reportRunningUpdate', payload)).toMatchObject({ ok: true });
+      expect(await request(socket, 'reportRunningUpdate', invalid)).toMatchObject({
+        ok: false, error: { code: 'invalid_args', message: 'invalid device', retryable: false },
+      });
 
-      const receipts = (
-        await db.query<{ device_id: string; receipt: Record<string, unknown> }>(
-          `SELECT device_id, receipt FROM device_update_receipts WHERE identity_id=$1`,
-          [tokens.identityId],
-        )
-      ).rows;
-      expect(receipts).toEqual([
-        {
-          device_id: payload.deviceId,
-          receipt: expect.objectContaining({
-            deviceId: payload.deviceId,
-            platform: 'android',
-            updateId: 'update-after-refresh',
-          }),
-        },
-      ]);
-      const families = (
-        await db.query<{ family_id: string; device_id: string }>(
-          `SELECT family_id::text, device_id FROM phone_update_devices WHERE identity_id=$1`,
-          [tokens.identityId],
-        )
-      ).rows;
-      expect(families).toEqual([
-        { family_id: expect.stringMatching(/^[0-9a-f-]{36}$/), device_id: payload.deviceId },
-      ]);
+      await db.query(
+        `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`,
+        [WORKSPACE, ROOM, tokens.identityId],
+      );
+      expect(await request(socket, 'reportMessageIssue', { roomId: ROOM, messageId: MESSAGE }))
+        .toMatchObject({ ok: true });
+      expect((await db.query(
+        `SELECT app_version, app_platform FROM feedback_items WHERE reporter_identity_id=$1`,
+        [tokens.identityId],
+      )).rows).toEqual([{ app_version: payload.releaseVersion, app_platform: payload.platform }]);
+
+      const socketReceipt = { ...payload, updateId: 'update-over-socket' };
+      expect(await request(socket, 'reportRunningUpdate', socketReceipt)).toMatchObject({ ok: true });
+      expect(await receipts()).toEqual([{ device_id: payload.deviceId, receipt: socketReceipt }]);
+      expect(await families()).toEqual(expectedFamilies);
     } finally {
       await new Promise<void>((resolve) => authServer.close(() => resolve()));
     }

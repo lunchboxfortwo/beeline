@@ -573,10 +573,9 @@ export function createBeelineServer(options: ServerOptions): Server {
   const invitePreview = new InvitePreviewAccess(options.database);
   const phoneViewing = new PhoneViewing(options.database, options.connectionPresence?.instanceId ?? randomUUID());
   const dispatchPhoneOperation = createPhoneOperationDispatcher(options, requestErrorStatus);
-  // Deployment/free-agent proof tools and the corner fixture controller are non-phone HTTP clients.
-  // Keep only their named commands; phone actions use the live socket.
+  // Shipped phone builds also send running-update receipts over HTTP.
   const httpPhoneOperation: PhoneHttpOperation = (name, input, viewerId, familyId) => {
-    if (!(PHONE_READ_OPERATIONS as readonly string[]).includes(name) &&
+    if (name !== 'reportRunningUpdate' && !(PHONE_READ_OPERATIONS as readonly string[]).includes(name) &&
         !(NON_PHONE_HTTP_WRITES as readonly string[]).includes(name))
       throw new PhoneOperationError(404, { error: 'not_found' });
     if ((name === 'readNeedsYou' || name === 'readTray') && input.markSeen !== false)

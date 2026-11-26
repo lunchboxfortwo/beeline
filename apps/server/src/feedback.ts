@@ -204,8 +204,7 @@ async function humanReportVersions(
       `SELECT
          CASE WHEN reported.receipt->>'platform' IN ('ios','android','web','macos','windows','linux')
               THEN reported.receipt->>'platform' END AS app_platform,
-         CASE WHEN reported.receipt->>'releaseVersion' ~ '^v[0-9]+\\.[0-9]+\\.[0-9]+$'
-              THEN reported.receipt->>'releaseVersion' END AS app_version
+         reported.receipt->>'releaseVersion' AS app_version
        FROM phone_update_devices installation
        JOIN device_update_receipts reported
          ON reported.identity_id=installation.identity_id
