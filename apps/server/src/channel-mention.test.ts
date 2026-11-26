@@ -275,4 +275,42 @@ describe('quoted mention TS/SQL agreement', () => {
       }
     } finally { await database.close(); }
   });
+
+  it('escapes dots and hyphens in SQL handle matching so dots are never wildcards', async () => {
+    const database = await fixture();
+    try {
+      const cases: Array<{ handle: string; text: string; expected: boolean }> = [
+        { handle: 'a.b', text: '@axb hello', expected: false },
+        { handle: 'a.b', text: '@a-b hello', expected: false },
+        { handle: 'a.b', text: '@a.b hello', expected: true },
+        { handle: 'a.b', text: '@a.b.', expected: true },
+        { handle: 'a.b', text: '@a.b.c', expected: false },
+        { handle: 'a-b', text: '@axb hello', expected: false },
+        { handle: 'a-b', text: '@a.b hello', expected: false },
+        { handle: 'a-b', text: '@a-b hello', expected: true },
+        { handle: 'a.b-c', text: '@axb-c hello', expected: false },
+        { handle: 'a.b-c', text: '@a.bxc hello', expected: false },
+        { handle: 'a.b-c', text: '@a.b-c hello', expected: true },
+      ];
+      for (const { handle, text, expected } of cases) {
+        await database.query('UPDATE identities SET handle=$2 WHERE id=$1', [BEE, handle]);
+        const handles = typedMentionHandles(text);
+        expect(handles.has(handle), `${handle} vs ${text} (TS)`).toBe(expected);
+        const resolved = await resolveCurrentMemberMentions(database, ROOM, text, AUTHOR);
+        expect(resolved.some((member) => member.id === BEE), `${handle} vs ${text} (resolve)`).toBe(expected);
+        const row = (
+          await database.query<{ ids: string[]; known: boolean }>(
+            `SELECT ${taggedIdentityIdsSql('m')} ids,
+              ${tagsKnownIdentitySql('m', '$3', '$5::text', "'human'")} known
+             FROM (SELECT $1::text text,$2::uuid room_id,$4::text author_id,'message'::text presentation) m`,
+            [text, ROOM, BEE, AUTHOR, handle],
+          )
+        ).rows[0]!;
+        expect(row.ids.includes(BEE), `${handle} vs ${text} (taggedIdentityIdsSql)`).toBe(expected);
+        expect(row.known, `${handle} vs ${text} (tagsKnownIdentitySql)`).toBe(expected);
+      }
+    } finally {
+      await database.close();
+    }
+  });
 });

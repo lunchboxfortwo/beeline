@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { needsYouMarksSchema } from './needs-you-marks.js';
 import { readNeedsYouOrder } from './needs-you.js';
 import { PhoneService } from './phone-service.js';
+import { postRoomChoice } from './room-choice.js';
 import { PgliteDatabase, migratedDatabase } from './test-support.js';
+import { updateWorkItem } from './work-board.js';
+import { askOwnerQuestion } from './work-questions.js';
 
 const VIEWER = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
@@ -10,8 +13,9 @@ const AGENT = 'c'.repeat(64);
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ROOM = '22222222-2222-4222-8222-222222222222';
 const CORNER = '33333333-3333-4333-8333-333333333333';
+const GRANT = '55555555-5555-4555-8555-555555555555';
 
-describe('person tags in Needs you', () => {
+describe('Needs you human mention retirement', () => {
   let database: PgliteDatabase;
   let phone: PhoneService;
   let sequence = 0;
@@ -21,8 +25,23 @@ describe('person tags in Needs you', () => {
       VALUES($1,$2,$3,$4,now()-$5*interval '1 minute')`, [id, roomId, authorId, text, ageMinutes]);
     return id;
   }
+  async function report(
+    roomId: string,
+    authorId: string,
+    text: string,
+    status: 'blocked' | 'needs-decision' = 'blocked',
+    ageMinutes = 10,
+  ) {
+    const id = await post(roomId, authorId, text, ageMinutes);
+    await database.query(`UPDATE messages SET card=$2::jsonb WHERE id=$1`, [
+      id,
+      JSON.stringify({ reportStatus: status, reportToId: VIEWER }),
+    ]);
+    return id;
+  }
   const read = () => phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, VIEWER);
   const count = async () => (await phone.execute('countNeedsYou', { workspaceId: WORKSPACE }, VIEWER)).count;
+
   beforeEach(async () => {
     sequence = 0;
     database = await migratedDatabase();
@@ -40,60 +59,161 @@ describe('person tags in Needs you', () => {
 
   afterEach(() => database.close());
 
-  it('PERSON-TAG: lists and counts a person tagging the viewer, excludes agent and inexact tags, and clears on reply or dismissal', async () => {
-    const tagged = await post(ROOM, PEER, '@ada please check the launch note.', 30);
-    await post(ROOM, AGENT, '@ada please check the launch note.', 29);
-    await post(ROOM, PEER, '@adam this is for someone else.', 28);
-    await post(ROOM, PEER, '`@ada` is a handle example.', 27);
-    await post(ROOM, PEER, '@channel please check the launch note.', 26);
-    await post(ROOM, VIEWER, '@ada a note to myself.', 31);
-    expect((await read()).items).toMatchObject([{ messageId: tagged, author: { name: 'Juniper', kind: 'human' } }]);
-    expect(await count()).toBe(1);
-    const reply = await post(ROOM, VIEWER, 'Reviewed the launch note.', 20);
-    expect(await count()).toBe(1);
-    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, tagged]);
+  it('Reproduction 1: excludes human-to-human mentions and questions while preserving reports, questions, and approvals', async () => {
+    await post(ROOM, PEER, '@ada @hoots can you look at this?', 30);
+    await post(ROOM, PEER, '@channel what do you think?', 29);
+    await post(ROOM, PEER, '@ada please check the launch note.', 28);
+    await post(CORNER, PEER, 'cost for leading companies to serve a token?', 27);
+    await post(ROOM, AGENT, '@ada please check the launch note?', 26);
+    await phone.execute('sendRoomMessage', {
+      roomId: ROOM,
+      messageId: 'd'.repeat(64),
+      text: '@ada can you review this?',
+    }, PEER);
+
+    expect((await database.query('SELECT * FROM needs_you_marks')).rows).toEqual([]);
     expect((await read()).items).toEqual([]);
     expect(await count()).toBe(0);
-    const dismissed = await post(ROOM, PEER, '@ada please check the revised note.', 10);
-    expect(await count()).toBe(1);
-    await phone.execute('clearNeedsYou', { workspaceId: WORKSPACE, messageId: dismissed }, VIEWER);
-    expect((await read()).items).toEqual([]);
-    expect(await count()).toBe(0);
+    expect(await readNeedsYouOrder(database, WORKSPACE, VIEWER)).toEqual({ count: 0, order: [] });
+    expect((await phone.liveNeedsYou(ROOM, VIEWER))?.count).toBe(0);
+
+    const blocked = await report(CORNER, AGENT, 'Need a signing decision before build?', 'blocked', 20);
+    const decision = await report(ROOM, AGENT, 'Ship the release tonight?', 'needs-decision', 19);
+    const workQuestion = await askOwnerQuestion(
+      database,
+      { about: { kind: 'thread', roomId: CORNER }, question: 'Which surface?', freeText: true },
+      AGENT,
+    );
+    const standaloneChoice = await postRoomChoice(database, {
+      roomId: ROOM,
+      agentId: AGENT,
+      requesterId: VIEWER,
+      mode: 'question',
+      prompt: 'Promote next to latest?',
+      options: [{ label: 'Promote' }, { label: 'Hold' }],
+    });
+    await database.query(
+      `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
+       VALUES($1,$2,$3,'command','gh pr checks','Watch CI',$2,$4,'pending')`,
+      [GRANT, AGENT, WORKSPACE, ROOM],
+    );
+    const grantCard = 'e'.repeat(64);
+    await database.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card)
+       VALUES($1,$2,$3,'Hoots asks Ada','card','grant-request',$4::jsonb)`,
+      [
+        grantCard,
+        ROOM,
+        AGENT,
+        JSON.stringify({
+          agent: { pubkey: AGENT, kind: 'agent', name: 'Hoots' },
+          grants: [{ grantId: GRANT, kind: 'command', target: 'gh pr checks', reason: 'Watch CI', status: 'pending' }],
+        }),
+      ],
+    );
+
+    const { items } = await read();
+    expect(items.map((item) => item.messageId).sort()).toEqual(
+      [blocked, decision, workQuestion.messageId, standaloneChoice.messageId, grantCard].sort(),
+    );
+    expect(await count()).toBe(5);
   });
 
-  it('keeps ordinary personal tags per-person after another recipient quote-answers', async () => {
-    const tagged = await post(ROOM, PEER, '@ada @hoots please review.', 30);
-    await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Quill','quill')`, ['e'.repeat(64)]);
-    await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$3,'member'),($1,$2,$3,'member')`, [WORKSPACE, ROOM, 'e'.repeat(64)]);
-    await database.query('UPDATE messages SET text=$2 WHERE id=$1', [tagged, '@ada @quill please review.']);
-    const reply = await post(ROOM, VIEWER, 'Reviewed.', 10);
-    await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, tagged]);
-    expect(await count()).toBe(0);
-    expect((await phone.execute('readNeedsYou', { workspaceId: WORKSPACE }, 'e'.repeat(64))).items.map(item => item.messageId)).toEqual([tagged]);
-    expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1 AND identity_id=$2', [tagged, 'e'.repeat(64)])).rows).toEqual([{ cleared_at: null }]);
-  });
+  it('retires open human-mention marks once on deploy without disturbing live reports, questions, or approvals', async () => {
+    const humanMention = await post(ROOM, PEER, '@ada @hoots can you look at this?', 40);
+    const humanQuestion = await post(ROOM, PEER, 'what do you think?', 39);
+    const alreadyCleared = await post(ROOM, PEER, '@ada already dismissed', 38);
+    const liveReport = await report(CORNER, AGENT, 'Blocked on signing key', 'blocked', 30);
+    const activeQuestion = await askOwnerQuestion(
+      database,
+      { about: { kind: 'thread', roomId: CORNER }, question: 'Which track?', freeText: true },
+      AGENT,
+    );
+    const dormantQuestion = await askOwnerQuestion(
+      database,
+      { about: { kind: 'thread', roomId: CORNER }, question: 'Which cohort?', freeText: true },
+      AGENT,
+    );
+    await updateWorkItem(database, { id: dormantQuestion.messageId, roomId: CORNER, assigneeId: PEER }, VIEWER);
+    const choiceQuestion = await postRoomChoice(database, {
+      roomId: ROOM,
+      agentId: AGENT,
+      requesterId: VIEWER,
+      mode: 'question',
+      prompt: 'Run release proof?',
+      options: [{ label: 'Yes' }, { label: 'No' }],
+    });
+    await database.query(
+      `INSERT INTO agent_grants(id,agent_id,workspace_id,kind,target,reason,requested_by,room_id,status)
+       VALUES($1,$2,$3,'command','gh pr checks','Watch CI',$2,$4,'pending')`,
+      [GRANT, AGENT, WORKSPACE, ROOM],
+    );
+    const grantCard = 'f'.repeat(64);
+    await database.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card)
+       VALUES($1,$2,$3,'Hoots asks Ada','card','grant-request',$4::jsonb)`,
+      [
+        grantCard,
+        ROOM,
+        AGENT,
+        JSON.stringify({
+          agent: { pubkey: AGENT, kind: 'agent', name: 'Hoots' },
+          grants: [{ grantId: GRANT, kind: 'command', target: 'gh pr checks', reason: 'Watch CI', status: 'pending' }],
+        }),
+      ],
+    );
 
-  it('PERSON-TAG: shares the question rules: no expiry, section clear and count', async () => {
-    const id = await post(CORNER, PEER, '@ada please review this corner.', 30 * 60);
-    expect(await count()).toBe(1);
-    expect((await read()).items.map(item => [item.messageId, item.expiresAt])).toEqual([[id, undefined]]);
-    await post(ROOM, PEER, '@ada please check another note.');
-    expect(await count()).toBe(2);
-    await phone.execute('clearNeedsYouSection', { workspaceId: WORKSPACE }, VIEWER);
-    expect((await read()).items).toEqual([]);
-    expect(await count()).toBe(0);
-  });
+    // Simulate pre-deploy marks from the retired human-to-human mention branch
+    // plus an already-dismissed mark and an open mark on an approval card.
+    await database.query(
+      `INSERT INTO needs_you_marks(identity_id,message_id,workspace_id,cleared_at,cleared_reason)
+       VALUES($1,$2,$3,NULL,NULL),($1,$4,$3,NULL,NULL),($1,$5,$3,now()-interval '1 hour','manual'),($1,$6,$3,NULL,NULL)`,
+      [VIEWER, humanMention, WORKSPACE, humanQuestion, alreadyCleared, grantCard],
+    );
+    await database.query("DELETE FROM workflow_backfills WHERE name='needs-you-retire-person-tags-v1'");
 
-  it('commits the open item with a phone send and settles it with the viewer reply', async () => {
-    const id = 'd'.repeat(64);
-    await phone.execute('sendRoomMessage', { roomId: ROOM, messageId: id, text: '@ada please review.' }, PEER);
-    expect((await database.query('SELECT first_seen_at,cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows)
-      .toEqual([{ first_seen_at: null, cleared_at: null }]);
-    expect(await readNeedsYouOrder(database, WORKSPACE, VIEWER)).toEqual({ count: 1, order: [id] });
-    expect((await phone.liveNeedsYou(ROOM, VIEWER))?.count).toBe(1);
-    await phone.execute('sendRoomReply', { roomId: ROOM, parentMessageId: id, text: 'Reviewed.' }, VIEWER);
-    expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows[0]?.cleared_at).toBeInstanceOf(Date);
-    expect(await count()).toBe(0);
+    await database.query(needsYouMarksSchema());
+
+    const marks = (
+      await database.query<{ message_id: string; cleared_reason: string | null; cleared: boolean }>(
+        `SELECT message_id,cleared_reason,cleared_at IS NOT NULL cleared
+         FROM needs_you_marks WHERE identity_id=$1 ORDER BY message_id`,
+        [VIEWER],
+      )
+    ).rows;
+    const byId = new Map(marks.map((row) => [row.message_id, row]));
+    expect(byId.get(humanMention)).toEqual({ message_id: humanMention, cleared_reason: 'removed', cleared: true });
+    expect(byId.get(humanQuestion)).toEqual({ message_id: humanQuestion, cleared_reason: 'removed', cleared: true });
+    expect(byId.get(alreadyCleared)).toEqual({ message_id: alreadyCleared, cleared_reason: 'manual', cleared: true });
+    expect(byId.get(liveReport)).toEqual({ message_id: liveReport, cleared_reason: null, cleared: false });
+    expect(byId.get(activeQuestion.messageId)).toEqual({
+      message_id: activeQuestion.messageId,
+      cleared_reason: null,
+      cleared: false,
+    });
+    expect(byId.get(dormantQuestion.messageId)).toEqual({
+      message_id: dormantQuestion.messageId,
+      cleared_reason: null,
+      cleared: false,
+    });
+    expect(byId.get(choiceQuestion.messageId)).toEqual({
+      message_id: choiceQuestion.messageId,
+      cleared_reason: null,
+      cleared: false,
+    });
+    expect(byId.get(grantCard)).toEqual({ message_id: grantCard, cleared_reason: null, cleared: false });
+
+    expect((await read()).items.map((item) => item.messageId).sort()).toEqual(
+      [liveReport, activeQuestion.messageId, choiceQuestion.messageId, grantCard].sort(),
+    );
+    expect(await count()).toBe(4);
+
+    // Idempotent on re-run.
+    const snapshot = (await database.query('SELECT * FROM needs_you_marks ORDER BY identity_id,message_id')).rows;
+    await database.query(needsYouMarksSchema());
+    expect((await database.query('SELECT * FROM needs_you_marks ORDER BY identity_id,message_id')).rows).toEqual(
+      snapshot,
+    );
   });
 
   it('backfills only open legacy reports, preserves seen clocks, and never backfills historical person tags', async () => {
@@ -122,18 +242,21 @@ describe('person tags in Needs you', () => {
     expect((await database.query('SELECT first_seen_at FROM needs_you_marks WHERE message_id=$1', [seen])).rows[0]?.first_seen_at).toEqual(clock);
     const freshTag = await post(ROOM, PEER, '@ada a new tag after rollout', 1);
     await database.query(needsYouMarksSchema());
-    expect(await count()).toBe(3);
-    expect((await read()).items.some(item => item.messageId === freshTag)).toBe(true);
+    expect(await count()).toBe(2);
+    expect((await read()).items.some(item => item.messageId === freshTag)).toBe(false);
   });
 
   it('rolls the open record back with its message and clears a removed request', async () => {
     await expect(database.transaction(async db => {
-      await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES('rollback-tag',$1,$2,'@ada review')`, [ROOM, PEER]);
-      expect((await db.query(`SELECT 1 FROM needs_you_marks WHERE message_id='rollback-tag'`)).rowCount).toBe(1);
+      await db.query(
+        `INSERT INTO messages(id,room_id,author_id,text,card) VALUES('rollback-report',$1,$2,'blocked: review',$3::jsonb)`,
+        [ROOM, AGENT, JSON.stringify({ reportStatus: 'blocked', reportToId: VIEWER })],
+      );
+      expect((await db.query(`SELECT 1 FROM needs_you_marks WHERE message_id='rollback-report'`)).rowCount).toBe(1);
       throw new Error('roll back message');
     })).rejects.toThrow('roll back message');
-    expect((await database.query(`SELECT 1 FROM needs_you_marks WHERE message_id='rollback-tag'`)).rowCount).toBe(0);
-    const id = await post(ROOM, PEER, '@ada please check this.');
+    expect((await database.query(`SELECT 1 FROM needs_you_marks WHERE message_id='rollback-report'`)).rowCount).toBe(0);
+    const id = await report(ROOM, AGENT, 'please check this.');
     await database.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [id]);
     expect(await count()).toBe(0);
     expect((await database.query('SELECT cleared_at FROM needs_you_marks WHERE message_id=$1', [id])).rows[0]?.cleared_at).toBeInstanceOf(Date);
@@ -150,5 +273,4 @@ describe('person tags in Needs you', () => {
     await database.query('UPDATE messages SET reply_to_message_id=$2 WHERE id=$1', [reply, id]);
     expect(await count()).toBe(0);
   });
-
 });

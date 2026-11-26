@@ -3,15 +3,11 @@ import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { IMPLEMENTER_BLOCKS_SCHEMA } from './implementer-blocks.js';
 import { agentReportSql, askingMessageSql, needsYouAnsweredSql, questionForSql, questionRecipientSql, settledMarkReasonSql, supersedesSql, viewerMemberSql } from './needs-you.js';
 import { humanReportCornerSql } from './corner-waiting-report.js';
-import { tagsKnownIdentitySql } from './message-mentions.js';
 
 /** Resolve an incoming request once, in the message's own transaction. */
 function requestedSql(message = 'm'): string {
   return `${message}.deleted_at IS NULL AND ${message}.author_id<>recipient.id AND (
     (${askingMessageSql(message)} AND ${message}.card->>'reportToId'=recipient.id)
-    OR (${message}.presentation='message' AND ${message}.system_event IS NULL AND recipient.kind='human'
-      AND EXISTS (SELECT 1 FROM identities sender WHERE sender.id=${message}.author_id AND sender.kind='human')
-      AND ${tagsKnownIdentitySql(message, 'recipient.id', 'recipient.handle', 'recipient.kind', false)})
     OR (recipient.kind='human' AND ${questionRecipientSql(message, 'recipient.id')})
   )`;
 }
@@ -208,7 +204,24 @@ DO $question_marks$ BEGIN
     INSERT INTO workflow_backfills(name) VALUES('needs-you-question-marks-v1') ON CONFLICT DO NOTHING;
   END IF;
 END $question_marks$;
+${retirePersonTagsOnceSql()}
 `;
+}
+
+/** Clear open marks left by the retired human-to-human mention branch once on deploy. */
+function retirePersonTagsOnceSql(): string {
+  return `DO $needs_you_retire_person_tags$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM workflow_backfills WHERE name='needs-you-retire-person-tags-v1') THEN
+      UPDATE needs_you_marks mark SET cleared_at=now(),cleared_reason='removed'
+      FROM messages m,identities recipient
+      WHERE mark.message_id=m.id AND recipient.id=mark.identity_id AND mark.cleared_at IS NULL
+        AND m.presentation='message'
+        AND (${requestedSql()}) IS NOT TRUE
+        AND NOT EXISTS (SELECT 1 FROM work_questions question WHERE question.message_id=m.id)
+        AND NOT EXISTS (SELECT 1 FROM room_choices choice WHERE choice.message_id=m.id AND choice.mode='question');
+      INSERT INTO workflow_backfills(name) VALUES('needs-you-retire-person-tags-v1') ON CONFLICT DO NOTHING;
+    END IF;
+  END $needs_you_retire_person_tags$;`;
 }
 
 /** Records the retired clock already hid stay cleared once nothing expires. */

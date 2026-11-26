@@ -11,7 +11,10 @@ vi.mock('tamagui', () => ({ XStack: 'XStack', YStack: 'YStack' }));
 vi.mock('@/ui/grammar', () => ({ T: 'T', Motion: 'Motion' }));
 vi.mock('./chat-surface-values', () => ({ COMPOSER_MIN_HEIGHT: 26, COMPOSER_MAX_HEIGHT: 120 }));
 vi.mock('@/components/buzz/TurnProgressLine', () => ({ TurnBandSlot: () => null, TurnSettledLine: () => null, TurnProgressLine: () => null }));
-vi.mock('@/components/buzz/MentionSuggestionMenu', () => ({ ChannelSuggestionMenu: () => null, MentionSuggestionMenu: () => null }));
+vi.mock('@/components/buzz/MentionSuggestionMenu', () => ({
+  ChannelSuggestionMenu: () => null,
+  MentionSuggestionMenu: (props: any) => React.createElement('MentionMenu', props),
+}));
 vi.mock('@/components/buzz/RepoPicker', () => ({ RepoPicker: () => null }));
 vi.mock('@/components/buzz/SlashVerbPicker', () => ({ SlashVerbPicker: () => null }));
 vi.mock('@/components/buzz/IndexRow', () => ({ IndexRow: () => null }));
@@ -214,4 +217,38 @@ it.each([false, true].flatMap((initiallyAttached) =>
   expect(sent).toEqual(initiallyAttached ? [] : [{ text: template, attachments: [file] }]);
   if (!initiallyAttached && action === 'dictation')
     expect(handleSend).toHaveBeenCalledWith(undefined, dictated);
+});
+
+it.each([
+  { name: '#general', expectedPlaceholder: 'Message #general', expectedPlace: '#general' },
+  { name: '##general', expectedPlaceholder: 'Message #general', expectedPlace: '#general' },
+  { name: '  #general  ', expectedPlaceholder: 'Message #general', expectedPlace: '#general' },
+  { name: 'general', expectedPlaceholder: 'Message #general', expectedPlace: '#general' },
+  { name: '###', expectedPlaceholder: undefined, expectedPlace: undefined },
+])('MATH-32188: strips leading # from room name $name for composer placeholder and mention place', ({ name, expectedPlaceholder, expectedPlace }) => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const props = {
+    isDirectMessage: false,
+    isCorner: false,
+    mentionMenuVisible: true,
+    mentionSuggestions: { matches: [], overflow: 0 },
+    personProfileByPubkey: new Map(),
+    commandController: {},
+    desktopExperience: false,
+    pendingAttachments: [],
+    pendingAttachmentsRef: { current: [] },
+    composerTagHandles: new Set(),
+    insertedStarterRef: { current: null },
+    voice: {},
+    roomSurface: { room: { name }, members: [] },
+    composerInputRevisionRef: { current: 0 },
+    composerHeight: 26,
+    setComposerHeight: () => {},
+    inputText: '',
+    inputTextRef: { current: '' },
+    setInputText: () => {},
+  } as unknown as Props;
+  act(() => { renderer = create(<ChatSurfaceComposer {...props} />); });
+  expect(renderer!.root.findByType('Composer').props.placeholder).toBe(expectedPlaceholder);
+  expect(renderer!.root.findByType('MentionMenu').props.place).toBe(expectedPlace);
 });

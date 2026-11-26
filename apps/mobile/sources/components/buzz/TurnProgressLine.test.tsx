@@ -76,7 +76,7 @@ it('shows nothing to press for someone who may not stop the turn', () => {
 });
 
 const agents = ['Ruby', 'Jellybean', 'Grunt', 'Bee'].map((name, i) => ({pubkey: name, name, startedAt: 100 + i * 20, stop: {agentPubkey: name, requestId: `request-${i}`}}));
-it.each([1, 3])('keeps the spinner and agent avatars together for %i working agents', (count) => {
+it.each([0, 1, 3])('keeps the spinner and agent avatars together for %i working agents', (count) => {
   let tree: any;
   act(() => { tree = create(<TurnProgressLine agents={agents.slice(0, count)} label="Working…" />); });
   expect(tree.root.findAllByType('Spinner')).toHaveLength(1);
@@ -84,7 +84,38 @@ it.each([1, 3])('keeps the spinner and agent avatars together for %i working age
   act(() => tree.unmount());
 });
 
-it('overlaps two avatars and exposes each elapsed counter and individual Stop on tap', async () => {
+it.each([1, 2, 3, 4])('keeps full-size avatar wrappers and the compact footprint for %i working agents', (count) => {
+  let tree: any;
+  act(() => { tree = create(<TurnProgressLine agents={agents.slice(0, count)} label="Working…" />); });
+  try {
+    const marks = tree.root.findAllByType('IdentityMark');
+    expect(marks.map((mark: any) => mark.props.seed)).toEqual(agents.slice(0, Math.min(count, 3)).map(agent => agent.pubkey));
+    marks.forEach((mark: any, index: number) => {
+      expect(mark.props.size).toBe(20);
+      expect(mark.parent.props).toMatchObject({
+        position: 'relative',
+        zIndex: index,
+        width: 24,
+        height: 24,
+        flexShrink: 0,
+        marginLeft: index === 0 ? 0 : -8,
+        backgroundColor: 'canvas',
+        borderWidth: 2,
+        borderColor: 'canvas',
+        borderRadius: 'md',
+      });
+    });
+    if (count > 3) {
+      const stack = marks[2].parent.parent;
+      expect(stack.children.slice(0, 3)).toEqual(marks.map((mark: any) => mark.parent));
+      expect(stack.children[3].props).toMatchObject({ children: ['+', 1], marginLeft: '1' });
+    }
+  } finally {
+    act(() => tree.unmount());
+  }
+});
+
+it('exposes each elapsed counter and individual Stop on tap', async () => {
   vi.useFakeTimers(); vi.setSystemTime(200_000);
   const stop = vi.fn(async (_stop: {agentPubkey:string;requestId:string}) => true); let tree: any;
   try {
