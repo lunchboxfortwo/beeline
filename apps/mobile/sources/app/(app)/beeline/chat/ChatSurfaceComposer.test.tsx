@@ -110,6 +110,7 @@ it.each([false, true])('COMPOSER-KEYBOARD-1: desktop=%s, only the phone chrome l
 // A Room with agent members still uses the thread's field/mic/send row.
 it.each([
   { isDirectMessage: false, isCorner: false, agent: true, callable: false },
+  { isDirectMessage: false, isCorner: false, agent: false, callable: false },
   { isDirectMessage: false, isCorner: true, agent: true, callable: false },
   { isDirectMessage: true, isCorner: true, agent: true, callable: false },
   { isDirectMessage: true, isCorner: false, agent: false, callable: false },
@@ -127,7 +128,11 @@ it.each([
   const composer = renderer!.root.findByType('Composer');
   expect(composer.props.voice).toBe(callable ? voice : undefined);
   if (location.isCorner) expect(composer.props.placeholder).toBe('Reply in thread');
-  else if (!location.isDirectMessage) expect(composer.props.placeholder).toBe('Message #crew');
+  else if (!location.isDirectMessage) {
+    expect(composer.props.placeholder).toBe(agent ? '@agent #chat /skill' : 'Message #crew');
+    act(() => renderer!.update(<ChatSurfaceComposer {...props} desktopExperience />));
+    expect(renderer!.root.findByType('Composer').props.placeholder).toBe('Message #crew');
+  } else expect(composer.props.placeholder).toBeUndefined();
 });
 
 it('blocks untouched chip text across Send, dictation, and Enter, but permits manual text', async () => {

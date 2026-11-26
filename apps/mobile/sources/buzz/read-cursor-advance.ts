@@ -1,5 +1,6 @@
 import { messageBoundaryIds } from './room-new-message-boundary';
 import type { ChatDisplayMessage } from './room-view-presentation';
+import type { TranscriptReadBoundary } from './system-lines';
 
 /**
  * How long the viewport must hold still before its newest row is published as
@@ -22,37 +23,37 @@ function isProvisional(
  * server's (created_at, id) order for read marks, without moving their UI.
  */
 function readBoundaries(chronological: readonly ChatDisplayMessage[]) {
-  const rows = chronological.filter(message => !isProvisional(message));
-  const rowBoundaries = (message: ChatDisplayMessage, hostId: string) =>
-    (message.foldedReadBoundaries ?? messageBoundaryIds(message).map(id => ({
+  type Boundary = { id: string; orderAtMs: number; hostId: string };
+  const rows: Boundary[] = [];
+  const markers: Boundary[] = [];
+  for (const message of chronological) {
+    if (isProvisional(message)) continue;
+    const rowBoundaries = message.foldedReadBoundaries ?? messageBoundaryIds(message).map((id): TranscriptReadBoundary => ({
       id, orderAtMs: message.orderAtMs ?? message.timestamp * 1_000,
-    }))).map(boundary => ({ ...boundary, hostId }));
-  type Boundary = ReturnType<typeof rowBoundaries>[number];
+    }));
+    for (const { id, orderAtMs, anchored } of rowBoundaries) {
+      (anchored ? markers : rows).push({ id, orderAtMs, hostId: message.id });
+    }
+  }
   const compare = (left: Boundary, right: Boundary) =>
     left.orderAtMs - right.orderAtMs || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
-  const markers = rows.flatMap(host => (host.cornerMarkers ?? [])
-    .filter(marker => !isProvisional(marker))
-    .flatMap(message => rowBoundaries(message, host.id)))
-    .sort(compare);
+  markers.sort(compare);
   const boundaries: Boundary[] = [];
   let nextMarker = 0;
   const appendMarker = () => {
     boundaries.push(markers[nextMarker++]!);
   };
-  for (const row of rows) {
-    for (const boundary of rowBoundaries(row, row.id)) {
-      while (nextMarker < markers.length && compare(markers[nextMarker]!, boundary) < 0) appendMarker();
-      boundaries.push(boundary);
-    }
+  for (const boundary of rows) {
+    while (nextMarker < markers.length && compare(markers[nextMarker]!, boundary) < 0) appendMarker();
+    boundaries.push(boundary);
   }
   while (nextMarker < markers.length) appendMarker();
   return boundaries;
 }
 
 /**
- * Seeing a host credits its anchored cards. Seeing the durable tail credits
- * all preceding content, including a newest card anchored above the viewport.
- * Away from the tail, cards on unseen hosts contribute nothing.
+ * Seeing a pill credits its events. Seeing the durable tail also credits
+ * corner markers anchored above the viewport.
  */
 export function newestVisibleMessageId(
   chronological: readonly ChatDisplayMessage[],

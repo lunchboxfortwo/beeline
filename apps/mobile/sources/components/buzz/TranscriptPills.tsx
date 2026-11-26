@@ -3,7 +3,7 @@ import { TypedView } from '@/ui/grammar';
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { ledgerStamp } from '@/buzz/relative-time';
 import { isGitHubEventRun, isSystemLine, stopNotice } from '@/buzz/transcript-pills';
-import { countedLifecycleItemIds, lifecycleItem, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
+import { countedLifecycleItemIds, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
 import { BEELINE_FACE, GITHUB_FACE, isNotice, PillRow, type PillEvent, type PillFace, type PillItem, type PillRunEntry } from '@/ui/screens/transcript/PillRow';
 import { LedgerEntryFrame, LedgerSystemLine } from './Ledger';
 import { MonoMarkdown } from './MonoMarkdown';
@@ -161,14 +161,8 @@ export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdent
   // A repeated webhook line for one PR event counts once across the whole run.
   const counted = countedLifecycleItemIds(run.flatMap((message) =>
     isGitHubEventRun(message) ? message.notificationLifecycleRun!.items : []));
-  const entries: PillRunEntry[] = run.flatMap(message => {
-    if (isGitHubEventRun(message)) return eventEntries(message, counted, handlers);
-    if (!message.deleted && message.daemonFact?.sourceMessageId) {
-      const marker = lifecycleItem(message);
-      if (marker?.cornerId) return [eventEntry(marker, ledgerStamp(message.timestamp), true, handlers)];
-    }
-    return [pillItem(message, resolve, handlers)];
-  });
+  const entries: PillRunEntry[] = run.flatMap(message =>
+    isGitHubEventRun(message) ? eventEntries(message, counted, handlers) : [pillItem(message, resolve, handlers)]);
   if (entries.length < 2) {
     return entries.map((entry) => ({ ...entry, system: Boolean(entry.system), body: entry.body ?? null }));
   }

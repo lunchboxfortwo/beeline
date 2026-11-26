@@ -6,7 +6,7 @@ import { isGitHubLifecycleItem } from '@/buzz/pr-lifecycle';
 type PillFields = Pick<
   ChatDisplayMessage,
   | 'deleted' | 'isSystemNotice' | 'isArchivedNotice' | 'awayWarning' | 'authorIdentity' | 'pubkey'
-  | 'isAgentActivity' | 'isAgentDraft' | 'isAgentLiveTurn' | 'attachments' | 'agentCommand' | 'cornerMarkers'
+  | 'isAgentActivity' | 'isAgentDraft' | 'isAgentLiveTurn' | 'attachments' | 'agentCommand' | 'hasAnchoredCornerMarkers'
   | 'vaultSave' | 'roomUpdate' | 'writePermission' | 'grantRequest' | 'squireApproval' | 'computerSession'
   | 'voiceCall' | 'onboarding' | 'choice' | 'appSignIn' | 'agentSignIn' | 'connectorOffer'
   | 'notificationLifecycleRun' | 'walletTx' | 'walletInsufficient' | 'walletDelegation'
@@ -59,7 +59,7 @@ export function isPillMessage(message: PillFields): boolean {
   if (message.notificationLifecycleRun?.items?.length) return true;
   if (hasCardBody(message)) return false;
   if (message.notificationLifecycleRun || isSystemLine(message)) return true;
-  if (message.cornerMarkers?.length || message.isAgentActivity ||
+  if (message.hasAnchoredCornerMarkers || message.isAgentActivity ||
       message.isAgentDraft || message.isAgentLiveTurn || message.attachments?.length) return false;
   const author = message.authorIdentity?.pubkey ?? message.pubkey;
   return message.agentCommand?.recipient.kind === 'agent' && Boolean(author);
@@ -95,8 +95,7 @@ export function foldPillRuns(messages: readonly ChatDisplayMessage[]): ChatDispl
     run = [];
   };
   for (const message of messages) {
-    // New notice bodies retain their own row, including any actions or markers.
-    if (isPillMessage(message) && !message.cornerMarkers?.length &&
+    if (isPillMessage(message) && !message.hasAnchoredCornerMarkers &&
         (isGitHubEventRun(message) || Boolean(stopNotice(message)) ||
           (!isSystemLine(message) && !message.notificationLifecycleRun))) {
       run.push(message);

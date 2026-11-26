@@ -1,5 +1,5 @@
 import { cornerDisplayName, cornerShortTitle, repositorySystemLine } from '@beeline/api-contract/phone';
-import type { SystemLineMessage } from './system-lines';
+import type { SystemLineMessage, TranscriptReadBoundary } from './system-lines';
 
 // The NAME titles a corner card; a card written before the name existed
 // falls back to the same three-word derivation every other corner surface
@@ -268,9 +268,9 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
     /^(?:failed a check|Check failed ·)/.test(message.systemEvent.verb)
   ).map(message => message.systemEvent!.object!.headSha));
   const result: T[] = [];
-  let run: { anchor: T; ids: string[]; boundaries: { id: string; orderAtMs: number }[]; items: LifecycleItem[]; index: number; github: boolean } | undefined;
+  let run: { anchor: T; ids: string[]; boundaries: TranscriptReadBoundary[]; items: LifecycleItem[]; index: number; github: boolean } | undefined;
   for (const message of messages) {
-    if (message.cornerMarkers?.length) {
+    if (message.hasAnchoredCornerMarkers) {
       run = undefined;
       result.push(message);
       continue;
@@ -306,7 +306,8 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
       result.push(message);
     }
     run.ids.push(message.id);
-    run.boundaries.push({ id: message.id, orderAtMs: message.orderAtMs ?? message.timestamp * 1_000 });
+    run.boundaries.push(...(message.foldedReadBoundaries ??
+      [{ id: message.id, orderAtMs: message.orderAtMs ?? message.timestamp * 1_000 }]));
     run.items.push({
       ...item,
       ...(item.url && !item.cornerId && corners.has(canonical(item.url))

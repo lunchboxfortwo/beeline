@@ -219,6 +219,7 @@ vi.mock('@/app/(app)/beeline/chat/RoomMessageVariants', async () => {
 import { useChatTranscriptRenderer } from '@/app/(app)/beeline/chat/useChatTranscriptRenderer';
 import { displayRoomMessage } from '@/buzz/room-view-presentation';
 import { foldTranscriptRows } from '@/buzz/room-message-store';
+import { newestVisibleMessageId } from '@/buzz/read-cursor-advance';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 
 it.each([false, true])('UAR-1 chat renders person-facing report text immediately (desktop=%s)', desktop => {
@@ -418,8 +419,9 @@ it('keeps a thread opening pilled at its source message and opens the thread fro
     daemonFact: { type: 'corner-open', cornerId, name: 'sample-thread', objective: '', sourceMessageId: source.id },
   });
   const folded = foldTranscriptRows([source, display(2), marker], null);
-  expect(folded.hostIds.get(marker.id)).toBe(source.id);
-  expect(folded.rows.map(row => row.id)).toEqual([source.id, idFor(2)]);
+  expect(folded.hostIds.get(marker.id)).toBe(marker.id);
+  expect(folded.rows.map(row => row.id)).toEqual([source.id, marker.id, idFor(2)]);
+  expect(newestVisibleMessageId(folded.rows, [folded.rows[2]!])).toBe(marker.id);
   const openCorner = vi.fn();
   let tree: any;
   act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop openCorner={openCorner} />); });
@@ -430,5 +432,30 @@ it('keeps a thread opening pilled at its source message and opens the thread fro
   const action = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `pill-event-${marker.id}`);
   act(() => action.props.onPress());
   expect(openCorner).toHaveBeenCalledWith(cornerId);
+  act(() => tree.unmount());
+});
+
+it('renders one phone pill for an anchored thread opening followed by a PR opening', () => {
+  const source = display(1, { text: '@carbon yes go' });
+  const marker = display(2, { presentation: 'card', systemTranscript: card,
+    daemonFact: { type: 'corner-open', cornerId: ROOM, name: 'sample-thread', objective: '', sourceMessageId: source.id },
+  });
+  const opened = display(3, {
+    presentation: 'system', systemTranscript: { origin: 'github', visibility: 'notice' },
+    systemEvent: { subject: { kind: 'github', name: 'GitHub' }, verb: 'opened pull request',
+      object: { text: 'Fix labels', url: 'https://github.com/example/example/pull/7' } },
+  });
+  const folded = foldTranscriptRows([source, marker, opened], null);
+  expect(folded.rows.map(row => row.id)).toEqual([source.id, marker.id]);
+  expect(folded.hostIds.get(opened.id)).toBe(marker.id);
+  let tree: any;
+  act(() => { tree = create(<TranscriptFixture rows={folded.rows} desktop={false} />); });
+  const pills = tree.root.findAllByType(PillRow);
+  expect(pills).toHaveLength(1);
+  expect(pills[0].props.items).toHaveLength(1);
+  expect(pills[0].props.items[0].run).toMatchObject([
+    { id: marker.id, event: { source: 'beeline', mark: 'thread' } },
+    { id: opened.id, event: { source: 'github', mark: 'opened' } },
+  ]);
   act(() => tree.unmount());
 });
