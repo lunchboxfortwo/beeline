@@ -38,15 +38,7 @@ export type SystemLineMessage = {
     branch?: string;
     targetBranch?: string;
   };
-  daemonFact?: {
-    type: 'corner-complete' | 'checks-failing' | 'worktree-cleaned' | 'corner-open';
-    cornerId: string;
-    name?: string;
-    objective: string;
-    sourceMessageId?: string;
-    outcome?: 'landed' | 'abandoned';
-    pullRequest?: { number?: number; title?: string; url: string };
-  };
+  daemonFact?: NonNullable<RoomViewMessage['daemonFact']>;
   walletTx?: RoomViewMessage['walletTx'];
   walletDelegation?: RoomViewMessage['walletDelegation'];
   authorIdentity?: { kind: 'human' | 'agent'; name: string; handle?: string };

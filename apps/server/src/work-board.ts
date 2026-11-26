@@ -33,6 +33,7 @@ import {
   parkThreadInBacklog,
   promoteBacklogTaskRow,
   promoteUnopenedTaskToThread,
+  recordBacklogAddedFact,
   resolveWorkAssigneeId,
   resumeParkedThread,
   WORK_ITEM_UUID_RE,
@@ -380,12 +381,13 @@ export async function updateWorkItem(
         id: string;
         workspace_id: string;
         parent_id: string | null;
+        direct: boolean;
         name: string;
         repository_key: string | null;
         repository_resolution: string | null;
         repository_target_branch: string | null;
       }>(
-        `SELECT r.id,r.workspace_id,r.parent_id,r.name,r.repository_key,r.repository_resolution,r.repository_target_branch
+        `SELECT r.id,r.workspace_id,r.parent_id,(r.direct_participants IS NOT NULL) direct,r.name,r.repository_key,r.repository_resolution,r.repository_target_branch
          FROM rooms r
          LEFT JOIN room_access member ON member.room_id=r.id AND member.identity_id=$2 AND member.removed_at IS NULL
          WHERE r.id=$1 AND (member.identity_id IS NOT NULL OR $3::boolean)`,
@@ -547,6 +549,25 @@ export async function updateWorkItem(
             objective: item.objective ?? '',
           });
         }
+      }
+
+      const createdBacklog =
+        !existingRow &&
+        !thread &&
+        (item.state ?? 'backlog') === 'backlog' &&
+        room.parent_id === null &&
+        !room.direct;
+      const originMessageId = input.originMessageId?.trim() || undefined;
+      const fromAgentChatTurn = Boolean(hooks.requestId && hooks.turnRoomId === input.roomId);
+      if (createdBacklog && (originMessageId || fromAgentChatTurn)) {
+        await recordBacklogAddedFact(tx, {
+          roomId: input.roomId,
+          itemId,
+          name: item.title ?? cornerShortTitle(room.name, input.title ?? room.name, itemId),
+          actorId,
+          originMessageId,
+          requestId: fromAgentChatTurn ? hooks.requestId : undefined,
+        });
       }
     }
 

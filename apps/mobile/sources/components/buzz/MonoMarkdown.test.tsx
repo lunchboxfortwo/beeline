@@ -9,7 +9,9 @@ vi.mock('react-native', () => ({ Platform: { OS: 'ios' } }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
 vi.mock('@/components/buzz/CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('@/buzz/message-link', () => ({ messageLinkId: () => undefined, openMessageLink: vi.fn() }));
-vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn() }));
+const routerNavigate = vi.hoisted(() => vi.fn());
+vi.mock('expo-router', () => ({ router: { navigate: routerNavigate } }));
+vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn().mockResolvedValue(undefined) }));
 import { STEP } from '@/ui/grammar';
 import { MonoMarkdown } from './MonoMarkdown';
 import { parseMarkdown } from '@/components/markdown/parseMarkdown';
@@ -149,4 +151,31 @@ it('keeps streaming unclosed math delimiters as plain text until closed', () => 
     expect(tree.root.findAll((node: any) => node.props.testID === 'math-block')).toHaveLength(0);
     expect(collectText(tree.toJSON())).toContain('\\[');
     act(() => tree.unmount());
+});
+
+it('routes web.usebeeline.app links in-app via expo-router instead of openExternalUrl', async () => {
+    const { openExternalUrl } = await import('@/utils/open-external-url');
+    vi.mocked(openExternalUrl).mockClear();
+    routerNavigate.mockClear();
+    const markdown = 'See [Thread](https://web.usebeeline.app/beeline/chat/room-9?communityId=ws-1) and [Docs](https://example.org/docs) and [Privacy](https://usebeeline.app/privacy).';
+    let tree: any;
+    act(() => { tree = create(<MonoMarkdown textStyle={{}} markdown={markdown} />); });
+    try {
+        const links = tree.root.findAll((node: any) => node.props.accessibilityRole === 'link' && typeof node.props.onPress === 'function');
+        const byText = (label: string) => links.find((node: any) => node.props.children === label)!;
+        await act(async () => { byText('Thread').props.onPress(); });
+        await vi.waitFor(() => {
+            expect(routerNavigate).toHaveBeenCalledWith({
+                pathname: '/beeline/chat/[channelId]',
+                params: { channelId: 'room-9', communityId: 'ws-1' },
+            });
+        });
+        expect(openExternalUrl).not.toHaveBeenCalled();
+
+        await act(async () => { byText('Docs').props.onPress(); });
+        expect(openExternalUrl).toHaveBeenCalledWith('https://example.org/docs');
+
+        await act(async () => { byText('Privacy').props.onPress(); });
+        expect(openExternalUrl).toHaveBeenCalledWith('https://usebeeline.app/privacy');
+    } finally { act(() => tree.unmount()); }
 });

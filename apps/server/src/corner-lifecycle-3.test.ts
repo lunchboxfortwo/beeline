@@ -300,7 +300,9 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
       (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, (id: string) => rootFixture.github.landCornerOutcome(id),
-      (id: string) => rootFixture.github.closeCornerPullRequest(id), (id: string) => rootFixture.github.readCornerPullRequest(id));
+      (id: string) => rootFixture.github.closeCornerPullRequest(id),
+      (id: string, options?: { pullRequest?: number | string; callerId?: string }) =>
+        rootFixture.github.readCornerPullRequest(id, options));
     // B reaches every corner through the parent Room, with no copied row.
     const outsider = '3'.repeat(64);
     await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Outsider','outsider') ON CONFLICT DO NOTHING`, [outsider]);
@@ -355,6 +357,115 @@ describe('the implementer merges when the gate opens (AC-5)', () => {
     await wiredDaemon.execute('archiveCorner', { cornerId, roomId: R }, B);
     expect((await rootFixture.db.query(`SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1`, [cornerId])).rows[0])
       .toEqual({ archived: true });
+  });
+
+
+  it('resolves readCornerPullRequest(pullRequest: N) among reachable threads in the same parent chat and refuses missing or unreachable PRs naming N', async () => {
+    const threadA = await inReview();
+    const threadB = await open('owner/widgets');
+    await rootFixture.db.query(
+      `UPDATE corner_github_cache SET lifecycle=$2::jsonb WHERE corner_id=$1`,
+      [
+        threadB,
+        JSON.stringify({
+          lifecycle: 'in-review',
+          checks: 'passing',
+          pr: {
+            number: 88,
+            url: 'https://github.com/owner/widgets/pull/88',
+            title: 'Other thread PR',
+            targetBranch: 'main',
+            headSha: '8'.repeat(40),
+          },
+        }),
+      ],
+    );
+    // An unreachable thread in a different parent chat linked to the same GitHub repository.
+    const privateRoom = randomUUID();
+    const privateThread = randomUUID();
+    await rootFixture.db.query(
+      `INSERT INTO rooms(id,workspace_id,name,created_by,repository_key,repository_remote,repository_resolution,github_installation_id)
+       VALUES($1,$2,'private-chat',$3,'owner/widgets','https://github.com/owner/widgets.git','repository',77)`,
+      [privateRoom, W, H],
+    );
+    await rootFixture.db.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'owner') ON CONFLICT DO NOTHING`,
+      [W, privateRoom, H],
+    );
+    await rootFixture.db.query(
+      `INSERT INTO rooms(id,workspace_id,parent_id,name,created_by) VALUES($1,$2,$3,'Secret-thread',$4)`,
+      [privateThread, W, privateRoom, H],
+    );
+    await rootFixture.db.query(
+      `INSERT INTO corner_facts(corner_id,lifecycle) VALUES($1,$2::jsonb)`,
+      [
+        privateThread,
+        JSON.stringify({
+          lifecycle: 'in-review',
+          checks: 'passing',
+          pr: {
+            number: 101,
+            url: 'https://github.com/owner/widgets/pull/101',
+            title: 'Secret PR',
+            targetBranch: 'main',
+            headSha: '9'.repeat(40),
+          },
+        }),
+      ],
+    );
+    const outsider = '3'.repeat(64);
+    await rootFixture.db.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'agent','Outsider','outsider') ON CONFLICT DO NOTHING`, [outsider]);
+    await rootFixture.db.query(`INSERT INTO agents(agent_id,owner_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, [outsider, H]);
+    await rootFixture.db.query(
+      `INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member') ON CONFLICT DO NOTHING`,
+      [W, outsider],
+    );
+
+    const readPrSpy = vi.spyOn(rootFixture.githubApp, 'readPullRequest');
+    const wiredDaemon = new DaemonService(rootFixture.db, new LiveHub(), undefined, undefined, false, undefined, false, undefined,
+      (input, confirmZeroChecks) => rootFixture.github.prChecksStatus(input, confirmZeroChecks), undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, (id: string) => rootFixture.github.landCornerOutcome(id),
+      (id: string) => rootFixture.github.closeCornerPullRequest(id),
+      (id: string, options?: { pullRequest?: number | string; callerId?: string }) =>
+        rootFixture.github.readCornerPullRequest(id, options));
+
+    // 1. Match: from threadA, pullRequest: 88 resolves threadB's PR #88 (not threadA's PR #7).
+    await expect(
+      wiredDaemon.execute('readCornerPullRequest', { cornerId: threadA, pullRequest: 88 }, B),
+    ).resolves.toMatchObject({ status: 'ok', number: 88 });
+    // Also works from the parent chat directly and with a string number.
+    await expect(
+      wiredDaemon.execute('readCornerPullRequest', { cornerId: R, pullRequest: '88' }, B),
+    ).resolves.toMatchObject({ status: 'ok', number: 88 });
+    // Without pullRequest, still reads threadA's own PR #7.
+    await expect(
+      wiredDaemon.execute('readCornerPullRequest', { cornerId: threadA }, B),
+    ).resolves.toMatchObject({ status: 'ok', number: 7 });
+
+    // 2. No match: refuses with a message naming 999 and makes no GitHub call.
+    readPrSpy.mockClear();
+    const missing = await wiredDaemon.execute('readCornerPullRequest', { cornerId: threadA, pullRequest: 999 }, B);
+    expect(missing).toEqual({
+      status: 'blocked',
+      blocker: 'no reachable thread in this chat has pull request #999',
+    });
+    expect(readPrSpy).not.toHaveBeenCalled();
+
+    // 3. Unreachable thread: PR #101 exists in another chat on the same repo, and outsider cannot reach PR #7 in R.
+    const otherChat = await wiredDaemon.execute('readCornerPullRequest', { cornerId: threadA, pullRequest: 101 }, B);
+    expect(otherChat).toEqual({
+      status: 'blocked',
+      blocker: 'no reachable thread in this chat has pull request #101',
+    });
+    const outsiderLookup = await rootFixture.github.readCornerPullRequest(threadA, {
+      pullRequest: 7,
+      callerId: outsider,
+    });
+    expect(outsiderLookup).toEqual({
+      status: 'blocked',
+      blocker: 'no reachable thread in this chat has pull request #7',
+    });
+    expect(readPrSpy).not.toHaveBeenCalled();
   });
 
 

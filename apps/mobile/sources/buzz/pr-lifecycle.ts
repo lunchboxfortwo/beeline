@@ -6,10 +6,14 @@ import type { SystemLineMessage, TranscriptReadBoundary } from './system-lines';
 // uses (C89). Single and grouped cards share it so a group of one matches.
 export function lifecycleCornerTitle(fact: {
   name?: string;
-  objective: string;
-  cornerId: string;
+  objective?: string;
+  cornerId?: string;
 }): string {
-  return cornerShortTitle(undefined, fact.name ?? cornerDisplayName(fact.objective), fact.cornerId);
+  return cornerShortTitle(
+    undefined,
+    fact.name ?? cornerDisplayName(fact.objective ?? ''),
+    fact.cornerId ?? '',
+  );
 }
 
 export type NotificationLifecycleState =
@@ -77,16 +81,13 @@ export function lifecycleItem(message: SystemLineMessage): LifecycleItem | undef
     };
   }
   if (fact) {
-    if (fact.type === 'corner-open' || fact.type === 'corner-complete') {
+    // Thread openings and chat-originated backlog additions stay inline in the transcript, never pilled.
+    if (fact.type === 'corner-open' || fact.type === 'backlog-added') return;
+    if (fact.type === 'corner-complete') {
       return {
         ...base,
         title: lifecycleCornerTitle(fact),
-        state:
-          fact.outcome === 'landed'
-            ? 'Merged'
-            : fact.type === 'corner-complete'
-              ? 'Closed'
-              : 'Opened',
+        state: fact.outcome === 'landed' ? 'Merged' : 'Closed',
         kind: 'corner',
         kindLine: 'corner',
         cornerId: fact.cornerId,
@@ -260,7 +261,7 @@ export function foldPrLifecycleRuns<T extends SystemLineMessage>(messages: reado
   const canonical = (url: string) => url.split(/[?#]/)[0].replace(/\/$/, '').toLowerCase();
   for (const message of messages) {
     const fact = message.daemonFact;
-    if (fact?.pullRequest?.url) corners.set(canonical(fact.pullRequest.url), fact.cornerId);
+    if (fact?.pullRequest?.url && fact.cornerId) corners.set(canonical(fact.pullRequest.url), fact.cornerId);
   }
   const namedFailureHeads = new Set(messages.filter(message =>
     message.systemEvent?.object?.headSha &&

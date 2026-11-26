@@ -41,6 +41,7 @@ import { CreatePollSheet, type PollDraft } from '@/components/buzz/CreatePollShe
 import { T } from '@/ui/grammar';
 import * as Clipboard from 'expo-clipboard';
 import { chatMessageLinkToken, copyChatMessageLink } from '@/buzz/message-link';
+import { createWorkItemId } from '@/buzz/work-item-id';
 
 type Props = {
   attachmentPickerVisible: boolean;
@@ -347,6 +348,40 @@ export function ChatSurfaceOverlays({
                 if (target) void beginForward(target);
               }}
               testID="message-forward-action"
+            />
+          ) : null}
+          {messageActionsTarget &&
+          !messageActionsTarget.isAgentActivity &&
+          !messageActionsTarget.deleted &&
+          !isDirectMessage &&
+          !isCorner &&
+          decodedId ? (
+            <HullActionSheetRow
+              accessibilityLabel="Save message to backlog"
+              label="Save to backlog"
+              onPress={() => {
+                const target = messageActionsTarget;
+                setMessageActionsTarget(null);
+                const text = target.text.trim();
+                const firstLine = text.split('\n').find((line) => line.trim())?.trim() ?? '';
+                const title = firstLine || target.attachments?.[0]?.name || 'saved-task';
+                void monolithPhoneOperation('updateWorkItem', {
+                  id: createWorkItemId(),
+                  roomId: decodedId,
+                  title,
+                  ...(text ? { objective: text } : {}),
+                  state: 'backlog',
+                  originMessageId: target.relayId ?? target.id,
+                })
+                  .then(() => {
+                    showCopyToast('Saved to backlog');
+                    readRoom?.();
+                  })
+                  .catch((error) => {
+                    Modal.alert('Could not save to backlog', appErrorCopy(error));
+                  });
+              }}
+              testID="message-save-backlog-action"
             />
           ) : null}
           {messageActionsTarget && canDeleteMessage(messageActionsTarget) ? (

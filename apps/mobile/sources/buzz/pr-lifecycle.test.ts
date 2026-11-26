@@ -178,3 +178,34 @@ it('drops a historical suite duplicate when the same head names a failed job', (
   expect(items[0].displayText).toBe('Check failed · TYPECHECK · aaaaaaa');
   expect(lifecycleSummary(items)).toBe('1 check failed');
 });
+
+it('exempts corner-open and backlog-added facts from lifecycle folding and breaks surrounding runs', () => {
+  const opened: SystemLineMessage = {
+    id: 'open-1',
+    text: '',
+    timestamp: 2,
+    daemonFact: { type: 'corner-open', cornerId: 'c1', name: 'fix-bug', objective: 'Fix bug' },
+  };
+  const backlogAdded: SystemLineMessage = {
+    id: 'backlog-1',
+    text: '',
+    timestamp: 3,
+    daemonFact: {
+      type: 'backlog-added',
+      roomId: 'r1',
+      items: [{ id: 't1', name: 'ship-drag' }],
+    },
+  };
+  expect(lifecycleItem(opened)).toBeUndefined();
+  expect(lifecycleItem(backlogAdded)).toBeUndefined();
+  const folded = foldPrLifecycleRuns([
+    event('pr-1', 'pull-request', 'opened', 1),
+    opened,
+    event('pr-2', 'pull-request', 'merged', 2),
+    backlogAdded,
+    event('pr-3', 'pull-request', 'closed', 3),
+  ]);
+  expect(folded.map((row) => row.id)).toEqual(['pr-1', 'open-1', 'pr-2', 'backlog-1', 'pr-3']);
+  expect((folded[1] as { notificationLifecycleRun?: unknown }).notificationLifecycleRun).toBeUndefined();
+  expect((folded[3] as { notificationLifecycleRun?: unknown }).notificationLifecycleRun).toBeUndefined();
+});

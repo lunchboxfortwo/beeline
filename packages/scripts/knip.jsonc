@@ -175,6 +175,8 @@
         "packages/scripts/fixtures/fake-app-store-connect.mjs",
         // The transcript benchmark README invokes these measurement CLIs by path.
         "packages/scripts/transcript-speed/{capture-*,seed,serve,inspect-web,reset,report,symbolicate-room-profile,list-engine-report,list-visual-audit,prepare-list-engines}.mjs",
+        // UI corners invoke this 6-frame Stone Dark & Light contact-sheet proof generator by path.
+        "packages/scripts/ui-surface-proof.mjs",
       ],
       "project": [
         "packages/test-helpers/seams/**/*.ts",

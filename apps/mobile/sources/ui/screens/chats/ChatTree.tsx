@@ -5,7 +5,7 @@ import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
 import { RepositoryMark } from '@/components/buzz/RepositoryMark';
 import React, { useRef, useState } from 'react';
 import { ListItem, Separator, XStack, YStack } from 'tamagui';
-import { ChevronDown, CornerDownRight, Pin } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, CornerDownRight, Pin } from 'lucide-react-native';
 import equal from 'fast-deep-equal';
 import { threadWorkMark, threadWorkState, voiceDuration } from '@beeline/api-contract/phone';
 import type { ChatListCorner } from '@beeline/api-contract/phone';
@@ -18,11 +18,11 @@ import { Btn, ChatName, Copy, Glyph, HEIGHT, MARK as STATE_MARK, StatusMark, T, 
 import {
   chatPreview,
   chatTagged,
-  chatThreads,
   chatTitle,
   joinableTitle,
   shownThreads,
   threadTitle,
+  WAITING_THREADS_SHOWN,
 } from './chat-tree-model';
 import { threadListLabel } from '@/ui/screens/thread/thread-status';
 
@@ -92,8 +92,7 @@ function ChatMark({ item, size = MARK }: { size?: number; item: Partial<Pick<Cha
   return <RepositoryMark homepageIconUrl={item.room?.homepageIcon} size={size} />;
 }
 
-/** One thread under its chat: ↳, its name at the meta size, then its state mark in the chat's
- * mark column; a waiting thread is semibold ink, the others regular and quieter. */
+/** One waiting thread under its chat: ↳, its name at the meta size, then its state mark. */
 function ThreadLine({
   item,
   corner,
@@ -184,18 +183,16 @@ export const ChatRow = React.memo(
     const refused = useRoomOutboxFailure(item.room.id);
     const summary = useRoomCornerSummary(item.room.id);
     const [expanded, setExpanded] = useState(false);
-    const { shown: threads, more } = shownThreads(
-      chatThreads(item, summary?.openCorners ?? item.openCorners, viewer),
-      expanded,
-      viewer,
-    );
+    const openCorners = summary?.openCorners ?? item.openCorners;
+    const { shown: threads, more } = shownThreads(item, openCorners, expanded, viewer);
+    const canToggleThreads = more > 0 || threads.length > WAITING_THREADS_SHOWN;
     const title = chatTitle(item);
     const zone = useReaderZone();
     const preview = chatPreview(item, viewer);
     const unread = item.unread === true;
     // Needs you: the chat's own ask or @mention, or a thread waiting on the viewer that is not
     // already listed under it with its own mark.
-    const tagged = chatTagged(item) || (summary?.openCorners ?? item.openCorners ?? []).some((corner) =>
+    const tagged = chatTagged(item) || (openCorners ?? []).some((corner) =>
       threadWorkState(corner, viewer) === 'needs-you' && !threads.some((shown) => shown.id === corner.id));
     const nameLine = typeStyle('listTitle', useTextSize()).lineHeight;
     const call = item.directMessage?.peer.kind === 'agent' && item.voiceCall && !item.voiceCall.endedAt ? item.voiceCall : null;
@@ -305,7 +302,7 @@ export const ChatRow = React.memo(
                 layout={threadLayout}
               />
             ))}
-            {more ? (
+            {canToggleThreads ? (
               <ListItem
                 minHeight={HEIGHT.control}
                 padding="0"
@@ -314,13 +311,14 @@ export const ChatRow = React.memo(
                 alignItems="center"
                 justifyContent="flex-start"
                 backgroundColor="transparent"
-                onPress={() => setExpanded(true)}
-                aria-label={`Show ${more} more ${more === 1 ? 'thread' : 'threads'}`}
+                onPress={() => setExpanded(!expanded)}
+                aria-label={expanded ? 'Show fewer threads' : `Show ${more} more ${more === 1 ? 'thread' : 'threads'}`}
+                aria-expanded={expanded}
                 accessibilityRole="button"
-                testID={`more-${item.room.id}`}
+                testID={`${expanded ? 'less' : 'more'}-${item.room.id}`}
               >
-                <T v="meta" color="secondary">{`${more} more`}</T>
-                <Glyph icon={ChevronDown} size={14} />
+                <T v="meta" color="secondary">{expanded ? 'Show fewer' : `${more} more`}</T>
+                {expanded ? <Glyph icon={ChevronUp} size={14} /> : <Glyph icon={ChevronDown} size={14} />}
               </ListItem>
             ) : null}
           </YStack>

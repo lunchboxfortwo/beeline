@@ -381,15 +381,15 @@ export type RoomViewMessage = {
         readonly ttlHours: number;
       };
   readonly daemonFact?: {
-    readonly type: 'corner-complete' | 'checks-failing' | 'worktree-cleaned' | 'corner-open';
-    readonly cornerId: string;
+    readonly type: 'corner-complete' | 'checks-failing' | 'worktree-cleaned' | 'corner-open' | 'backlog-added';
+    readonly cornerId?: string;
     /** The corner's short title (at most three words). Absent only on legacy cards. */
     readonly name?: string;
     /** Empty on a person-opened corner, which has no objective; its `name` titles it. */
-    readonly objective: string;
+    readonly objective?: string;
     /**
-     * The parent-Room message a person opened this corner from. The phone
-     * anchors the card beneath that message as the "corner opened" marker.
+     * The parent-Room message a person opened this corner from (or saved to backlog from).
+     * The phone anchors the card beneath that message.
      */
     readonly sourceMessageId?: string;
     readonly outcome?: 'landed' | 'abandoned';
@@ -402,6 +402,13 @@ export type RoomViewMessage = {
     readonly subgoals?: readonly {
       readonly step: string;
       readonly status: 'pending' | 'in_progress' | 'completed';
+    }[];
+    /** Chat room id for `backlog-added` facts. */
+    readonly roomId?: string;
+    /** Backlog tasks filed in this capture or agent turn (`backlog-added`). */
+    readonly items?: readonly {
+      readonly id: string;
+      readonly name: string;
     }[];
   };
 };

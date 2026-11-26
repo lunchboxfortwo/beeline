@@ -495,7 +495,8 @@ export function reactionIdentitiesSql(messageAlias: string): string {
  */
 export function titledDaemonFact(card: unknown): NonNullable<RoomViewMessage['daemonFact']> {
   const fact = card as NonNullable<RoomViewMessage['daemonFact']>;
-  const title = cornerDisplayName(fact.name ?? fact.objective);
+  if (fact.type === 'backlog-added') return fact;
+  const title = cornerDisplayName(fact.name ?? fact.objective ?? '');
   return title ? { ...fact, name: title } : fact;
 }
 

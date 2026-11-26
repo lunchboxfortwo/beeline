@@ -29,7 +29,9 @@ export default function TrayScreen() {
   const params = useLocalSearchParams<{
     communityId?: string | string[];
     workspaceName?: string | string[];
+    chatId?: string | string[];
   }>();
+  const initialChatId = first(params.chatId) || undefined;
   const active = useActiveCommunityId();
   const routeId = first(params.communityId);
   const discovered = useWorkspaceDiscoveryId(active === null && !routeId);
@@ -99,6 +101,21 @@ export default function TrayScreen() {
             assigneeId,
           });
         }),
+      move: (item, state) =>
+        execute(async () => {
+          await monolithPhoneOperation('updateWorkItem', {
+            id: item.id,
+            roomId: item.roomId,
+            state,
+          });
+        }),
+      create: (input) =>
+        execute(async () => {
+          await monolithPhoneOperation('updateWorkItem', {
+            ...input,
+            state: 'backlog',
+          });
+        }),
       decide: (item, action) =>
         execute(async () => {
           switch (action.kind) {
@@ -165,7 +182,14 @@ export default function TrayScreen() {
           </Btn>
         </YStack>
       ) : board ? (
-        <WorkBoard key={workspaceId} board={board} desktop={desktop} actions={actions} now={now} />
+        <WorkBoard
+          key={workspaceId}
+          board={board}
+          desktop={desktop}
+          actions={actions}
+          now={now}
+          initialChatId={initialChatId}
+        />
       ) : (
         <PageLoader />
       )}

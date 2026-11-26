@@ -2,11 +2,12 @@ import { githubProviderKey } from './providers/index.js';
 import type { CornerCiGate } from './corner-ci-gate.js';
 import { beginGitHubStarAuthorization, completeGitHubStarAuthorization } from './github-star-authorization.js';
 import { NotificationWork } from './notification-work.js';
+import { OwnerScheduleClock } from './owner-schedule-clock.js';
 import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
 import type { RepositorySignals } from './repository-onboarding.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { GitHubAppClient, GitHubOAuthClient } from '@beeline/auth/github';
+import { GitHubAppClient, GitHubOAuthClient, githubRetryDelay, transientGitHubError } from '@beeline/auth/github';
 import type { CornerLifecycleView, PhoneOperationMap } from '@beeline/api-contract/phone';
 import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
@@ -18,6 +19,7 @@ import { gitHubOperationsReconcileQueuedCorners, gitHubOperationsRecordConfirmed
 import { gitHubOperationsRefreshCheckRollup, gitHubOperationsLifecycle, gitHubOperationsUpdateLifecycle, gitHubOperationsSystemNote, gitHubOperationsMergeCorner, gitHubOperationsDeleteCornerBranch, gitHubOperationsSyncInstallation, gitHubOperationsListAdministeredInstallations, gitHubOperationsUserCanAdministerInstallation, gitHubOperationsAssertInstallationAccess } from './github-operations-refresh-check-rollup.js';
 import { gitHubOperationsUserCredential, gitHubOperationsRotateUserCredential, gitHubOperationsStoreRepository } from './github-operations-user-credential.js';
 import { repositoryIconPushTarget, resolveRepositoryIcons } from './repository-icons.js';
+import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
 export class GitHubOperations {
 
@@ -27,12 +29,19 @@ export class GitHubOperations {
 
   readonly #checkWork = new Set<Promise<unknown>>();
 
+  readonly #checkRetryAbort = new AbortController();
+
+  readonly #webhookCheckDeliveries = new Set<string>();
+
+  readonly #activeCheckRetries = new Map<string, Promise<void>>();
+
   #stoppingChecks = false;
 
 
   /** HTTP close cannot drain work left alive by a caller's transaction deadline. */
   async stopCheckRefreshes(): Promise<void> {
     this.#stoppingChecks = true;
+    this.#checkRetryAbort.abort();
     await Promise.allSettled(this.#checkWork);
   }
 
@@ -43,6 +52,106 @@ export class GitHubOperations {
     const work = run();
     this.#checkWork.add(work);
     return work.finally(() => this.#checkWork.delete(work));
+  }
+
+  /**
+   * Refreshes the commit check rollup for a webhook event. Transient GitHub
+   * failures do not fail the webhook with 500; instead the server accepts the
+   * delivery (202) and retries the rollup read in the background, deduplicated
+   * per delivery and per corner head.
+   */
+  async refreshWebhookCheckRollup(
+    target: CornerWebhookTarget & { has_pr?: boolean; pr_number?: string | null },
+    repository: string,
+    check: NonNullable<ReturnType<typeof checkFact>>,
+    database: SqlDatabase,
+    deliveryId?: string,
+    claim?: GitHubWebhookClaim,
+  ): Promise<void> {
+    claim?.assertActive();
+    const headSha = check.headSha;
+    const deliveryKey = deliveryId && headSha ? `${deliveryId}:${target.corner_id}:${headSha}` : undefined;
+    if (deliveryKey) {
+      if (this.#webhookCheckDeliveries.has(deliveryKey)) return;
+      this.#webhookCheckDeliveries.add(deliveryKey);
+      if (this.#webhookCheckDeliveries.size > 1_024) {
+        const oldest = this.#webhookCheckDeliveries.values().next().value;
+        if (oldest !== undefined) this.#webhookCheckDeliveries.delete(oldest);
+      }
+    }
+    try {
+      await this.refreshCheckRollup(target, repository, check, database, claim ? { claim } : undefined);
+      claim?.assertActive();
+    } catch (error) {
+      if (claim?.signal.aborted) {
+        if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
+        throw claim.signal.reason ?? error;
+      }
+      if (!transientGitHubError(error)) {
+        if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
+        throw error;
+      }
+      if (claim) {
+        try {
+          await claim.assertOwned(database);
+        } catch (ownershipError) {
+          if (deliveryKey) this.#webhookCheckDeliveries.delete(deliveryKey);
+          throw ownershipError;
+        }
+      }
+      const firstDelay = githubRetryDelay(error, WEBHOOK_CHECK_RETRY_DELAYS_MS[0]!);
+      if (headSha) this.scheduleWebhookCheckRetry(target, repository, check, database, firstDelay);
+    }
+  }
+
+  private scheduleWebhookCheckRetry(
+    target: CornerWebhookTarget & { has_pr?: boolean; pr_number?: string | null },
+    repository: string,
+    check: NonNullable<ReturnType<typeof checkFact>>,
+    database: SqlDatabase,
+    firstDelayMs: number,
+  ): void {
+    if (this.#stoppingChecks) return;
+    const retryKey = `${target.corner_id}:${check.headSha!}`;
+    if (this.#activeCheckRetries.has(retryKey)) return;
+    const work = this.ownCheckWork(async () => {
+      let delayMs = firstDelayMs;
+      for (let attempt = 0; attempt < WEBHOOK_CHECK_RETRY_DELAYS_MS.length; attempt++) {
+        if (!(await sleepAbortable(delayMs, this.#checkRetryAbort.signal))) return;
+        if (this.#stoppingChecks) return;
+        try {
+          await this.refreshCheckRollup(target, repository, check, database);
+          return;
+        } catch (error) {
+          if (!transientGitHubError(error) || this.#stoppingChecks) {
+            console.error(
+              `[server] background check rollup refresh failed for thread ${target.corner_id}:`,
+              error instanceof Error ? error.message : String(error),
+            );
+            return;
+          }
+          const nextBase = WEBHOOK_CHECK_RETRY_DELAYS_MS[attempt + 1];
+          if (nextBase === undefined) {
+            console.error(
+              `[server] background check rollup refresh exhausted retries for thread ${target.corner_id}:`,
+              error instanceof Error ? error.message : String(error),
+            );
+            return;
+          }
+          delayMs = githubRetryDelay(error, nextBase);
+        }
+      }
+    }).catch((error) => {
+      if (!this.#stoppingChecks) {
+        console.error(
+          `[server] background check rollup retry aborted for thread ${target.corner_id}:`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }).finally(() => {
+      if (this.#activeCheckRetries.get(retryKey) === work) this.#activeCheckRetries.delete(retryKey);
+    });
+    this.#activeCheckRetries.set(retryKey, work);
   }
 
 
@@ -232,26 +341,32 @@ async closeCornerPullRequest(cornerId: string): Promise<{
     blocker: string;
 }> { return gitHubOperationsCloseCornerPullRequest(this, cornerId); }
 /** PR association and run state move together for tool calls and GitHub facts. */
-async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database): Promise<boolean> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database); }
+async recordClosedCornerPullRequest(cornerId: string, number: number, database: SqlDatabase = this.database, claim?: GitHubWebhookClaim): Promise<boolean> { return gitHubOperationsRecordClosedCornerPullRequest(this, cornerId, number, database, claim); }
 /** Caller is authorized by DaemonService: it reaches the corner. */
-async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId); }
+async readCornerPullRequest(cornerId: string, options?: { pullRequest?: number | string; callerId?: string }): Promise<CornerPullRequestResult> { return gitHubOperationsReadCornerPullRequest(this, cornerId, options); }
 
 
-  async processWebhook(event: string, payload: unknown, deliveryId?: string) {
+  async processWebhook(event: string, payload: unknown, deliveryId?: string, claim?: GitHubWebhookClaim) {
     if (this.#stoppingChecks)
       throw new CommandRefusalError('GitHub check service is shutting down', 409);
+    const assertActive = () => {
+      claim?.assertActive();
+    };
+    assertActive();
     let finish!: () => void;
     const work = new Promise<void>((resolve) => { finish = resolve; });
     this.#checkWork.add(work);
     let release: (() => void) | undefined;
     try {
-      release = await this.#webhooks.acquire();
+      release = await this.#webhooks.acquire(claim?.signal);
+      assertActive();
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
       const body = payload as Record<string, unknown>;
       // The authenticated phone route uses this internal signal after a human message commits.
       // Retired: merge recovery no longer waits on a person's message.
       if (event === 'beeline:human-message') return;
       if (event === 'merge_group') {
+        if (claim) await claim.assertOwned(this.database);
         await this.reconcileQueuedCorners();
         return;
       }
@@ -259,15 +374,22 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
       if (!installation || typeof installation !== 'object' || Array.isArray(installation)) return;
       const install = installation as Record<string, unknown>;
       if (typeof install.id !== 'number') return;
+      const installationId = install.id;
       // Before any later return, so `new_permissions_accepted` drops stale tokens
       // even though this handler has no branch of its own for that action.
       if (event === 'installation' || event === 'installation_repositories') {
-        this.invalidateInstallationRoomTokens(install.id);
+        this.invalidateInstallationRoomTokens(installationId);
       }
       if (deliveryId) {
-        const changed = await fireRepositorySubscriptions(this.database, install.id, event, body, deliveryId);
+        const changed = claim
+          ? await this.database.transaction(async (tx) => {
+              await claim.assertOwned(tx);
+              return fireRepositorySubscriptions(tx, installationId, event, body, deliveryId);
+            })
+          : await fireRepositorySubscriptions(this.database, installationId, event, body, deliveryId);
         for (const roomId of new Set(changed)) this.onRoomChanged?.(roomId);
       }
+      assertActive();
       if (
         event === 'push' ||
         event === 'issues' ||
@@ -277,13 +399,22 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
         event === 'workflow_run' ||
         event === 'status'
       ) {
-        await this.processRepositoryEvent(event, body, install.id);
-        await this.processCornerEvent(event, body, install.id);
-        if (event === 'push') await this.processBaseBranchPush(body, install.id);
+        await this.processRepositoryEvent(event, body, install.id, claim);
+        assertActive();
+        await this.processCornerEvent(event, body, install.id, deliveryId, claim);
+        assertActive();
+        if (event === 'push') await this.processBaseBranchPush(body, install.id, claim);
+        assertActive();
         if (event === 'push') {
           const iconRepository = await repositoryIconPushTarget(this.database, body);
-          if (iconRepository) await this.resolveRepositoryIcons([iconRepository]);
+          assertActive();
+          if (iconRepository) {
+            if (claim) await claim.assertOwned(this.database);
+            await this.resolveRepositoryIcons([iconRepository]);
+          }
         }
+        assertActive();
+        if (claim) await claim.assertOwned(this.database);
         await this.reconcileQueuedCorners();
         return;
       }
@@ -292,22 +423,41 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
       // full GitHub refresh and repository-change wake for every bound Room.
       if (event !== 'installation' && event !== 'installation_repositories' && event !== 'repository') return;
       if (event === 'installation' && body.action === 'deleted') {
-        await this.database.query(
-          `UPDATE github_installations SET status='revoked',updated_at=now() WHERE installation_id=$1`,
-          [install.id],
-        );
-        await this.database.query(
-          `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1`,
-          [install.id],
-        );
+        const revoke = async (db: SqlDatabase) => {
+          await db.query(
+            `UPDATE github_installations SET status='revoked',updated_at=now() WHERE installation_id=$1`,
+            [installationId],
+          );
+          await db.query(
+            `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1`,
+            [installationId],
+          );
+        };
+        if (claim) {
+          await this.database.transaction(async (tx) => {
+            await claim.assertOwned(tx);
+            await revoke(tx);
+          });
+        } else {
+          await revoke(this.database);
+        }
         return;
       }
       if (event === 'installation' && body.action === 'suspend') {
-        await this.database.query(
-          `UPDATE github_installations SET status='suspended',updated_at=now()
-           WHERE installation_id=$1 AND status<>'revoked'`,
-          [install.id],
-        );
+        const suspend = (db: SqlDatabase) =>
+          db.query(
+            `UPDATE github_installations SET status='suspended',updated_at=now()
+             WHERE installation_id=$1 AND status<>'revoked'`,
+            [installationId],
+          );
+        if (claim) {
+          await this.database.transaction(async (tx) => {
+            await claim.assertOwned(tx);
+            await suspend(tx);
+          });
+        } else {
+          await suspend(this.database);
+        }
         return;
       }
       const existing = (
@@ -333,6 +483,7 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
           ).rows[0]?.identity_id;
       }
       if (!owner) return;
+      assertActive();
       if (event === 'installation_repositories') {
         const removed = Array.isArray(body.repositories_removed) ? body.repositories_removed : [];
         const removedIds = removed.flatMap((entry) => {
@@ -341,12 +492,23 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
           return typeof id === 'number' && Number.isSafeInteger(id) ? [id] : [];
         });
         if (removedIds.length) {
-          await this.database.query(
-            `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1 AND repository_id=ANY($2::bigint[])`,
-            [install.id, removedIds],
-          );
+          const deactivate = (db: SqlDatabase) =>
+            db.query(
+              `UPDATE github_repositories SET active=false,updated_at=now() WHERE installation_id=$1 AND repository_id=ANY($2::bigint[])`,
+              [installationId, removedIds],
+            );
+          if (claim) {
+            await this.database.transaction(async (tx) => {
+              await claim.assertOwned(tx);
+              await deactivate(tx);
+            });
+          } else {
+            await deactivate(this.database);
+          }
         }
       }
+      assertActive();
+      if (claim) await claim.assertOwned(this.database);
       await this.syncInstallation(owner, install.id);
     } finally {
       release?.();
@@ -361,7 +523,7 @@ async readCornerPullRequest(cornerId: string): Promise<CornerPullRequestResult> 
  * checks previously clean verdicts: checks can finish after the base moves
  * without a pull-request webhook carrying the new conflict.
  */
-async refreshStaleMergeability(cornerId?: string, confirmedPr?: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>): Promise<void> { return gitHubOperationsRefreshStaleMergeability(this, cornerId, confirmedPr); }
+async refreshStaleMergeability(cornerId?: string, confirmedPr?: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>, claim?: GitHubWebhookClaim): Promise<void> { return gitHubOperationsRefreshStaleMergeability(this, cornerId, confirmedPr, claim); }
 /** Reconcile committed queue facts against GitHub; never enqueue from a wake. */
 /**
  * Settles merge-queue entries against the live gate. For one corner (a hold,
@@ -371,20 +533,21 @@ async refreshStaleMergeability(cornerId?: string, confirmedPr?: Awaited<ReturnTy
  */
 async reconcileQueuedCorners(cornerId?: string): Promise<void> { return gitHubOperationsReconcileQueuedCorners(this, cornerId); }
 async recordConfirmedCornerMerge(target: CornerWebhookTarget, repository: string, number: number, pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>) { return gitHubOperationsRecordConfirmedCornerMerge(this, target, repository, number, pr); }
-async processBaseBranchPush(body: GitHubRecord, installationId: number): Promise<void> { return gitHubOperationsProcessBaseBranchPush(this, body, installationId); }
+async processBaseBranchPush(body: GitHubRecord, installationId: number, claim?: GitHubWebhookClaim): Promise<void> { return gitHubOperationsProcessBaseBranchPush(this, body, installationId, claim); }
 /**
  * Room-level repository activity. Issues and pull requests post on
  * opened/closed. Raw pushes and CI do NOT post: commit churn and
  * mainline check results are not Room conversation. Corner PRs use the
  * same repository events; CI stays on processCornerEvent.
  */
-async processRepositoryEvent(event: string, body: GitHubRecord, installationId: number) { return gitHubOperationsProcessRepositoryEvent(this, event, body, installationId); }
-async processCornerEvent(event: string, body: GitHubRecord, installationId: number) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId); }
+async processRepositoryEvent(event: string, body: GitHubRecord, installationId: number, claim?: GitHubWebhookClaim) { return gitHubOperationsProcessRepositoryEvent(this, event, body, installationId, claim); }
+async processCornerEvent(event: string, body: GitHubRecord, installationId: number, deliveryId?: string, claim?: GitHubWebhookClaim) { return gitHubOperationsProcessCornerEvent(this, event, body, installationId, deliveryId, claim); }
 async refreshCheckRollup(target: CornerWebhookTarget & {
     has_pr?: boolean;
     pr_number?: string | null;
 }, repository: string, check: NonNullable<ReturnType<typeof checkFact>>, database: SqlDatabase, options?: {
     quiet?: boolean;
+    claim?: GitHubWebhookClaim;
     snapshot?: {
         rollup: Awaited<ReturnType<GitHubAppClient['readCommitCheckRollup']>>;
         pr: Awaited<ReturnType<GitHubAppClient['readPullRequest']>>;
@@ -408,7 +571,7 @@ async mergeCorner(target: CornerWebhookTarget, pullRequest: {
     mergedBy?: string;
     commits: number;
     files: number;
-}, database: SqlDatabase = this.database, expectedPrNumber?: number) { return gitHubOperationsMergeCorner(this, target, pullRequest, database, expectedPrNumber); }
+}, database: SqlDatabase = this.database, expectedPrNumber?: number, claim?: GitHubWebhookClaim) { return gitHubOperationsMergeCorner(this, target, pullRequest, database, expectedPrNumber, claim); }
 /** One post-commit attempt; no persistent branch cleanup queue or retry. */
 async deleteCornerBranch(cornerId: string) { return gitHubOperationsDeleteCornerBranch(this, cornerId); }
 async syncInstallation(viewerId: string, installationId: number, transaction?: SqlDatabase) { return gitHubOperationsSyncInstallation(this, viewerId, installationId, transaction); }
@@ -657,6 +820,24 @@ export function challenge(value: string): string {
 }
 
 
+const WEBHOOK_CHECK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as const;
+
+function sleepAbortable(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const clock = new OwnerScheduleClock(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(true);
+    });
+    const onAbort = () => {
+      clock.stop();
+      resolve(false);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    clock.arm(ms);
+  });
+}
+
 export type ReviewerWakeStatus = 'unconfigured' | 'waiting' | 'dispatched';
 
 
@@ -664,10 +845,14 @@ export type ReviewerWakeStatus = 'unconfigured' | 'waiting' | 'dispatched';
 export function reviewerWakeFromFacts(input: {
   configuredReviewerId: string | null;
   reviewerHandle: string | null;
-  /** The live GitHub verdict reported beside this status, never the stored lifecycle. */
+  /** The live GitHub check verdict for this head, never the stored lifecycle. */
   checks: string | undefined;
-  /** The run sits in `review` after a green head woke the reviewer. */
+  /** The live CI gate verdict for this head (equals `checks` when no base-branch rule exists). */
+  gateChecks?: string | undefined;
+  /** A review request was dispatched to the configured reviewer for this head. */
   reviewWoken: boolean;
+  /** The stored cause recorded on the review wake command, when known. */
+  wakeCause?: string | null;
 }): { status: ReviewerWakeStatus; detail: string } {
   const label = input.reviewerHandle ? `@${input.reviewerHandle}` : 'the configured reviewer';
   if (!input.configuredReviewerId) {
@@ -677,15 +862,47 @@ export function reviewerWakeFromFacts(input: {
     };
   }
   if (input.reviewWoken) {
+    const cause = input.wakeCause ?? undefined;
+    const causeClause =
+      cause === 'checks-passed'
+        ? `The checks-passed transition woke ${label}`
+        : cause === 'required-checks-passed'
+          ? `Required checks passing woke ${label}`
+          : cause === 'no-required-checks'
+            ? `Review started for ${label} without waiting on checks (no required checks)`
+            : cause === 'brief-revised'
+              ? `A brief revision woke ${label}`
+              : `A review turn was dispatched to ${label}`;
+    if (cause === 'checks-passed' && input.checks === 'passed') {
+      return {
+        status: 'dispatched',
+        detail: `${causeClause}.`,
+      };
+    }
+    const currentChecks =
+      input.checks === 'passed'
+        ? 'checks are currently passing'
+        : input.checks === 'pending'
+          ? 'checks are currently pending'
+          : input.checks === 'failed'
+            ? 'checks are currently failing'
+            : 'current check state is unknown';
     return {
       status: 'dispatched',
-      detail: `The checks-passed transition woke ${label}.`,
+      detail: `${causeClause}; ${currentChecks}.`,
     };
   }
-  if (input.checks === 'pending') {
+  const waitingChecks = input.gateChecks ?? input.checks;
+  if (waitingChecks === 'pending' || input.checks === 'pending') {
     return {
       status: 'waiting',
       detail: `Checks are still pending, so ${label} has not been woken yet.`,
+    };
+  }
+  if (waitingChecks === 'failed' || input.checks === 'failed') {
+    return {
+      status: 'waiting',
+      detail: `Checks are failing, so ${label} has not been woken yet.`,
     };
   }
   return {
