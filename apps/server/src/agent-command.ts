@@ -32,6 +32,7 @@ import { mcpCommandWakeSql } from './rooms-mcp-events.js';
 import { recordMcpMemberWebhook,queuedMentionKind,recordQueuedMention,noteOfflineConnectors } from './rooms-mcp-members.js';
 import { cleanVoiceReply } from './voice-reply.js';
 import { assertMemberTranscript,modelText,systemText,type AgentVoice,type Composed,type MemberText,type SystemAuthorId } from './message-origin.js';
+import { peerReplyWakeInput,type PeerReplyWakeOutput } from './peer-reply-wake.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
 /** Sanitizing keeps the text's declared origin. */
 const pgText=<Text extends string>(value:Text)=>value.replace(/[\u0000\uD800-\uDFFF]/gu,'\uFFFD') as Text;
@@ -800,19 +801,26 @@ type AnswerReceipt = Partial<Pick<QueuedPostReceipt, 'id' | 'createdAt' | 'recei
   delivered?: boolean; answered?: boolean; queued?: boolean; deliveryCommandId?: string; destination?: MessageRoute['to'];
 };
 
+export async function wakePeerMessageSender(db: SqlDatabase, item: CommandRow, output: PeerReplyWakeOutput): Promise<CommandRow | undefined> {
+  const wake = await peerReplyWakeInput(db, item, output);
+  return wake ? queueMessage(db, wake) : undefined;
+}
+
 /** The only queue-answer exit. Publication and completion share its transaction. */
 export async function answerQueuedMessage(database: SqlDatabase, agentId: string, input: {
   roomId: string; requestId?: string; text: string;
   messageAsk?: MessageAsk; explicitReply?: boolean; publicPost?: boolean;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
+  batchCommandIds?: readonly string[];
   harnessEnded?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
+  invocationId?: string;
   outputFiles?: Attachment[];
   sharedReplyId?: string;
 }): Promise<AnswerReceipt> {
   if (input.harnessEnded && input.invocation && !input.explicitReply) return finalizeAgentInvocation(database,agentId,input.roomId,input.invocation,
-    db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
+    db => answerQueuedMessage(db,agentId,{...input,invocation:undefined,invocationId:input.invocation!.id,messageId:hash(`local-final:${input.invocation!.requestId}:${input.invocation!.id}`)}));
   if (input.queuedRequestIds?.length) return database.transaction(async db => {
     const ids = [...new Set([input.requestId, ...(input.queuedRequestIds ?? [])].filter((id): id is string => Boolean(id)))];
     const items = (await db.query<CommandRow>(`SELECT * FROM agent_commands
@@ -826,7 +834,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     let unanswered = false;
     for (const item of items) {
       const saved = await answerQueuedMessage(db,agentId,{
-        ...input,queuedRequestIds:undefined,requestId:item.id,
+        ...input,queuedRequestIds:undefined,batchCommandIds:ids,requestId:item.id,
         sharedReplyId,
         outputFiles:files, messageId:outputId,
       });
@@ -897,7 +905,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         if (existing && item.state === 'complete')
           return {...receipt, id:existing, messageId:existing, published:true, stored:true, visible:true, delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
-        await endAgentTurn(db,item,'complete',null,saved.id);
+        const ended = await endAgentTurn(db,item,'complete',null,saved.id);
+        if (ended) await wakePeerMessageSender(db,item,{kind:'answer',outputId:saved.id,text:messageText,attachments:files,batchCommandIds:input.batchCommandIds,invocationId:input.invocationId ?? input.invocation?.id});
         completedNow = true;
         return {...saved, commandId:item.id, messageId:saved.id, completed:true, published:true, delivered:true};
       }
