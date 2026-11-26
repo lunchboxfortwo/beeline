@@ -226,3 +226,35 @@ it('TASK-STATE-2: a thread card opens its thread, and its status mark opens the 
         expect(actions.open).toHaveBeenCalledOnce();
     } finally { act(() => tree.unmount()); }
 });
+
+it('gives desktop WorkBoard an aligned 52px header and min-width scrollable columns', () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const person = { pubkey: 'human', kind: 'human' as const, name: 'lunchboxfortwo' };
+    const board: WorkBoardView = {
+        workspaceId: 'ws', workspaceName: 'Crew', viewerId: 'viewer', chats: [], people: [],
+        items: [{
+            id: 'ask', roomId: 'chat', chatId: 'chat', chatName: 'ai-study', threadName: 'ai-study',
+            title: 'ai-study', state: 'needs-you', openedBy: person, assignee: null, createdAt: 1, updatedAt: 2,
+            ask: { messageId: 'ask', workspaceId: 'ws', roomId: 'chat', roomName: 'ai-study', roomKind: 'room',
+                author: person, text: 'Which benchmark?', createdAt: 1 },
+        }],
+    };
+    const actions = { open: vi.fn(), reply: vi.fn(), decide: vi.fn(), assign: vi.fn(), clear: vi.fn(), clearAll: vi.fn() };
+    let tree: any;
+    act(() => { tree = create(<WorkBoard board={board} desktop actions={actions} />); });
+    const host = (id: string) => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === id);
+    try {
+        expect(host('work-board-header').props.height).toBe(52);
+        expect(host('work-board-scroll')).toBeDefined();
+        expect(host('work-column-needs-you').props.minWidth).toBe(300);
+        for (const key of ['progress', 'backlog', 'done']) {
+            expect(host(`work-column-${key}`).props.minWidth).toBe(260);
+        }
+        const desktopRoom = tree.root.find((n: any) => n.type === 'Text' && n.props.children === '#ai-study');
+        expect(desktopRoom.props.minWidth).toBe(56);
+
+        act(() => tree.update(<WorkBoard board={board} desktop={false} actions={actions} />));
+        const phoneRoom = tree.root.find((n: any) => n.type === 'Text' && n.props.children === '#ai-study');
+        expect(phoneRoom.props.minWidth).toBeUndefined();
+    } finally { act(() => tree.unmount()); }
+});

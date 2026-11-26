@@ -23,7 +23,7 @@ it.each([false, true])('Nerd’s reply to Emberus’s avatar-background-color re
   await db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1', [OTHER, CHAT]);
   if (explicit) await replyToMessage(db,C, { id: task.id, roomId: THREAD, text: 'PASS: reviewed the PR' });
   else await answerQueuedMessage(db, C, { roomId: THREAD, requestId: task.id, text: 'PASS: reviewed the PR' });
-  expect(await queued()).toEqual(explicit ? [[A, CHAT]] : []);
+  expect(await queued()).toEqual([[A, CHAT]]);
   const replies = (await db.query('SELECT room_id FROM messages WHERE author_id=$1', [C])).rows;
   expect(replies).toEqual([{ room_id: explicit ? CHAT : THREAD }]);
 });
@@ -174,4 +174,167 @@ it('rings the blocker even when the same chat turn later posts local text', asyn
   await loop.runOnce();
   expect((await db.query('SELECT message_id FROM push_delivery_claims WHERE message_id=ANY($1::text[])',[[block.id,final.id]])).rows)
     .toEqual([{message_id:block.id}]);
+});
+
+it('Reproduction fb_638e1b93d94796a7f50188f0: wakes the commanding agent when a thread helper answers a peer message with normal turn text without ping-ponging', async () => {
+  const delegated = await daemon.execute('message', {
+    roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Audit slice 1 and report back.',
+  }, A);
+  const invocation = { id: crypto.randomUUID(), requestId: delegated.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: invocation.id }, B);
+  const report = 'Audit slice 1 complete: found two missing checks.';
+  const final = await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: report, harnessEnded: true, invocation,
+  }, B);
+  expect(final.completed).toBe(true);
+  // Retrying the same turn completion does not double-wake the commander.
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: report, harnessEnded: true, invocation,
+  }, B);
+  // Helper output stays a single public message in the thread with no duplicate agent-command pill.
+  expect((await db.query('SELECT room_id,presentation,text FROM messages WHERE author_id=$1', [B])).rows)
+    .toEqual([{ room_id: THREAD, presentation: 'message', text: report }]);
+  const wakes = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(wakes).toHaveLength(1);
+  expect(wakes[0]).toMatchObject({
+    reason: 'reply',
+    roomId: THREAD,
+    from: { agent: B, place: THREAD },
+    source: { body: report },
+  });
+  // Commander synthesizes with normal turn text: never wakes the helper back (no ping-pong).
+  const synthInvocation = { id: crypto.randomUUID(), requestId: wakes[0]!.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: wakes[0]!.id, invocationId: synthInvocation.id }, A);
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: wakes[0]!.id, text: 'Synthesized audit report ready.', harnessEnded: true, invocation: synthInvocation,
+  }, A);
+  expect(await queued()).toEqual([]);
+});
+
+it.each(['reply', 'normal', 'blocked', 'mention'] as const)('avoids double-waking the commander on thread peer turn completion (%s)', async mode => {
+  const delegated = await daemon.execute('message', {
+    roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Inspect module.',
+  }, A);
+  const invocation = { id: crypto.randomUUID(), requestId: delegated.id };
+  await daemon.execute('startAgentTurn', { roomId: THREAD, requestId: delegated.id, invocationId: invocation.id }, B);
+  if (mode === 'reply') {
+    await daemon.execute('message', { roomId: THREAD, requestId: delegated.id, type: 'reply', quoteMsgId: delegated.id, text: 'Explicit reply report.' }, B);
+  } else if (mode === 'normal') {
+    await daemon.execute('message', { roomId: THREAD, requestId: delegated.id, type: 'normal', address: `${A}@${THREAD}`, text: 'Direct message report.' }, B);
+  } else if (mode === 'blocked') {
+    await daemon.execute('message', { roomId: THREAD, requestId: delegated.id, type: 'blocked', text: 'Need credentials.' }, B);
+  }
+  const closingText = mode === 'mention' ? '@ruby Here is the audit report.' : 'Closing turn note.';
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: delegated.id, text: closingText, harnessEnded: true, invocation,
+  }, B);
+  expect((await readAgentCommands(db, A, THREAD)).commands).toHaveLength(1);
+});
+
+it('deduplicates auto-wake across batched peer messages from the same sender and lets the commander close silently', async () => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const invocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: invocation.id, batchedCommandIds: [second.id],
+  }, B);
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: first.id, queuedRequestIds: [second.id], text: 'Both parts checked.', harnessEnded: true, invocation,
+  }, B);
+  const wakes = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(wakes).toHaveLength(1);
+  // Informational reply allows the commander to end silently while waiting on another helper.
+  const silent = await answerQueuedMessage(db, A, { roomId: THREAD, requestId: wakes[0]!.id, text: '', harnessEnded: true });
+  expect(silent.completed).toBe(true);
+  expect(await queued()).toEqual([]);
+});
+
+it.each(['first', 'second'] as const)('avoids double-waking a commander when a batched turn explicitly replies to the %s request before posting closing text', async repliedWhich => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const otherCommander = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part C.' }, C);
+  const invocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: invocation.id, batchedCommandIds: [second.id, otherCommander.id],
+  }, B);
+  const target = repliedWhich === 'first' ? first : second;
+  await daemon.execute('message', {
+    roomId: THREAD, requestId: first.id, type: 'reply', quoteMsgId: target.id, text: 'Explicit reply covering both parts.',
+  }, B);
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: first.id, queuedRequestIds: [second.id, otherCommander.id], text: 'Closing summary for the batch.', harnessEnded: true, invocation,
+  }, B);
+  expect((await readAgentCommands(db, A, THREAD)).commands).toHaveLength(1);
+  // Another commander in the same batch who did not receive an explicit reply still wakes once.
+  expect((await readAgentCommands(db, C, THREAD)).commands).toHaveLength(1);
+});
+
+it('avoids double-waking a commander when an earlier batched request already completed via explicit reply before closing text posts for the remaining item', async () => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const invocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: invocation.id, batchedCommandIds: [second.id],
+  }, B);
+  await replyToMessage(db, B, { roomId: THREAD, id: first.id, text: 'Explicit reply for both parts.', invocation });
+  // Runner omits the already-completed first item from queuedRequestIds when posting closing text for second.
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: second.id, text: 'Closing summary.', harnessEnded: true, invocation,
+  }, B);
+  expect((await readAgentCommands(db, A, THREAD)).commands).toHaveLength(1);
+});
+
+it('wakes the commander when a fresh invocation completes a remaining request after an earlier batched invocation was interrupted', async () => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const firstInvocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: firstInvocation.id, batchedCommandIds: [second.id],
+  }, B);
+  await replyToMessage(db, B, { roomId: THREAD, id: first.id, text: 'Part A done.', invocation: firstInvocation });
+  // Turn ends/interrupts before answering second; first wake is handled and second stays pending.
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: second.id, text: '', harnessEnded: true, invocation: firstInvocation,
+  }, B);
+  const firstWake = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(firstWake).toHaveLength(1);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1', [second.id])).rows).toEqual([{ state: 'pending' }]);
+  await db.query("UPDATE agent_commands SET state='complete' WHERE id=$1", [firstWake[0]!.id]);
+
+  // A fresh invocation completes the remaining pending request and must wake the commander.
+  const freshInvocation = { id: crypto.randomUUID(), requestId: second.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: second.id, invocationId: freshInvocation.id,
+  }, B);
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: second.id, text: 'Part B done.', harnessEnded: true, invocation: freshInvocation,
+  }, B);
+  const freshWakes = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(freshWakes).toHaveLength(1);
+  expect(freshWakes[0]).toMatchObject({ reason: 'reply', source: { body: 'Part B done.' } });
+});
+
+it('does not wake on empty helper turns or review-context repair turns, and wakes on hosted helper failure', async () => {
+  // Silent empty turn stays owed without waking commander with empty noise.
+  const silentTask = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Audit slice.' }, A);
+  const empty = await daemon.execute('postRoomMessage', { roomId: THREAD, requestId: silentTask.id, text: '', harnessEnded: true }, B);
+  expect(empty.answered).toBe(false);
+  expect((await readAgentCommands(db, A, THREAD)).commands).toEqual([]);
+
+  // Hosted failure completes the helper command and wakes the waiting commander with the reason.
+  const { failHostedAgentTurn } = await import('./agent-turn-end.js');
+  const row = (await db.query<CommandRow>('SELECT * FROM agent_commands WHERE id=$1', [silentTask.id])).rows[0]!;
+  await db.transaction(tx => failHostedAgentTurn(tx, row, B, 'Model quota exhausted'));
+  const failWakes = (await readAgentCommands(db, A, THREAD)).commands;
+  expect(failWakes).toHaveLength(1);
+  expect(failWakes[0]).toMatchObject({ reason: 'reply', source: { body: 'Jellybean failed to answer: Model quota exhausted' } });
+  await db.query("UPDATE agent_commands SET state='complete' WHERE state='pending'");
+
+  // Review/repair messages carrying review_context stay governed by corner lifecycle, not peer auto-wake.
+  const repair = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'FAIL: fix test.' }, C);
+  await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [
+    repair.id, JSON.stringify({ cornerId: THREAD, headSha: 'a'.repeat(40), pullRequest: 7, briefRevision: 1, purpose: 'repair' }),
+  ]);
+  await daemon.execute('postRoomMessage', { roomId: THREAD, requestId: repair.id, text: 'Pushed fix, waiting for checks.', harnessEnded: true }, B);
+  expect((await readAgentCommands(db, C, THREAD)).commands).toEqual([]);
 });

@@ -50,14 +50,21 @@ it('interleaves two thread sessions without mixing their output or report recipi
 });
 
 it('binds connected-app writes to the received command when two tasks are pending', async () => {
+  await db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1',[OTHER,CHAT]);
   const one=await task(H,THREAD), two=await task(C,OTHER);
   const app=new RoomsMcpAgentTools(db,daemon);
   await expect(app.call(B,'reply',{commandId:two.id,id:one.id,text:'Local note'})).rejects.toThrow('Quote a message');
-  await app.call(B,'message',{commandId:two.id,to:{agent:A,place:CHAT},text:'Inspect'});
+  await expect(app.call(B,'message',{commandId:two.id,to:{agent:A,place:CHAT},text:'Wrong place'}))
+    .rejects.toThrow('thread agent session');
+  await expect(app.call(B,'message',{address:OTHER,to:{agent:H,place:THREAD},text:'Wrong recipient'}))
+    .rejects.toThrow('thread agent session');
+  await app.call(B,'message',{commandId:two.id,to:{agent:A,place:THREAD},text:'Inspect'});
   expect((await db.query('SELECT room_id FROM messages WHERE text=$1',['Local note'])).rows).toEqual([]);
   expect((await db.query("SELECT state FROM agent_commands WHERE id=$1",[one.id])).rows).toEqual([{state:'pending'}]);
-  expect((await db.query("SELECT message->'route'->'from' sender,parent_command_id FROM agent_commands WHERE agent_id=$1",[A])).rows)
-    .toEqual([{sender:{agent:B,place:OTHER},parent_command_id:two.id}]);
+  expect((await db.query("SELECT room_id,message->'route'->'from' sender,parent_command_id FROM agent_commands WHERE agent_id=$1",[A])).rows)
+    .toEqual([{room_id:THREAD,sender:{agent:B,place:OTHER},parent_command_id:two.id}]);
+  expect((await db.query('SELECT room_id,text FROM messages WHERE author_id=$1',[B])).rows)
+    .toEqual([{room_id:THREAD,text:'Inspect'}]);
 });
 
 it.each([true,false])('keeps file-only output home with report first=%s', async reportFirst => {
@@ -93,11 +100,33 @@ it('a watched event from an archived thread completes in the watching chat', asy
   expect((await db.query('SELECT id FROM messages WHERE author_id=$1',[B])).rows).toEqual([]);
 });
 
-it('routes reviewer lifecycle blocks to the assigning commander', async () => {
+it('refuses unquoted review tool messages even when the commander has a parent Room session', async () => {
   await db.query('UPDATE rooms SET reviewer_agent_id=$1 WHERE id=$2',[C,CHAT]);
-  await task(H,THREAD);
+  await task(A,THREAD);
   const review=await queueMessage(db,{roomId:THREAD,agentId:C,sourceMessageId:null,reason:'corner_review_dispatch'});
-  const saved=await daemon.execute('message',{roomId:THREAD,requestId:review!.id,type:'blocked',text:'Review needs input.'},C);
-  expect((await db.query("SELECT card->'route'->'to' recipient FROM messages WHERE id=$1",[saved.id])).rows)
-    .toEqual([{recipient:{agent:H,place:CHAT}}]);
+  await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:review!.id,invocationId:'review'},C);
+  const input={roomId:THREAD,text:'Review found a blocker.'};
+  const refusal='Put review findings in your turn text.';
+  await expect(daemon.execute('message',{...input,type:'blocked'},C)).rejects.toThrow(refusal);
+  await expect(daemon.execute('message',{...input,type:'normal',address:`${B}@${THREAD}`},C)).rejects.toThrow(refusal);
+  await expect(daemon.execute('message',{...input,type:'reply',quoteMsgId:'unrelated'},C)).rejects.toThrow(refusal);
+  await expect(new RoomsMcpAgentTools(db,daemon).call(C,'message',{
+    commandId:review!.id,to:{agent:B,place:THREAD},text:input.text,
+  })).rejects.toThrow(refusal);
+  expect((await db.query('SELECT id FROM messages WHERE author_id=$1',[C])).rows).toEqual([]);
+  expect((await db.query('SELECT id FROM agent_commands WHERE agent_id=$1',[A])).rows).toEqual([]);
+  const verdict=await daemon.execute('postRoomMessage',{...input,requestId:review!.id,harnessEnded:true},C);
+  expect((await db.query('SELECT room_id,text FROM messages WHERE id=$1',[verdict.id])).rows)
+    .toEqual([{room_id:THREAD,text:input.text}]);
+});
+
+it('accepts a reply to a real wake delivered alongside a review and refuses new messages', async () => {
+  const request=await sendMessage(db,{route:{from:{agent:A,place:CHAT},to:{agent:C,place:THREAD}},text:'Can you confirm the test ran?'});
+  const review=await queueMessage(db,{roomId:THREAD,agentId:C,sourceMessageId:null,reason:'corner_review_dispatch'});
+  await daemon.execute('startAgentTurn',{roomId:THREAD,requestId:request.id,invocationId:'batch',batchedCommandIds:[review!.id]},C);
+  await expect(daemon.execute('message',{roomId:THREAD,type:'normal',address:`${B}@${THREAD}`,text:'Extra review message'},C))
+    .rejects.toThrow('Put review findings in your turn text.');
+  const reply=await daemon.execute('message',{roomId:THREAD,type:'reply',quoteMsgId:request.id,text:'The test ran.'},C);
+  expect((await db.query('SELECT room_id,reply_to_message_id FROM messages WHERE id=$1',[reply.id])).rows)
+    .toEqual([{room_id:CHAT,reply_to_message_id:request.id}]);
 });

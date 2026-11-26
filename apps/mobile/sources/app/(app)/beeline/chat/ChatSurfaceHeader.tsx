@@ -17,6 +17,7 @@ export type DirectMessagePeerMark = {
 type Props = {
   isCorner: boolean;
   isDirectMessage: boolean;
+  desktop?: boolean;
   /** Phone only: a desktop chat sits beside the sidebar and has no Back. */
   showBack: boolean;
   handleBack: () => void;
@@ -71,6 +72,7 @@ export function ChatSurfaceErrorHeader({ title, showBack, handleBack, error }: {
 export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   isCorner,
   isDirectMessage,
+  desktop = false,
   showBack,
   handleBack,
   title,
@@ -96,21 +98,22 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
         expand={expandThread} openActions={openCornerActions} barRef={threadBarRef} onBarLayout={onThreadBarLayout} />
     );
   }
+  const titleVariant = desktop ? 'listTitle' : 'title';
   const name = title === null ? <TitleSkeleton /> : isDirectMessage ? (
-    <T v="title" testID="chat-title">{title}</T>
+    <T v={titleVariant} numberOfLines={desktop ? 1 : undefined} testID="chat-title">{title}</T>
   ) : (
-    <ListItem padding="0" minHeight={0} justifyContent="flex-start" backgroundColor="transparent"
+    <ListItem padding="0" minHeight={0} flexShrink={1} minWidth={0} maxWidth="100%" justifyContent="flex-start" backgroundColor="transparent"
       onPress={openChatInfo} aria-label={`Chat info: ${title}`} accessibilityRole="button" testID="chat-title-link">
-      <ChatName name={title} testID="chat-title" />
+      <ChatName v={titleVariant} name={title} numberOfLines={desktop ? 1 : undefined} testID="chat-title" />
     </ListItem>
   );
   const meta = isDirectMessage ? (
     dmHeaderPresence ? <T v="meta" color="secondary" numberOfLines={1} testID="room-header-meta">{dmHeaderPresence}</T> : null
   ) : (
-    <ListItem padding="0" paddingVertical="1" minHeight={0} alignSelf="flex-start" width="auto" justifyContent="flex-start"
+    <ListItem padding="0" paddingVertical={desktop ? '0' : '1'} minHeight={0} alignSelf="flex-start" width="auto" justifyContent="flex-start"
       backgroundColor="transparent" onPress={openMembers}
       aria-label={`${memberCount} members: open Members`} accessibilityRole="button" testID="chat-members-link">
-      <T v="meta" color="secondary">{memberCount === 1 ? '1 member' : `${memberCount} members`}</T>
+      <T v="meta" color="secondary" numberOfLines={desktop ? 1 : undefined}>{memberCount === 1 ? '1 member' : `${memberCount} members`}</T>
     </ListItem>
   );
   const right = isDirectMessage ? (
@@ -127,6 +130,7 @@ export const ChatSurfaceHeaderView = React.memo(function ChatSurfaceHeaderView({
   return (
     <PlaceHeader
       testID="chat-header"
+      desktop={desktop}
       back={showBack ? handleBack : undefined}
       backTestID="chat-back"
       mark={isDirectMessage

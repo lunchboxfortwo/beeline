@@ -504,13 +504,15 @@ describe('desktop Workspace navigation', () => {
     expect(saveActiveCommunityId).not.toHaveBeenCalled();
   });
 
-  it('keeps the Mac workspace header below the overlay title bar, and the Windows one at the top', async () => {
+  it('never adds a sidebar-only Mac titlebar spacer and keeps the user Text size under a mouse', async () => {
     const titlebar = () => tree.root.findAll((node: any) => node.type === 'YStack' && node.props.height === 56);
     desktopShell.current = true;
     vi.stubGlobal('navigator', { platform: 'MacIntel' });
     try {
       await act(async () => tree.update(<SidebarView key="mac" />));
-      expect(titlebar()).toHaveLength(1);
+      expect(titlebar()).toHaveLength(0);
+      // Sidebar rows use readable body/heading typography at the inherited TextSizeContext (medium = 16px, not forced small 12px).
+      expect(control('room-room-a-title').props.fontSize).toBe(16);
       vi.stubGlobal('navigator', { platform: 'Win32' });
       await act(async () => tree.update(<SidebarView key="windows" />));
       expect(titlebar()).toHaveLength(0);

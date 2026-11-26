@@ -649,10 +649,10 @@ describe('thread message attribution', () => {
     const [firstReview] = await commands(B, C);
     await claim(firstReview!);
     const findings = `@hoots FAIL on ${head}: the PR description lacks demonstration evidence.`;
-    await rootFixture.daemon.execute('message',{roomId:C,requestId:firstReview!.turnRequestId,type:'normal',address:`${A}@${C}`,text:findings},B);
-    await result(firstReview!,'');
+    await result(firstReview!,findings);
+    await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
     const [repair] = await commands(A, C);
-    expect(repair?.reason).toBe('message');
+    expect(repair?.reason).toBe('corner_review_needed');
     expect(repair?.source.body).toContain(findings);
     expect((await rootFixture.db.query('SELECT review_context->>\'headSha\' head FROM agent_commands WHERE id=$1', [repair!.id])).rows[0]).toEqual({ head });
     await claim(repair!);
@@ -668,7 +668,7 @@ describe('thread message attribution', () => {
     expect((await commands(B, C)).map(item => item.id)).toContain(rereview!.id);
     expect((await rootFixture.db.query<{ workflow_state: string }>(
       `SELECT ${cornerRunStateSql('corner_id')} workflow_state FROM corner_facts WHERE corner_id=$1`, [C],
-    )).rows[0]).toEqual({ workflow_state: 'working' });
+    )).rows[0]).toEqual({ workflow_state: 'review' });
   });
 
 

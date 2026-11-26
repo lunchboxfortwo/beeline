@@ -1,4 +1,5 @@
 import { findings } from './test-support-corner-review-dispatch.test-support.js';
+import { legacyReviewMessage } from './test-fixtures/queued-turn.test-support.js';
 import { commanderReportAddress } from './commander.js';
 import { cornerReviewWokenSql,noteReviewDispatchFailure } from './corner-lifecycle-review-state.js';
 import { queueReviewerCommand } from './corner-lifecycle.js';
@@ -36,8 +37,7 @@ describe('corner message attribution', () => {
     await verdict('check-passed');
     const [review] = await commands(B, C);
     await claim(review!);
-    await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,type:'normal',address:`${A}@${C}`,text:'FAIL: the waiver is not in the brief.'},B);
-    await result(review!,'');
+    await findings(review!,'FAIL: the waiver is not in the brief.');
     await reconcileConfiguredCornerReviewers(rootFixture.db, R);
     const repairs=await commands(A,C);
     expect(repairs.map(item=>item.reason)).toEqual(['message']);
@@ -293,13 +293,14 @@ describe('corner message attribution', () => {
 
 
   it.each(['FAIL: required evidence is missing.', 'blocked: waiting for required checks.'])(
-    'Reproduction REVIEW-STOP-1: %s leaves findings or a cause without retrying', async verdict => {
+    'Reproduction REVIEW-STOP-1: a refused message with %s leaves the review pending after a failed diagnostic', async verdict => {
       await rootFixture.phone.execute('updateRoom', { roomId: R, reviewerAgentId: B }, H);
       const head = 'd'.repeat(40);
       await greenHead(95, head);
       const [review] = await commands(B, C);
       await claim(review!);
-      await rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,...(verdict.startsWith('blocked:') ? {type:'blocked' as const} : {type:'normal' as const,address:`${A}@${C}`}),text:verdict},B);
+      await expect(rootFixture.daemon.execute('message',{roomId:C,requestId:review!.turnRequestId,...(verdict.startsWith('blocked:') ? {type:'blocked' as const} : {type:'normal' as const,address:`${A}@${C}`}),text:verdict},B))
+        .rejects.toThrow('Put review findings in your turn text.');
       await rootFixture.daemon.execute('postAgentTurnReceipt', { roomId: C, requestId: review!.turnRequestId, status: 'failed', reasonKind: 'hiccup', reason: 'unreported_order: runtime failed after delivery' }, B);
       const sourceId = (await rootFixture.db.query<{ id: string }>(
         `SELECT id FROM messages WHERE room_id=$1 AND system_event->>'kind'='check-passed' ORDER BY created_at DESC LIMIT 1`, [C])).rows[0]!.id;
@@ -334,7 +335,7 @@ describe('corner message attribution', () => {
     const beforeEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
-    const echoed = await rootFixture.daemon.execute('message', { roomId: C, requestId: review!.turnRequestId, type:'normal',address:`${A}@${C}`,text: 'failed: FAIL: the pull request is unchanged.' }, B);
+    const echoed = await legacyReviewMessage(rootFixture.db, review!, A, 'failed: FAIL: the pull request is unchanged.');
     const afterEcho = (await rootFixture.db.query<{ id: string }>(
       `SELECT id FROM agent_commands WHERE room_id=$1 AND agent_id=$2`, [C, B],
     )).rows.map(row => row.id);
@@ -553,7 +554,7 @@ it.each(['complete','failed'] as const)('Reproduction review-1: a delivered repa
   await greenHead(3060,head);
   const [review]=await commands(B,C);
   await claim(review!);
-  await rootFixture.daemon.execute('message',{ roomId:C, requestId:review!.turnRequestId, type: 'normal', address: `${A}@${C}`, text:'FAIL: the sample endpoint accepts an invalid request. Add the required validation.' },B);
+  await legacyReviewMessage(rootFixture.db, review!, A, 'FAIL: the sample endpoint accepts an invalid request. Add the required validation.');
   await rootFixture.daemon.execute('postAgentTurnReceipt',{ roomId:C, requestId:review!.turnRequestId, status, ...(status==='complete'?{completionKind:'no-reply' as const}:{reason:'unreported_order: runtime failed after delivery',reasonKind:'hiccup' as const}) },B);
   const repairs=(await commands(A,C)).filter(c=>c.reason==='message');
   expect(repairs.length).toBeGreaterThan(0);

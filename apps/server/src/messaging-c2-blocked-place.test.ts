@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { queueMessage } from './agent-command.js';
 import { modelText } from './message-origin.js';
-import { A, B, C, THREAD, daemon, db, PLACES, SYSTEM_WAKES, inbox, settle, personSays, systemWake, type Place } from './messaging-conditions.test-support.js';
+import { A, B, THREAD, daemon, db, PLACES, SYSTEM_WAKES, inbox, settle, personSays, systemWake, type Place } from './messaging-conditions.test-support.js';
 
 const places = Object.keys(PLACES) as Place[];
-const wakes = SYSTEM_WAKES.map(reason => [reason, reason === 'corner_review_dispatch' ? C : B] as const);
-const cases = places.flatMap(place => wakes.map(([reason, worker]) => [place, reason, worker] as const));
+const cases = places.flatMap(place => SYSTEM_WAKES.map(reason => [place, reason] as const));
 
 /** The first task reaches the implementer either as a message or as the recorded thread opening. */
 async function firstTask(place: string, opening: boolean) {
@@ -17,7 +16,7 @@ async function firstTask(place: string, opening: boolean) {
 
 /** System wakes answer in the thread; task replies retain their sender's place. */
 describe('C2: implementer blocks default to the opening commander', () => {
-  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake reaches the commander', async (place, reason, worker) => {
+  it.each(cases)('commander in the %s; a later thread tag; a blocked reply to the %s wake reaches the commander', async (place, reason) => {
     for (const opening of [false, true]) {
       await db.query('DELETE FROM agent_commands');
       await db.query('DELETE FROM messages');
@@ -26,12 +25,12 @@ describe('C2: implementer blocks default to the opening commander', () => {
       // Another person tag later in the thread is conversation, not a new commander.
       await personSays(THREAD, '@ruby Conversation only');
       await settle();
-      const wake = await systemWake(reason, worker);
-      const answer = await daemon.execute('message', { roomId:THREAD, requestId:wake.turn_request_id,type:'blocked', text:'need a decision' }, worker);
+      const wake = await systemWake(reason);
+      const answer = await daemon.execute('message', { roomId:THREAD, requestId:wake.turn_request_id,type:'blocked', text:'need a decision' }, B);
       expect((await inbox()).filter(row=>row.agent_id===A).map(row => [row.agent_id, row.room_id, row.from, Boolean(row.ask)]), `opening=${opening}`)
-        .toEqual([[A,PLACES[place],{agent:worker,place:THREAD},false]]);
+        .toEqual([[A,PLACES[place],{agent:B,place:THREAD},false]]);
       expect((await db.query('SELECT room_id,author_id FROM messages WHERE id=$1', [answer.id])).rows)
-        .toEqual([{ room_id: PLACES[place], author_id: worker }]);
+        .toEqual([{ room_id: PLACES[place], author_id: B }]);
     }
   });
 
