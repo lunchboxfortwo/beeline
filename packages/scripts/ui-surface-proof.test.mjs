@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validateArtifact } from '../../apps/body/dist/artifact-validation.js';
 import {
   PROOF_MATRIX,
@@ -164,8 +165,49 @@ test('renderContactSheetHtml rejects missing frames and escapes unsafe metadata 
   assert.doesNotMatch(html, /<script/i);
 });
 
-test('mobile-export-reachability checks both Android and Expo Web exports sequentially without leaks', () => {
+test('captureSurfaceFrames closes the local export server when browser launch fails', async () => {
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'beeline-ui-proof-fail-'));
+  try {
+    makeFixtureSite(fixtureDir);
+    const missingBinary = join(fixtureDir, 'missing-chromium');
+    await assert.rejects(
+      () => captureSurfaceFrames({ dir: fixtureDir, chromiumPath: missingBinary }),
+      /Failed to launch|ENOENT|Executable doesn't exist|browserType\.launch/i,
+    );
+
+    const moduleUrl = pathToFileURL(join(repoRoot, 'packages/scripts/ui-surface-proof.mjs')).href;
+    const probe = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { captureSurfaceFrames } from ${JSON.stringify(moduleUrl)};
+try {
+  await captureSurfaceFrames({ dir: ${JSON.stringify(fixtureDir)}, chromiumPath: ${JSON.stringify(missingBinary)} });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}`,
+      ],
+      { encoding: 'utf8', timeout: 10_000 },
+    );
+    assert.equal(probe.signal, null, `subprocess hung instead of closing server: ${probe.stderr}`);
+    assert.equal(probe.status, 1, `expected clean failure exit 1, got ${probe.status}`);
+  } finally {
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
+test('ci-workspace-tasks installs Chromium headless shell in typecheck and checks Android and Web sequentially', () => {
   const script = readFileSync(join(repoRoot, 'packages/scripts/ci-workspace-tasks.sh'), 'utf8');
+  const typecheckStart = script.indexOf('typecheck() {');
+  assert.ok(typecheckStart >= 0, 'typecheck function missing');
+  const typecheckBody = script.slice(typecheckStart, script.indexOf('\n}\n', typecheckStart) + 3);
+  const installIndex = typecheckBody.indexOf('npx playwright install --only-shell chromium');
+  const proofTestIndex = typecheckBody.indexOf('packages/scripts/ui-surface-proof.test.mjs');
+  assert.ok(installIndex > 0, 'typecheck must install Playwright Chromium headless shell');
+  assert.ok(proofTestIndex > installIndex, 'headless shell install must run before ui-surface-proof.test.mjs');
+
   const start = script.indexOf('mobile_export_reachability() {');
   assert.ok(start >= 0, 'mobile_export_reachability function missing');
   const body = script.slice(start, script.indexOf('\n}\n', start) + 3);

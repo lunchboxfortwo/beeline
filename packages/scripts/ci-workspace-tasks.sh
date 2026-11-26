@@ -41,6 +41,8 @@ typecheck() {
   npx tsc -p packages/scripts/tsconfig.scripts.json
   # Check no script, workflow, unit or skill names a deleted file
   npm run lint:referenced-paths
+  # Ensure Playwright's Chromium headless shell is available for browser-backed proof tests
+  npx playwright install --only-shell chromium
   # Check CI routing, partitioning and build provenance
   node --test --test-concurrency=1  packages/scripts/run-workspace-tests.test.mjs packages/scripts/report-main-checks.test.mjs packages/scripts/architecture-invariants.test.mjs packages/scripts/integration-shards.test.mjs packages/scripts/mobile-ui-policy-moves.test.mjs packages/scripts/mobile-grammar-policy.test.mjs packages/scripts/connection-ui-policy.test.mjs packages/scripts/server-timers.test.mjs packages/scripts/helper-waits.test.mjs packages/scripts/machine-connection-boundaries.test.mjs packages/scripts/corner-machine-boundary.test.mjs packages/scripts/system-transcript-boundary.test.mjs packages/scripts/legal-pages.test.mjs packages/scripts/ui-surface-proof.test.mjs
   # Test nightly Checks orchestration

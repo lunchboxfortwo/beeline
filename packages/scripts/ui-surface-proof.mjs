@@ -121,18 +121,32 @@ function escapeHtml(value) {
     .replaceAll('=', '&#61;');
 }
 
-function resolveChromiumExecutable(explicitPath) {
-  if (explicitPath) return explicitPath;
+function chromiumLaunchEnv() {
+  return existsSync('/tmp') ? { ...process.env, TMPDIR: '/tmp' } : undefined;
+}
+
+async function launchBrowser(explicitPath) {
+  const env = chromiumLaunchEnv();
+  const baseOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    ...(env ? { env } : {}),
+  };
+  if (explicitPath) {
+    return chromium.launch({ ...baseOptions, executablePath: explicitPath });
+  }
   try {
-    const bundled = chromium.executablePath();
-    if (bundled && existsSync(bundled)) return undefined;
-  } catch {
-    // Fall back to a system Chromium binary when Playwright's bundled binary is absent.
+    return await chromium.launch(baseOptions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/Executable doesn't exist|Failed to launch/i.test(message)) throw error;
+    for (const candidate of CHROMIUM_FALLBACK_PATHS) {
+      if (existsSync(candidate)) {
+        return chromium.launch({ ...baseOptions, executablePath: candidate });
+      }
+    }
+    throw error;
   }
-  for (const candidate of CHROMIUM_FALLBACK_PATHS) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
 }
 
 function resolveCellUrl(template, cell) {
@@ -238,21 +252,17 @@ export async function captureSurfaceFrames({
   }
 
   let server;
-  let baseUrl = url;
-  if (dir) {
-    server = await startStaticExportServer(dir);
-    const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
-    baseUrl = `${server.origin}${normalizedRoute}`;
-  }
-
-  const executablePath = resolveChromiumExecutable(chromiumPath);
-  const browser = await chromium.launch({
-    ...(executablePath ? { executablePath } : {}),
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
-
+  let browser;
   try {
+    let baseUrl = url;
+    if (dir) {
+      server = await startStaticExportServer(dir);
+      const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
+      baseUrl = `${server.origin}${normalizedRoute}`;
+    }
+
+    browser = await launchBrowser(chromiumPath);
+
     const frames = [];
     for (const cell of PROOF_MATRIX) {
       const cellUrl = resolveCellUrl(baseUrl, cell);
@@ -321,8 +331,10 @@ export async function captureSurfaceFrames({
       capturedAt: new Date().toISOString(),
     };
   } finally {
-    await browser.close();
-    if (server) await server.close();
+    await Promise.allSettled([
+      browser ? browser.close() : Promise.resolve(),
+      server ? server.close() : Promise.resolve(),
+    ]);
   }
 }
 
@@ -546,12 +558,7 @@ ${cellsHtml}
 }
 
 export async function renderContactSheetPng(html, { width = 1400, chromiumPath } = {}) {
-  const executablePath = resolveChromiumExecutable(chromiumPath);
-  const browser = await chromium.launch({
-    ...(executablePath ? { executablePath } : {}),
-    headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-  });
+  const browser = await launchBrowser(chromiumPath);
   try {
     const context = await browser.newContext({
       viewport: { width, height: 900 },
