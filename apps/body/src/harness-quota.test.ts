@@ -518,6 +518,11 @@ describe('Antigravity quota-axi reporting (Reproduction R-AGY-USAGE)', () => {
       }],
     }, 'agy', agyNow)!;
     expect(noEpochSentinel.read).toEqual({ status: 'stale', at: agyNow });
+
+    // A real Gemini window expiring after generatedAt but before consumption stays stale.
+    const consumedAfterReset = Date.parse('2026-11-26T18:49:00.000Z') / 1000;
+    const expiredBeforeConsumption = quotaAxiUsage(QUOTA_AXI_AGY_REPORT, 'agy', consumedAfterReset)!;
+    expect(expiredBeforeConsumption.read).toEqual({ status: 'stale', at: consumedAfterReset });
   });
 
   it('augments PATH for agy reads so quota-axi finds agy in non-interactive helper environments', async () => {

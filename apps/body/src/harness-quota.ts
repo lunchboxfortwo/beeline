@@ -114,7 +114,8 @@ function isAgyEpochSentinelStale(
   if (!attempts.some((attempt) => record(attempt)?.status === 'success')) return false;
   const generatedAt =
     typeof report?.generatedAt === 'string' ? Date.parse(report.generatedAt) : NaN;
-  const referenceMs = Number.isFinite(generatedAt) ? generatedAt : now * 1000;
+  const nowMs = now * 1000;
+  const referenceMs = Number.isFinite(generatedAt) ? Math.max(generatedAt, nowMs) : nowMs;
   const windows = Array.isArray(entry.windows) ? entry.windows : [];
   let sawEpochSentinel = false;
   for (const raw of windows) {
