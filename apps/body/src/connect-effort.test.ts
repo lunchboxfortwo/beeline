@@ -63,7 +63,7 @@ it.each([
     undefined,
     { NO_COLOR: '1' },
     undefined,
-    { detect: () => [], checkProgram: () => {}, announce: () => {} },
+    { checkProgram: () => {}, announce: () => {} },
   );
   expect(loadModels).toHaveBeenLastCalledWith(
     expect.objectContaining({ harness: 'pi', model: 'chosen-model' }),
@@ -104,7 +104,7 @@ it('covers the provider key check and the final model read with spinners', async
     { read: async () => undefined, save: async () => undefined },
     { NO_COLOR: '1' },
     verifyKey,
-    { detect: () => [], checkProgram: () => {}, announce: () => {} },
+    { checkProgram: () => {}, announce: () => {} },
   );
   expect(result).toEqual({
     harness: 'pi',

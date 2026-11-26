@@ -19,8 +19,6 @@ import {
   resolveAgentCommand,
   installedAgentProgramEnvironment,
   agentBehavior,
-  type DetectedAgentCommand,
-  detectInstalledAgentCommands,
 } from './agent-command.js';
 import { stdin, stdout } from 'node:process';
 import { fstatSync } from 'node:fs';
@@ -444,42 +442,11 @@ export function connectProbeFoundModels(catalog: ConnectModelCatalog): boolean {
   return catalog.note === undefined && catalog.options.length > 0;
 }
 
-/**
- * The one harness worth auto-selecting: the only supported harness actually
- * installed on this machine. Anything else — none, or several — is a genuine
- * choice, so the list is offered.
- */
-export function soleInstalledConnectHarness(
-  detected: DetectedAgentCommand[],
-): (typeof CONNECT_HARNESSES)[number] | undefined {
-  const ready = detected.filter((entry) => entry.status === 'ready');
-  return ready.length === 1 ? ready[0]!.kind : undefined;
-}
-
 export function connectHarnessLabel(harness: (typeof CONNECT_HARNESSES)[number]): string {
   return agentBehavior(harness).label ?? harness[0]!.toUpperCase() + harness.slice(1);
 }
 
-/**
- * What the probe found, said once: it stands in for the provider and key
- * questions it answered, and explains where the model prompt's default came
- * from.
- */
-export function connectFoundLine(input: {
-  harness: (typeof CONNECT_HARNESSES)[number];
-  sole: boolean;
-  model?: string;
-}): string {
-  const name = connectHarnessLabel(input.harness);
-  const found = input.sole
-    ? `${name} is the only harness installed here, and it is already set up`
-    : `${name} is already set up`;
-  return input.model ? `${found}, running ${input.model}.` : `${found}.`;
-}
-
 export interface ConnectWizardSeams {
-  /** Supported harnesses installed on this machine; defaults to a real scan. */
-  detect?: () => DetectedAgentCommand[];
   checkProgram?: (kind: AgentKind, env: NodeJS.ProcessEnv) => void;
   /** Where the wizard says what it found instead of asking for it. */
   announce?: (line: string) => void;
@@ -606,24 +573,17 @@ export async function collectConnectWizard(
       () => `${label} accepted the key`,
     );
 
-  const detected = (seams.detect ?? detectInstalledAgentCommands)();
-  const sole = soleInstalledConnectHarness(detected);
+  // Resolving a harness can launch its program. Leave that to the selected harness's model probe.
   const harness = await prompts.select<(typeof CONNECT_HARNESSES)[number]>({
     message: brass('Choose harness'),
     options: CONNECT_HARNESSES.map((value) => ({ value, label: connectHarnessLabel(value) })),
-    ...(sole ? { initialValue: sole } : {}),
   });
   const checkProgram = seams.checkProgram ?? requireInstalledAgentProgram;
   checkProgram(harness, env);
   const configured = await probe(harness);
   if (configured) {
-    announce(
-      connectFoundLine({
-        harness,
-        sole: harness === sole,
-        ...(configured.currentValue ? { model: configured.currentValue } : {}),
-      }),
-    );
+    const runningModel = configured.currentValue ? `, running ${configured.currentValue}` : '';
+    announce(`${connectHarnessLabel(harness)} is already set up${runningModel}.`);
     // What the harness is set to is the default, not the decision: both
     // questions are still asked, with its own current values pre-selected.
     const model = await askModel(configured, harness);

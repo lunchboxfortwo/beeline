@@ -459,8 +459,6 @@ m20_describe('installed agent programs', () => {
           loadModels,
           { read: async () => undefined, save: async () => {} },
           env,
-          async () => undefined,
-          { detect: () => [] },
         ),
       ).rejects.toThrow(m20_missingAgentProgramMessage(kind));
       m20_expect(loadModels).not.toHaveBeenCalled();

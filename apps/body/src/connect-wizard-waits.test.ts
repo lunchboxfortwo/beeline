@@ -5,8 +5,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, expect, it } from 'vitest';
-import { isInteractiveConnectTerminal } from './connect-command.js';
+import { afterEach, expect, it, vi } from 'vitest';
+import { collectConnectWizard, isInteractiveConnectTerminal } from './connect-command.js';
 import { runInstalledFinish } from './connect-command-parse-connect-subscriptions.js';
 
 const roots: string[] = [];
@@ -94,6 +94,38 @@ it('treats stdout redirected to a file or /dev/null as nobody reading the prompt
   }
 });
 
+it('opens the harness picker without running a slow agy on PATH', async () => {
+  const root = await scratch();
+  const marker = join(root, 'agy-ran');
+  await writeFile(
+    join(root, 'agy'),
+    `#!${process.execPath}
+require('node:fs').writeFileSync(${JSON.stringify(marker)}, '');
+Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+console.log('Available subcommands:\\n  acp   Start ACP');
+`,
+    { mode: 0o755 },
+  );
+  vi.stubEnv('PATH', root);
+  vi.stubEnv('BEELINE_HARNESS_PATH_AUGMENT', '0');
+  const cancelled = new Error('Stop at the harness picker');
+  const select = vi.fn().mockRejectedValue(cancelled);
+  try {
+    await expect(
+      collectConnectWizard({ select, autocomplete: vi.fn(), text: vi.fn(), password: vi.fn() }),
+    ).rejects.toBe(cancelled);
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'Choose harness',
+        options: expect.arrayContaining([expect.objectContaining({ value: 'antigravity' })]),
+      }),
+    );
+    expect(existsSync(marker)).toBe(false);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it('SIGINT during the harness probe stops the silent adapter and ends the wizard as cancelled', async () => {
   const root = await scratch();
   const adapter = join(root, 'silent-adapter.mjs');
@@ -126,7 +158,7 @@ const loadModels = (input) => loadConnectModelCatalog(input, {
 });
 try {
   await collectConnectWizard(prompts, loadModels, undefined, { NO_COLOR: '1' }, undefined,
-    { detect: () => [], checkProgram: () => {}, announce: () => {} });
+    { checkProgram: () => {}, announce: () => {} });
   console.log('wizard went on');
 } catch (error) { console.log('ended: ' + error.message); }
 `,
