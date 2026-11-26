@@ -7,6 +7,7 @@ import {
   BRAND_MARK,
   brass,
   canvasColor,
+  generateBrassCss,
   generateStoneCss,
   radii,
   resolveTheme,
@@ -150,6 +151,20 @@ describe('@beeline/design-tokens', () => {
   it('keeps generated apps/site/stone.css in sync with generateStoneCss()', () => {
     const actual = readFileSync(resolve(REPO_ROOT, 'apps/site/stone.css'), 'utf8');
     expect(actual).toBe(generateStoneCss());
+  });
+
+  it('keeps apps/server/assets/mcp/join.html Brass :root tokens in sync with generateBrassCss()', () => {
+    const html = readFileSync(resolve(REPO_ROOT, 'apps/server/assets/mcp/join.html'), 'utf8');
+    const match = html.match(/\/\* brass-tokens:start \*\/\n([\s\S]*?)\n\s*\/\* brass-tokens:end \*\//);
+    expect(match).not.toBeNull();
+    const unindented = match![1]
+      .split('\n')
+      .map((line) => line.replace(/^ {6}/, ''))
+      .join('\n');
+    expect(`${unindented}\n`).toBe(generateBrassCss());
+    // No hand-maintained Brass hexes outside the generated marker block.
+    const outsideBlock = html.replace(/\/\* brass-tokens:start \*\/[\s\S]*?\/\* brass-tokens:end \*\//, '');
+    expect(outsideBlock).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
   it('keeps docs/DESIGN.md frontmatter in sync with @beeline/design-tokens and grammar.tsx', () => {

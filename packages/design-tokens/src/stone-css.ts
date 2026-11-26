@@ -1,4 +1,4 @@
-import { stone } from './palettes.js';
+import { brass, stone } from './palettes.js';
 import { radii, SCRIM, space } from './scale.js';
 
 const STONE_CYPHER = {
@@ -87,6 +87,46 @@ export function generateStoneCss(): string {
     --cypher-mid: ${STONE_CYPHER.light.mid};
     --cypher-low: ${STONE_CYPHER.light.low};
     --cypher-void: ${STONE_CYPHER.light.void};
+  }
+}
+`;
+}
+
+/**
+ * Emit the Brass (`brass.obsidian` dark + `brass.bone` light) `:root` CSS
+ * custom properties for server-rendered Brass HTML templates such as
+ * `apps/server/assets/mcp/join.html`.
+ */
+export function generateBrassCss(): string {
+  const obsidian = brass.obsidian;
+  const bone = brass.bone;
+
+  return `/* Generated from @beeline/design-tokens (brass.obsidian + brass.bone). Do not edit by hand. Run: npm run tokens:css */
+:root {
+  --canvas: ${obsidian.bgBase};
+  --raised: ${obsidian.bgRaised};
+  --border: ${obsidian.border};
+  --strong: ${obsidian.borderStrong};
+  --t1: ${obsidian.textPrimary};
+  --t2: ${obsidian.textSecondary};
+  --quiet: ${obsidian.ledgerQuiet};
+  --muted: ${obsidian.textMuted};
+  --brass: ${obsidian.accent};
+  --radius-house: ${radii.house}px;
+  --font-sans: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --canvas: ${bone.bgBase};
+    --raised: ${bone.bgRaised};
+    --border: ${bone.border};
+    --strong: ${bone.borderStrong};
+    --t1: ${bone.textPrimary};
+    --t2: ${bone.textSecondary};
+    --quiet: ${bone.ledgerQuiet};
+    --muted: ${bone.textMuted};
+    --brass: ${bone.accent};
   }
 }
 `;

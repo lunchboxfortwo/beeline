@@ -22,4 +22,4 @@ export {
   type Mode,
   type Palette,
 } from './palettes.js';
-export { generateStoneCss } from './stone-css.js';
+export { generateBrassCss, generateStoneCss } from './stone-css.js';
