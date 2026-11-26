@@ -177,6 +177,8 @@ export function transitionCorner(
     return { state: current, wakes, notifications, suppression: 'stale head' };
   if (event.kind === 'open' && event.command)
     wake('open', `open:${event.command.privatePayload?.openKey ?? ''}`);
+  if (event.kind === 'backlog' && !event.backlog && event.command)
+    wake('open', `resume:${event.command.privatePayload?.openKey ?? ''}`);
   if (event.kind === 'brief-revised') wake('revision', `revision:${event.revision}`);
   if (!backlog && event.kind === 'merge-refused')
     wake(

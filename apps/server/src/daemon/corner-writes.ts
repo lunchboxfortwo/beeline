@@ -24,7 +24,7 @@ import { daemonBriefAttachmentRooms } from './corner-reports.js';
 import { Input } from './values.js';
 import { modelText } from '../message-origin.js';
 import { normalizedThreadWorkItems } from '../work-item-threads.js';
-import { clearWorkAssignmentMarks, normalizeWorkTitle } from '../work-board.js';
+import { normalizeWorkTitle, promoteBacklogTaskInThread } from '../work-board.js';
 
 const CORNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -263,37 +263,14 @@ const CORNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
       );
       await createCornerFacts(db, cornerId);
       if (promotedTask) {
-        await db.query("SELECT set_config('beeline.work_actor',$1,true)", [agentId]);
-        if (promotedTask.id.toLowerCase() === cornerId) {
-          await db.query(
-            `UPDATE work_items SET room_id=$1::uuid,state=NULL,completed_at=NULL,
-               title=COALESCE(title,$2),objective=COALESCE(NULLIF($3,''),objective),
-               assignee_id=$4,updated_at=now()
-             WHERE id=$1::text`,
-            [cornerId, effectiveName, objective, implementerAgentId],
-          );
-        } else {
-          // Legacy non-UUID backlog row promoted in-place to the new thread UUID.
-          await db.query("SELECT set_config('beeline.work_migration','on',true)");
-          await db.query(
-            `INSERT INTO work_items(id,room_id,source_message_id,state,priority,title,objective,assignee_id,opened_by,completed_at,created_at,updated_at)
-             SELECT $2::text,$2::uuid,NULL,NULL,priority,COALESCE(title,$3),COALESCE(NULLIF($4,''),objective),$5,opened_by,NULL,created_at,now()
-             FROM work_items WHERE id=$1`,
-            [promotedTask.id, cornerId, effectiveName, objective, implementerAgentId],
-          );
-          await db.query(`UPDATE work_item_entries SET work_item_id=$2 WHERE work_item_id=$1`, [promotedTask.id, cornerId]);
-          await db.query(`UPDATE work_item_attachments SET work_item_id=$2 WHERE work_item_id=$1`, [promotedTask.id, cornerId]);
-          await db.query(`DELETE FROM work_items WHERE id=$1`, [promotedTask.id]);
-          await db.query("SELECT set_config('beeline.work_migration','',true)");
-        }
-        await db.query(
-          `INSERT INTO work_item_entries(work_item_id,author_id,kind,text) VALUES($1,$2,'event','moved this to In progress')`,
-          [cornerId, agentId],
-        );
-        await clearWorkAssignmentMarks(db, promotedTask.id, 'answered');
-        if (promotedTask.id.toLowerCase() !== cornerId) {
-          await clearWorkAssignmentMarks(db, cornerId, 'answered');
-        }
+        await promoteBacklogTaskInThread(db, {
+          taskId: promotedTask.id,
+          cornerId,
+          effectiveName,
+          objective,
+          implementerAgentId,
+          actorId: agentId,
+        });
       }
       if (input.hold === true) {
         await setCornerHold(db, { cornerId, sourceMessageId: input.sourceMessageId }, commissionedBy ?? agentId, agentId);

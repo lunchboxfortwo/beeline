@@ -513,7 +513,7 @@ async function writeCornerAdvance(
         }
         case 'open': {
           const command =
-            event.kind === 'open' && event.command
+            (event.kind === 'open' || (event.kind === 'backlog' && !event.backlog)) && event.command
               ? await createAgentCommand(db, event.command)
               : undefined;
           result = {

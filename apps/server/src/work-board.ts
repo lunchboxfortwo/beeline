@@ -4,11 +4,14 @@ import {
   cornerShortTitle,
   WORK_STATES,
   threadWorkState,
+  type UpdateWorkItemInput,
   type WorkBoardView,
   type WorkItemView,
   type WorkState,
 } from '@beeline/api-contract/phone';
 import {
+  addWorkNote,
+  attachToWorkItem,
   workDetailColumnsSql,
   projectWorkDetail,
   type WorkDetailRow,
@@ -17,24 +20,45 @@ import type { SqlDatabase } from './database.js';
 import { phoneIdentity, type PhoneIdentityRow } from './phone-identity.js';
 import { needsYouItems, needsYouRowText } from './needs-you.js';
 import { cornerImplementerSql } from './corner-worker.js';
-import { cornerObjectiveSql } from './corner-objective.js';
+import { cornerObjectiveSql, writeCornerObjective } from './corner-objective.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { advanceCorner, type CornerMachine } from './corner-lifecycle.js';
 import {
+  clearWorkAssignmentMarks,
   deterministicWorkItemUuid,
   extractBracketedWorkTitle,
   normalizeWorkObjective,
   normalizeWorkTitle,
+  notifyWorkAssignment,
+  parkThreadInBacklog,
+  promoteBacklogTaskRow,
+  promoteUnopenedTaskToThread,
+  resolveWorkAssigneeId,
+  resumeParkedThread,
   WORK_ITEM_UUID_RE,
+  type UpdateWorkItemHooks,
 } from './work-board-lifecycle.js';
 
 export {
   clearWorkAssignmentMarks,
   deterministicWorkItemUuid,
   normalizeWorkTitle,
-  updateWorkItem,
   type UpdateWorkItemHooks,
 } from './work-board-lifecycle.js';
+
+export async function promoteBacklogTaskInThread(
+  db: SqlDatabase,
+  input: {
+    taskId: string;
+    cornerId: string;
+    effectiveName: string;
+    objective: string;
+    implementerAgentId: string;
+    actorId: string;
+  },
+): Promise<void> {
+  await promoteBacklogTaskRow(db, input, (tx, data, actorId) => updateWorkItem(tx, data, actorId));
+}
 
 type WorkRow = WorkDetailRow & {
   id: string;
@@ -159,17 +183,35 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
         : trailingObjective
           ? (normalizeWorkObjective(trailingObjective) ?? row.objective)
           : row.objective;
-      await tx.query(
-        `INSERT INTO work_items(id,room_id,source_message_id,state,title,objective,assignee_id,opened_by)
-         VALUES($1::text,$1::uuid,NULL,NULL,$2,$3,$4,$5)
-         ON CONFLICT(id) DO UPDATE SET
-           title=COALESCE(work_items.title,EXCLUDED.title),
-           objective=COALESCE(NULLIF(work_items.objective,''),EXCLUDED.objective),
-           assignee_id=COALESCE(work_items.assignee_id,EXCLUDED.assignee_id),
-           opened_by=COALESCE(work_items.opened_by,EXCLUDED.opened_by),
-           updated_at=now()`,
-        [row.thread_id, normalizedTitle, normalizedObjective, row.assignee_id, row.opened_by],
+      const existingThread = (
+        await tx.query<{
+          title: string | null;
+          objective: string | null;
+          assignee_id: string | null;
+          opened_by: string;
+        }>(`SELECT title,objective,assignee_id,opened_by FROM work_items WHERE id=$1`, [
+          row.thread_id,
+        ])
+      ).rows[0];
+      await updateWorkItem(
+        tx,
+        {
+          roomId: row.thread_id,
+          id: row.thread_id,
+          title: existingThread?.title ?? normalizedTitle,
+          objective: existingThread?.objective?.trim()
+            ? existingThread.objective
+            : (normalizedObjective ?? undefined),
+          assigneeId: existingThread?.assignee_id ?? row.assignee_id,
+        },
+        existingThread?.opened_by ?? row.opened_by,
       );
+      if (!existingThread) {
+        await tx.query(`UPDATE work_items SET opened_by=$2,updated_at=now() WHERE id=$1`, [
+          row.thread_id,
+          row.opened_by,
+        ]);
+      }
       if (row.work_item_id !== row.thread_id) {
         await tx.query(
           `UPDATE work_item_entries SET work_item_id=$2 WHERE work_item_id=$1`,
@@ -192,8 +234,21 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
     }
 
     const standalone = (
-      await tx.query<{ id: string; title: string | null; objective: string | null }>(
-        `SELECT w.id,w.title,w.objective FROM work_items w
+      await tx.query<{
+        id: string;
+        room_id: string;
+        state: WorkState | null;
+        priority: string;
+        title: string | null;
+        objective: string | null;
+        assignee_id: string | null;
+        opened_by: string;
+        completed_at: Date | null;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        `SELECT w.id,w.room_id::text room_id,w.state,w.priority,w.title,w.objective,w.assignee_id,w.opened_by,w.completed_at,w.created_at,w.updated_at
+         FROM work_items w
          WHERE w.source_message_id IS NULL
            AND NOT EXISTS(SELECT 1 FROM rooms t WHERE t.id::text=w.id AND t.parent_id IS NOT NULL)
          ORDER BY w.created_at,w.id`,
@@ -214,13 +269,27 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
           : row.objective;
       if (!WORK_ITEM_UUID_RE.test(row.id)) {
         const newId = deterministicWorkItemUuid(`work-item-migrate:${row.id}`);
-        await tx.query(
-          `INSERT INTO work_items(id,room_id,source_message_id,state,priority,title,objective,assignee_id,opened_by,completed_at,created_at,updated_at)
-           SELECT $2,room_id,source_message_id,state,priority,COALESCE($3,title),COALESCE($4,objective),assignee_id,opened_by,completed_at,created_at,updated_at
-           FROM work_items WHERE id=$1
-           ON CONFLICT(id) DO NOTHING`,
-          [row.id, newId, normalizedTitle ?? null, nextObjective ?? null],
-        );
+        const already = (
+          await tx.query('SELECT 1 FROM work_items WHERE id=$1', [newId])
+        ).rowCount;
+        if (!already) {
+          await updateWorkItem(
+            tx,
+            {
+              roomId: row.room_id,
+              id: newId,
+              state: row.state ?? 'backlog',
+              title: normalizedTitle ?? row.title ?? undefined,
+              objective: nextObjective ?? undefined,
+              assigneeId: row.assignee_id,
+            },
+            row.opened_by,
+          );
+          await tx.query(
+            `UPDATE work_items SET priority=$2,opened_by=$3,completed_at=$4,created_at=$5,updated_at=$6 WHERE id=$1`,
+            [newId, row.priority, row.opened_by, row.completed_at, row.created_at, row.updated_at],
+          );
+        }
         await tx.query(
           `UPDATE work_item_entries SET work_item_id=$2 WHERE work_item_id=$1`,
           [row.id, newId],
@@ -248,6 +317,257 @@ export async function unifyWorkItemsAndThreads(database: SqlDatabase): Promise<v
 
     await tx.query("SELECT set_config('beeline.work_migration','',true)");
   });
+}
+
+/**
+ * A thread has one state, owned by the corner machine. Its own task row keeps only
+ * assignee, title, objective, notes and attachments. Done on a thread is the caller's
+ * existing close (`closeThread`); moving an unopened UUID backlog task to In progress
+ * promotes it in-place into its thread; moving an open thread to Backlog stops active
+ * work and cleans up transient state.
+ */
+export async function updateWorkItem(
+  db: SqlDatabase,
+  input: UpdateWorkItemInput,
+  actorId: string,
+  accessIdentityId = actorId,
+  closeOrHooks?: (() => Promise<unknown>) | UpdateWorkItemHooks,
+): Promise<void> {
+  const hooks: UpdateWorkItemHooks =
+    typeof closeOrHooks === 'function' ? { closeThread: closeOrHooks } : (closeOrHooks ?? {});
+  if (input.state !== undefined && !WORK_STATES.includes(input.state))
+    throw new Error('invalid work state');
+  const itemId = input.id ?? input.roomId;
+  const thread =
+    itemId === input.roomId &&
+    ((
+      await db.query('SELECT 1 FROM rooms WHERE id::text=$1 AND parent_id IS NOT NULL', [
+        input.roomId,
+      ])
+    ).rowCount ?? 0) > 0;
+  if (thread && input.state === 'done' && !hooks.closeThread)
+    throw new Error('a thread is marked done only by its close');
+
+  let migrating = false;
+  let wasBacklog = false;
+  let parkedThread = false;
+  let unparkedThread = false;
+  let threadParentId: string | null = null;
+  let threadName = '';
+  let threadObjective = '';
+  let threadHasRepo = false;
+
+  await db.transaction(async (tx) => {
+    migrating =
+      (
+        await tx.query<{ migrating: boolean }>(
+          "SELECT current_setting('beeline.work_migration',true)='on' AS migrating",
+        )
+      ).rows[0]?.migrating === true;
+    const previous =
+      (
+        await tx.query<{ actor: string | null }>(
+          "SELECT current_setting('beeline.work_actor',true) actor",
+        )
+      ).rows[0]?.actor ?? '';
+    await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [actorId]);
+
+    const room = (
+      await tx.query<{
+        id: string;
+        workspace_id: string;
+        parent_id: string | null;
+        name: string;
+        repository_key: string | null;
+        repository_resolution: string | null;
+        repository_target_branch: string | null;
+      }>(
+        `SELECT r.id,r.workspace_id,r.parent_id,r.name,r.repository_key,r.repository_resolution,r.repository_target_branch
+         FROM rooms r
+         LEFT JOIN room_access member ON member.room_id=r.id AND member.identity_id=$2 AND member.removed_at IS NULL
+         WHERE r.id=$1 AND (member.identity_id IS NOT NULL OR $3::boolean)`,
+        [input.roomId, accessIdentityId, migrating],
+      )
+    ).rows[0];
+    if (!room) throw new CommandRefusalError('room access denied', 403);
+
+    const existingRow = (
+      await tx.query<{
+        room_id: string;
+        source_message_id: string | null;
+        state: WorkState | null;
+        title: string | null;
+        objective: string | null;
+        assignee_id: string | null;
+      }>(
+        `SELECT room_id::text room_id,source_message_id,state,title,objective,assignee_id
+         FROM work_items WHERE id=$1 FOR UPDATE`,
+        [itemId],
+      )
+    ).rows[0];
+    if (existingRow && existingRow.room_id !== input.roomId)
+      throw new CommandRefusalError('room access denied', 403);
+
+    const isAskMessage =
+      Boolean(existingRow?.source_message_id) ||
+      ((
+        await tx.query('SELECT 1 FROM messages WHERE id=$1 AND room_id=$2', [itemId, input.roomId])
+      ).rowCount ?? 0) > 0;
+
+    if (thread && !migrating) {
+      const fact = (
+        await tx.query<{ machine: CornerMachine | null; parent_has_repo: boolean }>(
+          `SELECT f.machine,
+                  EXISTS(SELECT 1 FROM rooms p WHERE p.id=$2 AND (p.repository_resolution='repository' OR p.repository_key IS NOT NULL)) parent_has_repo
+           FROM corner_facts f WHERE f.corner_id=$1`,
+          [input.roomId, room.parent_id],
+        )
+      ).rows[0];
+      wasBacklog = fact?.machine?.backlog === true;
+      threadParentId = room.parent_id;
+      threadName = room.name;
+      threadHasRepo = Boolean(fact?.parent_has_repo);
+    }
+
+    const hasAssignee = Object.hasOwn(input, 'assigneeId');
+    const resolvedAssigneeId = hasAssignee
+      ? await resolveWorkAssigneeId(tx, input.roomId, input.assigneeId)
+      : null;
+    const titleParts =
+      !isAskMessage && input.title !== undefined ? extractBracketedWorkTitle(input.title) : undefined;
+    const normalizedTitle = !isAskMessage ? normalizeWorkTitle(input.title) : input.title;
+    const effectiveObjectiveInput =
+      !isAskMessage &&
+      titleParts?.trailing &&
+      (input.objective === undefined || input.objective.trim() === '') &&
+      !(existingRow?.objective?.trim())
+        ? titleParts.trailing
+        : input.objective;
+    const normalizedObjective = !isAskMessage
+      ? normalizeWorkObjective(effectiveObjectiveInput)
+      : input.objective;
+
+    const changed = await tx.query<{
+      state: WorkState | null;
+      title: string | null;
+      objective: string | null;
+      assignee_id: string | null;
+      corner: boolean;
+    }>(
+      `INSERT INTO work_items(id,room_id,source_message_id,state,title,objective,assignee_id,opened_by,completed_at)
+    SELECT $7,r.id,(SELECT id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),
+      COALESCE($2,'backlog'),$3,$8,
+      CASE WHEN $5 THEN $4 ELSE ${cornerImplementerSql('f', 'r')} END,CASE WHEN $7=r.id::text THEN COALESCE(r.created_by,$6) ELSE COALESCE((SELECT author_id FROM messages source WHERE source.id=$7 AND source.room_id=r.id),$6) END,CASE WHEN $2='done' THEN now() END
+    FROM rooms r
+    LEFT JOIN room_access member ON member.room_id=r.id AND member.identity_id=$9 AND member.removed_at IS NULL
+    LEFT JOIN corner_facts f ON f.corner_id=r.id
+    WHERE r.id=$1 AND (member.identity_id IS NOT NULL OR $10::boolean)
+    ON CONFLICT(id) DO UPDATE SET state=COALESCE($2,work_items.state),
+      title=COALESCE($3,work_items.title),objective=COALESCE($8,work_items.objective),
+      assignee_id=CASE WHEN $5 THEN $4 ELSE work_items.assignee_id END,updated_at=now(),
+      completed_at=CASE WHEN COALESCE($2,work_items.state)='done' THEN COALESCE(work_items.completed_at,now()) ELSE NULL END WHERE work_items.room_id=$1
+    RETURNING state,title,objective,assignee_id,EXISTS(SELECT 1 FROM rooms corner WHERE corner.id=$1 AND corner.parent_id IS NOT NULL) corner`,
+      [
+        input.roomId,
+        input.state ?? null,
+        normalizedTitle ?? null,
+        resolvedAssigneeId,
+        hasAssignee,
+        actorId,
+        itemId,
+        normalizedObjective ?? null,
+        accessIdentityId,
+        migrating,
+      ],
+    );
+    const item = changed.rows[0];
+    if (!item) throw new CommandRefusalError('room access denied', 403);
+    threadObjective = item.objective ?? '';
+
+    if (migrating) {
+      await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
+      return;
+    }
+
+    if (item.corner && item.objective && (thread ? input.state : item.state) !== 'backlog')
+      await writeCornerObjective(tx, input.roomId, item.objective, true);
+    if (input.note !== undefined) await addWorkNote(tx, { ...input, text: input.note }, actorId);
+    for (const attachment of input.attachments ?? [])
+      await attachToWorkItem(tx, { ...input, attachment }, actorId);
+
+    const promoteToThread =
+      !thread &&
+      !isAskMessage &&
+      input.state === 'in-progress' &&
+      WORK_ITEM_UUID_RE.test(itemId) &&
+      room.parent_id === null;
+
+    if (promoteToThread) {
+      await promoteUnopenedTaskToThread(tx, {
+        itemId,
+        room,
+        title: item.title,
+        objective: item.objective,
+        assigneeId: item.assignee_id,
+        actorId,
+      });
+    } else if (!isAskMessage) {
+      if (input.state === 'done' || input.state === 'in-progress') {
+        await clearWorkAssignmentMarks(tx, itemId, 'answered');
+      }
+      if (thread && input.state === 'backlog') {
+        parkedThread = true;
+        await parkThreadInBacklog(tx, {
+          roomId: input.roomId,
+          workspaceId: room.workspace_id,
+          actorId,
+        });
+      } else if (thread && input.state !== undefined && input.state !== 'done') {
+        unparkedThread = true;
+      }
+
+      const assigneeChanged = hasAssignee && resolvedAssigneeId !== (existingRow?.assignee_id ?? null);
+      if (assigneeChanged) {
+        await clearWorkAssignmentMarks(tx, itemId, 'superseded');
+        if (
+          resolvedAssigneeId &&
+          resolvedAssigneeId !== actorId &&
+          input.state !== 'done' &&
+          input.state !== 'in-progress'
+        ) {
+          await notifyWorkAssignment(tx, {
+            roomId: input.roomId,
+            workItemId: itemId,
+            actorId,
+            assigneeId: resolvedAssigneeId,
+            title: item.title ?? room.name,
+            objective: item.objective ?? '',
+          });
+        }
+      }
+    }
+
+    await tx.query("SELECT set_config('beeline.work_actor',$1,true)", [previous]);
+  });
+
+  if (migrating) return;
+  if (thread && input.state === 'done') {
+    await hooks.closeThread!();
+  } else if (parkedThread) {
+    await advanceCorner(db, input.roomId, { kind: 'backlog', backlog: true });
+    await hooks.reconcileMergeQueue?.(input.roomId);
+  } else if (unparkedThread) {
+    await resumeParkedThread(db, {
+      roomId: input.roomId,
+      wasBacklog,
+      state: input.state,
+      threadParentId,
+      threadName,
+      threadObjective,
+      threadHasRepo,
+      actorId,
+    });
+  }
 }
 
 function workColumnsSql(viewer: string): string {

@@ -66,7 +66,7 @@ export type CornerEvent =
   | { kind: 'merged'; contents: Record<string, unknown> }
   | { kind: 'closed'; preserveTurn?: { agentId: string; requestId?: string } }
   /** update_work moved the thread into (true) or out of (false) Backlog. */
-  | { kind: 'backlog'; backlog: boolean }
+  | { kind: 'backlog'; backlog: boolean; command?: AgentCommandInput }
   | { kind: 'merge-conflict'; sourceMessageId: string }
   | { kind: 'reconcile' };
 
