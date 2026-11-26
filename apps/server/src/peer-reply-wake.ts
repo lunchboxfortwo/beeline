@@ -9,7 +9,13 @@ import { ensureSystemIdentity } from './system-line.js';
 type Attachment = NonNullable<PrivateCommandPayload['attachments']>[number];
 
 export type PeerReplyWakeOutput =
-  | { kind: 'answer'; outputId: string; text: string; attachments?: readonly Attachment[] }
+  | {
+      kind: 'answer';
+      outputId: string;
+      text: string;
+      attachments?: readonly Attachment[];
+      batchCommandIds?: readonly string[];
+    }
   | { kind: 'failed'; outputId: string; text: Composed<'system'> };
 
 /**
@@ -44,6 +50,9 @@ export async function peerReplyWakeInput(
   ) {
     return undefined;
   }
+  const batchIds = [
+    ...new Set([item.id, ...(output.kind === 'answer' ? (output.batchCommandIds ?? []) : [])]),
+  ];
   const eligible = (await db.query<{ ok: boolean }>(
     `SELECT true ok
      FROM rooms origin
@@ -56,13 +65,20 @@ export async function peerReplyWakeInput(
      WHERE origin.id=$1 AND origin.parent_id IS NOT NULL AND origin.archived_at IS NULL
        AND NOT EXISTS(
          SELECT 1 FROM agent_commands child
-         WHERE child.parent_command_id=$4
-           AND child.agent_id=$3
+         WHERE child.agent_id=$3
            AND child.room_id=$2
            AND child.reason IN ('reply','message')
+           AND (
+             child.parent_command_id=ANY($4::text[])
+             OR EXISTS(
+               SELECT 1 FROM agent_invocations inv
+               WHERE (inv.command_id=$5 OR $5=ANY(inv.batched_command_ids))
+                 AND (child.parent_command_id=inv.command_id OR child.parent_command_id=ANY(inv.batched_command_ids))
+             )
+           )
        )
      LIMIT 1`,
-    [item.room_id, sender.place, sender.agent, item.id],
+    [item.room_id, sender.place, sender.agent, batchIds, item.id],
   )).rows[0];
   if (!eligible) return undefined;
   if (output.kind === 'failed') await ensureSystemIdentity(db);

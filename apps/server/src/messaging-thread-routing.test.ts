@@ -249,6 +249,41 @@ it('deduplicates auto-wake across batched peer messages from the same sender and
   expect(await queued()).toEqual([]);
 });
 
+it.each(['first', 'second'] as const)('avoids double-waking a commander when a batched turn explicitly replies to the %s request before posting closing text', async repliedWhich => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const otherCommander = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part C.' }, C);
+  const invocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: invocation.id, batchedCommandIds: [second.id, otherCommander.id],
+  }, B);
+  const target = repliedWhich === 'first' ? first : second;
+  await daemon.execute('message', {
+    roomId: THREAD, requestId: first.id, type: 'reply', quoteMsgId: target.id, text: 'Explicit reply covering both parts.',
+  }, B);
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: first.id, queuedRequestIds: [second.id, otherCommander.id], text: 'Closing summary for the batch.', harnessEnded: true, invocation,
+  }, B);
+  expect((await readAgentCommands(db, A, THREAD)).commands).toHaveLength(1);
+  // Another commander in the same batch who did not receive an explicit reply still wakes once.
+  expect((await readAgentCommands(db, C, THREAD)).commands).toHaveLength(1);
+});
+
+it('avoids double-waking a commander when an earlier batched request already completed via explicit reply before closing text posts for the remaining item', async () => {
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part A.' }, A);
+  const second = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Check part B.' }, A);
+  const invocation = { id: crypto.randomUUID(), requestId: first.id };
+  await daemon.execute('startAgentTurn', {
+    roomId: THREAD, requestId: first.id, invocationId: invocation.id, batchedCommandIds: [second.id],
+  }, B);
+  await replyToMessage(db, B, { roomId: THREAD, id: first.id, text: 'Explicit reply for both parts.', invocation });
+  // Runner omits the already-completed first item from queuedRequestIds when posting closing text for second.
+  await daemon.execute('postRoomMessage', {
+    roomId: THREAD, requestId: second.id, text: 'Closing summary.', harnessEnded: true, invocation,
+  }, B);
+  expect((await readAgentCommands(db, A, THREAD)).commands).toHaveLength(1);
+});
+
 it('does not wake on empty helper turns or review-context repair turns, and wakes on hosted helper failure', async () => {
   // Silent empty turn stays owed without waking commander with empty noise.
   const silentTask = await daemon.execute('message', { roomId: THREAD, type: 'normal', address: `${B}@${THREAD}`, text: 'Audit slice.' }, A);

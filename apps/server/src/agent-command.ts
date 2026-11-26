@@ -812,6 +812,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   messageAsk?: MessageAsk; explicitReply?: boolean; publicPost?: boolean;
   steps?: unknown; messageId?: string; replyToMessageId?: string;
   queuedRequestIds?: readonly string[];
+  batchCommandIds?: readonly string[];
   harnessEnded?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   outputFiles?: Attachment[];
@@ -832,7 +833,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     let unanswered = false;
     for (const item of items) {
       const saved = await answerQueuedMessage(db,agentId,{
-        ...input,queuedRequestIds:undefined,requestId:item.id,
+        ...input,queuedRequestIds:undefined,batchCommandIds:ids,requestId:item.id,
         sharedReplyId,
         outputFiles:files, messageId:outputId,
       });
@@ -904,7 +905,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           return {...receipt, id:existing, messageId:existing, published:true, stored:true, visible:true, delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
         const ended = await endAgentTurn(db,item,'complete',null,saved.id);
-        if (ended) await wakePeerMessageSender(db,item,{kind:'answer',outputId:saved.id,text:messageText,attachments:files});
+        if (ended) await wakePeerMessageSender(db,item,{kind:'answer',outputId:saved.id,text:messageText,attachments:files,batchCommandIds:input.batchCommandIds});
         completedNow = true;
         return {...saved, commandId:item.id, messageId:saved.id, completed:true, published:true, delivered:true};
       }
