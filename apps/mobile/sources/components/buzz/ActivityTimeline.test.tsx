@@ -758,10 +758,10 @@ describe('folded historical transcripts', () => {
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-tool-1' }).props.accessibilityLabel,
-    ).toBe('6 steps, expandable');
+    ).toBe('Inspected code · 6 steps, expandable');
 
     expandRun(renderer, 'tool-1');
-    act(() => renderer.root.findByProps({ testID: 'tool-run-more-tool-1' }).props.onPress());
+    act(() => renderer.root.findByProps({ testID: 'tool-observation-fold-obs-tool-1' }).props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(6);
     expect(
       renderer.root.findByProps({ testID: 'tool-ledger-line-tool-8' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0]?.props.onPress,
@@ -802,7 +802,7 @@ describe('folded historical transcripts', () => {
       hostNodes(renderer, /^tool-run-group-/).map(
         (node: { props: { accessibilityLabel?: string } }) => node.props.accessibilityLabel,
       ),
-    ).toEqual(['7 steps, expandable']);
+    ).toEqual(['Inspected code · 7 steps, expandable']);
   });
 
   it('drops thinking-only rows while retaining summary tool lines', () => {
@@ -923,4 +923,5 @@ it.each([ActivityTimeline, TurnStepsLine])('shows a requested failed tool reason
   act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-requested-failure' }).props.onPress());
   expect(renderer.root.findByType('HullActionSheetModal').props.subtitle).toBe('command not found: pnpm');
   expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toContain('command not found: pnpm');
+  expect(renderer.root.findByProps({ testID: 'tool-output-command' })).toBeTruthy();
 });

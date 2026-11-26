@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TurnActivityAction } from './activity-timeline';
+import { buildTurnActivity, type TurnActivityAction } from './activity-timeline';
 import { groupToolLedgerRuns, toolGlyph, toolGroupSummary, toolLedgerLines } from './tool-ledger';
 
 const step = (patch: Partial<TurnActivityAction> & { id: string }): TurnActivityAction => ({
@@ -227,5 +227,124 @@ describe('toolGroupSummary', () => {
   it('one step, and no duration below the floor', () => {
     expect(toolGroupSummary(1, 0, undefined)).toBe('1 step');
     expect(toolGroupSummary(4, 0, 500)).toBe('4 steps');
+  });
+
+  it('leads with concise provenance when provided', () => {
+    expect(
+      toolGroupSummary(11, 0, undefined, 0, 'Listed schedules · inspected skill & server code'),
+    ).toBe('Listed schedules · inspected skill & server code · 11 steps');
+  });
+});
+
+describe('observation folding, startup warning demotion, and legacy rows', () => {
+  it('folds consecutive read-only observations while keeping mutations and real failures visible', () => {
+    const turn = buildTurnActivity([
+      {
+        kind: 'tool',
+        id: 'r1',
+        title: 'Read',
+        toolKind: 'read',
+        files: [{ path: '/repo/skills/waiting-and-wakes/SKILL.md' }],
+        status: 'completed',
+      },
+      {
+        kind: 'tool',
+        id: 's1',
+        title: 'exec_command',
+        toolKind: 'execute',
+        command: `bash -lc 'cd /repo && rg -n wake apps/server/src'`,
+        status: 'completed',
+      },
+      {
+        kind: 'tool',
+        id: 'e1',
+        title: 'Edit',
+        toolKind: 'edit',
+        files: [{ path: 'apps/server/src/index.ts' }],
+        status: 'completed',
+      },
+      {
+        kind: 'tool',
+        id: 'f1',
+        title: 'exec_command',
+        toolKind: 'execute',
+        command: 'npm test',
+        status: 'failed',
+        output: 'sh: 1: vitest: not found',
+      },
+    ]);
+    const [group] = groupToolLedgerRuns(toolLedgerLines(turn.steps));
+    expect(group!.count).toBe(4);
+    expect(group!.failed).toBe(1);
+    expect(group!.lines).toHaveLength(3);
+    expect(group!.lines[0]!.folded).toHaveLength(2);
+    expect(group!.lines[0]!.label).toBe('Read waiting-and-wakes/SKILL.md, searched code (2 calls)');
+    expect(group!.lines[1]!.label).toBe('server/src/index.ts');
+    expect(group!.lines[2]!.outcome).toBe('failure');
+    expect(group!.lines[2]!.label).toBe('npm test');
+  });
+
+  it('demotes recovered harness startup warnings to quiet notes with zero failed count', () => {
+    const turn = buildTurnActivity(
+      [
+        {
+          kind: 'tool',
+          id: 'boot',
+          title: 'codex-acp',
+          toolKind: 'other',
+          status: 'failed',
+          output: '[codex-acp forwarded startup stderr] MCP server codegraph timed out during boot',
+        },
+        {
+          kind: 'tool',
+          id: 'w1',
+          title: 'mcp.beeline-agent.wake',
+          toolKind: 'other',
+          input: JSON.stringify({ action: 'list' }),
+          status: 'completed',
+        },
+      ],
+      { settled: true },
+    );
+    const [group] = groupToolLedgerRuns(toolLedgerLines(turn.steps));
+    expect(group!.failed).toBe(0);
+    expect(group!.notes).toBe(0);
+    expect(group!.count).toBe(1);
+    expect(group!.lines[0]).toMatchObject({ kind: 'note', startupWarning: true, outcome: 'success' });
+    expect(group!.provenance).toBe('Listed schedules');
+  });
+
+  it('renders legacy stored rows without command or input without mangling to "the code" or "a file"', () => {
+    const turn = buildTurnActivity([
+      {
+        kind: 'tool',
+        id: 'legacy-rg',
+        title: 'rg -n "schedule" apps/server/src',
+        toolKind: 'execute',
+        status: 'completed',
+      },
+      {
+        kind: 'tool',
+        id: 'legacy-read',
+        title: 'Read /home/lunchbox/skills/waiting-and-wakes/SKILL.md',
+        toolKind: 'read',
+        status: 'completed',
+      },
+      {
+        kind: 'tool',
+        id: 'legacy-mcp',
+        title: 'mcp.beeline-agent.wake',
+        toolKind: 'other',
+        status: 'completed',
+      },
+    ]);
+    const lines = toolLedgerLines(turn.steps);
+    expect(lines[0]!.label).toBe('rg -n "schedule" apps/server/src');
+    expect(lines[0]!.label).not.toContain('the code');
+    expect(lines[1]!.label).toBe('waiting-and-wakes/SKILL.md');
+    expect(lines[1]!.label).not.toBe('SKILL.md');
+    expect(lines[2]!.verb).toBe('checked');
+    expect(lines[2]!.label).toBe('schedules');
+    expect(lines[2]!.label).not.toContain('mcp.beeline-agent');
   });
 });

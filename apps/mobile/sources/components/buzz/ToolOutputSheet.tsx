@@ -26,6 +26,8 @@ export const TOOL_OUTPUT_SHEET_MAX_WIDTH = Math.round(
 export type ToolOutputSheetProps = {
   title: string;
   subtitle?: string;
+  command?: string | null;
+  input?: string | null;
   detail: string | null | undefined;
   error?: string | null;
   outputHidden?: boolean;
@@ -39,13 +41,28 @@ export type ToolOutputSheetProps = {
   testID?: string;
 };
 
+function formatToolInput(input: string | null | undefined): string | undefined {
+  if (!input?.trim()) return undefined;
+  const trimmed = input.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
 /**
- * Tool output surface: title, optional subtitle, a scrollable selectable
- * wrapping body, and a Copy row.
+ * Tool output surface: title, optional subtitle, redacted command/arguments,
+ * a scrollable selectable wrapping body, and a Copy row.
  */
 export function ToolOutputSheet({
   title,
   subtitle,
+  command,
+  input,
   detail,
   outputHidden,
   error,
@@ -77,6 +94,11 @@ export function ToolOutputSheet({
   }, [detail, outputHidden]);
   const canCopy = Boolean(detail && !outputHidden && detail !== 'Loading…' && !error);
   const highlight = language !== undefined;
+  const shownCommand = !outputHidden && command?.trim() ? command.trim() : undefined;
+  const formattedInput = !outputHidden ? formatToolInput(input) : undefined;
+  const shownInput =
+    formattedInput && (!shownCommand || formattedInput !== shownCommand) ? formattedInput : undefined;
+  const hasInvocation = Boolean(shownCommand || shownInput);
   return (
     <HullActionSheetModal
       contentMaxWidth={TOOL_OUTPUT_SHEET_MAX_WIDTH}
@@ -93,14 +115,43 @@ export function ToolOutputSheet({
         maxHeight={Math.max(0, Math.round(windowHeight * 0.82) - 130 - insets.bottom)}
         testID="tool-output-scroll"
       >
-        <YStack paddingHorizontal="6">
-        {error ? <ErrorBanner inline title={error} /> : highlight ? (
-          <CodeHighlighter code={detail ?? ''} language={language} />
-        ) : (
-          <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1} testID="tool-output-text">
-            {detail || 'No output saved'}
-          </T>
-        )}
+        <YStack paddingHorizontal="6" gap="4">
+          {shownCommand ? (
+            <YStack gap="1" testID="tool-output-command">
+              <T v="meta" color="secondary">Command</T>
+              <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1}>
+                {shownCommand}
+              </T>
+            </YStack>
+          ) : null}
+          {shownInput ? (
+            <YStack gap="1" testID="tool-output-input">
+              <T v="meta" color="secondary">Arguments</T>
+              <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1}>
+                {shownInput}
+              </T>
+            </YStack>
+          ) : null}
+          <YStack gap="1">
+            {hasInvocation ? <T v="meta" color="secondary">Output</T> : null}
+            {error ? (
+              <ErrorBanner inline title={error} />
+            ) : highlight ? (
+              <CodeHighlighter code={detail ?? ''} language={language} />
+            ) : (
+              <T
+                v="code"
+                color="ink"
+                userSelect="text"
+                width="100%"
+                minWidth={0}
+                flexShrink={1}
+                testID="tool-output-text"
+              >
+                {detail || 'No output saved'}
+              </T>
+            )}
+          </YStack>
         </YStack>
       </ScrollView>
       {canCopy ? <Button
