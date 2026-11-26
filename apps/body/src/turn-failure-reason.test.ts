@@ -20,10 +20,23 @@ describe('redactToolDetail', () => {
     expect(redactToolDetail('ls && export MY_ENV=planted-val; echo hi')).toBe(
       'ls && export MY_ENV=[REDACTED]; echo hi',
     );
+    expect(redactToolDetail('echo hi&FOO_KEY=planted-val')).toBe('echo hi&FOO_KEY=[REDACTED]');
+    expect(redactToolDetail('echo hi &FOO_KEY=planted-val')).toBe('echo hi &FOO_KEY=[REDACTED]');
     expect(redactToolDetail('Bearer secret-bearer-value')).toBe('Bearer [REDACTED]');
     expect(redactToolDetail('Authorization: Bearer secret-bearer-value')).not.toContain(
       'secret-bearer-value',
     );
+    const bearerReceipt = redactToolDetail(
+      JSON.stringify({ authorization: 'Bearer secret-bearer-value', status: 'ok' }),
+    );
+    expect(bearerReceipt).not.toContain('secret-bearer-value');
+    expect(JSON.parse(bearerReceipt)).toEqual({ authorization: '[REDACTED]', status: 'ok' });
+
+    const headerReceipt = redactToolDetail(
+      JSON.stringify({ header: 'Bearer secret-bearer-value', status: 'ok' }),
+    );
+    expect(headerReceipt).not.toContain('secret-bearer-value');
+    expect(JSON.parse(headerReceipt)).toEqual({ header: 'Bearer [REDACTED]', status: 'ok' });
     expect(redactToolDetail('{"api_key": "planted-key", "token": "planted-tok"}')).toContain(
       '[REDACTED]',
     );

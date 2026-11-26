@@ -500,4 +500,40 @@ describe('roomReplySteps', () => {
     expect(parsed.schedules.length).toBeLessThan(40);
     expect(parsed._omittedCount).toBe(40 - parsed.schedules.length);
   });
+
+  it('redacts uppercase env assignments and single-& shell assignments inside apply_patch previews while preserving diff markers', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: apps/body/config.sh',
+      '@@ -1,3 +1,4 @@',
+      '-OLD_ENV=planted-old-secret',
+      '+NEW_ENV=planted-new-secret',
+      '+echo start&EXTRA_VAL=planted-bg-secret',
+      ' SAFE_CTX=planted-ctx-secret',
+      '+d=json.load(open("report.json"))',
+      '*** End Patch',
+    ].join('\n');
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          toolCallId: 'patch-secret-1',
+          title: 'apply_patch',
+          kind: 'edit',
+          status: 'completed',
+          rawInput: { patch },
+        },
+      },
+    ]);
+    const diff = rows[0]?.files?.[0]?.diff ?? '';
+    expect(diff).not.toContain('planted-old-secret');
+    expect(diff).not.toContain('planted-new-secret');
+    expect(diff).not.toContain('planted-bg-secret');
+    expect(diff).not.toContain('planted-ctx-secret');
+    expect(diff).toContain('-OLD_ENV=[REDACTED]');
+    expect(diff).toContain('+NEW_ENV=[REDACTED]');
+    expect(diff).toContain('+echo start&EXTRA_VAL=[REDACTED]');
+    expect(diff).toContain(' SAFE_CTX=[REDACTED]');
+    expect(diff).toContain('+d=json.load(open("report.json"))');
+  });
 });

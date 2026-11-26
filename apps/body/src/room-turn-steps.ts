@@ -328,10 +328,34 @@ function buildUnifiedDiff(oldText: string, newText: string): string | undefined 
   return boundStepOutputHeadTail(out.join('\n'), MAX_STEP_OUTPUT_BYTES);
 }
 
+function redactPatchText(patchText: string): string {
+  // Collapse multiline PEM private keys even when each line carries a diff prefix,
+  // then redact each patch line body while keeping its leading `+`, `-`, or ` ` marker.
+  const withoutPem = patchText
+    .replace(/\r\n?/g, '\n')
+    .replace(
+      /([+\- ]?)-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g,
+      '$1[REDACTED]',
+    );
+  return withoutPem
+    .split('\n')
+    .map((line) => {
+      if (
+        (line.startsWith('+') && !line.startsWith('+++')) ||
+        (line.startsWith('-') && !line.startsWith('---')) ||
+        line.startsWith(' ')
+      ) {
+        return line[0] + redactToolDetail(line.slice(1));
+      }
+      return redactToolDetail(line);
+    })
+    .join('\n');
+}
+
 function parseApplyPatchFiles(
   patchText: string,
 ): Array<{ path: string; status: string; diff?: string }> {
-  const lines = redactToolDetail(patchText.replace(/\r\n?/g, '\n')).split('\n');
+  const lines = redactPatchText(patchText).split('\n');
   const results: Array<{ path: string; status: string; diffLines: string[] }> = [];
   let current: { path: string; status: string; diffLines: string[] } | undefined;
   for (const line of lines) {

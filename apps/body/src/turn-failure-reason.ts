@@ -16,13 +16,13 @@ export interface DistilledTurnFailureReason {
 export function redactToolDetail(value: string): string {
   return value
     .replace(/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g, '[REDACTED]')
-    .replace(/\b(Bearer\s+)[^\s,]+/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer\s+)[^\s,"'}\]]+/gi, '$1[REDACTED]')
     .replace(
       /(["']?)\b(api[_-]?key|token|secret|password|passwd|authorization|credential|cookie|private[_-]?key)\1\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)/gi,
       '"$2": "[REDACTED]"',
     )
     .replace(
-      /\b(password|passwd)(\s+)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s]+)/gi,
+      /\b(password|passwd)(\s+)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s"']+)/gi,
       '$1$2[REDACTED]',
     )
     .replace(
@@ -30,8 +30,28 @@ export function redactToolDetail(value: string): string {
       '$1[REDACTED]',
     )
     .replace(
-      /(^|[\s;|]|&&)((?:export\s+)?[A-Z_][A-Z0-9_]*)=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;|&]+)/g,
-      '$1$2=[REDACTED]',
+      /(^|[\s;|&])((?:export\s+)?[A-Z_][A-Z0-9_]*)=(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s;|&"']+)/g,
+      (match, prefix: string, name: string, offset: number, source: string) => {
+        if (prefix === '&') {
+          const tokenStart =
+            Math.max(
+              source.lastIndexOf(' ', offset),
+              source.lastIndexOf('\t', offset),
+              source.lastIndexOf('\n', offset),
+              source.lastIndexOf('\r', offset),
+              source.lastIndexOf('"', offset),
+              source.lastIndexOf("'", offset),
+            ) + 1;
+          const tokenBeforeAmp = source.slice(tokenStart, offset);
+          if (
+            tokenBeforeAmp.includes('?') &&
+            (tokenBeforeAmp.includes('://') || tokenBeforeAmp.startsWith('?'))
+          ) {
+            return match;
+          }
+        }
+        return `${prefix}${name}=[REDACTED]`;
+      },
     )
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,})\b/gi, '[REDACTED]')
     .replace(/\b(?:bat|brt|bdt|bde|bfm)_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, '[REDACTED]')
