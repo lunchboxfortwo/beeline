@@ -53,7 +53,40 @@ function boundPageReplyExcerpt(text: string): string {
 }
 
 type ConversationItem = RoomConversationResult['items'][number];
-function messageRow(item: ConversationItem, offset: number) {
+const isPrivateHandoffPlaceholder = (item: ConversationItem) =>
+  item.type === 'private-handoff' || !item.id;
+
+type MessageRowBase = {
+  id?: string;
+  messageId?: string;
+  cursor?: string;
+  authorId?: string;
+  authorHandle?: string;
+  createdAt: number;
+  type: string;
+  openable?: false;
+  bodyOffset?: number;
+  repliesTo?: {
+    messageId: string;
+    authorId?: string;
+    authorName?: string;
+    excerpt?: string;
+  };
+  rootMessageId?: string;
+  requestAuthorId?: string;
+  attachmentCount?: number;
+  attachments?: ConversationItem['attachments'];
+  messageLink?: string;
+};
+
+function messageRow(item: ConversationItem, offset: number): MessageRowBase {
+  if (isPrivateHandoffPlaceholder(item)) {
+    return {
+      createdAt: item.createdAt,
+      type: item.type,
+      openable: false,
+    };
+  }
   const excerpt =
     typeof item.replyToExcerpt === 'string' && item.replyToExcerpt.trim()
       ? boundPageReplyExcerpt(item.replyToExcerpt)
@@ -84,7 +117,7 @@ function messageRow(item: ConversationItem, offset: number) {
   };
 }
 
-type MessageRow = ReturnType<typeof messageRow> & { body: string; bodyContinues?: true };
+type MessageRow = MessageRowBase & { body: string; bodyContinues?: true };
 const hasContent = (item: ConversationItem) =>
   Boolean(item.body.trim() || item.attachments.length || item.systemEvent);
 
@@ -146,7 +179,7 @@ export async function readAgentMessagePage(
   }
   let next: MessagePageCursor | undefined;
   if (newest) {
-    const before = visible.length > items.length ? items.at(-1)?.cursor : rawBoundary;
+    const before = visible.length > items.length ? window[items.length - 1]?.cursor : rawBoundary;
     if ((more || visible.length > items.length) && before) next = { before };
   } else if (offset !== undefined || more || visible.length > items.length) {
     if (offset === undefined && visible.length === items.length) after = rawBoundary ?? after;

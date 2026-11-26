@@ -78,12 +78,14 @@ it('routes a blocker after local completion to the assigning session, including 
   expect(await queued()).toEqual([[B,CHAT]]);
 });
 
-it('rings the human commander once for concurrent blocks without status words', async () => {
+it('keeps one open block and rings the human commander once for concurrent blocks without status words', async () => {
   const results = await Promise.allSettled(['Pick a branch.', 'Pick a target.'].map(text =>
     daemon.execute('message', {roomId:THREAD,type:'blocked',text}, B)));
-  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(2);
   expect((await db.query(`SELECT mark.identity_id FROM messages m JOIN needs_you_marks mark ON mark.message_id=m.id
     WHERE m.block_corner_id=$1 AND mark.cleared_at IS NULL`, [THREAD])).rows).toEqual([{identity_id:H}]);
+  expect((await db.query(`SELECT id FROM messages WHERE block_corner_id=$1 AND ask_closed_reason IS NULL`, [THREAD])).rows)
+    .toHaveLength(1);
 });
 
 it('a reply quotes its waking message and refuses another message before publishing', async () => {
@@ -146,7 +148,7 @@ it('returns an explicit reply to the later sibling sender', async () => {
     .toEqual([{room_id:OTHER,reply_to_message_id:task.id}]);
 });
 
-it('tracks a same-agent escalation separately in the assigning thread', async () => {
+it('tracks a same-agent escalation separately in the assigning thread and replaces it on a newer block', async () => {
   await db.query('UPDATE rooms SET parent_id=$2 WHERE id=$1',[OTHER,CHAT]);
   const {insertCornerFacts} = await import('./test-support.js');
   await insertCornerFacts(db,{cornerId:OTHER,workerAgentId:B});
@@ -157,7 +159,60 @@ it('tracks a same-agent escalation separately in the assigning thread', async ()
   const saved = await daemon.execute('message',input,B);
   expect((await db.query('SELECT block_corner_id,block_parent_id FROM messages WHERE id=$1',[saved.id])).rows)
     .toEqual([{block_corner_id:OTHER,block_parent_id:block.id}]);
-  await expect(daemon.execute('message',input,B)).rejects.toThrow('open block');
+  const replacement = await daemon.execute('message',{...input,text:'Which target branch?'},B);
+  expect((await db.query('SELECT id FROM messages WHERE block_corner_id=$1 AND ask_closed_reason IS NULL',[OTHER])).rows)
+    .toEqual([{id:replacement.id}]);
+  expect((await db.query('SELECT ask_closed_reason,ask_closed_by FROM messages WHERE id=$1',[saved.id])).rows)
+    .toEqual([{ask_closed_reason:`superseded by ${replacement.id}`,ask_closed_by:B}]);
+});
+
+it('replaces an open block on a second blocked message, closes the first with a note linking the new one, and notifies the commander once', async () => {
+  // Agent commander: block -> block again -> one open block remains, first closed with note, commander wakes once for the new block.
+  const task = await sendMessage(db, { route: { from: { agent: A, place: CHAT }, to: { agent: B, place: THREAD } }, text: 'Ship the fix.' });
+  const first = await daemon.execute('message', { roomId: THREAD, requestId: task.id, type: 'blocked', text: 'Waiting on API credentials.' }, B);
+  expect((await readAgentCommands(db, A, CHAT)).commands.map((c) => c.id)).toEqual([first.id]);
+  await db.query(`UPDATE agent_commands SET state='complete' WHERE id=$1`, [first.id]);
+
+  const second = await daemon.execute('message', { roomId: THREAD, requestId: task.id, type: 'blocked', text: 'API credentials worked; now blocked on staging deploy.' }, B);
+  expect(second.id).not.toBe(first.id);
+  expect(second.receipt).toContain(`superseded previous block ${first.id!.slice(0, 8)}`);
+
+  expect((await db.query('SELECT id FROM messages WHERE block_corner_id=$1 AND ask_closed_reason IS NULL', [THREAD])).rows)
+    .toEqual([{ id: second.id }]);
+  expect((await db.query('SELECT ask_closed_reason,ask_closed_by FROM messages WHERE id=$1', [first.id])).rows)
+    .toEqual([{ ask_closed_reason: `superseded by ${second.id}`, ask_closed_by: B }]);
+  // Commander receives exactly one new notification for the replacement block.
+  expect((await readAgentCommands(db, A, CHAT)).commands.map((c) => c.id)).toEqual([second.id]);
+});
+
+it('replaces an open human-commander block after the first was answered via wakeBlockAnswer', async () => {
+  const { wakeBlockAnswer } = await import('./implementer-blocks.js');
+  const first = await daemon.execute('message', { roomId: THREAD, type: 'blocked', text: 'Need database password.' }, B);
+  const replyId = '9'.repeat(64);
+  await db.query(
+    `INSERT INTO messages(id,room_id,author_id,text,reply_to_message_id) VALUES($1,$2,$3,'Added to vault.',$4)`,
+    [replyId, CHAT, H, first.id],
+  );
+  const wake = await wakeBlockAnswer(db, replyId, CHAT, H);
+  expect(wake).toBeDefined();
+
+  const second = await daemon.execute(
+    'message',
+    { roomId: THREAD, requestId: wake!.turn_request_id, type: 'blocked', text: 'Database connected; now blocked on DNS record.' },
+    B,
+  );
+  expect((await db.query('SELECT id,block_corner_id FROM messages WHERE block_corner_id=$1 AND ask_closed_reason IS NULL', [THREAD])).rows)
+    .toEqual([{ id: second.id, block_corner_id: THREAD }]);
+  expect((await db.query('SELECT ask_closed_reason,ask_closed_by FROM messages WHERE id=$1', [first.id])).rows)
+    .toEqual([{ ask_closed_reason: `superseded by ${second.id}`, ask_closed_by: B }]);
+  // Human commander has exactly one open Tasks mark, pointing to the new block.
+  expect((await db.query('SELECT message_id,cleared_reason FROM needs_you_marks WHERE identity_id=$1 ORDER BY message_id', [H])).rows)
+    .toEqual(
+      [
+        { message_id: first.id, cleared_reason: 'answered' },
+        { message_id: second.id, cleared_reason: null },
+      ].sort((a, b) => a.message_id!.localeCompare(b.message_id!)),
+    );
 });
 
 it('rings the blocker even when the same chat turn later posts local text', async () => {

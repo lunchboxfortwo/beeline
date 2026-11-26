@@ -106,4 +106,51 @@ describe('readAgentMessagePage causal provenance', () => {
       requestAuthorId: 'human-1',
     });
   });
+
+  it('renders unreadable private hand-offs as non-openable placeholders without leaking author or id while preserving pagination', async () => {
+    const page = await readAgentMessagePage(
+      { roomId: 'room-1', limit: 2 },
+      async (): Promise<RoomConversationResult> => ({
+        items: [
+          {
+            id: 'm1',
+            cursor: '100,m1',
+            authorId: 'human-1',
+            createdAt: 100,
+            type: 'message',
+            body: 'Earlier public message',
+            attachments: [],
+          },
+          {
+            id: '',
+            cursor: '200,secret-handoff-id',
+            authorId: '',
+            createdAt: 200,
+            type: 'private-handoff',
+            body: '[private hand-off]',
+            attachments: [],
+          },
+          {
+            id: 'm3',
+            cursor: '300,m3',
+            authorId: 'human-1',
+            createdAt: 300,
+            type: 'message',
+            body: 'Newest public message',
+            attachments: [],
+          },
+        ],
+      }),
+    );
+
+    expect(page.items).toHaveLength(2);
+    expect(page.items[0]).toMatchObject({ id: 'm3', body: 'Newest public message' });
+    expect(page.items[1]).toEqual({
+      createdAt: 200,
+      type: 'private-handoff',
+      openable: false,
+      body: '[private hand-off]',
+    });
+    expect(page.next).toEqual({ before: '200,secret-handoff-id' });
+  });
 });

@@ -5,7 +5,7 @@ import { sendMessage } from './agent-messaging.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { assignmentBeforeBlock, commanderReportAddress } from './commander.js';
 import type { SqlDatabase } from './database.js';
-import { openBlocksSql } from './implementer-blocks.js';
+import { openBlocksSql, supersedeOpenBlocks } from './implementer-blocks.js';
 import { recordedMessageRoute, replyableWake } from './message-route.js';
 
 type SessionMessage = {
@@ -23,6 +23,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       throw new CommandRefusalError('Use text with blocked, reply and quoteMsgId, or normal and address.',400);
     let to: MessageAddress;
     let quote: string | undefined;
+    let openBlockIds: string[] = [];
     if (input.type === 'normal' && typeof input.address === 'string' && input.quoteMsgId === undefined) {
       const parts = input.address.split('@');
       const [recipient, place] = parts;
@@ -65,8 +66,8 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
         throw new CommandRefusalError('No commander is recorded for this session.', 400);
       to = {agent: recipient, place};
       if (room?.parent_id) {
-        const existing = (await db.query<{id:string}>(`SELECT id FROM (${openBlocksSql('$1')}) block WHERE author_id=$2`, [input.roomId,agent])).rows[0];
-        if (existing && existing.id !== id) throw new CommandRefusalError('This worker already has an open block in the thread.',409);
+        openBlockIds = (await db.query<{id:string}>(`SELECT id FROM (${openBlocksSql('$1')}) block WHERE author_id=$2 ORDER BY created_at,id`, [input.roomId,agent]))
+          .rows.map((row) => row.id);
       }
     } else {
       throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
@@ -74,6 +75,12 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
     if (parent && saved.messageId && (quote || input.type === 'blocked')) await db.query(
       'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.messageId]);
+    if (input.type === 'blocked' && saved.messageId && openBlockIds.length) {
+      const replaced = await supersedeOpenBlocks(db, input.roomId, agent, saved.messageId, openBlockIds);
+      if (replaced.length && saved.receipt) {
+        return { ...saved, receipt: `${saved.receipt} · superseded previous block ${replaced.map((oldId) => oldId.slice(0, 8)).join(', ')}` };
+      }
+    }
     return saved;
   });
 }

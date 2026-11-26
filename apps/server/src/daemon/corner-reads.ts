@@ -21,6 +21,7 @@ import type { DaemonContext } from './context.js';
 import { id, Input, Output, seconds } from './values.js';
 import { daemonReach } from './corner-messages.js';
 import { daemonIdentity, daemonAccess } from './access.js';
+import { unreadablePrivateHandoffSql } from '../private-handoff-access.js';
 
 
   /**
@@ -110,8 +111,10 @@ import { daemonIdentity, daemonAccess } from './access.js';
         `SELECT c.parent_id parent_room_id,c.archived_at,${facts.columns},
            ${cornerOpenedFromSql('c.id')} opened_from_corner_id,${cornerImplementerSql('f', 'c')} implementer_agent_id,${cornerObjectiveSql('c')} objective,c.name title,${cornerKindSql('c.id')} kind,${cornerRequestSql('c.id')} request_id,
            approval.pull_request_number,approval.head_sha approval_head_sha,
-           lm.author_id last_author_id,lm.created_at last_created_at,
-           lm.presentation last_type,left(lm.text,280) last_excerpt
+           CASE WHEN ${unreadablePrivateHandoffSql('lm', '$2', 'false')} THEN NULL ELSE lm.author_id END last_author_id,
+           lm.created_at last_created_at,
+           CASE WHEN ${unreadablePrivateHandoffSql('lm', '$2', 'false')} THEN NULL ELSE lm.presentation END last_type,
+           CASE WHEN ${unreadablePrivateHandoffSql('lm', '$2', 'false')} THEN NULL ELSE left(lm.text,280) END last_excerpt
          FROM rooms c ${facts.joins}
          LEFT JOIN corner_merge_approvals approval ON approval.corner_id=c.id
            AND approval.approved_by=(SELECT ${cornerReviewerSql('c', 'parent')} FROM rooms parent WHERE parent.id=c.parent_id)
