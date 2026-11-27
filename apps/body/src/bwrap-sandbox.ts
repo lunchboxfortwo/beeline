@@ -19,6 +19,8 @@ import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
 import { foreignLoginMaskPaths, type AgentKind } from './agent-command.js';
+import { bridgeSocketPath } from './session-join/bridge-socket.js';
+import { stateDir as joinedSessionStateDir } from './session-join/store.js';
 
 
 
@@ -447,7 +449,10 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
   ]).filter((path) => isUnderTmp(path) && path !== '/tmp' && !writable.includes(path));
   const readOnly = tmpRestores;
   const hostSocketDirs = scratchAlias
-    ? normalize(spec.hostSocketPaths?.map(path => path && dirname(path)) ?? [])
+    ? normalize([
+        dirname(bridgeSocketPath(joinedSessionStateDir())),
+        ...(spec.hostSocketPaths ?? []).map(path => path && dirname(path)),
+      ])
       .filter(path => path.startsWith('/var/tmp/'))
     : [];
   return {
