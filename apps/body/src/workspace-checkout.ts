@@ -352,7 +352,7 @@ interface WorkspaceInput {
 const pendingCheckouts = new Map<string, Promise<string>>();
 
 /** Session prepare and workspace share this agent's in-flight checkout result. */
-export function prepareWorkspace(input: WorkspaceInput): Promise<string> {
+export function prepareWorkspace(input: WorkspaceInput, homeReady?: Promise<void>): Promise<string> {
   const key = JSON.stringify([
     resolve(input.supervisorRoot),
     input.agent.publicKey,
@@ -361,7 +361,8 @@ export function prepareWorkspace(input: WorkspaceInput): Promise<string> {
   ]);
   const pending = pendingCheckouts.get(key);
   if (pending) return pending;
-  const prepared = prepareCheckout(input).finally(() => pendingCheckouts.delete(key));
+  const checkout = homeReady ? homeReady.then(() => prepareCheckout(input)) : prepareCheckout(input);
+  const prepared = checkout.finally(() => pendingCheckouts.delete(key));
   pendingCheckouts.set(key, prepared);
   return prepared;
 }

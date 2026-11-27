@@ -226,17 +226,31 @@ export async function materializeAgentCornerCheckout(input: {
     const hasFiles = (await readdir(paths.path)).some((entry) => entry !== '.git');
     // Keep track of an empty worktree across interruptions after .git is linked.
     if (!hasFiles) await writeFile(pendingFiles, '');
-    // A lost .git file need not lose the index (including staged work). Reuse
-    // only the registration that names this exact checkout, never another one.
+    // A lost .git file need not lose the index (including staged work).
+    const checkoutParent = dirname(paths.path);
+    const canonicalParent = await realpath(checkoutParent);
+    const canonicalGitFile = resolve(canonicalParent, basename(paths.path), '.git');
     const registrations = resolve(paths.gitCommonDir, 'worktrees');
     let registration: string | undefined;
+    let abandonedWorktree: string | undefined;
     for (const entry of await readdir(registrations).catch(() => [] as string[])) {
       const candidate = resolve(registrations, entry);
-      const target = await readFile(resolve(candidate, 'gitdir'), 'utf8').catch(() => '');
-      if (resolve(target.trim()) === gitFile) {
+      const gitdir = await readFile(resolve(candidate, 'gitdir'), 'utf8').catch(() => '');
+      const target = resolve(candidate, gitdir.trim());
+      if (target === gitFile || target === canonicalGitFile) {
         registration = candidate;
         break;
       }
+      const worktree = dirname(target);
+      const temporary = dirname(worktree);
+      if (
+        target === resolve(temporary, 'worktree', '.git') &&
+        [checkoutParent, canonicalParent].includes(dirname(temporary)) &&
+        /^\.reattach-[A-Za-z0-9]{6}$/.test(basename(temporary)) &&
+        (await readFile(resolve(candidate, 'HEAD'), 'utf8').catch(() => '')).trim() ===
+          `ref: refs/heads/${input.branch}`
+      )
+        abandonedWorktree = worktree;
     }
     if (registration) {
       await writeFile(gitFile, `gitdir: ${registration}\n`);
@@ -244,7 +258,21 @@ export async function materializeAgentCornerCheckout(input: {
     } else {
       // Register at an empty temporary path, then move only the Git marker.
       // Bound checkout folders keep their inode and surviving files in place.
-      const temporary = await mkdtemp(resolve(dirname(paths.path), '.reattach-'));
+      if (abandonedWorktree) {
+        // The checkout lock is held, so this earlier temporary attachment is abandoned.
+        for (const path of [dirname(abandonedWorktree), abandonedWorktree])
+          if ((await lstat(path).catch(() => undefined))?.isSymbolicLink())
+            throw new Error('refusing symlinked temporary agent checkout');
+        await git([
+          `--git-dir=${paths.gitCommonDir}`,
+          'worktree',
+          'remove',
+          '--force',
+          '--force',
+          abandonedWorktree,
+        ]);
+      }
+      const temporary = await mkdtemp(resolve(checkoutParent, '.reattach-'));
       try {
         const worktree = resolve(temporary, 'worktree');
         await git([
