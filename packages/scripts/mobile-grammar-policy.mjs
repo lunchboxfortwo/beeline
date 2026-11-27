@@ -12,7 +12,7 @@ import { scanVisualSource } from './mobile-visual-policy.mjs';
 export const GRAMMAR_FILE = 'ui/grammar.tsx';
 // The app root and overlay sheet live beside the grammar so screens do not load native primitives.
 export const GRAMMAR_FILES = new Set([GRAMMAR_FILE, 'ui/grammar-overlay.tsx', 'ui/grammar-root.tsx', 'ui/grammar-image.tsx']);
-export const TOKEN_FILES = new Set(['ui/tamagui.config.ts', 'buzz/groknight.ts']);
+export const TOKEN_FILES = new Set(['ui/tamagui.config.ts']);
 
 export const COLOR_TOKENS = new Set([
   'canvas', 'raised', 'highlight', 'stroke', 'strongStroke', 'ink', 'secondary',

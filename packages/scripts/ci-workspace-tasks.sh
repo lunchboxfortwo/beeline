@@ -13,6 +13,7 @@ typecheck() {
   node packages/scripts/check-mobile-ui-components.mjs --base "$UI_POLICY_BASE"
   # Hold every Tamagui surface to the one design grammar
   node packages/scripts/check-mobile-grammar.mjs
+  node packages/scripts/generate-stone-css.mjs --check
   node packages/scripts/check-stone-surfaces.mjs
   node --test packages/scripts/check-stone-surfaces.test.mjs
   # Allow no phone network channel besides the main live socket

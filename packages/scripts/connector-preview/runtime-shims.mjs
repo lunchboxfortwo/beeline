@@ -7,7 +7,7 @@ export function webProofShims(mobile) {
       'export const init = () => {}; export const captureException = () => {};',
     './draft-identity':
       'export const useDraftIdentity = explicit => explicit === undefined ? "proof-viewer" : explicit;',
-    'react-native-unistyles': `import { beelineThemes } from '${path.join(mobile, 'sources/buzz/groknight')}';
+    'react-native-unistyles': `import { beelineThemes } from '${path.resolve(mobile, '../../packages/design-tokens/src/index.ts')}';
     const theme = { buzz: beelineThemes.obsidian };
     theme.colors ??= { groupped: { background: theme.buzz.bgTerminal } };
     export const StyleSheet = { create: factory => (typeof factory === 'function' ? factory(theme) : factory), hairlineWidth: 1,

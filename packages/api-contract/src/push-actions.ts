@@ -30,7 +30,7 @@ export type PushActionPayload =
       readonly grantTarget: string;
       readonly agentName: string;
     }
-  | { readonly kind: 'reply'; readonly authorName: string };
+  | { readonly kind: 'reply'; readonly authorName: string; readonly agentHandle?: string };
 
 /** The string-only data fields a push carries for its action. */
 export function pushActionData(action: PushActionPayload | undefined): Record<string, string> {
@@ -43,7 +43,12 @@ export function pushActionData(action: PushActionPayload | undefined): Record<st
       grantTarget: action.grantTarget,
       agentName: action.agentName,
     };
-  return { categoryId: PUSH_ACTION_CATEGORIES.reply, authorName: action.authorName };
+  const agentHandle = action.agentHandle?.trim().replace(/^@/, '');
+  return {
+    categoryId: PUSH_ACTION_CATEGORIES.reply,
+    authorName: action.authorName,
+    ...(agentHandle ? { agentHandle } : {}),
+  };
 }
 
 export function grantDecisionForPushAction(actionId: string): AgentGrantDecision | null {

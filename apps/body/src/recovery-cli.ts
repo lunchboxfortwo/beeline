@@ -11,13 +11,12 @@ import {
   installedReleaseChannel,
   readInstalledBundleIdentity,
   readUpdateState,
-  updateCommandManifestUrl,
+  updateCommandReleaseEnv,
   resolveBundleEntrypoint,
   hostPlatformKey,
   activateRelease,
-  fetchText,
 } from './self-update.js';
-import { parseUpdateManifest, compareBundleIdentity } from './self-update-manifest.js';
+import { compareBundleIdentity, readPublishedBundle } from './self-update-manifest.js';
 import { askMachine, helperAbsent, type MachineAnswer } from './machine-control.js';
 import { runOwned } from './wait.js';
 import { exitWithOwner } from './owner-link.js';
@@ -124,20 +123,20 @@ async function main(): Promise<void> {
     }
     const index = args.indexOf('--manifest-url');
     const checkOnly = args.includes('--check');
-    const url = await updateCommandManifestUrl(
+    const env = await updateCommandReleaseEnv(
       layout,
       index >= 0 ? args[index + 1] : undefined,
       command === 'update' && !checkOnly,
     );
     if (checkOnly) {
-      const bundle = parseUpdateManifest(await fetchText(url, fetch), hostPlatformKey()).bundle;
+      const { bundle } = await readPublishedBundle(hostPlatformKey(), { env });
       console.log(compareBundleIdentity(await readInstalledBundleIdentity(layout), bundle));
       return;
     }
     let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
     try {
       target = await prepareMachineRelease(layout, {
-        env: { ...process.env, BEELINE_UPDATE_MANIFEST_URL: url },
+        env,
         force: args.includes('--force'),
       });
     } catch (error) {

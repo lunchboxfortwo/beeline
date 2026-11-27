@@ -1,16 +1,4 @@
-/**
- * The ONE seam between the daemon's self-update logic and whatever publishes
- * Beeline bundles. Everything the update flow knows about the outside world's
- * publish contract lives in this file: where the manifest lives (URL) and how
- * its JSON maps onto the shape `self-update.ts` consumes. When the real
- * publisher's contract lands (`beeline-cli-publish`), reconciling is a change
- * to THIS file and nothing else.
- *
- * The fixture shape below matches the task description of that companion
- * work: a rolling bundle set published from `main` — `manifest.json` plus
- * per-platform `beeline-<platform>.tar.gz` / `.sha256`, carrying the source
- * commit SHA and a comparable version.
- */
+import { downloadBytes } from './update-download.js';
 
 export interface PublishedBundle {
   /** Archive filename, resolved relative to the manifest URL's directory. */
@@ -25,25 +13,41 @@ export interface PublishedBundle {
   node?: string;
 }
 
-export interface UpdateManifest {
-  schemaVersion: number;
-  /** Commit the published set was built from (may also be per-bundle). */
-  sourceCommit?: string;
-  version?: string;
-  bundles: Record<string, PublishedBundle>;
+const DIST_TAGS_URL = 'https://registry.npmjs.org/-/package/usebeeline/dist-tags';
+const RELEASES_URL = 'https://downloads.usebeeline.app/dl/releases';
+
+async function readChannelVersion(
+  channel: string,
+  fetchImpl?: typeof fetch,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (channel !== 'latest' && channel !== 'next') throw new Error(`invalid helper release channel: ${channel}`);
+  const raw = await downloadBytes(DIST_TAGS_URL, fetchImpl, {
+    request: { headers: { 'Cache-Control': 'no-cache' }, signal },
+  });
+  const tags = JSON.parse(Buffer.from(raw).toString('utf8')) as Record<string, unknown> | null;
+  const version = tags?.[channel];
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/.test(version)) {
+    throw new Error(`usebeeline npm dist-tag ${channel} has no valid helper version`);
+  }
+  return `v${version}`;
 }
 
-/** Default published-manifest location. Overridable with BEELINE_UPDATE_MANIFEST_URL. */
-export const DEFAULT_UPDATE_MANIFEST_URL = 'https://usebeeline.app/dl/manifest.json';
-
-export function resolveManifestUrl(
-  env: NodeJS.ProcessEnv = process.env,
-  channel = env.BEELINE_RELEASE_CHANNEL?.trim() || 'latest',
-): string {
+/** Resolve the npm channel to one immutable release, or read an explicit manifest override. */
+export async function readPublishedBundle(
+  platform: string,
+  {
+    env = process.env,
+    releaseChannel = env.BEELINE_UPDATE_RELEASE_CHANNEL || env.BEELINE_RELEASE_CHANNEL?.trim() || 'latest',
+    fetchImpl,
+    signal,
+  }: { env?: NodeJS.ProcessEnv; releaseChannel?: string; fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<{ url: string; bundle: PublishedBundle }> {
   const override = env.BEELINE_UPDATE_MANIFEST_URL?.trim();
-  if (override) return override;
-  if (!['latest', 'next'].includes(channel)) throw new Error(`invalid helper release channel: ${channel}`);
-  return channel === 'next' ? 'https://usebeeline.app/dl/next/manifest.json' : DEFAULT_UPDATE_MANIFEST_URL;
+  const version = override ? undefined : await readChannelVersion(releaseChannel, fetchImpl, signal);
+  const url = override || `${RELEASES_URL}/${version}/manifest.json`;
+  const raw = await downloadBytes(url, fetchImpl, { request: { signal } });
+  return { url, bundle: parseUpdateBundle(Buffer.from(raw).toString('utf8'), platform, version) };
 }
 
 /**
@@ -51,7 +55,7 @@ export function resolveManifestUrl(
  * plain reason on anything unusable — the caller reports that and leaves the
  * installed bundle untouched.
  */
-export function parseUpdateManifest(raw: string, platform: string): UpdateManifest & { bundle: PublishedBundle } {
+function parseUpdateBundle(raw: string, platform: string, expectedVersion?: string): PublishedBundle {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -62,6 +66,9 @@ export function parseUpdateManifest(raw: string, platform: string): UpdateManife
     throw new Error('update manifest is not an object');
   }
   const manifest = parsed as Record<string, unknown>;
+  if (expectedVersion && manifest.version !== expectedVersion) {
+    throw new Error(`update manifest does not match npm version ${expectedVersion}`);
+  }
   const bundles = manifest.bundles;
   if (typeof bundles !== 'object' || bundles === null) {
     throw new Error('update manifest has no bundles table');
@@ -92,18 +99,12 @@ export function parseUpdateManifest(raw: string, platform: string): UpdateManife
         ? manifest.version
         : undefined;
   return {
-    schemaVersion: typeof manifest.schemaVersion === 'number' ? manifest.schemaVersion : 1,
-    ...(sourceCommit ? { sourceCommit } : {}),
+    file,
+    sha256,
+    ...(typeof bundle.bytes === 'number' ? { bytes: bundle.bytes } : {}),
+    ...(sourceCommit ? { commit: sourceCommit } : {}),
     ...(version ? { version } : {}),
-    bundles: bundles as Record<string, PublishedBundle>,
-    bundle: {
-      file,
-      sha256,
-      ...(typeof bundle.bytes === 'number' ? { bytes: bundle.bytes } : {}),
-      ...(sourceCommit ? { commit: sourceCommit } : {}),
-      ...(version ? { version } : {}),
-      ...(typeof bundle.node === 'string' ? { node: bundle.node } : {}),
-    },
+    ...(typeof bundle.node === 'string' ? { node: bundle.node } : {}),
   };
 }
 

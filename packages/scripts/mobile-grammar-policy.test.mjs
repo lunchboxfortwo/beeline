@@ -38,7 +38,7 @@ test('type is set only by the grammar', () => {
     ]) assert.deepEqual(rules(text), ['type-scale'], text);
     assert.deepEqual(rules(`const value = style.${prop};`), []);
     assert.deepEqual(rules(`const style = { ${prop}: chosen };`, 'ui/grammar-root.tsx'), []);
-    assert.deepEqual(rules(`const style = { ${prop}: chosen };`, 'buzz/groknight.ts'), []);
+    assert.deepEqual(rules(`const style = { ${prop}: chosen };`, 'ui/tamagui.config.ts'), []);
   }
 });
 
@@ -85,7 +85,7 @@ test('every module is in scope, not only Tamagui screens', () => {
   assert.deepEqual(rules(`export const c = '#ffffff';\n`), ['colour-literal']);
   assert.deepEqual(rules(`import { View } from 'react-native';\n`), ['component-lock']);
   assert.deepEqual(rules(`import { StyleSheet } from 'react-native-unistyles';\n`), ['legacy-styles']);
-  assert.deepEqual(rules(`export const c = '#ffffff';\n`, 'buzz/groknight.ts'), []);
+  assert.deepEqual(rules(`export const c = '#ffffff';\n`, 'ui/tamagui.config.ts'), []);
 });
 
 test('spacing that follows Text size uses step() with a grammar step', () => {

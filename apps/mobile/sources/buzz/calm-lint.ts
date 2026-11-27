@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { typeRoles } from './groknight';
+import { typeRoles } from '@beeline/design-tokens';
 
 /**
  * Borrowing Calm lint: the raw `fontSize:`, `lineHeight:` and
@@ -53,7 +53,6 @@ export const CALM_PENDING_HEADER_UNIFY: Readonly<Record<string, string>> = {};
  * the lints carry the property names in their own patterns.
  */
 export const CALM_TOKEN_SOURCES: ReadonlySet<string> = new Set([
-  'buzz/groknight.ts',
   // The design grammar's type scale (scaled by Text size) and its app-root views.
   'ui/grammar.tsx',
   'ui/grammar-root.tsx',
@@ -120,9 +119,9 @@ export function resolveThemeRootedNames(source: string): {
   objectLiterals: Map<string, string>;
 } {
   const rooted = new Set<string>(['theme']);
-  for (const token of ['typeRoles', 'groknight', 'beelineThemes']) {
+  for (const token of ['typeRoles', 'stone', 'brass', 'beelineThemes']) {
     const imported = new RegExp(
-      `\\bimport\\s*\\{[^}]*\\b${token}\\b[^}]*\\}\\s*from\\s*['"][^'"]*groknight['"]`,
+      `\\bimport\\s*\\{[^}]*\\b${token}\\b[^}]*\\}\\s*from\\s*['"]@beeline/design-tokens['"]`,
     );
     if (imported.test(source)) rooted.add(token);
   }

@@ -10,13 +10,13 @@ cd "$(dirname "$0")/.."
 # Requires rsvg-convert (librsvg2-bin) and ImageMagick.
 
 brand_mark="$(node -p "require('./sources/buzz/brand.json').mark")"
-ink="$(sed -n "s/^[[:space:]]*bgBase: '\(#[0-9A-Fa-f]\{6\}\)',/\1/p" sources/buzz/groknight.ts | head -1)"
+ink="$(node -e "import { brass } from '../../packages/design-tokens/dist/index.js'; console.log(brass.obsidian.bgBase);")"
 white="#FFFFFF"
 image_dir="sources/assets/images"
 font_file="sources/assets/fonts/BricolageGrotesque-Bold.ttf"
 
-if [[ -z "$ink" ]] || ! grep -qi "\`$ink\`" ../../DESIGN.md; then
-  echo "Unable to prove the Obsidian bgBase token against DESIGN.md." >&2
+if [[ -z "$ink" ]] || ! grep -qi "\`$ink\`" ../../docs/DESIGN.md; then
+  echo "Unable to prove the Obsidian bgBase token against docs/DESIGN.md." >&2
   exit 1
 fi
 

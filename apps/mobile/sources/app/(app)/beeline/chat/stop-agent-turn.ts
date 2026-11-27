@@ -10,11 +10,15 @@ export async function requestAgentTurnStop(
   readRoom: () => void,
 ): Promise<boolean> {
   try {
-    await monolithPhoneOperation('cancelAgentTurn', {
-      roomId,
-      requestId: stop.requestId,
-      agentId: stop.agentPubkey,
-    });
+    await monolithPhoneOperation(
+      'cancelAgentTurn',
+      {
+        roomId,
+        requestId: stop.requestId,
+        agentId: stop.agentPubkey,
+      },
+      { recoverSilentSocket: true },
+    );
     return true;
   } catch (err) {
     readRoom();

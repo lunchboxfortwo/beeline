@@ -331,6 +331,7 @@
       "scope": [
         "packages/api-contract",
         "packages/buzz-client",
+        "packages/design-tokens",
         "packages/net",
         "packages/nostr",
         "packages/usebeeline"
@@ -377,6 +378,7 @@
       "scope": [
         "packages/api-contract",
         "packages/buzz-client",
+        "packages/design-tokens",
         "packages/net",
         "packages/nostr",
         "packages/usebeeline"

@@ -1,0 +1,64 @@
+/* Generated from @beeline/design-tokens. Do not edit by hand. Run: npm run tokens:css */
+:root {
+  color-scheme: dark light;
+  --canvas: #171717;
+  --raised: #222222;
+  --highlight: #2c2c2c;
+  --unread: #242424;
+  --border: #353535;
+  --stroke: #353535;
+  --strong: #57534e;
+  --ink: #fafaf9;
+  --secondary: #d6d3d1;
+  --muted: #a8a29e;
+  --quiet: #a8a29e;
+  --accent: #d6d3d1;
+  --needs-you: #d6d3d1;
+  --primary-fill: #f5f5f4;
+  --primary-ink: #1c1917;
+  --added: #3FB950;
+  --removed: #F85149;
+  --scrim: rgba(0,0,0,0.8);
+  --cypher-hi: #a8a29e;
+  --cypher-mid: #78716c;
+  --cypher-low: #44403c;
+  --cypher-void: #1c1917;
+  --radius-house: 3px;
+  --radius-code: 8px;
+  --radius-transcript: 10px;
+  --radius-room-card: 14px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-xxl: 48px;
+  --font-sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --canvas: #fafaf9;
+    --raised: #f5f5f4;
+    --highlight: #e7e5e4;
+    --unread: #f0efed;
+    --border: #e7e5e4;
+    --stroke: #e7e5e4;
+    --strong: #d6d3d1;
+    --ink: #1c1917;
+    --secondary: #44403c;
+    --muted: #6b6560;
+    --quiet: #6b6560;
+    --accent: #57534e;
+    --needs-you: #57534e;
+    --primary-fill: #1c1917;
+    --primary-ink: #fafaf9;
+    --added: #1a7f37;
+    --removed: #cf222e;
+    --cypher-hi: #57534e;
+    --cypher-mid: #78716c;
+    --cypher-low: #d6d3d1;
+    --cypher-void: #f5f5f4;
+  }
+}

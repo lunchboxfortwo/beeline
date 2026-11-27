@@ -31,7 +31,7 @@ import { StatusBarProvider } from '@/components/StatusBarProvider';
 // import * as SystemUI from 'expo-system-ui';
 import { initConsoleLogging } from '@/utils/consoleLogging';
 import { setAppPalette, useAppMode } from '@/display';
-import { NOTIFICATION_LIGHT, canvasColor } from '@/buzz/groknight';
+import { NOTIFICATION_LIGHT, canvasColor } from '@beeline/design-tokens';
 import { useLocalSetting } from '@/sync/storage';
 import { SafeSides } from '@/ui/grammar';
 import { AppRoot } from '@/ui/grammar-root';

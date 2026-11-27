@@ -26,7 +26,7 @@
 import React from 'react';
 import { Circle, Ellipse, G, Line, Path, Polygon, Rect } from 'react-native-svg';
 import { FACE_IDS, type FaceId } from './index';
-import { IDENTITY_ART } from '@/buzz/groknight';
+import { IDENTITY_ART } from '@beeline/design-tokens';
 
 export { FACE_IDS, type FaceId } from './index';
 export const BONE: string = IDENTITY_ART.bone;

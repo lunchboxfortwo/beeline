@@ -32,12 +32,15 @@ type RequestOptions = {
   reconnectAttempt?: true;
   /** Durable sends have their own one-replay budget on this same connection. */
   reconnectOwnedByOutbox?: true;
+  /** Verify a silent open socket with one zero-DB ping after a timeout and replace if dead. */
+  recoverSilentSocket?: true;
 };
 type PendingRequest = {
   operation: string;
   frame: string;
   socket?: WebSocket;
   generation?: number;
+  onSent?: (socket: WebSocket, generation: number, activityAtSend: number) => void;
   resolve(value: unknown): void;
   reject(reason: unknown, transportFailed?: boolean): void;
 };
@@ -97,6 +100,8 @@ const roomIdsFromFilters = (filters: SurfaceFilters) =>
 const isOpen = (socket: WebSocket | undefined): socket is WebSocket & { readyState: 1 } => socket?.readyState === 1;
 /** Pause between socket admissions while the outage banner shows in the foreground. */
 const OUTAGE_RECONNECT_MS = 5_000;
+/** Bound for the one-shot zero-DB ping check after an explicit silent timeout. */
+const LIVENESS_PING_TIMEOUT_MS = 2_500;
 
 /** The production native/browser host supplies online events without probes. */
 export function subscribeNetworkOnline(online: () => void): () => void {
@@ -136,11 +141,20 @@ export class LiveConnection {
   private readonly paintOwners = new Map<string, Registration>();
   private recovery?: { generation: number; promise: Promise<void> };
   private recovering = false;
+  /** Tracks a replacement socket opened after a silent timeout until the caller's Room read confirms it. */
+  private silentReplacement?: { afterGeneration: number; roomId?: string; claimed: boolean };
   private outageRetry?: ReturnType<typeof setTimeout>;
   private notificationActions = 0;
   private requestId = 0;
   private socketEpoch = 0;
   private socketGeneration = 0;
+  private socketActivity = 0;
+  private lastSocketActivityAt = 0;
+  private livenessCheck?: {
+    socket: WebSocket;
+    promise: Promise<'alive' | 'dead' | 'aborted'>;
+    finish: (result: 'alive' | 'dead' | 'aborted') => void;
+  };
   // Identity protects against old authorization completing after sign-out.
   private identity = 0;
   // An old screen's release must not hide a new identity's view of the same Room.
@@ -172,6 +186,7 @@ export class LiveConnection {
       this.identity++;
       this.recovery = undefined;
       this.recovering = false;
+      this.silentReplacement = undefined;
       resetConnectionFailure();
       this.viewEpoch++;
       this.viewing.clear();
@@ -217,14 +232,44 @@ export class LiveConnection {
     const identity = this.identity;
     const session = failureSession;
     let failed: boolean | undefined;
-    let reconnected = options.reconnectAttempt === true || this.recovering;
+    const observed = !TELEMETRY_OPERATIONS.includes(operation);
+    const requestRoomId =
+      args && typeof args === 'object' && 'roomId' in args && typeof args.roomId === 'string'
+        ? args.roomId
+        : undefined;
+    const activeSilentReplacement =
+      observed &&
+      options.reconnectAttempt !== true &&
+      !this.recovering &&
+      this.silentReplacement &&
+      this.socketGeneration >= this.silentReplacement.afterGeneration &&
+      this.socketGeneration <= this.silentReplacement.afterGeneration + 1
+        ? this.silentReplacement
+        : undefined;
+    const confirmingSilentReplacement = Boolean(
+      activeSilentReplacement &&
+      !activeSilentReplacement.claimed &&
+      (activeSilentReplacement.roomId === undefined ||
+        (operation === 'readRoom' && requestRoomId === activeSilentReplacement.roomId)),
+    );
+    if (confirmingSilentReplacement && activeSilentReplacement) {
+      activeSilentReplacement.claimed = true;
+    }
+    const expectedReplacementGeneration = activeSilentReplacement
+      ? activeSilentReplacement.afterGeneration + 1
+      : undefined;
+    let reconnected =
+      options.reconnectAttempt === true || this.recovering || Boolean(activeSilentReplacement);
     let generation = this.socketGeneration;
+    let sent: { socket: WebSocket; generation: number; activityAtSend: number } | undefined;
     const outcome = (value: boolean, socketGeneration: number) => {
       failed = value;
       generation = socketGeneration;
     };
+    const onSent = (socket: WebSocket, socketGeneration: number, activityAtSend: number) => {
+      sent = { socket, generation: socketGeneration, activityAtSend };
+    };
     const current = () => !this.disposed && this.foreground && identity === this.identity && session === failureSession;
-    const observed = !TELEMETRY_OPERATIONS.includes(operation);
     const startedAt=Date.now();
     let diagnostic=observed ? this.deps.telemetry?.origin() : undefined;
     if (diagnostic && operation==='createWorkspace') {
@@ -233,13 +278,33 @@ export class LiveConnection {
     }
     const send=() => {
       if (observed) this.deps.telemetry?.record({name:'operation_started',operation,actionId:diagnostic?.actionId,requestId:diagnostic?.requestId});
-      return this.sendRequest(operation,args,options,outcome,diagnostic) as Promise<PhoneOperationMap[Name]['output']>;
+      return this.sendRequest(operation,args,options,outcome,diagnostic,onSent) as Promise<PhoneOperationMap[Name]['output']>;
     };
     try {
       let result: PhoneOperationMap[Name]['output'];
       try {
         result=await send();
       } catch (error) {
+        if (
+          options.recoverSilentSocket &&
+          error instanceof MonolithRequestTimeoutError &&
+          !reconnected &&
+          current() &&
+          !options.signal?.aborted &&
+          sent &&
+          this.socket === sent.socket &&
+          this.socketGeneration === sent.generation
+        ) {
+          await this.recoverSilentSocket(
+            sent.socket,
+            sent.generation,
+            sent.activityAtSend,
+            current,
+            options.signal,
+            requestRoomId,
+          );
+          throw error;
+        }
         if (reconnected || !failed || !current() || options.signal?.aborted) throw error;
         // The durable outbox owns the one same-id send replay and calls this
         // connection's shared recovery itself; replay failures must not get a
@@ -267,12 +332,22 @@ export class LiveConnection {
       throw error;
 
     } finally {
+      const confirmedSilentReplacement =
+        confirmingSilentReplacement && this.silentReplacement === activeSilentReplacement;
+      if (confirmedSilentReplacement) this.silentReplacement = undefined;
       // Deadlines, cancellation, server refusals and background/old-account work
       // never infer an outage. Only a failed replacement can show the banner.
       if (current() && (failed === false || (reconnected && failed === true))) {
         const recovered = connectionFailure() && !failed;
         setConnectionFailure(failed);
         if (recovered && isOpen(this.socket)) this.publishConnected();
+        if (
+          confirmedSilentReplacement &&
+          failed === false &&
+          generation === expectedReplacementGeneration
+        ) {
+          this.refreshRoom(undefined, activeSilentReplacement?.roomId ?? requestRoomId);
+        }
       }
       this.reconnectAfterOutage();
     }
@@ -340,6 +415,7 @@ export class LiveConnection {
     options: RequestOptions,
     outcome: (failed: boolean, generation: number) => void,
     diagnostic?: ReturnType<NonNullable<Dependencies['telemetry']>['origin']>,
+    onSent?: (socket: WebSocket, generation: number, activityAtSend: number) => void,
   ): Promise<unknown> {
     if (options.signal?.aborted) return Promise.reject(this.abortError());
     // Native close callbacks can arrive late. Settle the old socket's requests
@@ -366,6 +442,7 @@ export class LiveConnection {
           args,
           ...(diagnostic ? { diagnostic } : {}),
         }),
+        onSent,
         resolve: (value) => {
           if (!finish()) return;
           outcome(false, request.generation ?? this.socketGeneration);
@@ -429,6 +506,7 @@ export class LiveConnection {
       if (request.socket) continue;
       request.socket = socket;
       request.generation = this.socketGeneration;
+      request.onSent?.(socket, this.socketGeneration, this.socketActivity);
       try {
         socket.send(request.frame);
       } catch {
@@ -475,6 +553,9 @@ export class LiveConnection {
         };
         const received = (event: MessageEvent) => {
           if (this.socket !== socket) return;
+          this.socketActivity++;
+          this.lastSocketActivityAt = Date.now();
+          if (this.livenessCheck?.socket === socket) this.livenessCheck.finish('alive');
           let frame: unknown;
           try {
             frame = JSON.parse(String(event.data));
@@ -535,6 +616,10 @@ export class LiveConnection {
   private socketFailed(socket: WebSocket): void {
     if (this.socket !== socket) return;
     const wasConnected = !this.connecting;
+    const confirmingSilentReplacement = Boolean(
+      this.silentReplacement && this.socketGeneration === this.silentReplacement.afterGeneration + 1,
+    );
+    if (confirmingSilentReplacement) this.silentReplacement = undefined;
     const requestOwnsRecovery = [...this.requests.values()].some(request =>
       !TELEMETRY_OPERATIONS.includes(request.operation));
     this.dropConnection(true);
@@ -542,7 +627,7 @@ export class LiveConnection {
     // pending. Telemetry intentionally cannot reconnect itself; a diagnostic
     // upload must not swallow the only signal that makes the Room read again.
     // The confirming replacement retains its existing one-attempt budget.
-    if (!this.recovering && AppState.currentState === 'active') {
+    if (!this.recovering && !confirmingSilentReplacement && AppState.currentState === 'active') {
       // Reopen established push coverage even when a Room waits for admission
       // before reading. Failed admission alone must not open another socket.
       if (wasConnected && !requestOwnsRecovery) this.reconnectNow();
@@ -550,6 +635,7 @@ export class LiveConnection {
     }
   }
   private dropConnection(transportFailed = false): void {
+    this.livenessCheck?.finish('aborted');
     this.endLaunch();
     const socket = this.socket;
     this.socket = undefined;
@@ -572,9 +658,85 @@ export class LiveConnection {
     // A suspended app or changed network can lose TCP without receiving close.
     // OPEN is then only local state. Retire it before reads or sends can use it;
     // lifecycle events do not diagnose an outage or replay an unknown write.
+    this.silentReplacement = undefined;
     if (isOpen(this.socket)) this.dropConnection();
     this.reconnectNow();
     this.refreshRoom();
+  }
+
+  /**
+   * Event-driven one-shot liveness check triggered only after an explicit
+   * silent request timeout. Uses the server's zero-DB ping handler and never
+   * schedules periodic heartbeats or probes on idle sockets.
+   */
+  private checkSocketLiveness(socket: WebSocket): Promise<'alive' | 'dead' | 'aborted'> {
+    if (this.livenessCheck?.socket === socket) return this.livenessCheck.promise;
+    this.livenessCheck?.finish('aborted');
+    if (this.socket !== socket || !isOpen(socket)) return Promise.resolve('aborted');
+    let finish!: (result: 'alive' | 'dead' | 'aborted') => void;
+    const promise = new Promise<'alive' | 'dead' | 'aborted'>((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => finish('dead'), LIVENESS_PING_TIMEOUT_MS);
+      finish = (result) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (this.livenessCheck?.promise === promise) this.livenessCheck = undefined;
+        resolve(result);
+      };
+    });
+    this.livenessCheck = { socket, promise, finish };
+    try {
+      socket.send('{"type":"ping"}');
+    } catch {
+      finish('dead');
+    }
+    return promise;
+  }
+
+  private replaceSilentSocket(generation: number, roomId?: string): void {
+    // Drop the confirmed dead socket and admit one replacement without issuing
+    // an extra workspace read. The caller's recovery Room read confirms the new
+    // socket and owns the outage banner if that replacement fails.
+    this.dropConnection();
+    this.silentReplacement = { afterGeneration: generation, roomId, claimed: false };
+    this.reconnectNow();
+  }
+
+  private async recoverSilentSocket(
+    socket: WebSocket,
+    generation: number,
+    activityAtSend: number,
+    current: () => boolean,
+    signal?: AbortSignal,
+    roomId?: string,
+  ): Promise<boolean> {
+    if (this.socket !== socket || this.socketGeneration !== generation || !current() || signal?.aborted) {
+      return false;
+    }
+    if (!isOpen(socket)) {
+      if (socket.readyState > 1) {
+        this.replaceSilentSocket(generation, roomId);
+        return true;
+      }
+      return false;
+    }
+    const recentlyActive =
+      this.socketActivity > activityAtSend &&
+      Date.now() - this.lastSocketActivityAt < LIVENESS_PING_TIMEOUT_MS;
+    if (recentlyActive) return false;
+    const status = await this.checkSocketLiveness(socket);
+    if (
+      status !== 'dead' ||
+      this.socket !== socket ||
+      this.socketGeneration !== generation ||
+      !current() ||
+      signal?.aborted
+    ) {
+      return false;
+    }
+    this.replaceSilentSocket(generation, roomId);
+    return true;
   }
 
   /** One failed explicit send may replace its socket, then refresh open screens. */
@@ -639,13 +801,15 @@ export class LiveConnection {
   notePushedMessage(roomId: string): void {
     if (this.roomReferences.has(roomId)) this.refreshRoom(roomId);
   }
-  refreshRoom(roomId?: string): void {
+  refreshRoom(roomId?: string, excludeRoomId?: string): void {
     for (const registration of this.registrations) {
       if (registration.closed || (roomId && !registration.roomIds.has(roomId))) continue;
+      const targetRoomId = roomId ?? [...registration.roomIds].find((id) => id !== excludeRoomId);
+      if (excludeRoomId && !roomId && registration.roomIds.size > 0 && !targetRoomId) continue;
       registration.listener({
         monolithLive: {
           type: 'invalidate',
-          roomId: roomId ?? registration.roomIds.values().next().value ?? '',
+          roomId: targetRoomId ?? '',
           reason: roomId ? 'resync' : 'reconnect',
         },
       });
@@ -702,6 +866,7 @@ export class LiveConnection {
   }
   dispose(): void {
     this.disposed = true;
+    this.silentReplacement = undefined;
     clearTimeout(this.outageRetry);
     this.identity++;
     resetConnectionFailure();

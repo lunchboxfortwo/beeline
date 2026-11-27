@@ -10,6 +10,7 @@ it('retires the check-in command trigger even when its private table is already 
     await db.query(`CREATE TABLE agent_commands(id text PRIMARY KEY,state text);
       CREATE TABLE push_outbox(message_id text);
       CREATE TABLE room_read_marks(message_id text);
+      CREATE TABLE rooms(id uuid,parent_id uuid,archived_at timestamptz);
       INSERT INTO agent_commands VALUES('ordinary-owner-schedule','pending');
       -- Former background-due-source.ts installed this branch on all commands.
       -- PL/pgSQL does not track this SQL reference as a table dependency.
@@ -97,7 +98,11 @@ it('db/push-outbox-lock-timeout: a rerun with unchanged trigger definitions leav
     const triggers = () => db.query<{ tgname: string; oid: number }>(`SELECT tgname,oid::int AS oid FROM pg_trigger
       WHERE tgfoid='beeline_background_source()'::regprocedure AND NOT tgisinternal ORDER BY tgname`);
     const before = (await triggers()).rows;
-    expect(before.map(row => row.tgname)).toEqual(['beeline_background_push', 'beeline_background_read_clear']);
+    expect(before.map(row => row.tgname)).toEqual([
+      'beeline_background_archive_clear',
+      'beeline_background_push',
+      'beeline_background_read_clear',
+    ]);
     // Dropping a trigger needs an exclusive lock on its table; an unchanged
     // definition must keep the same trigger row, so no drop happened.
     await migrate(db);

@@ -7,7 +7,7 @@ vi.mock('react-native', () => ({ Platform: { OS: 'android' }, Keyboard: { dismis
 vi.mock('tamagui', () => ({ YStack: 'YStack', useTheme: () => ({}) }));
 vi.mock('@/ui/grammar', () => ({ useTextSize: () => 'large' }));
 vi.mock('@/ui/grammar-root', () => ({ NativeTypeInput: 'NativeTypeInput', NativeTypeMeasure: 'NativeTypeMeasure' }));
-vi.mock('@/buzz/groknight', () => ({ groknight: { type: { body: { lineHeight: 22 } } } }));
+vi.mock('@beeline/design-tokens', () => ({ typeRoles: { body: { lineHeight: 22 } } }));
 vi.mock('@/components/buzz/ErrorBanner', () => ({ ErrorBanner: () => null }));
 vi.mock('./HullDialog', () => ({ HullDialog: () => null }));
 vi.mock('./MicGlyph', () => ({ COMPOSER_GLYPH_SIZE: 20 }));

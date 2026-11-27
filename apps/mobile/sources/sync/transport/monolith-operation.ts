@@ -102,13 +102,14 @@ export function phoneOperationFailureReason(error: unknown): string {
 export async function monolithPhoneOperation<Name extends keyof PhoneOperationMap>(
   name: Name,
   input: PhoneOperationMap[Name]['input'],
-  options?: { timeoutMs?: number; reconnectOwnedByOutbox?: true },
+  options?: { timeoutMs?: number; reconnectOwnedByOutbox?: true; recoverSilentSocket?: true },
 ): Promise<PhoneOperationMap[Name]['output']> {
   try {
     const args =
       name === 'createWorkspace' ? { ...input, locale: Intl.DateTimeFormat().resolvedOptions().locale, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone } : input,
       requestOptions = { ...phoneOperationRequestOptions(name, input, options),
         ...(options?.reconnectOwnedByOutbox ? { reconnectOwnedByOutbox: true as const } : {}),
+        ...(options?.recoverSilentSocket ? { recoverSilentSocket: true as const } : {}),
       };
     let result: PhoneOperationMap[Name]['output'];
     const ambiguous = (error: unknown) => error instanceof MonolithRequestTimeoutError || error instanceof PhoneSocketDisconnectedError;

@@ -9,10 +9,10 @@ for (const colour of ['#14091A', '#14091acc', 'rgb(25, 14, 33)', 'rgba(25, 14, 3
   it(`rejects a planted legacy surface on mobile, native, web and server: ${colour}`, () => {
     const root = mkdtempSync(join(tmpdir(), 'stone-policy-'));
     try {
-      for (const dir of ['apps/mobile/sources/buzz', 'apps/mobile/plugins', 'apps/mobile/public', 'apps/mobile/src-tauri', 'apps/server/src', 'apps/site']) mkdirSync(join(root, dir), { recursive: true });
+      for (const dir of ['packages/design-tokens/src', 'apps/mobile/sources', 'apps/mobile/plugins', 'apps/mobile/public', 'apps/mobile/src-tauri', 'apps/server/src', 'apps/site']) mkdirSync(join(root, dir), { recursive: true });
       writeFileSync(join(root, 'apps/mobile/app.config.js'), '');
       writeFileSync(join(root, 'apps/mobile/src-tauri/tauri.conf.json'), '{}');
-      writeFileSync(join(root, 'apps/mobile/sources/buzz/groknight.ts'), readFileSync('apps/mobile/sources/buzz/groknight.ts'));
+      writeFileSync(join(root, 'packages/design-tokens/src/palettes.ts'), readFileSync('packages/design-tokens/src/palettes.ts'));
       for (const file of ['apps/mobile/sources/Error.tsx', 'apps/mobile/plugins/splash.js', 'apps/server/src/page.ts', 'apps/site/index.html', 'apps/site/demo.mjs', 'apps/site/ui.json']) writeFileSync(join(root, file), `background: #F3EEE4; background: ${colour}`);
       assert.equal(checkStoneSurfaces(root).length, 12);
     } finally { rmSync(root, { recursive: true, force: true }); }

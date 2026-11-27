@@ -4,7 +4,7 @@ import { Modal, BackHandler, Platform, type TextInput } from 'react-native';
 import { Easing, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Input, Theme, XStack, YStack, styled, useThemeName, type InputProps, type YStackProps } from 'tamagui';
-import { space, typeRoles } from '@/buzz/groknight';
+import { space, typeRoles } from '@beeline/design-tokens';
 import { clearModalNavigationBarScrim } from '@/buzz/android-modal-navigation-bar';
 import { HEIGHT, MotionLayer, T } from '@/ui/grammar';
 import { type ButtonProps } from './Button';

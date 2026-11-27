@@ -1,9 +1,41 @@
 ---
 name: Beeline
-description: Obsidian Refined — agent work logged across one dark slab, with Bone as its light counterpart.
+description: Stone (dark + light default) and Brass (Obsidian + Bone) peer palettes driven by @beeline/design-tokens and the Tamagui grammar.
 colors:
-  brass: "#b08a4a"
   brand-mark: "#E5A645"
+  stone-dark-canvas: "#171717"
+  stone-dark-raised: "#222222"
+  stone-dark-unread: "#242424"
+  stone-dark-highlight: "#2c2c2c"
+  stone-dark-hover: "#292929"
+  stone-dark-pressed: "#303030"
+  stone-dark-border: "#353535"
+  stone-dark-border-strong: "#57534e"
+  stone-dark-text-primary: "#fafaf9"
+  stone-dark-text-secondary: "#d6d3d1"
+  stone-dark-ledger-quiet: "#a8a29e"
+  stone-dark-text-muted: "#a8a29e"
+  stone-dark-ledger-ghost: "#78716c"
+  stone-dark-accent: "#d6d3d1"
+  stone-dark-button-primary-fill: "#f5f5f4"
+  stone-dark-button-primary-text: "#1c1917"
+  stone-light-canvas: "#fafaf9"
+  stone-light-raised: "#f5f5f4"
+  stone-light-unread: "#f0efed"
+  stone-light-highlight: "#e7e5e4"
+  stone-light-hover: "#eceae8"
+  stone-light-pressed: "#e2e0de"
+  stone-light-border: "#e7e5e4"
+  stone-light-border-strong: "#d6d3d1"
+  stone-light-text-primary: "#1c1917"
+  stone-light-text-secondary: "#44403c"
+  stone-light-ledger-quiet: "#6b6560"
+  stone-light-text-muted: "#6b6560"
+  stone-light-ledger-ghost: "#a8a29e"
+  stone-light-accent: "#57534e"
+  stone-light-button-primary-fill: "#1c1917"
+  stone-light-button-primary-text: "#fafaf9"
+  brass: "#b08a4a"
   obsidian-canvas: "#14091A"
   obsidian-raised: "#190e21"
   obsidian-unread: "#1a1220"
@@ -66,8 +98,8 @@ typography:
     letterSpacing: "2px"
   sectionLabel:
     fontFamily: "SpaceGrotesk-Medium"
-    fontSize: "13px"
-    lineHeight: "19px"
+    fontSize: "12px"
+    lineHeight: "17px"
     letterSpacing: "2px"
   sectionCount:
     fontFamily: "SpaceGrotesk-Regular"
@@ -83,11 +115,38 @@ typography:
     fontFamily: "SpaceGrotesk-Regular"
     fontSize: "16px"
     lineHeight: "23px"
+grammar:
+  title:
+    fontSize: "24px"
+    lineHeight: "31px"
+  listTitle:
+    fontSize: "19px"
+    lineHeight: "25px"
+  heading:
+    fontSize: "16px"
+    lineHeight: "23px"
+  body:
+    fontSize: "16px"
+    lineHeight: "23px"
+  meta:
+    fontSize: "13px"
+    lineHeight: "19px"
+  metaStrong:
+    fontSize: "13px"
+    lineHeight: "19px"
+  code:
+    fontSize: "13px"
+    lineHeight: "19px"
+  controlHeight: "44px"
+  primaryHeight: "48px"
+  tabBarHeight: "52px"
+  sheetRowHeight: "56px"
 rounded:
   house: "3px"
   code: "8px"
   transcript-card: "10px"
   room-card: "14px"
+  viewer: "14px"
 spacing:
   xs: "4px"
   sm: "8px"
@@ -101,56 +160,56 @@ components:
     height: "44px"
     typography: "{typography.body}"
   transcript-card:
-    backgroundColor: "{colors.obsidian-raised}"
+    backgroundColor: "{colors.stone-dark-raised}"
     rounded: "{rounded.transcript-card}"
   room-card:
     rounded: "{rounded.room-card}"
   poll-option:
     rounded: "{rounded.house}"
   conversation-row-selected:
-    backgroundColor: "{colors.obsidian-highlight}"
+    backgroundColor: "{colors.stone-dark-highlight}"
 ---
 
 # Design System: Beeline
 
-Source of truth for tokens: `apps/mobile/sources/buzz/groknight.ts` (`beelineThemes.obsidian`, `beelineThemes.bone`, `typeRoles`, `space`, `layout`), exposed to components as `theme.buzz`. Motion constants: `motionTokens` in `apps/mobile/sources/components/buzz/MonoHull.tsx`. The frontmatter mirrors those files; when they disagree, the code wins and this file is stale. Known drift from these rules is listed under [Design inconsistencies](#design-inconsistencies).
+Source of truth for tokens: `packages/design-tokens` (`@beeline/design-tokens`, exporting complete peer `stone` (`dark`, `light`) and `brass` (`obsidian`, `bone`) palettes, `typeRoles`, `space`, `layout`, and `radii`), wired into Tamagui via `apps/mobile/sources/ui/tamagui.config.ts` and `apps/mobile/sources/ui/grammar.tsx` across iOS, Android, Web, and Tauri, and emitted to `apps/site/stone.css` via `npm run tokens:css`. Motion constants: `motionTokens` in `apps/mobile/sources/components/buzz/MonoHull.tsx`. Automated drift tests in `packages/design-tokens/src/design-tokens.test.ts` hold this frontmatter and `apps/site/stone.css` in sync with `@beeline/design-tokens` and `apps/mobile/sources/ui/grammar.tsx`. Known drift from these rules is listed under [Design inconsistencies](#design-inconsistencies).
 
 ## Overview
 
-**Creative North Star: "Obsidian Refined — the slab"**
+**Creative North Star: "Stone & Brass — one slab, two peer palettes"**
 
-The phone is a single slab of obsidian, and Beeline's output is logged across it. The interface recedes so the agents' work *is* the screen. There are no chat bubbles or per-message frames. Structured records and asks use the one `TranscriptCard` anatomy; everything else sits directly on the slab.
+The screen is a single quiet slab, and Beeline's output is logged across it. The interface recedes so the agents' work *is* the screen. There are no chat bubbles or per-message frames. Structured records and asks use the one `TranscriptCard` anatomy; pushed management pages use the Tamagui grammar (`PlaceHeader`, `Screen`, `Section`, `Row`, `Btn`, `SheetFrame`).
 
-It reads like a focused technical conversation, not a chat app. The governing readability rule: **content near-white, chrome dim, never the reverse.** Prose hierarchy comes from weight and brightness at one size. Chrome (Room-list header, transcript header, Workspace rail) has no plate of its own; it is the same canvas as the content, held apart by one hairline and by type weight.
+It reads like a focused technical conversation, not a chat app. The governing readability rule: **content high-contrast, chrome quiet, never the reverse.** Prose hierarchy comes from weight and brightness at one size. Chrome (Room-list header, transcript header, Workspace rail) has no plate of its own; it is the same canvas as the content, held apart by one hairline and by type weight.
 
-Bone is the same language run in reverse for light mode: content near-black, chrome mid, on a warm bone canvas. Settings → Appearance picks the theme; it follows the system until chosen.
+**Stone** (Stone Dark `#171717` / Stone Light `#fafaf9`) is the default neutral palette across iOS, Android, Web, Tauri, and standalone `apps/site/` pages (`/join/`, `/connect/`, `/room/`). **Brass** (Obsidian `#14091A` / Bone `#F3EEE4`) is its complete peer palette under Settings → Device → Color set. Settings → Appearance picks dark or light mode and follows the system until chosen.
 
 **Key Characteristics:**
 - One canvas, edge to edge; press and hover are the only luminance steps above it.
-- One accent (brass), always redundant with shape, glyph, or copy.
-- Five type sizes plus one mono role, held by a lint.
+- One accent (`needsYou` / `accent`), always redundant with shape, glyph, or copy.
+- Shared type roles (`typeRoles` + Tamagui grammar `<T v=…>`), held by lints.
 - Boxes only around what you act on, or around a single non-repeating region.
 - Live state breathes; it never travels or fills.
 
 ## Colors
 
-A near-monochrome aubergine-black (or warm bone) ladder with one brass accent and four named exceptions.
+Two complete peer palettes in `@beeline/design-tokens` — **Stone** (neutral dark/light) and **Brass** (aubergine-black Obsidian / warm Bone) — mapped into the Tamagui semantic token surface (`canvas`, `raised`, `highlight`, `stroke`, `strongStroke`, `ink`, `secondary`, `needsYou`, `added`, `removed`, `primaryFill`, `primaryInk`).
 
 ### Primary
-- **Brass** (`accent`, Obsidian `#b08a4a`, Bone `#8a6323`): the viewer's own byline name, `@handle` mentions in prose, live work (a working agent's ring, the corners door, a Room with a live corner), owner role, unread dots, attention rings, and the action you take on agent work. Bone darkens it because the Obsidian brass is too light on bone. `brassWash` / `brassWashStrong` (18% / 28% alpha) are its only tints.
-- **Brand mark gold** (`brandMark`, `#E5A645`, from `buzz/brand.json`): the Beeline brand mark only.
+- **Accent (`needsYou` / `accent`)**: Stone Dark `#d6d3d1`, Stone Light `#57534e`; Brass Obsidian `#b08a4a`, Bone `#8a6323`. Marks the viewer's own byline name, `@handle` mentions in prose, live work (a working agent's ring, the corners door, a Room with a live corner), owner role, unread dots, attention rings, and the action you take on agent work. `brassWash` / `brassWashStrong` are its only tints.
+- **Brand mark gold** (`BRAND_MARK`, `#E5A645`, in `@beeline/design-tokens` and `buzz/brand.json`): the Beeline brand mark only.
 
 ### Neutral
-- **Canvas** (`bgBase` / `bgVoid` / `appCanvas`): Obsidian `#14091A` (Speakeasy's aubergine), Bone `#F3EEE4`.
-- **Elevation ladder**: `bgRaised`/`bgCode` → `bgUnread` → `bgHighlight` (selection) → `bgHover` → `bgPressed` → `bgTexturePeak`. Each stop keeps the same relative offset in both themes.
+- **Canvas** (`bgBase` / `bgVoid` / `appCanvas`): Stone Dark `#171717`, Stone Light `#fafaf9`; Brass Obsidian `#14091A`, Bone `#F3EEE4`.
+- **Elevation ladder**: `bgRaised`/`bgCode` → `bgUnread` → `bgHighlight` (selection) → `bgHover` → `bgPressed` → `bgTexturePeak`. Each stop keeps the same relative offset in all four themes, and Stone defines its own neutral ladder with zero Obsidian/Bone leaks.
 - **Content inks**: `textPrimary` (narration, human messages, names), `textSecondary` (body under a lead line, previews).
-- **Ledger quiet** (`ledgerQuiet`, Obsidian `#90909B`, Bone `#6F6455`): the ledger's own reading matter — previews, stamps, system lines, quoted excerpts. It holds WCAG AA (≥4.5:1) on every resting ground, pinned in `groknight.test.ts`. Never re-dim it.
+- **Ledger quiet** (`ledgerQuiet`, Stone Dark `#a8a29e`, Stone Light `#6b6560`, Obsidian `#90909B`, Bone `#6F6455`): the ledger's own reading matter — previews, stamps, system lines, quoted excerpts. It holds WCAG AA (≥4.5:1) on every resting ground (`bgBase`, `bgRaised`, `bgUnread`), pinned in `packages/design-tokens/src/design-tokens.test.ts`. Never re-dim it.
 - **Chrome / muted** (`textMuted`, `chrome`): labels and chrome only, never narration.
 - **Ghost** (`ledgerGhost`, `textDisabled`): skipped-step text and the gutter's lowest tier. State marks follow the shared grammar below.
 - **Borders**: `border` (hairlines), `borderStrong` (rules, connectors, pending rings).
 
 ### Appearance
-Obsidian Refined is the default. Bone is its only counterpart (the older Editorial Ink and Ledger sets are retired). Both share `radius`, type roles, and spacing; only colour values differ. `unistyles.ts` registers each at three text sizes.
+Stone (dark/light) is the default colour set; Brass (Obsidian/Bone) is its complete peer counterpart (the older Editorial Ink and Ledger sets are retired). All four themes share `radii`, `typeRoles`, `space`, and `layout` from `@beeline/design-tokens`. `apps/mobile/sources/ui/tamagui.config.ts` registers all `(mode, palette)` combinations (`dark_stone`, `light_stone`, `dark_brass`, `light_brass`), and `apps/mobile/sources/ui/grammar.tsx` scales typography and spacing across small, medium, and large text sizes. Standalone static pages under `apps/site/` load generated `/stone.css`, which defaults to Stone Dark and switches automatically to Stone Light under `prefers-color-scheme: light`.
 
 ### Color exceptions
 Stated so no one re-litigates them. Each is redundant with a non-colour signal, and none licenses a fifth.
@@ -171,7 +230,7 @@ Stated so no one re-litigates them. Each is redundant with a non-colour signal, 
 **Character:** a technical grotesk for everything a person reads, and a plex mono reserved for strings a machine produced.
 
 ### Type
-Five sizes, one mono role, held by a lint. The roles live in `typeRoles` (on every theme as `theme.buzz.type`). Each carries family, size, line height (1.45×, rounded) and tracking. A screen spreads a role; it never sets a raw size.
+The shared type roles live in `typeRoles` (`@beeline/design-tokens`) and the Tamagui grammar `<T v=…>` (`apps/mobile/sources/ui/grammar.tsx`: `title`, `listTitle`, `heading`, `body`, `meta`, `metaStrong`, `code` scaled across small, medium, and large text sizes). Screens set text through `<T>` / `Copy` or `typeRoles`; never raw font sizes or weights.
 
 | role          | face                   | size | line | use                                                              |
 | ------------- | ---------------------- | ---- | ---- | ---------------------------------------------------------------- |
@@ -180,7 +239,7 @@ Five sizes, one mono role, held by a lint. The roles live in `typeRoles` (on eve
 | `bodyStrong`  | Space Grotesk SemiBold | 16   | 23   | emphasised `body`; page titles                                   |
 | `meta`        | Space Grotesk Regular  | 13   | 19   | previews, captions, stamps, counts, eyebrows                     |
 | `sectionHead` | Space Grotesk Medium   | 10   | 15   | section heads only (tracking 2, uppercase)                       |
-| `sectionLabel` | Space Grotesk Medium | 13 | 19 | shared section labels (tracking 2, uppercase; rendered on the count line) |
+| `sectionLabel` | Space Grotesk Medium | 12 | 17 | shared section labels (tracking 2, uppercase; rendered on the count line) |
 | `sectionCount` | Space Grotesk Regular | 15 | 22 | shared section counts |
 | `machine`     | IBM Plex Mono          | 13   | 19   | commands, paths, hashes, code, tool rows, byline tags and stamps |
 
@@ -188,7 +247,7 @@ Transcript prose uses `proseSize` 16 on `proseLineHeight` 23, the `body` role's 
 
 The transcript's day caption is the one caption exception: `sectionHead` in the `machine` face at `ledgerQuiet` (`THU 17 SEP`). The date also rides that day's first byline stamp when the day is not today.
 
-**The Calm Lint.** `calm-lint.design.test.ts` scans every `sources/**/*.ts(x)` for raw `fontSize:` outside {22, 16, 15, 13, 10}, `letterSpacing:` outside {−0.3, 0, 2}, and computed sizes (arithmetic or ternaries), and holds each file to its count in `apps/mobile/design/calm-baseline.json`. The token sources (`buzz/groknight.ts`, `theme.ts`) are not scanned. Counts only shrink; regenerate with `CALM_BASELINE_WRITE=1 npx vitest run sources/buzz/calm-lint`. `Typography.mono()` marks deliberate machine identifiers (allowlist in `components/buzz/Typography.test.ts`).
+**The Calm Lint.** `calm-lint.design.test.ts` scans every `sources/**/*.ts(x)` for raw `fontSize:` outside {22, 16, 15, 13, 12, 10}, `letterSpacing:` outside {−0.3, 0, 2}, and computed sizes (arithmetic or ternaries), and holds each file to its count in `apps/mobile/design/calm-baseline.json`. The grammar source (`ui/grammar.tsx`, `ui/grammar-root.tsx`) is not scanned; tokens live in `@beeline/design-tokens`. Counts only shrink; regenerate with `CALM_BASELINE_WRITE=1 npx vitest run sources/buzz/calm-lint`. `Typography.mono()` marks deliberate machine identifiers (allowlist in `components/buzz/Typography.test.ts`).
 
 **The Mono Is For Machines Rule.** Space Grotesk carries names, rows, buttons, labels and bylines. Mono is for strings a machine produced, plus the byline's model tag and stamp.
 
@@ -305,8 +364,8 @@ Profiles reuse Settings typography, spacing and `SettingsRow`. Bylines open prof
 ## Do's and Don'ts
 
 ### Do:
-- **Do** read colours, type, radius and spacing from `theme.buzz` so Obsidian and Bone both work.
-- **Do** spread a type role (`...theme.buzz.type.meta`); never set a raw `fontSize`.
+- **Do** read colours, type, radius and spacing from `@beeline/design-tokens` and the Tamagui grammar (`apps/mobile/sources/ui/grammar.tsx`: semantic tokens `canvas`, `raised`, `highlight`, `stroke`, `strongStroke`, `ink`, `secondary`, `needsYou`, `added`, `removed`, `primaryFill`, `primaryInk`) so Stone and Brass dark/light themes all work.
+- **Do** use `<T v=…>` / `Copy` (or `typeRoles` from `@beeline/design-tokens`); never set a raw `fontSize`.
 - **Do** encode every state redundantly: glyph, word, or shape alongside colour.
 - **Do** keep content brighter than chrome, and `ledgerQuiet` at or above AA.
 - **Do** give every control a 44 pt target and an accessible name.
@@ -336,7 +395,7 @@ Each file is held to its per-rule count in `apps/mobile/design/design-baseline.j
 
 None open. The list recorded on 2026-10-03 was fixed in full; the lints in Enforcement keep those classes from returning. The off-scale geometry the design baseline still holds (the arrival halo's concentric radii, the Ledger marginalia column, the QR quiet zone, centring and border compensation, the turn line's pixel budget, the workflow rail column) is not spacing rhythm, and each file names its reason in `DESIGN_BASELINE_REASONS`. Record a newly found inconsistency here, with its file and line, until it is fixed.
 
-Shared section headers use `sectionLabel` (13px, tracking 2) and `sectionCount` (15px) on a 22px line. Phone add actions occupy 44px targets at the screen inset; desktop keeps its existing compact mark within `tapLineHeight`. Icon-only `Button` controls opt into `iconOnly` for a 44px square without label padding.
+Shared section headers use `sectionLabel` (12px, tracking 2) and `sectionCount` (15px) on a 22px line. Phone add actions occupy 44px targets at the screen inset; desktop keeps its existing compact mark within `tapLineHeight`. Icon-only `Button` controls opt into `iconOnly` for a 44px square without label padding.
 
 ### System log rows
 

@@ -29,17 +29,13 @@ import {
   describeIdentity,
   discoveredBeelineInstallLayout,
   hostPlatformKey,
-  fetchText,
   installedReleaseChannel,
   readInstalledBundleIdentity,
   readUpdateState,
-  updateCommandManifestUrl,
+  updateCommandReleaseEnv,
   type BeelineInstallLayout,
 } from './self-update.js';
-import {
-  compareBundleIdentity,
-  parseUpdateManifest,
-} from './self-update-manifest.js';
+import { compareBundleIdentity, readPublishedBundle } from './self-update-manifest.js';
 
 interface RuntimeAdapterRefreshOptions extends AdapterUpdateOptions {
   env?: NodeJS.ProcessEnv;
@@ -166,7 +162,7 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
     const manifestUrlFlag = args.indexOf('--manifest-url');
     const checkOnly = args.includes('--check');
     const force = args.includes('--force');
-    const manifestUrl = await updateCommandManifestUrl(
+    const env = await updateCommandReleaseEnv(
       layout,
       manifestUrlFlag >= 0 ? args[manifestUrlFlag + 1] : undefined,
       args.includes('update') && !checkOnly,
@@ -175,14 +171,13 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
     console.log(`[beeline] installed bundle: ${describeIdentity(installed)}`);
 
     if (checkOnly) {
-      const raw = await fetchText(manifestUrl, fetch);
-      const { bundle } = parseUpdateManifest(raw, hostPlatformKey());
+      const { url, bundle } = await readPublishedBundle(hostPlatformKey(), { env, signal });
       const verdict = compareBundleIdentity(installed, bundle);
       if (verdict.kind === 'update-available') {
         console.log(
           `[beeline] update available: ${describeIdentity({ commit: bundle.commit, version: bundle.version })}`,
         );
-        console.log(`[beeline] archive: ${archiveUrlFor(manifestUrl, bundle.file)}`);
+        console.log(`[beeline] archive: ${archiveUrlFor(url, bundle.file)}`);
       } else
         console.log(
           `[beeline] ${verdict.kind === 'current' ? 'installed bundle is current.' : `cannot compare: ${verdict.reason}`}`,
@@ -192,11 +187,7 @@ export async function runUpdateCommand(args: string[], signal?: AbortSignal): Pr
     let target: Awaited<ReturnType<typeof prepareMachineRelease>>;
     try {
       target = await prepareMachineRelease(layout, {
-        env: {
-          ...process.env,
-          BEELINE_LIB_DIR: layout.libDir,
-          BEELINE_UPDATE_MANIFEST_URL: manifestUrl,
-        },
+        env: { ...env, BEELINE_LIB_DIR: layout.libDir },
         force,
         signal,
       });

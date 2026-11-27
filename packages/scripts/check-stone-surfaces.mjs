@@ -4,12 +4,14 @@ import { pathToFileURL } from 'node:url';
 
 // Artwork and the brand reference document are not UI surface declarations.
 const artwork = new Set(['apps/server/src/agent-avatar.ts', 'apps/server/src/face-templates.generated.json', 'apps/site/brand/index.html']);
-const tokens = 'apps/mobile/sources/buzz/groknight.ts';
+const tokens = 'packages/design-tokens/src/palettes.ts';
 const roots = ['apps/mobile/sources', 'apps/mobile/plugins', 'apps/mobile/public', 'apps/server/src', 'apps/site'];
 
 export function checkStoneSurfaces(root) {
   const source = readFileSync(join(root, tokens), 'utf8');
-  const colours = new Set([...source.matchAll(/(?:bg\w+|appCanvas|appTile|appCard|avatarGround|buttonPrimaryFill|buttonPrimaryText):\s*['"](#[\da-f]{6})['"]/gi)]
+  const brassStart = source.indexOf('export const brass =');
+  const brassSource = brassStart >= 0 ? source.slice(brassStart) : source;
+  const colours = new Set([...brassSource.matchAll(/(?:bg\w+|appCanvas|appTile|appCard|avatarGround|buttonPrimaryFill|buttonPrimaryText):\s*['"](#[\da-f]{6})['"]/gi)]
     .map(match => match[1].toLowerCase())
     .filter(value => !['#171717', '#222222', '#2c2c2c', '#242424', '#fafaf9', '#f5f5f4', '#e7e5e4', '#f0efed', '#1c1917'].includes(value)));
   const errors = [];

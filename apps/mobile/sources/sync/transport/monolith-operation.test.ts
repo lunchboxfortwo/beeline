@@ -31,6 +31,21 @@ describe('phone operations over the shared socket', () => {
     await expect(monolithPhoneOperation('sendPushTest', {}, { timeoutMs: 40_000 })).resolves.toBeUndefined();
     expect(request).toHaveBeenCalledWith('sendPushTest', {}, { timeoutMs: 40_000 });
   });
+  it('forwards recoverSilentSocket when requested', async () => {
+    request.mockResolvedValueOnce(undefined);
+    await expect(
+      monolithPhoneOperation(
+        'cancelAgentTurn',
+        { roomId: 'r', requestId: 'req', agentId: 'agent' },
+        { recoverSilentSocket: true },
+      ),
+    ).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledWith(
+      'cancelAgentTurn',
+      { roomId: 'r', requestId: 'req', agentId: 'agent' },
+      { timeoutMs: 20_000, recoverSilentSocket: true },
+    );
+  });
   it('adds the local time zone when creating a Workspace', async () => {
     await monolithPhoneOperation('createWorkspace', { name: 'Example' });
     expect(request.mock.calls[0]?.[1]).toMatchObject({ name: 'Example', locale: Intl.DateTimeFormat().resolvedOptions().locale, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });

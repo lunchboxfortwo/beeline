@@ -5,23 +5,21 @@ import { installWebControlProps } from './web-control-props';
 // animations on phones. `animationsCSS` exists only on web, so on phones every
 // Sheet threw Tamagui error 008 (no animation driver).
 import { animations } from '@tamagui/config/animations-css';
-import { beelineThemes, stonePalette as STONE, type BeelineThemeTokens } from '@/buzz/groknight';
+import { brass, radii, resolveTheme, type Mode, type Palette } from '@beeline/design-tokens';
 
 /**
  * The one design grammar's colour layer (build spec → The grammar). Eleven
  * semantic tokens per theme — canvas, raised, highlight, stroke, strongStroke,
  * ink, secondary, needsYou (brass), added,
  * removed — plus the button fills.
- * Values come from the Beeline token set (`groknight.ts`); the Stone colour
- * set swaps the neutral ladder and keeps every component.
+ * Values come from `@beeline/design-tokens`, where Stone and Brass are complete
+ * peer palettes sharing every component.
  */
-export type Palette = 'brass' | 'stone';
-export type Mode = 'dark' | 'light';
+export type { Mode, Palette };
 
 
 function themeValues(mode: Mode, palette: Palette): Record<string, string> & { needsYou: string; primaryInk: string; primaryFill: string; raised: string } {
-    const base = beelineThemes[mode === 'dark' ? 'obsidian' : 'bone'];
-    const c = (palette === 'brass' ? base : { ...base, ...STONE[mode] }) as BeelineThemeTokens;
+    const c = resolveTheme(mode, palette);
     const theme = {
         ...(defaultConfig.themes[mode] as Record<string, string>),
         'color-1': c.bgBase, 'color-2': c.bgRaised, 'color-3': c.bgHighlight, 'color-4': c.border,
@@ -38,7 +36,7 @@ function themeValues(mode: Mode, palette: Palette): Record<string, string> & { n
         ink: c.textPrimary, secondary: c.textSecondary,
         needsYou: c.accent, added: c.diffAdded, removed: c.diffRemoved,
         primaryFill: c.buttonPrimaryFill, primaryInk: c.buttonPrimaryText,
-        attachmentBadgeFill: `${beelineThemes.bone.textPrimary}b8`, attachmentBadgeInk: beelineThemes.bone.bgBase,
+        attachmentBadgeFill: `${brass.bone.textPrimary}b8`, attachmentBadgeInk: brass.bone.bgBase,
     };
     return theme;
 }
@@ -79,7 +77,7 @@ const body = {
 export const tamaguiConfig = createTamagui({
     ...defaultConfig,
     // Historical browser surfaces retain their pre-redesign geometry.
-    tokens: { ...defaultConfig.tokens, radius: { ...defaultConfig.tokens.radius, house: 3, transcript: 10, viewer: 14 } },
+    tokens: { ...defaultConfig.tokens, radius: { ...defaultConfig.tokens.radius, house: radii.house, transcript: radii.transcript, viewer: radii.viewer } },
     animations,
     // Longhand style props (paddingHorizontal, backgroundColor) are the grammar's spelling.
     settings: { ...defaultConfig.settings, onlyAllowShorthands: false },

@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { verifyWebDeployment, WEB_APP_ORIGIN } from './verify-web-deployment.mjs';
+import { syncStoneCss } from './generate-stone-css.mjs';
 
 function expectedRelease() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeline-web-release.'));
@@ -58,5 +59,21 @@ test('refuses alternate origins and stale deployments', async () => {
     );
   } finally {
     fs.rmSync(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('keeps generated apps/site/stone.css and server MCP join.html Brass tokens in sync with @beeline/design-tokens', () => {
+  assert.equal(syncStoneCss({ check: true }).status, 'ok');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'beeline-stone-css.'));
+  try {
+    const drifted = path.join(directory, 'stone.css');
+    fs.writeFileSync(drifted, ':root { --canvas: #000000; }\n');
+    assert.throws(() => syncStoneCss({ check: true, target: drifted }), /out of date/);
+
+    const driftedJoin = path.join(directory, 'join.html');
+    fs.writeFileSync(driftedJoin, '<style>/* brass-tokens:start */\n:root { --canvas: #000000; }\n/* brass-tokens:end */</style>');
+    assert.throws(() => syncStoneCss({ check: true, serverJoinHtml: driftedJoin }), /out of date/);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

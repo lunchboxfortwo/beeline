@@ -214,19 +214,27 @@ export function useChatTurnPresentation([
    * server refuses anyone else, so the two agree on one rule rather than the
    * phone guessing at it. The press is acknowledged on this line immediately
    * (`stoppingTurn`); the cancelled receipt is still what settles the durable
-   * "stopped" line and retires the control.
+   * "stopped" line and retires the control. If a live `turn-delta` is missed
+   * after the server confirms Stop, one bounded Room read reconciles the state
+   * so `· stopping` never stays stuck indefinitely.
    */
   const [stoppingTurn, setStoppingTurn] = useState<{
     agentPubkey: string;
     requestId: string;
+    confirmed: boolean;
   } | null>(null);
 
   const handleStopTurn = useCallback(
     async (stop: { agentPubkey: string; requestId: string }) => {
-      setStoppingTurn(stop);
+      setStoppingTurn({ ...stop, confirmed: false });
       const stopped = await requestAgentTurnStop(decodedId, stop, readRoom);
       if (stopped) {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        setStoppingTurn((current) =>
+          current?.requestId === stop.requestId && current.agentPubkey === stop.agentPubkey
+            ? { ...current, confirmed: true }
+            : current,
+        );
         return true;
       }
       setStoppingTurn((current) =>
@@ -236,19 +244,50 @@ export function useChatTurnPresentation([
       );
       return false;
     },
-    [decodedId],
+    [decodedId, readRoom],
+  );
+
+  const stoppingTurnStillActive = Boolean(
+    stoppingTurn && (
+      (activeAgentTurn &&
+        activeAgentTurn.requestId === stoppingTurn.requestId &&
+        activeAgentTurn.agentPubkey === stoppingTurn.agentPubkey) ||
+      agentTurnMarkers.some(
+        (turn) =>
+          isAgentTurnActive(turn) &&
+          turn.requestId === stoppingTurn.requestId &&
+          turn.agentPubkey === stoppingTurn.agentPubkey,
+      )
+    ),
   );
 
   useEffect(() => {
-    if (!stoppingTurn) return;
-    if (
-      !activeAgentTurn ||
-      activeAgentTurn.requestId !== stoppingTurn.requestId ||
-      activeAgentTurn.agentPubkey !== stoppingTurn.agentPubkey
-    ) {
-      setStoppingTurn(null);
-    }
-  }, [activeAgentTurn, stoppingTurn]);
+    if (!stoppingTurn || stoppingTurnStillActive) return;
+    setStoppingTurn(null);
+  }, [stoppingTurn, stoppingTurnStillActive]);
+
+  useEffect(() => {
+    if (!stoppingTurn?.confirmed || !stoppingTurnStillActive) return;
+    let cancelled = false;
+    const target = { agentPubkey: stoppingTurn.agentPubkey, requestId: stoppingTurn.requestId };
+    const timer = setTimeout(() => {
+      void Promise.resolve()
+        .then(() => readRoom())
+        .catch(() => undefined)
+        .finally(() => {
+          if (cancelled) return;
+          setStoppingTurn((current) =>
+            current?.requestId === target.requestId && current.agentPubkey === target.agentPubkey
+              ? null
+              : current,
+          );
+        });
+    }, 2_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [stoppingTurn, stoppingTurnStillActive, readRoom]);
 
   const stoppingThisTurn = Boolean(
     stoppingTurn &&

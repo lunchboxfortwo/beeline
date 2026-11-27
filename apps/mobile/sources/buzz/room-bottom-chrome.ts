@@ -1,4 +1,4 @@
-import { space } from './groknight';
+import { space } from '@beeline/design-tokens';
 
 /** Shared row geometry also used by desktop; the phone slot alone repositions it. */
 export const TURN_LINE_ROW_MIN_HEIGHT = space.lg;

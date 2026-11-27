@@ -30,6 +30,7 @@ export default defineConfig({
       vitest: resolve('node_modules/vitest'),
       '@beeline/push-gateway/projection': resolve('../push-gateway/src/room-indexer-projection.ts'),
       '@beeline/auth/github': resolve('../auth/src/github.ts'),
+      '@beeline/design-tokens': resolve('../../packages/design-tokens/src/index.ts'),
       '@': resolve('./sources'),
     },
   },

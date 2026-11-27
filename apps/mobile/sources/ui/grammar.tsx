@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, G, Path } from 'react-native-svg';
 import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
-import { QR_INK, QR_PAPER, SCRIM } from '@/buzz/groknight';
+import { QR_INK, QR_PAPER, SCRIM } from '@beeline/design-tokens';
 export { KeyboardBody, OverlaySheet, SheetFrame, SheetRow, SheetScroll, type OverlaySheetProps } from './grammar-overlay';
 
 /**

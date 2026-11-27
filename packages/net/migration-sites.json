@@ -228,14 +228,6 @@
       "phase": "M5"
     },
     {
-      "id": "apps/body/src/recovery-cli.ts::fetch",
-      "file": "apps/body/src/recovery-cli.ts",
-      "kind": "fetch",
-      "count": 1,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
       "id": "apps/body/src/registry-mcp.ts::import:node:net",
       "file": "apps/body/src/registry-mcp.ts",
       "kind": "import:node:net",
@@ -264,14 +256,6 @@
       "file": "apps/body/src/resource-mcp-facade.ts",
       "kind": "fetch-impl",
       "count": 3,
-      "compatibility": "legacy-only",
-      "phase": "M5"
-    },
-    {
-      "id": "apps/body/src/self-update-cli.ts::fetch",
-      "file": "apps/body/src/self-update-cli.ts",
-      "kind": "fetch",
-      "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5"
     },
@@ -1003,7 +987,7 @@
       "count": 1,
       "compatibility": "legacy-only",
       "phase": "M5",
-      "reason": "Moves existing manifest/archive download calls from self-update.ts into the approved update progress and inactivity observer; no additional destination or credential access."
+      "reason": "Shared downloader for Beeline's public npm dist-tags, helper manifests and archives."
     },
     {
       "id": "apps/body/src/grant-runner-server.ts::import:node:http",
