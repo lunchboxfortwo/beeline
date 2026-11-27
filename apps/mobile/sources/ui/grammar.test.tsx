@@ -215,3 +215,27 @@ it('bounds a scrolling sheet below the safe top and keeps its header outside the
         .find((node: any) => node.props.style.some((style: any) => style?.maxHeight !== undefined));
     expect(body.props.style[0].maxHeight).toBe(844 - insets.top - scaled('6', 'medium'));
 });
+
+it('disables native includeFontPadding on T while preserving points() and keeping web DOM styles clean', () => {
+    let nativeTree: any;
+    act(() => { nativeTree = create(<T v="title">release-corner</T>); });
+    const nativeProps = textOf(nativeTree);
+    expect(nativeProps.lineHeight).toBe('31px');
+    expect(nativeProps.style).toEqual({ includeFontPadding: false });
+    act(() => nativeTree.unmount());
+
+    const hadDocument = 'document' in globalThis;
+    const prevDocument = (globalThis as any).document;
+    (globalThis as any).document = {};
+    try {
+        let webTree: any;
+        act(() => { webTree = create(<T v="title">release-corner</T>); });
+        const webProps = textOf(webTree);
+        expect(webProps.lineHeight).toBe('31px');
+        expect(webProps.style).toBeUndefined();
+        act(() => webTree.unmount());
+    } finally {
+        if (hadDocument) (globalThis as any).document = prevDocument;
+        else delete (globalThis as any).document;
+    }
+});

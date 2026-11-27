@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkBoardView } from '@beeline/api-contract/phone';
 
 vi.mock('react-native', () => ({
+  AccessibilityInfo: { announceForAccessibility: vi.fn() },
   Platform: { OS: 'ios', select: (choices: any) => choices.ios ?? choices.default },
   useWindowDimensions: () => ({ height: 844, width: 390 }),
 }));
@@ -25,6 +26,10 @@ vi.mock('@/ui/screens/tags/WorkItemDetail', () => ({
 }));
 vi.mock('@/components/buzz/CodeBlock', () => ({ CodeBlock: () => null }));
 vi.mock('@/buzz/message-link', () => ({ messageLinkId: () => undefined, openMessageLink: vi.fn() }));
+vi.mock('@/buzz/room-corner-store', () => ({ findRoomCornerRow: () => undefined, useRoomCornerRecord: () => null }));
+vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: vi.fn() }));
+vi.mock('@/buzz/use-observed-resource', () => ({ useObservedResource: () => ({ data: null }), observeRoomResource: () => undefined }));
+vi.mock('@/buzz/use-room-workflow-run', () => ({ useRoomWorkflowRun: () => ({ workflow: undefined }) }));
 vi.mock('@/utils/open-external-url', () => ({ openExternalUrl: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('@/utils/responsive', () => ({ useIsDesktop: () => false }));
 
@@ -38,6 +43,11 @@ import { ChoiceOption } from '@/ui/screens/transcript/cards/ChoiceOption';
 import { TranscriptCardChoicePlate } from './ChoicePlate';
 import { MonoMarkdown } from './MonoMarkdown';
 import { WorkBoard } from '@/ui/screens/tags/WorkBoard';
+import { RequestFrame, SettledLine } from '@/ui/screens/transcript/cards/RequestCard';
+import { WorkflowRunCardView } from '@/ui/screens/transcript/cards/WorkflowRunCard';
+import { WorkflowRunLine } from './WorkflowRunLine';
+import { AgentUsage } from '@/ui/screens/profiles/AgentUsage';
+import type { WorkflowRunDetailView } from '@beeline/api-contract/phone';
 
 const SIZES: TextSize[] = ['small', 'medium', 'large'];
 
@@ -327,6 +337,135 @@ describe('UI vertical alignment sweep', () => {
       expect(head.props.paddingVertical).toBe('0');
       expect(head.props.paddingTop).toBeUndefined();
       expect(head.props.paddingBottom).toBeUndefined();
+    } finally {
+      act(() => tree.unmount());
+    }
+  });
+
+  it.each(SIZES)('anchors RequestFrame @ and SettledLine mark to line 1 at %s text size', (size) => {
+    const bodyLine = typeStyle('body', size).lineHeight;
+    const metaLine = typeStyle('meta', size).lineHeight;
+    const tree = renderAt(
+      size,
+      <RequestFrame ask="Approve running the host emulator?" testID="req-frame">
+        <SettledLine testID="req-settled">Approved once by lunchboxfortwo</SettledLine>
+      </RequestFrame>,
+    );
+    try {
+      expect(tree.root.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
+      const atBox = tree.root.find((n: any) => n.type === 'YStack' && n.props.height === bodyLine && n.props.justifyContent === 'center');
+      expect(atBox.findAll((n: any) => n.type === 'Icon.AtSign')).toHaveLength(1);
+      const settledRow = tree.root.find((n: any) => n.type === 'XStack' && n.props.alignItems === 'flex-start' && n.findAll((c: any) => c.props?.testID === 'req-settled').length > 0);
+      const settledBox = settledRow.find((n: any) => n.type === 'YStack' && n.props.height === metaLine && n.props.justifyContent === 'center');
+      expect(settledBox).toBeDefined();
+    } finally {
+      act(() => tree.unmount());
+    }
+  });
+
+  it.each(SIZES)('centers WorkflowRunCard header, trailing mark, and continuous rail across %s text size', (size) => {
+    const headingLine = typeStyle('heading', size).lineHeight;
+    const metaLine = typeStyle('meta', size).lineHeight;
+    const stepSlot = Math.max(20, metaLine);
+    const actor = { id: 'c', kind: 'agent', name: 'Crayon', handle: 'crayon' } as const;
+    const detail = {
+      run: { runId: 'r1', workflowSlug: 'verify_alignment', description: '', roomId: 'room', roomName: 'beeline', state: 'review', status: 'live', viewerHolds: false, holder: actor, startedAt: 1, updatedAt: 2, startedBy: actor },
+      contract: { handoffs: { build: { kind: 'handoff', role: 'fixer', does: 'Build', on: { done: 'review' } }, review: { kind: 'handoff', role: 'reviewer', does: 'Review', on: { done: 'done' } }, done: { kind: 'terminal', status: 'done' } } },
+      history: [
+        { toState: 'build', at: 1, actor, displayStatus: 'done' },
+        { fromState: 'build', outcome: 'done', toState: 'review', at: 2, actor, displayStatus: 'current', liveOutput: 'Checking.' },
+      ],
+      roleHolders: { fixer: actor, reviewer: actor },
+    } as unknown as WorkflowRunDetailView;
+
+    const card = renderAt(size, <WorkflowRunCardView detail={detail} />);
+    try {
+      expect(card.root.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
+      const headSlots = card.root.findAll((n: any) => n.type === 'YStack' && n.props.height === headingLine && n.props.justifyContent === 'center');
+      expect(headSlots).toHaveLength(2);
+      const stepInset = Math.max(0, (stepSlot - metaLine) / 2);
+      if (stepInset > 0) {
+        expect(card.root.findAll((n: any) => n.type === 'YStack' && n.props.height === stepInset)).toHaveLength(3);
+      }
+      if (metaLine > 20) {
+        const topConnectors = card.root.findAll((n: any) => n.type === 'YStack' && n.props.width === 2 && n.props.height === (stepSlot - 20) / 2);
+        expect(topConnectors).toHaveLength(3);
+      }
+    } finally {
+      act(() => card.unmount());
+    }
+
+    const bodyLine = typeStyle('body', size).lineHeight;
+    const line = renderAt(size, <WorkflowRunLine detail={detail} now={10_000} onOpenCorner={vi.fn()} />);
+    try {
+      const doneStep = line.root.find((n: any) => n.type === 'YStack' && n.props.testID === 'workflow-run-line-step-build');
+      const expectedDoneTop = 8 + (Math.max(20, bodyLine) - 20) / 2;
+      const doneBelow = doneStep.find((n: any) => n.props?.testID === 'workflow-run-line-step-build-below-brass');
+      expect(doneBelow.props.top).toBe(expectedDoneTop + 20);
+      const curStep = line.root.find((n: any) => n.type === 'YStack' && n.props.testID === 'workflow-run-line-step-review');
+      const expectedCurTop = 8 + (Math.max(20, headingLine) - 20) / 2;
+      const curAbove = curStep.find((n: any) => n.props?.testID === 'workflow-run-line-step-review-above-brass');
+      expect(curAbove.props.height).toBe(expectedCurTop);
+    } finally {
+      act(() => line.unmount());
+    }
+  });
+
+  it.each(SIZES)('pins AgentUsage refresh button and spinner to line 1 while preserving 44pt target at %s text size', (size) => {
+    const bodyLine = typeStyle('body', size).lineHeight;
+    const onRefresh = vi.fn(() => new Promise(() => {}));
+    const tree = renderAt(
+      size,
+      <AgentUsage
+        usage={{ updatedAt: 1_700_000_000, machine: 'squire', windows: [{ label: '5h', usedPercent: 20 }] } as any}
+        harness="claude"
+        onRefresh={onRefresh}
+      />,
+    );
+    try {
+      const btn = tree.root.find((n: any) => n.type === 'Button' && n.props.testID === 'agent-usage-refresh');
+      expect(btn.props.minWidth).toBe(HEIGHT.control);
+      expect(btn.props.minHeight).toBe(HEIGHT.control);
+      expect(btn.props.alignItems).toBe('flex-start');
+      const slot = btn.find((n: any) => n.type === 'YStack' && n.props.height === bodyLine && n.props.justifyContent === 'center');
+      expect(slot.findAll((n: any) => n.type === 'Icon.RefreshCw')).toHaveLength(1);
+      act(() => btn.props.onPress());
+      const spin = tree.root.find((n: any) => n.props?.testID === 'agent-usage-refreshing');
+      expect(spin.parent.props).toMatchObject({ width: HEIGHT.control, height: bodyLine, alignItems: 'center', justifyContent: 'center' });
+    } finally {
+      act(() => tree.unmount());
+    }
+  });
+
+  it.each(SIZES)('applies first-line inset to wrapped and subline TranscriptCard titles with a 28pt identity mark at %s text size', (size) => {
+    const headingLine = typeStyle('heading', size).lineHeight;
+    const expectedSlot = Math.max(28, headingLine);
+    const expectedInset = (expectedSlot - headingLine) / 2;
+    const tree = renderAt(
+      size,
+      <TranscriptCard
+        tier="record"
+        title="GitHub · Release checks for a wrapped multi-line heading"
+        wrapTitle
+        subline="v0.1.249-rc.3 · 3 legs passed"
+        alignSublineWithTitle
+        stamp="22:09"
+        identity={<T v="metaStrong">G</T>}
+        onHeaderPress={vi.fn()}
+        onDismiss={vi.fn()}
+        headerTestID="id-header"
+        testID="id-card"
+      />,
+    );
+    try {
+      const header = tree.root.find((n: any) => n.type === 'ListItem' && n.props.testID === 'id-header');
+      const slotBoxes = header.findAll((n: any) => n.type === 'YStack' && n.props.height === expectedSlot && n.props.justifyContent === 'center');
+      // identity, stamp, chevron, dismiss glyph
+      expect(slotBoxes).toHaveLength(4);
+      const inset = header.find((n: any) => n.type === 'YStack' && n.props.testID === 'id-card-title-inset');
+      expect(inset.props.height).toBe(expectedInset);
+      const titleNode = header.find((n: any) => n.type === 'Text' && n.props.testID === 'id-card-title');
+      expect(titleNode.props.numberOfLines).toBeUndefined();
     } finally {
       act(() => tree.unmount());
     }

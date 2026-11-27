@@ -49,7 +49,7 @@ function ThreadName({ title, v, regular = false, testID, trail }: {
             ))}
             <XStack maxWidth="100%" minWidth={0} alignItems="flex-end">
                 <T v={v} regular={regular} color="ink" minWidth={0} flexShrink={1}>{last}</T>
-                {trail ? <YStack flexShrink={0} height={line} marginLeft="2" alignItems="center" justifyContent="center" testID={testID ? `${testID}-state` : undefined}>{trail}</YStack> : null}
+                {trail ? <YStack flexShrink={0} height={line} paddingTop={v === 'title' ? '0.5' : undefined} marginLeft="2" alignItems="center" justifyContent="center" testID={testID ? `${testID}-state` : undefined}>{trail}</YStack> : null}
             </XStack>
         </XStack>
     );
@@ -92,7 +92,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                 </ListItem>
                             ) : null}
                             {collapsed && !expanded ? (
-                                <ListItem padding="0" minHeight={0} gap="2" alignItems="center"
+                                <ListItem padding="0" minHeight={0} gap="2" alignItems="flex-start"
                                     backgroundColor="transparent" justifyContent="flex-start" onPress={expand}
                                     aria-label={h.title} accessibilityRole={expand ? 'button' : 'text'} testID="thread-bar-title">
                                     <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-bar-arrow-box"><Glyph icon={CornerDownRight} size={16} /></YStack>
@@ -126,10 +126,14 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
         <YStack ref={blockRef as never} onLayout={onBlockLayout} width="100%" maxWidth={720} alignSelf="center"
             paddingHorizontal={inset ? "4" : "0"} paddingTop={inset ? "4" : "0"} paddingBottom="3" gap="2" borderBottomWidth={1} borderColor="stroke"
             testID="thread-title-block">
-            <XStack gap="2" alignItems="center" testID="thread-title-row">
-                <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
+            <XStack gap="2" alignItems="flex-start" testID="thread-title-row">
+                <YStack height={lineHeight} paddingTop="0.5" alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
                 <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={headerMark(h)?.state !== 'needs-you'} testID="thread-title" trail={<HeaderMark h={h} />} /></YStack>
-                {h.workItem ? <Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={26} hitSlop={10} onPress={() => setAssigneeOpen(!assigneeOpen)}>{h.workItem.assignee ? <WorkAvatar person={h.workItem.assignee} size={26} /> : <Glyph icon={Users} />}</Btn> : null}
+                {h.workItem ? (
+                    <YStack height={Math.max(26, lineHeight)} justifyContent="center" testID="thread-assignee-box">
+                        <Btn kind="quiet" label="Change assignee" paddingHorizontal="0" minHeight={0} height={26} hitSlop={10} onPress={() => setAssigneeOpen(!assigneeOpen)}>{h.workItem.assignee ? <WorkAvatar person={h.workItem.assignee} size={26} /> : <Glyph icon={Users} />}</Btn>
+                    </YStack>
+                ) : null}
             </XStack>
             {h.workItem && assigneeOpen ? <WorkAssigneePicker people={h.people ?? []} onPick={person => {
                 setAssigneeOpen(false);

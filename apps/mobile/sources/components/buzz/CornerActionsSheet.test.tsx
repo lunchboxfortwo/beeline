@@ -10,6 +10,8 @@ vi.mock('tamagui', () => ({
 vi.mock('lucide-react-native', () => ({ Archive: 'Archive', Lock: 'Lock' }));
 vi.mock('@/ui/grammar', () => ({
   Btn: 'Btn', Copy: 'Copy', Glyph: 'Glyph', T: 'T', HEIGHT: { primary: 48, sheetRow: 56 },
+  useTextSize: () => 'medium',
+  typeStyle: (v: string) => ({ lineHeight: v === 'heading' ? 23 : 23 }),
   SheetFrame: (props: any) => (props.open ? React.createElement('SheetFrame', props, props.children) : null),
 }));
 import { CornerActionsSheet } from './CornerActionsSheet';
@@ -77,5 +79,20 @@ it('offers unlock and Close on a locked thread only to a Workspace owner or admi
   await flush();
   expect(manager.setLocked).toHaveBeenCalledWith(false);
   expect(closeRows(tree)).toHaveLength(1);
+  act(() => tree.unmount());
+});
+
+it('aligns Lock and Close row icons and switch to computed line-1 slots without paddingTop hacks', () => {
+  let tree: any;
+  act(() => { tree = create(<CornerActionsSheet {...props()} />); });
+  const lockRow = byTestID(tree, 'lock-corner-action');
+  const closeRow = byTestID(tree, 'close-corner-action');
+  expect(lockRow.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
+  expect(closeRow.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
+  const lockSlots = lockRow.findAll((n: any) => n.type === 'YStack' && n.props.height === 28 && n.props.justifyContent === 'center');
+  expect(lockSlots).toHaveLength(2);
+  expect(lockRow.findAll((n: any) => n.type === 'YStack' && n.props.height === 2.5)).toHaveLength(1);
+  const closeSlots = closeRow.findAll((n: any) => n.type === 'YStack' && n.props.height === 23 && n.props.justifyContent === 'center');
+  expect(closeSlots).toHaveLength(1);
   act(() => tree.unmount());
 });

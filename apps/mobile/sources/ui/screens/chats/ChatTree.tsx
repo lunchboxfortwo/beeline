@@ -110,12 +110,13 @@ function ThreadLine({
   const title = threadTitle(item, corner);
   const { state, idle } = threadWorkMark(corner);
   const step = useStep();
+  const metaLine = typeStyle('meta', useTextSize()).lineHeight;
+  const markSlot = Math.max(STATE_MARK, metaLine);
   return (
     <ListItem
       minHeight={HEIGHT.control}
       padding="0"
       paddingVertical={step('2')}
-      gap={layout === 'C' ? '3' : step('3')}
       alignItems="center"
       justifyContent="flex-start"
       backgroundColor="transparent"
@@ -125,21 +126,24 @@ function ThreadLine({
       accessibilityRole="button"
       testID={`thread-row-${corner.id}`}
     >
-      <XStack width={layout === 'C' ? 40 : undefined} flexShrink={0}><Glyph icon={CornerDownRight} size={16} /></XStack>
-      <YStack flex={1} minWidth={0} gap="1">
-      <T
-        v={state === 'needs-you' ? 'metaStrong' : 'meta'}
-        color={state === 'needs-you' ? 'ink' : 'secondary'}
-        flex={1}
-        numberOfLines={1}
-      >
-        {title}
-      </T>
-        {corner.workingAgentName ? <T v="meta" color="secondary">{word}</T> : null}
-      </YStack>
-      <YStack width={STATE_MARK} height={STATE_MARK} flexShrink={0} alignItems="center" justifyContent="center">
-        <WorkStateMark state={state} idle={idle} />
-      </YStack>
+      <XStack flex={1} minWidth={0} gap={layout === 'C' ? '3' : step('3')} alignItems="flex-start">
+        <XStack width={layout === 'C' ? 40 : undefined} height={markSlot} flexShrink={0} alignItems="center">
+          <Glyph icon={CornerDownRight} size={16} />
+        </XStack>
+        <YStack flex={1} minWidth={0} gap="1">
+          <T
+            v={state === 'needs-you' ? 'metaStrong' : 'meta'}
+            color={state === 'needs-you' ? 'ink' : 'secondary'}
+            numberOfLines={1}
+          >
+            {title}
+          </T>
+          {corner.workingAgentName ? <T v="meta" color="secondary">{word}</T> : null}
+        </YStack>
+        <YStack width={STATE_MARK} height={markSlot} flexShrink={0} alignItems="center" justifyContent="center">
+          <WorkStateMark state={state} idle={idle} />
+        </YStack>
+      </XStack>
     </ListItem>
   );
 }

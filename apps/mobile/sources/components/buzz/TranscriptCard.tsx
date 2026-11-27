@@ -147,12 +147,17 @@ export function TranscriptCard({
     .filter((action) => action.accessibilityRole !== 'link')
     .sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary)));
   const headingLine = typeStyle('heading', useTextSize()).lineHeight;
+  const headSlot = identity ? Math.max(28, headingLine) : headingLine;
+  const headInset = Math.max(0, (headSlot - headingLine) / 2);
   const multiLineHead = Boolean(subline) || wrapTitle;
   const titleTestID = testID ? `${testID}-title` : undefined;
   const titleLine = (
     <XStack gap="2" alignItems={alignSublineWithTitle || wrapTitle ? 'flex-start' : 'center'}>
-      {identity ? <YStack>{identity}</YStack> : null}
+      {identity ? <YStack height={headSlot} justifyContent="center">{identity}</YStack> : null}
       <YStack flex={1} minWidth={0}>
+        {headInset > 0 && (alignSublineWithTitle || wrapTitle) ? (
+          <YStack height={headInset} testID={testID ? `${testID}-title-inset` : undefined} />
+        ) : null}
         <T v="heading" numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
         {alignSublineWithTitle && subline ? (
           <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
@@ -168,9 +173,9 @@ export function TranscriptCard({
           <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
         ) : null}
       </YStack>
-      {stamp ? <YStack height={headingLine} justifyContent="center"><T v="meta" color="secondary">{stamp}</T></YStack> : null}
+      {stamp ? <YStack height={headSlot} justifyContent="center"><T v="meta" color="secondary">{stamp}</T></YStack> : null}
       {onHeaderPress ? (
-        <YStack height={headingLine} justifyContent="center">
+        <YStack height={headSlot} justifyContent="center">
           <Glyph icon={headerExpanded ? ChevronDown : ChevronRight} size={16} />
         </YStack>
       ) : null}
@@ -184,7 +189,7 @@ export function TranscriptCard({
           testID={testID ? `${testID}-dismiss` : undefined}
         >
           {multiLineHead ? (
-            <YStack height={headingLine} justifyContent="center">
+            <YStack height={headSlot} justifyContent="center">
               <Glyph icon={X} size={16} />
             </YStack>
           ) : (
