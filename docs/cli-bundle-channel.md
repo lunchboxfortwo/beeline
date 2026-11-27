@@ -6,35 +6,32 @@
 > before the first release using this workflow. The marketing site stays on
 > GitHub Pages; helper publication does not deploy Pages.
 
-Helpers boot a verified staged release or the verified active release from local disk, then check for the newest release on a pushed release notice and once after socket registration from `https://usebeeline.app/dl/manifest.json`.
-The manifest, relative platform archives and `.sha256` paths remain unchanged,
-including `/dl/next/manifest.json`. The installer at `/install` and `/install.sh`
-still fetches `/dl/beeline-bootstrap.mjs` and its checksum through the same route.
-The recovery bootstrap migrates old installations forward to one native supervised helper.
+Helpers boot a verified staged or active release from local disk. On a pushed
+release notice and once after socket registration, they read the `usebeeline`
+npm dist-tags and download the selected version's manifest from
+`https://downloads.usebeeline.app/dl/releases/<version>/manifest.json`. They
+check the manifest's version and verify the archive against its SHA-256 before
+staging the update. The shell installer fetches `/dl/beeline-bootstrap.mjs`
+and its checksum through the stable download route.
 
 ## Following next
 
-User helpers follow latest at `/dl/manifest.json`. Set
+User helpers follow npm's `latest` dist-tag by default. Set
 `BEELINE_RELEASE_CHANNEL=next` in the native helper service environment to
-follow `/dl/next/manifest.json`. `BEELINE_UPDATE_MANIFEST_URL` remains the
-highest-priority override. For the squire host's first transition, firstmate
-should set **both**:
+follow npm's `next` dist-tag:
 
 ```ini
 BEELINE_RELEASE_CHANNEL=next
-BEELINE_UPDATE_MANIFEST_URL=https://usebeeline.app/dl/next/manifest.json
 ```
 
-The URL override also works in the currently installed older helper, before
-it has the channel selector. Apply those variables to the squire's existing
-native service configuration and its recovery/update shell; changing a shell
-alone does not change an already running service. Firstmate applies this host
-configuration after merge; this PR does not touch the host. Removing both
-settings returns to latest on the next ordinary update reconciliation.
+`BEELINE_UPDATE_MANIFEST_URL` and `update --manifest-url` allow explicit
+manifest selection. Remove a previously configured `BEELINE_UPDATE_MANIFEST_URL`
+to start following npm. Run `BEELINE_RELEASE_CHANNEL=latest beeline update`
+to replace a saved `next` preference with `latest`.
 
 Next publishes verified rc bundles to R2 under `dl/next/` and an immutable
-`dl/releases/<rc>/` prefix. Latest promotion points `/dl/manifest.json` and
-its companion downloads at that same immutable prefix. Both channels serve
+`dl/releases/<rc>/` prefix. Latest promotion changes npm's `latest` dist-tag
+to select that same immutable prefix. Both channels serve
 the original rc version, for example `v0.1.184-rc.3`.
 The next and pre-rollout latest rolling GitHub prereleases retain their
 secondary copies. The public download route is independent of the website.
@@ -67,7 +64,8 @@ has no Pages permission, environment, artifact upload or deployment wait.
 Publication uploads every archive, checksum, recovery bootstrap, Mac build input
 and manifest to the `beeline-downloads` R2 bucket under `dl/next/` and the
 immutable rc prefix, using the same client and Cloudflare credentials as desktop
-publication. Promotion updates the stable download pointer only. The Worker streams `https://downloads.usebeeline.app/dl/...`
+publication. Promotion updates the pointer used by the legacy helper and
+desktop download URLs. The Worker streams `https://downloads.usebeeline.app/dl/...`
 without credentials and bypasses caches for these mutable channel URLs.
 The rolling `helper-update-channel` and `helper-update-channel-next` GitHub
 prereleases retain secondary copies for authenticated build carry/downloads;
@@ -273,7 +271,7 @@ Paths and commands below are relative to the repository root. Read these invaria
 - **Update restarts are silent and exit directly.** `runMachineHelper` closes the machine link with `HELPER_UPDATE_CLOSE_CODE`/`HELPER_UPDATE_CLOSE_REASON`, then exits synchronously without awaiting agent teardown; `DaemonAgentSession` releases presence without an offline notice only for that signal. Unexpected loss still notices the owner (`machine-offline.test.ts`, `daemon-live.test.ts`, `machine-update-handoff.test.ts`). Release delivery wakes helpers (`release-notify.ts`); reporting-agent notices follow the [feedback loop](feedback-loop.md#agent-reports-told-when-the-fix-ships).
 - **Linux handovers use a fixed one-second native restart delay.** `native-helper.ts` renders no escalating restart steps. The running helper refreshes the installed unit with `daemon-reload`, without restarting the service. `recovery.startup.test.ts` proves verified staged/active boot makes no publication request; `systemd.test.ts` covers unit convergence.
 - **Release notices use the shared update transaction.** `ReleaseNotifier` pushes published helper releases; `MachineLink` reconciles the manifest once after first registration, with no periodic check. See [recovery and update completion](#recovery-and-the-first-update-from-an-old-release) for preparation, handoff and failure behavior. Regression coverage: `managed-update.startup.test.ts`, `machine-update-handoff.test.ts`, `agent-runtime.startup.test.ts`.
-- `unified-release.yml` builds Linux and Mac bundles in parallel; `.github/actions/daemon-leg/` collects and promotes their verified outputs; `launchd.ts` supervises macOS (no bwrap). `https://usebeeline.app/dl/manifest.json` stays pinned; runbook `docs/cli-bundle-channel.md`.
+- `unified-release.yml` builds Linux and Mac bundles in parallel; `.github/actions/daemon-leg/` collects and promotes their verified outputs; `launchd.ts` supervises macOS (no bwrap). The helper follows the npm dist-tag for its update channel.
 
 ### Installed bundle retention
 

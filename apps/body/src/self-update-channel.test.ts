@@ -1,22 +1,76 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ReleaseTransaction } from './managed-update.js';
-import { DEFAULT_UPDATE_MANIFEST_URL, resolveManifestUrl } from './self-update-manifest.js';
+import { readPublishedBundle } from './self-update-manifest.js';
+
+const distTagsUrl = 'https://registry.npmjs.org/-/package/usebeeline/dist-tags';
+const platform = 'linux-x64';
+const bundle = { file: 'beeline-linux-x64.tar.gz', sha256: 'a'.repeat(64) };
 
 describe('helper release channels', () => {
-  it('keeps ordinary helpers and recovery on latest by default', () => {
-    expect(resolveManifestUrl({})).toBe(DEFAULT_UPDATE_MANIFEST_URL);
-    expect(resolveManifestUrl({ BEELINE_RELEASE_CHANNEL: 'latest' })).toBe(DEFAULT_UPDATE_MANIFEST_URL);
-    expect(resolveManifestUrl({ BEELINE_RELEASE_CHANNEL: '  ' })).toBe(DEFAULT_UPDATE_MANIFEST_URL);
+  it.each([
+    [undefined, 'v0.1.248-rc.2'],
+    ['latest', 'v0.1.248-rc.2'],
+    [' next ', 'v0.1.249-rc.1'],
+  ])('resolves channel %s to the exact npm version %s', async (channel, version) => {
+    const url = `https://downloads.usebeeline.app/dl/releases/${version}/manifest.json`;
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json({ latest: '0.1.248-rc.2', next: '0.1.249-rc.1' }))
+      .mockResolvedValueOnce(Response.json({ version, bundles: { [platform]: bundle } }));
+    await expect(readPublishedBundle(platform, {
+      fetchImpl, env: { BEELINE_RELEASE_CHANNEL: channel },
+    })).resolves.toEqual({ url, bundle: { ...bundle, version } });
+    expect(fetchImpl.mock.calls.map(([request]) => request)).toEqual([distTagsUrl, url]);
   });
-  it('lets the squire opt into next', () => {
-    expect(resolveManifestUrl({ BEELINE_RELEASE_CHANNEL: ' next ' }))
-      .toBe('https://usebeeline.app/dl/next/manifest.json');
+
+  it('only fetches the explicit manifest override', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(Response.json({ bundles: { [platform]: bundle } }));
+    const url = 'https://lab.test/manifest.json';
+    await expect(readPublishedBundle(platform, {
+      fetchImpl, env: { BEELINE_RELEASE_CHANNEL: 'next', BEELINE_UPDATE_MANIFEST_URL: ` ${url} ` },
+    })).resolves.toEqual({ url, bundle });
+    expect(fetchImpl.mock.calls.map(([request]) => request)).toEqual([url]);
   });
-  it('preserves explicit manifest overrides and rejects typos', () => {
-    expect(resolveManifestUrl({ BEELINE_RELEASE_CHANNEL: 'next', BEELINE_UPDATE_MANIFEST_URL: ' https://lab.test/manifest.json ' }))
-      .toBe('https://lab.test/manifest.json');
-    expect(() => resolveManifestUrl({ BEELINE_RELEASE_CHANNEL: 'nightly' })).toThrow('invalid helper release channel');
-    expect(() => resolveManifestUrl({ BEELINE_RELEASE_CHANNEL: 'nxet' })).toThrow('invalid helper release channel');
+
+  it('rejects an unknown channel before fetching', async () => {
+    const fetchImpl = vi.fn();
+    await expect(readPublishedBundle(platform, {
+      fetchImpl, env: { BEELINE_RELEASE_CHANNEL: 'nxet' },
+    })).rejects.toThrow('invalid helper release channel');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, '../0.1.248', 'latest'])('rejects invalid registry tag target %s', async (next) => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(Response.json({ latest: '0.1.248-rc.2', next }));
+    await expect(readPublishedBundle(platform, {
+      fetchImpl, env: { BEELINE_RELEASE_CHANNEL: 'next' },
+    })).rejects.toThrow('no valid helper version');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a manifest with a different release version', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json({ latest: '0.1.248-rc.2' }))
+      .mockResolvedValueOnce(Response.json({ version: 'v0.1.247', bundles: { [platform]: bundle } }));
+    await expect(readPublishedBundle(platform, { fetchImpl, env: {} })).rejects.toThrow('does not match npm version');
+  });
+
+  it('preserves the build identity of a Mac bundle carried into the selected release', async () => {
+    const carriedBundle = {
+      file: 'beeline-darwin-arm64.tar.gz',
+      version: 'v0.1.247-rc.1',
+      commit: 'b'.repeat(40),
+      sha256: bundle.sha256,
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json({ latest: '0.1.248-rc.2' }))
+      .mockResolvedValueOnce(Response.json({
+        version: 'v0.1.248-rc.2',
+        bundles: { 'darwin-arm64': { ...carriedBundle, carriedFrom: carriedBundle } },
+      }));
+    await expect(readPublishedBundle('darwin-arm64', { fetchImpl, env: {} })).resolves.toEqual({
+      url: 'https://downloads.usebeeline.app/dl/releases/v0.1.248-rc.2/manifest.json',
+      bundle: carriedBundle,
+    });
   });
 });
 

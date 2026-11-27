@@ -5,12 +5,12 @@ import { ask } from './wait.js';
 export async function downloadBytes(
   url: string,
   fetchImpl: typeof fetch = fetch,
-  options: { report?: (line: string) => void } = {},
+  options: { report?: (line: string) => void; request?: RequestInit } = {},
 ): Promise<Uint8Array> {
   const report = options.report ?? progress;
   let step = `network DNS/connect/headers ${url}`;
   try {
-    const response = await ask({ url, fetch: fetchImpl });
+    const response = await ask({ url, fetch: fetchImpl }, options.request);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (!response.body) throw new Error('missing response body');
     step = `network body ${url} (0 bytes)`;

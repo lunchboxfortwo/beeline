@@ -287,10 +287,11 @@ rc prefix in R2 and the rc GitHub release. The updater checks R2 first and
 GitHub second, and manifest payload URLs use the immutable R2 prefix.
 
 Next publishes helper bytes under `dl/next/` and `dl/releases/<rc>/`, with
-the manifest last. Latest writes one small R2 pointer for the stable helper
-and desktop download routes. The Worker resolves the stable paths to their
-staged rc prefixes. GitHub rolling helper releases retain the next backup
-and the pre-rollout latest backup.
+the manifest last. Helpers select the staged version through the npm dist-tag
+for their channel. Latest also writes one small R2 pointer for the legacy helper
+and desktop download routes. The Worker resolves those paths to their staged
+rc prefixes. GitHub rolling helper releases retain the next backup and the
+pre-rollout latest backup.
 
 Provide `CLOUDFLARE_R2_TOKEN` (a Cloudflare API bearer token with R2 object
 write authority) and `CLOUDFLARE_ACCOUNT_ID` in the private local release env
@@ -441,7 +442,7 @@ release starts the following patch at `rc.1`.
 | Server | Deploy the shared server with compatibility for the previous app | Keep the already deployed server |
 | Phone OTA | Publish the candidate groups on a release branch and point `next` at it | Republish those exact groups on a production release branch and move `production` to it |
 | Store binaries | Explicit `store_track=beta` can build Android | Store submissions are independent of promotion |
-| Helpers | Publish verified rc bundles and point `/dl/next` at them | Move the stable download pointer to that rc |
+| Helpers | Stage verified rc bundles before publishing the npm package | Select those bundles through npm's `latest` dist-tag |
 | Desktop | Stage signed downloads in R2 and on the rc release | Move the stable download pointer to that rc |
 | Website | Stage the Pages manifest and EAS Hosting preview | Publish the recorded asset manifest and move the EAS production alias |
 | npm and GitHub | Publish the npm package with `--tag next` and mark the GitHub release a prerelease | Move npm's `latest` dist-tag, then mark the same GitHub release latest |
@@ -603,16 +604,15 @@ release. The final job records the helper version and publishes the GitHub
 release even while npm is processing the package; npm makes that same version
 installable when processing finishes, with no release rerun required.
 
-Installed helpers use the verified bundles published earlier by the daemon
-promotion step to `https://usebeeline.app/dl/manifest.json` (latest) or
-`https://usebeeline.app/dl/next/manifest.json` (next), independently of npm. The
-final release notification verifies that the live download manifest matches the
-release version and source commit, then wakes connected helpers even if another
-component or release bookkeeping failed. A no-op release sends no notice.
-Notification failure never changes the authoritative release outcome; their first socket
-registration also checks this channel. Downloads and activation follow the
-[helper update channel](cli-bundle-channel.md), so npm processing does not delay
-fleet updates.
+Installed helpers read the npm dist-tag for their channel, then fetch the
+verified bundle for that exact version. Helpers can discover the new version
+as soon as npm serves the updated tag. The final next release notification
+verifies that the live download manifest matches the release version and source
+commit, then wakes connected helpers even if another component or release
+bookkeeping failed. A no-op release sends no notice. Notification failure never
+changes the authoritative release outcome. Helpers also check on first socket
+registration. Downloads and activation follow the
+[helper update channel](cli-bundle-channel.md).
 
 The initializer compares the pinned release SHA with every component's own source
 SHA in the newest published GitHub Release's `release.json` (see *Release

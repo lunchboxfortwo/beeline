@@ -6,7 +6,7 @@ import {
   resolveBundleEntrypoint,
 } from './self-update.js';
 import { resolve } from 'node:path';
-import { resolveManifestUrl, parseUpdateManifest } from './self-update-manifest.js';
+import { readPublishedBundle } from './self-update-manifest.js';
 import { prepareMachineRelease } from './recovery.js';
 import { withInstallLock } from './managed-update.js';
 import type { AgentAccessPolicy } from './access-policy.js';
@@ -731,17 +731,10 @@ export async function installCurrentRelease(
     step?.signal.throwIfAborted();
     return { binary, version };
   }
-  const manifestUrl = resolveManifestUrl(process.env);
-  const response = await ask(
-    { url: manifestUrl, fetch: fetchImpl },
-    step ? { signal: step.signal } : undefined,
-  );
-  if (!response.ok)
-    throw new Error(`fetching the Beeline release manifest failed: HTTP ${response.status}`);
-  const published = parseUpdateManifest(await response.text(), hostPlatformKey()).bundle;
+  const manifest = await readPublishedBundle(hostPlatformKey(), { fetchImpl, signal: step?.signal });
   step?.signal.throwIfAborted();
   const { releaseId } = await prepareMachineRelease(layout, {
-    manifest: { url: manifestUrl, bundle: published },
+    manifest,
     fetchImpl,
     logger: step?.say ?? (() => {}),
     ...(step ? { signal: step.signal } : {}),
@@ -753,7 +746,7 @@ export async function installCurrentRelease(
   });
   return {
     binary,
-    version: published.version ?? releaseId,
+    version: manifest.bundle.version ?? releaseId,
   };
 }
 

@@ -7,7 +7,6 @@ import { runUpdateCommand } from './self-update-cli.js';
 import { convergeMachine, prepareMachineRelease } from './recovery.js';
 import { convergeDependencies } from './recovery-dependencies.js';
 import { anchorLayout, prepareLatestRelease } from './self-update.js';
-import { DEFAULT_UPDATE_MANIFEST_URL } from './self-update-manifest.js';
 vi.mock('./recovery.js', () => ({ prepareMachineRelease: vi.fn(), convergeMachine: vi.fn() }));
 vi.mock('./recovery-dependencies.js', () => ({ convergeDependencies: vi.fn(async () => {}) }));
 vi.mock('./helper-status.js', () => ({ helperStatusLines: vi.fn(async () => ['not running']) }));
@@ -81,23 +80,27 @@ it('keeps the chosen channel across background checks and shows it in status', a
     agents: {},
   });
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const expectBackgroundManifest = async (env: NodeJS.ProcessEnv, url: string) => {
-    const fetchImpl = vi.fn().mockRejectedValue(new Error('fixture stops after manifest selection'));
+  const expectBackgroundManifest = async (env: NodeJS.ProcessEnv, version: string) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json({ latest: '1.2.3-rc.1', next: '1.2.4-rc.1' }))
+      .mockRejectedValueOnce(new Error('fixture stops after manifest selection'));
     await expect(prepareLatestRelease(layout, { env, fetchImpl })).rejects.toThrow('fixture stops');
-    expect(fetchImpl).toHaveBeenCalledWith(url, expect.anything());
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      'https://registry.npmjs.org/-/package/usebeeline/dist-tags',
+      `https://downloads.usebeeline.app/dl/releases/${version}/manifest.json`,
+    ]);
   };
   try {
-    await expectBackgroundManifest({}, DEFAULT_UPDATE_MANIFEST_URL);
+    await expectBackgroundManifest({}, 'v1.2.3-rc.1');
 
     vi.stubEnv('BEELINE_RELEASE_CHANNEL', 'next');
     await runUpdateCommand(['update']);
     vi.stubEnv('BEELINE_RELEASE_CHANNEL', undefined);
-    const nextUrl = 'https://usebeeline.app/dl/next/manifest.json';
-    await expectBackgroundManifest({}, nextUrl);
+    await expectBackgroundManifest({}, 'v1.2.4-rc.1');
     await runUpdateCommand(['update']);
     expect(prepareMachineRelease).toHaveBeenLastCalledWith(
       layout,
-      expect.objectContaining({ env: expect.objectContaining({ BEELINE_UPDATE_MANIFEST_URL: nextUrl }) }),
+      expect.objectContaining({ env: expect.objectContaining({ BEELINE_UPDATE_RELEASE_CHANNEL: 'next' }) }),
     );
     await runUpdateCommand(['update', '--status']);
     const statusLines = log.mock.calls.map(([line]) => stripVTControlCharacters(line));
@@ -105,7 +108,7 @@ it('keeps the chosen channel across background checks and shows it in status', a
 
     vi.stubEnv('BEELINE_RELEASE_CHANNEL', 'latest');
     await runUpdateCommand(['update']);
-    await expectBackgroundManifest({ BEELINE_RELEASE_CHANNEL: 'next' }, DEFAULT_UPDATE_MANIFEST_URL);
+    await expectBackgroundManifest({ BEELINE_RELEASE_CHANNEL: 'next' }, 'v1.2.3-rc.1');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
