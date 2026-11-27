@@ -18,11 +18,17 @@ Raw logs land at
 `~/.local/share/beeline-log-walk/raw/<app>/<UTC date>.log`.
 The systemd journal records stream failures and authentication errors.
 
-`collect.sh` reconnects `flyctl logs` every ten minutes, forcibly terminating
-streams that ignore SIGTERM. systemd restarts the collector if it dies.
+`collect.sh` reconnects `flyctl logs` at least every ten minutes, forcibly
+terminating streams that ignore SIGTERM. If the newest raw entry is more than
+fifteen minutes old after a stream attempt, the collector logs the stale
+timestamp to the journal and exits. For an empty log directory, the fifteen
+minutes start when the collector starts. systemd restarts the collector after a
+staleness failure.
 Collectors keep eight days of logs. If Fly rejects the token or systemd cannot
 load it, the affected service stays failed. Restart it after the credential is
 repaired.
 
 Run `bash packages/scripts/log-walk/test-systemd.sh` with a running user
 manager to test the credential setup failure using a disposable service.
+Run `bash packages/scripts/log-walk/test-collect.sh` to test raw log freshness
+with a simulated Fly stream.
