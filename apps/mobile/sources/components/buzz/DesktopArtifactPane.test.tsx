@@ -1,4 +1,4 @@
-vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: () => 0 }));
+vi.mock('@/buzz/use-artifact-recovery', () => ({ useArtifactRecoveryGeneration: mocks.useRecoveryGeneration }));
 vi.mock('@/auth/signin-funnel', () => ({ funnelOnboarding: vi.fn(async () => undefined) }));
 vi.mock('./Button', () => ({ Button: 'Button' }));
 // The runnable boundary has its own suite; this pane suite verifies selection
@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   platformOS: { value: 'web' as string },
   fetchArtifactBytes: vi.fn(),
   fetchArtifactText: vi.fn(),
+  subscribePurge: vi.fn((_file: unknown, _listener: () => void) => () => {}),
+  useRecoveryGeneration: vi.fn(() => 0),
   openArtifactInBrowserOrExplain: vi.fn(),
   copyPicture: vi.fn(async () => true),
   sharePicture: vi.fn(),
@@ -64,7 +66,7 @@ const theme = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/buzz/artifact-link', () => ({
-  subscribeArtifactBytesPurge: () => () => {},
+  subscribeArtifactBytesPurge: mocks.subscribePurge,
   fetchArtifactBytes: mocks.fetchArtifactBytes,
   fetchArtifactText: mocks.fetchArtifactText,
   openArtifactInBrowserOrExplain: mocks.openArtifactInBrowserOrExplain,
@@ -172,6 +174,77 @@ describe('the desktop work pane artifact view', () => {
     );
     expect(renderer.root.findByType('MonoMarkdown')).toBeDefined();
     expect(renderer.root.findByType('MonoMarkdown').props.document).toBe(true);
+  });
+
+  it('drops purged Markdown, ignores a late read, and rereads after connection recovery', async () => {
+    let resolvePurged!: (text: string) => void;
+    let resolveSuperseded!: (text: string) => void;
+    let purge!: () => void;
+    let reconnect!: () => void;
+    const unsubscribe = vi.fn();
+    mocks.subscribePurge.mockImplementation((_file, listener) => {
+      purge = listener;
+      return unsubscribe;
+    });
+    mocks.useRecoveryGeneration.mockImplementation(() => {
+      const [generation, setGeneration] = React.useState(0);
+      reconnect = () => setGeneration((current) => current + 1);
+      return generation;
+    });
+    mocks.fetchArtifactText.mockClear()
+      .mockImplementationOnce(() => new Promise<string>((resolve) => { resolvePurged = resolve; }))
+      .mockRejectedValueOnce(new Error('Offline'))
+      .mockImplementationOnce(() => new Promise<string>((resolve) => { resolveSuperseded = resolve; }))
+      .mockResolvedValueOnce('# Recovered');
+    const first = attachment({ mimeType: 'text/markdown', name: 'first.md' });
+    const second = attachment({ ...first, url: first.url.replace(/6$/, '7'), name: 'second.md' });
+    const renderer = render(<DesktopArtifactPane attachment={first} onClose={mocks.onClose} />);
+    const byId = (testID: string) => renderer.root.findAllByProps({ testID });
+    const signal = (call: number) => mocks.fetchArtifactText.mock.calls[call][1].signal;
+
+    try {
+      expect(byId('desktop-artifact-loading').length).toBeGreaterThan(0);
+      act(() => purge());
+      expect(signal(0).aborted).toBe(true);
+      await act(async () => resolvePurged('# Removed'));
+      expect(byId('desktop-artifact-markdown')).toHaveLength(0);
+      expect(byId('desktop-artifact-failed').length).toBeGreaterThan(0);
+
+      await act(async () => renderer.update(<DesktopArtifactPane attachment={second} onClose={mocks.onClose} />));
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(byId('desktop-artifact-failed')).toHaveLength(0);
+      expect(byId('desktop-artifact-loading').length).toBeGreaterThan(0);
+      expect(mocks.fetchArtifactText).toHaveBeenCalledTimes(2);
+
+      await act(async () => reconnect());
+      expect(signal(1).aborted).toBe(true);
+      expect(unsubscribe).toHaveBeenCalledTimes(2);
+      expect(mocks.fetchArtifactText).toHaveBeenLastCalledWith(second, { signal: signal(2) });
+      expect(byId('desktop-artifact-loading').length).toBeGreaterThan(0);
+
+      await act(async () => reconnect());
+      expect(signal(2).aborted).toBe(true);
+      await act(async () => resolveSuperseded('# Stale'));
+      expect(renderer.root.findByType('MonoMarkdown').props).toMatchObject({
+        markdown: '# Recovered', document: true,
+      });
+      act(() => purge());
+      expect(byId('desktop-artifact-markdown')).toHaveLength(0);
+      expect(byId('desktop-artifact-failed').length).toBeGreaterThan(0);
+
+      const markdown = { title: 'Brief', text: '# Inline brief', revision: 2 };
+      act(() => renderer.update(<DesktopArtifactPane markdown={markdown} onClose={mocks.onClose} />));
+      expect(unsubscribe).toHaveBeenCalledTimes(4);
+      expect(renderer.root.findByType('MonoMarkdown').props).toMatchObject({
+        markdown: markdown.text, document: true,
+      });
+      expect(mocks.fetchArtifactText).toHaveBeenCalledTimes(4);
+    } finally {
+      act(() => renderer.unmount());
+      mocks.subscribePurge.mockReset();
+      mocks.useRecoveryGeneration.mockReset();
+      mocks.fetchArtifactText.mockReset();
+    }
   });
 
   // The audit found the pane sent a PDF to the browser and had no way to paint

@@ -42,6 +42,10 @@
       "ArtifactDocumentPreview",
       "WebView"
     ],
+    "components/buzz/ArtifactMarkdown.tsx": [
+      "ArtifactMarkdown",
+      "ArtifactMarkdownBody"
+    ],
     "components/buzz/ArtifactMedia.tsx": [
       "ArtifactImage",
       "ArtifactText"
@@ -54,8 +58,6 @@
       "WebView"
     ],
     "components/buzz/ArtifactViewer.tsx": [
-      "ArtifactViewerMarkdown",
-      "ArtifactViewerMarkdownBody",
       "ArtifactViewerSandbox",
       "ArtifactViewerScreen",
       "WebView"
@@ -156,7 +158,6 @@
     "components/buzz/decorative-glyph.web.ts": [],
     "components/buzz/DesktopArtifactPane.tsx": [
       "DesktopArtifactFrame",
-      "DesktopArtifactMarkdown",
       "DesktopArtifactPane"
     ],
     "components/buzz/DesktopMessageAction.tsx": [
