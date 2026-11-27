@@ -91,7 +91,7 @@ const TOOLS: Tool[] = [...ROOM_TOOLS, ...MCP_AGENT_TOOLS];
 const toolsFor=(principal:McpPrincipal,enabled:boolean)=>enabled
   ? [...TOOLS,...(principal.identity_id===OPERATOR_OWNER_ID?MCP_OPERATOR_TOOLS:[])] : ROOM_TOOLS;
 /** Repeated until delivery is proved or explicitly on demand, including hosts that drop server instructions. */
-const SETUP_NOTE = `Setup: call list_chats first to verify you, owner and the intended chats. Your owner's Allow is standing approval to answer when a person tags your @handle. Agents ask agents with message, never tags. ${MCP_STARTER_ROUTINE} Repository writes go through a thread implementer. Continue with setup_delivery in the actual host surface. This note stops only after proved delivery or an explicit on-demand binding.`;
+const SETUP_NOTE = `Setup: call list_chats first to verify you, owner and the intended chats. Agents ask agents with message, never tags. ${MCP_STARTER_ROUTINE} Repository writes go through a thread implementer. Continue with setup_delivery in the actual host surface. This note stops only after proved delivery or an explicit on-demand binding.`;
 const DEFAULT_PROFILE_NOTE = 'Your Beeline profile is still the app default: call set_profile once with the name, @handle and picture you already use.';
 const READABLE = `SELECT r.id,r.name,r.parent_id,r.workspace_id FROM rooms r
   JOIN room_access rm ON rm.room_id=r.id AND rm.identity_id=$1 AND rm.removed_at IS NULL
@@ -274,6 +274,7 @@ export class RoomsMcp {
   }
   private async mentionsPage(member: string, cursor: string, limit: number, db: SqlDatabase = this.oauth.database, stream = false) {
     // The stream delivers the full tag. The catch-up tool returns a bounded preview.
+    // A host receipt prevents a second push delivery, but the tag still needs an answer.
     const rows = (await db.query<{ seq: string; id: string; room_id: string; room_name: string; author_id: string; author_handle: string | null; author_name: string | null; created_at: Date; text: string; institutionalContext: string | null; commandId: string | null; truncated: boolean; attachments: import('@beeline/api-contract/daemon').DaemonAttachment[] }>(
       `WITH readable AS (${READABLE})
        SELECT mention.seq::text seq,m.id,m.room_id,r.name room_name,m.author_id,beeline_room_handle(i.id,m.room_id) author_handle,i.name author_name,
@@ -293,9 +294,9 @@ export class RoomsMcp {
        ) queued ON true
        WHERE mention.member_id=$1 AND mention.cleared_at IS NULL AND mention.seq>$2::bigint
          AND ${OWED_MENTION_OPEN_SQL}
-         AND NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=mention.member_id
+         AND (NOT $4::boolean OR NOT EXISTS(SELECT 1 FROM agent_commands command WHERE command.agent_id=mention.member_id
            AND command.source_message_id=mention.message_id AND ${publicMentionCommandSql('command')}
-           AND ${connectorHostAcceptedSql('command')})
+           AND ${connectorHostAcceptedSql('command')}))
          AND EXISTS(SELECT 1 FROM rooms active WHERE active.id=mention.room_id AND active.archived_at IS NULL)
        ORDER BY mention.seq LIMIT $3`, [member, cursor, limit + 1, stream])).rows;
     const page = rows.slice(0, limit);
@@ -366,7 +367,7 @@ export class RoomsMcp {
       return {...page, ...await this.setupNote(member)};
     }
     if (name === 'search_messages') {
-      const terms = messageSearchTerms(textArg(args.query, 300));
+      const terms = messageSearchTerms(textArg(args.query, 300), { allowExactSingleWord: true });
       if (!terms) return { messages: [] };
       const messages = await db.transaction(async tx => {
         await tx.query("SET LOCAL statement_timeout='2s'");

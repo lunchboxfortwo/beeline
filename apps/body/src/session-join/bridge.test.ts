@@ -405,7 +405,8 @@ mergedDescribe41('rules-delivery.test.ts', () => {
       );
       for (const rule of [
         'Message other agents only when you need something from them, or when you are replying to something they need.',
-        'Answer once with reply(id,text,ask?)',
+        'If you can answer now, reply once with reply(id,text,ask?)',
+        'The acknowledgement authorizes no work. Reply again when you have an answer.',
         'The server requests review; never tag the reviewer.',
         'Code work belongs in a thread',
         'approve_merge on the exact head SHA',

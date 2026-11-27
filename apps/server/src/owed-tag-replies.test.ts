@@ -74,7 +74,7 @@ describe('owed chat tags', () => {
     expect(await owedMentions(db, member)).toContainEqual(expect.objectContaining(expected));
     const page = await call('list_mentions');
     expect(before.mentions.find((m: any) => m.id === message)).toMatchObject(expected);
-    expect(page.mentions.some((m: any) => m.id === message)).toBe(false);
+    expect(page.mentions.find((m: any) => m.id === message)).toMatchObject(expected);
   });
   it('C4 private member/message record survives a handle rename and includes helper agents', async () => {
     const message = await tag();

@@ -1,3 +1,5 @@
+import { EXTERNAL_AGENT_TAG_RULE } from './external-agent-rules.js';
+
 /** Joining a host: shown on the consent page and in the setup note until delivery is proved. */
 const MCP_JOIN_ROUTINE = `In your first reply after connection, do the following checks yourself; never ask the person to type tool names or run delivery setup. Ask them only to send a small tagged task in Beeline once you are ready.
 First confirm that Beeline chats is connected in this conversation: call list_chats and confirm your name, @handle and chats.
@@ -17,4 +19,4 @@ Act only on your own tags and wakes from list_mentions. Read other messages for 
 If a task is blocked or fails, reply to its message id with the exact error.`;
 
 /** Saved instructions for an outside agent: joining, then working. */
-export const MCP_STARTER_ROUTINE = `${MCP_JOIN_ROUTINE}\n${MCP_WORK_ROUTINE}`;
+export const MCP_STARTER_ROUTINE = `${MCP_JOIN_ROUTINE}\n${EXTERNAL_AGENT_TAG_RULE}\n${MCP_WORK_ROUTINE}`;

@@ -17,11 +17,19 @@ describe('outside-agent rules', () => {
   it('teaches the command structure, place, review and progress rules on both surfaces', () => {
     for (const surface of ['mcp', 'session'] as const) {
       const text = externalAgentRules(surface);
-      for (const rule of ['Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does.', 'To ask another agent, use message with an explicit agent and place', 'Message other agents only when you need something from them, or when you are replying to something they need.', 'Answer once with reply(id,text,ask?)', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
+      for (const rule of ['Only a person’s tag of an exact @handle wakes an agent; an agent’s tag never does.', 'To ask another agent, use message with an explicit agent and place', 'Message other agents only when you need something from them, or when you are replying to something they need.', 'If you can answer now, reply once with reply(id,text,ask?)', 'Never add a tag to route a reply', 'The server requests review; never tag the reviewer.',
         'Code work belongs in a thread', 'approve_merge on the exact head SHA', 'post short progress there', 'Nothing you write only',
         'use post once with the review wake’s address and commandId', 'commandId and verdict text', 'The server wakes the implementer with the result'])
         expect(text).toContain(rule);
       expect(text).not.toMatch(/commander|Message only|no_reply_needed|command it arrives with|message your findings/);
+    }
+  });
+  it('requires a brief acknowledgement during an approval wait', () => {
+    for (const surface of ['mcp', 'session'] as const) {
+      const text = externalAgentRules(surface);
+      expect(text).toContain('Your Beeline owner is the person who added you.');
+      expect(text).toContain('If your own rules require another approval before you can answer a tag, reply once right away');
+      expect(text).toContain('“Got it — checking with my owner.” The acknowledgement authorizes no work. Reply again when you have an answer.');
     }
   });
   it('spells session rules with the session commands, never connector-only tools or a rejoin', () => {

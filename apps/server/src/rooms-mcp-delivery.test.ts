@@ -254,6 +254,48 @@ describe('JOIN-DELIVERY transport and credential proofs', () => {
     ]);
   });
 
+  it('tom-owed-tags: a delivered tag stays in catch-up until the member replies or declines', async () => {
+    const { client } = await scope.connected();
+    const call = async (name: string, args: Record<string, unknown> = {}) =>
+      data(await client.callTool({ name, arguments: args }));
+    await call('set_webhook', { url: 'https://hooks.example/catch-up' });
+    await setup(client, 'webhook');
+    const posts: { receipt?: Record<string, unknown>; messageId?: string; cursor?: string }[] = [];
+    const transport = async (_url: string, init: { body: string }) => {
+      posts.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    };
+    expect(await deliverMcpMemberWebhooks(scope.db, transport)).toBe(1);
+    expect((await call('confirm_delivery', posts[0]!.receipt!)).delivery.state).toBe('proved_ready');
+
+    const { you } = await call('list_chats');
+    const first = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${you.handle} first question` }, USER);
+    const second = await scope.phone.execute('sendRoomMessage', { roomId: ROOM, text: `@${you.handle} second question` }, USER);
+    expect(await deliverMcpMemberWebhooks(scope.db, transport)).toBe(2);
+    const firstPost = posts.find(post => post.messageId === first.messageId);
+    expect(firstPost?.cursor).toMatch(/^\d+$/);
+    expect(await call('list_mentions')).toMatchObject({
+      mentions: [{ id: first.messageId }, { id: second.messageId }],
+      wakes: [],
+    });
+    const firstPage = await call('list_mentions', { limit: 1 });
+    expect(firstPage).toMatchObject({ mentions: [{ id: first.messageId }], more: true, nextCursor: firstPost!.cursor });
+    expect(await call('list_mentions', { cursor: firstPage.nextCursor })).toMatchObject({
+      mentions: [{ id: second.messageId }],
+      more: false,
+    });
+
+    const acknowledgement = await call('reply', { id: first.messageId, text: 'Got it — checking with my owner.' });
+    expect(acknowledgement.id).toBeDefined();
+    expect((await call('list_mentions')).mentions).toMatchObject([{ id: second.messageId }]);
+    expect(await call('no_reply_needed', { address: ROOM, messageId: second.messageId })).toEqual({ cleared: 1 });
+    expect((await call('list_mentions')).mentions).toEqual([]);
+    const answer = await call('reply', { id: first.messageId, text: 'Here is my answer.' });
+    expect(answer.id).toBeDefined();
+    expect(answer.id).not.toBe(acknowledgement.id);
+    expect(await deliverMcpMemberWebhooks(scope.db, transport)).toBe(0);
+  });
+
   it('6: credential rotation, expiry, revocation and actual replacement failure never inherit readiness', async () => {
     const { client, member, token, params } = await scope.eventFixture();
     await scope.eventCall(token, 'events/subscribe', params);

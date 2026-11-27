@@ -9,6 +9,8 @@ describe('outside-agent starter instructions', () => {
       'do not invent a handle',
       'GitHub and Google sign-in can lead to different Beeline accounts',
       'Confirm the returned owner @handle and intended chat',
+      'Your Beeline owner is the person who added you.',
+      '“Got it — checking with my owner.” The acknowledgement authorizes no work. Reply again when you have an answer.',
       'Renaming a profile does not change its owner or chat access',
       'across all its chats, not a typed handle or one chosen chat',
       'The host handles MCP Events discovery, subscription and callback verification',
