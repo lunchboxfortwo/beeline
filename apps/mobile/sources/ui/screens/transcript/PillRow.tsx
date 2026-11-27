@@ -300,8 +300,8 @@ function EventLine({ id, event }: { id: string; event: PillEvent }) {
     );
 }
 
-/** Back-to-back events from one source under one "ring · time" heading; more than three show two and "N more". */
-function EventGroup({ events, targetId }: { targetId?: string; events: readonly (PillRunEntry & { event: PillEvent })[] }) {
+/** Back-to-back events from one source, under a "ring · time" heading when mixed with other blocks; more than three show two and "N more". */
+function EventGroup({ events, targetId, showHeading = true }: { targetId?: string; events: readonly (PillRunEntry & { event: PillEvent })[]; showHeading?: boolean }) {
     const [all, setAll] = useState(false);
     const hiddenTarget = events.length > EVENT_GROUP_SHOWN && events.slice(2).some(entry => entry.id === targetId);
     useLayoutEffect(() => { if (hiddenTarget) setAll(true); }, [hiddenTarget]);
@@ -310,10 +310,12 @@ function EventGroup({ events, targetId }: { targetId?: string; events: readonly 
     const shown = all || events.length <= EVENT_GROUP_SHOWN ? events : events.slice(0, 2);
     return (
         <YStack gap="1" minWidth={0} testID={`pill-event-group-${first.id}`}>
-            <XStack gap="1" alignItems="center" accessibilityLabel={`${source}, ${first.time}`}>
-                <Face face={SOURCE_FACES[first.event.source]} />
-                <Copy small quiet>{`· ${first.time}`}</Copy>
-            </XStack>
+            {showHeading ? (
+                <XStack gap="1" alignItems="center" accessibilityLabel={`${source}, ${first.time}`}>
+                    <Face face={SOURCE_FACES[first.event.source]} />
+                    <Copy small quiet>{`· ${first.time}`}</Copy>
+                </XStack>
+            ) : null}
             <YStack minWidth={0}>
                 {shown.map((entry) => <EventLine key={entry.id} id={entry.id} event={entry.event} />)}
                 {shown.length < events.length ? (
@@ -362,15 +364,19 @@ function MessageEntry({ entry }: { entry: PillRunEntry }) {
 /**
  * The opened run: every message in send order under its own face → face
  * heading, in the transcript's text column (`TranscriptLine` with no sender).
- * Back-to-back events from one source share one GitHub or Beeline heading.
+ * Back-to-back events from one source share one GitHub or Beeline heading when
+ * mixed with other blocks; a single-source event-only run omits the redundant
+ * heading because the pill already identifies that source.
  * Rows sit the same-speaker 12 apart; a heading sits 4 above its body.
  */
 function RunList({ run, targetId }: { targetId?: string; run: readonly PillRunEntry[] }) {
+    const blocks = runBlocks(run);
+    const showEventHeading = blocks.length > 1;
     return (
         <TranscriptLine testID="pill-open">
             <YStack gap="3" minWidth={0}>
-                {runBlocks(run).map((block) => block.kind === 'events'
-                    ? <EventGroup key={block.events[0]!.id} events={block.events} targetId={targetId} />
+                {blocks.map((block) => block.kind === 'events'
+                    ? <EventGroup key={block.events[0]!.id} events={block.events} targetId={targetId} showHeading={showEventHeading} />
                     : <MessageEntry key={block.entry.id} entry={block.entry} />)}
             </YStack>
         </TranscriptLine>
