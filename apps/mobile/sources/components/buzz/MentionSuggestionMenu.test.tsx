@@ -15,6 +15,7 @@ vi.mock('@/components/buzz/MemberRosterRow', () => ({
 vi.mock('@/buzz/agent-display', () => ({ resolveAgentDisplayIdentity: (pubkey: string) => ({ name: pubkey }) }));
 import { ChannelSuggestionMenu, MentionSuggestionMenu } from './MentionSuggestionMenu';
 import { CHANNEL_MENTION_PUBKEY } from '@/buzz/room-participants';
+import { TextSizeContext, ThreadGlyph, typeStyle, type TextSize } from '@/ui/grammar';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -75,3 +76,57 @@ it('uses one title and keeps the keyboard window at three rows with this chat fi
   expect(scroll.props.maxHeight).toBe(3 * 56);
   expect(tree.root.findAll((node: any) => node.type === 'ListItem')[0].props.testID).toBe('channel-suggestion-beeline');
 });
+
+it.each(['small', 'medium', 'large'] as const)(
+  'aligns the thread mark to the thread name line when a suggestion carries a subtitle (%s text size)',
+  (size: TextSize) => {
+    const nameLine = typeStyle('metaStrong', size).lineHeight;
+    const markSlot = Math.max(28, nameLine);
+    const expectedInset = (markSlot - nameLine) / 2;
+    const withSubtitle = {
+      kind: 'corner' as const,
+      id: 'c-sub',
+      token: 'beeline/thread-glyph-center',
+      name: 'thread-glyph-center',
+      subtitle: '#beeline · active',
+      activityAt: 1_000_000,
+    };
+    const withoutSubtitle = {
+      kind: 'corner' as const,
+      id: 'c-plain',
+      token: 'beeline/one-row-header',
+      name: 'one-row-header',
+      activityAt: 1_000_000,
+    };
+    act(() => {
+      tree = create(
+        <TextSizeContext.Provider value={size}>
+          <ChannelSuggestionMenu
+            query="beeline/"
+            matches={[withSubtitle, withoutSubtitle]}
+            overflow={0}
+            highlightedIndex={0}
+            keyboardOpen
+            nowMs={(1_000_000 + 60) * 1000}
+            onSelect={() => undefined}
+          />
+        </TextSizeContext.Provider>,
+      );
+    });
+
+    const subRow = row('channel-suggestion-beeline/thread-glyph-center');
+    const subInner = subRow.find((n: any) => n.type === 'XStack' && n.props.flex === 1);
+    expect(subInner.props.alignItems).toBe('flex-start');
+    const subMark = subRow.find((n: any) => n.type === 'YStack' && n.props.testID === 'channel-suggestion-beeline/thread-glyph-center-mark');
+    expect(subMark.props).toMatchObject({ width: 28, height: markSlot, justifyContent: 'center' });
+    expect(subMark.findAllByType(ThreadGlyph)).toHaveLength(1);
+    const subInset = subRow.find((n: any) => n.type === 'YStack' && n.props.testID === 'channel-suggestion-beeline/thread-glyph-center-name-inset');
+    expect(subInset.props.height).toBe(expectedInset);
+    expect(subInset.props.height + nameLine / 2).toBe(markSlot / 2);
+
+    const plainRow = row('channel-suggestion-beeline/one-row-header');
+    const plainInner = plainRow.find((n: any) => n.type === 'XStack' && n.props.flex === 1);
+    expect(plainInner.props.alignItems).toBe('center');
+    expect(plainRow.findAll((n: any) => n.props?.testID === 'channel-suggestion-beeline/one-row-header-name-inset')).toHaveLength(0);
+  },
+);
