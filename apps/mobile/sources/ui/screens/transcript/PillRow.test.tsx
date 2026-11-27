@@ -399,6 +399,102 @@ describe('PillRow', () => {
             act(() => more.props.onPress());
             expect(shown()).toEqual(['pill-event-e1', 'pill-event-e2', 'pill-event-e3', 'pill-event-e4', 'pill-event-e5', 'pill-event-e6', 'pill-event-e7']);
         });
+
+        it('omits the duplicate GitHub heading when opening a single-source GitHub event run', () => {
+            let tree: any;
+            const ghRun: PillItem = {
+                id: 'm217', system: false, from: github, time: '19:33', body: null,
+                run: [
+                    { ...event('m217', 217, 'Keep unread and streaming transcripts at the reader’s position'), time: '19:33' },
+                    { ...event('m214', 214, 'Unify OverlaySheet, standardize pushed pages, and add UI governance ratchets'), time: '19:33' },
+                    { ...event('m218', 218, 'Open push notifications at their exact transcript message'), time: '19:33' },
+                ],
+            };
+            act(() => { tree = create(<PillRow items={[ghRun]} />); });
+            const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+            expect(pill().findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(1);
+            expect(strings(pill())).toEqual(['3 events']);
+            expect(pill().props['aria-label']).toBe('Read 3 GitHub events, 19:33');
+            act(() => pill().props.onPress());
+            const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+            expect(open.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-event-group-m217')).toHaveLength(1);
+            expect(open.findAll((node: any) => node.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(node.props.testID))).toHaveLength(0);
+            expect(strings(open)).not.toContain('· 19:33');
+            expect(open.findAll((node: any) => typeof node.type === 'string' && /^pill-event-m\d+$/.test(node.props.testID ?? ''))
+                .map((node: any) => node.props.testID)).toEqual(['pill-event-m217', 'pill-event-m214', 'pill-event-m218']);
+        });
+
+        it('omits the duplicate Beeline heading when opening a single-source Beeline event run', () => {
+            let tree: any;
+            const beelineRun: PillItem = {
+                id: 'b1', system: false, from: beeline, time: '20:45', body: null,
+                run: [thread('b1'), thread('b2')],
+            };
+            act(() => { tree = create(<PillRow items={[beelineRun]} />); });
+            const pill = () => tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'run-pill');
+            expect(pill().findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
+            expect(pill().findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(0);
+            expect(strings(pill())).toEqual(['2 events']);
+            act(() => pill().props.onPress());
+            const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+            expect(open.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-event-group-b1')).toHaveLength(1);
+            expect(open.findAll((node: any) => node.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(node.props.testID))).toHaveLength(0);
+            expect(strings(open)).not.toContain('· 20:45');
+            expect(open.findAll((node: any) => typeof node.type === 'string' && /^pill-event-b\d+$/.test(node.props.testID ?? ''))
+                .map((node: any) => node.props.testID)).toEqual(['pill-event-b1', 'pill-event-b2']);
+        });
+
+        it('preserves "N more" disclosure and targetId auto-expansion on a single-source event run with no duplicate heading', () => {
+            const longRun: PillItem = {
+                id: 'g1', system: false, from: github, time: '21:05', body: null,
+                run: [
+                    event('g1', 101, 'First merge'),
+                    event('g2', 102, 'Second merge'),
+                    event('g3', 103, 'Third merge'),
+                    event('g4', 104, 'Fourth merge'),
+                ],
+            };
+            let tree: any;
+            act(() => { tree = create(<PillRow items={[longRun]} />); });
+            act(() => tree.root.find((node: any) => node.type === 'Button').props.onPress());
+            const open = () => tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+            const shown = () => open().findAll((node: any) => typeof node.type === 'string' && /^pill-event-g\d$/.test(node.props.testID ?? ''))
+                .map((node: any) => node.props.testID);
+            expect(open().findAll((node: any) => node.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(node.props.testID))).toHaveLength(0);
+            expect(shown()).toEqual(['pill-event-g1', 'pill-event-g2']);
+            const more = open().find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-event-more-g1');
+            expect(more.props.accessibilityLabel).toBe('2 more GitHub events');
+            act(() => more.props.onPress());
+            expect(shown()).toEqual(['pill-event-g1', 'pill-event-g2', 'pill-event-g3', 'pill-event-g4']);
+            expect(open().findAll((node: any) => node.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(node.props.testID))).toHaveLength(0);
+            act(() => tree.unmount());
+
+            let targeted: any;
+            act(() => { targeted = create(<PillRow items={[longRun]} targetId="g4" />); });
+            const targetedOpen = targeted.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+            expect(targetedOpen.findAll((node: any) => node.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(node.props.testID))).toHaveLength(0);
+            expect(targetedOpen.findAll((node: any) => typeof node.type === 'string' && /^pill-event-g\d$/.test(node.props.testID ?? ''))
+                .map((node: any) => node.props.testID)).toEqual(['pill-event-g1', 'pill-event-g2', 'pill-event-g3', 'pill-event-g4']);
+            act(() => targeted.unmount());
+        });
+
+        it('keeps source headings when an event-only run mixes GitHub and Beeline events', () => {
+            let tree: any;
+            const multiSource: PillItem = {
+                id: 'ms1', system: false, from: github, time: '21:10', body: null,
+                run: [event('ms1', 88, 'Merge feature'), thread('ms2')],
+            };
+            act(() => { tree = create(<PillRow items={[multiSource]} />); });
+            act(() => tree.root.find((node: any) => node.type === 'Button').props.onPress());
+            const open = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === 'pill-open');
+            const groups = open.findAll((node: any) => node.type === 'YStack' && /^pill-event-group-/.test(node.props.testID ?? ''));
+            expect(groups.map((node: any) => [node.props.testID,
+                node.findAll((face: any) => face.type === 'YStack' && ['pill-github-face', 'pill-system-face'].includes(face.props.testID))
+                    .map((face: any) => face.props.testID)])).toEqual([
+                ['pill-event-group-ms1', ['pill-github-face']],
+                ['pill-event-group-ms2', ['pill-system-face']],
+            ]);
+        });
     });
 
     it('draws a lone issue event with its opened or closed mark, from the stored line to the pill', async () => {
