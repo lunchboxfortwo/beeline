@@ -39,7 +39,7 @@ it('starts a free-agent Room with absent native logins, masked proxy credentials
       assert.match(fs.readFileSync('/proc/self/status', 'utf8'), /CapEff:\\s+0+\\n/);
       assert.notEqual(fs.readlinkSync('/proc/self/ns/pid'), ${JSON.stringify(readlinkSync('/proc/self/ns/pid'))});
       assert.equal(fs.existsSync(${JSON.stringify(secret)}), false);
-      assert.equal(fs.readdirSync('/dev/shm').some(name => name.startsWith('beeline-masks')), false);
+      assert.equal(fs.existsSync('/dev/shm/beeline-masks'), false);
       assert.equal(fs.readFileSync(${JSON.stringify(join(home, 'settings'))}, 'utf8'), 'host-settings');
       assert.throws(() => fs.writeFileSync(${JSON.stringify(join(home, 'escape'))}, 'bad'), { code: 'EROFS' });
       fs.writeFileSync(${JSON.stringify(join(state, 'request.json'))}, 'model-request');

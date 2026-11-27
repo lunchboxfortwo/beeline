@@ -13,7 +13,6 @@
  * Missing or unusable bubblewrap remains a loudly reported fail-open path.
  */
 import { namesCredentialFile,pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
-import { randomUUID } from 'node:crypto';
 import { lstatSync,mkdirSync,readdirSync,realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
@@ -505,10 +504,10 @@ const OVERLAY_BOOTSTRAP = [
 /** Prepare mountpoints on namespace-only copies of their parents. */
 const MOUNTPOINT_BOOTSTRAP = [
   'set -eu',
-  'scratch=$1',
-  'scratch_link=$2',
-  'shift 2',
-  'mkdir -m 700 -- "$scratch"',
+  'scratch_link=$1',
+  'shift',
+  'scratch=/dev/shm/beeline-masks',
+  'mkdir "$scratch"',
   'i=0',
   'while [ "$1" != -- ]; do',
   '  mkdir "$scratch/$i" "$scratch/$i/lower" "$scratch/$i/upper" "$scratch/$i/work"',
@@ -557,8 +556,24 @@ export function buildBwrapArgv(input: {
   cwd: string;
   command: string;
   args?: string[];
+  nativeMaskMounts?: boolean;
 }): WrappedCommand {
   const overlays = input.plan.overlays ?? [];
+  const scratchAlias = input.plan.scratchAlias;
+  const missingMasks = input.plan.masks.filter(mask => mask.create);
+  const mountpointParents = missingMasks.map(mask => {
+    let parent = dirname(mask.path);
+    while (!lstatSync(parent, { throwIfNoEntry: false })) parent = dirname(parent);
+    return parent;
+  });
+  // Bubblewrap follows a symlink at a bind destination. Replace the host's
+  // short scratch link with a directory in the private overlay first.
+  if (scratchAlias) mountpointParents.push(dirname(scratchAlias.path));
+  const parents = normalize(mountpointParents).filter((parent, _index, all) => !all.some(other =>
+    other !== parent && parent.startsWith(`${other}/`)));
+  // Keep the private root, /tmp and /dev mounts and the session's /proc.
+  const nativeMaskMounts = input.nativeMaskMounts && !scratchAlias && parents.every(parent =>
+    parent !== '/' && !/^\/(dev|proc|tmp)(\/|$)/.test(parent));
   const args = [
     // sd_bus rejects peers whose PID cannot be resolved in its namespace.
     ...(input.plan.userBus ? [] : ['--unshare-pid']),
@@ -580,6 +595,9 @@ export function buildBwrapArgv(input: {
   }
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
+  if (nativeMaskMounts) {
+    for (const parent of parents) args.push('--overlay-src', parent, '--tmp-overlay', parent);
+  }
   const bridgeSocketDirs = (input.plan.bridgeSockets ?? []).flatMap(({ path, fallback }) => {
     const directory = dirname(path);
     if (!directory.startsWith('/var/tmp/')) return [];
@@ -609,9 +627,12 @@ export function buildBwrapArgv(input: {
       args.push('--tmpfs', mask.path);
     } else args.push('--ro-bind', '/dev/null', mask.path);
   }
+  // Only the empty masks and explicit writable binds should remain writable.
+  if (nativeMaskMounts) {
+    for (const parent of parents) args.push('--remount-ro', parent);
+  }
   // Optional harness roots may be absent.
   for (const path of input.plan.writable) args.push('--bind-try', path, path);
-  const scratchAlias = input.plan.scratchAlias;
   if (scratchAlias) args.push('--bind', scratchAlias.source, scratchAlias.path);
   for (const path of input.plan.sealed ?? []) args.push('--ro-bind', path, path);
   args.push('--chdir', input.cwd);
@@ -628,20 +649,7 @@ export function buildBwrapArgv(input: {
   } else {
     args.push('--', input.command, ...(input.args ?? []));
   }
-  const missingMasks = input.plan.masks.filter(mask => mask.create);
-  if (!missingMasks.length && !scratchAlias) return { command: input.bwrapPath, args };
-  const mountpointParents = missingMasks.map(mask => {
-    let parent = dirname(mask.path);
-    while (!lstatSync(parent, { throwIfNoEntry: false })) parent = dirname(parent);
-    return parent;
-  });
-  // Bubblewrap follows a symlink at a bind destination. Replace the host's
-  // short scratch link with a directory in the private overlay first.
-  if (scratchAlias) mountpointParents.push(dirname(scratchAlias.path));
-  const parents = normalize(mountpointParents).filter((parent, _index, all) => !all.some(other =>
-    other !== parent && parent.startsWith(`${other}/`)));
-  // The private /dev/shm mount retires this launch's scratch with its namespace.
-  const maskScratch = `/dev/shm/beeline-masks-${randomUUID()}`;
+  if (!parents.length || nativeMaskMounts) return { command: input.bwrapPath, args };
   // Writable grants and private state must bind the host inode, rather than
   // writing into the temporary overlay. /dev is replaced by the inner bwrap,
   // hiding these original-parent aliases before the agent starts.
@@ -653,7 +661,7 @@ export function buildBwrapArgv(input: {
     if (!['--bind', '--bind-try', '--dev-bind-try'].includes(flag) &&
         !(flag === '--ro-bind-try' && hostSocketDirs.includes(source))) continue;
     const parentIndex = parents.findIndex(parent => source === parent || source.startsWith(`${parent}/`));
-    if (parentIndex !== -1) args[i + 1] = `${maskScratch}/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;
+    if (parentIndex !== -1) args[i + 1] = `/dev/shm/beeline-masks/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;
     i += 2;
   }
   // The inner root bind makes these temporary overlays read-only before any
@@ -667,7 +675,7 @@ export function buildBwrapArgv(input: {
     ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap]),
     '--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--tmpfs', '/dev/shm',
     '--die-with-parent', '--', 'sh', '-c', MOUNTPOINT_BOOTSTRAP, 'beeline-mountpoints',
-    maskScratch, scratchAlias?.path ?? '', ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
+    scratchAlias?.path ?? '', ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
     ...(overlays.length ? [] : ['--unshare-user', '--uid', String(process.getuid!()), '--gid', String(process.getgid!()), '--cap-drop', 'ALL']),
     ...args,
   ] };
@@ -680,6 +688,7 @@ export function wrapAgentCommand(input: {
   spec: SandboxSessionSpec;
   command: string;
   args?: string[];
+  nativeMaskMounts?: boolean;
 }): WrappedCommand {
   if (!input.bwrapPath) return { command: input.command, args: [...(input.args ?? [])] };
   return buildBwrapArgv({
@@ -688,5 +697,6 @@ export function wrapAgentCommand(input: {
     cwd: input.spec.cwd,
     command: input.command,
     args: input.args,
+    nativeMaskMounts: input.nativeMaskMounts,
   });
 }
