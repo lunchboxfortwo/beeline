@@ -470,8 +470,9 @@ async function provisionRoomAgentCredentials(
   // the long real path below.
   try {
     const tmpLink = roomSessionTmpDir(root);
-    // Relative, so the sandbox can bind the scratch folder onto the link itself.
-    // Measured from the real folder: macOS /var/tmp is a link to /private/var/tmp.
+    // The host uses this relative symlink. Bubblewrap mounts the scratch
+    // directory at the same short path inside its namespace.
+    // macOS /var/tmp is a link to /private/var/tmp, so measure from the real parent.
     const tmpTarget = relative(await realpath(dirname(tmpLink)), resolve(root, 'tmp'));
     if ((await readlink(tmpLink).catch(() => undefined)) !== tmpTarget) {
       await rm(tmpLink, { recursive: true, force: true });

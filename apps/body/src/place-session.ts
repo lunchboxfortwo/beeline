@@ -62,6 +62,7 @@ import { LiveTurnSteps } from './live-turn-steps.js';
 import { roomReplySteps } from './room-turn-steps.js';
 import type { AgentRuntimeRecord } from './runtime.js';
 import { runtimeDirectory } from './runtime.js';
+import { stateDir as joinedSessionStateDir } from './session-join/store.js';
 import { SessionResources } from './session-resources.js';
 import {
   RunningModelReporter,
@@ -492,6 +493,8 @@ export class PlaceSession {
       harnessStateDirs: stateDirs,
       harnessHomeStateDirs: homeStateDirs,
       ...(tmpDir ? { tmpDir } : {}),
+      hostSocketPaths: [config.browserShareHostSocket, config.registryMcpBrokerSocket],
+      bridgeStateDir: joinedSessionStateDir(agentEnv),
       additionalWritablePaths: [
         ...harnessLoginWritablePaths(config.agentKind, operatorHome),
         ...(corner && config.workspaceRoot ? [config.workspaceRoot] : []),
