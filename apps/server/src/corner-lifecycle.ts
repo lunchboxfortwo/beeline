@@ -211,6 +211,15 @@ export async function archiveCorner(
     if (!(await database.query(`SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL FOR KEY SHARE`, [cornerId])).rowCount)
       throw new Error('thread not found');
     await cancelCornerAgentCommands(database, cornerId, preserveTurn);
+    // An idle notice can already be in the helper's queue in the commander's place.
+    await database.query(
+      `SELECT beeline_finish_agent_command(id,'cancelled','corner_close',NULL) FROM agent_commands
+       WHERE state='pending' AND room_id::text<>$1 AND private_payload->>'fromRoomId'=$1
+         AND private_payload->>'authorId'='${SYSTEM_IDENTITY_ID}' AND private_payload->>'kind' IN ('report','message')
+         AND private_payload->>'automatic'='true' AND private_payload->>'idleSince' IS NOT NULL
+       ORDER BY created_at DESC,id DESC`,
+      [cornerId],
+    );
     // Match command output: command locks precede the Room archival write lock.
     const changed = await database.query(
       `UPDATE rooms SET archived_at=now(),updated_at=now() WHERE id=$1 AND archived_at IS NULL`, [cornerId]);
@@ -674,6 +683,7 @@ async function writeCornerAdvance(
       : plan.state;
     for (const notice of plan.notifications) {
       if (notice.kind === 'idle' && row) {
+        if (plan.state.state === 'archived') continue;
         await reportAgentAttention(
           db,
           cornerId,
