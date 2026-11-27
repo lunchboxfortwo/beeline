@@ -11,6 +11,9 @@ cat > "$scratch/flyctl" <<'FLYCTL'
 if [[ -n ${TEST_FLY_LINE:-} ]]; then
   printf '%s\n' "$TEST_FLY_LINE"
 fi
+if [[ ${TEST_FLY_IGNORE_TERM:-} == 1 ]]; then
+  trap '' TERM
+fi
 exec sleep "${TEST_FLY_WAIT:-0}"
 FLYCTL
 chmod +x "$scratch/flyctl"
@@ -57,7 +60,11 @@ test "$(grep -Fxc "$fresh recovered" "$scratch/recover/$app/${fresh:0:10}.log")"
 
 near_deadline="$(date -u -d '897 seconds ago' +%FT%TZ)"
 seed_log "$scratch/silent" "$near_deadline"
-TEST_FLY_WAIT=15 expect_exit 1 9 600 "$scratch/silent"
+# Rotate before the freshness deadline while Fly ignores SIGTERM. The
+# freshness failure must beat both the kill grace and the reconnect pause.
+TEST_FLY_WAIT=15 TEST_FLY_IGNORE_TERM=1 \
+  LOG_COLLECT_KILL_AFTER_SECONDS=30 LOG_COLLECT_PAUSE_SECONDS=5 \
+  expect_exit 1 9 1 "$scratch/silent"
 grep -Fq "last timestamp: $near_deadline" "$scratch/collector.err"
 
 printf 'Collector freshness tests passed.\n'
