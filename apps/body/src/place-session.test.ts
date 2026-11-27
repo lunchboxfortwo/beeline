@@ -1,5 +1,5 @@
 import type { AgentCommand } from '@beeline/api-contract/daemon';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import type { AcpClient } from './acp.js';
@@ -687,8 +687,9 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', li
   await f.session.dispose();
 });
 
-it("brings another agent's push into an existing thread checkout before the next turn", async () => {
+async function branchRefreshFixture() {
   const f = await fixture(true);
+  delete f.config.agentHomeRoot;
   const root = f.config.workspaceRoot!;
   const git = (cwd: string, ...args: string[]) =>
     execFileAsync('git', ['-C', cwd, '-c', 'user.name=T', '-c', 'user.email=t@t', ...args]);
@@ -698,13 +699,28 @@ it("brings another agent's push into an existing thread checkout before the next
   await execFileAsync('git', ['init', '--bare', '-b', branch, origin]);
   await execFileAsync('git', ['clone', `file://${origin}`, other]);
   await git(other, 'checkout', '-b', branch);
-  await git(other, 'commit', '--allow-empty', '-m', 'first');
+  await writeFile(join(other, 'tracked.md'), 'initial text\n');
+  await mkdir(join(other, 'packages', 'sample'), { recursive: true });
+  await writeFile(join(other, 'packages', 'sample', 'index.js'), 'export {};\n');
+  await git(other, 'add', '.');
+  await git(other, 'commit', '-m', 'first');
   await git(other, 'push', 'origin', branch);
   const folder = f.session.folder();
   await mkdir(dirname(folder), { recursive: true });
   await execFileAsync('git', ['clone', '-b', branch, `file://${origin}`, folder]);
-  await git(other, 'commit', '--allow-empty', '-m', 'second agent push');
-  await git(other, 'push', 'origin', branch);
+  async function push(message: string) {
+    await writeFile(join(other, 'tracked.md'), `${message}\n`);
+    await git(other, 'commit', '-am', message);
+    await git(other, 'push', 'origin', branch);
+    return (await git(other, 'rev-parse', 'HEAD')).stdout.trim();
+  }
+  return { ...f, root, folder, branch, git, push };
+}
+
+it("brings another agent's push into an existing thread checkout before the next turn", async () => {
+  const f = await branchRefreshFixture();
+  const { root, folder, branch, git } = f;
+  await f.push('second agent push');
   await f.session.start(f.item);
   await f.session.deliver(f.item, []);
   expect((await git(folder, 'log', '-1', '--format=%s')).stdout.trim()).toBe('second agent push');
@@ -715,4 +731,77 @@ it("brings another agent's push into an existing thread checkout before the next
     `Your branch ${branch} could not be refreshed from origin`,
   );
   await f.session.dispose();
+});
+
+it('refreshes a reviewer checkout on the next wake with dependency install output present', async () => {
+  const f = await branchRefreshFixture();
+  const { root, folder, git } = f;
+  const wake = { ...f.item, reason: 'corner_review_dispatch' };
+  await f.session.start(wake);
+  try {
+    await f.session.deliver(wake, []);
+    // A prepared root dependency symlink and a workspace-local install from the prior review.
+    const store = join(root, 'dependencies');
+    const localInstall = join(folder, 'packages', 'sample', 'node_modules');
+    await mkdir(store);
+    await writeFile(join(store, 'package.js'), 'root dependency');
+    await symlink(store, join(folder, 'node_modules'), 'dir');
+    await mkdir(localInstall);
+    await writeFile(join(localInstall, 'package.js'), 'workspace dependency');
+    const dirty = (await git(folder, 'status', '--porcelain=v1', '--untracked-files=normal')).stdout;
+    expect(dirty.trim().split('\n')).toEqual(['?? node_modules', '?? packages/sample/node_modules/']);
+
+    const head = await f.push('new head for review');
+    await f.session.deliver({ ...wake, id: 'next-review', turnRequestId: 'next-review' }, []);
+
+    expect(f.prompt.mock.calls[1]?.[1]).not.toContain('could not be refreshed');
+    expect((await git(folder, 'rev-parse', 'HEAD')).stdout.trim()).toBe(head);
+    expect(await readFile(join(folder, 'node_modules', 'package.js'), 'utf8')).toBe('root dependency');
+    expect(await readFile(join(localInstall, 'package.js'), 'utf8')).toBe('workspace dependency');
+  } finally {
+    await f.session.dispose();
+  }
+});
+
+it.each([false, true])('refuses a reviewer refresh and names tracked edits (staged=%s)', async (staged) => {
+  const f = await branchRefreshFixture();
+  const { folder, git } = f;
+  const wake = { ...f.item, reason: 'corner_review_dispatch' };
+  const oldHead = (await git(folder, 'rev-parse', 'HEAD')).stdout.trim();
+  await writeFile(join(folder, 'tracked.md'), 'reviewer edit\n');
+  if (staged) await git(folder, 'add', 'tracked.md');
+  await f.push('new head for review');
+  await f.session.start(wake);
+  try {
+    await f.session.deliver(wake, []);
+    expect((await git(folder, 'rev-parse', 'HEAD')).stdout.trim()).toBe(oldHead);
+    expect(await readFile(join(folder, 'tracked.md'), 'utf8')).toBe('reviewer edit\n');
+    expect((await git(folder, 'show', ':tracked.md')).stdout).toBe(staged ? 'reviewer edit\n' : 'initial text\n');
+    const prompt = String(f.prompt.mock.calls[0]?.[1]);
+    expect(prompt.split('\n').find(line => line.includes('could not be refreshed'))).toContain('tracked.md');
+  } finally {
+    await f.session.dispose();
+  }
+});
+
+it('still refuses refresh when untracked files are present outside dependency directories', async () => {
+  const f = await branchRefreshFixture();
+  const { folder, git } = f;
+  const oldHead = (await git(folder, 'rev-parse', 'HEAD')).stdout.trim();
+  await writeFile(join(folder, 'node_modules'), 'ordinary file\n');
+  await writeFile(join(folder, 'review notes.md'), 'untracked review notes\n');
+  await f.push('new head for review');
+  await f.session.start(f.item);
+  try {
+    await f.session.deliver(f.item, []);
+    expect((await git(folder, 'rev-parse', 'HEAD')).stdout.trim()).toBe(oldHead);
+    expect(await readFile(join(folder, 'node_modules'), 'utf8')).toBe('ordinary file\n');
+    expect(await readFile(join(folder, 'review notes.md'), 'utf8')).toBe('untracked review notes\n');
+    const prompt = String(f.prompt.mock.calls[0]?.[1]);
+    const warning = prompt.split('\n').find(line => line.includes('could not be refreshed'));
+    expect(warning).toContain('"node_modules"');
+    expect(warning).toContain('"review notes.md"');
+  } finally {
+    await f.session.dispose();
+  }
 });

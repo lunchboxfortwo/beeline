@@ -1,6 +1,6 @@
 import { runOwnedFile } from './wait.js';
-import { access, readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { access, lstat, readFile } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
 
 /**
  * Two agents, one branch. The branch on GitHub, not any one helper's
@@ -10,7 +10,8 @@ import { resolve } from 'node:path';
  *   - remote absent, or already contained in this checkout → nothing to do;
  *   - this checkout strictly behind → fast-forward;
  *   - the histories diverged → rebase this checkout's own commits on top;
- *   - uncommitted work or a conflicting rebase → keep local work and throw.
+ *   - uncommitted work (apart from untracked node_modules) or a conflicting
+ *     rebase → keep local work and throw.
  *
  * Unpublished commits survive a failed sync. The remote is never force-pushed.
  */
@@ -67,10 +68,29 @@ export async function syncCornerBranch(input: {
     );
   // Equal, or ahead: this checkout's push will fast-forward the branch.
   if (local === remote || (await contains(local, remote))) return 'unchanged';
-  // Never turn another agent's unfinished edits into a destructive realignment.
-  if ((await git(['status', '--porcelain'])).trim())
+  // Exclude node_modules only from the untracked scan. Prepared dependencies
+  // can be symlinks, which a directory-only gitignore rule does not match.
+  const tracked = await git(['status', '--porcelain=v1', '--untracked-files=no']);
+  const untracked = await git([
+    'ls-files',
+    '--others',
+    '--exclude-standard',
+    '--exclude=node_modules/',
+    '--directory',
+    '--no-empty-directory',
+    '-z',
+  ]);
+  const dirtyPaths = tracked.split('\n').filter(Boolean).map((entry) => entry.slice(3));
+  for (const path of untracked.split('\0').filter(Boolean)) {
+    if (basename(path) === 'node_modules') {
+      const entry = await lstat(resolve(input.worktreePath, path)).catch(() => undefined);
+      if (entry?.isSymbolicLink()) continue;
+    }
+    dirtyPaths.push(JSON.stringify(path));
+  }
+  if (dirtyPaths.length)
     throw new Error(
-      'uncommitted work is preserved; commit or stash it, then sync with the remote branch',
+      `Local changes in ${dirtyPaths.join(', ')} were preserved. Commit or stash them before syncing with the remote branch.`,
     );
   const behind = await contains(remote, local);
   try {
