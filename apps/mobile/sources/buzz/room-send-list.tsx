@@ -184,8 +184,6 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
     [data.length, preview],
   );
   const previewInEmptyRoom = useSyncExternalStore(preview.subscribe, emptySnapshot, emptySnapshot);
-  const paintingSnapshot = useCallback(() => preview.snapshot()?.painted === false, [preview]);
-  const painting = useSyncExternalStore(preview.subscribe, paintingSnapshot, paintingSnapshot);
   const [atAutoFollowTail, setAtAutoFollowTail] = useState(true);
   const autoFollowThreshold = props.maintainVisibleContentPosition?.autoscrollToTopThreshold;
   const callbacks = useRef({ onContentSizeChange, onScroll, onViewableItemsChanged });
@@ -263,7 +261,7 @@ export const RoomSendList = forwardRef<FlatList<ChatDisplayMessage>, Props>(func
       // pending-scroll counter stuck and its rendered window unable to fill.
       // Keep native anchoring for readers in history and detached jump windows.
       maintainVisibleContentPosition={
-        painting || (autoFollowThreshold != null && atAutoFollowTail)
+        autoFollowThreshold != null && atAutoFollowTail
           ? undefined
           : props.maintainVisibleContentPosition
       }

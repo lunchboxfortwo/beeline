@@ -61,11 +61,17 @@ export function useChatScrollState([
   sendPreviewRef.current = sendPreview;
   const phoneRowKey = useCallback(
     (rowId: string) => `${transcriptWindowIdRef.current}:${sendPreviewRef.current.key(rowId)}`, []);
-  const [measuredPhoneRowKeys] = useState(() => new Set<string>());
+  const [phoneRowLayouts] = useState(() => new Map<string, { y: number; height: number }>());
   const [phoneScrollList] = useState(() =>
     phoneTranscriptList(
       () => flatListRef.current,
-      (rowId) => measuredPhoneRowKeys.has(phoneRowKey(rowId)),
+      (rowId) => phoneRowLayouts.has(phoneRowKey(rowId)),
+      readPhoneScrollOffsetRef,
+      {
+        row: (id) => phoneRowLayouts.get(phoneRowKey(id)),
+        viewportHeight: () => readPhoneListHeightRef().current,
+        contentHeight: () => readPhoneContentHeightRef().current,
+      },
     ),
   );
   const [desktopScrollList] = useState(() =>
@@ -83,6 +89,7 @@ export function useChatScrollState([
   const scrollController = useTranscriptScrollController<ChatDisplayMessage>({
     list: () => (readDesktopTranscript() ? desktopScrollList : phoneScrollList),
     rows: () => readTranscriptMessagesRef().current,
+    precedingRowStep: () => readDesktopTranscript() ? -1 : 1,
     rowIndex: (destination, rows) =>
       destination.kind === 'firstUnread'
         ? boundaryRowIndex(rows, destination.messageId)
@@ -95,8 +102,9 @@ export function useChatScrollState([
       if (destination.kind === 'firstUnread') {
         const residentIndex = boundaryRowIndex(readFoldedMessages(), destination.messageId);
         if (residentIndex >= 0) {
-          readRevealTranscriptThrough()(readFoldedMessages().length - residentIndex);
-        } else if (readTranscriptHistoryStatus() === 'idle') {
+          const count = readFoldedMessages().length;
+          readRevealTranscriptThrough()(Math.min(count, count - residentIndex + 1));
+        } else if (!readDesktopTranscript() && readTranscriptHistoryStatus() === 'idle') {
           readLoadOlderTranscriptMessages()();
         }
         return;
@@ -119,7 +127,8 @@ export function useChatScrollState([
       if (scrollController.isHoldingLanding()) {
         readHeldLandingFromOldestRef().current =
           readPhoneContentHeightRef().current - readPhoneScrollOffsetRef().current;
-        readHeldLandingShortRef().current = readPhoneContentHeightRef().current < readPhoneListHeightRef().current;
+        readHeldLandingShortRef().current = destination.kind === 'message' && readAnchoredSegmentActive() &&
+          readPhoneContentHeightRef().current < readPhoneListHeightRef().current;
       }
       // The landing is COMPLETE here — the row is on screen, which is the same
       // rule the badge runs on. A flash fired at row mount or at the first
@@ -141,7 +150,7 @@ export function useChatScrollState([
     // short-list fill, a later page). The target stays where it landed until
     // the reader moves the list.
     holdsLanding: (destination) =>
-      destination.kind === 'message' && destination.jump && readAnchoredSegmentActive(),
+      destination.kind === 'firstUnread' || (destination.kind === 'message' && destination.jump),
     // A jump the reader left (a drag, the newest disc, a send, another jump)
     // drops its own read so it cannot move them later. Only its own: a read
     // for another message belongs to the request that replaced this one.
@@ -161,17 +170,24 @@ export function useChatScrollState([
     () =>
       function PhoneTranscriptCell({
         cellKey,
-        index: _index,
-        item: _item,
+        index,
+        item,
         onLayout,
         ...props
       }: ViewProps & { cellKey: string; index: number; item: ChatDisplayMessage }) {
+        const previous = useRef<{ key: string; height: number } | null>(null);
         return (
           <ListCell
             {...props}
             onLayout={(event) => {
               onLayout?.(event);
-              measuredPhoneRowKeys.add(cellKey);
+              const height = event.nativeEvent.layout.height;
+              const last = previous.current;
+              previous.current = index === 0 ? { key: cellKey, height } : null;
+              if (index === 0 && last?.key === cellKey) {
+                scrollController.holdReadingPosition(height - last.height, item.id);
+              }
+              phoneRowLayouts.set(cellKey, event.nativeEvent.layout);
               if (scrollController.isLanding()) scrollController.observeLayout();
             }}
           />

@@ -243,7 +243,6 @@ export function useChatTranscriptWindow([
     arrivingIds: transcriptArrivalObservation.arrivingIds,
     newestMessageId: newestArrivalMessageId,
     isPinnedToTail: () => !anchoredSegmentActive && scrollController.isPinnedToTail(),
-    enabled: !isCorner,
   });
 
   // The desktop transcript's real scroll container and content node — a

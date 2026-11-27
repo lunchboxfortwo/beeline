@@ -377,7 +377,7 @@ export function useRoomSurfaceSession({
       return next;
     });
   }, []);
-  const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<string | null>(null);
+  const [firstUnreadMessageId, setFirstUnreadMessageId] = useState<string | null>(openingCache?.view.viewer.readCursor?.firstUnreadMessageId ?? null);
   const [liveOverlays, setLiveOverlays] = useState<readonly LiveOverlay[]>([]);
   const [userPubkey, setUserPubkey] = useState(openingCache?.viewerPubkey ?? openingViewer?.viewerPubkey ?? '');
   const [heartbeatPresences, setAgentPresences] = useState<Record<string, RoomAgentPresence>>({});
@@ -394,7 +394,7 @@ export function useRoomSurfaceSession({
   const roomClientRef = useRef<RoomViewClient | null>(null);
   roomClientRef.current = roomClient;
   const liveOverlaysRef = useRef(liveOverlays);
-  const readRoomRef = useRef<(() => Promise<void>) | null>(null);
+  const readRoomRef = useRef<((newVisit?: boolean) => Promise<void>) | null>(null);
   const reconciledViewRef = useRef<RoomView | null>(openingCache?.view ?? null);
   const sessionStartedRef = useRef(false);
   const agentPresencesRef = useRef(heartbeatPresences);
@@ -463,13 +463,13 @@ export function useRoomSurfaceSession({
       readCursorRef.current?.resume();
       const viewport = readViewportRef.current;
       if (viewport?.roomId === channelId && viewport.viewer === readCursorViewerRef.current) {
-        if (!isCornerRef.current && AppState.currentState === 'active')
+        if (AppState.currentState === 'active')
           readCursorRef.current?.observe(viewport.chronological, viewport.visible);
       }
       const view = reconciledViewRef.current;
       if (becameFocused && view?.room.id === channelId)
         queueNewestFrameMark(view.messages.at(-1)?.id, channelId);
-      void readRoomRef.current?.();
+      void readRoomRef.current?.(becameFocused);
       return;
     }
     readCursorRef.current?.flush();
@@ -484,7 +484,6 @@ export function useRoomSurfaceSession({
   const advanceReadCursor = useCallback(
     (chronological: readonly ChatDisplayMessage[], visible: readonly ChatDisplayMessage[]) => {
       readViewportRef.current = { roomId: channelIdRef.current, viewer: readCursorViewerRef.current, chronological, visible };
-      if (isCornerRef.current) return;
       if (!isFocusedRef.current) return;
       if (AppState.currentState === 'background' || AppState.currentState === 'inactive') return;
       readCursorRef.current?.observe(chronological, visible);
@@ -498,7 +497,7 @@ export function useRoomSurfaceSession({
     // reading it again on the very next report, then move the server boundary.
     readCursorRef.current?.suspend();
     const previousMessageId = firstUnreadMessageId;
-    const lineWasSpent = unreadLineSpent(channelIdRef.current);
+    const lineWasSpent = unreadLineSpent(channelIdRef.current, previousMessageId);
     // Naming a row is asking for the line back, so it gets a ticket even if
     // this visit already spent one (`buzz/unread-line-ticket.ts`). Issued
     // before the boundary moves, because the boundary is what the control
@@ -509,14 +508,14 @@ export function useRoomSurfaceSession({
       await roomClientRef.current?.markUnread(channelIdRef.current, messageId);
     } catch (error) {
       setFirstUnreadMessageId(previousMessageId);
-      if (lineWasSpent) spendUnreadLine(channelIdRef.current);
+      if (lineWasSpent && previousMessageId) spendUnreadLine(channelIdRef.current, previousMessageId);
       readCursorRef.current?.resume();
       throw error;
     }
   }, [firstUnreadMessageId]);
 
   const acknowledgeReadMark = useCallback((messageId: string) => {
-    if (!isCornerRef.current) readCursorRef.current?.acknowledge(messageId);
+    readCursorRef.current?.acknowledge(messageId);
   }, []);
 
   const applyAgentPresence = useCallback((presence: RoomAgentPresence | undefined) => {

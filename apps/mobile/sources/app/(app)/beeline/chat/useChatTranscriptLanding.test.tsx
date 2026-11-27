@@ -17,7 +17,7 @@ it.each(['room', 'corner'])('lands a canonical %s message URL without a push res
   const request = vi.fn();
   const jump = vi.fn();
   const handled = { current: null };
-  const controller = { request, isPinnedToTail: () => false, isUserDragging: () => false };
+  const controller = { request, observeTailPinned: vi.fn(), isPinnedToTail: () => false, isUserDragging: () => false };
   const liveDrafts = { subscribeCommit: () => () => {} };
   const noop = () => {};
   function Transcript({ ready }: { ready: boolean }) {
@@ -39,4 +39,29 @@ it.each(['room', 'corner'])('lands a canonical %s message URL without a push res
     await act(async () => renderer.update(<Transcript ready />));
     expect(request).toHaveBeenCalledOnce();
   } finally { if (renderer) await act(async () => renderer.unmount()); }
+});
+
+it.each([false, true])('lands each new opening boundary once (corner %s)', async isCorner => {
+  const roomId = isCorner ? 'warm-thread' : 'warm-chat';
+  const { spendUnreadLine } = await import('@/buzz/unread-line-ticket');
+  spendUnreadLine(roomId, 'previous');
+  const request = vi.fn();
+  const controller = { request, isPinnedToTail: () => false, isUserDragging: () => false };
+  const noop = () => {};
+  function Transcript({ boundary }: { boundary: string }) {
+    useChatTranscriptLanding([
+      controller, noop, false, noop, [], null, isCorner, boundary, '', roomId,
+      noop, { subscribeCommit: () => noop }, {}, [], undefined, undefined, undefined,
+      { current: null }, { current: new Map() }, noop, null, '', null, noop, false, 'idle',
+      { current: null }, noop,
+    ] as unknown as Parameters<typeof useChatTranscriptLanding>[0]);
+    return null;
+  }
+  let renderer!: ReactTestRenderer;
+  await act(async () => { renderer = create(<Transcript boundary="previous" />); });
+  expect(request).not.toHaveBeenCalled();
+  await act(async () => renderer.update(<Transcript boundary="next" />));
+  await act(async () => renderer.update(<Transcript boundary="next" />));
+  expect(request).toHaveBeenCalledExactlyOnceWith({ kind: 'firstUnread', messageId: 'next' });
+  await act(async () => renderer.unmount());
 });

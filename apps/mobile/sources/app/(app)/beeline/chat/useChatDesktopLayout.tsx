@@ -118,8 +118,8 @@ export function useChatDesktopLayout([
   const isCorner = Boolean(parentChannelId);
 
   useEffect(() => {
-    if (!isCorner && firstUnreadMessageId) allowOlderHistoryRef.current = true;
-  }, [firstUnreadMessageId, isCorner]);
+    if (!desktopExperience && firstUnreadMessageId) allowOlderHistoryRef.current = true;
+  }, [firstUnreadMessageId, desktopExperience]);
 
   const resolvedChannelName = roomSurface?.room.name ?? routeChannelTitle ?? null;
 

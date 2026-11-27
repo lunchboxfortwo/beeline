@@ -1,5 +1,5 @@
 import { observeArtifactRows } from '@/buzz/artifact-viewport';
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react';
 import { type ViewToken } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
@@ -162,9 +162,8 @@ export function useChatDesktopScroll([
     [],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     scrollController.reset();
-    desktopRowNodesRef.current.clear();
     desktopRowRefCallbacksRef.current.clear();
     desktopIntersectingIdsRef.current.clear();
     desktopReadingAnchorRef.current = null;
@@ -367,6 +366,7 @@ export function useChatDesktopScroll([
   const handleDesktopScroll = useCallback(
     (event: { currentTarget: HTMLElement }) => {
       const node = event.currentTarget;
+      scrollController.observeScroll();
       const pinned = node.scrollHeight - node.scrollTop - node.clientHeight <= TAIL_PIN_THRESHOLD;
       scrollController.observeTailPinned(pinned);
       observeTailPinned(pinned);

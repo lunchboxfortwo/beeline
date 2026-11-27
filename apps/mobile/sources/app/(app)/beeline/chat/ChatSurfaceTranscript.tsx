@@ -182,7 +182,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                     // newest row is not the live tail: newer rows load below a
                     // jump target there, and following them would carry the
                     // reader away from it.
-                    ...(anchoredSegmentActive ? {} : { autoscrollToTopThreshold: 50 }),
+                    ...(anchoredSegmentActive ? {} : { autoscrollToTopThreshold: TAIL_PIN_THRESHOLD }),
                   }}
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode={transcriptKeyboardDismissMode(Platform.OS)}
@@ -190,6 +190,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   showsVerticalScrollIndicator={false}
                   onScroll={(event) => {
                     phoneScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+                    scrollController.observeScroll();
                     observePhoneTailOffset(event.nativeEvent.contentOffset.y);
                     transcriptPositions.observeScroll(
                       event.nativeEvent,
@@ -254,6 +255,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   onLayout={(event) => {
                     phoneListHeightRef.current = event.nativeEvent.layout.height;
                     phoneUnderfill.observeListHeight(event.nativeEvent.layout.height);
+                    if (scrollController.isLanding()) scrollController.observeLayout();
                   }}
                   onContentSizeChange={(_width, height) => {
                     transcriptPositions.observeContentSize(height);

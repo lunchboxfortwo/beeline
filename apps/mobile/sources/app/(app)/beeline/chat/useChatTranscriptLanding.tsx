@@ -3,6 +3,8 @@ import { Platform } from 'react-native';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { roomOpenLandsOnTail, useScrollFollowOnArrival } from '@/buzz/room-scroll-follow';
 import { requestMessageJump } from '@/buzz/transcript-scroll-controller';
+import { unreadLineSpent } from '@/buzz/unread-line-ticket';
+import { boundaryRowIndex } from '@/buzz/room-new-message-boundary';
 import { hostRowIndex } from '@/buzz/room-message-store';
 import { TAIL_PIN_THRESHOLD } from './chat-surface-values';
 
@@ -83,13 +85,20 @@ export function useChatTranscriptLanding([
     scrollController.observeLayout();
   }, [desktopTranscript, scrollController, transcriptJump, transcriptMessages]);
 
-  // Desktop opens at the newest page. Walking back to an old unread boundary
-  // can read the entire transcript before the reader has asked for history.
-  // The phone retains its existing first-unread landing.
-  useEffect(() => {
-    if (desktopTranscript || isCorner || !firstUnreadMessageId || messageAnchorId) return;
+  const openingBoundary = React.useMemo(
+    () => unreadLineSpent(decodedId, firstUnreadMessageId) ? null : firstUnreadMessageId,
+    [decodedId, firstUnreadMessageId],
+  );
+  const residentBoundary = React.useMemo(() => Boolean(openingBoundary && (!desktopTranscript ||
+    boundaryRowIndex(foldedMessages, openingBoundary) >= 0)), [openingBoundary, desktopTranscript, foldedMessages]);
+  useLayoutEffect(() => {
+    if (messageAnchorId) scrollController.observeTailPinned(false);
+  }, [messageAnchorId, scrollController]);
+
+  useLayoutEffect(() => {
+    if (!residentBoundary || !firstUnreadMessageId || messageAnchorId) return;
     scrollController.request({ kind: 'firstUnread', messageId: firstUnreadMessageId });
-  }, [decodedId, desktopTranscript, firstUnreadMessageId, isCorner, messageAnchorId, scrollController]);
+  }, [decodedId, firstUnreadMessageId, residentBoundary, messageAnchorId, scrollController]);
 
   // The disc's one job. It lands on the tail itself rather than on a queued
   // boundary row, so a reader who is merely re-reading history — no queue at
@@ -153,7 +162,7 @@ export function useChatTranscriptLanding([
   });
 
   useLayoutEffect(() => {
-    if (arrivalFollow === 'hold') return;
+    if (arrivalFollow === 'hold' || !scrollController.isPinnedToTail()) return;
     // Desktop's own ResizeObserver (`setDesktopContentNode` above) already
     // re-lands on the real DOM as the appended row's layout commits; this
     // call is a harmless, idempotent second landing for the same content —
