@@ -47,6 +47,7 @@ export type TranscriptScrollCancelReason = 'replaced' | 'drag' | 'cancelled';
 
 /** The calls a platform list answers. Only the adapters below implement it. */
 export type TranscriptScrollList = {
+  contextFitsViewport?(contextRowId: string, unreadRowId: string): boolean;
   toNewest(): void;
   /** False when the list cannot reach the row yet (not measured or not drawn). */
   toRow(index: number, rowId: string, align: TranscriptRowAlign): boolean;
@@ -134,6 +135,9 @@ type Active = {
   readonly destination: TranscriptScrollDestination;
   scrolled: boolean;
   following: boolean;
+  lastScrollVisibilitySeq: number;
+  contextScrolled: boolean;
+  skipContextRow: boolean;
 };
 
 function isRowDestination(
@@ -151,6 +155,7 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
 ): TranscriptScrollController<Row> {
   const schedule = options.schedule ?? defaultSchedule;
   let active: Active | null = null;
+  let visibilitySeq = 0;
   let visibleRows: readonly Row[] = [];
   // The rows the last visibility report described. A report about other rows
   // (a window opened since) cannot settle a request.
@@ -186,7 +191,7 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
   const settledRow = (current: Active): Row | null => {
     const destination = current.destination;
     if (!isRowDestination(destination)) return null;
-    if (!current.scrolled) return null;
+    if (!current.scrolled || visibilitySeq <= current.lastScrollVisibilitySeq) return null;
     if (visibleRowsOf !== options.rows()) return null;
     const index = options.rowIndex(destination, visibleRows);
     return index >= 0 ? visibleRows[index]! : null;
@@ -230,7 +235,19 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
     const rowId = rows[index]!.id;
     const align = destination.kind === 'message' ? destination.align : 'top';
     const contextIndex = index + (options.precedingRowStep?.() ?? 0);
-    const target = destination.kind === 'firstUnread' && rows[contextIndex] ? contextIndex : index;
+    const context = rows[contextIndex];
+    let target = index;
+    if (destination.kind === 'firstUnread' && context && contextIndex !== index && !current.skipContextRow) {
+      // A fresh report that could not settle the boundary means the context
+      // hid it. Align the unread row itself for the rest of this request.
+      if ((current.contextScrolled && visibilitySeq > current.lastScrollVisibilitySeq && visibleRowsOf === rows) ||
+          list.contextFitsViewport?.(context.id, rowId) === false) {
+        current.skipContextRow = true;
+      } else {
+        target = contextIndex;
+      }
+    }
+    current.lastScrollVisibilitySeq = visibilitySeq;
     if (!list.toRow(target, rows[target]!.id, align)) {
       // Scroll near the row so the list draws and measures it. A list that
       // has nothing left to draw sends no later pass by itself, and a row
@@ -238,19 +255,20 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       list.toEstimatedRow(target);
       return;
     }
+    current.contextScrolled = target !== index;
     if (!current.scrolled) {
       current.scrolled = true;
       options.onScrolled?.(destination, rowId);
-      if (active !== current) return;
     }
-    const after = settledRow(current);
-    if (after) land(current, after.id);
   };
 
   const request = (destination: TranscriptScrollDestination, following = false) => {
     if (destination.kind === 'message' || destination.kind === 'offset') readerMoved = true;
     end('replaced');
-    const current: Active = { destination, scrolled: false, following };
+    const current: Active = {
+      destination, scrolled: false, following,
+      lastScrollVisibilitySeq: visibilitySeq, contextScrolled: false, skipContextRow: false,
+    };
     active = current;
     if (destination.kind === 'offset') {
       attempt(current);
@@ -319,6 +337,7 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       }
     },
     observeVisibleRows(rows) {
+      visibilitySeq += 1;
       visibleRows = rows;
       visibleRowsOf = options.rows();
       if (active) attempt(active);
@@ -478,9 +497,13 @@ export function phoneTranscriptList(
 type DesktopNode = {
   scrollTop: number;
   readonly scrollHeight: number;
+  readonly clientHeight?: number;
 };
 
-type DesktopRowNode = { scrollIntoView(options: { block: 'start' | 'center' }): void };
+type DesktopRowNode = {
+  scrollIntoView(options: { block: 'start' | 'center' }): void;
+  getBoundingClientRect?(): { top: number };
+};
 
 /** The desktop transcript: a plain scrollable DOM node with one node per row. */
 export function desktopTranscriptList(
@@ -488,6 +511,12 @@ export function desktopTranscriptList(
   getRowNode: (rowId: string) => DesktopRowNode | undefined,
 ): TranscriptScrollList {
   return {
+    contextFitsViewport(contextId, unreadId) {
+      const height = getScrollNode()?.clientHeight;
+      const context = getRowNode(contextId)?.getBoundingClientRect?.();
+      const unread = getRowNode(unreadId)?.getBoundingClientRect?.();
+      return !height || !context || !unread || unread.top - context.top < height;
+    },
     toNewest() {
       const node = getScrollNode();
       if (node) node.scrollTop = node.scrollHeight;

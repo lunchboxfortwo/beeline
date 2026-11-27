@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createTranscriptScrollController, phoneTranscriptList } from './transcript-scroll-controller';
+import { createTranscriptScrollController, desktopTranscriptList, phoneTranscriptList } from './transcript-scroll-controller';
 
 function transcript(step = 1) {
   const rows = ['live', 'unread', 'read'].map(id => ({ id }));
@@ -23,11 +23,53 @@ it.each([1, -1])('aligns the preceding read row before settling a visible unread
   expect(controller.isPinnedToTail()).toBe(false);
   flush();
   expect(list.toRow).toHaveBeenCalledWith(1 + step, 'read', 'top');
+  expect(controller.isLanding()).toBe(true);
+  controller.observeVisibleRows(rows);
   controller.observeTailPinned(true);
   controller.follow();
   flush();
   expect(controller.isHoldingLanding()).toBe(true);
   expect(list.toNewest).not.toHaveBeenCalled();
+});
+
+it('falls back to New when the preceding read row fills the viewport', () => {
+  const { controller, rows, list, flush } = transcript();
+  controller.observeVisibleRows(rows);
+  controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  flush();
+  expect(controller.isLanding()).toBe(true);
+  expect(list.toRow.mock.calls).toEqual([[2, 'read', 'top']]);
+
+  // The context row occupies the entire viewport after its top alignment.
+  controller.observeVisibleRows([rows[2]!]);
+  expect(list.toRow.mock.calls).toEqual([[2, 'read', 'top'], [1, 'unread', 'top']]);
+  expect(controller.isLanding()).toBe(true);
+  controller.observeVisibleRows([rows[1]!]);
+  expect(controller.isHoldingLanding()).toBe(true);
+  expect(list.toRow).toHaveBeenCalledTimes(2);
+});
+
+it('skips the context scroll when desktop measurements put New below the viewport', () => {
+  const rows = [{ id: 'read' }, { id: 'unread' }];
+  const scrollContext = vi.fn();
+  const scrollUnread = vi.fn();
+  const list = desktopTranscriptList(
+    () => ({ scrollTop: 0, scrollHeight: 1200, clientHeight: 600 }),
+    id => id === 'read'
+      ? { getBoundingClientRect: () => ({ top: 30 }), scrollIntoView: scrollContext }
+      : { getBoundingClientRect: () => ({ top: 630 }), scrollIntoView: scrollUnread },
+  );
+  const controller = createTranscriptScrollController({
+    list: () => list, rows: () => rows, precedingRowStep: () => -1,
+    rowIndex: (target, candidates) => candidates.findIndex(row => row.id === target.messageId),
+    schedule: work => work(),
+  });
+  controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  expect(scrollContext).not.toHaveBeenCalled();
+  expect(scrollUnread).toHaveBeenCalledExactlyOnceWith({ block: 'start' });
+  expect(controller.isLanding()).toBe(true);
+  controller.observeVisibleRows([rows[1]!]);
+  expect(controller.isLanding()).toBe(false);
 });
 
 it('compensates streaming growth and collapse only while the live row owns the viewport', () => {
