@@ -10,6 +10,16 @@ import type { AgentModelConfigOption } from './model-types.js';
 
 export type RunningModelReport = { model?: string; selected?: string; reason?: string };
 
+export function launchModelSelection(
+  selection: { model?: string; effort?: string; fastMode?: boolean },
+  catalog: readonly AgentModelConfigOption[] | undefined,
+) {
+  const knownModels = catalog?.find((option) => option.category === 'model');
+  if (!selection.model) return undefined;
+  // An empty selection clears stale model arguments so the harness can start.
+  return knownModels?.options.some((option) => option.id === selection.model) ? selection : {};
+}
+
 /**
  * Tells the server which model one session runs. Like the optional reads, the
  * write goes out after the session's first prompt, so it never holds delivery;
