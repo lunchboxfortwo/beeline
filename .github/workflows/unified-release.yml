@@ -945,7 +945,7 @@ jobs:
         run: |
           set -euo pipefail
           bash packages/scripts/npm-ci-timed.sh
-          npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
+          npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net && npm run build -w @beeline/design-tokens
       - uses: ./.github/actions/eas-cli
       - run: mkdir -p "$RUNNER_TEMP/website-staging"
       - uses: ./.github/actions/pages-leg
