@@ -1,5 +1,6 @@
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { cornerKindSql, createHash, randomBytes, describe, expect, it, migrate, SYSTEM_IDENTITY_ID, describedWorkflow, PhoneService, DaemonService, LiveHub, systemLine, advanceCorner, CORNER_LIFECYCLE_SLUG, cornerMergeGate, deleteStoredCornerWorkflows, createAgentCommand, CORNER_LIFECYCLE_CARD_TYPE, cornerOwnerSql, getWorkflowRun, liveWorkflowRun, saveWorkflow, startWorkflow, RecordingDatabase, H, A, B, W, R, db, phone, daemon, github, githubRollupState, githubHead, githubApp, implementersMerge, derivedWorker, cards, currentState, commissioned, brief, open, claim, pushToCorner, greenHead, redHead, commands, result, SHA, OPEN_CLOSE_BADGES, branchOf, reasons, projected, inReview, approve, approved, mergedWebhook, say, revise, F, fallback, rootFixture, fixtureScope2, fixtureScope9, fixtureScope10, fixtureScope11, type CommandRow } from './test-support-corner-lifecycle.test-support.js';
+import { cornerIdleSql } from './corner-idle.js';
 
 describe('the corner lifecycle contract itself', () => {
 
@@ -111,6 +112,33 @@ const scope2 = fixtureScope2(_name, stored);
     expect([opened, await scope2.badge(cornerId, true)]).toEqual(OPEN_CLOSE_BADGES);
     await expect(rootFixture.phone.execute('readWorkflowRun', { roomId: cornerId, runId: cornerId }, H))
       .rejects.toThrow('workflow run not found');
+  });
+});
+describe('idle notices on merge', () => {
+  it.each([false, true])('Reproduction 1: archives an idle-eligible thread (notice already queued: %s)', async queued => {
+    const cornerId = await open('owner/widgets', true, B);
+    await greenHead(cornerId, 7, SHA);
+    await rootFixture.db.query(`UPDATE corner_merge_holds SET released_at=now(),released_by=$2 WHERE corner_id=$1`, [cornerId, H]);
+    expect((await rootFixture.db.query(cornerIdleSql('$1'), [cornerId])).rows[0])
+      .toMatchObject({ suppressed: false, worker_active: false, reviewer_active: false, peer_active: false,
+        blocking: false, idle_report_count: 0, idle_report_pending: false });
+    const notices = async () => (await rootFixture.db.query(`SELECT agent_id,state FROM agent_commands
+      WHERE private_payload->>'fromRoomId'=$1 AND private_payload->>'idleSince' IS NOT NULL`, [cornerId])).rows;
+
+    if (queued) await advanceCorner(rootFixture.db, cornerId, { kind: 'reconcile' });
+    const idleText = 'blocked: Thread Ship-widget is idle. Resume it, set a hold, or close it.';
+    const notice = (await commands(B, R)).find(command => command.source.body === idleText);
+    expect(notice?.source.body).toBe(queued ? idleText : undefined);
+
+    await mergedWebhook(cornerId, 7, SHA);
+
+    expect(await projected(cornerId)).toBe('archived');
+    if (notice) {
+      await expect(rootFixture.daemon.execute('startAgentTurn', {
+        roomId: R, requestId: notice.turnRequestId, invocationId: 'stale-idle-notice',
+      }, B)).rejects.toThrow(/invocation requires a pending command/);
+    }
+    expect(await notices()).toEqual(queued ? [{ agent_id: B, state: 'cancelled' }] : []);
   });
 });
 describe('thread lock', () => {
