@@ -6,8 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { retrieveTempText } from '@/sync/persistence';
 import * as Clipboard from 'expo-clipboard';
 import { HullDialog } from '@/components/buzz/HullDialog';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SafeBottom, SafeTop, T } from '@/ui/grammar';
+import { SafeBottom, ScreenHeader, T } from '@/ui/grammar';
 
 type Notice = {
     title: string;
@@ -73,9 +72,10 @@ export default function TextSelectionScreen() {
 
     return (
         <YStack flex={1} backgroundColor="canvas">
-            <SafeTop />
-            <PageHeader
-                action={
+            <ScreenHeader
+                back={() => router.back()}
+                backLabel="Back"
+                right={
                     <Button
                       accessibilityLabel={'Copy'}
                       accessibilityRole="button"
@@ -88,10 +88,9 @@ export default function TextSelectionScreen() {
                       iconOnly
                     />
                 }
-                backAccessibilityLabel={"Back"}
-                onBack={() => router.back()}
+                safeTop
                 testID="text-selection-header"
-                title={"Select Text"}
+                title="Select Text"
             />
             {loading ? (
                 <T v="body" color="secondary" marginTop="8" textAlign="center">{"Loading..."}</T>
@@ -100,7 +99,7 @@ export default function TextSelectionScreen() {
                     flex={1}
                     showsVerticalScrollIndicator
                 >
-                    <YStack paddingHorizontal="4" paddingTop="4" paddingBottom="4">
+                    <YStack paddingHorizontal="4" paddingTop="4" paddingBottom="4" width="100%" maxWidth={720} alignSelf="center">
                         <T
                             v="code"
                             accessibilityLabel={"Select Text"}

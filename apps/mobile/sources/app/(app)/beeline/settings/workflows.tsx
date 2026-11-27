@@ -1,11 +1,7 @@
 import { PageLoader } from '@/ui/PageLoader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { appErrorCopy, appReadErrorCopy } from '@/buzz/app-error-copy';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useCallback, useState } from 'react';
-import { ScrollView, XStack, YStack } from 'tamagui';
 import { router, useFocusEffect, useLocalSearchParams, type Href } from 'expo-router';
 import {
   roomTitle,
@@ -13,12 +9,12 @@ import {
   type RoomWorkflowView,
 } from '@beeline/api-contract/phone';
 import { getEffectiveRelayUrl, loadBuzzIdentity } from '@/auth/buzz-identity-storage';
-import { PageHeader } from '@/components/buzz/PageHeader';
+import { Button } from '@/components/buzz/Button';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { RoomViewClient } from '@/sync/transport/room-view-client';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { Modal } from '@/modal/ModalManager';
-import { CHEVRON_ROW_SIZE, ChevronGlyph } from '@/components/buzz/ChevronGlyph';
-import { Copy, Inked, SafeBottom, SafeTop, T } from '@/ui/grammar';
+import { Copy, Row, Screen, Section } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -26,10 +22,16 @@ function first(value: string | string[] | undefined): string | undefined {
 
 const LAST_RUN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
+function conclusionLabel(conclusion: string | null | undefined): string {
+  if (!conclusion) return 'Running';
+  if (conclusion === 'success') return 'Passed';
+  if (conclusion === 'failure') return 'Failed';
+  return conclusion[0]!.toUpperCase() + conclusion.slice(1);
+}
+
 /** Repository workflows remain a Room-manager action; this route is only an entry surface. */
 export default function RoomWorkflows() {
   useLatencyRouteFrame('/beeline/settings/workflows');
-  const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{ roomId?: string | string[] }>();
   const roomId = first(params.roomId);
   const [roomName, setRoomName] = useState('Chat');
@@ -37,11 +39,15 @@ export default function RoomWorkflows() {
   const [loading, setLoading] = useState(true);
   useLatencyRouteFrame('/beeline/settings/workflows', !loading, true);
   const [running, setRunning] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{
+    workflow: RoomWorkflowView;
+    message: string;
+  } | null>(null);
 
   const reload = useCallback(async () => {
     if (!roomId) {
-      setError('Workflow target is missing.');
+      setReadError('Workflow target is missing.');
       setLoading(false);
       return;
     }
@@ -58,9 +64,9 @@ export default function RoomWorkflows() {
       const workflows = await monolithPhoneOperation('listRoomWorkflows', { roomId });
       setRoomName(room.room.name);
       setList(workflows);
-      setError(null);
+      setReadError(null);
     } catch (caught) {
-      setError(appReadErrorCopy(caught));
+      setReadError(appReadErrorCopy(caught));
     } finally {
       setLoading(false);
     }
@@ -83,7 +89,7 @@ export default function RoomWorkflows() {
       );
       if (!confirmed) return;
       setRunning(workflow.name);
-      setError(null);
+      setActionError(null);
       try {
         await monolithPhoneOperation('dispatchRoomWorkflow', {
           roomId,
@@ -91,7 +97,10 @@ export default function RoomWorkflows() {
         });
         await reload();
       } catch (caught) {
-        setError(appErrorCopy(caught, `Could not run ${workflow.name}.`));
+        setActionError({
+          workflow,
+          message: appErrorCopy(caught, `Could not run ${workflow.name}.`),
+        });
       } finally {
         setRunning(null);
       }
@@ -99,73 +108,71 @@ export default function RoomWorkflows() {
     [list, reload, roomId, running],
   );
 
+  const retrySend = () => {
+    if (actionError) void run(actionError.workflow);
+  };
+
   return (
-    <YStack flex={1} backgroundColor="canvas"
-      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.list : undefined}
-      alignSelf={desktopPageLayout ? 'center' : undefined}>
-      <SafeTop />
-      <PageHeader
-        backAccessibilityLabel="Back to chat"
-        eyebrow={roomTitle(roomName) ?? 'Chat'}
-        onBack={() => router.back()}
-        testID="workflows-room"
-        title="Workflows"
-      />
+    <Screen
+      title="Workflows"
+      eyebrow={roomTitle(roomName) ?? 'Chat'}
+      back={() => router.back()}
+      backLabel="Back to chat"
+      headerTestID="workflows-room"
+    >
       {loading ? (
         <PageLoader testID="workflows-loader" />
       ) : (
-        <ScrollView>
-          <YStack padding="4" gap="2">
-          <Copy small quiet marginBottom="1">
-            Dispatches run on {list?.defaultBranch ?? 'the repository default branch'}.
-          </Copy>
+        <>
           {list?.workflows.length ? (
-            list.workflows.map((workflow) => {
-              const busy = running === workflow.name;
-              const lastRun = workflow.lastRunAt
-                ? `${LAST_RUN.format(new Date(workflow.lastRunAt * 1_000))} · ${workflow.conclusion ?? 'running'}`
-                : 'Never run';
-              return (
-                <XStack
-                  accessibilityLabel={`Run ${workflow.name}`}
-                  accessibilityRole="button"
-                  disabled={Boolean(running)}
-                  key={workflow.name}
-                  onPress={running ? undefined : () => void run(workflow)}
-                  minHeight={56}
-                  borderTopWidth={1}
-                  borderTopColor="stroke"
-                  paddingVertical="2"
-                  alignItems="center"
-                  gap="2"
-                  testID={`room-workflow-${workflow.name}`}
-                >
-                  <YStack flex={1} minWidth={0} gap="1">
-                    <T v="heading">{workflow.name}</T>
-                    <Copy small quiet>{lastRun}</Copy>
-                  </YStack>
-                  <XStack alignItems="center" gap="1">
-                    <T v="metaStrong" color="needsYou">{busy ? 'RUNNING…' : 'RUN'}</T>
-                    {!busy ? (
-                      <Inked color="needsYou" glyph={ChevronGlyph} direction="right" size={CHEVRON_ROW_SIZE} />
-                    ) : null}
-                  </XStack>
-                </XStack>
-              );
-            })
-          ) : (
+            <Section
+              title="Dispatchable"
+              note={`Branch: ${list.defaultBranch}`}
+              testID="workflows-section"
+            >
+              {list.workflows.map((workflow, index) => {
+                const busy = running === workflow.name;
+                const lastRun = workflow.lastRunAt
+                  ? `${LAST_RUN.format(new Date(workflow.lastRunAt * 1_000))} · ${conclusionLabel(workflow.conclusion)}`
+                  : 'Never run';
+                return (
+                  <Row
+                    key={workflow.name}
+                    label={workflow.name}
+                    detail={lastRun}
+                    detailTone={workflow.conclusion === 'failure' ? 'removed' : undefined}
+                    last={index === list.workflows.length - 1}
+                    right={
+                      <Button
+                        accessibilityLabel={`Run ${workflow.name}`}
+                        compact
+                        disabled={Boolean(running)}
+                        label={busy ? 'Running…' : 'Run'}
+                        loading={busy}
+                        onPress={() => void run(workflow)}
+                        testID={`room-workflow-${workflow.name}`}
+                        variant="secondary"
+                      />
+                    }
+                  />
+                );
+              })}
+            </Section>
+          ) : !readError ? (
             <Copy small quiet>No dispatchable workflows in this chat.</Copy>
-          )}
-          {error && (
-            <SettingsRow
-              title={error}
+          ) : null}
+          {actionError ? (
+            <ErrorBanner
+              inline
+              onRetry={retrySend}
               testID="workflows-error"
+              title={actionError.message}
             />
-          )}
-          </YStack>
-        </ScrollView>
+          ) : readError ? (
+            <ErrorBanner inline testID="workflows-error" title={readError} />
+          ) : null}
+        </>
       )}
-      <SafeBottom />
-    </YStack>
+    </Screen>
   );
 }

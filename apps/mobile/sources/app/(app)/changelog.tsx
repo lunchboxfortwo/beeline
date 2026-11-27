@@ -5,13 +5,10 @@ import { router } from 'expo-router';
 import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
 import { getChangelogEntries, getLatestTitle, setLastViewedTitle } from '@/changelog';
 import { layout } from '@/components/layout';
-import { useLayoutClass } from '@/utils/responsive';
-import { PageHeader } from '@/components/buzz/PageHeader';
-import { SafeBottom, SafeTop, T, TypedView } from '@/ui/grammar';
+import { Copy, SafeBottom, ScreenHeader, T, TypedView } from '@/ui/grammar';
 
 export default function ChangelogScreen() {
   useLatencyRouteFrame('/changelog', true, true);
-    const isCompact = useLayoutClass() === 'compact';
     const entries = getChangelogEntries();
 
     useEffect(() => {
@@ -24,7 +21,6 @@ export default function ChangelogScreen() {
     if (entries.length === 0) {
         return (
             <YStack flex={1} backgroundColor="canvas">
-                <SafeTop />
                 <ChangelogHeader />
                 <YStack flex={1} alignItems="center" justifyContent="center" padding="8">
                     <T v="body" color="secondary" textAlign="center">
@@ -37,7 +33,6 @@ export default function ChangelogScreen() {
 
     return (
         <YStack flex={1} backgroundColor="canvas">
-            <SafeTop />
             <ChangelogHeader />
             <ScrollView
                 flex={1}
@@ -48,7 +43,7 @@ export default function ChangelogScreen() {
                     paddingHorizontal="4"
                     paddingTop="4"
                     paddingBottom="8"
-                    maxWidth={isCompact ? '100%' : layout.maxWidth}
+                    maxWidth={layout.maxWidth}
                     alignSelf="center"
                     width="100%"
                 >
@@ -77,12 +72,12 @@ export default function ChangelogScreen() {
 
 function ChangelogHeader() {
     return (
-        <PageHeader
-            backAccessibilityLabel={"Back"}
-            meta="RELEASE LEDGER"
-            onBack={() => router.back()}
-            prominent
-            title={"What's New"}
+        <ScreenHeader
+            back={() => router.back()}
+            backLabel="Back"
+            meta={<Copy small quiet>RELEASE LEDGER</Copy>}
+            safeTop
+            title="What's New"
         />
     );
 }

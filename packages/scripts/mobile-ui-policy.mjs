@@ -32,11 +32,14 @@ export const SHARED_CONTROL_OWNERS = new Set([
   'components/buzz/HullSwitch.tsx',
   'components/buzz/IndexRow.tsx',
   'components/buzz/LedgerDisclosure.tsx',
-  'components/buzz/PageHeader.tsx',
   'components/buzz/RoomListSectionHeader.tsx',
   'components/buzz/RoomListToolbar.tsx',
   'components/buzz/ShowMoreRow.tsx',
 ]);
+
+/** Source directories whose component files and symbols must be registered. */
+export const isInventoriedUiFile = (file) =>
+  file.startsWith('components/') || file.startsWith('ui/');
 
 /** Whether a rule applies to a file: screens take every rule; shared files the strict and widened ones. */
 function ruleApplies(rule, file) {
@@ -315,7 +318,7 @@ export const UI_CONTROL_RULES = [
       (/["']heading["']/.test(c.properties.get('accessibilityRole')?.getText(c.sourceFile) ?? '') ||
         (c.properties.has('style') &&
           (/header|Header/.test(c.style) || /Header$/.test(c.owner(c.node)))))
-        ? 'Use PageHeader or a registered shared header.'
+        ? 'Use PlaceHeader, ScreenHeader or a registered shared header.'
         : null,
   },
   {
@@ -372,7 +375,7 @@ export function scanUiSource(source, file, rules = UI_CONTROL_RULES) {
       components.add(name);
   }
   function visit(node) {
-    if (file.startsWith('components/')) {
+    if (isInventoriedUiFile(file)) {
       if (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node))
         component(
           node.name?.text ??
@@ -484,7 +487,7 @@ export function grandfatherRegistry(scans) {
     fingerprintMode: FINGERPRINT_MODE,
     components: Object.fromEntries(
       scans
-        .filter((scan) => scan.file.startsWith('components/'))
+        .filter((scan) => isInventoriedUiFile(scan.file))
         .map((scan) => [scan.file, scan.components]),
     ),
     legacyControls: Object.fromEntries(
@@ -539,13 +542,13 @@ export function judgeUiRegistry(scans, registry, baseRegistry) {
     }
   for (const scan of scans) {
     errors.push(...scan.offences.filter((offence) => offence.strict));
-    if (scan.file.startsWith('components/')) {
+    if (isInventoriedUiFile(scan.file)) {
       if (!Object.hasOwn(registry.components, scan.file))
         errors.push({
           file: scan.file,
           line: 1,
           rule: 'component-file',
-          message: `New shared component file. Register it explicitly in ${REGISTRY_PATH}.`,
+          message: `New UI component file. Register it explicitly in ${REGISTRY_PATH}.`,
         });
       for (const name of scan.components)
         if (!registry.components[scan.file]?.includes(name))

@@ -1,4 +1,15 @@
 vi.mock('@/ui/window-dimensions', () => ({ useWindowDimensions: () => ({ height: 844, width: 390 }) }));
+vi.mock('@/ui/overlay-host', async () => {
+  const R = await import('react');
+  const { useWindowDimensions } = await import('@/ui/window-dimensions');
+  return {
+    useIsDesktop: () => useWindowDimensions().width >= 768,
+    HullModal: (props: any) =>
+      R.createElement('HullModal', props, props.visible ? props.children : null),
+    HullFloatingSurface: (props: any) =>
+      R.createElement('HullFloatingSurface', props, props.children),
+  };
+});
 vi.mock('react-native-keyboard-controller', () => ({ useReanimatedKeyboardAnimation: () => ({ height: { value: 0 } }), KeyboardAvoidingView: (props: any) => React.createElement('View', props, props.children) }));
 import React from 'react';
 import { beforeEach, vi } from 'vitest';

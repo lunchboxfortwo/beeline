@@ -207,6 +207,21 @@ it.each([[true, '1'], [false, '5']])('clears the surface top with the title when
   expect(title.props.paddingTop).toBe(paddingTop);
 });
 
+it('re-emits the active Tamagui theme class inside the Modal portal so web surfaces stay opaque', () => {
+  Object.assign(Platform, { OS: 'web' });
+  act(() => {
+    renderer = create(
+      <HullModal visible onRequestClose={() => undefined}>
+        <Content />
+      </HullModal>,
+    );
+  });
+  const modal = renderer.root.findByType('Modal');
+  const theme = modal.findByType('Theme');
+  expect(theme.props.name).toBe('dark_brass');
+  expect(theme.props.forceClassName).toBe(true);
+});
+
 function Content() {
   return React.createElement('Text', {}, 'Mute notifications');
 }

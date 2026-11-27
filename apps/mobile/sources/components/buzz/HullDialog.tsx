@@ -3,7 +3,7 @@ import React from 'react';
 import { Modal, BackHandler, Platform, type TextInput } from 'react-native';
 import { Easing, FadeOut, ReduceMotion } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
-import { Input, XStack, YStack, styled, useThemeName, type InputProps, type YStackProps } from 'tamagui';
+import { Input, Theme, XStack, YStack, styled, useThemeName, type InputProps, type YStackProps } from 'tamagui';
 import { space, typeRoles } from '@beeline/design-tokens';
 import { clearModalNavigationBarScrim } from '@/buzz/android-modal-navigation-bar';
 import { HEIGHT, MotionLayer, T } from '@/ui/grammar';
@@ -56,7 +56,7 @@ export function HullFloatingSurface(props: HullFloatingSurfaceProps) {
       overflow="hidden"
       borderWidth={HAIRLINE}
       borderColor="strongStroke"
-      borderRadius="sm"
+      borderRadius="house"
       backgroundColor="raised"
       shadowOffset={{ width: 0, height: 18 }}
       shadowOpacity={dark ? 0.55 : 0.14}
@@ -275,6 +275,7 @@ const StableHullModal = React.memo(function StableHullModal({
   visible,
   withinScreen = false,
 }: HullModalProps) {
+  const themeName = useThemeName();
   React.useLayoutEffect(() => {
     if (!withinScreen || Platform.OS !== 'android' || !visible) return;
     const back = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -351,7 +352,11 @@ const StableHullModal = React.memo(function StableHullModal({
       transparent
       visible={visible}
     >
-      {body}
+      {/* On web, Modal portals into document.body outside the app's Tamagui Theme DOM class;
+          forceClassName re-emits the active theme class inside the portal so CSS tokens resolve. */}
+      <Theme name={themeName} forceClassName>
+        {body}
+      </Theme>
     </Modal>
   );
 });
@@ -495,7 +500,7 @@ export const HullDialogInput = React.forwardRef<
       borderBottomColor={focused ? 'needsYou' : 'strongStroke'}
       borderWidth={boxed ? HAIRLINE : undefined}
       borderColor={boxed ? (focused ? 'needsYou' : 'strongStroke') : undefined}
-      borderRadius={boxed ? 'sm' : 0}
+      borderRadius={boxed ? 'house' : 0}
       paddingHorizontal={boxed ? '4' : 0}
       paddingVertical={boxed ? '2' : 0}
       minHeight={
@@ -527,7 +532,7 @@ export const HullDialogInput = React.forwardRef<
       color="ink"
       backgroundColor="transparent"
       borderWidth={0}
-      borderRadius="sm"
+      borderRadius="house"
       outlineWidth={0}
       textAlign="left"
       textAlignVertical={props.multiline ? 'top' : 'center'}

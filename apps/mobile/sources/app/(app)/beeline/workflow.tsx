@@ -1,8 +1,5 @@
 import { PageLoader } from '@/ui/PageLoader';
 import { appErrorCopy } from '@/buzz/app-error-copy';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import { workflowRunHref } from '@/buzz/workflow-run-copy';
@@ -12,11 +9,11 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import type { PhoneOperationMap } from '@beeline/api-contract/phone';
 import { workflowDisplayName } from '@/buzz/workflow-graph';
 import { workflowStarterLine } from '@/buzz/workflow-run-copy';
-import { PageHeader } from '@/components/buzz/PageHeader';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { DetailSection } from '@/components/buzz/ScheduledWorkDetail';
 import { WorkflowRunLine } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
-import { SafeBottom, SafeTop, T } from '@/ui/grammar';
+import { SafeBottom, ScreenHeader, T } from '@/ui/grammar';
 
 /**
  * One workflow: its steps on the run page's rail (every step pending, as no
@@ -31,7 +28,6 @@ export default function Workflow() {
   }>();
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
   const name = Array.isArray(params.name) ? params.name[0] : params.name;
-  const desktopPageLayout = useDesktopPageLayout();
   const [detail, setDetail] = useState<
     PhoneOperationMap['readWorkflowDefinition']['output'] | null
   >(null);
@@ -51,22 +47,18 @@ export default function Workflow() {
     }, [reload]),
   );
   return (
-    <YStack
-      flex={1}
-      backgroundColor="canvas"
-      width={desktopPageLayout ? '100%' : undefined}
-      maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
-      alignSelf={desktopPageLayout ? 'center' : undefined}
-    >
-      <SafeTop />
-      <PageHeader
+    <YStack flex={1} backgroundColor="canvas" width="100%" maxWidth={720} alignSelf="center">
+      <ScreenHeader
         title={workflowDisplayName(name)}
-        onBack={() => router.back()}
-        backAccessibilityLabel="Back"
+        back={() => router.back()}
+        backLabel="Back"
+        safeTop
         testID="workflow-header"
       />
       {error ? (
-        <SettingsRow title={error} />
+        <YStack paddingHorizontal="4" paddingTop="3">
+          <ErrorBanner inline title={error} />
+        </YStack>
       ) : null}
       {!detail && !error ? <PageLoader /> : null}
       {detail ? (

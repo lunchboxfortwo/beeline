@@ -348,7 +348,7 @@ async function render(): Promise<ReactTestRenderer> {
 }
 const byId = (renderer: ReactTestRenderer, id: string): any => renderer.root.findAll((node: any) => node.props.testID === id)[0];
 const has = (renderer: ReactTestRenderer, id: string) => Boolean(byId(renderer, id));
-const sheet = (renderer: ReactTestRenderer, id: string) => renderer.root.findAll((node: any) => node.type === 'Sheet' && node.props.open !== undefined)
+const sheet = (renderer: ReactTestRenderer, id: string) => renderer.root.findAll((node: any) => node.type === 'HullModal' && node.props.visible !== undefined)
   .find((node: any) => node.findAll((child: any) => child.props.testID === id).length > 0);
 
 describe('Workspace settings tab', () => {
@@ -412,7 +412,7 @@ describe('Workspace settings tab', () => {
     expect(row.props.value).toBe('Private');
     expect(row.props.detail).toBe('Not joined');
     act(() => row.props.onPress());
-    expect(sheet(renderer, 'room-sheet')?.props.open).toBe(true);
+    expect(sheet(renderer, 'room-sheet')?.props.visible).toBe(true);
     await act(async () => { byId(renderer, 'room-sheet-join').props.onPress(); await Promise.resolve(); await Promise.resolve(); });
     expect(phoneOperation).toHaveBeenCalledWith('addRoomMember', { roomId: 'milo', memberId: 'a'.repeat(64) });
     expect(navigation.push).toHaveBeenCalled();
@@ -421,7 +421,7 @@ describe('Workspace settings tab', () => {
   it('requires the exact Workspace name before Delete Workspace', async () => {
     const renderer = await render();
     act(() => byId(renderer, 'workspace-delete-row').props.onPress());
-    expect(sheet(renderer, 'workspace-delete-sheet')?.props.open).toBe(true);
+    expect(sheet(renderer, 'workspace-delete-sheet')?.props.visible).toBe(true);
     expect(byId(renderer, 'workspace-delete-confirm').props.disabled).toBe(true);
     act(() => byId(renderer, 'workspace-delete-confirm-input').props.onChangeText('Hull'));
     expect(byId(renderer, 'workspace-delete-confirm').props.disabled).toBe(false);

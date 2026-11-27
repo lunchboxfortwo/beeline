@@ -1,20 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
-import { useWindowDimensions } from './window-dimensions';
-import { lowerKeyboard } from '@/ui/lower-keyboard';
 import {
     Button as TButton,
     Card,
     ListItem,
     ScrollView,
     Separator,
-    Sheet,
     Text,
-    Theme,
     XStack,
     YStack,
     useTheme,
-    useThemeName,
 } from 'tamagui';
 import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +16,7 @@ import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, w
 import Svg, { Circle, G, Path } from 'react-native-svg';
 import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
 import { QR_INK, QR_PAPER, SCRIM } from '@beeline/design-tokens';
+export { KeyboardBody, OverlaySheet, SheetFrame, SheetRow, SheetScroll, type OverlaySheetProps } from './grammar-overlay';
 
 /**
  * The one design grammar (build spec → "The grammar (one page)"). Six type
@@ -142,12 +137,12 @@ export function Btn({ kind = 'secondary', label, children, disabled, viewerInset
     viewerInset?: boolean;
 } & Omit<ButtonProps, 'children' | 'aria-label'>) {
     const shape: Partial<ButtonProps> =
-        kind === 'primary' ? { theme: 'button' as any, minHeight: HEIGHT.primary }
+        kind === 'primary' ? { theme: 'button' as any, minHeight: HEIGHT.primary, borderRadius: 'house' }
             : kind === 'icon' ? { size: 'sm' as any, circular: true, minWidth: HEIGHT.control, minHeight: HEIGHT.control, backgroundColor: 'transparent', borderWidth: 0 }
-                : kind === 'quiet' ? { size: 'sm' as any, minHeight: HEIGHT.control, backgroundColor: 'transparent', borderWidth: 0 }
-                    : kind === 'destructive' ? { minHeight: HEIGHT.control, borderWidth: 1, borderColor: 'removed', backgroundColor: 'canvas' }
-                        : kind === 'accent' ? { size: 'sm' as any, minHeight: HEIGHT.control, borderWidth: 1, borderColor: 'needsYou' }
-                            : { minHeight: HEIGHT.control, borderWidth: 1, borderColor: 'strongStroke' };
+                : kind === 'quiet' ? { size: 'sm' as any, minHeight: HEIGHT.control, borderRadius: 'house', backgroundColor: 'transparent', borderWidth: 0 }
+                    : kind === 'destructive' ? { minHeight: HEIGHT.control, borderRadius: 'house', borderWidth: 1, borderColor: 'removed', backgroundColor: 'canvas' }
+                        : kind === 'accent' ? { size: 'sm' as any, minHeight: HEIGHT.control, borderRadius: 'house', borderWidth: 1, borderColor: 'needsYou' }
+                            : { minHeight: HEIGHT.control, borderRadius: 'house', borderWidth: 1, borderColor: 'strongStroke' };
     const content = typeof children === 'string'
         ? <T v="heading" color={kind === 'primary' ? 'primaryInk' : kind === 'destructive' ? 'removed' : 'ink'}>{children}</T>
         : children;
@@ -173,29 +168,29 @@ export function Section({ title, children, note, testID }: { title: string; chil
     const step = useStep();
     return (
         <YStack gap={step('2')} testID={testID}>
-            <XStack gap={step('2')} alignItems="baseline" flexWrap="wrap">
+            <XStack gap={step('2')} alignItems="baseline" justifyContent="space-between" flexWrap="wrap">
                 <T v="metaStrong" color="secondary">{title}</T>
                 {note ? <Copy small quiet>{note}</Copy> : null}
             </XStack>
-            <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" paddingHorizontal={step('3')} paddingVertical={step('1')}>{children}</Card>
+            <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="house" paddingHorizontal={step('3')} paddingVertical={step('1')}>{children}</Card>
         </YStack>
     );
 }
 
 /** Label, value or second line, chevron if it opens. */
-export function Row({ label, value, detail, icon, leading, onPress, last, right, testID, tone }: {
-    label: string; value?: string; detail?: string; icon?: IconComponent; leading?: React.ReactNode;
+export function Row({ label, value, detail, detailTone, icon, leading, onPress, last, right, testID, tone }: {
+    label: string; value?: string; detail?: string; detailTone?: 'removed'; icon?: IconComponent; leading?: React.ReactNode;
     onPress?: () => void; last?: boolean; right?: React.ReactNode; testID?: string; tone?: 'removed';
 }) {
     const step = useStep();
     const line = typeStyle(tone ? 'heading' : 'body', useTextSize()).lineHeight;
     const body = (
-        <XStack gap={step('3')} alignItems="flex-start" paddingVertical={step('3')} flexGrow={1} flexShrink={1} minWidth={0}>
+        <XStack gap={step('3')} alignItems={right && !onPress ? 'center' : 'flex-start'} paddingVertical={step('3')} flexGrow={1} flexShrink={1} minWidth={0}>
             {leading}
             {icon ? <YStack height={line} justifyContent="center"><Glyph icon={icon} size={18} /></YStack> : null}
             <YStack flex={1} minWidth={0} gap={step('1')}>
                 {tone ? <T v="heading" color={tone}>{label}</T> : <Copy>{label}</Copy>}
-                {detail ? <Copy small quiet>{detail}</Copy> : null}
+                {detail ? (detailTone ? <T v="meta" color={detailTone}>{detail}</T> : <Copy small quiet>{detail}</Copy>) : null}
             </YStack>
             {value ? <YStack maxWidth="50%"><Copy quiet>{value}</Copy></YStack> : null}
             {right}
@@ -214,15 +209,16 @@ export function Row({ label, value, detail, icon, leading, onPress, last, right,
 
 /**
  * The header of a place (a chat, its info, a pushed page): Back, an optional
- * mark, the title with an optional quiet line under it, then actions. A chat
- * and every page it opens share this frame, so entering one never shifts the
- * title. Takes the device's top inset on phones.
+ * mark, an optional eyebrow above the title, the title with an optional quiet
+ * line under it, then actions. A chat and every page it opens share this frame,
+ * so entering one never shifts the title. Takes the device's top inset on phones.
  */
-export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark, meta, right, safeTop = true, desktop = false, testID }: {
-    title: React.ReactNode; back?: () => void; backLabel?: string; backTestID?: string; mark?: React.ReactNode; meta?: React.ReactNode;
+export function PlaceHeader({ title, eyebrow, back, backLabel = 'Back', backTestID, mark, meta, right, safeTop = true, desktop = false, testID }: {
+    title: React.ReactNode; eyebrow?: React.ReactNode; back?: () => void; backLabel?: string; backTestID?: string; mark?: React.ReactNode; meta?: React.ReactNode;
     right?: React.ReactNode; safeTop?: boolean; desktop?: boolean; testID?: string;
 }) {
     const step = useStep();
+    const eyebrowNode = typeof eyebrow === 'string' ? <Copy small quiet numberOfLines={1}>{eyebrow}</Copy> : eyebrow;
     if (desktop) {
         return (
             <YStack backgroundColor="canvas">
@@ -231,6 +227,7 @@ export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark,
                     <XStack flex={1} minWidth={0} gap="3" alignItems="center">
                         {mark}
                         <YStack flex={1} minWidth={0}>
+                            {eyebrowNode}
                             {typeof title === 'string' ? <T v="listTitle" numberOfLines={1}>{title}</T> : title}
                             {meta}
                         </YStack>
@@ -249,6 +246,7 @@ export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark,
                 <XStack flex={1} minWidth={0} gap={step('3')} alignItems="center">
                     {mark}
                     <YStack flex={1} minWidth={0}>
+                        {eyebrowNode}
                         {typeof title === 'string' ? <T v="title">{title}</T> : title}
                         {meta}
                     </YStack>
@@ -260,23 +258,28 @@ export function PlaceHeader({ title, back, backLabel = 'Back', backTestID, mark,
 }
 
 /** Back and title on pushed pages (phone); desktop panels close with the same control. */
-export function ScreenHeader({ title, back, right, backLabel = 'Back', safeTop = false }: { title: string; back?: () => void; right?: React.ReactNode; backLabel?: string; safeTop?: boolean }) {
+export function ScreenHeader({ title, eyebrow, meta, back, right, backLabel = 'Back', backTestID, safeTop = false, testID }: {
+    title: string; eyebrow?: React.ReactNode; meta?: React.ReactNode; back?: () => void; right?: React.ReactNode; backLabel?: string; backTestID?: string; safeTop?: boolean; testID?: string;
+}) {
     return (
         <>
-            <PlaceHeader title={title} back={back} right={right} backLabel={backLabel} safeTop={safeTop} />
+            <PlaceHeader title={title} eyebrow={eyebrow} meta={meta} back={back} right={right} backLabel={backLabel} backTestID={backTestID} safeTop={safeTop} testID={testID} />
             <Separator borderColor="stroke" />
         </>
     );
 }
 
 /** A pushed page: header (or a place's own `header`), then a scrolling column of sections. */
-export function Screen({ title, back, children, testID, right, header }: { title: string; back?: () => void; children: React.ReactNode; testID?: string; right?: React.ReactNode; header?: React.ReactNode }) {
+export function Screen({ title, eyebrow, meta, back, backLabel, children, testID, headerTestID, scrollTestID, right, header }: {
+    title: string; eyebrow?: React.ReactNode; meta?: React.ReactNode; back?: () => void; backLabel?: string; children: React.ReactNode;
+    testID?: string; headerTestID?: string; scrollTestID?: string; right?: React.ReactNode; header?: React.ReactNode;
+}) {
     const step = useStep();
     return (
         <YStack flex={1} minHeight={0} backgroundColor="canvas" testID={testID}>
-            {header ?? <ScreenHeader title={title} back={back} right={right} safeTop />}
+            {header ?? <ScreenHeader title={title} eyebrow={eyebrow} meta={meta} back={back} backLabel={backLabel} right={right} safeTop testID={headerTestID} />}
             {/* The column grows to the page's height so a page loader centres in it; wide windows read it at the Settings width. */}
-            <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
+            <ScrollView flex={1} minHeight={0} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }} testID={scrollTestID}>
                 <YStack flexGrow={1} padding={step('4')} gap={step('5')} paddingBottom={step('8')}
                     width="100%" maxWidth={720} alignSelf="center">{children}</YStack>
             </ScrollView>
@@ -308,104 +311,6 @@ export function ChatName({ name, v = 'title', numberOfLines, testID }: { name: s
 export function Indent({ depth, children }: { depth: number; children: React.ReactNode }) {
     const step = useStep();
     return <YStack width="100%" paddingLeft={Math.max(0, depth) * step('4')}>{children}</YStack>;
-}
-
-/**
- * A screen's keyboard-avoiding body: fills the space under the header and pads
- * its bottom by the keyboard, on every platform. It never moves, so nothing in
- * it draws over the header or takes the header's taps while the keyboard opens.
- * The padding reads the app-wide keyboard height, which is live even for a
- * screen that mounts while the keyboard is still closing, so no inset from the
- * previous screen is left behind. Pass maxHeight for a content-sized sheet: its
- * scroll body shrinks when keyboard padding consumes the available height.
- */
-export function KeyboardBody({ children, maxHeight }: { children?: React.ReactNode; maxHeight?: number }) {
-    const { height } = useReanimatedKeyboardAnimation();
-    const pad = useAnimatedStyle(() => ({ paddingBottom: -height.value }));
-    return <Animated.View style={[maxHeight === undefined ? KEYBOARD_BODY : { maxHeight, flexShrink: 1 }, pad]}>{children}</Animated.View>;
-}
-const KEYBOARD_BODY = { flex: 1 } as const;
-
-/** The one sheet frame: scrim, handle, title, one step deep with Back. */
-export function SheetFrame({ open, close, title, testID, children, back, scrollable = false, belowModals = false }: {
-    open: boolean; close: () => void; title: string; testID?: string; children: React.ReactNode; back?: () => void; scrollable?: boolean; belowModals?: boolean;
-}) {
-    const theme = useThemeName();
-    // Android's 3-button bar and the iOS home indicator sit over the sheet's foot.
-    const insets = useSafeAreaInsets();
-    const step = useStep();
-    // The sheet draws in the app window, under the keyboard: opening it from a
-    // focused composer would leave its scrim taking every tap with the sheet
-    // itself hidden. Lower the keyboard as it opens.
-    useEffect(() => { if (open) lowerKeyboard(); }, [open]);
-    const opened = React.useRef(false);
-    if (open) opened.current = true;
-    // Retain an opened sheet for native dismissal; unopened sheets have no body to lay out.
-    if (!opened.current) return null;
-    // Sheets that open RN Web Modal prompts/alerts opt in to stack below Modal (zIndex 9999) and above page chrome (<= 2000).
-    const sheetStack = belowModals ? { zIndex: 5000, portalProps: { zIndex: 5000 } } : {};
-    const overlayStack = belowModals ? { zIndex: 4999 } : {};
-    return (
-        <Theme name={theme}>
-            <Sheet modal open={open} {...sheetStack} onOpenChange={(o: boolean) => { if (!o) close(); }} snapPointsMode="fit" dismissOnSnapToBottom>
-                <Sheet.Overlay {...overlayStack} backgroundColor={SCRIM} />
-                <Sheet.Container maxWidth={480} width="100%" alignSelf="center" testID={testID}>
-                    <Sheet.Background backgroundColor="raised" borderTopLeftRadius="lg" borderTopRightRadius="lg" borderWidth={1} borderColor="stroke" />
-                    {/* The grip sits on the sheet's own edge; the whole sheet is the drag surface. */}
-                    <YStack accessibilityElementsHidden importantForAccessibility="no-hide-descendants" height={18} alignItems="center" justifyContent="center">
-                        <YStack width={34} height={3} borderRadius="sm" backgroundColor="secondary" opacity={0.55} />
-                    </YStack>
-                    <SheetKeyboardBody>
-                        {/* Text-size steps, then the device's physical bottom inset. */}
-                        <YStack flexShrink={1} minHeight={0} padding={step('4')} paddingTop={0} paddingBottom={step('6') + insets.bottom} gap={step('2')}>
-                            <XStack flexShrink={0} gap={step('2')} alignItems="center" paddingBottom={step('2')} minHeight={HEIGHT.control}>
-                                {back ? <Btn kind="icon" label="Back" onPress={back}><Glyph icon={ArrowLeft} /></Btn> : null}
-                                <T v="title" flex={1}>{title}</T>
-                            </XStack>
-                            {scrollable ? (
-                                <Sheet.ScrollView flexShrink={1} minHeight={0} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                                    {children}
-                                </Sheet.ScrollView>
-                            ) : children}
-                        </YStack>
-                    </SheetKeyboardBody>
-                </Sheet.Container>
-            </Sheet>
-        </Theme>
-    );
-}
-
-/** Measure a sheet only after opening, alongside its keyboard-aware body. */
-function SheetKeyboardBody({ children }: { children: React.ReactNode }) {
-    const { height } = useWindowDimensions();
-    const insets = useSafeAreaInsets();
-    const step = useStep();
-    return <KeyboardBody maxHeight={height - insets.top - step('6')}>{children}</KeyboardBody>;
-}
-
-/** Scroll the detail body while its composer stays reachable below it. */
-export function SheetScroll({ children }: { children: React.ReactNode }) {
-    const { height } = useWindowDimensions();
-    return <ScrollView flexShrink={1} minHeight={0} maxHeight={height * 0.7} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
-}
-
-/** One sheet row: an optional icon column, a label and an optional quiet line, then a chevron when it opens a step. */
-export function SheetRow({ icon, label, detail, onPress, testID, right, chevron = false, selected }: {
-    /** The leading column; omit it for a row with no leading mark. */
-    icon?: React.ReactNode; label: string; detail?: string; onPress: () => void; testID?: string; right?: React.ReactNode; chevron?: boolean; selected?: boolean;
-}) {
-    const step = useStep();
-    return (
-        <ListItem minHeight={HEIGHT.sheetRow} paddingHorizontal="0" paddingVertical={step('2')} gap={step('3')} justifyContent="flex-start" backgroundColor="raised" onPress={onPress} aria-label={selected !== undefined && detail ? `${label}, ${detail}` : label} accessibilityRole={selected === undefined ? "button" : "radio"} role={selected === undefined ? "button" : "radio"} aria-checked={selected} testID={testID}>
-            {icon === undefined ? null : <YStack width={28} alignItems="center">{icon}</YStack>}
-            <YStack flex={1} minWidth={0} gap={step(selected === undefined ? '1' : '0')}>
-                <Copy>{label}</Copy>
-                {detail ? <Copy small quiet>{detail}</Copy> : null}
-            </YStack>
-            {right}
-            {chevron ? <Glyph icon={ChevronRight} size={16} /> : null}
-        </ListItem>
-    );
 }
 
 /** One copyable line (a link, a command, a join line): the whole row copies it. */

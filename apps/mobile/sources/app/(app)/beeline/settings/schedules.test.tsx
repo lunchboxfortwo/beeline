@@ -30,11 +30,7 @@ vi.mock('react-native', async () => {
 });
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) }));
 vi.mock('@expo/vector-icons/Ionicons', () => ({ default: () => null }));
-vi.mock('@/components/buzz/PageHeader', () => ({ PageHeader: (props: any) => React.createElement('PageHeader', props) }));
-vi.mock('@/components/buzz/SettingsRow', async () => {
-  const { createElement } = await import('react');
-  return { SettingsRow: (props: any) => createElement('SettingsRow', props, props.leading) };
-});
+vi.mock('@/utils/use-fine-pointer', () => ({ useFinePointer: () => false }));
 vi.mock('@/components/buzz/WorkflowRunLine', () => ({ WorkflowRunLine: () => null }));
 vi.mock('@/components/buzz/SurfaceGlyphLoader', () => ({ SurfaceGlyphLoader: () => null }));
 vi.mock('@/auth/buzz-identity-storage', () => ({ loadBuzzIdentity: async () => ({ publicKey: 'viewer' }), getEffectiveRelayUrl: async () => 'http://local' }));
@@ -227,12 +223,13 @@ it.each([
   try {
     await act(async () => press(tree, stopId));
     await act(async () => press(tree, `${stopId}-confirm`));
-    const row = tree.root.findByProps({ testID: `${kind}-stop-error` });
-    expect(row.props.title).toBe(`Could not stop this ${kind}.`);
-    expect(row.props.action).toBe('Retry');
+    const banner = tree.root.find((node: any) => typeof node.type === 'string' && node.props.testID === `${kind}-stop-error`);
+    expect(banner).toBeTruthy();
+    expect(words(tree)).toContain(`Could not stop this ${kind}.`);
+    expect(words(tree)).toContain('Retry');
     expect(words(tree)).not.toMatch(/MonolithPhoneOperationError|deleteRoom|\(\d{3}\)|not found/);
     expect(router.back).not.toHaveBeenCalled();
-    await act(async () => press(tree, `${kind}-stop-error`));
+    await act(async () => press(tree, `${kind}-stop-error-retry`));
     expect(operation.mock.calls.filter(([name]) => name === stopOperation)).toHaveLength(2);
   } finally { restore(); await act(async () => tree.unmount()); }
 });

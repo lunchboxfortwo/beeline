@@ -67,7 +67,7 @@ describe('Agents + in a chat', () => {
         act(() => tree.root.findByType('ListItem').props.onPress());
         const started = performance.now();
         act(() => primary(tree).props.onPress());
-        expect(tree.root.findAllByType('Sheet')).toHaveLength(0);
+        expect(tree.root.findAllByType('HullModal')).toHaveLength(0);
         expect(close).not.toHaveBeenCalled();
         const interactionMs = performance.now() - started;
         expect(interactionMs).toBeLessThan(150);
@@ -87,9 +87,9 @@ describe('Agents + in a chat', () => {
         const tree = render([row('a'.repeat(64), 'beebee')], onAdded, close);
         act(() => tree.root.findByType('ListItem').props.onPress());
         act(() => primary(tree).props.onPress());
-        expect(tree.root.findAllByType('Sheet')).toHaveLength(0);
+        expect(tree.root.findAllByType('HullModal')).toHaveLength(0);
         await act(async () => refuse(new Error('workspace membership required')));
-        expect(tree.root.findByType('Sheet').props.open).toBe(true);
+        expect(tree.root.findByType('HullModal').props.visible).toBe(true);
         expect(tree.root.findByType('ListItem').props['aria-checked']).toBe(true);
         expect(text(tree)).toContain('workspace membership required');
         expect(onAdded).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe('Agents + in a chat', () => {
 
     it('puts a long candidate list inside the bounded Astryx sheet scroll view', () => {
         const tree = render(Array.from({ length: 60 }, (_, i) => row(String(i), `agent-${i}`)));
-        const scroll = tree.root.findByType('Sheet.ScrollView');
+        const scroll = tree.root.findByType('ScrollView');
         expect(scroll.props.flexShrink).toBe(1);
         expect(scroll.props.minHeight).toBe(0);
         expect(scroll.props.nestedScrollEnabled).toBe(true);

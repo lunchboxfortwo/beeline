@@ -1,8 +1,5 @@
 import { PageLoader } from '@/ui/PageLoader';
 import { RoutineBody } from '@/ui/screens/profiles/RoutineBody';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useState } from 'react';
 import { ScrollView, YStack } from 'tamagui';
@@ -11,6 +8,7 @@ import {
   stopSubscription,
   useScheduledWork,
 } from '@/buzz/scheduled-work';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { StopScheduledWork } from '@/components/buzz/ScheduledWorkDetail';
 import { Copy, SafeBottom, SafeTop, ScreenHeader } from '@/ui/grammar';
 
@@ -21,7 +19,6 @@ function first(value: string | string[] | undefined): string | undefined {
 /** The event and source that wake one agent, with the same stop control as a schedule. */
 export default function Subscription() {
   useLatencyRouteFrame('/beeline/settings/subscription');
-  const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{ roomId?: string | string[]; subscriptionId?: string | string[] }>();
   const roomId = first(params.roomId);
   const subscriptionId = first(params.subscriptionId);
@@ -47,21 +44,22 @@ export default function Subscription() {
   };
 
   return (
-    <YStack flex={1} backgroundColor="canvas"
-      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.detail : undefined}
-      alignSelf={desktopPageLayout ? 'center' : undefined}>
+    <YStack flex={1} backgroundColor="canvas" width="100%" maxWidth={720} alignSelf="center">
       <SafeTop />
       <ScreenHeader title="Routine" back={() => router.back()} backLabel="Back to Routines" />
       {stopFailed ? (
-        <SettingsRow
-          title="Could not stop this subscription."
-          action="Retry"
-          onPress={() => void stop()}
-          testID="subscription-stop-error"
-        />
-      ) : error ? (
-        <SettingsRow title={error}
+        <YStack paddingHorizontal="4" paddingTop="3">
+          <ErrorBanner
+            inline
+            title="Could not stop this subscription."
+            onRetry={() => void stop()}
+            testID="subscription-stop-error"
           />
+        </YStack>
+      ) : error ? (
+        <YStack paddingHorizontal="4" paddingTop="3">
+          <ErrorBanner inline title={error} />
+        </YStack>
       ) : null}
       {loading && !work ? (
         <PageLoader testID="subscription-loader" />

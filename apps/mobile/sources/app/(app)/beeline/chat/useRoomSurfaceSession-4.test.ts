@@ -113,7 +113,7 @@ it('shows a list-delivered reply after background cache eviction without waiting
     expect(roomMessageRecord(identityScope('https://relay.test', 'viewer'), 'room-a', message.id)).toEqual(message);
     expect(current.roomSurface?.latestAgentTurns).toEqual([finish.turn]);
     expect(current.roomSurface?.latestAgentTurns.some(turn => turn.status === 'working')).toBe(false);
-    await act(async () => current.readRoom());
+    await act(async () => { void current.readRoom(); });
     await act(async () => controls.responses.at(-1)!.apply({ ...view, messages: [sent, message], latestAgentTurns: [finish.turn] }));
     expect(visible()).toContain(message.text);
     expect(current.roomSurface?.latestAgentTurns).toEqual([finish.turn]);

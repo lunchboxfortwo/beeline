@@ -1,9 +1,6 @@
 import { WorkflowStepCircle } from '@/components/buzz/WorkflowStepCircle';
 import { WorkflowWorkingMark } from '@/components/buzz/WorkflowWorkingMark';
 import { PageLoader } from '@/ui/PageLoader';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { RoomListSectionHeader } from '@/components/buzz/RoomListSectionHeader';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React, { useEffect, useState } from 'react';
@@ -21,10 +18,10 @@ import { useRoomLiveDrafts } from '@/buzz/room-live-drafts';
 import { liveRoomRuns, useRoomWorkflowRuns } from '@/buzz/use-room-workflow-run';
 import { workflowDisplayName, workflowStateLabel } from '@/buzz/workflow-graph';
 import { formatRunDuration, runDayLabel, workflowRunHeadline, workflowRunHref, workflowStarterLine } from '@/buzz/workflow-run-copy';
-import { PageHeader } from '@/components/buzz/PageHeader';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
 import { WorkflowRunLine } from '@/components/buzz/WorkflowRunLine';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
-import { Btn, Copy, SafeBottom, SafeTop, T } from '@/ui/grammar';
+import { Btn, Copy, SafeBottom, ScreenHeader, T } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -44,11 +41,10 @@ const LIVE_HALO = 20;
  */
 export default function WorkflowRun() {
   useLatencyRouteFrame('/beeline/workflow-run');
-  const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{ roomId?: string | string[]; runId?: string | string[] }>();
   const roomId = first(params.roomId);
   const runId = first(params.runId);
-  const { data: detail, loading, error, retry } = useObservedResource<WorkflowRunDetailView>(
+  const { data: detail, loading, error } = useObservedResource<WorkflowRunDetailView>(
     `workflow-run:${roomId}:${runId}`, {
       load: async () => {
         if (!roomId || !runId) throw new Error('Workflow run is missing.');
@@ -76,20 +72,20 @@ export default function WorkflowRun() {
   const last = detail?.history[detail.history.length - 1];
   const starter = detail ? workflowStarterLine(detail.run) || detail.history[0]?.actor?.name : undefined;
   return (
-    <YStack flex={1} backgroundColor="canvas"
-      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.list : undefined}
-      alignSelf={desktopPageLayout ? 'center' : undefined}>
-      <SafeTop />
-      <PageHeader
-        backAccessibilityLabel="Back"
+    <YStack flex={1} backgroundColor="canvas" width="100%" maxWidth={720} alignSelf="center">
+      <ScreenHeader
+        back={() => router.back()}
+        backLabel="Back"
         eyebrow={run?.roomName ?? 'Workflow'}
-        onBack={() => router.back()}
+        safeTop
         testID="workflow-run-header"
         title={run ? workflowDisplayName(run.workflowSlug) : 'Workflow'}
-
       />
-      {error && <SettingsRow title={error}
-          />}
+      {error ? (
+        <YStack paddingHorizontal="4" paddingTop="3">
+          <ErrorBanner inline title={error} />
+        </YStack>
+      ) : null}
       {loading && !detail ? (
         <YStack padding="8" alignItems="center" justifyContent="center">
           <PageLoader testID="workflow-run-loader" />

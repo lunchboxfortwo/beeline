@@ -1,9 +1,7 @@
 import { PageLoader } from '@/ui/PageLoader';
-import { desktopColumnWidths } from '@/buzz/desktop-layout-tokens';
-import { useIsDesktop as useDesktopPageLayout } from '@/utils/responsive';
 import { useLatencyRouteFrame } from '@/buzz/latency-route-hook';
 import React from 'react';
-import { ScrollView, YStack } from 'tamagui';
+import { YStack } from 'tamagui';
 import { CornerDownRight } from 'lucide-react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -15,8 +13,8 @@ import {
   subscriptionWhen,
   useScheduledWork,
 } from '@/buzz/scheduled-work';
-import { SettingsRow } from '@/components/buzz/SettingsRow';
-import { Copy, Inked, SafeBottom, SafeTop, ScreenHeader, T, Section, Row, Glyph } from '@/ui/grammar';
+import { ErrorBanner } from '@/components/buzz/ErrorBanner';
+import { Copy, Glyph, Inked, Row, Screen, Section, T } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -53,13 +51,11 @@ export function orderScheduledWork(
  */
 export default function ScheduledWork() {
   useLatencyRouteFrame('/beeline/settings/schedules');
-  const desktopPageLayout = useDesktopPageLayout();
   const params = useLocalSearchParams<{
     roomId?: string | string[];
     workspaceId?: string | string[];
   }>();
   const roomId = first(params.roomId);
-  const workspaceId = first(params.workspaceId);
   const { work, loading, error } = useScheduledWork(roomId);
   useLatencyRouteFrame('/beeline/settings/schedules', !loading, true);
   const schedules = work?.schedules ?? [];
@@ -87,41 +83,31 @@ export default function ScheduledWork() {
   };
 
   return (
-    <YStack flex={1} backgroundColor="canvas"
-      width={desktopPageLayout ? '100%' : undefined} maxWidth={desktopPageLayout ? desktopColumnWidths.list : undefined}
-      alignSelf={desktopPageLayout ? 'center' : undefined}>
-      <SafeTop />
-      <ScreenHeader title="Routines" back={() => router.back()} backLabel={work?.isDirectMessage ? 'Back to DM' : 'Back to chat'} />
-      {error && <SettingsRow title={error}
-          />}
+    <Screen
+      title="Routines"
+      eyebrow={work ? (work.isDirectMessage ? 'DM' : roomTitle(work.roomName) ?? 'Chat') : undefined}
+      back={() => router.back()}
+      backLabel={work?.isDirectMessage ? 'Back to DM' : 'Back to chat'}
+      scrollTestID="scheduled-work-list"
+    >
+      {error ? <ErrorBanner inline title={error} /> : null}
       {loading ? (
         <YStack padding="8" alignItems="center" justifyContent="center">
           <PageLoader testID="schedules-loader" />
         </YStack>
+      ) : entries.length === 0 ? (
+        <YStack padding="4" alignItems="flex-start" justifyContent="center" testID="scheduled-work-empty">
+          <Inked color="needsYou" glyph={TimeOutline} size={22} />
+          <T v="heading" marginTop="2">Nothing wakes agents here yet</T>
+          <Copy small quiet marginTop="2">
+            Agents set up routines. Ask an agent in {work?.isDirectMessage ? 'this DM' : 'this chat'} to add one.
+          </Copy>
+        </YStack>
       ) : (
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          testID="scheduled-work-list"
-        >
-          {entries.length === 0 ? (
-            <YStack padding="8" alignItems="flex-start" justifyContent="center" testID="scheduled-work-empty">
-              <Inked color="needsYou" glyph={TimeOutline} size={22} />
-              <T v="heading" marginTop="2">Nothing wakes agents here yet</T>
-              <Copy small quiet marginTop="2">
-                Agents set up routines. Ask an agent in {work?.isDirectMessage ? 'this DM' : 'this chat'} to add one.
-              </Copy>
-            </YStack>
-          ) : (
-            <YStack padding="4" gap="4">
-              <Section title={work?.isDirectMessage ? 'DM' : roomTitle(work?.roomName) ?? 'Chat'}>
-                {entries.map(renderEntry)}
-              </Section>
-            </YStack>
-          )}
-          <YStack paddingBottom="6" />
-          <SafeBottom />
-        </ScrollView>
+        <Section title={work?.isDirectMessage ? 'DM' : roomTitle(work?.roomName) ?? 'Chat'}>
+          {entries.map(renderEntry)}
+        </Section>
       )}
-    </YStack>
+    </Screen>
   );
 }

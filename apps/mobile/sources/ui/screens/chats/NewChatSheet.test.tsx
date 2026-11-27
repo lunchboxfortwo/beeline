@@ -51,8 +51,8 @@ function sheet(step: NewChatStep | null, overrides: Partial<NewChatSheetProps> =
 
 it('offers Start empty and Attach a GitHub repository, with no templates', () => {
   const { tree, props } = sheet('menu');
-  const frame = tree.root.find((node: any) => node.type === 'Sheet');
-  expect(frame.props.open).toBe(true);
+  const frame = tree.root.find((node: any) => node.type === 'HullModal');
+  expect(frame.props.visible).toBe(true);
   expect(byTestID(tree, 'new-chat-empty').props['aria-label']).toBe('Start empty');
   expect(byTestID(tree, 'new-chat-github').props['aria-label']).toBe('Attach a GitHub repository…');
   expect(tree.root.findAll((node: any) => node.props['aria-label']?.includes('template'))).toHaveLength(0);
