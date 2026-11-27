@@ -182,7 +182,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                     // newest row is not the live tail: newer rows load below a
                     // jump target there, and following them would carry the
                     // reader away from it.
-                    ...(anchoredSegmentActive ? {} : { autoscrollToTopThreshold: 50 }),
+                    ...(anchoredSegmentActive ? {} : { autoscrollToTopThreshold: TAIL_PIN_THRESHOLD }),
                   }}
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode={transcriptKeyboardDismissMode(Platform.OS)}

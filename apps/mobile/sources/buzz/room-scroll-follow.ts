@@ -68,8 +68,8 @@ export function scrollFollowOnArrival({
   // Cold open: an inverted list already shows the newest end at offset 0; a
   // chronological list shows its oldest row there and must scroll to the
   // tail to match the same landing.
-  if (previousNewestId === null) return openLandsOnTail ? 'hold' : 'scroll';
   if (!isPinnedToTail) return 'hold';
+  if (previousNewestId === null) return openLandsOnTail ? 'hold' : 'scroll';
   // Never fight the user's finger mid-drag.
   if (isUserDragging) return 'hold';
   return 'scroll';

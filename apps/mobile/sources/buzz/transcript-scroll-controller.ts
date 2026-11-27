@@ -19,8 +19,8 @@ import { scheduleAnimationFrame } from './host-scheduler';
  *   forward source): the feature may open a store window around it and
  *   flashes it on landing. Without, a row that is already shown (the code
  *   reader's return).
- * - `firstUnread`: the row that holds the unread boundary, centered. It is
- *   done when the row is visible, whether or not it had to scroll.
+ * - `firstUnread`: the row that holds the unread boundary, with its preceding row at the top
+ *   when available. Visibility confirms the scroll.
  * - `offset`: a raw list offset (the scrubber). Runs at once. During
  *   momentum the list may coast past it, so it stays active and runs again
  *   when momentum ends. A drag on the list cancels it.
@@ -61,6 +61,7 @@ export type TranscriptScrollRow = { readonly id: string };
 
 export type TranscriptScrollControllerOptions<Row extends TranscriptScrollRow> = {
   list(): TranscriptScrollList | null;
+  precedingRowStep?(): number;
   /** Rows in list index order. */
   rows(): readonly Row[];
   /** Index in `rows` of the row that shows the destination, or -1. */
@@ -97,7 +98,7 @@ export type TranscriptScrollController<Row extends TranscriptScrollRow> = {
   /** Same as `follow`, without waiting a frame (a measured desktop resize). */
   followNow(): void;
   /** Keep a reading row in place while nothing else owns the list. */
-  holdReadingPosition(delta: number): void;
+  holdReadingPosition(delta: number, onlyVisibleRowId?: string): void;
   /** The content changed: move a held landing to `offset`, where it keeps its place. */
   holdLanding(offset: number): void;
   cancel(): void;
@@ -132,6 +133,7 @@ export type TranscriptScrollController<Row extends TranscriptScrollRow> = {
 type Active = {
   readonly destination: TranscriptScrollDestination;
   scrolled: boolean;
+  following: boolean;
 };
 
 function isRowDestination(
@@ -162,12 +164,9 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
   let held = false;
   let readerMoved = false;
   let followPendingLayout = false;
-  let awaitingTailPin = false;
-  let observedTailPinned = true;
 
   const end = (reason: TranscriptScrollCancelReason) => {
     followPendingLayout = false;
-    awaitingTailPin = false;
     held = false;
     const ended = active;
     if (!ended) return;
@@ -187,7 +186,7 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
   const settledRow = (current: Active): Row | null => {
     const destination = current.destination;
     if (!isRowDestination(destination)) return null;
-    if (destination.kind === 'message' && !current.scrolled) return null;
+    if (!current.scrolled) return null;
     if (visibleRowsOf !== options.rows()) return null;
     const index = options.rowIndex(destination, visibleRows);
     return index >= 0 ? visibleRows[index]! : null;
@@ -229,12 +228,14 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       return;
     }
     const rowId = rows[index]!.id;
-    const align = destination.kind === 'message' ? destination.align : 'center';
-    if (!list.toRow(index, rowId, align)) {
+    const align = destination.kind === 'message' ? destination.align : 'top';
+    const contextIndex = index + (options.precedingRowStep?.() ?? 0);
+    const target = destination.kind === 'firstUnread' && rows[contextIndex] ? contextIndex : index;
+    if (!list.toRow(target, rows[target]!.id, align)) {
       // Scroll near the row so the list draws and measures it. A list that
       // has nothing left to draw sends no later pass by itself, and a row
       // request waiting for one never lands.
-      list.toEstimatedRow(index);
+      list.toEstimatedRow(target);
       return;
     }
     if (!current.scrolled) {
@@ -246,10 +247,10 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
     if (after) land(current, after.id);
   };
 
-  const request = (destination: TranscriptScrollDestination) => {
+  const request = (destination: TranscriptScrollDestination, following = false) => {
     if (destination.kind === 'message' || destination.kind === 'offset') readerMoved = true;
     end('replaced');
-    const current: Active = { destination, scrolled: false };
+    const current: Active = { destination, scrolled: false, following };
     active = current;
     if (destination.kind === 'offset') {
       attempt(current);
@@ -257,12 +258,7 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
     }
     // The viewer asked for the newest end; an arrival in the meantime follows.
     if (destination.kind === 'newest') pinned = true;
-    // A boundary already on screen is a completed landing.
-    const settled = destination.kind === 'firstUnread' ? settledRow(current) : null;
-    if (settled) {
-      land(current, settled.id);
-      return;
-    }
+    if (isRowDestination(destination)) pinned = false;
     schedule(() => attempt(current));
   };
 
@@ -279,20 +275,21 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
     follow() {
       if (!followAllowed()) return;
       if (active?.destination.kind === 'newest') return;
-      request({ kind: 'newest' });
+      request({ kind: 'newest' }, true);
     },
     followAfterLayout() {
       // Like follow(), the caller has already decided against the pre-commit
       // tail pin. Native anchoring may have moved it before this effect runs.
       if (!followAllowed()) return;
-      if (active?.destination.kind !== 'newest') request({ kind: 'newest' });
+      if (active?.destination.kind !== 'newest') request({ kind: 'newest' }, true);
       followPendingLayout = true;
     },
     followNow() {
       if (!followAllowed()) return;
       options.list()?.toNewest();
     },
-    holdReadingPosition(delta) {
+    holdReadingPosition(delta, onlyVisibleRowId) {
+      if (onlyVisibleRowId && (visibleRows.length !== 1 || visibleRows[0]?.id !== onlyVisibleRowId)) return;
       if (active || pinned || delta === 0) return;
       options.list()?.shiftBy(delta);
     },
@@ -304,8 +301,8 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       end('cancelled');
     },
     reset() {
+      pinned = true;
       followPendingLayout = false;
-      awaitingTailPin = false;
       active = null;
       held = false;
       momentumOwed = false;
@@ -317,7 +314,6 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       if (active) attempt(active);
       if (followPendingLayout && followAllowed()) {
         followPendingLayout = false;
-        awaitingTailPin = true;
         options.list()?.toNewest();
         pinned = true;
       }
@@ -328,13 +324,11 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       if (active) attempt(active);
     },
     observeTailPinned(next) {
-      observedTailPinned = next;
-      // Android can deliver the old anchor's offset after onContentSizeChange
-      // has already issued the tail scroll. Only a native tail observation
-      // after layout acknowledges that move. A drag or history request cancels
-      // both waits through end(), so this never claims the reader's gesture.
-      if ((followPendingLayout || awaitingTailPin) && !next) return;
-      if (next && !followPendingLayout && !momentum) awaitingTailPin = false;
+      if (held || (active && isRowDestination(active.destination))) return;
+      // A native anchor can move while a pinned draft commit is laying out.
+      // Its one pending layout completes the follow; later offsets stand.
+      if (!next && followPendingLayout) return;
+      if (!next && active?.following) active = null;
       pinned = next;
     },
     dragStarted() {
@@ -371,13 +365,6 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       momentum = false;
       momentumOwed = false;
       if (active?.destination.kind === 'offset') attempt(active);
-      // Native visible-position maintenance uses a fling animator. A zero
-      // seen mid-animation can be followed by another old offset. Wait for
-      // its resting observation, and correct an interrupted native follow.
-      if (awaitingTailPin && !followPendingLayout && followAllowed()) {
-        if (observedTailPinned) awaitingTailPin = false;
-        else options.list()?.toNewest();
-      }
     },
     userScrolled() {
       readerMoved = true;
@@ -415,6 +402,7 @@ export function useTranscriptScrollController<Row extends TranscriptScrollRow>(
   optionsRef.current = options;
   const [controller] = useState(() =>
     createTranscriptScrollController<Row>({
+      precedingRowStep: () => optionsRef.current.precedingRowStep?.() ?? 0,
       list: () => optionsRef.current.list(),
       rows: () => optionsRef.current.rows(),
       rowIndex: (destination, rows) => optionsRef.current.rowIndex(destination, rows),
@@ -447,6 +435,7 @@ type PhoneList = {
 export function phoneTranscriptList(
   getList: () => PhoneList | null,
   isMeasured: (rowId: string) => boolean,
+  getOffsetRef?: () => { current: number },
 ): TranscriptScrollList & {
   scrollToIndexFailed(info: { averageItemLength: number }): void;
 } {
@@ -473,7 +462,12 @@ export function phoneTranscriptList(
     toOffset(offset) {
       getList()?.scrollToOffset({ offset, animated: false });
     },
-    shiftBy() {},
+    shiftBy(delta) {
+      const offsetRef = getOffsetRef?.();
+      if (!offsetRef) return;
+      offsetRef.current = Math.max(0, offsetRef.current + delta);
+      getList()?.scrollToOffset({ offset: offsetRef.current, animated: false });
+    },
     scrollToIndexFailed(info) {
       failed = true;
       averageItemLength = info.averageItemLength;

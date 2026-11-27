@@ -55,7 +55,7 @@ export const COMPOSER_MAX_HEIGHT = COMPOSER_MAX_INPUT_HEIGHT;
 // How close to the visual bottom counts as "already reading the newest end"
 // for the layout-change tail snap (C97): offset 0 when native is inverted,
 // or content height minus viewport height on the ordinary desktop list.
-export const TAIL_PIN_THRESHOLD = 50;
+export const TAIL_PIN_THRESHOLD = 8;
 
 // Keep earlier phone rows in the initial, retained FlatList window. Two
 // short rows can leave earlier messages blank while arrivals move the batched

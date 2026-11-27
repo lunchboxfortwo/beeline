@@ -345,7 +345,7 @@ describe('useRoomSurfaceSession', () => {
   });
 
 
-  it('does not capture or advance unread state for a corner', async () => {
+  it('captures and advances unread state for a corner', async () => {
     const corner = {
       ...roomView('corner-a'),
       room: { ...roomView('corner-a').room, parentId: 'room-a' },
@@ -371,7 +371,7 @@ describe('useRoomSurfaceSession', () => {
     });
     await flushEffects();
     await act(async () => controls.responses[0]!.apply(corner));
-    expect(current.firstUnreadMessageId).toBeNull();
+    expect(current.firstUnreadMessageId).toBe('first-new');
     const rows: ChatDisplayMessage[] = [
       { id: 'first-new', text: 'new', isUser: false, timestamp: 1 },
     ];
@@ -379,7 +379,18 @@ describe('useRoomSurfaceSession', () => {
       current.advanceReadCursor(rows, rows);
       await new Promise((resolve) => setTimeout(resolve, READ_CURSOR_DEBOUNCE_MS + 20));
     });
-    expect(controls.readMarks).toEqual([]);
+    expect(controls.readMarks).toEqual(['first-new']);
+    const render = (isFocused: boolean) => React.createElement(Harness, {
+      channelId: 'corner-a', isFocused,
+      capture: (result: UseRoomSurfaceSessionResult) => (current = result),
+    });
+    await act(async () => renderer.update(render(false)));
+    await act(async () => renderer.update(render(true)));
+    await act(async () => controls.responses[0]!.apply({
+      ...corner,
+      viewer: { ...corner.viewer, readCursor: { ...corner.viewer.readCursor, messageId: 'first-new', firstUnreadMessageId: 'next-visit' } },
+    }));
+    expect(current.firstUnreadMessageId).toBe('next-visit');
     await act(async () => renderer.unmount());
   });
 

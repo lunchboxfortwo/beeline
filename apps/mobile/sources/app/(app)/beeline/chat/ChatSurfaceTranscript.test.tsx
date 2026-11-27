@@ -10,6 +10,7 @@ import { createTranscriptScrollController } from '@/buzz/transcript-scroll-contr
 import { useChatTranscriptLanding } from './useChatTranscriptLanding';
 
 vi.mock('react-native', () => ({ View: 'View', FlatList: 'FlatList', Platform: { OS: 'android' } }));
+vi.mock('@/ui/grammar-root', () => ({ ListCell: 'ListCell' }));
 vi.mock('tamagui', () => ({ YStack: 'YStack' }));
 vi.mock('@/ui/grammar', async () => {
   const { createElement } = await import('react');
@@ -98,6 +99,7 @@ it('keeps a short-message viewport in the eager phone window through draft repla
     expect(eagerRows.map((message: ChatDisplayMessage) => message.id)).toContain('earlier-5');
     expect(list.props.maxToRenderPerBatch).toBe(4);
     expect(list.props.windowSize).toBe(5);
+    expect(list.props.maintainVisibleContentPosition.autoscrollToTopThreshold).toBe(8);
     expect(list.props.maintainVisibleContentPosition.minIndexForVisible).toBe(1);
   }
 });
@@ -323,4 +325,38 @@ it('uses the same head gutter before an empty thread and the oldest block of a f
   act(() => renderer.update(<ChatSurfaceTranscript {...props} leadBlock={null} />));
   // Ordinary empty chats keep their composer-facing inset.
   expect(renderer.root.findByType('RoomSendList').props.top).toBe(40);
+});
+
+it('holds the same streaming cell through growth and collapse until another row can anchor it', async () => {
+  const { useChatScrollState } = await import('./useChatScrollState');
+  const live = { id: 'live', text: 'Draft', timestamp: 1, isUser: false };
+  const other = { ...live, id: 'earlier' };
+  const offset = { current: 25 };
+  const scrollToOffset = vi.fn();
+  let controller!: ReturnType<typeof useChatScrollState>[1];
+  function Transcript({ cellKey }: { cellKey: string }) {
+    const noop = () => undefined;
+    const args = [{ key: (id: string) => id }, noop, noop, () => false, () => ({ current: [live, other] }),
+      noop, noop, noop, noop, noop, noop, noop, noop, noop, noop, () => offset, noop, noop, noop, noop, noop, noop];
+    const [, scroll, , list, , Cell] = useChatScrollState(args as unknown as Parameters<typeof useChatScrollState>[0]);
+    controller = scroll;
+    list.current = { scrollToOffset } as never;
+    return <Cell cellKey={cellKey} index={0} item={live} />;
+  }
+  act(() => { renderer = create(<Transcript cellKey="live" />); });
+  const layout = (height: number) => act(() => {
+    renderer.root.findAllByType('ListCell')[0]!
+      .props.onLayout({ nativeEvent: { layout: { height } } });
+  });
+  controller.observeTailPinned(false);
+  controller.observeVisibleRows([live]);
+  layout(1200);
+  layout(1230);
+  controller.observeVisibleRows([live, other]);
+  layout(1280);
+  controller.observeVisibleRows([live]);
+  layout(1260);
+  act(() => renderer.update(<Transcript cellKey="replacement" />));
+  layout(250);
+  expect(scrollToOffset.mock.calls.map(([arg]) => arg.offset)).toEqual([55, 35]);
 });

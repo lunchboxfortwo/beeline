@@ -17,7 +17,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 it('keeps live-tail arrivals out of native pending-scroll anchoring, preserving history anchors', () => {
   const preview = new RoomSendPreview();
-  const anchor = { minIndexForVisible: 1, autoscrollToTopThreshold: 50 };
+  const anchor = { minIndexForVisible: 1, autoscrollToTopThreshold: 8 };
   const props = { preview, initialNumToRender: 2, renderItem: null, maintainVisibleContentPosition: anchor };
   const first = message('first');
   let renderer!: ReturnType<typeof create>;
@@ -34,11 +34,11 @@ it('keeps live-tail arrivals out of native pending-scroll anchoring, preserving 
   const scroll = (y: number) => act(() => list().props.onScroll({
     nativeEvent: { contentOffset: { y } },
   }));
-  scroll(200);
+  scroll(9);
   expect(list().props.maintainVisibleContentPosition).toBe(anchor);
   act(() => { renderer.update(<RoomSendList {...props} data={[message('next'), message('settled'), first]} />); });
   expect(list().props.maintainVisibleContentPosition).toBe(anchor);
-  scroll(0);
+  scroll(8);
   expect(list().props.maintainVisibleContentPosition).toBeUndefined();
   // Offset zero in a detached source window belongs to the jump target.
   const detachedAnchor = { minIndexForVisible: 1 };

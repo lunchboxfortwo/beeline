@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChatDisplayMessage } from './room-view-presentation';
 import {
   EMPTY_NEW_MESSAGE_QUEUE,
@@ -32,14 +32,13 @@ export function useUnreadLineControl({
   // session captures the cursor once a visit, so the only thing that moves
   // `firstUnreadMessageId` mid-visit is "Mark unread", which issues its own
   // ticket first.
-  const [lineOwed, setLineOwed] = useState(false);
+  const lineOwed = useMemo(
+    () => enabled && firstUnreadMessageId !== null && !unreadLineSpent(roomId, firstUnreadMessageId),
+    [enabled, firstUnreadMessageId, roomId],
+  );
   useEffect(() => {
-    setLineOwed(enabled && firstUnreadMessageId !== null && !unreadLineSpent(roomId));
-  }, [enabled, firstUnreadMessageId, roomId]);
-
-  useEffect(() => {
-    if (lineOwed) spendUnreadLine(roomId);
-  }, [lineOwed, roomId]);
+    if (lineOwed && firstUnreadMessageId) spendUnreadLine(roomId, firstUnreadMessageId);
+  }, [lineOwed, roomId, firstUnreadMessageId]);
 
   // Reaching the newest row is being caught up, which is what earns the next
   // run its line — whether or not one was drawn for this one.
@@ -180,7 +179,7 @@ export function useNewMessageControl({
       // a short unread run can leave boundary and newest on screen together at
       // open, and retiring there would blink the line out before the reader
       // could look at it.
-      if (enabled && newestVisible) {
+      if (enabled && newestVisible && isPinnedToTailRef.current()) {
         setQueue(acknowledgeNewMessageQueue);
         if (!opening) retire();
       }

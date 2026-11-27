@@ -62,7 +62,7 @@ type Props = [
   setTransport: import("react/index").Dispatch<import("react/index").SetStateAction<BuzzRigTransport | null>>,
   setRoomClient: import("react/index").Dispatch<import("react/index").SetStateAction<RoomViewClient | null>>,
   roomReadStampRef: import("react/index").RefObject<number>,
-  readRoomRef: import("react/index").RefObject<(() => Promise<void>) | null>,
+  readRoomRef: import("react/index").RefObject<((newVisit?: boolean) => Promise<void>) | null>,
   hydrationAttempt: number,
 ];
 export function useRoomSurfaceSubscription([
@@ -83,7 +83,7 @@ export function useRoomSurfaceSubscription([
     if ((!channelId)) return;
     if (!sessionActivated) return;
     isCornerRef.current = false;
-    setFirstUnreadMessageId(null);
+    setFirstUnreadMessageId(openingCache?.view.room.id === channelId ? openingCache.view.viewer.readCursor?.firstUnreadMessageId ?? null : null);
     liveDraftDrainStore.setActive(true);
 
     let cancelled = false;
@@ -174,7 +174,6 @@ export function useRoomSurfaceSubscription([
     const paintView = (view: RoomView, fresh: boolean, readStamp = 0): RoomView | null => {
       if (cancelled) return null;
       isCornerRef.current = Boolean(view.parent?.id ?? view.room.parentId);
-      if (isCornerRef.current) readCursorRef.current?.cancel();
       offerRoomView(messageRecordScopeRef.current, view, fresh ? readStamp : 0);
       const selectedView = selectRoomViewRecords(messageRecordScopeRef.current, view);
       const stableView = (reconcileRoomView(reconciledViewRef.current, selectedView));
@@ -197,18 +196,17 @@ export function useRoomSurfaceSubscription([
       reconciledViewRef.current = stableView;
       hasPainted = true;
       bindingsRef.current.observeRoomSurface();
-      if (fresh && !isCornerRef.current) {
+      if (fresh) {
         // The server's own mark: a viewport that sees nothing past it writes nothing.
         const mark = view.viewer.readCursor?.messageId;
         if (mark) readCursorRef.current?.seed(mark);
       }
-      if (fresh && !capturedUnreadBoundary && !isCornerRef.current) {
+      if (!capturedUnreadBoundary) {
         // This is the last server answer before markRead advances to the tail.
         // Keep the exact id for the whole focused visit; later refreshes may
         // clear the cursor but must not move the divider under the reader.
-        capturedUnreadBoundary = true;
+        capturedUnreadBoundary = fresh;
         setFirstUnreadMessageId(view.viewer.readCursor?.firstUnreadMessageId ?? null);
-
       }
       setRoomSurface(stableView);
       if (fresh) {
@@ -745,7 +743,10 @@ export function useRoomSurfaceSubscription([
             setHydrationError(copy || null);
           }
         };
-        readRoomRef.current = readRoom;
+        readRoomRef.current = async (newVisit) => {
+          if (newVisit) capturedUnreadBoundary = false;
+          await readRoom?.();
+        };
         markRoomOpen('watch-install');
         await installWatch();
         if (cancelled) return;

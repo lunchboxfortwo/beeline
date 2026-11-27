@@ -186,8 +186,7 @@ export function useChatTranscriptHistory([
   // Same-verb system lines and adjacent GitHub lifecycle rows fold into one.
   const unreadLine = useUnreadLineControl({
     roomId: decodedId,
-    firstUnreadMessageId: isCorner ? null : firstUnreadMessageId,
-    enabled: !isCorner,
+    firstUnreadMessageId,
   });
 
   const { dividerMessageId: firstNewMessageId } = unreadLine;

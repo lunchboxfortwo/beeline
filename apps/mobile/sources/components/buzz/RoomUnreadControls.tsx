@@ -41,7 +41,7 @@ export function RoomUnreadControls({
   discVisible: boolean;
   onJumpToNewest: () => void;
 }) {
-  const badgeShown = !corner && badgeCount > 0;
+  const badgeShown = badgeCount > 0;
   return (
     <>
       {discVisible && (
