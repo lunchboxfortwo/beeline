@@ -119,8 +119,16 @@ export interface SessionUpdate {
 }
 
 
+export interface ToolCallOrigin {
+  kind: 'subagent';
+  label?: string;
+  sessionId?: string;
+}
+
 export interface ToolCallEntry {
   id?: string;
+  sessionId?: string;
+  origin?: ToolCallOrigin;
   name?: string;
   title?: string;
   kind?: string;
@@ -618,49 +626,173 @@ export function agentTurnSteps(
 }
 
 
+function asPlainObject(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function extractSubagentOrigin(
+  sessionId: string | undefined,
+  update: Record<string, unknown>,
+  rootSessionId: string | undefined,
+): ToolCallOrigin | undefined {
+  const meta = asPlainObject(update._meta);
+  const metaSubagent = asPlainObject(meta?.subagent) ?? asPlainObject(meta?.origin);
+  const directOrigin = asPlainObject(update.origin) ?? asPlainObject(update.subagent);
+  const subagentSession =
+    (typeof metaSubagent?.sessionId === 'string' && metaSubagent.sessionId.trim()) ||
+    (typeof directOrigin?.sessionId === 'string' && directOrigin.sessionId.trim()) ||
+    (typeof update.subagentSessionId === 'string' && update.subagentSessionId.trim()) ||
+    (sessionId && rootSessionId && sessionId !== rootSessionId ? sessionId : undefined);
+  const rawLabel =
+    (typeof metaSubagent?.label === 'string' && metaSubagent.label.trim()) ||
+    (typeof metaSubagent?.role === 'string' && metaSubagent.role.trim()) ||
+    (typeof metaSubagent?.name === 'string' && metaSubagent.name.trim()) ||
+    (typeof directOrigin?.label === 'string' && directOrigin.label.trim()) ||
+    (typeof directOrigin?.role === 'string' && directOrigin.role.trim()) ||
+    (typeof directOrigin?.name === 'string' && directOrigin.name.trim()) ||
+    (typeof update.subagent === 'string' && update.subagent.trim()) ||
+    (typeof update.subagentRole === 'string' && update.subagentRole.trim()) ||
+    (typeof update.agentName === 'string' && update.agentName.trim()) ||
+    undefined;
+  const hasParent =
+    (typeof update.parentToolCallId === 'string' && update.parentToolCallId.trim().length > 0) ||
+    (typeof meta?.parentToolCallId === 'string' && meta.parentToolCallId.trim().length > 0) ||
+    (typeof update.parentSessionId === 'string' && update.parentSessionId.trim().length > 0) ||
+    (typeof meta?.parentSessionId === 'string' && meta.parentSessionId.trim().length > 0);
+  if (!subagentSession && !rawLabel && !hasParent && metaSubagent?.kind !== 'subagent' && directOrigin?.kind !== 'subagent') {
+    return undefined;
+  }
+  return {
+    kind: 'subagent',
+    ...(rawLabel ? { label: rawLabel.slice(0, 80) } : {}),
+    ...(subagentSession ? { sessionId: subagentSession.slice(0, 128) } : {}),
+  };
+}
+
+function mergePartialRecord(previous: unknown, next: unknown): unknown {
+  if (next === undefined || next === null) return previous;
+  const prevObj = asPlainObject(previous);
+  const nextObj = asPlainObject(next);
+  if (prevObj && nextObj) {
+    if (Object.keys(nextObj).length === 0) return previous;
+    const merged: Record<string, unknown> = { ...prevObj };
+    for (const [k, v] of Object.entries(nextObj)) {
+      if (v === undefined || v === null) continue;
+      if (k === '_meta' && asPlainObject(prevObj._meta) && asPlainObject(v)) {
+        merged._meta = { ...asPlainObject(prevObj._meta), ...asPlainObject(v) };
+      } else {
+        merged[k] = v;
+      }
+    }
+    return merged;
+  }
+  if (typeof next === 'string' && next.length === 0 && previous !== undefined) return previous;
+  return next;
+}
+
+function mergeToolContent(previous: unknown, next: unknown): unknown {
+  if (next === undefined || next === null) return previous;
+  if (Array.isArray(next)) {
+    if (next.length === 0 && previous !== undefined) return previous;
+    // Idempotent on repeated snapshots and preserves fuller latest snapshot.
+    return next;
+  }
+  if (typeof next === 'string' && next.length === 0 && previous !== undefined) return previous;
+  return mergePartialRecord(previous, next);
+}
+
+function locationKey(entry: unknown): string {
+  if (typeof entry === 'string') return `s:${entry}`;
+  const rec = asPlainObject(entry);
+  if (!rec) return `j:${JSON.stringify(entry)}`;
+  const path = typeof rec.path === 'string' ? rec.path : typeof rec.uri === 'string' ? rec.uri : '';
+  const line = typeof rec.line === 'number' ? rec.line : typeof rec.startLine === 'number' ? rec.startLine : '';
+  const endLine = typeof rec.endLine === 'number' ? rec.endLine : '';
+  return `o:${path}:${line}:${endLine}`;
+}
+
+function mergeToolLocations(previous: unknown, next: unknown): unknown {
+  if (next === undefined || next === null) return previous;
+  if (!Array.isArray(next)) return next;
+  if (next.length === 0) return previous;
+  if (!Array.isArray(previous) || previous.length === 0) return next;
+  const merged = new Map<string, unknown>();
+  for (const item of previous) merged.set(locationKey(item), item);
+  for (const item of next) merged.set(locationKey(item), item);
+  return [...merged.values()];
+}
+
 /** Track each physical call at its first occurrence and fold subsequent notifications into it. */
 function projectToolCalls<T>(
   updates: readonly SessionUpdate[],
-  merge: (id: string, update: SessionUpdate['update'], previous: T | undefined) => T,
+  merge: (
+    id: string,
+    update: SessionUpdate['update'],
+    previous: T | undefined,
+    meta: { sessionId: string; origin?: ToolCallOrigin },
+  ) => T,
 ): { at: number; call: T }[] {
   const calls = new Map<string, { at: number; call: T }>();
   let anonymous = 0;
-  let activeAnonymous: string | undefined;
-  for (const [index, { update }] of updates.entries()) {
+  const activeAnonymousBySession = new Map<string, string>();
+  const rootSessionId = updates[0]?.sessionId;
+  for (const [index, { sessionId, update }] of updates.entries()) {
     const sessionUpdate = update.sessionUpdate as string | undefined;
     if (!sessionUpdate || !TOOL_UPDATE_TYPES.has(sessionUpdate)) continue;
-    const id = typeof update.toolCallId === 'string' ? update.toolCallId : undefined;
-    if (id) activeAnonymous = undefined;
-    if (!id && (sessionUpdate === 'tool_call' || !activeAnonymous)) {
-      activeAnonymous = `anonymous-${anonymous++}`;
+    const origin = extractSubagentOrigin(sessionId, update, rootSessionId);
+    const scopeSession = origin?.sessionId ?? sessionId ?? '';
+    const id = typeof update.toolCallId === 'string' && update.toolCallId.trim() ? update.toolCallId : undefined;
+    if (id) activeAnonymousBySession.delete(scopeSession);
+    if (!id && (sessionUpdate === 'tool_call' || !activeAnonymousBySession.has(scopeSession))) {
+      activeAnonymousBySession.set(scopeSession, `anonymous-${anonymous++}`);
     }
-    const key = id ?? activeAnonymous!;
-    const previous = calls.get(key);
-    const call = merge(key, update, previous?.call);
+    const callId = id ?? activeAnonymousBySession.get(scopeSession)!;
+    const mapKey = scopeSession ? `${scopeSession}\0${callId}` : callId;
+    const previous = calls.get(mapKey);
+    const call = merge(callId, update, previous?.call, { sessionId: scopeSession, origin });
     if (previous) previous.call = call;
-    else calls.set(key, { at: index, call });
-    if (!id && sessionUpdate === 'tool_result') activeAnonymous = undefined;
+    else calls.set(mapKey, { at: index, call });
+    if (!id && sessionUpdate === 'tool_result') activeAnonymousBySession.delete(scopeSession);
   }
   return [...calls.values()];
 }
 
 
 function toolCallSpans(updates: readonly SessionUpdate[]): { at: number; call: ToolCallEntry }[] {
-  return projectToolCalls<ToolCallEntry>(updates, (id, update, previous) =>
-    maskCredentialResult({
+  return projectToolCalls<ToolCallEntry>(updates, (id, update, previous, meta) => {
+    const nextRawInput = 'rawInput' in update ? mergePartialRecord(previous?.rawInput, update.rawInput) : previous?.rawInput;
+    const nextContent = 'content' in update ? mergeToolContent(previous?.content, update.content) : previous?.content;
+    const nextRawOutput = 'rawOutput' in update ? mergePartialRecord(previous?.rawOutput, update.rawOutput) : previous?.rawOutput;
+    const nextLocations = 'locations' in update ? mergeToolLocations(previous?.locations, update.locations) : previous?.locations;
+    const nextOrigin = meta.origin
+      ? {
+          kind: 'subagent' as const,
+          ...(previous?.origin?.label ?? meta.origin.label
+            ? { label: meta.origin.label ?? previous?.origin?.label }
+            : {}),
+          ...(previous?.origin?.sessionId ?? meta.origin.sessionId
+            ? { sessionId: meta.origin.sessionId ?? previous?.origin?.sessionId }
+            : {}),
+        }
+      : previous?.origin;
+    return maskCredentialResult({
       ...previous,
       id,
-      ...(typeof update.name === 'string' ? { name: update.name } : {}),
-      ...(typeof update.title === 'string' ? { title: update.title } : {}),
-      ...(typeof update.kind === 'string' ? { kind: update.kind } : {}),
-      ...(typeof update.status === 'string' ? { status: update.status } : {}),
+      ...(nextOrigin && meta.sessionId ? { sessionId: meta.sessionId } : {}),
+      ...(nextOrigin ? { origin: nextOrigin } : {}),
+      ...(typeof update.name === 'string' && update.name.trim() ? { name: update.name } : {}),
+      ...(typeof update.title === 'string' && update.title.trim() ? { title: update.title } : {}),
+      ...(typeof update.kind === 'string' && update.kind.trim() ? { kind: update.kind } : {}),
+      ...(typeof update.status === 'string' && update.status.trim() ? { status: update.status } : {}),
       ...(update.sessionUpdate === 'tool_result' ? { resultReceived: true } : {}),
-      ...('rawInput' in update ? { rawInput: update.rawInput } : {}),
-      ...('content' in update ? { content: update.content } : {}),
-      ...('rawOutput' in update ? { rawOutput: update.rawOutput } : {}),
-      ...('locations' in update ? { locations: update.locations } : {}),
-    }),
-  );
+      ...(nextRawInput !== undefined ? { rawInput: nextRawInput } : {}),
+      ...(nextContent !== undefined ? { content: nextContent } : {}),
+      ...(nextRawOutput !== undefined ? { rawOutput: nextRawOutput } : {}),
+      ...(nextLocations !== undefined ? { locations: nextLocations } : {}),
+    });
+  });
 }
 
 

@@ -119,13 +119,21 @@ function redactShellEnvAssignments(source: string): string {
   return cursor === 0 ? source : out + source.slice(cursor);
 }
 
+const URI_SECRET_QUERY_PARAMS =
+  /([?&](?:api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|id[_-]?token|token|secret|password|passwd|auth|authorization|sig|signature|credential|session|session[_-]?id|cookie|jwt|bearer|key|x-amz-signature|x-amz-credential|x-amz-security-token)=)([^&#\s"'`<>]+)/gi;
+
+const URI_USERINFO_SECRET =
+  /(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@"'`<>]+:)([^@\s"'`<>]+)(@)/gi;
+
 /** Keep wire-visible tool detail useful without ever carrying credentials. */
 export function redactToolDetail(value: string): string {
   const preEnv = value
     .replace(/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g, '[REDACTED]')
+    .replace(URI_USERINFO_SECRET, '$1[REDACTED]$3')
+    .replace(URI_SECRET_QUERY_PARAMS, '$1[REDACTED]')
     .replace(/\b(Bearer\s+)[^\s,"'}\]]+/gi, '$1[REDACTED]')
     .replace(
-      /(["']?)\b(api[_-]?key|token|secret|password|passwd|authorization|credential|cookie|private[_-]?key)\1\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)/gi,
+      /(?<![?&])(["']?)\b(api[_-]?key|token|secret|password|passwd|authorization|credential|cookie|private[_-]?key)\1\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)/gi,
       '"$2": "[REDACTED]"',
     )
     .replace(

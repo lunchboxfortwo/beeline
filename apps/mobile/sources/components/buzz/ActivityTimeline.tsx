@@ -51,19 +51,31 @@ const OUTCOME_WORDS = {
   failure: 'failed',
 } as const;
 
+function originCopy(origin: ToolLedgerLine['origin']): string | undefined {
+  if (!origin || origin.kind !== 'subagent') return undefined;
+  return origin.label ? `subagent · ${origin.label}` : 'subagent';
+}
+
 function lineAccessibilityLabel(line: ToolLedgerLine): string {
   if (line.kind === 'note') {
     return line.startupWarning ? `Startup note: ${line.label}` : `Note: ${line.label}`;
   }
-  const parts = [line.label];
+  const parts: string[] = [];
+  const origin = originCopy(line.origin);
+  if (origin) parts.push(origin);
+  parts.push(line.label);
   if (line.kind !== 'thought') parts.push(OUTCOME_WORDS[line.outcome]);
+  if (line.signal) parts.push(`signalled ${line.signal}`);
+  if (line.stat?.kind === 'diff') parts.push(`+${line.stat.added} -${line.stat.removed}`);
+  else if (line.stat?.kind === 'text') parts.push(line.stat.text);
   if (line.reason) parts.push(line.reason);
   return parts.join(', ');
 }
 
 /**
- * Shared transcript child row: action, machine object and recorded duration.
- * The whole row opens the output sheet only when the call carries inspectable detail.
+ * Shared 3-part transcript step row: verb, 2-line wrapped subject (tail ellipsis),
+ * quiet right stat column, optional subagent origin line, and `>` chevron ONLY
+ * when opening reveals an additional stored fact.
  */
 function ToolLedgerLineRow({
   line,
@@ -76,7 +88,6 @@ function ToolLedgerLineRow({
   onPress?: () => void;
   testID?: string;
 }) {
-  const duration = formatToolCallDuration(line.durationMs);
   const showVerdict = line.kind === 'tool';
   const accessibilityLabel = lineAccessibilityLabel(line);
   if (line.kind === 'note' && line.startupWarning) {
@@ -111,7 +122,7 @@ function ToolLedgerLineRow({
     // Interim agent prose sits inline in the flat list without a trailing chevron.
     return (
       <TranscriptNavigationRow divider={divider} testID={testID}>
-        <YStack flex={1} minWidth={0}>
+        <YStack width="100%" minWidth={0}>
           <TypedView view={MonoMarkdown} v="meta" markdown={line.label} />
         </YStack>
       </TranscriptNavigationRow>
@@ -129,6 +140,9 @@ function ToolLedgerLineRow({
   const isHumanTargetRow =
     (action === 'sent' || action === 'replied') && /(?:^|\s)[@#][A-Za-z0-9._-]+/.test(line.label);
   const labelSegments = isHumanTargetRow ? line.label.split(/((?:^|\s)[@#][A-Za-z0-9._-]+)/g) : null;
+  const originText = originCopy(line.origin);
+  const quietReceipt = !onPress && line.outcome === 'success';
+
   return (
     <TranscriptNavigationRow
       testID={testID}
@@ -146,12 +160,23 @@ function ToolLedgerLineRow({
           : undefined
       }
     >
-      <YStack gap="1" flex={1} minWidth={0}>
-        <XStack alignItems="center" gap="2" minWidth={0}>
-          {(!hasNamedAction || line.outcome === 'failure') && !(labelSegments && labelSegments.length > 1 && line.outcome !== 'failure') ? (
+      <YStack gap="0.5" width="100%" minWidth={0}>
+        {originText ? (
+          <T
+            v="code"
+            color="secondary"
+            numberOfLines={1}
+            testID={`activity-origin-${line.id}`}
+          >
+            {originText}
+          </T>
+        ) : null}
+        <XStack alignItems="flex-start" gap="2" minWidth={0}>
+          {(!hasNamedAction || line.outcome === 'failure') &&
+          !(labelSegments && labelSegments.length > 1 && line.outcome !== 'failure') ? (
             <T
               v={line.outcome === 'failure' ? 'metaStrong' : 'meta'}
-              color={line.outcome === 'failure' ? 'needsYou' : 'ink'}
+              color={line.outcome === 'failure' ? 'needsYou' : quietReceipt ? 'secondary' : 'ink'}
               flexShrink={0}
               numberOfLines={1}
             >
@@ -160,7 +185,7 @@ function ToolLedgerLineRow({
           ) : null}
           {!redundantFailureLabel ? (
             labelSegments && labelSegments.length > 1 ? (
-              <T v="meta" color="ink" numberOfLines={2} flex={1} minWidth={48}>
+              <T v="meta" color={quietReceipt ? 'secondary' : 'ink'} numberOfLines={2} flex={1} minWidth={48}>
                 {!hasNamedAction && line.outcome !== 'failure' ? `${verb} ` : ''}
                 {labelSegments.map((part, index) => {
                   const match = part.match(/^(\s*)([@#][A-Za-z0-9._-]+)$/);
@@ -176,15 +201,41 @@ function ToolLedgerLineRow({
                 })}
               </T>
             ) : (
-              <T v="code" ellipsizeMode="middle" numberOfLines={1} flex={1} minWidth={48}>
+              <T
+                v={line.subjectMono ? 'code' : 'meta'}
+                color={quietReceipt ? 'secondary' : 'ink'}
+                ellipsizeMode="tail"
+                numberOfLines={2}
+                flex={1}
+                minWidth={48}
+              >
                 {line.label}
               </T>
             )
           ) : null}
-          {duration ? (
-            <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']}>
-              {duration}
-            </T>
+          {line.stat ? (
+            line.stat.kind === 'signal' ? (
+              <T v="code" color="removed" flexShrink={0} fontVariant={['tabular-nums']} numberOfLines={1}>
+                {line.stat.text}
+              </T>
+            ) : line.stat.kind === 'diff' ? (
+              <XStack alignItems="center" gap="1" flexShrink={0}>
+                {line.stat.added > 0 ? (
+                  <T v="code" color="added" fontVariant={['tabular-nums']} numberOfLines={1}>
+                    {`+${line.stat.added}`}
+                  </T>
+                ) : null}
+                {line.stat.removed > 0 ? (
+                  <T v="code" color="removed" fontVariant={['tabular-nums']} numberOfLines={1}>
+                    {`-${line.stat.removed}`}
+                  </T>
+                ) : null}
+              </XStack>
+            ) : (
+              <T v="code" color="secondary" flexShrink={0} fontVariant={['tabular-nums']} numberOfLines={1}>
+                {line.stat.text}
+              </T>
+            )
           ) : null}
           {showVerdict && line.outcome === 'running' ? (
             <Spinner testID={`activity-verdict-${line.id}`} />
@@ -237,33 +288,61 @@ function useToolOutput(lookup?: ToolIdentityLookup) {
       return;
     }
     setLine({ ...next, detail: 'Loading…', rawOutput: 'Loading…' });
-    const request = monolithPhoneOperation('readRoomTools', next.toolOutput);
+    const targetRef = {
+      roomId: next.toolOutput.roomId,
+      anchor: next.toolOutput.anchor,
+      messageId: next.toolOutput.messageId,
+    };
+    const request = monolithPhoneOperation('readRoomTools', targetRef);
     void request
       .then((page) => {
         if (generation !== current.current) return;
-        const full = toolPageLines(page, lookup).find((item) => item.id === next.id);
+        const fetched = toolPageLines(page, lookup);
+        const itemIndex = next.toolOutput?.itemIndex;
+        const full =
+          (itemIndex !== undefined
+            ? fetched.find((item) => item.id === `${next.toolOutput!.messageId}:${itemIndex}`) ??
+              fetched[itemIndex]
+            : undefined) ?? fetched.find((item) => item.id === next.id);
+        if (!full) {
+          const missing = 'This step’s saved detail is no longer available.';
+          setLine({ ...next, detail: undefined, rawOutput: undefined, blocks: undefined });
+          setError(missing);
+          return;
+        }
         setLine({
           ...next,
-          label: full?.label ?? next.label,
-          sheetTitle: full?.sheetTitle ?? next.sheetTitle,
-          verb: full?.verb ?? next.verb,
-          receipt: full?.receipt ?? next.receipt,
-          detail: full?.detail,
-          rawOutput: full?.rawOutput,
-          files: full?.files ?? next.files,
-          plan: full?.plan ?? next.plan,
-          terminalOnly: full?.terminalOnly ?? next.terminalOnly,
-          requester: full?.requester,
-          reason: full?.reason,
-          outputHidden: full?.outputHidden,
-          command: full?.command ?? next.command,
-          input: full?.input ?? next.input,
+          label: full.label ?? next.label,
+          sheetTitle: full.sheetTitle ?? next.sheetTitle,
+          verb: full.verb ?? next.verb,
+          subjectMono: full.subjectMono ?? next.subjectMono,
+          stat: full.stat ?? next.stat,
+          summary: full.summary ?? next.summary,
+          exitCode: full.exitCode ?? next.exitCode,
+          signal: full.signal ?? next.signal,
+          outputTruncated: full.outputTruncated ?? next.outputTruncated,
+          omittedCount: full.omittedCount ?? next.omittedCount,
+          sanitized: full.sanitized ?? next.sanitized,
+          hasDetail: full.hasDetail ?? next.hasDetail,
+          origin: full.origin ?? next.origin,
+          receipt: full.receipt ?? next.receipt,
+          detail: full.detail,
+          rawOutput: full.rawOutput,
+          blocks: full.blocks,
+          files: full.files ?? next.files,
+          plan: full.plan ?? next.plan,
+          terminalOnly: full.terminalOnly ?? next.terminalOnly,
+          requester: full.requester,
+          reason: full.reason,
+          outputHidden: full.outputHidden,
+          command: full.command ?? next.command,
+          input: full.input ?? next.input,
         });
       })
       .catch((cause) => {
         if (generation !== current.current) return;
         const message = appReadErrorCopy(cause);
-        setLine({ ...next, detail: message || undefined, rawOutput: undefined });
+        setLine({ ...next, detail: message || undefined, rawOutput: undefined, blocks: undefined });
         setError(message || null);
       });
   };
@@ -403,6 +482,12 @@ function ToolRunGroupRow({
   );
 }
 
+function sheetSubtitleFor(line: ToolLedgerLine | null): string | undefined {
+  if (!line) return undefined;
+  if (line.outcome === 'failure') return line.reason;
+  return line.requester;
+}
+
 /**
  * A settled reply's steps line: the turn's tool calls and interim notes folded
  * under one quiet step-count trigger. Renders nothing when the reply has no steps.
@@ -437,16 +522,22 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
         receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
         rawOutput={sheetLine?.rawOutput}
+        blocks={sheetLine?.blocks}
         files={sheetLine?.files}
         plan={sheetLine?.plan}
         outcome={sheetLine?.outcome}
+        exitCode={sheetLine?.exitCode}
+        signal={sheetLine?.signal}
+        outputTruncated={sheetLine?.outputTruncated}
+        omittedCount={sheetLine?.omittedCount}
+        sanitized={sheetLine?.sanitized}
         terminalOnly={sheetLine?.terminalOnly}
         outputHidden={sheetLine?.outputHidden}
         requester={sheetLine?.requester}
         lookup={lookup}
         error={sheetError}
         onClose={closeLine}
-        subtitle={sheetLine?.outcome === 'failure' ? sheetLine.reason : sheetLine?.requester}
+        subtitle={sheetSubtitleFor(sheetLine)}
         title={sheetLine?.sheetTitle ?? sheetLine?.label ?? 'Output'}
         visible={Boolean(sheetLine)}
       />
@@ -515,16 +606,22 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
         receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
         rawOutput={sheetLine?.rawOutput}
+        blocks={sheetLine?.blocks}
         files={sheetLine?.files}
         plan={sheetLine?.plan}
         outcome={sheetLine?.outcome}
+        exitCode={sheetLine?.exitCode}
+        signal={sheetLine?.signal}
+        outputTruncated={sheetLine?.outputTruncated}
+        omittedCount={sheetLine?.omittedCount}
+        sanitized={sheetLine?.sanitized}
         terminalOnly={sheetLine?.terminalOnly}
         outputHidden={sheetLine?.outputHidden}
         requester={sheetLine?.requester}
         lookup={lookup}
         error={sheetError}
         onClose={closeLine}
-        subtitle={sheetLine?.outcome === 'failure' ? sheetLine.reason : sheetLine?.requester}
+        subtitle={sheetSubtitleFor(sheetLine)}
         title={sheetLine?.sheetTitle ?? sheetLine?.label ?? 'Output'}
         visible={Boolean(sheetLine)}
       />

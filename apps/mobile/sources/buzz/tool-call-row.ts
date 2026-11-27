@@ -1,27 +1,26 @@
 import type { TurnActivityAction } from './activity-timeline';
 import {
   describeMcpCall,
+  displayFileLocation,
   displayFilePath,
   parseMcpTool,
   peelShellCommand,
   redactDisplayPaths,
+  stripRecognizedDisplayPrefix,
 } from './tool-call-classify';
 import type { ToolIdentityLookup } from './tool-identity-lookup';
 import { cleanToolOutputText } from './tool-output-format';
 
 /**
- * What a tool call *is*, for the one-line tool ledger (tool-ledger.ts).
+ * What a tool call *is*, for the universal 3-part tool ledger row (tool-ledger.ts).
  *
- * This module maps a call's unwrapped command, MCP operation, or file target
- * to its ledger verb, compact label, duration, and cleaned output.
+ * Maps a call's unwrapped command, MCP operation, file locations, or specific
+ * summary to its ledger verb, 2-line-wrappable subject, quiet right stat, and
+ * full unwrapped sheet title.
  */
 
-/** The object column truncates in the MIDDLE: the flags at the end carry the meaning. */
-export const TOOL_CALL_OBJECT_MAX = 56;
-/** The ledger line's label cap (owner-approved tool-ledger design, 2026-08-24). */
-const TOOL_CALL_LABEL_MAX = 40;
-/** Structured MCP receipts keep enough room for target, timing, and causal provenance. */
-const TOOL_CALL_RECEIPT_LABEL_MAX = 120;
+export const TOOL_CALL_OBJECT_MAX = 240;
+const TOOL_CALL_LABEL_SAFETY_MAX = 240;
 /** A duration is only worth a column when the call was slow enough to notice. */
 export const TOOL_CALL_DURATION_FLOOR_MS = 1000;
 
@@ -37,10 +36,10 @@ const KIND_VERBS: Readonly<Record<string, string>> = {
   list: 'listed',
   listed: 'listed',
   inspected: 'read',
-  edit: 'wrote',
+  edit: 'edited',
   write: 'wrote',
   create: 'wrote',
-  patch: 'wrote',
+  patch: 'edited',
   move: 'moved',
   delete: 'deleted',
   execute: 'ran',
@@ -50,6 +49,8 @@ const KIND_VERBS: Readonly<Record<string, string>> = {
 /** Generic human-readable verbs displayed in the row's leading meta column. */
 const GENERIC_LEDGER_VERBS = new Set([
   ...Object.values(KIND_VERBS),
+  'wrote',
+  'edited',
   'git',
   'checked',
   'created',
@@ -100,6 +101,17 @@ const TITLE_VERB =
 const GENERIC_SHELL_TITLES =
   /^(?:bash|sh|zsh|shell|terminal|execute|command|exec_command|run_command|tool)$/i;
 
+const GENERIC_SUMMARY_PATTERN =
+  /^(?:run(?:ning)?\s+(?:a\s+)?(?:shell\s+)?command|execute\s+(?:shell\s+)?command|shell\s+command|bash\s+command|tool\s+call|read\s+file|edit\s+file|write\s+file|search\s+files?)$/i;
+
+const INLINE_SCRIPT_PATTERN =
+  /^(?:python3?|node|ruby|perl|php|bash|sh|zsh|pwsh|powershell)\s+(?:-[a-zA-Z]*[ce]|--eval)\b/i;
+
+export type ToolRowStat =
+  | { kind: 'signal'; text: string }
+  | { kind: 'diff'; added: number; removed: number }
+  | { kind: 'text'; text: string };
+
 function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -113,12 +125,17 @@ function singleLineCommand(command: string): string {
     .join('; ');
 }
 
+function tailClamp(value: string, limit = TOOL_CALL_LABEL_SAFETY_MAX): string {
+  const clean = oneLine(value);
+  if (clean.length <= limit) return clean;
+  return `${clean.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
+}
+
 /**
- * Keep the head AND the tail. `npm run test -- --coverage --reporter=json`
- * truncated at the end is just `npm run test --…`, which is every test command
- * in the repo; the flags are the half that says which one this was.
+ * Keep the head AND the tail for callers that explicitly want single-line middle clipping.
+ * Step rows themselves now wrap up to 2 lines with natural tail ellipsis.
  */
-export function middleTruncate(value: string, limit = TOOL_CALL_OBJECT_MAX): string {
+export function middleTruncate(value: string, limit = 56): string {
   const clean = oneLine(value);
   if (clean.length <= limit) return clean;
   const keep = Math.max(2, limit - 1);
@@ -153,8 +170,9 @@ function searchPattern(step: TurnActivityAction): string | undefined {
   return undefined;
 }
 
-/** `12 matches` in the tool's own result — never a count the client invented. */
-function hitCount(output: readonly string[]): string | undefined {
+/** `12 matches` in the tool's own untruncated result — never a count the client invented. */
+function hitCount(output: readonly string[], truncated?: boolean): string | undefined {
+  if (truncated) return undefined;
   for (const line of output) {
     const hits = line.match(/\b(\d+)\s+(?:matches?|results?|hits?)\b/i);
     if (hits) return `${hits[1]} hits`;
@@ -186,9 +204,6 @@ function textLeaves(value: unknown): string[] {
   return [];
 }
 
-/** Older rows could be cut in the middle of a single-field JSON string wrapper.
- * Recover only when the payload starts with that single text wrapper key so
- * multi-key truncated JSON objects keep their full structure for the sheet. */
 function legacyTruncatedText(raw: string): string | undefined {
   const match =
     /^\s*\{\s*"(?:formatted_output|stdout|stderr|output|text|content|message|result)"\s*:\s*"/.exec(
@@ -206,8 +221,6 @@ function legacyTruncatedText(raw: string): string | undefined {
       encoded += char;
     }
   }
-  // Decode a complete escape at a time. A dangling escape or partial unicode
-  // escape remains literal instead of making the entire legacy row disappear.
   return encoded.replace(/\\(?:u[0-9a-fA-F]{4}|["\\/bfnrt])/g, (escape) => {
     try {
       return JSON.parse(`"${escape}"`) as string;
@@ -240,15 +253,6 @@ export function isTerminalOnlyOutput(raw: string | undefined): boolean {
   return envelope !== undefined && isTerminalOnlyEnvelope(envelope);
 }
 
-/**
- * The call's real output, or nothing.
- *
- * A terminal-backed execute returns `[{"type":"terminal","terminalId":"exec-…"}]`
- * — a machine identifier the reader can do nothing with. Showing nothing is the
- * honest rendering of "we were handed a handle, not a result". Structured JSON
- * results (such as Beeline MCP state receipts and schedule lists) are formatted
- * cleanly rather than discarded.
- */
 export function toolCallOutput(raw: string | undefined): string[] {
   if (!raw?.trim()) return [];
   const cleaned = cleanToolOutputText(raw);
@@ -285,16 +289,67 @@ export function formatToolCallDuration(ms: number | undefined): string | undefin
   return `${minutes}m ${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}s`;
 }
 
+function specificSummary(step: TurnActivityAction): string | undefined {
+  const inputObj = parsed(step.input);
+  const candidate =
+    step.summary ??
+    field(inputObj, ['description', 'toolSummary']);
+  if (!candidate) return undefined;
+  const clean = oneLine(stripRecognizedDisplayPrefix(candidate));
+  if (!clean || clean.length < 4 || GENERIC_SUMMARY_PATTERN.test(clean)) return undefined;
+  return clean;
+}
+
+function isUnreadableInlineScript(command: string): boolean {
+  const trimmed = command.trim();
+  if (INLINE_SCRIPT_PATTERN.test(trimmed)) return true;
+  if (trimmed.includes('\n') && trimmed.length > 80) return true;
+  return trimmed.length > 110 && /[;{}()|]/.test(trimmed);
+}
+
+function formatFilesTarget(step: TurnActivityAction): string | undefined {
+  const files = step.files;
+  if (!files?.length) return undefined;
+  const first = files[0]!;
+  const primary = displayFileLocation(first);
+  if (files.length === 1) return primary;
+  const sameFileOtherLines = files
+    .slice(1)
+    .filter((f) => f.path === first.path && typeof f.line === 'number');
+  if (sameFileOtherLines.length === files.length - 1 && sameFileOtherLines.length <= 2) {
+    const extra = sameFileOtherLines
+      .map((f) => (f.endLine && f.endLine > f.line! ? `:${f.line}–${f.endLine}` : `:${f.line}`))
+      .join(', ');
+    return `${primary}, ${extra}`;
+  }
+  return `${primary} (+${files.length - 1})`;
+}
+
+type VerbObjectResult = {
+  verb: string;
+  object: string;
+  namedTool?: boolean;
+  subjectMono?: boolean;
+  replacedCommandBySummary?: boolean;
+  searchHits?: string;
+};
+
 function verbAndObject(
   step: TurnActivityAction,
   output: readonly string[],
   lookup?: ToolIdentityLookup,
-) {
+): VerbObjectResult {
   const kind = step.toolKind?.toLowerCase();
   const mcp = parseMcpTool(step.title, step.command, step.input);
-  const file =
-    step.files?.[0]?.path ??
-    field(parsed(step.input), ['path', 'file_path', 'filePath', 'filename', 'Path']);
+  const filesTarget = formatFilesTarget(step);
+  const inputFile = field(parsed(step.input), [
+    'path',
+    'file_path',
+    'filePath',
+    'filename',
+    'Path',
+  ]);
+  const fileTarget = filesTarget ?? (inputFile ? displayFilePath(inputFile) : undefined);
   const titleLower = oneLine(step.title).toLowerCase();
 
   if (titleLower === 'toolsearch' || titleLower === 'tool_search') {
@@ -302,7 +357,7 @@ function verbAndObject(
     return {
       verb: 'loaded',
       object: query ? `tools · ${query}` : 'tools',
-      expandedLabel: true,
+      subjectMono: false,
     };
   }
 
@@ -320,45 +375,77 @@ function verbAndObject(
         ? `plan · ${done}/${total} done`
         : `plan · ${total} ${total === 1 ? 'item' : 'items'}`
       : 'plan';
-    return { verb: 'updated', object: suffix, expandedLabel: true };
+    return { verb: 'updated', object: suffix, subjectMono: false };
   }
 
   if (mcp) {
     const described = describeMcpCall(mcp, step.input, step.command, step.output, lookup);
+    const hits =
+      described.verb === 'found' ? hitCount(output, step.outputTruncated) : undefined;
     return {
       verb: described.verb,
       object: described.object,
       namedTool: described.namedTool,
-      hasReceipt: Boolean(described.receipt || described.expandedLabel),
+      subjectMono: false,
+      ...(hits ? { searchHits: hits } : {}),
     };
   }
 
   if (step.command) {
-    const command = singleLineCommand(peelShellCommand(step.command));
+    const peeled = peelShellCommand(step.command);
+    const summary = specificSummary(step);
+    if (summary && isUnreadableInlineScript(peeled)) {
+      return {
+        verb: 'ran',
+        object: summary,
+        subjectMono: false,
+        replacedCommandBySummary: true,
+      };
+    }
+    const command = singleLineCommand(peeled);
     const git = command.match(/^git\s+(.+)$/i);
-    if (git) return { verb: 'git', object: redactDisplayPaths(git[1] ?? command) };
-    return { verb: 'ran', object: redactDisplayPaths(command) };
+    if (git) return { verb: 'git', object: redactDisplayPaths(git[1] ?? command), subjectMono: true };
+    return { verb: 'ran', object: redactDisplayPaths(command), subjectMono: true };
   }
 
   if (kind === 'search' || kind === 'searched' || kind === 'grep') {
     const pattern = searchPattern(step);
-    const hits = hitCount(output);
-    const object = [pattern, hits].filter(Boolean).join(' · ');
-    return { verb: 'found', object: object || titleObject(step) };
+    const hits = hitCount(output, step.outputTruncated);
+    return {
+      verb: 'found',
+      object: pattern || titleObject(step),
+      subjectMono: false,
+      ...(hits ? { searchHits: hits } : {}),
+    };
   }
 
   if (kind === 'execute' && step.title && !GENERIC_SHELL_TITLES.test(oneLine(step.title))) {
-    const peeled = singleLineCommand(peelShellCommand(step.title));
-    const git = peeled.match(/^git\s+(.+)$/i);
-    if (git) return { verb: 'git', object: redactDisplayPaths(git[1] ?? peeled) };
-    return { verb: 'ran', object: redactDisplayPaths(peeled) };
+    const peeled = peelShellCommand(step.title);
+    const summary = specificSummary(step);
+    if (summary && isUnreadableInlineScript(peeled)) {
+      return {
+        verb: 'ran',
+        object: summary,
+        subjectMono: false,
+        replacedCommandBySummary: true,
+      };
+    }
+    const single = singleLineCommand(peeled);
+    const git = single.match(/^git\s+(.+)$/i);
+    if (git) return { verb: 'git', object: redactDisplayPaths(git[1] ?? single), subjectMono: true };
+    return { verb: 'ran', object: redactDisplayPaths(single), subjectMono: true };
   }
 
-  if (kind && KIND_VERBS[kind] && file) {
-    return { verb: KIND_VERBS[kind], object: displayFilePath(file) };
+  if (kind && KIND_VERBS[kind] && fileTarget) {
+    return { verb: KIND_VERBS[kind], object: fileTarget, subjectMono: true };
   }
-  if (file) {
-    return { verb: KIND_VERBS[kind ?? ''] ?? 'read', object: displayFilePath(file) };
+  if (fileTarget) {
+    const hasDiff = Boolean(step.files?.some((f) => f.diff || f.status === 'M' || f.status === 'A' || f.status === 'D'));
+    return {
+      verb: KIND_VERBS[kind ?? ''] ?? (hasDiff ? 'edited' : 'read'),
+      object: fileTarget,
+      subjectMono: true,
+    };
   }
 
   const rollup = oneLine(step.title).match(/^(\w+ing)\s+(\d+)$/i);
@@ -367,9 +454,14 @@ function verbAndObject(
     return {
       verb: PARTICIPLE_VERBS[participle] ?? KIND_VERBS[kind ?? ''] ?? 'ran',
       object: `${rollup[2]} calls`,
+      subjectMono: false,
     };
   }
-  return { verb: KIND_VERBS[kind ?? ''] ?? 'ran', object: titleObject(step) };
+  const summary = specificSummary(step);
+  if (summary && GENERIC_SHELL_TITLES.test(oneLine(step.title))) {
+    return { verb: KIND_VERBS[kind ?? ''] ?? 'ran', object: summary, subjectMono: false };
+  }
+  return { verb: KIND_VERBS[kind ?? ''] ?? 'ran', object: titleObject(step), subjectMono: false };
 }
 
 /** The harness title, stripped of the verb the column already carries. */
@@ -382,43 +474,99 @@ function titleObject(step: TurnActivityAction): string {
   return title.replace(TITLE_VERB, '') || title;
 }
 
-/** The action word shown beside a tool's machine text. */
-export function toolCallVerb(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
-  return verbAndObject(step, toolCallOutput(step.output), lookup).verb;
+/** Exact right-column stat — never inferred from bounded/truncated excerpts. */
+export function toolCallStat(
+  step: TurnActivityAction,
+  output: readonly string[],
+  searchHits?: string,
+): ToolRowStat | undefined {
+  if (step.signal) {
+    return { kind: 'signal', text: step.signal };
+  }
+  const files = step.files ?? [];
+  if (
+    files.length > 0 &&
+    !step.outputTruncated &&
+    files.every((f) => !f.diffTruncated) &&
+    files.some((f) => typeof f.addedLines === 'number' || typeof f.removedLines === 'number')
+  ) {
+    const added = files.reduce((sum, f) => sum + (f.addedLines ?? 0), 0);
+    const removed = files.reduce((sum, f) => sum + (f.removedLines ?? 0), 0);
+    if (added > 0 || removed > 0) {
+      return { kind: 'diff', added, removed };
+    }
+  }
+  if (searchHits) {
+    return { kind: 'text', text: searchHits };
+  }
+  const duration = formatToolCallDuration(step.durationMs);
+  if (duration) {
+    return { kind: 'text', text: duration };
+  }
+  if (step.toolKind === 'search' || step.toolKind === 'grep') {
+    const hits = hitCount(output, step.outputTruncated);
+    if (hits) return { kind: 'text', text: hits };
+  }
+  return undefined;
 }
 
-/**
- * The ledger line's label (owner-approved tool-ledger design, 2026-08-24): the
- * call's object — the command, the file, the search pattern with its hit
- * count — cut to the label cap. The row displays the generic action separately,
- * so its label omits that word. Tool-specific names remain part of the label.
- */
-export function toolCallLabel(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
+export function toolCallRowModel(
+  step: TurnActivityAction,
+  lookup?: ToolIdentityLookup,
+): {
+  verb: string;
+  label: string;
+  sheetTitle: string;
+  subjectMono: boolean;
+  replacedCommandBySummary: boolean;
+  stat?: ToolRowStat;
+} {
   const output = toolCallOutput(step.output);
-  const { verb, object, namedTool, hasReceipt, expandedLabel } = verbAndObject(step, output, lookup);
+  const { verb, object, namedTool, subjectMono, replacedCommandBySummary, searchHits } =
+    verbAndObject(step, output, lookup);
   const generic = !namedTool && GENERIC_LEDGER_VERBS.has(verb);
-  const label = generic ? object : `${verb} ${object}`;
-  const limit = hasReceipt || expandedLabel ? TOOL_CALL_RECEIPT_LABEL_MAX : TOOL_CALL_LABEL_MAX;
-  return middleTruncate(oneLine(label) || 'tool call', limit);
+  const rawLabel = generic ? object : `${verb} ${object}`;
+  const label = tailClamp(oneLine(rawLabel) || 'tool call', TOOL_CALL_LABEL_SAFETY_MAX);
+  const stat = toolCallStat(step, output, searchHits);
+  const sheetTitle = buildSheetTitle(step, verb, object, namedTool);
+  return {
+    verb,
+    label,
+    sheetTitle,
+    subjectMono: Boolean(subjectMono),
+    replacedCommandBySummary: Boolean(replacedCommandBySummary),
+    ...(stat ? { stat } : {}),
+  };
 }
 
-/** Plain-English un-truncated heading for ToolOutputSheet. */
-export function toolCallSheetTitle(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
-  const output = toolCallOutput(step.output);
-  const { verb, object, namedTool } = verbAndObject(step, output, lookup);
-  const inputObj = parsed(step.input);
-  const description = field(inputObj, ['description']);
-  if (description && step.command) return description;
+function buildSheetTitle(
+  step: TurnActivityAction,
+  verb: string,
+  object: string,
+  namedTool?: boolean,
+): string {
+  const summary = specificSummary(step);
+  if (summary && step.command) return summary;
   if (step.files?.some((f) => f.diff)) {
-    const file = displayFilePath(step.files[0]!.path);
+    const file = displayFileLocation(step.files[0]!);
     return `Edited ${file}`;
   }
   if (!namedTool && GENERIC_LEDGER_VERBS.has(verb)) {
     if (verb === 'ran' || verb === 'git') {
-      return middleTruncate(oneLine(object) || 'Command', 96);
+      return oneLine(object) || 'Command';
     }
     const lead = verb.charAt(0).toUpperCase() + verb.slice(1);
     return `${lead} ${oneLine(object)}`.trim();
   }
   return oneLine(`${verb} ${object}`) || 'Output';
+}
+
+/** The action word shown beside a tool's machine text. */
+export function toolCallVerb(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
+  return verbAndObject(step, toolCallOutput(step.output), lookup).verb;
+}
+
+/** The 2-line-wrappable ledger subject (no 40-char middle-truncation soup). */
+export function toolCallLabel(step: TurnActivityAction, lookup?: ToolIdentityLookup): string {
+  return toolCallRowModel(step, lookup).label;
 }

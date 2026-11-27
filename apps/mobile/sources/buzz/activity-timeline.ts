@@ -26,11 +26,17 @@ export type TurnActivityFile = {
   path: string;
   status?: string;
   diff?: string;
+  diffTruncated?: boolean;
+  addedLines?: number;
+  removedLines?: number;
+  line?: number;
+  endLine?: number;
 };
 
 export type TurnActivityAction = {
   toolGroup?: import('@beeline/api-contract/phone').RoomViewActivity['toolGroup'];
   toolOutput?: import('@beeline/api-contract/phone').RoomViewActivity['toolOutput'];
+  hasDetail?: boolean;
   id: string;
   /** `note` is an earlier text run of the turn, shown in full between tools. */
   kind: 'tool' | 'thought' | 'note';
@@ -38,7 +44,7 @@ export type TurnActivityAction = {
   startupWarning?: true;
   weight: ActionWeight;
   title: string;
-  /** The transcript's compact verb-object copy. Always <= 40 characters. */
+  /** The transcript's compact verb-object copy. */
   label: string;
   /** Settled state projected from the existing activity status. */
   outcome: 'running' | 'success' | 'failure';
@@ -46,6 +52,15 @@ export type TurnActivityAction = {
   durationMs?: number;
   toolKind?: string;
   status?: string;
+  summary?: string;
+  exitCode?: number;
+  signal?: string;
+  outputTruncated?: boolean;
+  omittedCount?: number;
+  terminalOnly?: boolean;
+  outputHidden?: boolean;
+  sanitized?: boolean;
+  origin?: AgentActivityItem['origin'];
   /**
    * One plain-language line projected from the tool result saying WHY this
    * failed — `exit 1: vitest: not found`, never a bare generic status.
@@ -56,6 +71,7 @@ export type TurnActivityAction = {
   command?: string;
   input?: string;
   output?: string;
+  blocks?: AgentActivityItem['blocks'];
   /** Who asked for the turn this call belongs to; quiet text in the expanded row. */
   requestedBy?: { pubkey: string; name?: string };
   files?: TurnActivityFile[];
@@ -166,8 +182,10 @@ function outputIndicatesError(raw: string | undefined): boolean {
 }
 
 function isFailure(item: AgentActivityItem): boolean {
+  if (item.signal) return true;
+  if (typeof item.exitCode === 'number' && item.exitCode !== 0) return true;
   const status = item.status ?? '';
-  if (/\b(?:failed|error|unavailable|denied|rejected|timed[_ -]?out|cancell?ed)\b/i.test(status)) {
+  if (/\b(?:failed|error|unavailable|denied|rejected|timed[_ -]?out|cancell?ed|signall?ed)\b/i.test(status)) {
     return true;
   }
   if (outputIndicatesError(item.output)) return true;
@@ -200,8 +218,14 @@ export function isHarnessStartupWarning(item: AgentActivityItem): boolean {
  */
 export function failureReason(item: AgentActivityItem): string | undefined {
   const raw = item.output ?? item.text;
-  const statusCode = Number(item.status?.match(/(?:exit|code)\s*(\d+)/i)?.[1]);
-  if (!raw) return Number.isFinite(statusCode) ? `exit ${statusCode}` : undefined;
+  const statusCode =
+    typeof item.exitCode === 'number' && item.exitCode !== 0
+      ? item.exitCode
+      : Number(item.status?.match(/(?:exit|code)\s*(\d+)/i)?.[1]);
+  if (!raw) {
+    if (item.signal) return `killed by ${item.signal}`;
+    return Number.isFinite(statusCode) ? `exit ${statusCode}` : undefined;
+  }
   // Body usually JSON-stringifies the tool result envelope.
   let text = cleanToolOutputText(raw);
   let exitCode: number | undefined;
@@ -256,7 +280,7 @@ export function failureReason(item: AgentActivityItem): string | undefined {
   const refused = text.match(/fatal:\s*(.+)/i);
   if (refused) return clamp(oneLine(refused[1]), 90);
   const errorLine = lines.find((line) =>
-    /(?:^|\b)(?:error(?:\s+TS\d+)?|ERR!|Traceback|FATAL|exception|cannot|failed:)\b/i.test(line),
+    /(?:^|\b)(?:error(?:\s+TS\d+)?|ERR!|Traceback|FATAL|exception|cannot|failed:|killed|terminated|signall?ed|out of memory|OOM)\b/i.test(line),
   );
   const detail = errorLine ?? lines.find((line) => !/^>\s/.test(line));
   const code = exitCode ?? (Number.isFinite(statusCode) ? statusCode : undefined);
@@ -361,16 +385,28 @@ function mergeToolActivity(
   next: AgentActivityItem,
 ): AgentActivityItem {
   if (!current) return { ...next, files: next.files ? [...next.files] : undefined };
-  const files = new Map((current.files ?? []).map((file) => [file.path, file]));
+  const fileKey = (file: NonNullable<AgentActivityItem['files']>[number]) =>
+    `${file.path}\0${file.line ?? ''}\0${file.endLine ?? ''}`;
+  const files = new Map((current.files ?? []).map((file) => [fileKey(file), file]));
   for (const file of next.files ?? []) {
-    files.set(file.path, { ...files.get(file.path), ...file });
+    const key = fileKey(file);
+    files.set(key, { ...files.get(key), ...file });
   }
   return {
     ...current,
     ...next,
     ...(files.size ? { files: [...files.values()] } : {}),
     ...(next.output || current.output ? { output: next.output ?? current.output } : {}),
+    ...(next.blocks?.length || current.blocks?.length
+      ? { blocks: next.blocks?.length ? next.blocks : current.blocks }
+      : {}),
     ...(next.text || current.text ? { text: next.text ?? current.text } : {}),
+    ...(next.summary || current.summary ? { summary: next.summary ?? current.summary } : {}),
+    ...(next.origin || current.origin ? { origin: next.origin ?? current.origin } : {}),
+    ...(next.exitCode !== undefined || current.exitCode !== undefined
+      ? { exitCode: next.exitCode ?? current.exitCode }
+      : {}),
+    ...(next.signal || current.signal ? { signal: next.signal ?? current.signal } : {}),
   };
 }
 
@@ -680,6 +716,7 @@ export function buildTurnActivity(
       kind: 'tool',
       ...(tool.toolGroup ? { toolGroup: tool.toolGroup } : {}),
       ...(tool.toolOutput ? { toolOutput: tool.toolOutput } : {}),
+      ...(tool.hasDetail !== undefined ? { hasDetail: tool.hasDetail } : {}),
       weight,
       title,
       label: ledgerStepLabel(tool, options?.lookup),
@@ -687,9 +724,19 @@ export function buildTurnActivity(
       ...(reason ? { reason } : {}),
       ...(tool.toolKind ? { toolKind: tool.toolKind } : {}),
       ...(tool.status ? { status: tool.status } : {}),
+      ...(tool.summary ? { summary: tool.summary } : {}),
+      ...(tool.exitCode !== undefined ? { exitCode: tool.exitCode } : {}),
+      ...(tool.signal ? { signal: tool.signal } : {}),
+      ...(tool.outputTruncated ? { outputTruncated: true } : {}),
+      ...(tool.omittedCount ? { omittedCount: tool.omittedCount } : {}),
+      ...(tool.terminalOnly ? { terminalOnly: true } : {}),
+      ...(tool.outputHidden ? { outputHidden: true } : {}),
+      ...(tool.sanitized ? { sanitized: true } : {}),
+      ...(tool.origin ? { origin: { ...tool.origin } } : {}),
       ...(tool.command ? { command: tool.command } : {}),
       ...(tool.input ? { input: tool.input } : {}),
       ...((tool.output ?? tool.text) ? { output: tool.output ?? tool.text } : {}),
+      ...(tool.blocks?.length ? { blocks: tool.blocks.map((block) => ({ ...block })) } : {}),
       ...(tool.requestedBy ? { requestedBy: { ...tool.requestedBy } } : {}),
       ...(tool.files?.length ? { files: tool.files.map((file) => ({ ...file })) } : {}),
       ...(tool.plan

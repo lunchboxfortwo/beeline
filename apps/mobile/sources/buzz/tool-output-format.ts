@@ -1,3 +1,4 @@
+import type { ActivityResultBlock } from '@beeline/api-contract/phone';
 import {
   formatMessageTarget,
   humanizeAppName,
@@ -5,262 +6,27 @@ import {
   sanitizeIdsInText,
   type ToolIdentityLookup,
 } from './tool-identity-lookup';
+import { stripRecognizedDisplayPrefix } from './tool-display-paths';
+import {
+  cleanToolOutputText,
+  formatBytesCompact,
+  formatScalarValue,
+  humanizeFieldKey,
+  parseStrictSearchMatches,
+  parseTolerantJson,
+  type ParsedJsonResult,
+  type SheetMatchGroup,
+} from './tool-output-parsers';
 
-const OSC_ESCAPE = /\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
-const CSI_ESCAPE = /\u001b\[[0-?]*[ -/]*[@-~]/g;
-const OUTER_FENCE_COMPLETE = /^\s*```[a-z0-9_+-]*[ \t]*\r?\n([\s\S]*?)\r?\n?```\s*$/i;
-const OUTER_FENCE_OPEN_ONLY = /^\s*```(?:console|json|txt|text|sh|bash|zsh|diff|patch|log)?[ \t]*\r?\n([\s\S]+)$/i;
-
-/**
- * Strip OSC terminal hyperlinks, CSI ANSI escapes, `\r` progress overwrites,
- * and outer markdown code fences (` ```console `, ` ```json `) before JSON or
- * text rendering.
- */
-export function cleanToolOutputText(raw: string): string {
-  const withoutEscapes = raw.replace(OSC_ESCAPE, '').replace(CSI_ESCAPE, '');
-  const collapsedCr = withoutEscapes
-    .split('\n')
-    .map((line) => {
-      if (!line.includes('\r')) return line;
-      const cleaned = line.replace(/\r$/, '');
-      if (!cleaned.includes('\r')) return cleaned;
-      const segments = cleaned.split('\r');
-      for (let i = segments.length - 1; i >= 0; i -= 1) {
-        if (segments[i]!.length > 0) return segments[i]!;
-      }
-      return '';
-    })
-    .join('\n');
-  const completeFence = collapsedCr.match(OUTER_FENCE_COMPLETE);
-  if (completeFence?.[1] !== undefined) return completeFence[1];
-  const openFence = collapsedCr.match(OUTER_FENCE_OPEN_ONLY);
-  if (openFence?.[1] !== undefined) return openFence[1];
-  return collapsedCr;
-}
-
-export type ParsedJsonResult = {
-  value: unknown;
-  truncated: boolean;
-  bounded: boolean;
-  omittedCount?: number;
+export {
+  cleanToolOutputText,
+  formatBytesCompact,
+  humanizeFieldKey,
+  parseStrictSearchMatches,
+  parseTolerantJson,
+  type ParsedJsonResult,
+  type SheetMatchGroup,
 };
-
-function scanJsonValueEnd(text: string, start: number): number {
-  let i = start;
-  while (i < text.length && /\s/.test(text[i]!)) i += 1;
-  if (i >= text.length) return -1;
-  const ch = text[i]!;
-  if (ch === '"') {
-    i += 1;
-    while (i < text.length) {
-      if (text[i] === '\\') {
-        i += 2;
-        continue;
-      }
-      if (text[i] === '"') return i + 1;
-      i += 1;
-    }
-    return -1;
-  }
-  if (ch === '{' || ch === '[') {
-    const stack: string[] = [ch];
-    let inString = false;
-    i += 1;
-    while (i < text.length && stack.length > 0) {
-      const c = text[i]!;
-      if (inString) {
-        if (c === '\\') {
-          i += 2;
-          continue;
-        }
-        if (c === '"') inString = false;
-        i += 1;
-        continue;
-      }
-      if (c === '"') inString = true;
-      else if (c === '{' || c === '[') stack.push(c);
-      else if (c === '}' && stack.at(-1) === '{') stack.pop();
-      else if (c === ']' && stack.at(-1) === '[') stack.pop();
-      i += 1;
-    }
-    return stack.length === 0 ? i : -1;
-  }
-  // Primitive (number, true, false, null)
-  const rest = text.slice(i);
-  const prim = rest.match(/^(?:true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?=[\s,}\]]|$)/);
-  return prim ? i + prim[0].length : -1;
-}
-
-function recoverPartialJsonObject(text: string): Record<string, unknown> | undefined {
-  const result: Record<string, unknown> = {};
-  let i = text.indexOf('{');
-  if (i < 0) return undefined;
-  i += 1;
-  let recovered = 0;
-  while (i < text.length) {
-    while (i < text.length && /[\s,]/.test(text[i]!)) i += 1;
-    if (i >= text.length || text[i] === '}') break;
-    if (text[i] !== '"') break;
-    const keyEnd = scanJsonValueEnd(text, i);
-    if (keyEnd < 0) break;
-    let key: string;
-    try {
-      key = JSON.parse(text.slice(i, keyEnd)) as string;
-    } catch {
-      break;
-    }
-    i = keyEnd;
-    while (i < text.length && /\s/.test(text[i]!)) i += 1;
-    if (text[i] !== ':') break;
-    i += 1;
-    const valEnd = scanJsonValueEnd(text, i);
-    if (valEnd < 0) break;
-    try {
-      result[key] = JSON.parse(text.slice(i, valEnd)) as unknown;
-      recovered += 1;
-    } catch {
-      break;
-    }
-    i = valEnd;
-  }
-  return recovered > 0 ? result : undefined;
-}
-
-function recoverPartialJsonArray(text: string): unknown[] | undefined {
-  const result: unknown[] = [];
-  let i = text.indexOf('[');
-  if (i < 0) return undefined;
-  i += 1;
-  while (i < text.length) {
-    while (i < text.length && /[\s,]/.test(text[i]!)) i += 1;
-    if (i >= text.length || text[i] === ']') break;
-    const valEnd = scanJsonValueEnd(text, i);
-    if (valEnd < 0) break;
-    try {
-      result.push(JSON.parse(text.slice(i, valEnd)) as unknown);
-    } catch {
-      break;
-    }
-    i = valEnd;
-  }
-  return result.length > 0 ? result : undefined;
-}
-
-function extractOmittedCount(value: unknown): number | undefined {
-  if (Array.isArray(value)) {
-    const last = value.at(-1);
-    if (
-      last &&
-      typeof last === 'object' &&
-      !Array.isArray(last) &&
-      typeof (last as Record<string, unknown>)._omittedCount === 'number'
-    ) {
-      return (last as Record<string, unknown>)._omittedCount as number;
-    }
-    return undefined;
-  }
-  if (value && typeof value === 'object') {
-    const count = (value as Record<string, unknown>)._omittedCount;
-    if (typeof count === 'number' && count > 0) return count;
-  }
-  return undefined;
-}
-
-/**
- * Parse JSON cleanly, or recover complete top-level keys/items from a truncated
- * `>4 KiB` / `head -c` JSON snippet.
- */
-export function parseTolerantJson(raw: string): ParsedJsonResult | undefined {
-  const cleaned = cleanToolOutputText(raw).trim();
-  if (!cleaned.startsWith('{') && !cleaned.startsWith('[')) return undefined;
-  try {
-    const value = JSON.parse(cleaned) as unknown;
-    if (value && typeof value === 'object') {
-      const omittedCount = extractOmittedCount(value);
-      return {
-        value,
-        truncated: false,
-        bounded: Boolean(omittedCount),
-        ...(omittedCount ? { omittedCount } : {}),
-      };
-    }
-    return undefined;
-  } catch {
-    const beforeCut = cleaned.split('\n[… omitted …]\n')[0] ?? cleaned;
-    const recovered = beforeCut.startsWith('{')
-      ? recoverPartialJsonObject(beforeCut)
-      : recoverPartialJsonArray(beforeCut);
-    if (!recovered) return undefined;
-    return { value: recovered, truncated: true, bounded: false };
-  }
-}
-
-export function humanizeFieldKey(key: string): string {
-  const spaced = key
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([a-zA-Z])(\d)/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .trim();
-  if (!spaced) return key;
-  const words = spaced.split(/\s+/).map((word, index) => {
-    const upper = word.toUpperCase();
-    if (['ID', 'URL', 'URLS', 'PR', 'CI', 'API', 'MCP', 'UTC', 'JSON', 'SHA'].includes(upper)) {
-      return upper === 'URLS' ? 'URLs' : upper;
-    }
-    return index === 0 ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : word.toLowerCase();
-  });
-  return words.join(' ');
-}
-
-function formatScalarValue(value: unknown, lookup?: ToolIdentityLookup): {
-  text: string;
-  mono?: boolean;
-  muted?: boolean;
-} {
-  if (value === null || value === undefined || value === '') {
-    return { text: 'None', muted: true };
-  }
-  if (typeof value === 'boolean') return { text: value ? 'Yes' : 'No' };
-  if (typeof value === 'number') return { text: String(value), mono: true };
-  if (typeof value === 'string') {
-    const clean = sanitizeIdsInText(value.trim(), lookup);
-    if (!clean) return { text: 'None', muted: true };
-    const isIsoDate = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?/.test(clean);
-    const isPathOrUrl = /^(?:https?:\/\/|\/|\.{1,2}\/)/.test(clean);
-    return { text: clean, mono: isIsoDate || isPathOrUrl };
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) return { text: 'None', muted: true };
-    if (value.every((item) => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean')) {
-      return { text: value.map((item) => sanitizeIdsInText(String(item), lookup)).join(', ') };
-    }
-    return { text: `${value.length} ${value.length === 1 ? 'item' : 'items'}` };
-  }
-  if (typeof value === 'object') {
-    const rec = value as Record<string, unknown>;
-    const entries = Object.entries(rec).filter(([, v]) => v !== undefined && v !== null && v !== '');
-    if (entries.length === 0) return { text: 'None', muted: true };
-    if (typeof rec.start === 'string' && typeof rec.end === 'string' && entries.length <= 3) {
-      return { text: `${rec.start} – ${rec.end}`, mono: true };
-    }
-    if (typeof rec.name === 'string') {
-      const handle = typeof rec.handle === 'string' ? ` (@${rec.handle.replace(/^@/, '')})` : '';
-      return { text: `${rec.name}${handle}` };
-    }
-    if (typeof rec.handle === 'string') {
-      return { text: `@${rec.handle.replace(/^@/, '')}` };
-    }
-    const parts: string[] = [];
-    for (const [k, v] of entries.slice(0, 4)) {
-      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
-        parts.push(`${v} ${k.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()}`);
-      }
-    }
-    if (parts.length) return { text: parts.join(' · ') };
-    return { text: `${entries.length} fields` };
-  }
-  return { text: String(value) };
-}
 
 export type SheetKvRow = {
   key: string;
@@ -284,12 +50,18 @@ export type SheetDiffLine = {
 export type SheetDiffFile = {
   path: string;
   status?: string;
+  truncated?: boolean;
   lines: SheetDiffLine[];
 };
 
 export type SheetChecklistItem = {
   step: string;
   status: 'pending' | 'in_progress' | 'completed';
+};
+
+export type SheetBadge = {
+  label: string;
+  tone?: 'danger' | 'accent' | 'muted';
 };
 
 export type ToolSheetBody =
@@ -303,11 +75,45 @@ export type ToolSheetBody =
   | {
       kind: 'diff';
       files: SheetDiffFile[];
+      truncated?: boolean;
     }
   | {
       kind: 'checklist';
       objective?: string;
       items: SheetChecklistItem[];
+    }
+  | {
+      kind: 'matches';
+      groups: SheetMatchGroup[];
+      truncated?: boolean;
+    }
+  | {
+      kind: 'media';
+      mediaKind: 'image' | 'audio';
+      mimeType?: string;
+      label?: string;
+      sizeBytes?: number;
+      available: boolean;
+    }
+  | {
+      kind: 'resource';
+      mode: 'link' | 'text' | 'blob';
+      uri?: string;
+      name?: string;
+      mimeType?: string;
+      text?: string;
+      sizeBytes?: number;
+      truncated?: boolean;
+    }
+  | {
+      kind: 'unknown';
+      rawType?: string;
+      text?: string;
+    }
+  | {
+      kind: 'caption';
+      text: string;
+      truncated?: boolean;
     }
   | {
       kind: 'empty';
@@ -321,6 +127,7 @@ export type ToolSheetBody =
       itemNoun: string;
       cards: SheetItemCard[];
       omittedCount?: number;
+      truncated?: boolean;
     }
   | {
       kind: 'kv-card';
@@ -331,14 +138,26 @@ export type ToolSheetBody =
       kind: 'mono';
       receipt?: string;
       text: string;
+      truncated?: boolean;
     };
 
 export type ToolSheetPresentation = {
   title: string;
   subtitle?: string;
+  statusLine?: string;
+  statusTone?: 'danger' | 'muted';
   badge?: 'Bounded' | 'Truncated';
+  badges: SheetBadge[];
+  /** Primary Zone 1 block (alias of `blocks[0]`) for single-block consumers/tests. */
   body: ToolSheetBody;
+  /** Ordered Zone 1 universal ACP result blocks. */
+  blocks: ToolSheetBody[];
+  /** Auto-expand Zone 2 invocation block (e.g. silent observed exit-0 commands). */
+  autoExpandZone2?: boolean;
+  /** True when Zone 1 already shows raw mono text verbatim, so Zone 2 must not duplicate it. */
+  zone1ShowsMonoVerbatim?: boolean;
   rawLabel: string;
+  copyLabel: string;
   rawText?: string;
   canCopy: boolean;
 };
@@ -348,7 +167,7 @@ function parseDiffLines(diff: string): SheetDiffLine[] {
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line): SheetDiffLine => {
-      if (line.startsWith('@@')) return { kind: 'hunk', text: line };
+      if (line.startsWith('@@') || line.trim() === '[… omitted …]') return { kind: 'hunk', text: line };
       if (line.startsWith('+') && !line.startsWith('+++')) return { kind: 'add', text: line };
       if (line.startsWith('-') && !line.startsWith('---')) return { kind: 'del', text: line };
       return { kind: 'context', text: line };
@@ -439,6 +258,118 @@ function queryChips(inputObj: Record<string, unknown> | undefined): string[] | u
   return parts.length ? parts : undefined;
 }
 
+function jsonToSheetBlock(
+  json: ParsedJsonResult,
+  opts: {
+    shownReceipt?: string;
+    inputObj?: Record<string, unknown>;
+    lookup?: ToolIdentityLookup;
+    explicitTruncated?: boolean;
+    explicitOmitted?: number;
+  },
+): ToolSheetBody {
+  const omittedCount = opts.explicitOmitted ?? json.omittedCount;
+  const truncated = Boolean(opts.explicitTruncated || json.truncated || json.bounded || omittedCount);
+
+  if (Array.isArray(json.value)) {
+    const items = json.value.filter(
+      (entry) =>
+        !(
+          entry &&
+          typeof entry === 'object' &&
+          !Array.isArray(entry) &&
+          Object.keys(entry as Record<string, unknown>).length === 1 &&
+          '_omittedCount' in (entry as Record<string, unknown>)
+        ),
+    );
+    if (items.length === 0) {
+      return { kind: 'empty', heading: 'No items returned', chips: queryChips(opts.inputObj) };
+    }
+    return {
+      kind: 'array-cards',
+      receipt: opts.shownReceipt,
+      itemNoun: 'items',
+      cards: items.map((item) => summarizeCardItem(item, opts.lookup)),
+      ...(omittedCount ? { omittedCount } : {}),
+      ...(truncated ? { truncated: true } : {}),
+    };
+  }
+
+  if (json.value && typeof json.value === 'object') {
+    const obj = json.value as Record<string, unknown>;
+    const visibleEntries = Object.entries(obj).filter(
+      ([k]) => k !== '_omittedCount' && k !== 'receipt',
+    );
+    if (visibleEntries.length === 0) {
+      return {
+        kind: 'empty',
+        heading: opts.shownReceipt ?? 'No data returned',
+        chips: queryChips(opts.inputObj),
+      };
+    }
+    if (
+      visibleEntries.length === 1 &&
+      Array.isArray(visibleEntries[0]![1]) &&
+      (visibleEntries[0]![1] as unknown[]).length === 0
+    ) {
+      const key = visibleEntries[0]![0];
+      const noun = humanizeFieldKey(key).toLowerCase();
+      const chips = queryChips(opts.inputObj);
+      return {
+        kind: 'empty',
+        heading: key === 'tools' ? 'No matching tools returned' : `No ${noun} returned`,
+        ...(chips ? { detail: 'Looked up:', chips } : {}),
+      };
+    }
+    const arrayEntries = visibleEntries.filter(
+      ([, v]) => Array.isArray(v) && v.length > 0 && v.some((item) => item && typeof item === 'object'),
+    );
+    if (arrayEntries.length === 1 && visibleEntries.length <= 4) {
+      const [arrKey, arrVal] = arrayEntries[0]!;
+      const list = arrVal as unknown[];
+      return {
+        kind: 'array-cards',
+        receipt: opts.shownReceipt,
+        itemNoun: humanizeFieldKey(arrKey).toLowerCase(),
+        cards: list.map((item) => summarizeCardItem(item, opts.lookup)),
+        ...(omittedCount ? { omittedCount } : {}),
+        ...(truncated ? { truncated: true } : {}),
+      };
+    }
+    const rows: SheetKvRow[] = visibleEntries.map(([key, value]) => {
+      const formatted = formatScalarValue(value, opts.lookup);
+      return {
+        key: humanizeFieldKey(key),
+        value: formatted.text,
+        ...(formatted.mono ? { mono: true } : {}),
+        ...(formatted.muted ? { muted: true } : {}),
+        ...(formatted.text.length > 42 ? { stacked: true } : {}),
+      };
+    });
+    return {
+      kind: 'kv-card',
+      receipt: opts.shownReceipt,
+      rows,
+    };
+  }
+
+  return { kind: 'mono', text: String(json.value) };
+}
+
+function buildCopyLabel(opts: {
+  boundedOrTruncated: boolean;
+  sanitized?: boolean;
+  silentCommandOnly?: boolean;
+  isJson?: boolean;
+}): string {
+  if (opts.silentCommandOnly) return 'Copy command';
+  if (opts.sanitized && opts.boundedOrTruncated) return 'Copy sanitized excerpt';
+  if (opts.sanitized) return 'Copy sanitized';
+  if (opts.boundedOrTruncated) return 'Copy excerpt';
+  if (opts.isJson) return 'Copy JSON';
+  return 'Copy raw';
+}
+
 export function buildToolSheetPresentation(params: {
   title: string;
   subtitle?: string;
@@ -447,9 +378,22 @@ export function buildToolSheetPresentation(params: {
   receipt?: string | null;
   detail?: string | null;
   rawOutput?: string | null;
-  files?: readonly { path: string; status?: string; diff?: string }[];
+  blocks?: readonly ActivityResultBlock[];
+  files?: readonly {
+    path: string;
+    status?: string;
+    diff?: string;
+    diffTruncated?: boolean;
+    line?: number;
+    endLine?: number;
+  }[];
   plan?: { objective?: string; items: readonly { step: string; status: 'pending' | 'in_progress' | 'completed' }[] };
   outcome?: 'running' | 'success' | 'failure';
+  exitCode?: number;
+  signal?: string;
+  outputTruncated?: boolean;
+  omittedCount?: number;
+  sanitized?: boolean;
   terminalOnly?: boolean;
   outputHidden?: boolean;
   requester?: string;
@@ -463,7 +407,6 @@ export function buildToolSheetPresentation(params: {
       ? sanitizeIdsInText(params.receipt.trim(), params.lookup)
       : undefined;
 
-  // Build title + subtitle
   let title = params.title;
   let subtitle = params.subtitle;
   const appName = humanizeAppName(typeof inputObj?.app === 'string' ? inputObj.app : undefined);
@@ -478,22 +421,52 @@ export function buildToolSheetPresentation(params: {
     }
   }
   const description = typeof inputObj?.description === 'string' ? inputObj.description.trim() : undefined;
-  if (description && !subtitle) {
+  if (description && !subtitle && description !== title) {
     subtitle = description;
   }
 
-  // 1. Secret hidden
+  const badges: SheetBadge[] = [];
+  let statusLine: string | undefined;
+  let statusTone: 'danger' | 'muted' = 'muted';
+
+  if (params.signal) {
+    statusTone = 'danger';
+    badges.push({ label: `Signalled · ${params.signal}`, tone: 'danger' });
+  } else if (typeof params.exitCode === 'number' && params.exitCode !== 0) {
+    statusTone = 'danger';
+    badges.push({ label: `Exit (${params.exitCode})`, tone: 'danger' });
+  } else if (params.outcome === 'failure') {
+    statusLine = 'Failed';
+    statusTone = 'danger';
+  } else if (params.outcome === 'running') {
+    statusLine = 'Running';
+  } else if (params.exitCode === 0 && !cleanedSource.trim() && !params.blocks?.length) {
+    statusLine = 'Exited (0) · no output';
+  } else if (params.terminalOnly) {
+    statusLine = 'Completed · terminal handle only';
+  } else {
+    statusLine = 'Completed';
+  }
+
   if (params.outputHidden) {
+    const secretBlock: ToolSheetBody = {
+      kind: 'secret',
+      notice: params.detail || 'Output hidden: contains a secret.',
+    };
     return {
       title,
       subtitle,
-      body: { kind: 'secret', notice: params.detail || 'Output hidden: contains a secret.' },
+      statusLine,
+      statusTone,
+      badges,
+      body: secretBlock,
+      blocks: [secretBlock],
       rawLabel: 'Raw output',
+      copyLabel: 'Copy raw',
       canCopy: false,
     };
   }
 
-  // Raw payload assembly for collapsible footer & Copy raw
   const rawSections: string[] = [];
   if (params.command?.trim()) rawSections.push(params.command.trim());
   if (params.input?.trim()) {
@@ -506,7 +479,58 @@ export function buildToolSheetPresentation(params: {
   if (cleanedSource.trim()) rawSections.push(cleanedSource.trim());
   const rawText = rawSections.join('\n\n') || undefined;
 
-  // 2. Sent message card (`beeline-agent.message` / `reply` with `text`)
+  const finalize = (opts: {
+    blocks: ToolSheetBody[];
+    badge?: 'Bounded' | 'Truncated';
+    rawLabel: string;
+    rawTextOverride?: string;
+    autoExpandZone2?: boolean;
+    zone1ShowsMonoVerbatim?: boolean;
+    silentCommandOnly?: boolean;
+    isJson?: boolean;
+    isDiffBounded?: boolean;
+    titleOverride?: string;
+    subtitleOverride?: string;
+  }): ToolSheetPresentation => {
+    const finalBadges = [...badges];
+    const isBoundedOrTruncated = Boolean(
+      opts.badge || params.outputTruncated || opts.isDiffBounded || params.omittedCount,
+    );
+    const derivedBadge: 'Bounded' | 'Truncated' | undefined =
+      opts.badge ?? (params.outputTruncated || opts.isDiffBounded ? 'Bounded' : undefined);
+    if (opts.isDiffBounded) {
+      finalBadges.push({ label: 'Bounded diff', tone: 'accent' });
+    } else if (derivedBadge) {
+      finalBadges.push({ label: derivedBadge, tone: 'accent' });
+    }
+    if (params.sanitized) {
+      finalBadges.push({ label: 'Sanitized', tone: 'muted' });
+    }
+    const finalRaw = opts.rawTextOverride ?? rawText;
+    return {
+      title: opts.titleOverride ?? title,
+      subtitle: opts.subtitleOverride ?? subtitle,
+      statusLine,
+      statusTone,
+      ...(derivedBadge ? { badge: derivedBadge } : {}),
+      badges: finalBadges,
+      body: opts.blocks[0]!,
+      blocks: opts.blocks,
+      ...(opts.autoExpandZone2 ? { autoExpandZone2: true } : {}),
+      ...(opts.zone1ShowsMonoVerbatim ? { zone1ShowsMonoVerbatim: true } : {}),
+      rawLabel: opts.rawLabel,
+      copyLabel: buildCopyLabel({
+        boundedOrTruncated: isBoundedOrTruncated,
+        sanitized: params.sanitized,
+        silentCommandOnly: opts.silentCommandOnly,
+        isJson: opts.isJson,
+      }),
+      rawText: finalRaw,
+      canCopy: Boolean(finalRaw),
+    };
+  };
+
+  // Sent message card
   if (
     typeof inputObj?.text === 'string' &&
     inputObj.text.trim() &&
@@ -539,9 +563,7 @@ export function buildToolSheetPresentation(params: {
           : formatted.place
             ? 'Thread task'
             : 'Message';
-    const messageTitle = formatted.agent
-      ? `Sent message to ${formatted.agent}`
-      : 'Sent message';
+    const messageTitle = formatted.agent ? `Sent message to ${formatted.agent}` : 'Sent message';
     const statusTail =
       shownReceipt ||
       (params.outcome === 'failure'
@@ -550,245 +572,271 @@ export function buildToolSheetPresentation(params: {
           ? `Queued & woke ${formatted.agent}`
           : 'Sent');
     const messageSub = [formatted.place, statusTail].filter(Boolean).join(' · ');
-    return {
-      title: messageTitle,
-      subtitle: subtitle ?? messageSub,
-      body: {
-        kind: 'sent-message',
-        fromTo,
-        tag,
-        text: inputObj.text.trim(),
-      },
+    return finalize({
+      titleOverride: messageTitle,
+      subtitleOverride: subtitle ?? messageSub,
+      blocks: [{ kind: 'sent-message', fromTo, tag, text: inputObj.text.trim() }],
       rawLabel: 'Raw JSON',
-      rawText,
-      canCopy: Boolean(rawText),
-    };
+      isJson: true,
+    });
   }
 
-  // 3. File diffs
+  // Universal ordered ACP blocks[]
+  if (params.blocks && params.blocks.length > 0) {
+    const rendered: ToolSheetBody[] = [];
+    let anyJson = false;
+    let anyTruncated = Boolean(params.outputTruncated);
+    let anyBounded = Boolean(params.omittedCount);
+    let anyDiffTruncated = false;
+
+    for (const block of params.blocks) {
+      if (block.kind === 'text') {
+        if (block.truncated) anyTruncated = true;
+        const cleaned = cleanToolOutputText(block.text).trim();
+        if (!cleaned) continue;
+        const isMixed = params.blocks.length > 1;
+        if (isMixed && !cleaned.includes('\n') && cleaned.length <= 220) {
+          rendered.push({ kind: 'caption', text: cleaned, ...(block.truncated ? { truncated: true } : {}) });
+        } else {
+          const matches = parseStrictSearchMatches(cleaned);
+          if (matches) {
+            rendered.push({ kind: 'matches', groups: matches, ...(block.truncated ? { truncated: true } : {}) });
+          } else {
+            rendered.push({ kind: 'mono', text: cleaned, ...(block.truncated ? { truncated: true } : {}) });
+          }
+        }
+      } else if (block.kind === 'json') {
+        anyJson = true;
+        if (block.truncated) anyTruncated = true;
+        if (block.omittedCount) anyBounded = true;
+        const parsed = parseTolerantJson(block.text);
+        if (parsed) {
+          if (parsed.bounded) anyBounded = true;
+          if (parsed.truncated) anyTruncated = true;
+          rendered.push(
+            jsonToSheetBlock(parsed, {
+              shownReceipt: rendered.length === 0 ? shownReceipt : undefined,
+              inputObj,
+              lookup: params.lookup,
+              explicitTruncated: block.truncated,
+              explicitOmitted: block.omittedCount,
+            }),
+          );
+        } else {
+          rendered.push({ kind: 'mono', text: block.text, ...(block.truncated ? { truncated: true } : {}) });
+        }
+      } else if (block.kind === 'diff') {
+        if (block.truncated) anyDiffTruncated = true;
+        rendered.push({
+          kind: 'diff',
+          files: [
+            {
+              path: stripRecognizedDisplayPrefix(block.path),
+              ...(block.status ? { status: block.status } : {}),
+              ...(block.truncated ? { truncated: true } : {}),
+              lines: parseDiffLines(block.diff),
+            },
+          ],
+          ...(block.truncated ? { truncated: true } : {}),
+        });
+      } else if (block.kind === 'media') {
+        rendered.push({
+          kind: 'media',
+          mediaKind: block.mediaKind,
+          ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+          ...(block.label ? { label: block.label } : {}),
+          ...(block.sizeBytes !== undefined ? { sizeBytes: block.sizeBytes } : {}),
+          available: block.available === true,
+        });
+      } else if (block.kind === 'resource') {
+        if (block.truncated) anyTruncated = true;
+        rendered.push({
+          kind: 'resource',
+          mode: block.mode,
+          ...(block.uri ? { uri: block.uri } : {}),
+          ...(block.name ? { name: block.name } : {}),
+          ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+          ...(block.text ? { text: block.text } : {}),
+          ...(block.sizeBytes !== undefined ? { sizeBytes: block.sizeBytes } : {}),
+          ...(block.truncated ? { truncated: true } : {}),
+        });
+      } else if (block.kind === 'unknown') {
+        rendered.push({
+          kind: 'unknown',
+          ...(block.rawType ? { rawType: block.rawType } : {}),
+          ...(block.text ? { text: block.text } : {}),
+        });
+      }
+    }
+
+    if (rendered.length > 0) {
+      const onlyMono = rendered.length === 1 && rendered[0]!.kind === 'mono';
+      const badge = anyBounded ? 'Bounded' : anyTruncated ? 'Truncated' : undefined;
+      return finalize({
+        blocks: rendered,
+        badge,
+        isDiffBounded: anyDiffTruncated,
+        isJson: anyJson && !params.command,
+        zone1ShowsMonoVerbatim: onlyMono,
+        rawLabel: anyJson
+          ? params.command?.trim()
+            ? 'Parameters & Raw JSON'
+            : 'Raw JSON'
+          : params.command?.trim()
+            ? 'Invocation'
+            : 'Raw output',
+      });
+    }
+  }
+
+  // File diffs
   const diffFiles: SheetDiffFile[] = (params.files ?? [])
-    .filter((file): file is { path: string; status?: string; diff: string } =>
+    .filter((file): file is { path: string; status?: string; diff: string; diffTruncated?: boolean } =>
       Boolean(file.diff?.trim()),
     )
-    .map((file) => ({
-      path: file.path,
-      ...(file.status ? { status: file.status } : {}),
-      lines: parseDiffLines(file.diff),
-    }));
+    .map((file) => {
+      const truncated = Boolean(file.diffTruncated || file.diff.includes('[… omitted …]'));
+      return {
+        path: stripRecognizedDisplayPrefix(file.path),
+        ...(file.status ? { status: file.status } : {}),
+        ...(truncated ? { truncated: true } : {}),
+        lines: parseDiffLines(file.diff),
+      };
+    });
   if (diffFiles.length > 0) {
     const rawDiff = diffFiles.map((f) => `${f.path}\n${f.lines.map((l) => l.text).join('\n')}`).join('\n\n');
     const firstFile = diffFiles[0]!;
-    return {
-      title,
-      subtitle:
-        subtitle ??
-        [firstFile.path, params.outcome === 'failure' ? 'Failed' : 'Succeeded']
-          .filter(Boolean)
-          .join(' · '),
-      body: { kind: 'diff', files: diffFiles },
+    const anyDiffTruncated = diffFiles.some((f) => f.truncated);
+    return finalize({
+      subtitleOverride: subtitle ?? firstFile.path,
+      blocks: [{ kind: 'diff', files: diffFiles, ...(anyDiffTruncated ? { truncated: true } : {}) }],
+      isDiffBounded: anyDiffTruncated,
       rawLabel: 'Raw patch',
-      rawText: rawText || rawDiff,
-      canCopy: Boolean(rawText || rawDiff),
-    };
+      rawTextOverride: rawText || rawDiff,
+    });
   }
   if (/^(?:@@\s+-\d+|---\s+\S+\n\+\+\+\s+\S+|\*\*\*\s+Begin Patch)/m.test(cleanedSource)) {
-    return {
-      title,
-      subtitle,
-      body: {
-        kind: 'diff',
-        files: [{ path: params.files?.[0]?.path ?? 'Patch', lines: parseDiffLines(cleanedSource) }],
-      },
+    const diffTruncated = Boolean(params.outputTruncated || cleanedSource.includes('[… omitted …]'));
+    return finalize({
+      blocks: [
+        {
+          kind: 'diff',
+          files: [
+            {
+              path: stripRecognizedDisplayPrefix(params.files?.[0]?.path ?? 'Patch'),
+              ...(diffTruncated ? { truncated: true } : {}),
+              lines: parseDiffLines(cleanedSource),
+            },
+          ],
+          ...(diffTruncated ? { truncated: true } : {}),
+        },
+      ],
+      isDiffBounded: diffTruncated,
       rawLabel: 'Raw patch',
-      rawText,
-      canCopy: Boolean(rawText),
-    };
+    });
   }
 
-  // 4. Checklist (`TodoWrite` / ACP `plan`)
+  // Checklist
   if (params.plan?.items.length) {
-    return {
-      title,
-      subtitle,
-      body: {
-        kind: 'checklist',
-        ...(params.plan.objective ? { objective: params.plan.objective } : {}),
-        items: params.plan.items.map((item) => ({ ...item })),
-      },
+    return finalize({
+      blocks: [
+        {
+          kind: 'checklist',
+          ...(params.plan.objective ? { objective: params.plan.objective } : {}),
+          items: params.plan.items.map((item) => ({ ...item })),
+        },
+      ],
       rawLabel: 'Raw JSON',
-      rawText,
-      canCopy: Boolean(rawText),
-    };
+      isJson: true,
+    });
   }
 
-  // 5. Structured JSON payloads (complete or partial-recovered)
+  // Structured JSON
   const json = parseTolerantJson(cleanedSource);
   if (json) {
-    const badge = json.bounded ? 'Bounded' : json.truncated ? 'Truncated' : undefined;
+    const badge = json.bounded || params.omittedCount
+      ? 'Bounded'
+      : json.truncated || params.outputTruncated
+        ? 'Truncated'
+        : undefined;
     const rawLabel = params.command?.trim() ? 'Raw command & JSON' : 'Raw JSON';
-
-    if (Array.isArray(json.value)) {
-      const items = json.value.filter(
-        (entry) =>
-          !(
-            entry &&
-            typeof entry === 'object' &&
-            !Array.isArray(entry) &&
-            Object.keys(entry as Record<string, unknown>).length === 1 &&
-            '_omittedCount' in (entry as Record<string, unknown>)
-          ),
-      );
-      if (items.length === 0) {
-        return {
-          title,
-          subtitle,
-          badge,
-          body: { kind: 'empty', heading: 'No items returned', chips: queryChips(inputObj) },
-          rawLabel,
-          rawText,
-          canCopy: Boolean(rawText),
-        };
-      }
-      return {
-        title,
-        subtitle,
-        badge,
-        body: {
-          kind: 'array-cards',
-          receipt: shownReceipt,
-          itemNoun: 'items',
-          cards: items.map((item) => summarizeCardItem(item, params.lookup)),
-          omittedCount: json.omittedCount,
-        },
-        rawLabel,
-        rawText,
-        canCopy: Boolean(rawText),
-      };
-    }
-
-    if (json.value && typeof json.value === 'object') {
-      const obj = json.value as Record<string, unknown>;
-      const visibleEntries = Object.entries(obj).filter(
-        ([k]) => k !== '_omittedCount' && k !== 'receipt',
-      );
-      // Empty object `{}`
-      if (visibleEntries.length === 0) {
-        return {
-          title,
-          subtitle,
-          badge,
-          body: {
-            kind: 'empty',
-            heading: shownReceipt ?? 'No data returned',
-            chips: queryChips(inputObj),
-          },
-          rawLabel,
-          rawText,
-          canCopy: Boolean(rawText),
-        };
-      }
-      // Single empty array key e.g. `{"tools": []}`
-      if (
-        visibleEntries.length === 1 &&
-        Array.isArray(visibleEntries[0]![1]) &&
-        (visibleEntries[0]![1] as unknown[]).length === 0
-      ) {
-        const key = visibleEntries[0]![0];
-        const noun = humanizeFieldKey(key).toLowerCase();
-        const chips = queryChips(inputObj);
-        return {
-          title,
-          subtitle,
-          badge,
-          body: {
-            kind: 'empty',
-            heading: key === 'tools' ? 'No matching tools returned' : `No ${noun} returned`,
-            ...(chips ? { detail: 'Looked up:', chips } : {}),
-          },
-          rawLabel,
-          rawText,
-          canCopy: Boolean(rawText),
-        };
-      }
-      // Single dominant non-empty array of objects (e.g. `{ schedules: [...] }`, `{ messages: [...] }`, `{ runs: [...] }`)
-      const arrayEntries = visibleEntries.filter(
-        ([, v]) => Array.isArray(v) && v.length > 0 && v.some((item) => item && typeof item === 'object'),
-      );
-      if (arrayEntries.length === 1 && visibleEntries.length <= 4) {
-        const [arrKey, arrVal] = arrayEntries[0]!;
-        const list = arrVal as unknown[];
-        return {
-          title,
-          subtitle,
-          badge,
-          body: {
-            kind: 'array-cards',
-            receipt: shownReceipt,
-            itemNoun: humanizeFieldKey(arrKey).toLowerCase(),
-            cards: list.map((item) => summarizeCardItem(item, params.lookup)),
-            omittedCount: json.omittedCount,
-          },
-          rawLabel,
-          rawText,
-          canCopy: Boolean(rawText),
-        };
-      }
-      // Flat or 1-level nested object -> kv-card
-      const rows: SheetKvRow[] = visibleEntries.map(([key, value]) => {
-        const formatted = formatScalarValue(value, params.lookup);
-        return {
-          key: humanizeFieldKey(key),
-          value: formatted.text,
-          ...(formatted.mono ? { mono: true } : {}),
-          ...(formatted.muted ? { muted: true } : {}),
-          ...(formatted.text.length > 42 ? { stacked: true } : {}),
-        };
-      });
-      return {
-        title,
-        subtitle,
-        badge,
-        body: {
-          kind: 'kv-card',
-          receipt: shownReceipt,
-          rows,
-        },
-        rawLabel,
-        rawText,
-        canCopy: Boolean(rawText),
-      };
-    }
+    const block = jsonToSheetBlock(json, {
+      shownReceipt,
+      inputObj,
+      lookup: params.lookup,
+      explicitTruncated: params.outputTruncated,
+      explicitOmitted: params.omittedCount,
+    });
+    return finalize({
+      blocks: [block],
+      badge,
+      rawLabel,
+      isJson: true,
+    });
   }
 
-  // 6. Empty / terminal-only / failed-empty states
+  // Empty / observed exit 0 / terminal-only / failed-empty
   if (!cleanedSource.trim()) {
-    const heading =
-      params.outcome === 'failure'
+    if (params.exitCode === 0 && params.command?.trim()) {
+      return finalize({
+        blocks: [
+          {
+            kind: 'empty',
+            heading: 'Exited (0) · no output',
+            detail: 'Observed exit 0, empty stdout/stderr',
+          },
+        ],
+        autoExpandZone2: true,
+        silentCommandOnly: true,
+        rawLabel: 'Command',
+      });
+    }
+    const heading = params.signal
+      ? `Signalled · ${params.signal}`
+      : params.outcome === 'failure'
         ? 'Failed with no output'
-        : params.terminalOnly && params.command?.trim()
-          ? 'Ran in terminal (no text output)'
-          : 'No output saved';
-    return {
-      title,
-      subtitle,
-      body: { kind: 'empty', heading },
-      rawLabel: params.command?.trim() ? 'Raw command' : 'Raw arguments',
-      rawText,
-      canCopy: Boolean(rawText),
-    };
+        : 'Completed';
+    const detail = params.terminalOnly
+      ? 'Adapter reported completion without an exit code or captured text.'
+      : params.outcome === 'failure'
+        ? undefined
+        : 'No output captured for this step.';
+    return finalize({
+      blocks: [{ kind: 'empty', heading, ...(detail ? { detail } : {}) }],
+      autoExpandZone2: Boolean(params.command?.trim()),
+      silentCommandOnly: Boolean(params.command?.trim() && !params.input?.trim()),
+      rawLabel: params.command?.trim() ? 'Command' : 'Raw arguments',
+    });
   }
 
-  // 7. Plain CLI logs / mono text
-  return {
-    title,
-    subtitle,
-    body: {
-      kind: 'mono',
-      receipt: shownReceipt,
-      text: cleanedSource,
-    },
-    rawLabel: params.command?.trim() ? 'Raw command & output' : 'Raw output',
-    rawText,
-    canCopy: Boolean(rawText),
-  };
+  // Strict grouped matches
+  const strictMatches = parseStrictSearchMatches(cleanedSource);
+  if (strictMatches) {
+    return finalize({
+      blocks: [
+        {
+          kind: 'matches',
+          groups: strictMatches,
+          ...(params.outputTruncated ? { truncated: true } : {}),
+        },
+      ],
+      rawLabel: params.command?.trim() ? 'Invocation & raw matches' : 'Raw matches',
+    });
+  }
+
+  // Plain CLI logs / mono text
+  const isTruncatedMono = Boolean(params.outputTruncated || cleanedSource.includes('[… omitted …]'));
+  return finalize({
+    blocks: [
+      {
+        kind: 'mono',
+        receipt: shownReceipt,
+        text: cleanedSource,
+        ...(isTruncatedMono ? { truncated: true } : {}),
+      },
+    ],
+    badge: isTruncatedMono ? 'Bounded' : undefined,
+    zone1ShowsMonoVerbatim: true,
+    rawLabel: params.command?.trim() ? 'Invocation' : 'Arguments',
+  });
 }

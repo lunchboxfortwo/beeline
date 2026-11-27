@@ -184,13 +184,15 @@ describe('one-line tool ledger', () => {
     const text = renderedText(renderer);
     expect(text).toContain('ls -la node_modules/.bin');
     expect(text).not.toContain('terminalId');
-    // A narrow screen cuts where the data cap does: the middle.
+    // Row wraps up to 2 lines with tail ellipsis instead of 1-line middle truncation.
     expect(
       renderer.root
         .findByProps({ testID: 'tool-ledger-line-shell' })
         .findAll(
-          (node: { type: unknown; props: { ellipsizeMode?: string } }) =>
-            node.type === 'Text' && node.props.ellipsizeMode === 'middle',
+          (node: { type: unknown; props: { ellipsizeMode?: string; numberOfLines?: number } }) =>
+            node.type === 'Text' &&
+            node.props.ellipsizeMode === 'tail' &&
+            node.props.numberOfLines === 2,
         ),
     ).toHaveLength(1);
     const pressable = renderer.root
@@ -199,7 +201,10 @@ describe('one-line tool ledger', () => {
     expect(pressable.props.onPress).toBeTypeOf('function');
     act(() => pressable.props.onPress());
     expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toBe(
-      'Ran in terminal (no text output)',
+      'Completed',
+    );
+    expect(renderedText(renderer)).toContain(
+      'Adapter reported completion without an exit code or captured text.',
     );
   });
 
@@ -234,12 +239,13 @@ describe('one-line tool ledger', () => {
     expect(spinner.type).toBe(Spinner);
   });
 
-  it('omits chevron and onPress on zero-detail rows while inspectable rows remain 44pt buttons', () => {
+  it('omits chevron and onPress on zero-detail & path-only rows while inspectable rows remain 44pt buttons', () => {
     const renderer = render(
       <ActivityTimeline
         active={false}
         items={[
           TOOLS[0]!,
+          TOOLS[1]!,
           { kind: 'tool', id: 'bare', title: 'Ran project task', toolKind: 'execute' },
           { kind: 'note', id: 'note1', title: 'Note', text: 'Interim note prose.' },
           { kind: 'summary', title: 'Summary', rollup: { read: 4 } },
@@ -255,12 +261,12 @@ describe('one-line tool ledger', () => {
     );
     expandRun(renderer, 'read');
     const inspectablePress = renderer.root
-      .findByProps({ testID: 'tool-ledger-line-read' })
+      .findByProps({ testID: 'tool-ledger-line-failure' })
       .findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function');
     expect(inspectablePress).toHaveLength(1);
     expect(inspectablePress[0].props.accessibilityRole).toBe('button');
 
-    for (const id of ['bare', 'note1', 'summary-0', 'term-empty']) {
+    for (const id of ['read', 'bare', 'note1', 'summary-0', 'term-empty']) {
       const row = renderer.root.findByProps({ testID: `tool-ledger-line-${id}` });
       expect(row.props.onPress).toBeUndefined();
       expect(
@@ -479,7 +485,7 @@ describe('the output sheet', () => {
       act(() => renderer.root.findByProps({ testID: 'tool-ledger-line-empty' }).props.onPress());
       expect(renderer.root.findByProps({ testID: 'tool-output-sheet' }).props.subtitle).toBe(status === 'failed' ? output : "at lunchbox's request");
       expect(renderer.root.findAllByProps({ testID: 'tool-output-copy' })).toHaveLength(0);
-      expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toBe(output ?? 'No output saved');
+      expect(renderer.root.findByProps({ testID: 'tool-output-text' }).props.children).toBe(output ?? 'Completed');
     },
   );
 

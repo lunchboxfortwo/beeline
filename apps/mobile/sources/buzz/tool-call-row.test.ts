@@ -10,6 +10,7 @@ import {
   middleTruncate,
   toolCallLabel,
   toolCallOutput,
+  toolCallRowModel,
   toolCallVerb,
   TOOL_CALL_OBJECT_MAX,
 } from './tool-call-row';
@@ -140,18 +141,31 @@ describe('toolCallLabel', () => {
     ).toBe('tool-call-row.ts');
   });
 
-  it('carries the search pattern and the tool’s own hit count', () => {
-    expect(
-      toolCallLabel(
-        step({
-          id: 's',
-          toolKind: 'search',
-          title: 'Grep',
-          input: '{"pattern":"toolCallRow","path":"sources"}',
-          output: '12 matches across 3 files',
-        }),
-      ),
-    ).toBe('toolCallRow · 12 hits');
+  it('carries the search pattern in the subject and exact hit count in the right stat column', () => {
+    const model = toolCallRowModel(
+      step({
+        id: 's',
+        toolKind: 'search',
+        title: 'Grep',
+        input: '{"pattern":"toolCallRow","path":"sources"}',
+        output: '12 matches across 3 files',
+      }),
+    );
+    expect(model.label).toBe('toolCallRow');
+    expect(model.stat).toEqual({ kind: 'text', text: '12 hits' });
+
+    // Never fabricates/displays hit counts on truncated excerpts
+    const truncatedModel = toolCallRowModel(
+      step({
+        id: 's2',
+        toolKind: 'search',
+        title: 'Grep',
+        input: '{"pattern":"toolCallRow"}',
+        output: '12 matches across 3 files',
+        outputTruncated: true,
+      }),
+    );
+    expect(truncatedModel.stat).toBeUndefined();
   });
 
   it('leads an MCP call with the tool’s own short name — a verb that IS information stays', () => {
@@ -166,18 +180,67 @@ describe('toolCallLabel', () => {
     );
   });
 
-  it('truncates in the middle at the label cap — the tail flags carry the meaning', () => {
+  it('preserves full readable commands for 2-line wrapping instead of 40-char middle-truncation soup', () => {
+    const cmd = 'npm run test --workspace apps/mobile -- --coverage --reporter=json';
     const label = toolCallLabel(
       step({
         id: 't',
         toolKind: 'execute',
-        command: 'npm run test --workspace apps/mobile -- --coverage --reporter=json',
+        command: cmd,
         title: 'Bash',
       }),
     );
-    expect(label.length).toBeLessThanOrEqual(40);
-    expect(label).toContain('…');
-    expect(label).toContain('--reporter=json');
+    expect(label).toBe(cmd);
+    expect(label).not.toContain('…');
+  });
+
+  it('prefers specific summary over unreadable inline scripts, formats distinct file line ranges, and keeps exact stats only', () => {
+    const scriptModel = toolCallRowModel(
+      step({
+        id: 'py',
+        toolKind: 'execute',
+        command: `python3 -c 'import json; print([j["status"] for j in json.load(open("run.json"))])'`,
+        summary: 'Inspect release run job statuses for run 45925038255',
+        title: 'Bash',
+      }),
+    );
+    expect(scriptModel.label).toBe('Inspect release run job statuses for run 45925038255');
+    expect(scriptModel.replacedCommandBySummary).toBe(true);
+    expect(scriptModel.subjectMono).toBe(false);
+
+    const rangeModel = toolCallRowModel(
+      step({
+        id: 'loc',
+        toolKind: 'read',
+        title: 'Read',
+        files: [
+          { path: 'ui/screens/chats/ChatTree.tsx', line: 114, endLine: 145 },
+          { path: 'ui/screens/chats/ChatTree.tsx', line: 200 },
+        ],
+      }),
+    );
+    expect(rangeModel.label).toBe('ChatTree.tsx:114–145, :200');
+    expect(rangeModel.subjectMono).toBe(true);
+
+    const exactDiff = toolCallRowModel(
+      step({
+        id: 'ed1',
+        toolKind: 'edit',
+        title: 'Edit',
+        files: [{ path: 'ChatTree.tsx', status: 'M', addedLines: 6, removedLines: 3, diff: '+a' }],
+      }),
+    );
+    expect(exactDiff.stat).toEqual({ kind: 'diff', added: 6, removed: 3 });
+
+    const boundedDiff = toolCallRowModel(
+      step({
+        id: 'ed2',
+        toolKind: 'edit',
+        title: 'Edit',
+        files: [{ path: 'ChatTree.tsx', status: 'M', diffTruncated: true, addedLines: 6, removedLines: 3, diff: '+a' }],
+      }),
+    );
+    expect(boundedDiff.stat).toBeUndefined();
   });
 
   it('keeps parent directory context for generic filenames', () => {

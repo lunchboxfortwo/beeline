@@ -10,43 +10,19 @@ import {
   summarizeScheduleListOutput,
   type ToolIdentityLookup,
 } from './tool-identity-lookup';
+import {
+  displayFileLocation,
+  displayFilePath,
+  redactDisplayPaths,
+  stripRecognizedDisplayPrefix,
+} from './tool-display-paths';
+
+export { displayFileLocation, displayFilePath, redactDisplayPaths, stripRecognizedDisplayPrefix };
 
 /**
  * Shell command unwrapping, read-only classification, disambiguated file paths,
  * and cross-harness MCP call formatting for the mobile tool ledger.
  */
-
-const GENERIC_BASENAMES = new Set([
-  'skill.md',
-  'readme.md',
-  'index.ts',
-  'index.tsx',
-  'index.js',
-  'index.jsx',
-  'index.mjs',
-  'index.cjs',
-  'route.ts',
-  'route.tsx',
-  'page.tsx',
-  'page.ts',
-  'layout.tsx',
-  'layout.ts',
-  'package.json',
-  'tsconfig.json',
-  'mod.rs',
-  'lib.rs',
-  'main.rs',
-  'main.go',
-  'main.ts',
-  '__init__.py',
-  'types.ts',
-  'constants.ts',
-  'utils.ts',
-  'helpers.ts',
-  'config.ts',
-  'schema.ts',
-  'styles.ts',
-]);
 
 const KNOWN_MCP_SERVERS = [
   'beeline-readonly-mcp',
@@ -130,33 +106,6 @@ function oneLine(value: string): string {
 
 function normalizeNewlines(value: string): string {
   return value.replace(/\r\n?/g, '\n').trim();
-}
-
-/**
- * Keep enough parent context when a basename is generic (`waiting-and-wakes/SKILL.md`,
- * `server/index.ts`, `server/src/index.ts`) while keeping distinctive files compact (`Ledger.tsx`).
- */
-export function displayFilePath(path: string): string {
-  const cleaned = path.replace(/^file:\/\//i, '').replace(/[\\/]+$/, '');
-  const parts = cleaned.split(/[\\/]/).filter(Boolean);
-  const base = parts.at(-1);
-  if (!base) return path;
-  if (parts.length >= 2 && GENERIC_BASENAMES.has(base.toLowerCase())) {
-    const parent = parts[parts.length - 2]!;
-    if (parts.length >= 3 && /^(?:src|lib|dist|app)$/i.test(parent)) {
-      return `${parts[parts.length - 3]}/${parent}/${base}`;
-    }
-    return `${parent}/${base}`;
-  }
-  return base;
-}
-
-/** Replace embedded absolute paths while preserving disambiguating parent segments and relative repo paths. */
-export function redactDisplayPaths(value: string): string {
-  return value.replace(
-    /(^|[\s"'`(=:])((?:file:\/\/)?\/(?:[\w.@~+%=,:-]+\/)+[\w.@~+%=,:-]+)/g,
-    (_match, lead: string, path: string) => `${lead}${displayFilePath(path)}`,
-  );
 }
 
 function unquoteShellArg(value: string): string {

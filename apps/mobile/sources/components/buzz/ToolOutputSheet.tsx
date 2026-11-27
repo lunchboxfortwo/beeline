@@ -1,3 +1,4 @@
+import type { ActivityResultBlock } from '@beeline/api-contract/phone';
 import { ErrorBanner } from './ErrorBanner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWindowDimensions } from 'react-native';
@@ -6,7 +7,11 @@ import { ScrollView, XStack, YStack } from 'tamagui';
 import { T } from '@/ui/grammar';
 import { typeRoles } from '@beeline/design-tokens';
 import type { ToolIdentityLookup } from '@/buzz/tool-identity-lookup';
-import { buildToolSheetPresentation } from '@/buzz/tool-output-format';
+import {
+  buildToolSheetPresentation,
+  formatBytesCompact,
+  type ToolSheetBody,
+} from '@/buzz/tool-output-format';
 import { HULL_SHEET_INSET, HullActionSheetModal } from './HullActionSheet';
 import { Button } from './Button';
 import { CodeHighlighter } from './CodeHighlighter';
@@ -30,12 +35,25 @@ export type ToolOutputSheetProps = {
   receipt?: string | null;
   detail: string | null | undefined;
   rawOutput?: string | null;
-  files?: readonly { path: string; status?: string; diff?: string }[];
+  blocks?: readonly ActivityResultBlock[];
+  files?: readonly {
+    path: string;
+    status?: string;
+    diff?: string;
+    diffTruncated?: boolean;
+    line?: number;
+    endLine?: number;
+  }[];
   plan?: {
     objective?: string;
     items: readonly { step: string; status: 'pending' | 'in_progress' | 'completed' }[];
   };
   outcome?: 'running' | 'success' | 'failure';
+  exitCode?: number;
+  signal?: string;
+  outputTruncated?: boolean;
+  omittedCount?: number;
+  sanitized?: boolean;
   terminalOnly?: boolean;
   requester?: string;
   lookup?: ToolIdentityLookup;
@@ -43,7 +61,7 @@ export type ToolOutputSheetProps = {
   outputHidden?: boolean;
   /**
    * When set, render Two Inks and wrap. Omitted for ordinary tool output,
-   * which renders result-first structured cards or wrapped machine text.
+   * which renders result-first structured blocks or wrapped machine text.
    */
   language?: string | null;
   visible: boolean;
@@ -64,11 +82,14 @@ function formatToolInput(input: string | null | undefined): string | undefined {
   return trimmed;
 }
 
+
 /**
- * Result-first tool output sheet: plain-English title + subtitle (+ Bounded/Truncated
- * badge), structured result body first (sent message card, key-value card, stacked
- * array cards, empty banner, colored unified diff, checklist, or unwrapped mono log),
- * and one collapsible `Raw … ⌄/⌃` + `Copy raw` footer.
+ * Universal 2-zone ACP tool output sheet:
+ * - Full wrapping title + honest status/signal/bounded/sanitized badges
+ * - Zone 1: ordered universal ACP result blocks (diff, structured JSON, strict matches,
+ *   media receipt, resource card, checklist, sent message, caption, mono, or honest completion)
+ * - Zone 2: collapsible invocation/raw data, NEVER duplicating plain mono text already shown
+ *   in Zone 1, with honest Copy labeling (`Copy excerpt` / `Copy command` / `Copy JSON`).
  */
 export function ToolOutputSheet({
   title,
@@ -78,9 +99,15 @@ export function ToolOutputSheet({
   receipt,
   detail,
   rawOutput,
+  blocks,
   files,
   plan,
   outcome,
+  exitCode,
+  signal,
+  outputTruncated,
+  omittedCount,
+  sanitized,
   terminalOnly,
   requester,
   lookup,
@@ -98,19 +125,6 @@ export function ToolOutputSheet({
   const [showAllCards, setShowAllCards] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    setRawExpanded(false);
-    setShowAllCards(false);
-    setCopied(false);
-  }, [visible, title, detail, rawOutput]);
-
-  useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    [],
-  );
-
   const presentation = useMemo(
     () =>
       buildToolSheetPresentation({
@@ -121,9 +135,15 @@ export function ToolOutputSheet({
         receipt,
         detail,
         rawOutput,
+        blocks,
         files,
         plan,
         outcome,
+        exitCode,
+        signal,
+        outputTruncated,
+        omittedCount,
+        sanitized,
         terminalOnly,
         outputHidden,
         requester,
@@ -137,14 +157,33 @@ export function ToolOutputSheet({
       receipt,
       detail,
       rawOutput,
+      blocks,
       files,
       plan,
       outcome,
+      exitCode,
+      signal,
+      outputTruncated,
+      omittedCount,
+      sanitized,
       terminalOnly,
       outputHidden,
       requester,
       lookup,
     ],
+  );
+
+  useEffect(() => {
+    setRawExpanded(Boolean(presentation.autoExpandZone2));
+    setShowAllCards(false);
+    setCopied(false);
+  }, [visible, title, detail, rawOutput, presentation.autoExpandZone2]);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
   );
 
   const copyPayload = presentation.rawText ?? detail ?? undefined;
@@ -167,16 +206,22 @@ export function ToolOutputSheet({
   const formattedInput = !outputHidden ? formatToolInput(input) : undefined;
   const shownInput =
     formattedInput && (!shownCommand || formattedInput !== shownCommand) ? formattedInput : undefined;
-  const hasRaw = Boolean(!outputHidden && !isLoading && !error && (shownCommand || shownInput || presentation.rawText));
-  const body = presentation.body;
-  const visibleArrayCards =
-    body.kind === 'array-cards'
-      ? showAllCards
-        ? body.cards
-        : body.cards.slice(0, INITIAL_ARRAY_CARDS)
-      : [];
-  const hiddenLocalCards =
-    body.kind === 'array-cards' ? body.cards.length - visibleArrayCards.length : 0;
+  // Never duplicate raw mono output or command/arguments in Zone 2 Output.
+  const rawZone2Output =
+    rawOutput?.trim() ||
+    detail?.trim() ||
+    (presentation.rawText &&
+    presentation.rawText !== shownCommand &&
+    presentation.rawText !== shownInput
+      ? presentation.rawText
+      : undefined);
+  const showRawOutputInZone2 = Boolean(!presentation.zone1ShowsMonoVerbatim && rawZone2Output);
+  const hasZone2Content = Boolean(
+    !outputHidden &&
+      !isLoading &&
+      !error &&
+      (shownCommand || shownInput || showRawOutputInZone2),
+  );
 
   return (
     <HullActionSheetModal
@@ -185,6 +230,7 @@ export function ToolOutputSheet({
       subtitle={presentation.subtitle}
       testID={testID}
       title={presentation.title}
+      wrapTitle
       visible={visible}
     >
       <ScrollView
@@ -195,21 +241,48 @@ export function ToolOutputSheet({
         testID="tool-output-scroll"
       >
         <YStack paddingHorizontal="6" gap="3">
-          {presentation.badge ? (
-            <XStack justifyContent="flex-start">
-              <YStack
-                paddingHorizontal="2"
-                paddingVertical="0.5"
-                borderRadius="sm"
-                borderWidth={1}
-                borderColor="needsYou"
-                backgroundColor="raised"
-                testID="tool-output-badge"
-              >
-                <T v="metaStrong" color="needsYou">
-                  {presentation.badge}
+          {presentation.statusLine || presentation.badges.length > 0 ? (
+            <XStack flexWrap="wrap" alignItems="center" justifyContent="flex-start" gap="2">
+              {presentation.statusLine ? (
+                <T
+                  v="code"
+                  color={presentation.statusTone === 'danger' ? 'removed' : 'secondary'}
+                  testID="tool-output-status"
+                >
+                  {presentation.statusLine}
                 </T>
-              </YStack>
+              ) : null}
+              {presentation.badges.map((badge, index) => (
+                <YStack
+                  key={`${badge.label}-${index}`}
+                  paddingHorizontal="2"
+                  paddingVertical="0.5"
+                  borderRadius="sm"
+                  borderWidth={1}
+                  borderColor={
+                    badge.tone === 'danger'
+                      ? 'removed'
+                      : badge.tone === 'accent'
+                        ? 'needsYou'
+                        : 'strongStroke'
+                  }
+                  backgroundColor="raised"
+                  testID={index === 0 ? 'tool-output-badge' : `tool-output-badge-${index}`}
+                >
+                  <T
+                    v="metaStrong"
+                    color={
+                      badge.tone === 'danger'
+                        ? 'removed'
+                        : badge.tone === 'accent'
+                          ? 'needsYou'
+                          : 'secondary'
+                    }
+                  >
+                    {badge.label}
+                  </T>
+                </YStack>
+              ))}
             </XStack>
           ) : null}
           {error ? (
@@ -220,356 +293,578 @@ export function ToolOutputSheet({
             <T v="meta" color="secondary" testID="tool-output-text">
               Loading…
             </T>
-          ) : body.kind === 'secret' ? (
-            <YStack
-              backgroundColor="raised"
-              borderWidth={1}
-              borderColor="stroke"
-              borderRadius="sm"
-              padding="3"
-              testID="tool-output-secret"
-            >
-              <T v="meta" color="secondary" testID="tool-output-text">
-                {body.notice}
-              </T>
-            </YStack>
-          ) : body.kind === 'sent-message' ? (
-            <YStack
-              backgroundColor="raised"
-              borderWidth={1}
-              borderColor="stroke"
-              borderRadius="sm"
-              padding="3"
-              gap="2"
-              testID="tool-output-sent-message"
-            >
-              {body.fromTo || body.tag ? (
-                <XStack
-                  justifyContent="space-between"
-                  alignItems="center"
-                  paddingBottom="2"
-                  borderBottomWidth={0.5}
-                  borderBottomColor="stroke"
-                >
-                  <T v="meta" color="secondary">
-                    {body.fromTo ?? ''}
-                  </T>
-                  <T v="meta" color="secondary">
-                    {body.tag ?? ''}
-                  </T>
-                </XStack>
-              ) : null}
-              <T v="body" color="ink" userSelect="text" testID="tool-output-text">
-                {body.text}
-              </T>
-            </YStack>
-          ) : body.kind === 'diff' ? (
-            <YStack gap="3" testID="tool-output-diff">
-              {body.files.map((file, fileIndex) => (
-                <YStack
-                  key={`${file.path}-${fileIndex}`}
-                  backgroundColor="raised"
-                  borderWidth={1}
-                  borderColor="stroke"
-                  borderRadius="sm"
-                  overflow="hidden"
-                >
-                  <XStack
-                    alignItems="center"
-                    gap="2"
-                    paddingHorizontal="3"
-                    paddingVertical="2"
-                    backgroundColor="highlight"
-                    borderBottomWidth={0.5}
-                    borderBottomColor="stroke"
-                  >
-                    {file.status ? (
-                      <T v="metaStrong" color="needsYou" flexShrink={0}>
-                        {file.status}
-                      </T>
-                    ) : null}
-                    <T v="code" color="secondary" flex={1} minWidth={0} numberOfLines={1}>
-                      {file.path}
-                    </T>
-                  </XStack>
-                  <YStack paddingVertical="1">
-                    {file.lines.map((line, lineIndex) => (
+          ) : (
+            <YStack gap="3">
+              {presentation.blocks.map((block, blockIndex) => (
+                <React.Fragment key={`${block.kind}-${blockIndex}`}>
+                  {(() => {
+                  if (block.kind === 'secret') {
+                    return (
                       <YStack
-                        key={lineIndex}
-                        paddingHorizontal="3"
-                        paddingVertical="0.5"
-                        backgroundColor={line.kind === 'hunk' ? 'highlight' : 'transparent'}
-                        borderLeftWidth={line.kind === 'add' || line.kind === 'del' ? 2 : 0}
-                        borderLeftColor={
-                          line.kind === 'add'
-                            ? 'added'
-                            : line.kind === 'del'
-                              ? 'removed'
-                              : 'transparent'
-                        }
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        padding="3"
+                        testID="tool-output-secret"
                       >
-                        <T
-                          v="code"
-                          color={
-                            line.kind === 'add'
-                              ? 'added'
-                              : line.kind === 'del'
-                                ? 'removed'
-                                : line.kind === 'hunk'
-                                  ? 'secondary'
-                                  : 'ink'
-                          }
-                          userSelect="text"
-                        >
-                          {line.text}
+                        <T v="meta" color="secondary" testID="tool-output-text">
+                          {block.notice}
                         </T>
                       </YStack>
-                    ))}
-                  </YStack>
-                </YStack>
-              ))}
-            </YStack>
-          ) : body.kind === 'checklist' ? (
-            <YStack
-              backgroundColor="raised"
-              borderWidth={1}
-              borderColor="stroke"
-              borderRadius="sm"
-              testID="tool-output-checklist"
-            >
-              {body.objective ? (
-                <YStack
-                  paddingHorizontal="3"
-                  paddingVertical="2"
-                  borderBottomWidth={0.5}
-                  borderBottomColor="stroke"
-                >
-                  <T v="metaStrong" color="ink">
-                    {body.objective}
-                  </T>
-                </YStack>
-              ) : null}
-              {body.items.map((item, index) => (
-                <XStack
-                  key={`${item.step}-${index}`}
-                  alignItems="flex-start"
-                  gap="2"
-                  paddingHorizontal="3"
-                  paddingVertical="2"
-                  borderTopWidth={index > 0 ? 0.5 : 0}
-                  borderTopColor="stroke"
-                >
-                  <T
-                    v="code"
-                    color={
-                      item.status === 'completed'
-                        ? 'added'
-                        : item.status === 'in_progress'
-                          ? 'needsYou'
-                          : 'secondary'
-                    }
-                    flexShrink={0}
-                  >
-                    {item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○'}
-                  </T>
-                  <T v="meta" color="ink" flex={1} minWidth={0} userSelect="text">
-                    {item.step}
-                  </T>
-                </XStack>
-              ))}
-            </YStack>
-          ) : body.kind === 'empty' ? (
-            <YStack
-              backgroundColor="raised"
-              borderWidth={1}
-              borderColor="stroke"
-              borderRadius="sm"
-              padding="3"
-              gap="2"
-              testID="tool-output-empty"
-            >
-              <T v="metaStrong" color="ink" testID="tool-output-text">
-                {body.heading}
-              </T>
-              {body.detail || body.chips?.length ? (
-                <XStack flexWrap="wrap" alignItems="center" gap="1">
-                  {body.detail ? (
-                    <T v="meta" color="secondary">
-                      {body.detail}
-                    </T>
-                  ) : null}
-                  {(body.chips ?? []).map((chip, index) => (
-                    <YStack
-                      key={`${chip}-${index}`}
-                      backgroundColor="highlight"
-                      borderRadius="sm"
-                      paddingHorizontal="2"
-                      paddingVertical="0.5"
-                    >
-                      <T v="code" color="ink">
-                        {chip}
+                    );
+                  }
+
+                  if (block.kind === 'caption') {
+                    return (
+                      <T v="meta" color="ink" userSelect="text" testID={`tool-output-caption-${blockIndex}`}>
+                        {block.text}
+                      </T>
+                    );
+                  }
+
+                  if (block.kind === 'sent-message') {
+                    return (
+                      <YStack
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        padding="3"
+                        gap="2"
+                        testID="tool-output-sent-message"
+                      >
+                        {block.fromTo || block.tag ? (
+                          <XStack
+                            justifyContent="space-between"
+                            alignItems="center"
+                            paddingBottom="2"
+                            borderBottomWidth={0.5}
+                            borderBottomColor="stroke"
+                          >
+                            <T v="meta" color="secondary">
+                              {block.fromTo ?? ''}
+                            </T>
+                            <T v="meta" color="secondary">
+                              {block.tag ?? ''}
+                            </T>
+                          </XStack>
+                        ) : null}
+                        <T v="body" color="ink" userSelect="text" testID="tool-output-text">
+                          {block.text}
+                        </T>
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'diff') {
+                    return (
+                      <YStack gap="3" testID="tool-output-diff">
+                        {block.files.map((file, fileIndex) => (
+                          <YStack
+                            key={`${file.path}-${fileIndex}`}
+                            backgroundColor="raised"
+                            borderWidth={1}
+                            borderColor="stroke"
+                            borderRadius="sm"
+                            overflow="hidden"
+                          >
+                            <XStack
+                              alignItems="center"
+                              justifyContent="space-between"
+                              gap="2"
+                              paddingHorizontal="3"
+                              paddingVertical="2"
+                              backgroundColor="highlight"
+                              borderBottomWidth={0.5}
+                              borderBottomColor="stroke"
+                            >
+                              <XStack alignItems="center" gap="2" flex={1} minWidth={0}>
+                                {file.status ? (
+                                  <T v="metaStrong" color="needsYou" flexShrink={0}>
+                                    {file.status}
+                                  </T>
+                                ) : null}
+                                <T v="code" color="secondary" flex={1} minWidth={0} numberOfLines={1}>
+                                  {file.path}
+                                </T>
+                              </XStack>
+                              {file.truncated ? (
+                                <T v="code" color="secondary" flexShrink={0}>
+                                  partial
+                                </T>
+                              ) : null}
+                            </XStack>
+                            <YStack paddingVertical="1">
+                              {file.lines.map((line, lineIndex) => (
+                                <YStack
+                                  key={lineIndex}
+                                  paddingHorizontal="3"
+                                  paddingVertical="0.5"
+                                  backgroundColor={line.kind === 'hunk' ? 'highlight' : 'transparent'}
+                                  borderLeftWidth={line.kind === 'add' || line.kind === 'del' ? 2 : 0}
+                                  borderLeftColor={
+                                    line.kind === 'add'
+                                      ? 'added'
+                                      : line.kind === 'del'
+                                        ? 'removed'
+                                        : 'transparent'
+                                  }
+                                >
+                                  <T
+                                    v="code"
+                                    color={
+                                      line.kind === 'add'
+                                        ? 'added'
+                                        : line.kind === 'del'
+                                          ? 'removed'
+                                          : line.kind === 'hunk'
+                                            ? 'secondary'
+                                            : 'ink'
+                                    }
+                                    userSelect="text"
+                                  >
+                                    {line.text}
+                                  </T>
+                                </YStack>
+                              ))}
+                            </YStack>
+                          </YStack>
+                        ))}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'matches') {
+                    return (
+                      <YStack gap="2" testID="tool-output-matches">
+                        {block.groups.map((group, groupIndex) => (
+                          <YStack
+                            key={`${group.path}-${groupIndex}`}
+                            backgroundColor="raised"
+                            borderWidth={1}
+                            borderColor="stroke"
+                            borderRadius="sm"
+                            overflow="hidden"
+                          >
+                            <XStack
+                              alignItems="center"
+                              justifyContent="space-between"
+                              gap="2"
+                              paddingHorizontal="3"
+                              paddingVertical="2"
+                              backgroundColor="highlight"
+                              borderBottomWidth={0.5}
+                              borderBottomColor="stroke"
+                            >
+                              <T v="code" color="secondary" flex={1} minWidth={0} numberOfLines={1}>
+                                {group.path}
+                              </T>
+                              {!block.truncated ? (
+                                <T v="code" color="secondary" flexShrink={0}>
+                                  {`${group.matches.length} ${group.matches.length === 1 ? 'match' : 'matches'}`}
+                                </T>
+                              ) : (
+                                <T v="code" color="secondary" flexShrink={0}>
+                                  excerpt
+                                </T>
+                              )}
+                            </XStack>
+                            {group.matches.map((match, matchIndex) => (
+                              <XStack
+                                key={`${match.line}-${matchIndex}`}
+                                alignItems="flex-start"
+                                gap="2"
+                                paddingHorizontal="3"
+                                paddingVertical="2"
+                                borderTopWidth={matchIndex > 0 ? 0.5 : 0}
+                                borderTopColor="stroke"
+                              >
+                                <T
+                                  v="code"
+                                  color="secondary"
+                                  minWidth={28}
+                                  textAlign="right"
+                                  flexShrink={0}
+                                  fontVariant={['tabular-nums']}
+                                >
+                                  {String(match.line)}
+                                </T>
+                                <T v="code" color="ink" flex={1} minWidth={0} userSelect="text">
+                                  {match.text}
+                                </T>
+                              </XStack>
+                            ))}
+                          </YStack>
+                        ))}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'media') {
+                    const kindLabel = block.mediaKind === 'image' ? 'Image' : 'Audio';
+                    const size = formatBytesCompact(block.sizeBytes);
+                    const headline = [kindLabel, block.mimeType, size].filter(Boolean).join(' · ');
+                    return (
+                      <YStack
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        padding="3"
+                        gap="1"
+                        testID={`tool-output-media-${blockIndex}`}
+                      >
+                        <T v="metaStrong" color="ink">
+                          {block.label ? `${headline} — ${block.label}` : headline}
+                        </T>
+                        <T v="meta" color="secondary">
+                          {block.available
+                            ? 'Media available in attachment.'
+                            : 'Media bytes not stored in activity log'}
+                        </T>
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'resource') {
+                    const size = formatBytesCompact(block.sizeBytes);
+                    const modeLabel =
+                      block.mode === 'link'
+                        ? [block.mimeType ? `Link · ${block.mimeType}` : 'Link', '(not fetched)'].join(' ')
+                        : block.mode === 'blob'
+                          ? ['Blob', block.mimeType, size].filter(Boolean).join(' · ')
+                          : ['Embedded text', block.mimeType].filter(Boolean).join(' · ');
+                    return (
+                      <YStack
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        padding="3"
+                        gap="2"
+                        testID={`tool-output-resource-${blockIndex}`}
+                      >
+                        <XStack justifyContent="space-between" alignItems="baseline" gap="2">
+                          <T v="meta" color="secondary" flexShrink={0}>
+                            Resource
+                          </T>
+                          <T v="metaStrong" color="ink" textAlign="right" flex={1} minWidth={0}>
+                            {block.name ? `${block.name} · ${modeLabel}` : modeLabel}
+                          </T>
+                        </XStack>
+                        {block.uri ? (
+                          <T v="code" color="secondary" userSelect="text">
+                            {block.uri}
+                          </T>
+                        ) : null}
+                        {block.mode === 'blob' ? (
+                          <T v="meta" color="secondary">
+                            Binary resource bytes not stored in activity log
+                          </T>
+                        ) : null}
+                        {block.mode === 'text' && block.text ? (
+                          <YStack
+                            paddingTop="2"
+                            borderTopWidth={0.5}
+                            borderTopColor="stroke"
+                          >
+                            <T v="code" color="ink" userSelect="text">
+                              {block.text}
+                            </T>
+                          </YStack>
+                        ) : null}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'unknown') {
+                    return (
+                      <YStack
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        padding="3"
+                        gap="1"
+                        testID={`tool-output-unknown-${blockIndex}`}
+                      >
+                        <T v="metaStrong" color="secondary">
+                          {block.rawType ? `Unrecognized result block · ${block.rawType}` : 'Unrecognized result block'}
+                        </T>
+                        {block.text ? (
+                          <T v="code" color="ink" userSelect="text">
+                            {block.text}
+                          </T>
+                        ) : null}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'checklist') {
+                    return (
+                      <YStack
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        testID="tool-output-checklist"
+                      >
+                        {block.objective ? (
+                          <YStack
+                            paddingHorizontal="3"
+                            paddingVertical="2"
+                            borderBottomWidth={0.5}
+                            borderBottomColor="stroke"
+                          >
+                            <T v="metaStrong" color="ink">
+                              {block.objective}
+                            </T>
+                          </YStack>
+                        ) : null}
+                        {block.items.map((item, index) => (
+                          <XStack
+                            key={`${item.step}-${index}`}
+                            alignItems="flex-start"
+                            gap="2"
+                            paddingHorizontal="3"
+                            paddingVertical="2"
+                            borderTopWidth={index > 0 ? 0.5 : 0}
+                            borderTopColor="stroke"
+                          >
+                            <T
+                              v="code"
+                              color={
+                                item.status === 'completed'
+                                  ? 'added'
+                                  : item.status === 'in_progress'
+                                    ? 'needsYou'
+                                    : 'secondary'
+                              }
+                              flexShrink={0}
+                            >
+                              {item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○'}
+                            </T>
+                            <T v="meta" color="ink" flex={1} minWidth={0} userSelect="text">
+                              {item.step}
+                            </T>
+                          </XStack>
+                        ))}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'empty') {
+                    return (
+                      <YStack
+                        backgroundColor="raised"
+                        borderWidth={1}
+                        borderColor="stroke"
+                        borderRadius="sm"
+                        padding="3"
+                        gap="2"
+                        testID="tool-output-empty"
+                      >
+                        <T v="metaStrong" color="ink" testID="tool-output-text">
+                          {block.heading}
+                        </T>
+                        {block.detail || block.chips?.length ? (
+                          <XStack flexWrap="wrap" alignItems="center" gap="1">
+                            {block.detail ? (
+                              <T v="meta" color="secondary">
+                                {block.detail}
+                              </T>
+                            ) : null}
+                            {(block.chips ?? []).map((chip, index) => (
+                              <YStack
+                                key={`${chip}-${index}`}
+                                backgroundColor="highlight"
+                                borderRadius="sm"
+                                paddingHorizontal="2"
+                                paddingVertical="0.5"
+                              >
+                                <T v="code" color="ink">
+                                  {chip}
+                                </T>
+                              </YStack>
+                            ))}
+                          </XStack>
+                        ) : null}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'array-cards') {
+                    const visibleArrayCards = showAllCards ? block.cards : block.cards.slice(0, INITIAL_ARRAY_CARDS);
+                    const hiddenLocalCards = block.cards.length - visibleArrayCards.length;
+                    return (
+                      <YStack gap="2" testID="tool-output-array-cards">
+                        {block.receipt ? (
+                          <YStack
+                            backgroundColor="raised"
+                            borderWidth={1}
+                            borderColor="stroke"
+                            borderRadius="sm"
+                            padding="3"
+                            testID="tool-output-receipt"
+                          >
+                            <T v="meta" color="ink" userSelect="text">
+                              {block.receipt}
+                            </T>
+                          </YStack>
+                        ) : null}
+                        {visibleArrayCards.map((card, index) => (
+                          <YStack
+                            key={`${card.lead}-${index}`}
+                            backgroundColor="raised"
+                            borderWidth={1}
+                            borderColor="stroke"
+                            borderRadius="sm"
+                            paddingHorizontal="3"
+                            paddingVertical="2"
+                            gap="1"
+                            testID={`tool-output-card-${index}`}
+                          >
+                            <XStack justifyContent="space-between" alignItems="baseline" gap="2">
+                              <T v="metaStrong" color="ink" flex={1} minWidth={0} userSelect="text">
+                                {card.lead}
+                              </T>
+                              {card.badge ? (
+                                <T v="metaStrong" color="needsYou" flexShrink={0}>
+                                  {card.badge}
+                                </T>
+                              ) : null}
+                            </XStack>
+                            {card.meta ? (
+                              <T v="meta" color="secondary" userSelect="text">
+                                {card.meta}
+                              </T>
+                            ) : null}
+                          </YStack>
+                        ))}
+                        {hiddenLocalCards > 0 ? (
+                          <Button
+                            size="inline"
+                            label={`Show ${hiddenLocalCards} more`}
+                            alignSelf="flex-start"
+                            onPress={() => setShowAllCards(true)}
+                            testID="tool-output-show-more"
+                          />
+                        ) : null}
+                        {block.omittedCount ? (
+                          <T v="meta" color="needsYou" testID="tool-output-omitted-note">
+                            {`+ ${block.omittedCount} more ${block.itemNoun} omitted at the 4 KiB step cap`}
+                          </T>
+                        ) : null}
+                      </YStack>
+                    );
+                  }
+
+                  if (block.kind === 'kv-card') {
+                    return (
+                      <YStack gap="2">
+                        {block.receipt ? (
+                          <YStack
+                            backgroundColor="raised"
+                            borderWidth={1}
+                            borderColor="stroke"
+                            borderRadius="sm"
+                            padding="3"
+                            testID="tool-output-receipt"
+                          >
+                            <T v="meta" color="ink" userSelect="text">
+                              {block.receipt}
+                            </T>
+                          </YStack>
+                        ) : null}
+                        <YStack
+                          backgroundColor="raised"
+                          borderWidth={1}
+                          borderColor="stroke"
+                          borderRadius="sm"
+                          testID="tool-output-kv-card"
+                        >
+                          {block.rows.map((row, index) => (
+                            <YStack
+                              key={`${row.key}-${index}`}
+                              borderTopWidth={index > 0 ? 0.5 : 0}
+                              borderTopColor="stroke"
+                              paddingHorizontal="3"
+                              paddingVertical="2"
+                              gap="1"
+                            >
+                              {row.stacked ? (
+                                <>
+                                  <T v="meta" color="secondary">
+                                    {row.key}
+                                  </T>
+                                  <T
+                                    v={row.mono ? 'code' : 'meta'}
+                                    color={row.muted ? 'secondary' : 'ink'}
+                                    userSelect="text"
+                                  >
+                                    {row.value}
+                                  </T>
+                                </>
+                              ) : (
+                                <XStack justifyContent="space-between" alignItems="baseline" gap="3">
+                                  <T v="meta" color="secondary" flexShrink={0}>
+                                    {row.key}
+                                  </T>
+                                  <T
+                                    v={row.mono ? 'code' : 'metaStrong'}
+                                    color={row.muted ? 'secondary' : 'ink'}
+                                    textAlign="right"
+                                    flex={1}
+                                    minWidth={0}
+                                    userSelect="text"
+                                  >
+                                    {row.value}
+                                  </T>
+                                </XStack>
+                              )}
+                            </YStack>
+                          ))}
+                        </YStack>
+                      </YStack>
+                    );
+                  }
+
+                  return (
+                    <YStack gap="2">
+                      {block.receipt ? (
+                        <YStack
+                          backgroundColor="raised"
+                          borderWidth={1}
+                          borderColor="stroke"
+                          borderRadius="sm"
+                          padding="3"
+                          testID="tool-output-receipt"
+                        >
+                          <T v="meta" color="ink" userSelect="text">
+                            {block.receipt}
+                          </T>
+                        </YStack>
+                      ) : null}
+                      <T
+                        v="code"
+                        color="ink"
+                        userSelect="text"
+                        width="100%"
+                        minWidth={0}
+                        flexShrink={1}
+                        testID="tool-output-text"
+                      >
+                        {block.text}
                       </T>
                     </YStack>
-                  ))}
-                </XStack>
-              ) : null}
-            </YStack>
-          ) : body.kind === 'array-cards' ? (
-            <YStack gap="2" testID="tool-output-array-cards">
-              {body.receipt ? (
-                <YStack
-                  backgroundColor="raised"
-                  borderWidth={1}
-                  borderColor="stroke"
-                  borderRadius="sm"
-                  padding="3"
-                  testID="tool-output-receipt"
-                >
-                  <T v="meta" color="ink" userSelect="text">
-                    {body.receipt}
-                  </T>
-                </YStack>
-              ) : null}
-              {visibleArrayCards.map((card, index) => (
-                <YStack
-                  key={`${card.lead}-${index}`}
-                  backgroundColor="raised"
-                  borderWidth={1}
-                  borderColor="stroke"
-                  borderRadius="sm"
-                  paddingHorizontal="3"
-                  paddingVertical="2"
-                  gap="1"
-                  testID={`tool-output-card-${index}`}
-                >
-                  <XStack justifyContent="space-between" alignItems="baseline" gap="2">
-                    <T v="metaStrong" color="ink" flex={1} minWidth={0} userSelect="text">
-                      {card.lead}
-                    </T>
-                    {card.badge ? (
-                      <T v="metaStrong" color="needsYou" flexShrink={0}>
-                        {card.badge}
-                      </T>
-                    ) : null}
-                  </XStack>
-                  {card.meta ? (
-                    <T v="meta" color="secondary" userSelect="text">
-                      {card.meta}
-                    </T>
-                  ) : null}
-                </YStack>
+                  );
+                  })()}
+                </React.Fragment>
               ))}
-              {hiddenLocalCards > 0 ? (
-                <Button
-                  size="inline"
-                  label={`Show ${hiddenLocalCards} more`}
-                  alignSelf="flex-start"
-                  onPress={() => setShowAllCards(true)}
-                  testID="tool-output-show-more"
-                />
-              ) : null}
-              {body.omittedCount ? (
-                <T v="meta" color="needsYou" testID="tool-output-omitted-note">
-                  {`+ ${body.omittedCount} more ${body.itemNoun} omitted at the 4 KiB step cap`}
-                </T>
-              ) : null}
-            </YStack>
-          ) : body.kind === 'kv-card' ? (
-            <YStack gap="2">
-              {body.receipt ? (
-                <YStack
-                  backgroundColor="raised"
-                  borderWidth={1}
-                  borderColor="stroke"
-                  borderRadius="sm"
-                  padding="3"
-                  testID="tool-output-receipt"
-                >
-                  <T v="meta" color="ink" userSelect="text">
-                    {body.receipt}
-                  </T>
-                </YStack>
-              ) : null}
-              <YStack
-                backgroundColor="raised"
-                borderWidth={1}
-                borderColor="stroke"
-                borderRadius="sm"
-                testID="tool-output-kv-card"
-              >
-                {body.rows.map((row, index) => (
-                  <YStack
-                    key={`${row.key}-${index}`}
-                    borderTopWidth={index > 0 ? 0.5 : 0}
-                    borderTopColor="stroke"
-                    paddingHorizontal="3"
-                    paddingVertical="2"
-                    gap="1"
-                  >
-                    {row.stacked ? (
-                      <>
-                        <T v="meta" color="secondary">
-                          {row.key}
-                        </T>
-                        <T
-                          v={row.mono ? 'code' : 'meta'}
-                          color={row.muted ? 'secondary' : 'ink'}
-                          userSelect="text"
-                        >
-                          {row.value}
-                        </T>
-                      </>
-                    ) : (
-                      <XStack justifyContent="space-between" alignItems="baseline" gap="3">
-                        <T v="meta" color="secondary" flexShrink={0}>
-                          {row.key}
-                        </T>
-                        <T
-                          v={row.mono ? 'code' : 'metaStrong'}
-                          color={row.muted ? 'secondary' : 'ink'}
-                          textAlign="right"
-                          flex={1}
-                          minWidth={0}
-                          userSelect="text"
-                        >
-                          {row.value}
-                        </T>
-                      </XStack>
-                    )}
-                  </YStack>
-                ))}
-              </YStack>
-            </YStack>
-          ) : (
-            <YStack gap="2">
-              {body.receipt ? (
-                <YStack
-                  backgroundColor="raised"
-                  borderWidth={1}
-                  borderColor="stroke"
-                  borderRadius="sm"
-                  padding="3"
-                  testID="tool-output-receipt"
-                >
-                  <T v="meta" color="ink" userSelect="text">
-                    {body.receipt}
-                  </T>
-                </YStack>
-              ) : null}
-              <T
-                v="code"
-                color="ink"
-                userSelect="text"
-                width="100%"
-                minWidth={0}
-                flexShrink={1}
-                testID="tool-output-text"
-              >
-                {body.text}
-              </T>
             </YStack>
           )}
-          {hasRaw && rawExpanded ? (
+          {hasZone2Content && rawExpanded ? (
             <YStack
               gap="3"
               padding="3"
@@ -599,17 +894,13 @@ export function ToolOutputSheet({
                   </T>
                 </YStack>
               ) : null}
-              {presentation.rawText && !shownCommand && !shownInput ? (
-                <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1}>
-                  {presentation.rawText}
-                </T>
-              ) : rawOutput || detail ? (
+              {showRawOutputInZone2 ? (
                 <YStack gap="1" testID="tool-output-raw-output">
                   <T v="meta" color="secondary">
                     Output
                   </T>
                   <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1}>
-                    {rawOutput ?? detail}
+                    {rawZone2Output}
                   </T>
                 </YStack>
               ) : null}
@@ -617,7 +908,7 @@ export function ToolOutputSheet({
           ) : null}
         </YStack>
       </ScrollView>
-      {hasRaw || canCopy ? (
+      {hasZone2Content || canCopy ? (
         <XStack
           justifyContent="space-between"
           alignItems="center"
@@ -628,7 +919,7 @@ export function ToolOutputSheet({
           borderTopColor="stroke"
           testID="tool-output-footer"
         >
-          {hasRaw ? (
+          {hasZone2Content ? (
             <LedgerDisclosure
               expanded={rawExpanded}
               onPress={() => setRawExpanded((value) => !value)}
@@ -645,7 +936,7 @@ export function ToolOutputSheet({
             <Button
               size="inline"
               alignSelf="center"
-              label={copied ? 'Copied' : 'Copy raw'}
+              label={copied ? 'Copied' : presentation.copyLabel}
               onPress={copy}
               testID="tool-output-copy"
             />

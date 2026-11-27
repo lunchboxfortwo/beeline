@@ -310,11 +310,15 @@ export async function acpClientSessionPrompt(
   let completed = false;
   const asyncTasks = new Map<string, ToolCallEntry>();
   const onUpdate = (u: SessionUpdate) => {
-    if (u.sessionId !== sessionId) return;
+    const meta = u.update._meta && typeof u.update._meta === 'object' ? (u.update._meta as Record<string, unknown>) : undefined;
+    const parentSessionId =
+      (typeof u.update.parentSessionId === 'string' ? u.update.parentSessionId : undefined) ??
+      (typeof meta?.parentSessionId === 'string' ? meta.parentSessionId : undefined);
+    if (u.sessionId !== sessionId && parentSessionId !== sessionId) return;
     if (['tool_call', 'tool_call_update', 'tool_result'].includes(String(u.update.sessionUpdate))) {
       const calls = [...toolCallEntries(updates), ...asyncTasks.values()];
       const previous = u.update.toolCallId
-        ? calls.find((call) => call.id === u.update.toolCallId)
+        ? calls.find((call) => call.id === u.update.toolCallId && (!call.sessionId || call.sessionId === u.sessionId))
         : u.update.sessionUpdate === 'tool_call'
           ? undefined
           : calls.at(-1);

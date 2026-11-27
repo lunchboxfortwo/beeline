@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentTurnStep } from './acp.js';
-import { MAX_NOTE_LENGTH, MAX_REPLY_STEPS, roomReplySteps } from './room-turn-steps.js';
+import { toolCallEntries, type AgentTurnStep, type SessionUpdate } from './acp.js';
+import {
+  MAX_NOTE_LENGTH,
+  MAX_REPLY_STEPS,
+  MAX_REPLY_TOTAL_BYTES,
+  MAX_STEP_AGGREGATE_BYTES,
+  roomReplySteps,
+} from './room-turn-steps.js';
 
 const note = (text: string): AgentTurnStep => ({ kind: 'note', text });
 const tool = (title: string): AgentTurnStep => ({
@@ -535,5 +541,299 @@ describe('roomReplySteps', () => {
     expect(diff).toContain('+echo start&EXTRA_VAL=[REDACTED]');
     expect(diff).toContain(' SAFE_CTX=[REDACTED]');
     expect(diff).toContain('+d=json.load(open("report.json"))');
+  });
+
+  it('preserves ordered mixed ACP blocks, prefers structuredContent by coalescing echoed text, and keeps unknown block fallback', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'squire.capture_checkout',
+          kind: 'other',
+          status: 'completed',
+          content: [
+            { type: 'text', text: 'Captured billing confirmation after Stripe Link redirect.' },
+            { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUg==' },
+            { type: 'text', text: '{"domain":"whitejade.xyz","status":"confirmed","total":"$29.00"}' },
+            { type: 'custom_widget', summary: 'Receipt widget ready' },
+          ],
+          rawOutput: {
+            structuredContent: { status: 'confirmed', domain: 'whitejade.xyz', total: '$29.00' },
+          },
+        },
+      },
+    ]);
+    const blocks = rows[0]!.blocks!;
+    expect(blocks).toHaveLength(4);
+    expect(blocks[0]).toEqual({
+      kind: 'text',
+      text: 'Captured billing confirmation after Stripe Link redirect.',
+    });
+    expect(blocks[1]).toMatchObject({
+      kind: 'media',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      available: false,
+    });
+    expect(blocks[2]).toMatchObject({
+      kind: 'json',
+    });
+    expect(JSON.parse((blocks[2] as { kind: 'json'; text: string }).text)).toEqual({
+      status: 'confirmed',
+      domain: 'whitejade.xyz',
+      total: '$29.00',
+    });
+    expect(blocks[3]).toEqual({
+      kind: 'unknown',
+      rawType: 'custom_widget',
+      text: 'Receipt widget ready',
+    });
+    expect(JSON.stringify(rows[0])).not.toContain('iVBORw0KGgo');
+  });
+
+  it('distinguishes observed exit 0 vs bare completed vs SIGKILL vs terminal-handle-only', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'exec_command',
+          kind: 'execute',
+          status: 'completed',
+          rawInput: { cmd: 'git add ChatTree.tsx' },
+          rawOutput: { _meta: { terminal_exit: { exit_code: 0 } } },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'exec_command',
+          kind: 'execute',
+          status: 'completed',
+          content: [{ type: 'terminal', terminalId: 'term-only-1' }],
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'exec_command',
+          kind: 'execute',
+          status: 'completed',
+          rawInput: { cmd: 'npm test --workspace=@beeline/body' },
+          rawOutput: { _meta: { terminal_exit: { signal: 'SIGKILL' } }, stdout: 'PASS a.test.ts' },
+        },
+      },
+    ]);
+    expect(rows[0]!.exitCode).toBe(0);
+    expect(rows[0]!.terminalOnly).toBeUndefined();
+    expect(rows[0]!.status).toBe('completed');
+
+    expect(rows[1]!.exitCode).toBeUndefined();
+    expect(rows[1]!.terminalOnly).toBe(true);
+    expect(rows[1]!.status).toBe('completed');
+
+    expect(rows[2]!.signal).toBe('SIGKILL');
+    expect(rows[2]!.status).toBe('failed');
+  });
+
+  it('preserves distinct 1-based file locations, optional endLine only when reported, and exact vs bounded diff counts', () => {
+    const bigOld = Array.from({ length: 200 }, (_, i) => `const oldLine${i} = "${'x'.repeat(30)}";`).join('\n');
+    const bigNew = Array.from({ length: 200 }, (_, i) => `const newLine${i} = "${'y'.repeat(30)}";`).join('\n');
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'Read /home/lunchbox/.local/state/beeline/corners/abcdef0123456789/apps/mobile/ChatTree.tsx',
+          kind: 'read',
+          locations: [
+            { path: '/home/lunchbox/.local/state/beeline/corners/abcdef0123456789/apps/mobile/ChatTree.tsx', line: 10 },
+            { path: '/home/lunchbox/.local/state/beeline/corners/abcdef0123456789/apps/mobile/ChatTree.tsx', line: 114, endLine: 145 },
+            { path: 'apps/server/src/index.ts', range: { start: { line: 0 }, end: { line: 4 } } },
+          ],
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'Edit',
+          kind: 'edit',
+          rawInput: { file_path: 'apps/mobile/Small.tsx', old_string: 'a\nb', new_string: 'a\nc\nd' },
+        },
+      },
+      {
+        kind: 'tool',
+        call: {
+          title: 'Edit',
+          kind: 'edit',
+          rawInput: { file_path: 'apps/mobile/Big.tsx', old_string: bigOld, new_string: bigNew },
+        },
+      },
+    ]);
+    expect(rows[0]!.title).toBe('Read apps/mobile/ChatTree.tsx');
+    expect(rows[0]!.files).toEqual([
+      { path: 'apps/mobile/ChatTree.tsx', line: 10 },
+      { path: 'apps/mobile/ChatTree.tsx', line: 114, endLine: 145 },
+      { path: 'apps/server/src/index.ts', line: 1, endLine: 5 },
+    ]);
+    expect(rows[1]!.files?.[0]).toMatchObject({
+      path: 'apps/mobile/Small.tsx',
+      addedLines: 2,
+      removedLines: 1,
+    });
+    expect(rows[1]!.files?.[0]?.diffTruncated).toBeUndefined();
+    // Bounded diff omits exact totals and marks diffTruncated
+    expect(rows[2]!.files?.[0]?.diffTruncated).toBe(true);
+    expect(rows[2]!.files?.[0]?.addedLines).toBeUndefined();
+    expect(rows[2]!.files?.[0]?.removedLines).toBeUndefined();
+  });
+
+  it('distinguishes resource link/text/blob and redacts URI query secrets ahead of fallbacks without touching command operands', () => {
+    const rows = roomReplySteps([
+      {
+        kind: 'tool',
+        call: {
+          title: 'Fetch resource',
+          kind: 'fetch',
+          rawInput: {
+            description: 'Inspect agent-home/codex/skills/test/SKILL.md',
+            cmd: 'cat /home/lunchbox/.local/state/beeline/corners/abcdef0123456789/apps/server/src/index.ts',
+          },
+          content: [
+            { type: 'resource_link', uri: 'mcp://linear/issues?token=secret-tok&page=2', mimeType: 'application/json' },
+            { type: 'resource', resource: { uri: 'https://user:pass123@api.example.com/doc?api_key=k99', mimeType: 'text/plain', text: 'Body text' } },
+            { type: 'resource', resource: { uri: 'file:///tmp/data.bin', mimeType: 'application/octet-stream', blob: 'AQIDBA==' } },
+          ],
+        },
+      },
+    ]);
+    expect(rows[0]!.summary).toBe('Inspect skills/test/SKILL.md');
+    // Command operands are NOT path-rewritten
+    expect(rows[0]!.command).toBe(
+      'cat /home/lunchbox/.local/state/beeline/corners/abcdef0123456789/apps/server/src/index.ts',
+    );
+    expect(rows[0]!.sanitized).toBe(true);
+    expect(rows[0]!.blocks).toEqual([
+      { kind: 'resource', mode: 'link', uri: 'mcp://linear/issues?token=[REDACTED]&page=2', mimeType: 'application/json' },
+      { kind: 'resource', mode: 'text', uri: 'https://user:[REDACTED]@api.example.com/doc?api_key=[REDACTED]', mimeType: 'text/plain', text: 'Body text' },
+      { kind: 'resource', mode: 'blob', uri: 'file:///tmp/data.bin', mimeType: 'application/octet-stream', sizeBytes: 4 },
+    ]);
+    expect(JSON.stringify(rows[0])).not.toContain('secret-tok');
+    expect(JSON.stringify(rows[0])).not.toContain('pass123');
+    expect(JSON.stringify(rows[0])).not.toContain('k99');
+  });
+
+  it('merges live partial updates by (session, callId), preserves omitted fields, scopes subagents, and isolates simultaneous identical commands', () => {
+    const updates: SessionUpdate[] = [
+      {
+        sessionId: 'root-sess',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-1',
+          title: 'Run tests',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { cmd: 'npm test --workspace=@beeline/body' },
+        },
+      },
+      {
+        sessionId: 'root-sess',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-2',
+          title: 'Run tests',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { cmd: 'npm test --workspace=@beeline/body' },
+        },
+      },
+      // Subagent reuses callId "call-1" inside its own session
+      {
+        sessionId: 'sub-sess-1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-1',
+          title: 'Search history',
+          kind: 'search',
+          _meta: { subagent: { label: 'researcher', sessionId: 'sub-sess-1' } },
+          rawInput: { query: 'backlog' },
+        },
+      },
+      // Partial update omitting rawInput / sending empty title must NOT wipe initial fields
+      {
+        sessionId: 'root-sess',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-1',
+          title: '',
+          rawInput: {},
+          status: 'completed',
+          rawOutput: { stdout: 'PASS', _meta: { terminal_exit: { exit_code: 0 } } },
+        },
+      },
+      // Repeated snapshot is idempotent
+      {
+        sessionId: 'root-sess',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-1',
+          status: 'completed',
+          rawOutput: { stdout: 'PASS', _meta: { terminal_exit: { exit_code: 0 } } },
+        },
+      },
+      // Second identical command gets SIGKILL
+      {
+        sessionId: 'root-sess',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-2',
+          status: 'failed',
+          rawOutput: { _meta: { terminal_exit: { signal: 'SIGKILL' } } },
+        },
+      },
+    ];
+
+    const calls = toolCallEntries(updates);
+    expect(calls).toHaveLength(3);
+    const rows = roomReplySteps(calls.map((call) => ({ kind: 'tool' as const, call })));
+    expect(rows[0]).toMatchObject({
+      title: 'Run tests',
+      command: 'npm test --workspace=@beeline/body',
+      exitCode: 0,
+      status: 'completed',
+      output: 'PASS',
+    });
+    expect(rows[1]).toMatchObject({
+      title: 'Run tests',
+      command: 'npm test --workspace=@beeline/body',
+      signal: 'SIGKILL',
+      status: 'failed',
+    });
+    expect(rows[2]).toMatchObject({
+      title: 'Search history',
+      origin: { kind: 'subagent', label: 'researcher', sessionId: 'sub-sess-1' },
+    });
+  });
+
+  it('enforces per-step and whole-reply aggregate UTF-8 byte budgets while preserving all notes', () => {
+    const bigBlocks = Array.from({ length: 10 }, (_, i) => ({
+      type: 'resource',
+      resource: { uri: `file:///doc-${i}.txt`, text: `block-${i}: ` + 'a'.repeat(3500) },
+    }));
+    const single = roomReplySteps([{ kind: 'tool', call: { title: 'Big mixed', content: bigBlocks } }]);
+    expect(Buffer.byteLength(JSON.stringify(single[0]), 'utf8')).toBeLessThanOrEqual(
+      MAX_STEP_AGGREGATE_BYTES,
+    );
+    expect(single[0]!.outputTruncated).toBe(true);
+
+    // Whole reply budget keeps notes intact under MAX_REPLY_TOTAL_BYTES
+    const manySteps: AgentTurnStep[] = [
+      note('Important agent note that must survive.'),
+      ...Array.from({ length: 400 }, (_, i) => ({
+        kind: 'tool' as const,
+        call: { title: `step-${i}`, content: bigBlocks },
+      })),
+    ];
+    const rows = roomReplySteps(manySteps);
+    expect(Buffer.byteLength(JSON.stringify(rows), 'utf8')).toBeLessThanOrEqual(MAX_REPLY_TOTAL_BYTES);
+    expect(noteText(rows)).toBe('Important agent note that must survive.');
   });
 });

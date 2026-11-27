@@ -8,6 +8,7 @@ import { cornerDisplayName, formatSystemLine, MESSAGE_REACTION_EMOJIS, type Arti
 import { isAgentReachable } from '@beeline/api-contract/agent-access';
 import { mediaIdFromUrl } from '../media-ttl.js';
 import { readVaultSaveCard } from '@beeline/api-contract/phone';
+import { sanitizeActivityList } from '../sanitize-activity.js';
 import { MemberRow, RoomHeaderRow, AttachmentFacts, MessageRow, RoomScheduleRow } from './types.js';
 import { unix } from './values.js';
 import { visibleMessageSql } from '../read-cursor.js';
@@ -302,7 +303,7 @@ export function projectedMessage(
         }
       : {}),
     ...(row.reply_to_message_id && replyPreview ? { replyPreview } : {}),
-    ...(row.activity ? { activity: row.activity as NonNullable<RoomViewMessage['activity']> } : {}),
+    ...(row.activity ? { activity: sanitizeActivityList(row.activity, { full: true }) ?? [] } : {}),
     ...(row.durable_fact ? { durableFact: row.durable_fact } : {}),
     ...(row.system_event ? { systemEvent: row.system_event } : {}),
   };

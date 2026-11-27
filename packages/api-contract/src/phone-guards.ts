@@ -339,6 +339,84 @@ export function readToolReference(value:unknown): import('./phone-types.js').Roo
     typeof item.anchor==='string'&&item.anchor.length>0&&item.anchor.length<=128?{roomId:item.roomId,anchor:item.anchor}:undefined;
 }
 
+export function readActivityOrigin(
+  value: unknown,
+): import('./activity-item.js').ActivityOrigin | undefined {
+  const item = record(value);
+  if (!item || item.kind !== 'subagent') return undefined;
+  return {
+    kind: 'subagent',
+    ...field('label', typeof item.label === 'string' && item.label.length > 0 ? item.label : undefined),
+    ...field('sessionId', typeof item.sessionId === 'string' && item.sessionId.length > 0 ? item.sessionId : undefined),
+  };
+}
+
+export function readActivityBlock(
+  value: unknown,
+): import('./activity-item.js').ActivityResultBlock | null {
+  const item = record(value);
+  if (!item || typeof item.kind !== 'string') return null;
+  if (item.kind === 'text') {
+    if (typeof item.text !== 'string') return null;
+    return {
+      kind: 'text',
+      text: item.text,
+      ...field('truncated', item.truncated === true ? true : undefined),
+    };
+  }
+  if (item.kind === 'json') {
+    if (typeof item.text !== 'string') return null;
+    return {
+      kind: 'json',
+      text: item.text,
+      ...field('truncated', item.truncated === true ? true : undefined),
+      ...field('omittedCount', integer(item.omittedCount) && item.omittedCount > 0 ? item.omittedCount : undefined),
+    };
+  }
+  if (item.kind === 'diff') {
+    if (typeof item.path !== 'string' || typeof item.diff !== 'string') return null;
+    return {
+      kind: 'diff',
+      path: item.path,
+      diff: item.diff,
+      ...field('status', typeof item.status === 'string' ? item.status : undefined),
+      ...field('truncated', item.truncated === true ? true : undefined),
+    };
+  }
+  if (item.kind === 'media') {
+    if (item.mediaKind !== 'image' && item.mediaKind !== 'audio') return null;
+    return {
+      kind: 'media',
+      mediaKind: item.mediaKind,
+      ...field('mimeType', typeof item.mimeType === 'string' ? item.mimeType : undefined),
+      ...field('label', typeof item.label === 'string' ? item.label : undefined),
+      ...field('sizeBytes', integer(item.sizeBytes) ? item.sizeBytes : undefined),
+      ...field('available', typeof item.available === 'boolean' ? item.available : undefined),
+    };
+  }
+  if (item.kind === 'resource') {
+    if (item.mode !== 'link' && item.mode !== 'text' && item.mode !== 'blob') return null;
+    return {
+      kind: 'resource',
+      mode: item.mode,
+      ...field('uri', typeof item.uri === 'string' ? item.uri : undefined),
+      ...field('name', typeof item.name === 'string' ? item.name : undefined),
+      ...field('mimeType', typeof item.mimeType === 'string' ? item.mimeType : undefined),
+      ...field('text', typeof item.text === 'string' ? item.text : undefined),
+      ...field('sizeBytes', integer(item.sizeBytes) ? item.sizeBytes : undefined),
+      ...field('truncated', item.truncated === true ? true : undefined),
+    };
+  }
+  if (item.kind === 'unknown') {
+    return {
+      kind: 'unknown',
+      ...field('rawType', typeof item.rawType === 'string' ? item.rawType : undefined),
+      ...field('text', typeof item.text === 'string' ? item.text : undefined),
+    };
+  }
+  return null;
+}
+
 export function readActivity(value: unknown): RoomViewActivity | null {
   const item = record(value);
   if (
@@ -354,20 +432,39 @@ export function readActivity(value: unknown): RoomViewActivity | null {
   }
   const rollup = record(item.rollup);
   const plan = readPlan(item.plan);
+  const toolOutputRef = readToolReference(item.toolOutput);
+  const toolOutputRecord = record(item.toolOutput);
   return {
     kind: item.kind,
     title: item.title,
     ...field('toolGroup',readToolReference(item.toolGroup)&&integer(record(item.toolGroup)?.count)&&Number(record(item.toolGroup)?.count)>0
       ?{...readToolReference(item.toolGroup)!,count:Number(record(item.toolGroup)!.count)}:undefined),
-    ...field('toolOutput',readToolReference(item.toolOutput)&&typeof record(item.toolOutput)?.messageId==='string'
-      ?{...readToolReference(item.toolOutput)!,messageId:String(record(item.toolOutput)!.messageId)}:undefined),
+    ...field('toolOutput', toolOutputRef && typeof toolOutputRecord?.messageId === 'string'
+      ? {
+          ...toolOutputRef,
+          messageId: String(toolOutputRecord.messageId),
+          ...field('itemIndex', integer(toolOutputRecord.itemIndex) ? toolOutputRecord.itemIndex : undefined),
+          ...field('hasDetail', typeof toolOutputRecord.hasDetail === 'boolean' ? toolOutputRecord.hasDetail : undefined),
+        }
+      : undefined),
+    ...field('hasDetail', typeof item.hasDetail === 'boolean' ? item.hasDetail : undefined),
     ...field('text', typeof item.text === 'string' ? item.text : undefined),
     ...field('continues', item.continues === true ? true : undefined),
     ...field('operation', typeof item.operation === 'string' ? item.operation : undefined),
     ...field('status', typeof item.status === 'string' ? item.status : undefined),
+    ...field('summary', typeof item.summary === 'string' ? item.summary : undefined),
+    ...field('exitCode', typeof item.exitCode === 'number' && Number.isSafeInteger(item.exitCode) ? item.exitCode : undefined),
+    ...field('signal', typeof item.signal === 'string' && item.signal.length > 0 ? item.signal : undefined),
+    ...field('outputTruncated', item.outputTruncated === true ? true : undefined),
+    ...field('omittedCount', integer(item.omittedCount) && item.omittedCount > 0 ? item.omittedCount : undefined),
+    ...field('terminalOnly', item.terminalOnly === true ? true : undefined),
+    ...field('outputHidden', item.outputHidden === true ? true : undefined),
+    ...field('sanitized', item.sanitized === true ? true : undefined),
+    ...field('origin', readActivityOrigin(item.origin)),
     ...field('command', typeof item.command === 'string' ? item.command : undefined),
     ...field('input', typeof item.input === 'string' ? item.input : undefined),
     ...field('output', typeof item.output === 'string' ? item.output : undefined),
+    ...field('blocks', readList(item.blocks, readActivityBlock, 24)),
     ...field('requestedBy', readActivityRequester(item.requestedBy)),
     ...field('thoughtMs', integer(item.thoughtMs) ? item.thoughtMs : undefined),
     ...field(
@@ -393,10 +490,20 @@ export function readActivity(value: unknown): RoomViewActivity | null {
       readList(item.files, (candidate) => {
         const file = record(candidate);
         if (!file || typeof file.path !== 'string') return null;
+        const line = integer(file.line) && file.line > 0 ? file.line : undefined;
+        const endLine =
+          line !== undefined && integer(file.endLine) && file.endLine >= line
+            ? file.endLine
+            : undefined;
         return {
           path: file.path,
           ...field('status', typeof file.status === 'string' ? file.status : undefined),
           ...field('diff', typeof file.diff === 'string' ? file.diff : undefined),
+          ...field('diffTruncated', file.diffTruncated === true ? true : undefined),
+          ...field('addedLines', integer(file.addedLines) ? file.addedLines : undefined),
+          ...field('removedLines', integer(file.removedLines) ? file.removedLines : undefined),
+          ...field('line', line),
+          ...field('endLine', endLine),
         };
       }),
     ),
