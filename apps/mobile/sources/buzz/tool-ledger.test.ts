@@ -69,20 +69,85 @@ describe('toolLedgerLines', () => {
     expect(shown!.durationMs).toBe(2100);
   });
 
-  it('keeps reason, file lines and output in the sheet detail', () => {
+  it('keeps failure reason and output in the sheet detail without fabricating path-only file lines', () => {
     const [line] = toolLedgerLines([
       step({
         id: 'd',
         toolKind: 'read',
         title: 'Read',
+        outcome: 'failure',
         reason: 'permission denied',
         files: [{ path: 'sources/Ledger.tsx', status: 'M' }],
         output: '[{"type":"content","content":{"type":"text","text":"first\\nsecond"}}]',
       }),
     ]);
-    expect(line!.detail).toBe(
-      ['permission denied', 'M sources/Ledger.tsx', 'first', 'second'].join('\n'),
-    );
+    expect(line!.detail).toBe(['permission denied', 'first', 'second'].join('\n'));
+    expect(line!.detail).not.toContain('M sources/Ledger.tsx');
+  });
+
+  it('enforces the chevron acceptance invariant across receipts, failures, old/new servers, and unseen facts', () => {
+    const [pathOnlyRead, emptyReadMsg, redundantFail, extraFail, exitZeroCmd, oldServerHandle, newServerNoDetail] =
+      toolLedgerLines([
+        step({
+          id: 'r1',
+          toolKind: 'read',
+          title: 'Read',
+          files: [{ path: 'agent-home/codex/skills/beeline-connecting-services/SKILL.md' }],
+        }),
+        step({
+          id: 'r2',
+          toolKind: 'other',
+          title: 'mcp.beeline-agent.read',
+          input: '{"facet":"message","messageId":"abc"}',
+        }),
+        step({
+          id: 'f1',
+          toolKind: 'execute',
+          title: 'Bash',
+          command: 'vitest run',
+          outcome: 'failure',
+          reason: 'command not found: vitest',
+        }),
+        step({
+          id: 'f2',
+          toolKind: 'execute',
+          title: 'Bash',
+          command: 'vitest run',
+          outcome: 'failure',
+          reason: 'command not found: vitest',
+          output: 'sh: 1: vitest: not found\nPATH=/usr/bin',
+        }),
+        step({
+          id: 'ok0',
+          toolKind: 'execute',
+          title: 'Bash',
+          command: 'git add ChatTree.tsx',
+          exitCode: 0,
+        }),
+        step({
+          id: 'old-srv',
+          toolKind: 'read',
+          title: 'Read',
+          toolOutput: { roomId: '11111111-1111-4111-8111-111111111111', anchor: 'a', messageId: 'm' },
+        }),
+        step({
+          id: 'new-srv',
+          toolKind: 'read',
+          title: 'Read',
+          hasDetail: false,
+          toolOutput: { roomId: '11111111-1111-4111-8111-111111111111', anchor: 'a', messageId: 'm', hasDetail: false },
+        }),
+      ]);
+
+    expect(pathOnlyRead!.inspectable).toBe(false);
+    expect(emptyReadMsg!.inspectable).toBe(false);
+    expect(redundantFail!.inspectable).toBe(false);
+    expect(extraFail!.inspectable).toBe(true);
+    expect(exitZeroCmd!.inspectable).toBe(true);
+    // Old server unconditional handle cannot rule out unseen detail before fetch
+    expect(oldServerHandle!.inspectable).toBe(true);
+    // New server explicit hasDetail=false stays quiet
+    expect(newServerNoDetail!.inspectable).toBe(false);
   });
 
   it('a step with nothing behind it is not pressable — no detail at all', () => {

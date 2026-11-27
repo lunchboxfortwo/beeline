@@ -58,17 +58,34 @@ export type AgentActivityItem = {
   thoughtMs?: number;
   text?: string;
   status?: string;
+  summary?: string;
+  exitCode?: number;
+  signal?: string;
+  outputTruncated?: boolean;
+  omittedCount?: number;
+  terminalOnly?: boolean;
+  outputHidden?: boolean;
+  sanitized?: boolean;
+  hasDetail?: boolean;
+  origin?: import('@beeline/api-contract/phone').ActivityOrigin;
   /** Bounded, redacted corner-tool argument summary. */
   command?: string;
   input?: string;
   /** Bounded first/last-line excerpt from the completed tool result. */
   output?: string;
+  /** Bounded ordered sequence of ACP result blocks for mixed or structured results. */
+  blocks?: readonly import('@beeline/api-contract/phone').ActivityResultBlock[];
   /** The identity whose message triggered the turn ("at Alex's request"). */
   requestedBy?: { pubkey: string; name?: string };
   files?: Array<{
     path: string;
     status?: string;
     diff?: string;
+    diffTruncated?: boolean;
+    addedLines?: number;
+    removedLines?: number;
+    line?: number;
+    endLine?: number;
   }>;
   /**
    * On a `note`: this text carries on the previous note. One text run longer

@@ -20,16 +20,34 @@ export class LiveTurnSteps {
     },
   ) {}
 
+  private callKey(call: ToolCallEntry, index: number): string {
+    const scope = call.origin?.sessionId ?? call.sessionId ?? '';
+    const base = call.id ?? `anonymous-${index}`;
+    return scope ? `${scope}\0${base}` : base;
+  }
+
   readonly onToolCalls = (calls: readonly ToolCallEntry[]): void => {
     calls.forEach((call, index) => {
-      if (!call.resultReceived && !['completed', 'failed'].includes(call.status ?? '')) return;
-      const key = call.id ?? `anonymous-${index}`;
+      if (
+        !call.resultReceived &&
+        !['completed', 'failed', 'error', 'cancelled', 'canceled', 'signalled', 'signaled'].includes(
+          (call.status ?? '').toLowerCase(),
+        )
+      ) {
+        return;
+      }
+      const key = this.callKey(call, index);
       if (this.seen.has(key)) return;
       this.seen.add(key);
       // ACP appends background tasks after ordinary calls; snapshot positions move.
       const activityKey = createHash('sha256').update(JSON.stringify([this.turn.invocation?.id ?? this.turn.requestId, key])).digest('hex');
       // A result may retain the earlier in-progress status until another update.
-      const finished = { ...call, status: call.status === 'failed' ? 'failed' : 'completed' };
+      const lowerStatus = (call.status ?? '').toLowerCase();
+      const settledStatus =
+        !lowerStatus || ['in_progress', 'in-progress', 'pending', 'running', 'started', 'working'].includes(lowerStatus)
+          ? 'completed'
+          : call.status!;
+      const finished = { ...call, status: settledStatus };
       const activity = roomReplySteps([{ kind: 'tool', call: finished }]);
       this.pending = this.pending
         .then(async () => {
@@ -54,7 +72,7 @@ export class LiveTurnSteps {
     return steps.filter((step) => {
       if (step.kind !== 'tool') return true;
       const index = toolIndex++;
-      return !this.saved.has(step.call.id ?? `anonymous-${index}`);
+      return !this.saved.has(this.callKey(step.call, index));
     });
   }
 }

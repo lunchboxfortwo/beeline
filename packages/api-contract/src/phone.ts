@@ -1,3 +1,4 @@
+export * from './activity-item.js';
 export * from './phone-types.js';
 export * from './model-choice.js';
 export * from './voice.js';

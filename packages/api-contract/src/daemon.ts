@@ -1,3 +1,4 @@
+export * from './activity-item.js';
 export * from './daemon-operations.js';
 export * from './vault-save.js';
 export * from './reply-context.js';

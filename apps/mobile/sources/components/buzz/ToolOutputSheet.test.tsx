@@ -271,4 +271,136 @@ describe('ToolOutputSheet (v3 result-first)', () => {
     expect(secret.root.findAllByProps({ testID: 'tool-output-copy' })).toHaveLength(0);
     expect(secret.root.findAllByProps({ testID: 'tool-output-raw-toggle' })).toHaveLength(0);
   });
+
+  it('renders ordered mixed ACP blocks (caption + unavailable media receipt + structured JSON) with wrapping title', () => {
+    const renderer = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Squire · Capture checkout state for long wrapping subject verification"
+        detail={undefined}
+        blocks={[
+          { kind: 'text', text: 'Captured billing confirmation after Stripe Link redirect.' },
+          { kind: 'media', mediaKind: 'image', mimeType: 'image/png', sizeBytes: 145_408, available: false },
+          { kind: 'json', text: JSON.stringify({ status: 'confirmed', domain: 'whitejade.xyz', total: '$29.00' }) },
+        ]}
+      />,
+    );
+    expect(renderer.root.findByType('HullActionSheetModal').props.wrapTitle).toBe(true);
+    expect(renderer.root.findByProps({ testID: 'tool-output-caption-0' })).toBeTruthy();
+    expect(renderer.root.findByProps({ testID: 'tool-output-media-1' })).toBeTruthy();
+    expect(renderer.root.findByProps({ testID: 'tool-output-kv-card' })).toBeTruthy();
+    const text = treeText(renderer);
+    expect(text).toContain('Image · image/png · 142 KB');
+    expect(text).toContain('Media bytes not stored in activity log');
+    expect(text).toContain('whitejade.xyz');
+  });
+
+  it('renders signalled bounded terminal excerpt without duplicating raw mono in Zone 2 and labels Copy excerpt', () => {
+    const renderer = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Run body test suite"
+        outcome="failure"
+        signal="SIGKILL"
+        outputTruncated
+        command='NODE_OPTIONS="--max-old-space-size=4096" npm test --workspace=@beeline/body'
+        detail={'PASS src/a.test.ts\n[… omitted …]\nKilled (signal SIGKILL)'}
+        rawOutput={'PASS src/a.test.ts\n[… omitted …]\nKilled (signal SIGKILL)'}
+      />,
+    );
+    const text = treeText(renderer);
+    expect(text).toContain('Signalled · SIGKILL');
+    expect(text).toContain('Bounded');
+    expect(renderer.root.findByProps({ testID: 'tool-output-copy' }).props.label).toBe('Copy excerpt');
+
+    // Expand Zone 2 -> shows Command, does NOT duplicate mono Output!
+    act(() => renderer.root.findByProps({ testID: 'tool-output-raw-toggle' }).props.onPress());
+    expect(renderer.root.findByProps({ testID: 'tool-output-command' })).toBeTruthy();
+    expect(renderer.root.findAllByProps({ testID: 'tool-output-raw-output' })).toHaveLength(0);
+  });
+
+  it('distinguishes observed exit 0 (auto-expanding Command) vs unobserved terminal-handle-only completion', () => {
+    const exitZero = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Stage modified files"
+        outcome="success"
+        exitCode={0}
+        command="git add ChatTree.tsx"
+        detail={undefined}
+      />,
+    );
+    expect(treeText(exitZero)).toContain('Exited (0) · no output');
+    expect(exitZero.root.findByProps({ testID: 'tool-output-command' })).toBeTruthy();
+    expect(exitZero.root.findByProps({ testID: 'tool-output-copy' }).props.label).toBe('Copy command');
+
+    const terminalOnly = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Sync workspace index"
+        outcome="success"
+        terminalOnly
+        detail={undefined}
+      />,
+    );
+    expect(treeText(terminalOnly)).toContain('Completed');
+    expect(treeText(terminalOnly)).not.toContain('Exited (0)');
+    expect(treeText(terminalOnly)).toContain('Adapter reported completion without an exit code or captured text.');
+  });
+
+  it('groups strict file:line:text matches while keeping colon-bearing logs, host:port, and Windows paths as mono', () => {
+    const grouped = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Found projection"
+        detail={
+          'apps/server/src/room-tool-projection.ts:25:SELECT jsonb_agg(...)\napps/server/src/room-tool-projection.ts:40:toolOutput'
+        }
+        rawOutput={
+          'apps/server/src/room-tool-projection.ts:25:SELECT jsonb_agg(...)\napps/server/src/room-tool-projection.ts:40:toolOutput'
+        }
+      />,
+    );
+    expect(grouped.root.findByProps({ testID: 'tool-output-matches' })).toBeTruthy();
+
+    const colonLogs = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Server log"
+        detail={'12:04:11 WARN api.usebeeline.app:443 retry 1\nC:\\Users\\dev\\beeline\\app.ts: loaded config'}
+        rawOutput={'12:04:11 WARN api.usebeeline.app:443 retry 1\nC:\\Users\\dev\\beeline\\app.ts: loaded config'}
+      />,
+    );
+    expect(colonLogs.root.findAllByProps({ testID: 'tool-output-matches' })).toHaveLength(0);
+    expect(colonLogs.root.findByProps({ testID: 'tool-output-text' })).toBeTruthy();
+  });
+
+  it('renders resource link/text/blob modes and unknown block fallback honestly without auto-fetching', () => {
+    const renderer = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Inspect resources"
+        sanitized
+        detail={undefined}
+        blocks={[
+          { kind: 'resource', mode: 'link', uri: 'mcp://linear/issues?token=[REDACTED]', mimeType: 'application/json' },
+          { kind: 'resource', mode: 'blob', uri: 'file:///tmp/out.bin', mimeType: 'application/octet-stream', sizeBytes: 4096 },
+          { kind: 'unknown', rawType: 'custom_card', text: 'Unsupported payload' },
+        ]}
+      />,
+    );
+    const text = treeText(renderer);
+    expect(text).toContain('Link · application/json (not fetched)');
+    expect(text).toContain('mcp://linear/issues?token=[REDACTED]');
+    expect(text).toContain('Binary resource bytes not stored in activity log');
+    expect(text).toContain('Unrecognized result block · custom_card');
+    expect(text).toContain('Sanitized');
+  });
 });

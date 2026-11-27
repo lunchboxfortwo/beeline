@@ -185,7 +185,13 @@ export type RoomToolPage = { readonly roomId: string; readonly messages: readonl
 
 type RoomViewActivityFields = {
   readonly toolGroup?: RoomToolReference & { readonly count: number };
-  readonly toolOutput?: RoomToolReference & { readonly messageId: string };
+  readonly toolOutput?: RoomToolReference & {
+    readonly messageId: string;
+    readonly itemIndex?: number;
+    readonly hasDetail?: boolean;
+  };
+  /** List-time bounded presence flag: true when stored detail exists beyond list metadata. */
+  readonly hasDetail?: boolean;
   readonly thoughtMs?: number;
   readonly rollup?: Readonly<Record<string, number>>;
   readonly observed?: readonly {

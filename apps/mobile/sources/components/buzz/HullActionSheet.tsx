@@ -27,6 +27,8 @@ type HullActionSheetProps = {
   subtitle?: string;
   testID?: string;
   title?: string;
+  /** Allow long sheet titles (such as full tool subjects) to wrap cleanly. */
+  wrapTitle?: boolean;
   /** Makes the title a button, e.g. a Room's name that opens its rename editor. */
   onTitlePress?: () => void;
   titleAccessibilityLabel?: string;
@@ -81,6 +83,7 @@ export function HullActionSheet({
   subtitle,
   testID,
   title,
+  wrapTitle = false,
   titleAccessibilityLabel,
   titleTestID,
 }: HullActionSheetProps) {
@@ -151,13 +154,13 @@ export function HullActionSheet({
           onPress={onTitlePress}
           testID={titleTestID}
         >
-          <T v="heading" numberOfLines={1} paddingHorizontal="6" paddingTop={clearsTop ? '5' : '1'} paddingBottom="2">{title}</T>
+          <T v="heading" numberOfLines={wrapTitle ? undefined : 1} paddingHorizontal="6" paddingTop={clearsTop ? '5' : '1'} paddingBottom="2">{title}</T>
         </YStack>
       ) : title ? (
         <T
           v="heading"
           accessibilityRole="header"
-          numberOfLines={1}
+          numberOfLines={wrapTitle ? undefined : 1}
           paddingHorizontal="6"
           paddingTop={clearsTop ? '5' : '1'}
           paddingBottom="2"
@@ -294,6 +297,7 @@ type HullActionSheetModalProps = {
   scrimTestID?: string;
   testID?: string;
   title?: string;
+  wrapTitle?: boolean;
   onTitlePress?: () => void;
   titleAccessibilityLabel?: string;
   titleTestID?: string;
@@ -319,6 +323,7 @@ export function HullActionSheetModal({
   subtitle,
   testID,
   title,
+  wrapTitle,
   titleAccessibilityLabel,
   titleTestID,
   visible,
@@ -352,6 +357,7 @@ export function HullActionSheetModal({
         testID={testID}
         onTitlePress={onTitlePress}
         title={title}
+        wrapTitle={wrapTitle}
         titleAccessibilityLabel={titleAccessibilityLabel}
         titleTestID={titleTestID}
       >
