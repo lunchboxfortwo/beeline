@@ -301,3 +301,19 @@ test('initialize exports every plan flag release finalization reads', () => {
     ...RELEASE_COMPONENTS.map(component => `run_${component.replace('-', '_')}`)];
   for (const flag of flags) assert.ok(outputs[flag], `initialize output ${flag}`);
 });
+
+test('website and desktop release workflows build @beeline/design-tokens with the shared packages', () => {
+  const websiteSteps = parse(readFileSync('.github/workflows/unified-release.yml', 'utf8')).jobs.website.steps;
+  const desktopSteps = parse(readFileSync('.github/workflows/desktop.yml', 'utf8')).jobs.build.steps;
+  const macDesktopSteps = parse(readFileSync('.github/workflows/mac-desktop.yml', 'utf8')).jobs.build.steps;
+
+  for (const [label, steps] of [
+    ['unified-release website', websiteSteps],
+    ['desktop build', desktopSteps],
+    ['mac-desktop build', macDesktopSteps],
+  ]) {
+    const sharedBuild = steps.find(step => typeof step.run === 'string' && step.run.includes('@beeline/buzz-client'));
+    assert.ok(sharedBuild, `${label} has a shared-package build step`);
+    assert.match(sharedBuild.run, /npm run build -w @beeline\/design-tokens\b/, `${label} builds @beeline/design-tokens`);
+  }
+});

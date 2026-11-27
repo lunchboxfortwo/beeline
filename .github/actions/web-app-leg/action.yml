@@ -1,5 +1,5 @@
 # The caller installs Node 22, the root `npm ci`, the @beeline/nostr,
-# api-contract and buzz-client builds Metro resolves, and the pinned eas-cli.
+# api-contract, buzz-client, net and design-tokens builds Metro resolves, and the pinned eas-cli.
 name: Publish the Expo web app
 description: Export and deploy the candidate to an immutable EAS Hosting preview
 inputs:

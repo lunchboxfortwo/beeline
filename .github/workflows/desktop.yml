@@ -173,7 +173,7 @@ jobs:
           restore-keys: |
             desktop-cargo-${{ matrix.label }}-
       - run: bash packages/scripts/npm-ci-timed.sh
-      - run: npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net
+      - run: npm run build -w @beeline/nostr && npm run build -w @beeline/api-contract && npm run build -w @beeline/buzz-client && npm run build -w @beeline/net && npm run build -w @beeline/design-tokens
       - name: Install mobile dependencies
         working-directory: apps/mobile
         run: bash ../../packages/scripts/npm-ci-timed.sh

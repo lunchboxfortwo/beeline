@@ -60,7 +60,34 @@ const sameHashesVersion = fs.existsSync(path.join(rootHashesPath, 'package.json'
   require(path.join(rootHashesPath, 'package.json')).version ===
     require(path.join(mobileHashesPath, 'package.json')).version;
 const designTokensDistEntry = path.resolve(__dirname, '../../packages/design-tokens/dist/index.js');
-const designTokensSrcEntry = path.resolve(__dirname, '../../packages/design-tokens/src/index.ts');
+const designTokensSrcDir = path.resolve(__dirname, '../../packages/design-tokens/src');
+const designTokensSrcEntry = path.join(designTokensSrcDir, 'index.ts');
+const isInsideDir = (dir, target) => {
+  const rel = path.relative(dir, target);
+  return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+};
+const resolveDesignTokensSourceImport = (originModulePath, moduleName) => {
+  if (
+    typeof originModulePath !== 'string' ||
+    (!moduleName.startsWith('./') && !moduleName.startsWith('../')) ||
+    !moduleName.endsWith('.js')
+  ) {
+    return null;
+  }
+  const resolvedOrigin = path.resolve(originModulePath);
+  if (!isInsideDir(designTokensSrcDir, resolvedOrigin)) {
+    return null;
+  }
+  const targetJs = path.resolve(path.dirname(resolvedOrigin), moduleName);
+  if (!isInsideDir(designTokensSrcDir, targetJs) || fs.existsSync(targetJs)) {
+    return null;
+  }
+  const targetTs = `${targetJs.slice(0, -3)}.ts`;
+  if (fs.existsSync(targetTs)) {
+    return { filePath: targetTs, type: 'sourceFile' };
+  }
+  return null;
+};
 const baseResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === '@beeline/design-tokens') {
@@ -68,6 +95,10 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       filePath: fs.existsSync(designTokensDistEntry) ? designTokensDistEntry : designTokensSrcEntry,
       type: 'sourceFile',
     };
+  }
+  const designTokensFallback = resolveDesignTokensSourceImport(context?.originModulePath, moduleName);
+  if (designTokensFallback) {
+    return designTokensFallback;
   }
   if (moduleName === 'preact') {
     return { filePath: preactCjsPath, type: 'sourceFile' };
