@@ -331,7 +331,7 @@ it('groups activity in its corner and keeps each message separately tappable', (
 describe('APNs read-clear request', () => {
   it('updates the server badge after a read without displaying a second notification', () => {
     const request = apnsReadClearRequest('device', [], 'app.bundle', 'jwt', 0);
-    expect(request.payload.aps).toEqual({ 'content-available': 1, badge: 0 });
+    expect(request.payload).toEqual({ aps: { 'content-available': 1, badge: 0 } });
     expect(request.headers['apns-push-type']).toBe('alert');
   });
 

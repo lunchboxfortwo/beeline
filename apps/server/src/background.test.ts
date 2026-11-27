@@ -562,7 +562,7 @@ describe('background advisory-lock ownership', () => {
 
   // G9-R2: marking a Room unread moves its mark backwards. That is not a read,
   // so it must not send a silent push that dismisses the Room's notifications.
-  it('sends no read-clear push when a Room is marked unread', async () => {
+  it('updates only the badge when a Room is marked unread', async () => {
     const db = await migratedDatabase();
     try {
       const human = 'a'.repeat(64),
@@ -620,12 +620,12 @@ describe('background advisory-lock ownership', () => {
       // The mark moves back past every message; second stays in the shade.
       await phone.markUnread(room, first, human);
       await loop.runOnce();
-      expect(clearRead).toHaveBeenCalledTimes(1);
+      expect(clearRead).toHaveBeenLastCalledWith(ios, [], 2);
 
       // Reading it is a read, and clears it.
       await phone.markRead(room, second, human);
       await loop.runOnce();
-      expect(clearRead).toHaveBeenCalledTimes(2);
+      expect(clearRead).toHaveBeenCalledTimes(3);
       expect(clearRead).toHaveBeenLastCalledWith(ios, [
         { channelId: room, messageId: second, readMessageIds: [] },
       ], expect.any(Number));

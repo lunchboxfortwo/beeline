@@ -154,14 +154,18 @@ export async function backfillPushOutbox(database: SqlDatabase): Promise<void> {
 
 
 /* Count unread messages across the recipient's accessible conversations, using the Room cursor rule. */
-export async function pushUnreadCount(database: SqlDatabase, viewerId: string): Promise<number> {
-  const result = await database.query<{ badge: number }>(`
+export function pushUnreadCountSql(viewer: string): string {
+  return `(
     SELECT count(*)::int badge
     FROM room_access access
     LEFT JOIN room_read_marks mark ON mark.room_id=access.room_id AND mark.identity_id=access.identity_id
     JOIN messages message ON message.room_id=access.room_id
-    WHERE access.identity_id=$1 AND access.removed_at IS NULL
+    WHERE access.identity_id=${viewer} AND access.removed_at IS NULL
       AND (message.created_at,message.id)>(COALESCE(mark.message_created_at,'-infinity'::timestamptz),COALESCE(mark.message_id,''))
-      AND ${unreadMessageSql('message', '$1')}`, [viewerId]);
+      AND ${unreadMessageSql('message', viewer)})`;
+}
+
+export async function pushUnreadCount(database: SqlDatabase, viewerId: string): Promise<number> {
+  const result = await database.query<{ badge: number }>(`SELECT ${pushUnreadCountSql('$1')} AS badge`, [viewerId]);
   return result.rows[0]!.badge;
 }

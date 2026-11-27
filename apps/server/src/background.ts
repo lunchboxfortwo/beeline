@@ -19,7 +19,7 @@ import { apnsReadClearBatch } from './apns-push.js';
 import { firebaseReadClearBatch } from './firebase-push.js';
 import { cornerFactsSql, cornerRowState, type CornerStateRow } from './chat-corner-counts.js';
 import { pushDirectAttentionSql } from './push-attention.js';
-import { pushUnreadCount } from './push-outbox.js';
+import { pushUnreadCount, pushUnreadCountSql } from './push-outbox.js';
 import { agentBlockSql } from './read-cursor.js';
 import { SERVER_LEASE_EXPIRY_MS } from './connection-presence.js';
 
@@ -175,6 +175,11 @@ export class PushDeliveryLoop {
     return delivered;
   }
 
+  private async recordBadge(token: string, viewer: string, badge: number): Promise<void> {
+    await this.database.query(`UPDATE push_devices SET last_badge_count=$3
+      WHERE token=$1 AND identity_id=$2 AND platform='ios' AND last_badge_count IS DISTINCT FROM $3`, [token, viewer, badge]);
+  }
+
   /** Batch delivered claims at or before each read mark, or in archived threads, into one silent push per device. */
   private async sendReadClears(): Promise<void> {
     // One rule for both platforms; each sender keeps its own size limit.
@@ -189,13 +194,21 @@ export class PushDeliveryLoop {
       token: string;
       platform: 'ios' | 'android';
       identity_id: string;
-      channel_ids: string[];
+      badge: number | null;
+      channel_ids: string[] | null;
       message_ids: string[];
       read_message_ids: string[];
     }>(
       // Registered-device claims beyond any cap remain due for a later push.
-      `SELECT device.token,device.identity_id,device.platform,batch.channel_ids,batch.message_ids,batch.read_message_ids
+      `WITH ios_badges AS MATERIALIZED (
+         SELECT owner.id,CASE WHEN owner.push_level='off' THEN 0
+           ELSE ${pushUnreadCountSql('owner.id')} END AS badge
+         FROM (SELECT DISTINCT identity_id FROM push_devices WHERE platform='ios' AND 'ios'=ANY($1::text[])) ios
+         JOIN identities owner ON owner.id=ios.identity_id
+       )
+       SELECT device.token,device.identity_id,device.platform,ios_badges.badge,batch.channel_ids,batch.message_ids,batch.read_message_ids
        FROM push_devices device
+       LEFT JOIN ios_badges ON device.platform='ios' AND ios_badges.id=device.identity_id
        CROSS JOIN LATERAL (
          SELECT array_agg(pending.room_id ORDER BY pending.sort_at,pending.room_id) channel_ids,
            array_agg(pending.message_id ORDER BY pending.sort_at,pending.room_id) message_ids,
@@ -246,25 +259,28 @@ export class PushDeliveryLoop {
            ) archived
          ) pending
        ) batch
-       WHERE device.platform=ANY($1::text[]) AND batch.channel_ids IS NOT NULL
+       WHERE device.platform=ANY($1::text[]) AND (batch.channel_ids IS NOT NULL
+         OR (device.platform='ios' AND ios_badges.badge IS DISTINCT FROM device.last_badge_count))
 `,
       [enabled],
     );
     for (const row of due.rows) {
       const { sender, batch } = platforms[row.platform];
       if (!sender?.clearRead) continue;
-      let pending = row.channel_ids.map((channelId, index) => ({
+      let pending = (row.channel_ids ?? []).map((channelId, index) => ({
         channelId, messageId: row.message_ids[index]!,
         readMessageIds: JSON.parse(row.read_message_ids[index]!) as string[],
       }));
-      while (pending.length) {
+      do {
         const reads = batch(pending);
         try {
-          if (row.platform === 'ios') {
-            await sender.clearRead(row.token, reads, await pushUnreadCount(this.database, row.identity_id));
+          if (row.badge !== null) {
+            await sender.clearRead(row.token, reads, row.badge);
+            await this.recordBadge(row.token, row.identity_id, row.badge);
           } else {
             await sender.clearRead(row.token, reads);
           }
+          if (reads.length === 0) break;
           await this.database.query(
             `UPDATE push_delivery_claims SET read_cleared_at=now()
              WHERE device_token=$1 AND message_id=ANY($2::text[])`,
@@ -280,7 +296,7 @@ export class PushDeliveryLoop {
           const remaining = read.readMessageIds.filter(id => !ids.has(id));
           return remaining.length ? [{ ...read, readMessageIds: remaining }] : [];
         });
-      }
+      } while (pending.length);
     }
   }
 
@@ -662,12 +678,13 @@ export class PushDeliveryLoop {
                     ? await badgeFor(this.database, candidate.identity_id) : undefined;
                   if (Date.now() >= expiryByKey.get(JSON.stringify([candidate.message_id,candidate.token]))!)
                     throw new Error('Push expired before provider send');
-                  return sender.send(candidate.token, {
+                  await sender.send(candidate.token, {
                     deliveryId: randomUUID(),
                     ...(unreadCount !== undefined ? { unreadCount } : {}),
                     ...message,
                     recipientIdentityId: candidate.identity_id,
                   });
+                  if (unreadCount !== undefined) await this.recordBadge(candidate.token, candidate.identity_id, unreadCount);
                 });
               slotSends.set(slot, sending);
               await sending;

@@ -32,6 +32,38 @@ async function post(db: SqlDatabase, id: string) {
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@owner hello')`, [id, room, author]);
 }
 
+it('updates the iOS badge after reading a Room that never produced a push claim', async () => {
+  const db = new PgliteDatabase();
+  const quiet = '33333333-3333-4333-8333-333333333333';
+  try {
+    await setup(db);
+    await db.query("UPDATE push_devices SET platform='ios'");
+    await db.query("UPDATE identities SET push_level='attention' WHERE id=$1", [person]);
+    await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Quiet')", [quiet, workspace]);
+    await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')",
+      [workspace, quiet, person]);
+    await db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES('quiet',$1,$2,'Ordinary update')", [quiet, author]);
+    await post(db, 'mention');
+    const send = vi.fn().mockResolvedValue(undefined);
+    const clearRead = vi.fn().mockResolvedValue(undefined);
+    const loop = new PushDeliveryLoop(db, undefined, { send, clearRead });
+    const markRead = (id: string) => db.query(`INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id)
+      SELECT room_id,$1,created_at,id FROM messages WHERE id=$2`, [person, id]);
+    expect(await loop.runOnce()).toBe(1);
+    expect(send).toHaveBeenCalledWith('proof-device', expect.objectContaining({ messageId: 'mention', unreadCount: 2 }));
+    expect(clearRead).not.toHaveBeenCalled();
+    await markRead('mention');
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenLastCalledWith('proof-device', [expect.objectContaining({ messageId: 'mention' })], 1);
+    expect((await db.query("SELECT message_id FROM push_delivery_claims WHERE read_cleared_at IS NULL")).rows).toEqual([]);
+    await markRead('quiet');
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenLastCalledWith('proof-device', [], 0);
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenCalledTimes(2);
+  } finally { await db.close(); }
+});
+
 it('never retries an abandoned claim when a server restarts', async () => {
   const db = new PgliteDatabase();
   try {

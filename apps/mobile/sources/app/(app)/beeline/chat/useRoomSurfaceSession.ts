@@ -299,10 +299,10 @@ export function useRoomSurfaceSession({
   const readStamp = roomReadStampRef.current;
   const lastShadeRead = useRef(readStamp);
   useEffect(() => {
-    if (lastShadeRead.current === readStamp) return;
+    if (!isFocused || roomSurface?.room.id !== channelId || lastShadeRead.current === readStamp) return;
     lastShadeRead.current = readStamp;
     if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
-    if (!isFocused || roomSurface?.room.id !== channelId || roomSurface.viewer.readCursor?.firstUnreadMessageId !== null) return;
+    if (roomSurface.viewer.readCursor?.firstUnreadMessageId !== null) return;
     void import('expo-notifications').then(api =>
       dismissPresentedNotificationsForChannel(channelId, api, Platform.OS)).catch(error =>
       console.log('Failed to dismiss read notifications:', error));

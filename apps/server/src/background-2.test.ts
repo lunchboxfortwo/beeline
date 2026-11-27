@@ -174,8 +174,8 @@ describe('background advisory-lock ownership', () => {
         [first, second, room, agent],
       );
       await db.query(
-        `INSERT INTO push_devices(token,identity_id,platform,environment,registered_at)
-         VALUES($1,$2,'ios','physical',now()-interval '1 hour')`,
+        `INSERT INTO push_devices(token,identity_id,platform,environment,registered_at,last_badge_count)
+         VALUES($1,$2,'ios','physical',now()-interval '1 hour',2)`,
         [ios, human],
       );
       await db.query(

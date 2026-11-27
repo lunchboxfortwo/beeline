@@ -2147,6 +2147,7 @@
           "environment": "existing before the registry; weekly audit reviews",
           "registered_at": "existing before the registry; weekly audit reviews",
           "updated_at": "existing before the registry; weekly audit reviews",
+          "last_badge_count": "Last unread total accepted by APNs for this installation",
           "web_keys": "existing before the registry; weekly audit reviews"
         }
       },

@@ -115,7 +115,7 @@ export function apnsPushRequest(
 export const APNS_MAX_PAYLOAD_BYTES = 4096;
 
 function readClearPayload(reads: readonly ReadClear[], badge?: number): Record<string, unknown> {
-  return { aps: { 'content-available': 1, ...(badge !== undefined ? { badge } : {}) }, ...readClearPushData(reads) };
+  return { aps: { 'content-available': 1, ...(badge !== undefined ? { badge } : {}) }, ...(reads.length ? readClearPushData(reads) : {}) };
 }
 
 /** The longest prefix of these reads whose read-clear payload fits APNs's size limit. */
