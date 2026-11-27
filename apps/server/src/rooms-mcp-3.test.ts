@@ -377,7 +377,7 @@ const scope1 = fixtureScope1();
   it('keeps delivery setup after set_profile until a proved or explicit on-demand binding', async () => {
     const { client } = await scope1.connected();
     expect(scope1.data(await client.callTool({ name: 'list_chats', arguments: {} })).setup).toContain('set_profile');
-    expect(scope1.data(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } })).setup).toContain('tags your @handle');
+    expect(scope1.data(await client.callTool({ name: 'read_messages', arguments: { room: ROOM, limit: 1 } })).setup).toContain('tags your exact @handle');
     const tools = (await client.listTools()).tools;
     expect(tools.find(t => t.name === 'list_chats')!.description).toContain('verify your approved member identity and owner');
     expect(tools.find(t => t.name === 'set_profile')!.description).toMatch(/^After verifying list_chats/);
@@ -397,6 +397,15 @@ const scope1 = fixtureScope1();
     await scope1.db.query('UPDATE memberships SET removed_at=now() WHERE identity_id=$1 AND room_id IS NOT NULL', [member]);
     const listed = scope1.data(await client.callTool({ name: 'list_chats', arguments: {} }));
     expect(listed.rooms).toEqual([]); expect(listed.note).toContain('under Members in the Beeline app');
+  });
+
+  it.each(['tom', '@tom'])('tom-handle-search: %s finds a message containing @tom', async query => {
+    const { client } = await scope1.connected();
+    const tagged = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Can @tom check this?' }, USER);
+    const longer = await scope1.phone.execute('sendRoomMessage', { roomId: ROOM, text: 'Can @tomorrow check this?' }, USER);
+    const result = scope1.data(await client.callTool({ name: 'search_messages', arguments: { room: ROOM, query } }));
+    expect(result.messages).toContainEqual(expect.objectContaining({ id: tagged.messageId }));
+    expect(result.messages).not.toContainEqual(expect.objectContaining({ id: longer.messageId }));
   });
 
   it('lists the tags owed a reply across chats, oldest first, after a cursor', async () => {

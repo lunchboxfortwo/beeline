@@ -185,7 +185,7 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
   });
 
   it.each(['webhook', 'events', 'unsubscribe'])(
-    'keeps %s-accepted commands pending without replaying them after reconnect',
+    'keeps %s-accepted tags owed after reconnect without repeating delivery',
     async (mechanism) => {
       const fixture = mechanism !== 'webhook' ? await scope.eventFixture() : await connector();
       const { client, member } = fixture;
@@ -243,7 +243,7 @@ describe('CONNECTOR-RECONNECT: event-driven retirement on the agent-command queu
       expect(await pendingMcpWakes(scope.db, member)).toEqual([]);
       const caughtUp = data(await client.callTool({ name: 'list_mentions', arguments: {} }));
       expect(caughtUp.wakes).toEqual([]);
-      expect(caughtUp.mentions).toEqual([]);
+      expect(caughtUp.mentions.map((mention: { id: string }) => mention.id)).toEqual([source]);
       const repeated: string[] = [];
       const observe = async (_url: string, init: { body: string }) => {
         repeated.push(init.body);

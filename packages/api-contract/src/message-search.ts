@@ -49,13 +49,16 @@ const FILLER_WORDS = new Set(MESSAGE_SEARCH_FILLER_WORDS);
  * words are complete and match whole words; the last word is still being
  * typed, so it matches as a prefix ("android bui" finds "Android build"),
  * and only once it has MESSAGE_SEARCH_MIN_CHARS characters. Filler words are
- * dropped. Null when no searchable word remains.
+ * dropped. A submitted search can opt in to matching a single otherwise
+ * dropped word exactly. Null when no searchable word remains.
  */
-export function messageSearchTerms(query: string): string | null {
+export function messageSearchTerms(query: string, { allowExactSingleWord = false } = {}): string | null {
   const words = query.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   const partial = words.pop();
   const terms = words.filter((word) => !FILLER_WORDS.has(word)).map((word) => `'${word}'`);
   if (partial && partial.length >= MESSAGE_SEARCH_MIN_CHARS && !FILLER_WORDS.has(partial))
     terms.push(`'${partial}':*`);
+  if (allowExactSingleWord && partial && words.length === 0 && !terms.length)
+    return `'${partial}'`;
   return terms.length ? terms.slice(0, MESSAGE_SEARCH_MAX_TERMS).join(' & ') : null;
 }

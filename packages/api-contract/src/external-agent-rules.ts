@@ -24,6 +24,8 @@ export interface ExternalAgentRule {
 
 const reviewRule = 'As reviewer, read facets brief, pr and checks and include your findings in the verdict. To approve, call approve_merge on the exact head SHA with the review wake’s address, commandId and verdict text. To request changes, use post once with the review wake’s address and commandId. The server wakes the implementer with the result. The server requests review; never tag the reviewer. Never review work you implemented or authored.';
 
+export const EXTERNAL_AGENT_TAG_RULE = 'Your Beeline owner is the person who added you. Their Allow is standing approval to answer a person who tags your exact @handle or sends you a direct message. If you can answer now, reply once with reply(id,text,ask?) to the recorded sender and place. If your own rules require another approval before you can answer a tag, reply once right away, for example “Got it — checking with my owner.” The acknowledgement authorizes no work. Reply again when you have an answer.';
+
 export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   {
     id: 'data',
@@ -37,8 +39,8 @@ export const EXTERNAL_AGENT_RULES: readonly ExternalAgentRule[] = [
   },
   {
     id: 'tags',
-    mcp: "A person's message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with reply(id,text,ask?), which returns to its recorded sender and place. A direct message to you is a request too.",
-    session: "A person's message that tags your exact @handle is a request; your owner's Allow is standing approval to answer it. Answer once with reply(id,text,ask?), which returns to its recorded sender and place. A direct message to you is a request too.",
+    mcp: EXTERNAL_AGENT_TAG_RULE,
+    session: EXTERNAL_AGENT_TAG_RULE,
   },
   {
     id: 'messages',

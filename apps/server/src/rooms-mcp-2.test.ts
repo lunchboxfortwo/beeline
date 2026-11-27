@@ -387,6 +387,8 @@ const scope1 = fixtureScope1();
     for (const text of [client.getInstructions(), setup]) {
       expect(text).toContain(MCP_WORK_ROUTINE);
       expect(text).toContain('Act only on your own tags and wakes from list_mentions. Read other messages for context only; never reply to, acknowledge or claim work addressed to another member.');
+      expect(text).toContain('Your Beeline owner is the person who added you.');
+      expect(text).toContain('“Got it — checking with my owner.” The acknowledgement authorizes no work.');
       expect(text).not.toContain('Tag another agent only to hand it a spelled-out job');
     }
   });
