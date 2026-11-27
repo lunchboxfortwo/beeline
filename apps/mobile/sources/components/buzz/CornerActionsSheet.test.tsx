@@ -91,7 +91,7 @@ it('aligns Lock and Close row icons and switch to computed line-1 slots without 
   expect(closeRow.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
   const lockSlots = lockRow.findAll((n: any) => n.type === 'YStack' && n.props.height === 28 && n.props.justifyContent === 'center');
   expect(lockSlots).toHaveLength(2);
-  expect(lockRow.findAll((n: any) => n.type === 'YStack' && n.props.width === 0 && n.props.height === 28)).toHaveLength(1);
+  expect(lockRow.findAll((n: any) => n.type === 'YStack' && n.props.height === 2.5)).toHaveLength(1);
   const closeSlots = closeRow.findAll((n: any) => n.type === 'YStack' && n.props.height === 23 && n.props.justifyContent === 'center');
   expect(closeSlots).toHaveLength(1);
   act(() => tree.unmount());

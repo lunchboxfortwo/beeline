@@ -75,6 +75,7 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
     const headingLine = typeStyle('heading', textSize).lineHeight;
     const metaLine = typeStyle('meta', textSize).lineHeight;
     const stepSlot = Math.max(20, metaLine);
+    const stepInset = Math.max(0, (stepSlot - metaLine) / 2);
     const railTop = Math.max(0, (stepSlot - 20) / 2);
     return (
         <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="md" padding="3" gap="3"
@@ -110,13 +111,11 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
                                 )}
                             </YStack>
                             <YStack flex={1} minWidth={0} paddingBottom={last ? '0' : '3'}>
-                                <XStack alignItems="center">
-                                    <YStack width={0} height={stepSlot} />
-                                    <T v={step.status === 'current' ? 'metaStrong' : 'meta'} color={step.status === 'pending' ? 'secondary' : 'ink'}>
-                                        {step.name}
-                                        {step.who ? <T v="meta" color="secondary">{` · ${step.who}`}</T> : null}
-                                    </T>
-                                </XStack>
+                                {stepInset > 0 ? <YStack height={stepInset} /> : null}
+                                <T v={step.status === 'current' ? 'metaStrong' : 'meta'} color={step.status === 'pending' ? 'secondary' : 'ink'}>
+                                    {step.name}
+                                    {step.who ? <T v="meta" color="secondary">{` · ${step.who}`}</T> : null}
+                                </T>
                                 {step.note ? (
                                     <T v="meta" color={step.status === 'current' ? 'needsYou' : 'secondary'} numberOfLines={2}>{step.note}</T>
                                 ) : null}

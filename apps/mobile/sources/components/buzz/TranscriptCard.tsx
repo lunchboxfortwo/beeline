@@ -148,20 +148,17 @@ export function TranscriptCard({
     .sort((a, b) => Number(Boolean(b.primary)) - Number(Boolean(a.primary)));
   const headingLine = typeStyle('heading', useTextSize()).lineHeight;
   const headSlot = identity ? Math.max(28, headingLine) : headingLine;
+  const headInset = Math.max(0, (headSlot - headingLine) / 2);
   const multiLineHead = Boolean(subline) || wrapTitle;
   const titleTestID = testID ? `${testID}-title` : undefined;
   const titleLine = (
     <XStack gap="2" alignItems={alignSublineWithTitle || wrapTitle ? 'flex-start' : 'center'}>
       {identity ? <YStack height={headSlot} justifyContent="center">{identity}</YStack> : null}
       <YStack flex={1} minWidth={0}>
-        {identity && (alignSublineWithTitle || wrapTitle) ? (
-          <XStack alignItems="center">
-            <YStack width={0} height={headSlot} />
-            <T v="heading" flex={1} minWidth={0} numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
-          </XStack>
-        ) : (
-          <T v="heading" numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
-        )}
+        {headInset > 0 && (alignSublineWithTitle || wrapTitle) ? (
+          <YStack height={headInset} testID={testID ? `${testID}-title-inset` : undefined} />
+        ) : null}
+        <T v="heading" numberOfLines={wrapTitle ? undefined : 1} testID={titleTestID}>{title}</T>
         {alignSublineWithTitle && subline ? (
           <T v="meta" color="secondary" numberOfLines={sublineLines} testID={sublineTestID}>{subline}</T>
         ) : null}

@@ -383,8 +383,10 @@ describe('UI vertical alignment sweep', () => {
       expect(card.root.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
       const headSlots = card.root.findAll((n: any) => n.type === 'YStack' && n.props.height === headingLine && n.props.justifyContent === 'center');
       expect(headSlots).toHaveLength(2);
-      const struts = card.root.findAll((n: any) => n.type === 'YStack' && n.props.width === 0 && n.props.height === stepSlot);
-      expect(struts).toHaveLength(3);
+      const stepInset = Math.max(0, (stepSlot - metaLine) / 2);
+      if (stepInset > 0) {
+        expect(card.root.findAll((n: any) => n.type === 'YStack' && n.props.height === stepInset)).toHaveLength(3);
+      }
       if (metaLine > 20) {
         const topConnectors = card.root.findAll((n: any) => n.type === 'YStack' && n.props.width === 2 && n.props.height === (stepSlot - 20) / 2);
         expect(topConnectors).toHaveLength(3);
@@ -435,13 +437,16 @@ describe('UI vertical alignment sweep', () => {
     }
   });
 
-  it.each(SIZES)('sizes TranscriptCard header slots to max(28, headingLine) when a 28pt identity mark is shown at %s text size', (size) => {
-    const expectedSlot = Math.max(28, typeStyle('heading', size).lineHeight);
+  it.each(SIZES)('applies first-line inset to wrapped and subline TranscriptCard titles with a 28pt identity mark at %s text size', (size) => {
+    const headingLine = typeStyle('heading', size).lineHeight;
+    const expectedSlot = Math.max(28, headingLine);
+    const expectedInset = (expectedSlot - headingLine) / 2;
     const tree = renderAt(
       size,
       <TranscriptCard
         tier="record"
-        title="GitHub · Release checks"
+        title="GitHub · Release checks for a wrapped multi-line heading"
+        wrapTitle
         subline="v0.1.249-rc.3 · 3 legs passed"
         alignSublineWithTitle
         stamp="22:09"
@@ -457,7 +462,10 @@ describe('UI vertical alignment sweep', () => {
       const slotBoxes = header.findAll((n: any) => n.type === 'YStack' && n.props.height === expectedSlot && n.props.justifyContent === 'center');
       // identity, stamp, chevron, dismiss glyph
       expect(slotBoxes).toHaveLength(4);
-      expect(header.findAll((n: any) => n.type === 'YStack' && n.props.width === 0 && n.props.height === expectedSlot)).toHaveLength(1);
+      const inset = header.find((n: any) => n.type === 'YStack' && n.props.testID === 'id-card-title-inset');
+      expect(inset.props.height).toBe(expectedInset);
+      const titleNode = header.find((n: any) => n.type === 'Text' && n.props.testID === 'id-card-title');
+      expect(titleNode.props.numberOfLines).toBeUndefined();
     } finally {
       act(() => tree.unmount());
     }

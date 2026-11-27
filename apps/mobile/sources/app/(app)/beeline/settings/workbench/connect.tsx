@@ -275,7 +275,9 @@ function ConnectToolFlow() {
     });
   };
   const signInLabel = squire ? 'Sign in to Google' : `Sign in to ${connectorName}`;
-  const stepSlot = Math.max(28, typeStyle('body', useTextSize()).lineHeight);
+  const bodyLine = typeStyle('body', useTextSize()).lineHeight;
+  const stepSlot = Math.max(28, bodyLine);
+  const stepInset = Math.max(0, (stepSlot - bodyLine) / 2);
 
   return (
     <ConnectorFrame title={showSteps && squire ? `Connect ${machineName}` : connectorName} back={() => router.back()}
@@ -348,10 +350,10 @@ function ConnectToolFlow() {
                 <StepDot state={step.state} testID={`connect-step-${index}-dot`} />
               </YStack>
               <YStack flex={1} minWidth={0} gap="1">
-                <XStack alignItems="center">
-                  <YStack width={0} height={stepSlot} />
+                <YStack>
+                  {stepInset > 0 ? <YStack height={stepInset} /> : null}
                   <Copy quiet={step.state === 'todo'}>{step.title}</Copy>
-                </XStack>
+                </YStack>
                 {step.detail ? (
                   <T v="meta" color={step.state === 'failed' ? 'removed' : step.state === 'current' ? 'needsYou' : 'secondary'}
                     testID={step.error ? 'connect-error' : `connect-step-${index}-detail`}>

@@ -685,5 +685,5 @@ it('aligns connect step rows to max(28, bodyLine) without paddingTop hacks', asy
   expect(step0.props.alignItems).toBe('flex-start');
   const dotSlot = step0.find((n: any) => n.type === 'YStack' && n.props.height === 28 && n.props.justifyContent === 'center');
   expect(dotSlot.findAll((n: any) => n.props?.testID === 'connect-step-0-dot').length).toBeGreaterThan(0);
-  expect(step0.findAll((n: any) => n.type === 'YStack' && n.props.width === 0 && n.props.height === 28)).toHaveLength(1);
+  expect(step0.findAll((n: any) => n.type === 'YStack' && n.props.height === 2.5)).toHaveLength(1);
 });

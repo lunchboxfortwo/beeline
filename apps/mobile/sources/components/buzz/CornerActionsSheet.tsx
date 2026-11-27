@@ -91,6 +91,7 @@ export function CornerActionsSheet({
   const bodyLine = typeStyle('body', textSize).lineHeight;
   const headingLine = typeStyle('heading', textSize).lineHeight;
   const lockSlot = Math.max(28, bodyLine);
+  const lockInset = Math.max(0, (lockSlot - bodyLine) / 2);
   return (
     <SheetFrame open={visible} close={dismiss} title={title} testID="corner-actions-sheet">
       {closeOffered && (
@@ -112,10 +113,10 @@ export function CornerActionsSheet({
             <Glyph icon={Lock} size={18} />
           </YStack>
           <YStack flex={1} minWidth={0} gap="1">
-            <XStack alignItems="center">
-              <YStack width={0} height={lockSlot} />
+            <YStack>
+              {lockInset > 0 ? <YStack height={lockInset} /> : null}
               <Copy>Lock thread</Copy>
-            </XStack>
+            </YStack>
             <Copy small quiet>
               Stops agents and members from closing this thread, including after a merge. Admins can
               still close it.
