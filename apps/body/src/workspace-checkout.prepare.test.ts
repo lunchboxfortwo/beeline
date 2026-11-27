@@ -351,6 +351,28 @@ it('installs a pnpm checkout from its lockfile before building', async () => {
   expect(await readFile(join(path, 'dist', 'built.txt'), 'utf8')).toBe('v1\n');
 });
 
+it('installs pnpm dependencies when another user owns the legacy mask path', async () => {
+  const f = await fixture({}, {}, 'pnpm');
+  const foreignDir = '/usr/share';
+  expect((await stat(foreignDir)).uid).not.toBe(process.getuid!());
+  const run = wait.runOwnedFile;
+  const withLegacyMask = vi.fn((args: string[]) => {
+    const shm = args.findIndex((arg, i) => arg === '--tmpfs' && args[i + 1] === '/dev/shm');
+    expect(shm).toBeGreaterThanOrEqual(0);
+    // Seed the old path inside the bootstrap namespace only.
+    return [...args.slice(0, shm + 2), '--ro-bind', foreignDir, '/dev/shm/beeline-masks', ...args.slice(shm + 2)];
+  });
+  vi.spyOn(wait, 'runOwnedFile').mockImplementation((file, args, options) =>
+    run(file, file === f.config.bwrapPath ? withLegacyMask(args) : args, options),
+  );
+
+  const result = await f.prepare('room');
+  const path = result.match(/^Checkout ready at (.+?) on /)?.[1];
+  expect(path, result).toBeDefined();
+  expect(JSON.parse(await readFile(join(path!, 'node_modules/dep/package.json'), 'utf8')).name).toBe('dep');
+  expect(withLegacyMask).toHaveBeenCalledTimes(1);
+});
+
 it('prepare says the checkout is not ready when no OS sandbox can run its scripts', async () => {
   const f = await fixture({ build: 'node build.mjs' });
   delete f.config.bwrapPath;

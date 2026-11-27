@@ -444,7 +444,7 @@ it.each([
       import assert from 'node:assert/strict';
       assert.equal(fs.readFileSync(${JSON.stringify(join(operatorHome, 'settings.json'))}, 'utf8'), 'operator-settings');
       assert.throws(() => fs.writeFileSync(${JSON.stringify(join(operatorHome, 'escape'))}, 'escape'), { code: 'EROFS' });
-      assert.equal(fs.existsSync('/dev/shm/beeline-masks'), false);
+      assert.equal(fs.readdirSync('/dev/shm').some(name => name.startsWith('beeline-masks')), false);
       fs.writeFileSync(${JSON.stringify(join(state, 'private'))}, 'private-state');
       if (${dependencies}) fs.writeFileSync(${JSON.stringify(join(layer.tree, 'package.json'))}, 'private-package');
       process.stdin.once('data', () => {

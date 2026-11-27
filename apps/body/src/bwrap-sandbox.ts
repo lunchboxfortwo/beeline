@@ -13,6 +13,7 @@
  * Missing or unusable bubblewrap remains a loudly reported fail-open path.
  */
 import { namesCredentialFile,pathGrantAllowsWrite } from '@beeline/api-contract/agent-grants';
+import { randomUUID } from 'node:crypto';
 import { lstatSync,mkdirSync,readdirSync,realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
@@ -504,10 +505,10 @@ const OVERLAY_BOOTSTRAP = [
 /** Prepare mountpoints on namespace-only copies of their parents. */
 const MOUNTPOINT_BOOTSTRAP = [
   'set -eu',
-  'scratch_link=$1',
-  'shift',
-  'scratch=/dev/shm/beeline-masks',
-  'mkdir "$scratch"',
+  'scratch=$1',
+  'scratch_link=$2',
+  'shift 2',
+  'mkdir -m 700 -- "$scratch"',
   'i=0',
   'while [ "$1" != -- ]; do',
   '  mkdir "$scratch/$i" "$scratch/$i/lower" "$scratch/$i/upper" "$scratch/$i/work"',
@@ -639,6 +640,8 @@ export function buildBwrapArgv(input: {
   if (scratchAlias) mountpointParents.push(dirname(scratchAlias.path));
   const parents = normalize(mountpointParents).filter((parent, _index, all) => !all.some(other =>
     other !== parent && parent.startsWith(`${other}/`)));
+  // The private /dev/shm mount retires this launch's scratch with its namespace.
+  const maskScratch = `/dev/shm/beeline-masks-${randomUUID()}`;
   // Writable grants and private state must bind the host inode, rather than
   // writing into the temporary overlay. /dev is replaced by the inner bwrap,
   // hiding these original-parent aliases before the agent starts.
@@ -650,7 +653,7 @@ export function buildBwrapArgv(input: {
     if (!['--bind', '--bind-try', '--dev-bind-try'].includes(flag) &&
         !(flag === '--ro-bind-try' && hostSocketDirs.includes(source))) continue;
     const parentIndex = parents.findIndex(parent => source === parent || source.startsWith(`${parent}/`));
-    if (parentIndex !== -1) args[i + 1] = `/dev/shm/beeline-masks/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;
+    if (parentIndex !== -1) args[i + 1] = `${maskScratch}/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;
     i += 2;
   }
   // The inner root bind makes these temporary overlays read-only before any
@@ -664,7 +667,7 @@ export function buildBwrapArgv(input: {
     ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap]),
     '--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--tmpfs', '/dev/shm',
     '--die-with-parent', '--', 'sh', '-c', MOUNTPOINT_BOOTSTRAP, 'beeline-mountpoints',
-    scratchAlias?.path ?? '', ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
+    maskScratch, scratchAlias?.path ?? '', ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
     ...(overlays.length ? [] : ['--unshare-user', '--uid', String(process.getuid!()), '--gid', String(process.getgid!()), '--cap-drop', 'ALL']),
     ...args,
   ] };
