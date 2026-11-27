@@ -366,6 +366,7 @@ export function useChatDesktopScroll([
   const handleDesktopScroll = useCallback(
     (event: { currentTarget: HTMLElement }) => {
       const node = event.currentTarget;
+      scrollController.observeScroll();
       const pinned = node.scrollHeight - node.scrollTop - node.clientHeight <= TAIL_PIN_THRESHOLD;
       scrollController.observeTailPinned(pinned);
       observeTailPinned(pinned);

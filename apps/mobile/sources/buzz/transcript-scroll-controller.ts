@@ -47,12 +47,13 @@ export type TranscriptScrollCancelReason = 'replaced' | 'drag' | 'cancelled';
 
 /** The calls a platform list answers. Only the adapters below implement it. */
 export type TranscriptScrollList = {
+  currentOffset?(): number | undefined;
   isRowVisible?(rowId: string): boolean | null;
   contextFitsViewport?(contextRowId: string, unreadRowId: string): boolean;
   toNewest(): void;
-  /** False when the list cannot reach the row yet (not measured or not drawn). */
-  // A no-op is a reached row alignment that could not move the viewport.
-  toRow(index: number, rowId: string, align: TranscriptRowAlign): boolean | 'no-op';
+  /** False if unreachable, true for a native request, synced after a DOM move,
+   * or no-op when the requested alignment cannot move the viewport. */
+  toRow(index: number, rowId: string, align: TranscriptRowAlign): boolean | 'no-op' | 'synced';
   /** Scroll near a row the list could not reach, so its neighbours measure. */
   toEstimatedRow(index: number): void;
   toOffset(offset: number): void;
@@ -109,6 +110,8 @@ export type TranscriptScrollController<Row extends TranscriptScrollRow> = {
   reset(): void;
   /** Re-attempt the active request after a layout change. */
   observeLayout(): void;
+  /** A scroll event delivered the current viewport offset. */
+  observeScroll(): void;
   observeVisibleRows(rows: readonly Row[]): void;
   observeTailPinned(pinned: boolean): void;
   /** A touch drag began. Cancels the active request. */
@@ -137,6 +140,7 @@ type Active = {
   readonly destination: TranscriptScrollDestination;
   scrolled: boolean;
   following: boolean;
+  verifyScroll?: () => void;
   scrollAttempt: number;
   lastScrollVisibilitySeq: number;
   contextScrolled: boolean;
@@ -252,6 +256,8 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
     }
     const scrollVisibilitySeq = visibilitySeq;
     const scrollAttempt = ++current.scrollAttempt;
+    current.verifyScroll = undefined;
+    const beforeOffset = list.currentOffset?.();
     current.lastScrollVisibilitySeq = scrollVisibilitySeq;
     const result = list.toRow(target, rows[target]!.id, align);
     if (!result) {
@@ -266,14 +272,12 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       current.scrolled = true;
       options.onScrolled?.(destination, rowId);
     }
-    // A native scroll may still be in flight when the next JS frame runs.
-    // Only a proven no-op can reuse the current viewport.
-    if (result !== 'no-op') return;
-    schedule(() => {
+    const verify = () => {
       if (active !== current || current.scrollAttempt !== scrollAttempt ||
           visibilitySeq !== scrollVisibilitySeq || rows !== options.rows()) return;
       let visible = list.isRowVisible?.(rowId) ?? null;
-      if (visible === null && visibleRowsOf === rows) {
+      // Only an unchanged viewport can reuse its pre-scroll visibility report.
+      if (visible === null && result === 'no-op' && visibleRowsOf === rows) {
         visible = options.rowIndex(destination, visibleRows) >= 0;
       }
       if (visible) land(current, rowId);
@@ -281,7 +285,14 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
         current.skipContextRow = true;
         attempt(current);
       }
-    });
+    };
+    current.verifyScroll = () => {
+      // A queued native scroll event can still carry the pre-command offset.
+      if (result === true && beforeOffset !== undefined && list.currentOffset?.() === beforeOffset) return;
+      verify();
+    };
+    if (result === 'synced') verify();
+    else if (result === 'no-op') schedule(verify);
   };
 
   const request = (destination: TranscriptScrollDestination, following = false) => {
@@ -357,6 +368,9 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
         options.list()?.toNewest();
         pinned = true;
       }
+    },
+    observeScroll() {
+      active?.verifyScroll?.();
     },
     observeVisibleRows(rows) {
       visibilitySeq += 1;
@@ -496,6 +510,7 @@ export function phoneTranscriptList(
   let failed = false;
   let averageItemLength = 0;
   return {
+    currentOffset: () => getOffsetRef?.().current,
     isRowVisible(rowId) {
       const row = geometry?.row(rowId);
       const viewport = geometry?.viewportHeight();
@@ -595,7 +610,7 @@ export function desktopTranscriptList(
       const node = getScrollNode();
       const before = node?.scrollTop;
       row.scrollIntoView({ block: align === 'top' ? 'start' : 'center', behavior: 'instant' });
-      return node && node.scrollTop === before ? 'no-op' : true;
+      return node && node.scrollTop === before ? 'no-op' : 'synced';
     },
     toEstimatedRow() {},
     toOffset(offset) {

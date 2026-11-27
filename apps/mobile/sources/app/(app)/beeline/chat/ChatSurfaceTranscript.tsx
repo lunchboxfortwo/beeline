@@ -190,6 +190,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   showsVerticalScrollIndicator={false}
                   onScroll={(event) => {
                     phoneScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+                    scrollController.observeScroll();
                     observePhoneTailOffset(event.nativeEvent.contentOffset.y);
                     transcriptPositions.observeScroll(
                       event.nativeEvent,

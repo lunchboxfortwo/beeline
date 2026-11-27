@@ -55,6 +55,45 @@ it('holds a short unread transcript when a clamped scroll emits no visibility ch
   expect(list.toRow).toHaveBeenCalledTimes(1);
 });
 
+it('confirms the desktop landing after scrolling with the same rows visible', () => {
+  const node = { scrollTop: 0, scrollHeight: 1200, clientHeight: 600,
+    getBoundingClientRect: () => ({ top: 0, bottom: 600 }) };
+  const starts: Record<string, number> = { read: 120, unread: 240, live: 480 };
+  const adapter = desktopTranscriptList(() => node, id => ({
+    scrollIntoView() { node.scrollTop = starts[id]!; },
+    getBoundingClientRect() {
+      const top = starts[id]! - node.scrollTop;
+      return { top, bottom: top + 120 };
+    },
+  }));
+  const { controller, rows, flush } = transcript(-1, adapter);
+  controller.observeVisibleRows(rows);
+  controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  flush();
+  expect(node.scrollTop).toBe(120);
+  expect(controller.isLanding()).toBe(false);
+  expect(controller.isHoldingLanding()).toBe(true);
+});
+
+it('confirms the phone landing from the delivered offset when the visible rows stay the same', () => {
+  const offset = { current: 0 };
+  const adapter = phone(600, 1200, offset, {
+    live: { y: 0, height: 240 }, unread: { y: 240, height: 240 }, read: { y: 480, height: 240 },
+  });
+  const { controller, rows, flush } = transcript(1, adapter);
+  controller.observeVisibleRows(rows);
+  controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  flush();
+  flush();
+  expect(controller.isLanding()).toBe(true);
+  controller.observeScroll(); // A queued event still at the old offset.
+  expect(controller.isLanding()).toBe(true);
+  offset.current = 120;
+  controller.observeScroll();
+  expect(controller.isLanding()).toBe(false);
+  expect(controller.isHoldingLanding()).toBe(true);
+});
+
 it('skips a measured viewport-tall context row on the inverted phone list', () => {
   const adapter = phone(600, 1800, { current: 0 }, {
     unread: { y: 650, height: 100 }, read: { y: 750, height: 600 },
@@ -78,7 +117,7 @@ it('uses the clamped top or center target to identify an already aligned phone r
   expect(adapter.toRow(1, 'unread', 'center')).toBe('no-op');
 });
 
-it('waits for delayed native visibility before falling back from a tall context row', () => {
+it.each(['visibility', 'scroll'])('waits for the native %s report before falling back from a tall context row', report => {
   const offset = { current: 0 };
   const layouts = { read: { y: 560, height: 90 }, unread: { y: 490, height: 70 } };
   const { controller, rows, list, flush } = transcript(1, phone(600, 1800, offset, layouts));
@@ -93,13 +132,15 @@ it('waits for delayed native visibility before falling back from a tall context 
   // The context row occupies the entire viewport after its top alignment.
   layouts.read.height = 600;
   offset.current = 560;
-  controller.observeVisibleRows([rows[2]!]);
+  if (report === 'scroll') controller.observeScroll();
+  else controller.observeVisibleRows([rows[2]!]);
   expect(list.toRow.mock.calls).toEqual([[2, 'read', 'top'], [1, 'unread', 'top']]);
   expect(controller.isLanding()).toBe(true);
   flush();
   expect(controller.isLanding()).toBe(true);
   offset.current = 0;
-  controller.observeVisibleRows([rows[1]!]);
+  if (report === 'scroll') controller.observeScroll();
+  else controller.observeVisibleRows([rows[1]!]);
   expect(controller.isHoldingLanding()).toBe(true);
   expect(list.toRow).toHaveBeenCalledTimes(2);
 });
