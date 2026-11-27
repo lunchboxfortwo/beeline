@@ -1,5 +1,5 @@
 /** Room route: header, transcript, and composer are the open, not a last-message pixel. */
-import React, { memo, useLayoutEffect, useRef } from 'react';
+import React, { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ParamListBase } from '@react-navigation/native';
@@ -8,6 +8,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { markRoomOpen } from '@/buzz/room-open-trace';
 import { RoomPresentationContext } from '@/buzz/room-presentation-context';
 import { RoomOpenTraceOverlay } from '@/components/buzz/RoomOpenTraceOverlay';
+import type { NotificationAnchor } from './useChatRoute';
 import { BuzzChatSurface } from './_chat-surface';
 import {
   useRoomSurfaceSession,
@@ -17,16 +18,17 @@ import {
 const RoomSurface = memo(function RoomSurface(props: React.ComponentProps<typeof BuzzChatSurface>) {
   return <BuzzChatSurface {...props} />;
 }, (previous, next) =>
+  previous.anchor === next.anchor &&
   previous.bindingsRef === next.bindingsRef &&
   (Object.keys(previous.session) as Array<keyof typeof previous.session>).every(
     (key) => Object.is(previous.session[key], next.session[key]),
   ));
 
 export default function BuzzChat() {
-  const { channelId, notificationResponseId } = useLocalSearchParams<{
-    channelId: string;
-    notificationResponseId?: string;
-  }>();
+  const { channelId, notificationResponseId, notificationMessageId, notificationTarget } =
+    useLocalSearchParams<NotificationAnchor & { channelId: string }>();
+  const anchor = useMemo(() => ({ notificationResponseId, notificationMessageId, notificationTarget }),
+    [notificationResponseId, notificationMessageId, notificationTarget]);
   const decodedId = channelId ? decodeURIComponent(channelId) : '';
   // Expo can reuse this route when a deep link replaces only its parameters.
   // The session refs, transcript window and composer must belong to one Room.
@@ -34,17 +36,17 @@ export default function BuzzChat() {
     <RoomVisit
       key={decodedId}
       channelId={decodedId}
-      notificationResponseId={notificationResponseId}
+      anchor={anchor}
     />
   );
 }
 
 function RoomVisit({
   channelId: decodedId,
-  notificationResponseId,
+  anchor,
 }: {
   channelId: string;
-  notificationResponseId?: string;
+  anchor: NotificationAnchor;
 }) {
   const isFocused = useIsFocused();
   const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
@@ -78,13 +80,13 @@ function RoomVisit({
   const session = useRoomSurfaceSession({
     channelId: decodedId,
     isFocused,
-    ...(notificationResponseId ? { notificationResponseId } : {}),
+    notificationResponseId: anchor.notificationResponseId,
     bindingsRef,
   });
 
   return (
     <RoomPresentationContext.Provider value={session.liveDraftStore}>
-      <RoomSurface session={session} bindingsRef={bindingsRef} />
+      <RoomSurface anchor={anchor} session={session} bindingsRef={bindingsRef} />
       <RoomOpenTraceOverlay />
     </RoomPresentationContext.Provider>
   );

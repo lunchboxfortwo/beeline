@@ -16,7 +16,7 @@ for (const corner of [false, true]) {
       const push = firebasePushMessage('test-device', {
         type: 'message', target: 'message', workspaceId: 'workspace', roomId: 'room',
         channelId: corner ? 'corner' : 'room', ...(corner ? { cornerId: 'corner' } : {}),
-        messageId, text: 'An older message', collapseId: 'reused-android-slot',
+        messageId, deliveryId: 'push-tap', text: 'An older message', collapseId: 'reused-android-slot',
       });
       let finishSelection!: () => void;
       if (entry !== 'cold') markInitialLandingResolved();
@@ -40,7 +40,7 @@ for (const corner of [false, true]) {
         const stack = openStack.mock.calls[0]![0];
         expect(stack.at(-1)).toMatchObject({ name: 'beeline/chat/[channelId]', params: {
           channelId: corner ? 'corner' : 'room', communityId: 'workspace',
-          notificationMessageId: messageId, notificationResponseId: messageId,
+          notificationMessageId: messageId, notificationResponseId: 'push-tap',
           ...(corner ? { parent: 'room' } : {}),
         } });
         expect(suppress).toHaveBeenCalledOnce();
@@ -58,7 +58,7 @@ for (const corner of [false, true]) {
     const push = firebasePushMessage('device', {
       type: 'message', target: 'message', workspaceId: 'workspace', roomId: 'room',
       channelId: corner ? 'corner' : 'room', ...(corner ? { cornerId: 'corner' } : {}),
-      messageId, text: 'Cold notification',
+      messageId, deliveryId: 'push-tap', text: 'Cold notification',
     });
     const response = { actionIdentifier: defaultAction,
       notification: { request: { identifier: 'android-slot', content: { data: push.data } } } };
@@ -68,7 +68,7 @@ for (const corner of [false, true]) {
     const url = new URL(path, 'https://web.usebeeline.app');
     expect(url.pathname).toBe(`/beeline/chat/${corner ? 'corner' : 'room'}`);
     expect(url.searchParams.get('notificationMessageId')).toBe(messageId);
-    expect(url.searchParams.get('notificationResponseId')).toBe(messageId);
+    expect(url.searchParams.get('notificationResponseId')).toBe('push-tap');
     expect(url.searchParams.get('communityId')).toBe('workspace');
     if (corner) expect(url.searchParams.get('parent')).toBe('room');
     expect(entries.consumedResponses.add).not.toHaveBeenCalled();
@@ -140,4 +140,9 @@ it('opens the chat for a retained notification naming the retired Threads page',
       returnTo: 'room-list', notificationTarget: 'message',
     } },
   ]);
+});
+
+it.each(['agent-attention', 'pull-request-opened'])('opens the exact event for %s', type => {
+  const target = getBuzzNotificationTargetFromData({ type, channelId: 'corner', eventId: 'event' })!;
+  expect(notificationStackRoutes(target, 'tap').at(-1)?.params.notificationMessageId).toBe('event');
 });

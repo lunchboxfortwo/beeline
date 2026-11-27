@@ -7,6 +7,8 @@ import {
 } from './web-push-registration';
 import { pushOpenBuzzChannelId, releaseOpenBuzzChannelId } from '@/buzz/open-room-tracker';
 
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('expo-router', () => ({ router: { navigate } }));
 const operation = vi.hoisted(() => vi.fn());
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
 
@@ -110,6 +112,9 @@ describe('Chrome push registration', () => {
       const postMessage = vi.fn();
       respond({ data: { type: 'beeline-web-push-open-room' }, ports: [{ postMessage }] });
       expect(postMessage).toHaveBeenCalledWith({ channelId: 'room-1' });
+      const path = '/beeline/chat/room-1?notificationMessageId=event';
+      respond({ data: { type: 'beeline-web-push-navigate', path }, ports: [{ postMessage }] });
+      expect(navigate).toHaveBeenCalledWith(path);
       stop();
       expect(removeMessageListener).toHaveBeenCalledWith('message', respond);
     } finally {

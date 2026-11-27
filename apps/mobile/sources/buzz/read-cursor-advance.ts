@@ -22,7 +22,7 @@ function isProvisional(
  * have moved away from their chronological position: merge them back by the
  * server's (created_at, id) order for read marks, without moving their UI.
  */
-function readBoundaries(chronological: readonly ChatDisplayMessage[]) {
+export function readBoundaries(chronological: readonly ChatDisplayMessage[]) {
   type Boundary = { id: string; orderAtMs: number; hostId: string };
   const rows: Boundary[] = [];
   const markers: Boundary[] = [];

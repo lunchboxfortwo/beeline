@@ -1,14 +1,12 @@
 import { setArtifactViewportActive } from '@/buzz/artifact-viewport';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import React, { useEffect, useLayoutEffect, useState, useCallback } from 'react';
-import { Platform, AppState } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { sharedLiveConnection } from '@/sync/transport/live-connection';
 import { BuzzRigTransport } from '@/sync/transport';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { pushOpenBuzzChannelId, releaseOpenBuzzChannelId } from '@/buzz/open-room-tracker';
-import { dismissPresentedNotificationsForChannel } from '@/push/presented-notifications';
 import { markRoomOpen, type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 
@@ -99,23 +97,10 @@ export function useChatRoomSession([
       const viewingState = AppState.addEventListener('change', (state) =>
         updateViewing(state === 'active'),
       );
-      const dismiss = () => {
-        if (AppState.currentState !== 'active') return;
-        void dismissPresentedNotificationsForChannel(decodedId, Notifications, Platform.OS).catch(
-          (error) => {
-            console.log('Failed to dismiss notifications for opened conversation:', error);
-          },
-        );
-      };
-      dismiss();
-      const appState = AppState.addEventListener('change', dismiss);
-      const received = Notifications.addNotificationReceivedListener(dismiss);
       return () => {
         viewingState.remove();
         updateViewing(false);
         releaseOpenBuzzChannelId(decodedId || null);
-        appState.remove();
-        received.remove();
       };
     }, [decodedId]),
   );

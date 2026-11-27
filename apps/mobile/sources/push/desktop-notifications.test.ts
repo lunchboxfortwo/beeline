@@ -61,7 +61,7 @@ vi.mock('@/buzz/room-corner-store', () => ({
   },
 }));
 
-import { startDesktopNotifications } from './desktop-notifications';
+import { showClickableDesktopNotification, startDesktopNotifications } from './desktop-notifications';
 
 it('re-reads corners only for the parent whose corner summary changed', async () => {
   fixture.summaries.set('parent-a', { cornerCount: 1, revision: 1 });
@@ -84,4 +84,24 @@ it('re-reads corners only for the parent whose corner summary changed', async ()
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(fixture.corners).not.toHaveBeenCalled();
   stop();
+});
+
+
+it('focuses the desktop window and runs the delivery-specific callback on a web notification click', () => {
+  const focus = vi.fn();
+  const open = vi.fn();
+  let shown: EventTarget;
+  class ClickableNotification extends EventTarget {
+    constructor() { super(); shown = this; }
+    close() {}
+  }
+  vi.stubGlobal('window', { Notification: ClickableNotification, focus });
+  try {
+    expect(showClickableDesktopNotification('Room', 'Reply', open)).toBe(true);
+    shown!.dispatchEvent(new Event('click'));
+    expect(focus).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledOnce();
+    window.Notification = function () {} as unknown as typeof Notification;
+    expect(showClickableDesktopNotification('Room', 'Reply', open)).toBe(false);
+  } finally { vi.unstubAllGlobals(); }
 });

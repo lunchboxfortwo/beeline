@@ -45,6 +45,7 @@ describe('APNs provider token and request', () => {
       'device-token',
       {
         messageId: 'message-1',
+        unreadCount: 7,
         workspaceId: 'workspace-1',
         roomId: 'room-1',
         channelId: 'room-1',
@@ -66,6 +67,7 @@ describe('APNs provider token and request', () => {
       'device/token',
       {
         messageId: 'message-1',
+        unreadCount: 7,
         workspaceId: 'workspace-1',
         roomId: 'room-1',
         channelId: 'corner-1',
@@ -92,7 +94,8 @@ describe('APNs provider token and request', () => {
       aps: {
         alert: { title: 'Beeline', body: 'hello' },
         sound: 'default',
-        'thread-id': 'message-1',
+        'thread-id': 'corner-1',
+        badge: 7,
       },
       type: 'channel-activity',
       target: 'corner',
@@ -128,8 +131,8 @@ describe('APNs provider token and request', () => {
     );
     expect(first.headers['apns-collapse-id']).toBe('first');
     expect(second.headers['apns-collapse-id']).toBe('second');
-    expect((first.payload.aps as Record<string, unknown>)['thread-id']).toBe('first');
-    expect((second.payload.aps as Record<string, unknown>)['thread-id']).toBe('second');
+    expect((first.payload.aps as Record<string, unknown>)['thread-id']).toBe('room-1');
+    expect((second.payload.aps as Record<string, unknown>)['thread-id']).toBe('room-1');
     const longId = 'long-message-id-'.repeat(8);
     const longRequest = apnsPushRequest(
       'device-token',
@@ -149,6 +152,7 @@ describe('APNs provider token and request', () => {
       'device-token',
       {
         messageId: 'message-1',
+        unreadCount: 7,
         workspaceId: 'workspace-1',
         roomId: 'dm-1',
         channelId: 'dm-1',
@@ -168,6 +172,7 @@ describe('APNs provider token and request', () => {
       'device-token',
       {
         messageId: 'message-1',
+        unreadCount: 7,
         workspaceId: 'workspace-1',
         roomId: 'dm-1',
         channelId: 'dm-1',
@@ -296,7 +301,7 @@ describe('APNs HTTP/2 provider', () => {
   });
 });
 
-it('uses the same activity slot for APNs collapse and grouping, separate from attention', () => {
+it('groups activity in its corner and keeps each message separately tappable', () => {
   const base = {
     type: 'message' as const,
     workspaceId: 'workspace',
@@ -318,8 +323,8 @@ it('uses the same activity slot for APNs collapse and grouping, separate from at
     'provider',
   );
   const mention = apnsPushRequest('token', { ...base, messageId: 'mention' }, 'app', 'provider');
-  expect(activity.headers['apns-collapse-id']).toBe(next.headers['apns-collapse-id']);
-  expect((activity.payload.aps as Record<string, unknown>)['thread-id']).toBe('agent:corner');
+  expect(activity.headers['apns-collapse-id']).not.toBe(next.headers['apns-collapse-id']);
+  expect((activity.payload.aps as Record<string, unknown>)['thread-id']).toBe('corner');
   expect(mention.headers['apns-collapse-id']).toBe('mention');
 });
 

@@ -13,7 +13,7 @@ import { BuzzCommunityShell } from '@/components/buzz/CommunityRail';
 import { RoomActionsBackground } from '@/components/buzz/RoomRepositoryChoice';
 import { RoomReviewerSurfaceNotice } from '@/components/buzz/RoomReviewerActions';
 export { ChatOpeningSurface } from '@/components/buzz/ChatOpeningSurface';
-import { useChatRoute } from './useChatRoute';
+import { useChatRoute, type NotificationAnchor } from './useChatRoute';
 import { useChatScrollState } from './useChatScrollState';
 import { useChatComposerRefs } from './useChatComposerRefs';
 import { useChatRoomSession } from './useChatRoomSession';
@@ -56,9 +56,11 @@ import { openChatMessageLink } from '@/buzz/message-link';
 
 
 export function BuzzChatSurface({
+  anchor,
   session,
   bindingsRef,
 }: {
+  anchor: NotificationAnchor;
   session: UseRoomSurfaceSessionResult;
   bindingsRef: MutableRefObject<RoomSurfaceSessionBindings>;
 }) {
@@ -67,9 +69,7 @@ export function BuzzChatSurface({
     routeParentChannelId, allowOlderHistoryRef, routeChannelTitle, routeCommunityId, messageAnchorId, notificationResponseId,
     notificationMessageId, notificationTarget, insets, cornerReturnTarget, isDesktop,
     readOnlyFooterInset,
-  ] = useChatRoute([
-
-  ]);
+  ] = useChatRoute(anchor);
   const [
     transcriptWindowIdRef, scrollController, handledNotificationAnchorRef, flatListRef, phoneRowKey,
     PhoneTranscriptCell, phoneScrollList,

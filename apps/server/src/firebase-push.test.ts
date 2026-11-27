@@ -137,11 +137,11 @@ describe('Firebase push routing payload', () => {
       messageId: 'message-1',
       title: 'Beeline',
       message: 'routing payload',
-      tag: 'message-1',
+      tag: `${channelId}:message-1`,
     });
     expect(payload).not.toHaveProperty('notification');
     expect(payload.android).toEqual({ priority: 'high' });
-    expect(payload.apns).toEqual({ payload: { aps: { sound: 'default', threadId: roomId } } });
+    expect(payload.apns).toEqual({ payload: { aps: { sound: 'default', threadId: channelId } } });
     expect(payload.android).not.toHaveProperty('collapseKey');
   });
 
@@ -277,7 +277,7 @@ it('replaces an activity slot without losing its unique message destination', ()
     collapseId: 'agent:corner',
   });
   expect(push.data).toMatchObject({
-    tag: 'agent:corner',
+    tag: 'corner:fresh-final',
     collapseId: 'agent:corner',
     messageId: 'fresh-final',
     channelId: 'corner',

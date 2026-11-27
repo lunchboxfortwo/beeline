@@ -4,7 +4,8 @@ import type { MessageSendState } from '@/buzz/message-outbox';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { Modal } from '@/modal';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import { dismissPresentedNotificationsForChannel, dismissPresentedNotificationsForChannels } from '@/push/presented-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import type { RoomRepositoryResult } from '@beeline/api-contract/phone';
@@ -35,7 +36,7 @@ import {
 } from '@/buzz/room-view-presentation';
 import { selectRoomViewRecords, useRoomTurnRecords, writeRoomMessage } from '@/buzz/room-message-records';
 import { saveActiveCommunityId, saveLastViewedChannel } from '@/buzz/community-storage';
-import { ReadCursorAdvancer } from '@/buzz/read-cursor-advance';
+import { ReadCursorAdvancer, readBoundaries } from '@/buzz/read-cursor-advance';
 import { liveDraftRowId } from '@/buzz/draft-settle';
 import {
   applyLiveOverlayStructure,
@@ -293,7 +294,19 @@ export function useRoomSurfaceSession({
   const scheduleCacheWriteRef = useRef<(() => void) | undefined>(undefined);
   const [identityRecordScope, setIdentityRecordScope] = useState<string | null>(openingCache?.scope ?? openingScope);
   const messageRecordScopeRef = useRef<string | null>(openingCache?.scope ?? openingScope);
-  const roomReadStampRef = useRef(0);
+  // Prefetched server reads have stamp zero. A cached view has no fresh read yet.
+  const roomReadStampRef = useRef(-1);
+  const readStamp = roomReadStampRef.current;
+  const lastShadeRead = useRef(readStamp);
+  useEffect(() => {
+    if (lastShadeRead.current === readStamp) return;
+    lastShadeRead.current = readStamp;
+    if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+    if (!isFocused || roomSurface?.room.id !== channelId || roomSurface.viewer.readCursor?.firstUnreadMessageId !== null) return;
+    void import('expo-notifications').then(api =>
+      dismissPresentedNotificationsForChannel(channelId, api, Platform.OS)).catch(error =>
+      console.log('Failed to dismiss read notifications:', error));
+  }, [channelId, isFocused, readStamp, roomSurface]);
   const identityVersion = useIdentityRecords();
   const turnRecords = useRoomTurnRecords(identityRecordScope, channelId);
   const selectedRoomSurface = useMemo(
@@ -301,7 +314,7 @@ export function useRoomSurfaceSession({
       if ((!roomSurface)) return null;
 
       const view = identityRecordScope
-        ? new IdentitySelection(identityRecordScope, roomReadStampRef.current).roomView(roomSurface)
+        ? new IdentitySelection(identityRecordScope, Math.max(0, roomReadStampRef.current)).roomView(roomSurface)
         : roomSurface;
       return reconcileRoomView(roomSurface, selectRoomViewRecords(identityRecordScope, view));
     },
@@ -426,7 +439,16 @@ export function useRoomSurfaceSession({
     chronological: readonly ChatDisplayMessage[]; visible: readonly ChatDisplayMessage[] } | null>(null);
   if (readCursorRef.current === null) {
     readCursorRef.current = new ReadCursorAdvancer((messageId) => {
-      void roomClientRef.current?.markRead(channelIdRef.current, messageId).catch(() => undefined);
+      const roomId = channelIdRef.current;
+      const viewport = readViewportRef.current;
+      void roomClientRef.current?.markRead(roomId, messageId).then(async () => {
+        if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+        const boundaries = viewport?.roomId === roomId ? readBoundaries(viewport.chronological) : [];
+        const end = boundaries.findIndex(row => row.id === messageId);
+        const readMessageIds = boundaries.slice(0, end + 1).map(row => row.id);
+        await dismissPresentedNotificationsForChannels([{ channelId: roomId, messageId, readMessageIds }],
+          await import('expo-notifications'), Platform.OS, { keepActionOutcomes: true });
+      }).catch(() => undefined);
     }, undefined, () => roomClientRef.current !== null);
   }
   useEffect(() => {

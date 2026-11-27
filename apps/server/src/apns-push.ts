@@ -87,8 +87,8 @@ export function apnsPushRequest(
   providerToken: string,
 ): { headers: OutgoingHttpHeaders; payload: Record<string, unknown> } {
   const data = pushMessageData(message);
-  const threadId = message.type === 'message' ? message.collapseId ?? message.messageId : data.threadId;
-  const slot = message.collapseId ?? message.messageId;
+  const threadId = data.channelId;
+  const slot = message.messageId;
   const collapseId = Buffer.byteLength(slot, 'utf8') <= 64
     ? slot : createHash('sha256').update(slot).digest('hex');
   return {
@@ -102,6 +102,7 @@ export function apnsPushRequest(
       aps: {
         alert: pushAlert(message),
         sound: 'default',
+        ...(message.unreadCount !== undefined ? { badge: message.unreadCount } : {}),
         ...(threadId ? { 'thread-id': threadId } : {}),
         ...(data.categoryId ? { category: data.categoryId } : {}),
       },

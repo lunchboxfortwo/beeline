@@ -57,7 +57,8 @@ export function presentedNotificationMatchesChannel(
       (target.channelId === openedChannelId || target.cornerId === openedChannelId)
     );
   }
-  return presentedNotificationIdentifierTag(notification.request.identifier) === openedChannelId;
+  const tag = presentedNotificationIdentifierTag(notification.request.identifier);
+  return tag === openedChannelId || Boolean(tag?.startsWith(openedChannelId + ':'));
 }
 
 /** Remove pre-Room-tag Android rows once; their original destination is unrecoverable. */
@@ -73,7 +74,7 @@ export async function clearLegacyPresentedNotificationsOnce(
   const legacyIds = presented.flatMap((notification) => {
     const target = getBuzzNotificationTargetFromData(notification.request.content?.data);
     const tag = presentedNotificationIdentifierTag(notification.request.identifier);
-    return !target && (!tag || !ROOM_ID.test(tag)) ? [notification.request.identifier] : [];
+    return !target && (!tag || !ROOM_ID.test(tag.split(':', 1)[0]!)) ? [notification.request.identifier] : [];
   });
   await Promise.all(legacyIds.map((identifier) => api.dismissNotificationAsync(identifier)));
   await storage.setItem(LEGACY_PRESENTED_NOTIFICATIONS_CLEARED_KEY, '1');
@@ -113,11 +114,11 @@ function isActionOutcome(notification: PresentedNotification): boolean {
   );
 }
 
-function presentedMessageId(notification: PresentedNotification): string | null {
-  const data = notification.request.content?.data;
-  if (!data || typeof data !== 'object') return null;
-  const messageId = (data as Record<string, unknown>).messageId;
-  return typeof messageId === 'string' && messageId ? messageId : null;
+function presentedMessageId(notification: PresentedNotification, channelId: string): string | null {
+  const target = getBuzzNotificationTargetFromData(notification.request.content?.data);
+  if (target) return target.messageId ?? null;
+  const tag = presentedNotificationIdentifierTag(notification.request.identifier);
+  return tag?.startsWith(channelId + ':') ? tag.slice(channelId.length + 1) : null;
 }
 
 type ChannelRead = {
@@ -153,7 +154,7 @@ export async function dismissPresentedNotificationsForChannels(
     readChannels.some((read) => {
       if (!presentedNotificationMatchesChannel(notification, read.channelId)) return false;
       if (!read.messageId) return true;
-      const messageId = presentedMessageId(notification);
+      const messageId = presentedMessageId(notification, read.channelId);
       return (
         messageId !== null &&
         (messageId === read.messageId || (read.readMessageIds ?? []).includes(messageId))

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { localizeReportTimes } from '@beeline/api-contract/report-time';
 import { commandGrantAction } from '@beeline/api-contract/agent-grants';
 import { messageColumns } from './message-columns.js';
@@ -18,6 +19,7 @@ import { apnsReadClearBatch } from './apns-push.js';
 import { firebaseReadClearBatch } from './firebase-push.js';
 import { cornerFactsSql, cornerRowState, type CornerStateRow } from './chat-corner-counts.js';
 import { pushDirectAttentionSql } from './push-attention.js';
+import { pushUnreadCount } from './push-outbox.js';
 import { agentBlockSql } from './read-cursor.js';
 import { SERVER_LEASE_EXPIRY_MS } from './connection-presence.js';
 
@@ -34,6 +36,8 @@ export interface PushSender {
       /** A permission ask: its text is delivered whole, never cut to fit. */
       permission?: true;
       recipientIdentityId?: string;
+      deliveryId?: string;
+      unreadCount?: number;
       /** Replacement slot; attention uses its own message or human-burst id. */
       collapseId?: string;
     } & (
@@ -405,10 +409,7 @@ export class PushDeliveryLoop {
           COALESCE(NULLIF(author.name,''),'Someone') author_name,
           CASE WHEN author.kind='agent'
             THEN NULLIF(btrim(ltrim(beeline_room_handle(author.id,m.room_id),'@')),'') END author_handle,
-          CASE WHEN attention.direct OR m.presentation<>'message' THEN m.id
-          -- Keep human prose visible when a subsequent agent summary replaces its slot.
-          ELSE CASE WHEN author.kind='human' THEN room.id::text ELSE 'agent:'||room.id::text END
-          END collapse_id,
+          m.id collapse_id,
           COALESCE(attention.direct,false) direct_attention,
           -- A DM takes its title from dm_peer below, not from a Room name. A
           -- corner under a DM is titled from the DM's stored name, as in the app.
@@ -628,6 +629,14 @@ export class PushDeliveryLoop {
       });
     }
     const expiryByKey = new Map(due.rows.map(row => [JSON.stringify([row.message_id,row.device_token]), new Date(row.expires_at).getTime()]));
+    const badges = new Map<string, Promise<number>>();
+    function badgeFor(database: SqlDatabase, viewer: string) {
+      const existing = badges.get(viewer);
+      if (existing) return existing;
+      const badge = pushUnreadCount(database, viewer);
+      badges.set(viewer, badge);
+      return badge;
+    }
     const slotSends = new Map<string, Promise<void>>();
     const workerResults = await Promise.all(
       claimedDeliveries.map(async ({ candidate, message }) => {
@@ -643,10 +652,14 @@ export class PushDeliveryLoop {
               const slot = `${candidate.token}:${candidate.collapse_id ?? candidate.message_id}`;
               const sending = (slotSends.get(slot) ?? Promise.resolve())
                 .catch(() => undefined)
-                .then(() => {
+                .then(async () => {
+                  const unreadCount = candidate.platform === 'ios'
+                    ? await badgeFor(this.database, candidate.identity_id) : undefined;
                   if (Date.now() >= expiryByKey.get(JSON.stringify([candidate.message_id,candidate.token]))!)
                     throw new Error('Push expired before provider send');
                   return sender.send(candidate.token, {
+                    deliveryId: randomUUID(),
+                    ...(unreadCount !== undefined ? { unreadCount } : {}),
                     ...message,
                     recipientIdentityId: candidate.identity_id,
                   });

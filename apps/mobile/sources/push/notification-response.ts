@@ -70,35 +70,46 @@ function parseConsumedResponseIds(raw: string | null): string[] {
  */
 export function getNotificationResponseId(response: TappedNotificationResponse): string | undefined {
   const target = getBuzzNotificationTargetFromData(response.notification?.request?.content?.data);
-  if (target?.messageId) return target.messageId;
+  if (target?.deliveryId) return target.deliveryId;
   const identifier = response.notification?.request?.identifier;
-  return typeof identifier === 'string' && identifier ? identifier : undefined;
+  if (identifier && target?.messageId) return JSON.stringify([identifier, target.messageId]);
+  return identifier || target?.messageId;
 }
 
 /** Persist routed Expo response ids so a later process cannot replay the same leftover extras. */
 export function createConsumedNotificationResponseStore(
   storage: NotificationResponseIdStorage,
 ): ConsumedNotificationResponseStore {
-  let loaded: string[] | undefined;
-  const load = async (): Promise<string[]> => {
-    loaded ??= parseConsumedResponseIds(
-      await storage.getItem(CONSUMED_NOTIFICATION_RESPONSE_IDS_KEY),
-    );
+  let loaded: Promise<string[]> | undefined;
+  let writes = Promise.resolve();
+  function load() {
+    loaded ??= storage.getItem(CONSUMED_NOTIFICATION_RESPONSE_IDS_KEY).then(parseConsumedResponseIds)
+      .catch(error => { loaded = undefined; throw error; });
     return loaded;
-  };
+  }
   return {
-    async has(id: string): Promise<boolean> {
-      return (await load()).includes(id);
-    },
-    async add(id: string): Promise<void> {
+    async has(id) {
       const ids = await load();
-      if (ids.includes(id)) return;
-      ids.push(id);
-      if (ids.length > MAX_CONSUMED_NOTIFICATION_RESPONSE_IDS) {
-        ids.splice(0, ids.length - MAX_CONSUMED_NOTIFICATION_RESPONSE_IDS);
+      if (ids.includes(id)) return true;
+      // Older installations stored the bare message id for the same leftover intent.
+      if (!id.startsWith('[')) return false;
+      try {
+        const pair: unknown = JSON.parse(id);
+        return Array.isArray(pair) && pair.length === 2 && ids.includes(pair[1]);
+      } catch {
+        return false;
       }
-      loaded = ids;
-      await storage.setItem(CONSUMED_NOTIFICATION_RESPONSE_IDS_KEY, JSON.stringify(ids));
+    },
+    add(id) {
+      const write = writes.then(async () => {
+        const ids = await load();
+        if (ids.includes(id)) return;
+        const next = [...ids, id].slice(-MAX_CONSUMED_NOTIFICATION_RESPONSE_IDS);
+        await storage.setItem(CONSUMED_NOTIFICATION_RESPONSE_IDS_KEY, JSON.stringify(next));
+        loaded = Promise.resolve(next);
+      });
+      writes = write.catch(() => {});
+      return write;
     },
   };
 }

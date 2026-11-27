@@ -126,6 +126,10 @@ it('MERGE-ROWS-1 folds a run of merges into one pill that counts them and opens 
     item.run[index].event.open.onPress();
     expect(openUrl).toHaveBeenLastCalledWith(event.systemEvent!.object!.url);
   }
+  expect(tree.root.findAllByProps({ testID: 'pill-event-merge-13' })).toHaveLength(0);
+  act(() => tree.update(<TranscriptPills run={rows[0]!.pillRun ?? [rows[0]!]} targetId="merge-13"
+    resolve={() => ({ kind: 'system', name: 'Beeline' })} onOpenUrl={openUrl} />));
+  expect(tree.root.findAllByProps({ testID: 'pill-event-merge-13' }).length).toBeGreaterThan(0);
   // Each event keeps its own send time.
   expect(item.run[0].time).not.toBe(item.run[13].time);
   act(() => tree.unmount());

@@ -1,3 +1,4 @@
+import { router, type Href } from 'expo-router';
 import type { Identity } from '@beeline/buzz-client';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { getOpenBuzzChannelId } from '@/buzz/open-room-tracker';
@@ -10,6 +11,14 @@ const OWNER_KEY = '@beeline/web-push/owner';
 export function installWebPushForegroundResponder(): () => void {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return () => {};
   const respond = (event: MessageEvent) => {
+    if (event.data?.type === 'beeline-web-push-navigate') {
+      const path = event.data.path;
+      if (typeof path === 'string' && path.startsWith('/beeline/')) {
+        router.navigate(path as Href);
+        event.ports[0]?.postMessage(true);
+      }
+      return;
+    }
     if (event.data?.type !== 'beeline-web-push-open-room') return;
     event.ports[0]?.postMessage({ channelId: getOpenBuzzChannelId() });
   };

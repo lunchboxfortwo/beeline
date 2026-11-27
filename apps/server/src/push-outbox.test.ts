@@ -6,7 +6,7 @@ import { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { migrate, PostgresDatabase, postgresPoolConfig, type SqlDatabase } from './database.js';
 import { PushDeliveryLoop } from './background.js';
-import { backfillPushOutbox } from './push-outbox.js';
+import { backfillPushOutbox, pushUnreadCount } from './push-outbox.js';
 import { messageSearchDocumentSql } from './message-search-document-sql.js';
 import { PgliteDatabase } from './test-support.js';
 import { updateWorkItem } from './work-board.js';
@@ -37,6 +37,7 @@ it('never retries an abandoned claim when a server restarts', async () => {
   try {
     await setup(db);
     await post(db, 'abandoned');
+    expect(await pushUnreadCount(db, person)).toBe(1);
     await db.query(`INSERT INTO push_delivery_claims(message_id,device_token,status,claimed_at)
       VALUES('abandoned','proof-device','claimed',now()-interval '2 minutes')`);
     const send = vi.fn().mockResolvedValue(undefined);

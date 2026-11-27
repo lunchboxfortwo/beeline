@@ -35,7 +35,7 @@ const defaultAction = 'expo.modules.notifications.actions.DEFAULT';
 const messageId = 'a'.repeat(64);
 const serverPush = (id: string) => firebasePushMessage('fixture-device-token', {
   type: 'message', target: 'message', workspaceId: 'workspace', roomId: 'room', channelId: 'room',
-  messageId: id, text: 'A server-built notification', collapseId: 'room-slot',
+  messageId: id, deliveryId: 'delivery-' + id, text: 'A server-built notification', collapseId: 'room-slot',
 });
 type Push = ReturnType<typeof serverPush>;
 const wrappers = {
@@ -111,7 +111,7 @@ for (const [wrapper, wrap] of Object.entries(wrappers)) {
       expect(clearLastResponse).not.toHaveBeenCalled();
       early.response = response;
       prefetchLastPushedRoom();
-      expect(early.prefetch).toHaveBeenCalledExactlyOnceWith(messageId, 'room');
+      expect(early.prefetch).toHaveBeenCalledExactlyOnceWith('delivery-' + messageId, 'room');
       const stop = startNotificationResponseEntries({
         addResponseListener: (callback) => { listener = callback; return { remove: vi.fn() }; },
         getLastResponse: async () => entry === 'cold' ? response : null,
@@ -128,7 +128,7 @@ for (const [wrapper, wrap] of Object.entries(wrappers)) {
         await delivered;
         expect(state.routes[state.index]).toMatchObject({
           name: 'beeline/chat/[channelId]',
-          params: { channelId: 'room', communityId: 'workspace', notificationMessageId: messageId, notificationResponseId: messageId },
+          params: { channelId: 'room', communityId: 'workspace', notificationMessageId: messageId, notificationResponseId: 'delivery-' + messageId },
         });
         expect(clearLastResponse).toHaveBeenCalledOnce();
         dispatch.mockClear();
@@ -194,7 +194,7 @@ it('cancels a cold replay waiting for durable deduplication when a newer live ta
     addResponseListener: (callback) => { listener = callback; return { remove: vi.fn() }; },
     getLastResponse: async () => old, getAppState: () => 'background', route,
     consumedResponses: {
-      has: async (id) => { if (id === messageId) return false; coldChecked(); return check; },
+      has: async (id) => { if (id === 'delivery-' + messageId) return false; coldChecked(); return check; },
       add: async () => {},
     },
   });
@@ -206,4 +206,23 @@ it('cancels a cold replay waiting for durable deduplication when a newer live ta
     await Promise.resolve();
     expect(route).toHaveBeenCalledExactlyOnceWith(latest, 'background');
   } finally { stop(); }
+});
+
+it('handles distinct deliveries for one card and ignores a replay of each receipt', async () => {
+  const openStack = vi.fn();
+  const routing = {
+    navigator: { openStack }, handled: new Set<string>(), defaultActionIdentifier: defaultAction,
+    suppressPendingInitialLanding: vi.fn(), clearLastResponse: async () => {},
+    resolveTarget: async (target: import('@/utils/notificationRouting').BuzzNotificationTarget) => target,
+    log: () => {},
+  };
+  for (const deliveryId of ['first', 'first', 'second']) {
+    await routeBuzzNotificationResponse({
+      actionIdentifier: defaultAction,
+      notification: { request: { identifier: 'slot', content: { data: {
+        type: 'pull-request-opened', channelId: 'thread', eventId: 'card', deliveryId,
+      } } } },
+    }, routing);
+  }
+  expect(openStack.mock.calls.map(([routes]) => routes.at(-1).params.notificationResponseId)).toEqual(['first', 'second']);
 });
