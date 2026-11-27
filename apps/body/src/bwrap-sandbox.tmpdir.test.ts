@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { expect, it } from 'vitest';
 
-it('mounts the short TMPDIR as a real directory and keeps the session bridge reachable', () => {
+it('mounts the short TMPDIR as a real directory and reaches a bridge started afterward', () => {
   // Give the fixture its own /var/tmp so it can create the short link even
   // when Vitest itself is running in a read-only Beeline sandbox.
   const result = spawnSync('/usr/bin/bwrap', [
@@ -10,10 +10,12 @@ it('mounts the short TMPDIR as a real directory and keeps the session bridge rea
     '--setenv', 'XDG_STATE_HOME', '/mnt/' + 'long-state-directory/'.repeat(6), '--',
     process.execPath, '--import', 'tsx', '--input-type=module', '-e', `
       import assert from 'node:assert/strict';
-      import { execFile } from 'node:child_process';
-      import { lstatSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
+      import { spawn } from 'node:child_process';
+      import { once } from 'node:events';
+      import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
       import { createServer } from 'node:net';
-      import { promisify } from 'node:util';
+      import { dirname } from 'node:path';
+      import { createInterface } from 'node:readline';
       import { wrapAgentCommand } from ${JSON.stringify(new URL('./bwrap-sandbox.ts', import.meta.url).href)};
       import { preparePrivateSocketDirectory } from ${JSON.stringify(new URL('./local-socket.ts', import.meta.url).href)};
       import { bridgeSocketPath } from ${JSON.stringify(new URL('./session-join/bridge-socket.ts', import.meta.url).href)};
@@ -25,12 +27,7 @@ it('mounts the short TMPDIR as a real directory and keeps the session bridge rea
       symlinkSync('../../mnt/agent-home/tmp', tmpDir);
       const bridgeSocket = bridgeSocketPath(stateDir());
       assert(bridgeSocket.startsWith('/var/tmp/'));
-      await preparePrivateSocketDirectory(bridgeSocket);
-      const bridge = createServer(peer => peer.end('bridge ready'));
-      await new Promise((done, reject) => {
-        bridge.once('error', reject);
-        bridge.listen(bridgeSocket, done);
-      });
+      assert.equal(existsSync(dirname(bridgeSocket)), false);
       const command = wrapAgentCommand({
         bwrapPath: '/usr/bin/bwrap',
         spec: { mode: 'readonly', cwd: process.cwd(), tmpDir },
@@ -43,24 +40,40 @@ it('mounts the short TMPDIR as a real directory and keeps the session bridge rea
           assert.equal(fs.lstatSync(tmp).isDirectory(), true, 'TMPDIR must be a directory');
           assert.equal(fs.realpathSync(tmp), tmp);
           fs.writeFileSync(tmp + '/proof', 'scratch');
-          const peer = require('node:net').createConnection(process.argv[1]);
-          peer.setEncoding('utf8');
-          let reply = '';
-          peer.on('data', chunk => { reply += chunk; });
-          peer.on('end', () => assert.equal(reply, 'bridge ready'));
+          process.stdin.once('data', () => {
+            const peer = require('node:net').createConnection(process.argv[1]);
+            peer.setEncoding('utf8');
+            let reply = '';
+            peer.on('data', chunk => { reply += chunk; });
+            peer.on('end', () => assert.equal(reply, 'bridge ready'));
+          });
+          console.log('sandbox ready');
         \`, bridgeSocket],
       });
+      const sandbox = spawn(command.command, command.args, {
+        env: { ...process.env, TMPDIR: tmpDir },
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+      const ended = once(sandbox, 'close');
+      const lines = createInterface({ input: sandbox.stdout });
+      const bridge = createServer(peer => peer.end('bridge ready'));
       try {
-        await promisify(execFile)(command.command, command.args, {
-          env: { ...process.env, TMPDIR: tmpDir },
-          timeout: 5000,
-        });
+        await Promise.race([
+          once(lines, 'line').then(([line]) => assert.equal(line, 'sandbox ready')),
+          ended.then(([code]) => assert.fail('sandbox exited before ready: ' + code)),
+        ]);
+        await preparePrivateSocketDirectory(bridgeSocket);
+        bridge.listen(bridgeSocket);
+        await once(bridge, 'listening');
+        sandbox.stdin.end('connect');
+        assert.equal((await ended)[0], 0);
       } finally {
-        await new Promise(done => bridge.close(done));
+        sandbox.kill();
+        if (bridge.listening) await new Promise(done => bridge.close(done));
       }
       assert.equal(lstatSync(tmpDir).isSymbolicLink(), true);
       assert.equal(readFileSync(scratch + '/proof', 'utf8'), 'scratch');
     `,
-  ], { encoding: 'utf8' });
+  ], { encoding: 'utf8', timeout: 10000 });
   expect(result.status, result.stderr).toBe(0);
 });

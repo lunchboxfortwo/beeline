@@ -19,6 +19,7 @@ import { basename,dirname,isAbsolute,relative,resolve } from 'node:path';
 import type { SessionMode } from './config.js';
 import { CURSOR_HARNESS_COMMAND } from './cursor-acp-bridge.js';
 import { foreignLoginMaskPaths, type AgentKind } from './agent-command.js';
+import { preparePrivateSocketDirectorySync } from './local-socket.js';
 import { bridgeSocketPath } from './session-join/bridge-socket.js';
 import { stateDir as joinedSessionStateDir } from './session-join/store.js';
 
@@ -267,6 +268,8 @@ export interface SandboxMountPlan {
   scratchAlias?: { path: string; source: string };
   /** Helper socket directories to keep on their original filesystem. */
   hostSocketDirs?: string[];
+  /** Session bridge endpoints whose directories may need to be prepared before launch. */
+  bridgeSockets?: Array<{ path: string; fallback: boolean }>;
   /** Copy-on-write layers mounted over shared dependency trees; see {@link DependencyLayer}. */
   overlays?: DependencyLayer[];
   /**
@@ -312,6 +315,8 @@ export interface SandboxSessionSpec {
   tmpDir?: string;
   /** Sockets served by the helper outside the session. */
   hostSocketPaths?: Array<string | undefined>;
+  /** The joined-session state directory used by the harness environment. */
+  bridgeStateDir?: string;
   /** Git common directory backing a corner's linked worktree. */
   gitCommonDir?: string;
   /** Shared dependency trees, each writable through this checkout's own layer. */
@@ -449,11 +454,15 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
   ]).filter((path) => isUnderTmp(path) && path !== '/tmp' && !writable.includes(path));
   const readOnly = tmpRestores;
   const hostSocketDirs = scratchAlias
-    ? normalize([
-        dirname(bridgeSocketPath(joinedSessionStateDir())),
-        ...(spec.hostSocketPaths ?? []).map(path => path && dirname(path)),
-      ])
+    ? normalize((spec.hostSocketPaths ?? []).map(path => path && dirname(path)))
       .filter(path => path.startsWith('/var/tmp/'))
+    : [];
+  const bridgeSockets = scratchAlias
+    ? [...new Set([joinedSessionStateDir(), spec.bridgeStateDir])].flatMap(stateDir => {
+        if (!stateDir) return [];
+        const path = bridgeSocketPath(stateDir);
+        return [{ path: resolve(path), fallback: dirname(path) !== stateDir }];
+      })
     : [];
   return {
     ownerPaths,
@@ -463,6 +472,7 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
     writable,
     ...(scratchAlias ? { scratchAlias } : {}),
     ...(hostSocketDirs.length ? { hostSocketDirs } : {}),
+    ...(bridgeSockets.length ? { bridgeSockets } : {}),
     ...(spec.dependencyLayers?.length ? { overlays: spec.dependencyLayers } : {}),
     masks: [...(spec.maskPaths ?? []),
       ...[...new Set(['/run/docker.sock', '/var/run/docker.sock', ...(spec.userRuntimeDir ? [resolve(spec.userRuntimeDir, 'docker.sock')] : [])]
@@ -569,7 +579,17 @@ export function buildBwrapArgv(input: {
   }
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
-  const hostSocketDirs = input.plan.hostSocketDirs ?? [];
+  const bridgeSocketDirs = (input.plan.bridgeSockets ?? []).flatMap(({ path, fallback }) => {
+    const directory = dirname(path);
+    if (!directory.startsWith('/var/tmp/')) return [];
+    // The bridge can start later. Bind the directory now so the socket it
+    // creates on the host appears inside the sandbox on the original inode.
+    try {
+      if (fallback) preparePrivateSocketDirectorySync(path);
+      return [directory];
+    } catch { return []; } // An unavailable optional socket must not prevent sandbox startup.
+  });
+  const hostSocketDirs = normalize([...(input.plan.hostSocketDirs ?? []), ...bridgeSocketDirs]);
   for (const path of hostSocketDirs) args.push('--ro-bind-try', path, path);
   for (const binding of input.plan.ownerPaths ?? [])
     args.push(binding.writable ? '--bind-try' : '--ro-bind-try', binding.path, binding.path);
