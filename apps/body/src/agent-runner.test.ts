@@ -569,6 +569,25 @@ it('ends a hosted item with the real startup failure and does not replay it on r
   expect(harness.deliver).not.toHaveBeenCalled();
 });
 
+it('retries the same hosted scheduled wake after a startup failure', async () => {
+  const f = await fixture(undefined, true);
+  const wake = { ...f.item('hosted-schedule'), reason: 'schedule' };
+  harness.start.mockRejectedValueOnce(new Error('Harness startup disconnected'));
+
+  f.changed([wake]);
+  await vi.waitFor(() => expect(harness.stop).toHaveBeenCalledOnce());
+  expect(harness.deliver).not.toHaveBeenCalled();
+  expect(f.execute).not.toHaveBeenCalledWith('startAgentTurn', expect.objectContaining({ available: false }));
+
+  f.changed([wake]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: wake.turnRequestId, text: 'answer',
+  })));
+  expect(harness.start).toHaveBeenCalledTimes(2);
+  expect(harness.deliver).toHaveBeenCalledOnce();
+  expect(harness.deliver).toHaveBeenCalledWith(wake, [wake]);
+});
+
 it.each([false, true])('ends an unanswered hosted tag visibly after empty end_turn (restored=%s)', async restored => {
   if (restored) vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
     itemId: 'beebee-empty-end-turn', roomId: 'room', requestId: 'beebee-empty-end-turn', text: '', harnessEnded: true,

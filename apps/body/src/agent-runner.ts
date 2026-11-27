@@ -443,6 +443,9 @@ export class AgentRunner {
                 invocation,
                 failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
               });
+          } else if (item.reason === 'schedule') {
+            // Retry the same wake on the next queue delivery.
+            place.waiting.unshift(item);
           } else if (
             !this.stopped &&
             this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
