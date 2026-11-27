@@ -51,6 +51,7 @@ function unwrapNotificationEnvelope(data: unknown): unknown {
 
 type BuzzNotificationTargetBase = {
   type: string;
+  deliveryId?: string;
   eventId?: string;
   messageId?: string;
 };
@@ -93,12 +94,14 @@ export function getBuzzNotificationTargetFromData(data: unknown): BuzzNotificati
   const type = nonEmptyString(getObjectValue(normalizedData, 'type'));
   const rawChannelId = nonEmptyString(getObjectValue(normalizedData, 'channelId'));
   if (!type) return null;
+  const deliveryId = nonEmptyString(getObjectValue(normalizedData, 'deliveryId'));
+  const receipt = deliveryId ? { deliveryId } : {};
 
   const cornerId = nonEmptyString(getObjectValue(normalizedData, 'cornerId'));
   const targetValue = nonEmptyString(getObjectValue(normalizedData, 'target'));
   const workspaceId = nonEmptyString(getObjectValue(normalizedData, 'workspaceId'));
   if ((targetValue === 'workspace' || (type === 'workspace-join' && !rawChannelId)) && workspaceId)
-    return { type, target: 'workspace', workspaceId };
+    return { type, target: 'workspace', workspaceId, ...receipt };
   if (!rawChannelId) return null;
   const target: BuzzNotificationTarget['target'] =
     targetValue === 'message' || targetValue === 'corner'
@@ -115,9 +118,10 @@ export function getBuzzNotificationTargetFromData(data: unknown): BuzzNotificati
     nonEmptyString(getObjectValue(normalizedData, 'roomId')) ??
     (cornerId && cornerId !== rawChannelId ? rawChannelId : channelId);
   const eventId = nonEmptyString(getObjectValue(normalizedData, 'eventId'));
-  const messageId = nonEmptyString(getObjectValue(normalizedData, 'messageId'));
+  const messageId = nonEmptyString(getObjectValue(normalizedData, 'messageId')) ?? eventId;
   return {
     type,
+    ...receipt,
     target,
     ...(workspaceId ? { workspaceId } : {}),
     roomId,

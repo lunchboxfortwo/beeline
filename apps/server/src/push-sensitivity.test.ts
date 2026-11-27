@@ -169,7 +169,7 @@ describe('sensitivity boundaries and replacement slots', () => {
     expect(send.mock.calls.map(([,message]) => message.messageId)).not.toContain(final);
   });
 
-  it('collapses room activity while keeping human messages and attention separate', async () => {
+  it('keeps each activity and attention message independently tappable', async () => {
     await db.query(`UPDATE identities SET push_level='full' WHERE id=$1`, [person]);
     const human = await post('Human update', teammate, room);
     await loop.runOnce();
@@ -182,9 +182,9 @@ describe('sensitivity boundaries and replacement slots', () => {
     const byId = new Map(
       send.mock.calls.map(([, message]) => [message.messageId, message.collapseId]),
     );
-    expect(byId.get(human)).toBe(room);
-    expect(byId.get(first)).toBe(`agent:${room}`);
-    expect(byId.get(second)).toBe(byId.get(first));
+    expect(byId.get(human)).toBe(human);
+    expect(byId.get(first)).toBe(first);
+    expect(byId.get(second)).toBe(second);
     expect(byId.get(mention)).toBe(mention);
   });
 

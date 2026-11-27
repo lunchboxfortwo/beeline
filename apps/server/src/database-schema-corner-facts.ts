@@ -370,6 +370,8 @@ CREATE TABLE IF NOT EXISTS push_devices (
 ALTER TABLE push_devices DROP CONSTRAINT IF EXISTS push_devices_platform_check;
 ALTER TABLE push_devices ADD CONSTRAINT push_devices_platform_check CHECK (platform IN ('android', 'ios', 'web'));
 ALTER TABLE push_devices ADD COLUMN IF NOT EXISTS web_keys jsonb;
+ALTER TABLE push_devices ADD COLUMN IF NOT EXISTS last_badge_count integer;
+ALTER TABLE push_devices ALTER COLUMN last_badge_count SET DEFAULT 0;
 ALTER TABLE push_devices ADD COLUMN IF NOT EXISTS registered_at timestamptz;
 UPDATE push_devices SET registered_at=updated_at WHERE registered_at IS NULL;
 ALTER TABLE push_devices ALTER COLUMN registered_at SET DEFAULT now();

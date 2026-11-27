@@ -11,7 +11,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Fonts from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigationContainerRef, usePathname, useSegments } from 'expo-router';
+import { router, type Href, useNavigationContainerRef, usePathname, useSegments } from 'expo-router';
 import { setMobileErrorRoute } from '@/buzz/sentry-entry';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -520,7 +520,7 @@ function BackgroundEffects() {
   }, []);
 
   React.useEffect(
-    () => (Platform.OS === 'web' ? installWebPushForegroundResponder() : undefined),
+    () => (Platform.OS === 'web' ? installWebPushForegroundResponder(path => router.navigate(path as Href)) : undefined),
     [],
   );
 

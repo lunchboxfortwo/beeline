@@ -13,7 +13,9 @@ import { token } from './values.js';
     }
     await ctx.database.transaction(async (database) => {
       await database.query(
-        `INSERT INTO push_devices(token,identity_id,platform,environment,web_keys,registered_at) VALUES($1,$2,$3,$4,$5::jsonb,now()) ON CONFLICT(token) DO UPDATE SET identity_id=EXCLUDED.identity_id,platform=EXCLUDED.platform,environment=EXCLUDED.environment,web_keys=EXCLUDED.web_keys,registered_at=CASE WHEN push_devices.identity_id IS DISTINCT FROM EXCLUDED.identity_id OR push_devices.web_keys IS DISTINCT FROM EXCLUDED.web_keys THEN now() ELSE push_devices.registered_at END,updated_at=now()`,
+        `INSERT INTO push_devices(token,identity_id,platform,environment,web_keys,registered_at) VALUES($1,$2,$3,$4,$5::jsonb,now()) ON CONFLICT(token) DO UPDATE SET identity_id=EXCLUDED.identity_id,platform=EXCLUDED.platform,environment=EXCLUDED.environment,
+         last_badge_count=CASE WHEN push_devices.identity_id<>EXCLUDED.identity_id OR push_devices.platform<>EXCLUDED.platform
+           THEN NULL ELSE push_devices.last_badge_count END,web_keys=EXCLUDED.web_keys,registered_at=CASE WHEN push_devices.identity_id IS DISTINCT FROM EXCLUDED.identity_id OR push_devices.web_keys IS DISTINCT FROM EXCLUDED.web_keys THEN now() ELSE push_devices.registered_at END,updated_at=now()`,
         [
           input.token,
           viewerId,

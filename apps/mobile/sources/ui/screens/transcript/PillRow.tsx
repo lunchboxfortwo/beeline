@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { XStack, YStack, useThemeName } from 'tamagui';
 import { ArrowRight, CircleCheck, CircleDot, CircleX, CornerDownRight, GitMerge, GitPullRequest, GitPullRequestClosed } from 'lucide-react-native';
 import { Btn, Copy, Glyph, HEIGHT, T } from '@/ui/grammar';
@@ -301,8 +301,10 @@ function EventLine({ id, event }: { id: string; event: PillEvent }) {
 }
 
 /** Back-to-back events from one source under one "ring · time" heading; more than three show two and "N more". */
-function EventGroup({ events }: { events: readonly (PillRunEntry & { event: PillEvent })[] }) {
+function EventGroup({ events, targetId }: { targetId?: string; events: readonly (PillRunEntry & { event: PillEvent })[] }) {
     const [all, setAll] = useState(false);
+    const hiddenTarget = events.length > EVENT_GROUP_SHOWN && events.slice(2).some(entry => entry.id === targetId);
+    useLayoutEffect(() => { if (hiddenTarget) setAll(true); }, [hiddenTarget]);
     const first = events[0]!;
     const source = SOURCE_NAMES[first.event.source];
     const shown = all || events.length <= EVENT_GROUP_SHOWN ? events : events.slice(0, 2);
@@ -363,12 +365,12 @@ function MessageEntry({ entry }: { entry: PillRunEntry }) {
  * Back-to-back events from one source share one GitHub or Beeline heading.
  * Rows sit the same-speaker 12 apart; a heading sits 4 above its body.
  */
-function RunList({ run }: { run: readonly PillRunEntry[] }) {
+function RunList({ run, targetId }: { targetId?: string; run: readonly PillRunEntry[] }) {
     return (
         <TranscriptLine testID="pill-open">
             <YStack gap="3" minWidth={0}>
                 {runBlocks(run).map((block) => block.kind === 'events'
-                    ? <EventGroup key={block.events[0]!.id} events={block.events} />
+                    ? <EventGroup key={block.events[0]!.id} events={block.events} targetId={targetId} />
                     : <MessageEntry key={block.entry.id} entry={block.entry} />)}
             </YStack>
         </TranscriptLine>
@@ -383,8 +385,10 @@ function RunList({ run }: { run: readonly PillRunEntry[] }) {
  * lone event is its GitHub or Beeline ring and its state mark. A lone agent message is
  * a pill too, and opens on tap like any other.
  */
-export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?: string }) {
+export function PillRow({ items, testID, targetId }: { targetId?: string; items: readonly PillItem[]; testID?: string }) {
     const [openId, setOpenId] = useState<string | null>(null);
+    const targetItem = targetId && items.find(item => item.id === targetId || item.run?.some(entry => entry.id === targetId))?.id;
+    useLayoutEffect(() => { if (targetItem) setOpenId(targetItem); }, [targetItem, targetId]);
     const open = items.find((item) => item.id === openId);
     return (
         <YStack gap="3" width="100%" minWidth={0} testID={testID ?? 'pill-row'}>
@@ -423,7 +427,7 @@ export function PillRow({ items, testID }: { items: readonly PillItem[]; testID?
                     );
                 })}
             </XStack>
-            {open?.run ? <RunList run={open.run} /> : open ? (
+            {open?.run ? <RunList run={open.run} targetId={targetId} /> : open ? (
                 <TranscriptLine testID="pill-open">
                     {open.event ? <EventLine id={open.id} event={open.event} /> : open.body}
                 </TranscriptLine>

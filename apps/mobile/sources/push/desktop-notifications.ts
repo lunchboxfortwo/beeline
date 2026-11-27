@@ -37,6 +37,20 @@ export function desktopNotificationTitle(
   return roomTitle(room.room.name) ?? room.room.name;
 }
 
+/** The desktop plugin's injected Notification constructor lacks DOM click events. */
+export function showClickableDesktopNotification(
+  title: string, body: string, onClick: () => void,
+): boolean {
+  if (typeof window.Notification?.prototype?.addEventListener !== 'function') return false;
+  const notification = new window.Notification(title, { body });
+  notification.addEventListener('click', () => {
+    notification.close();
+    window.focus();
+    onClick();
+  }, { once: true });
+  return true;
+}
+
 /** The Tauri process must remain running and connected. A quit app has no desktop remote token. */
 export function startDesktopNotifications(): () => void {
   if (!isTauri()) return () => undefined;
@@ -174,13 +188,19 @@ export function startDesktopNotifications(): () => void {
       const notification = await import('@tauri-apps/plugin-notification');
       if (!(await notification.isPermissionGranted()) || disposed || current !== generation) return;
       const prose = localizeReportTimes(message.text, managed?.timeZone ?? deviceTimeZone());
-      notification.sendNotification({
-        title: desktopNotificationTitle(room, parentName),
-        body: (room.directMessage ? prose : `${message.author.name}: ${prose}`).slice(
-          0,
-          240,
-        ),
+      const title = desktopNotificationTitle(room, parentName);
+      const body = (room.directMessage ? prose : `${message.author.name}: ${prose}`).slice(0, 240);
+      const handled = showClickableDesktopNotification(title, body, () => {
+        if (disposed || current !== generation) return;
+        void import('expo-router').then(({ router }) => {
+          if (disposed || current !== generation) return;
+          router.navigate({ pathname: '/beeline/chat/[channelId]', params: {
+            channelId: roomId, communityId: room.room.workspaceId, notificationMessageId: message.id,
+            notificationResponseId: message.id,
+          } });
+        }).catch(report);
       });
+      if (!handled) notification.sendNotification({ title, body });
     }
 
     /** Read the Workspace list, hold each Workspace's Room list, and read each once more. */

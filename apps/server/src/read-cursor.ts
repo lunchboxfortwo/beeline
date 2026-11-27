@@ -70,13 +70,13 @@ export function agentBlockSql(alias: string): string {
  *
  * `$2` is the viewer.
  */
-export function unreadMessageSql(alias: string): string {
+export function unreadMessageSql(alias: string, viewer = '$2'): string {
   const column = (name: string) => `${alias}.${name}`;
   // An agent's order or report record is reference, not news: it never counts.
   return `${visibleChatMessageSql(alias)}
       AND ${column('card_type')} IS DISTINCT FROM 'agent-command'
       AND NOT ${agentBlockSql(alias)}
-      AND ${column('author_id')} IS DISTINCT FROM $2`;
+      AND ${column('author_id')} IS DISTINCT FROM ${viewer}`;
 }
 
 /**

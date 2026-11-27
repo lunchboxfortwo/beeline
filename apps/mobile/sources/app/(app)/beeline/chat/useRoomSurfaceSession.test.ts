@@ -16,6 +16,14 @@ import { type MonolithSurfaceEvent } from '@/sync/transport/monolith-rig-transpo
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { type UseRoomSurfaceSessionResult } from './useRoomSurfaceSession';
 
+const shade = vi.hoisted(() => ({
+  dismissNotificationAsync: vi.fn(async () => {}),
+  getPresentedNotificationsAsync: vi.fn(async () => [{
+    request: { identifier: 'read-alert', content: { data: { type: 'channel-activity', channelId: 'room-a', messageId: 'latest' } } },
+  }]),
+}));
+vi.mock('expo-notifications', () => shade);
+
 describe('reopening a dismissed Room', () => {
 const scope1 = fixtureScope1();
 
@@ -303,6 +311,26 @@ describe('useRoomSurfaceSession', () => {
     await act(async () => renderer.unmount());
   });
 
+
+  it('dismisses an all-read snapshot received while blurred on the next focus', async () => {
+    shade.dismissNotificationAsync.mockClear();
+    const render = (isFocused: boolean) => React.createElement(Harness, {
+      channelId: 'room-a', isFocused, capture: () => {},
+    });
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(render(true)); });
+    try {
+      await flushEffects();
+      await act(async () => renderer.update(render(false)));
+      const view = roomView('room-a');
+      await act(async () => controls.responses[0]!.apply({
+        ...view, viewer: { ...view.viewer, readCursor: { messageId: 'latest', firstUnreadMessageId: null } },
+      }));
+      expect(shade.dismissNotificationAsync).not.toHaveBeenCalled();
+      await act(async () => renderer.update(render(true)));
+      await vi.waitFor(() => expect(shade.dismissNotificationAsync).toHaveBeenCalledExactlyOnceWith('read-alert'));
+    } finally { await act(async () => renderer.unmount()); }
+  });
 
   it('keeps the first unread boundary from the opening read for the whole visit', async () => {
     controls.cached = roomView('room-a');

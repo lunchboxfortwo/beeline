@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { localizeReportTimes } from '@beeline/api-contract/report-time';
 import { commandGrantAction } from '@beeline/api-contract/agent-grants';
 import { messageColumns } from './message-columns.js';
@@ -18,6 +19,7 @@ import { apnsReadClearBatch } from './apns-push.js';
 import { firebaseReadClearBatch } from './firebase-push.js';
 import { cornerFactsSql, cornerRowState, type CornerStateRow } from './chat-corner-counts.js';
 import { pushDirectAttentionSql } from './push-attention.js';
+import { pushUnreadCount, pushUnreadCountSql } from './push-outbox.js';
 import { agentBlockSql } from './read-cursor.js';
 import { SERVER_LEASE_EXPIRY_MS } from './connection-presence.js';
 
@@ -34,6 +36,8 @@ export interface PushSender {
       /** A permission ask: its text is delivered whole, never cut to fit. */
       permission?: true;
       recipientIdentityId?: string;
+      deliveryId?: string;
+      unreadCount?: number;
       /** Replacement slot; attention uses its own message or human-burst id. */
       collapseId?: string;
     } & (
@@ -58,7 +62,7 @@ export interface PushSender {
     ),
   ): Promise<void>;
   /** iOS and Android: a silent push that clears these conversations from the shade. */
-  clearRead?(token: string, reads: readonly ReadClear[]): Promise<void>;
+  clearRead?(token: string, reads: readonly ReadClear[], unreadCount?: number): Promise<void>;
 }
 
 const PUSH_TITLE_LENGTH = 40;
@@ -171,6 +175,16 @@ export class PushDeliveryLoop {
     return delivered;
   }
 
+  private async recordBadge(token: string, viewer: string, badge: number): Promise<void> {
+    try {
+      await this.database.query(`UPDATE push_devices SET last_badge_count=$3
+        WHERE token=$1 AND identity_id=$2 AND platform='ios' AND last_badge_count IS DISTINCT FROM $3`, [token, viewer, badge]);
+    } catch (error) {
+      // Badge reconciliation retries a stale count independently of the alert claim.
+      captureServerError(error, { background_job: 'push-badge' });
+    }
+  }
+
   /** Batch delivered claims at or before each read mark, or in archived threads, into one silent push per device. */
   private async sendReadClears(): Promise<void> {
     // One rule for both platforms; each sender keeps its own size limit.
@@ -184,13 +198,22 @@ export class PushDeliveryLoop {
     const due = await this.database.query<{
       token: string;
       platform: 'ios' | 'android';
-      channel_ids: string[];
+      identity_id: string;
+      badge: number | null;
+      channel_ids: string[] | null;
       message_ids: string[];
       read_message_ids: string[];
     }>(
       // Registered-device claims beyond any cap remain due for a later push.
-      `SELECT device.token,device.platform,batch.channel_ids,batch.message_ids,batch.read_message_ids
+      `WITH ios_badges AS MATERIALIZED (
+         SELECT owner.id,CASE WHEN owner.push_level='off' THEN 0
+           ELSE ${pushUnreadCountSql('owner.id')} END AS badge
+         FROM (SELECT DISTINCT identity_id FROM push_devices WHERE platform='ios' AND 'ios'=ANY($1::text[])) ios
+         JOIN identities owner ON owner.id=ios.identity_id
+       )
+       SELECT device.token,device.identity_id,device.platform,ios_badges.badge,batch.channel_ids,batch.message_ids,batch.read_message_ids
        FROM push_devices device
+       LEFT JOIN ios_badges ON device.platform='ios' AND ios_badges.id=device.identity_id
        CROSS JOIN LATERAL (
          SELECT array_agg(pending.room_id ORDER BY pending.sort_at,pending.room_id) channel_ids,
            array_agg(pending.message_id ORDER BY pending.sort_at,pending.room_id) message_ids,
@@ -241,21 +264,28 @@ export class PushDeliveryLoop {
            ) archived
          ) pending
        ) batch
-       WHERE device.platform=ANY($1::text[]) AND batch.channel_ids IS NOT NULL
+       WHERE device.platform=ANY($1::text[]) AND (batch.channel_ids IS NOT NULL
+         OR (device.platform='ios' AND ios_badges.badge IS DISTINCT FROM device.last_badge_count))
 `,
       [enabled],
     );
     for (const row of due.rows) {
       const { sender, batch } = platforms[row.platform];
       if (!sender?.clearRead) continue;
-      let pending = row.channel_ids.map((channelId, index) => ({
+      let pending = (row.channel_ids ?? []).map((channelId, index) => ({
         channelId, messageId: row.message_ids[index]!,
         readMessageIds: JSON.parse(row.read_message_ids[index]!) as string[],
       }));
-      while (pending.length) {
+      do {
         const reads = batch(pending);
         try {
-          await sender.clearRead(row.token, reads);
+          if (row.badge !== null) {
+            await sender.clearRead(row.token, reads, row.badge);
+            await this.recordBadge(row.token, row.identity_id, row.badge);
+          } else {
+            await sender.clearRead(row.token, reads);
+          }
+          if (reads.length === 0) break;
           await this.database.query(
             `UPDATE push_delivery_claims SET read_cleared_at=now()
              WHERE device_token=$1 AND message_id=ANY($2::text[])`,
@@ -271,7 +301,7 @@ export class PushDeliveryLoop {
           const remaining = read.readMessageIds.filter(id => !ids.has(id));
           return remaining.length ? [{ ...read, readMessageIds: remaining }] : [];
         });
-      }
+      } while (pending.length);
     }
   }
 
@@ -405,10 +435,7 @@ export class PushDeliveryLoop {
           COALESCE(NULLIF(author.name,''),'Someone') author_name,
           CASE WHEN author.kind='agent'
             THEN NULLIF(btrim(ltrim(beeline_room_handle(author.id,m.room_id),'@')),'') END author_handle,
-          CASE WHEN attention.direct OR m.presentation<>'message' THEN m.id
-          -- Keep human prose visible when a subsequent agent summary replaces its slot.
-          ELSE CASE WHEN author.kind='human' THEN room.id::text ELSE 'agent:'||room.id::text END
-          END collapse_id,
+          m.id collapse_id,
           COALESCE(attention.direct,false) direct_attention,
           -- A DM takes its title from dm_peer below, not from a Room name. A
           -- corner under a DM is titled from the DM's stored name, as in the app.
@@ -628,56 +655,59 @@ export class PushDeliveryLoop {
       });
     }
     const expiryByKey = new Map(due.rows.map(row => [JSON.stringify([row.message_id,row.device_token]), new Date(row.expires_at).getTime()]));
-    const slotSends = new Map<string, Promise<void>>();
+    const badges = new Map<string, Promise<number>>();
+    function badgeFor(database: SqlDatabase, viewer: string) {
+      const existing = badges.get(viewer);
+      if (existing) return existing;
+      const badge = pushUnreadCount(database, viewer);
+      badges.set(viewer, badge);
+      return badge;
+    }
+    const slotSends = new Map<string, Promise<number | undefined>>();
     const workerResults = await Promise.all(
       claimedDeliveries.map(async ({ candidate, message }) => {
-          let localDelivered = 0;
-
-            try {
-              const sender =
-                candidate.platform === 'ios'
-                  ? this.iosSender!
-                  : candidate.platform === 'web'
-                    ? this.webSender!
-                    : this.sender!;
-              const slot = `${candidate.token}:${candidate.collapse_id ?? candidate.message_id}`;
-              const sending = (slotSends.get(slot) ?? Promise.resolve())
-                .catch(() => undefined)
-                .then(() => {
-                  if (Date.now() >= expiryByKey.get(JSON.stringify([candidate.message_id,candidate.token]))!)
-                    throw new Error('Push expired before provider send');
-                  return sender.send(candidate.token, {
-                    ...message,
-                    recipientIdentityId: candidate.identity_id,
-                  });
-                });
-              slotSends.set(slot, sending);
-              await sending;
-              await this.database.query(
-                `UPDATE push_delivery_claims SET status='delivered',completed_at=now() WHERE message_id=$1 AND device_token=$2`,
-                [candidate.message_id, candidate.token],
-              );
-              localDelivered += 1;
-            } catch (error) {
-              await this.database.query(
-                `UPDATE push_delivery_claims
-                 SET status='failed',completed_at=now(),error=$3
-                 WHERE message_id=$1 AND device_token=$2`,
-                [
-                  candidate.message_id,
-                  candidate.token,
-                  error instanceof Error ? error.message : String(error),
-                ],
-              );
-              if (isUnregisteredPushToken(error))
-                await this.database.query(`DELETE FROM push_devices WHERE token=$1`, [
-                  candidate.token,
-                ]);
-            }
-          return localDelivered;
-        }),
+        let sentBadge: number | undefined;
+        try {
+          const sender = candidate.platform === 'ios' ? this.iosSender!
+            : candidate.platform === 'web' ? this.webSender! : this.sender!;
+          const slot = `${candidate.token}:${candidate.collapse_id ?? candidate.message_id}`;
+          const sending = (slotSends.get(slot) ?? Promise.resolve())
+            .catch(() => undefined)
+            .then(async () => {
+              const unreadCount = candidate.platform === 'ios'
+                ? await badgeFor(this.database, candidate.identity_id) : undefined;
+              if (Date.now() >= expiryByKey.get(JSON.stringify([candidate.message_id,candidate.token]))!)
+                throw new Error('Push expired before provider send');
+              await sender.send(candidate.token, {
+                deliveryId: randomUUID(),
+                ...(unreadCount !== undefined ? { unreadCount } : {}),
+                ...message,
+                recipientIdentityId: candidate.identity_id,
+              });
+              return unreadCount;
+            });
+          slotSends.set(slot, sending);
+          sentBadge = await sending;
+        } catch (error) {
+          await this.database.query(
+            `UPDATE push_delivery_claims
+             SET status='failed',completed_at=now(),error=$3
+             WHERE message_id=$1 AND device_token=$2`,
+            [candidate.message_id, candidate.token, error instanceof Error ? error.message : String(error)],
+          );
+          if (isUnregisteredPushToken(error))
+            await this.database.query('DELETE FROM push_devices WHERE token=$1', [candidate.token]);
+          return 0;
+        }
+        await this.database.query(
+          `UPDATE push_delivery_claims SET status='delivered',completed_at=now() WHERE message_id=$1 AND device_token=$2`,
+          [candidate.message_id, candidate.token],
+        );
+        if (sentBadge !== undefined) await this.recordBadge(candidate.token, candidate.identity_id, sentBadge);
+        return 1;
+      }),
     );
-    delivered = workerResults.reduce((sum, count) => sum + count, 0);
+    delivered = workerResults.reduce<number>((sum, count) => sum + count, 0);
     return delivered;
   }
 }

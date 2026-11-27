@@ -129,6 +129,7 @@ describe('web push transport', () => {
       expect.objectContaining({ TTL: 3600, agent: expect.anything() }),
     );
     const sent = JSON.parse((sendNotification.mock.calls[0] as unknown as [unknown, string])[1]);
+    expect(new URL(sent.url, 'https://example.org').searchParams.get('notificationMessageId')).toBe('message-1');
     expect(sent).toMatchObject({
       channelId: 'room',
       roomId: 'room',

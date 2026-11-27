@@ -6,7 +6,7 @@ import { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { migrate, PostgresDatabase, postgresPoolConfig, type SqlDatabase } from './database.js';
 import { PushDeliveryLoop } from './background.js';
-import { backfillPushOutbox } from './push-outbox.js';
+import { backfillPushOutbox, pushUnreadCount } from './push-outbox.js';
 import { messageSearchDocumentSql } from './message-search-document-sql.js';
 import { PgliteDatabase } from './test-support.js';
 import { updateWorkItem } from './work-board.js';
@@ -32,11 +32,83 @@ async function post(db: SqlDatabase, id: string) {
   await db.query(`INSERT INTO messages(id,room_id,author_id,text) VALUES($1,$2,$3,'@owner hello')`, [id, room, author]);
 }
 
+it('updates the iOS badge after reading a Room that never produced a push claim', async () => {
+  const db = new PgliteDatabase();
+  const quiet = '33333333-3333-4333-8333-333333333333';
+  try {
+    await setup(db);
+    await db.query("UPDATE push_devices SET platform='ios'");
+    await db.query("UPDATE identities SET push_level='attention' WHERE id=$1", [person]);
+    await db.query("INSERT INTO rooms(id,workspace_id,name) VALUES($1,$2,'Quiet')", [quiet, workspace]);
+    await db.query("INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,$2,$3,'member')",
+      [workspace, quiet, person]);
+    await db.query("INSERT INTO messages(id,room_id,author_id,text) VALUES('quiet',$1,$2,'Ordinary update')", [quiet, author]);
+    await post(db, 'mention');
+    const send = vi.fn().mockResolvedValue(undefined);
+    const clearRead = vi.fn().mockResolvedValue(undefined);
+    const loop = new PushDeliveryLoop(db, undefined, { send, clearRead });
+    const markRead = (id: string) => db.query(`INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id)
+      SELECT room_id,$1,created_at,id FROM messages WHERE id=$2`, [person, id]);
+    expect(await loop.runOnce()).toBe(1);
+    expect(send).toHaveBeenCalledWith('proof-device', expect.objectContaining({ messageId: 'mention', unreadCount: 2 }));
+    expect(clearRead).not.toHaveBeenCalled();
+    await markRead('mention');
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenLastCalledWith('proof-device', [expect.objectContaining({ messageId: 'mention' })], 1);
+    expect((await db.query("SELECT message_id FROM push_delivery_claims WHERE read_cleared_at IS NULL")).rows).toEqual([]);
+    await markRead('quiet');
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenLastCalledWith('proof-device', [], 0);
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenCalledTimes(2);
+  } finally { await db.close(); }
+});
+
+it('clears an accepted iOS alert after its badge write fails', async () => {
+  const db = new PgliteDatabase();
+  try {
+    await setup(db);
+    await db.query("UPDATE push_devices SET platform='ios'");
+    await post(db, 'mention');
+    const query = db.query.bind(db);
+    const badgeError = new Error('badge storage unavailable');
+    let statusAtFailedWrite: string | undefined;
+    vi.spyOn(db, 'query').mockImplementation(async (sql, values) => {
+      if (statusAtFailedWrite === undefined && sql.includes('UPDATE push_devices SET last_badge_count')) {
+        const claim = await query<{ status: string }>("SELECT status FROM push_delivery_claims WHERE message_id='mention'");
+        statusAtFailedWrite = claim.rows[0]!.status;
+        throw badgeError;
+      }
+      return query(sql, values);
+    });
+    const send = vi.fn().mockResolvedValue(undefined);
+    const clearRead = vi.fn().mockResolvedValue(undefined);
+    const loop = new PushDeliveryLoop(db, undefined, { send, clearRead });
+    const count = await loop.runOnce();
+    expect(send).toHaveBeenCalledOnce();
+    expect(statusAtFailedWrite).toBe('delivered');
+    expect((await db.query("SELECT status FROM push_delivery_claims WHERE message_id='mention'")).rows)
+      .toEqual([{ status: 'delivered' }]);
+    expect(count).toBe(1);
+    expect((await db.query("SELECT last_badge_count FROM push_devices WHERE token='proof-device'")).rows)
+      .toEqual([{ last_badge_count: 1 }]);
+
+    await db.query(`INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id)
+      SELECT room_id,$1,created_at,id FROM messages WHERE id='mention'`, [person]);
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenLastCalledWith('proof-device', [expect.objectContaining({ messageId: 'mention' })], 0);
+    expect((await db.query("SELECT status,read_cleared_at IS NOT NULL AS cleared FROM push_delivery_claims")).rows)
+      .toEqual([{ status: 'delivered', cleared: true }]);
+    expect(send).toHaveBeenCalledOnce();
+  } finally { await db.close(); }
+});
+
 it('never retries an abandoned claim when a server restarts', async () => {
   const db = new PgliteDatabase();
   try {
     await setup(db);
     await post(db, 'abandoned');
+    expect(await pushUnreadCount(db, person)).toBe(1);
     await db.query(`INSERT INTO push_delivery_claims(message_id,device_token,status,claimed_at)
       VALUES('abandoned','proof-device','claimed',now()-interval '2 minutes')`);
     const send = vi.fn().mockResolvedValue(undefined);

@@ -57,7 +57,8 @@ export function presentedNotificationMatchesChannel(
       (target.channelId === openedChannelId || target.cornerId === openedChannelId)
     );
   }
-  return presentedNotificationIdentifierTag(notification.request.identifier) === openedChannelId;
+  const tag = presentedNotificationIdentifierTag(notification.request.identifier);
+  return tag === openedChannelId || Boolean(tag?.startsWith(openedChannelId + ':'));
 }
 
 /** Remove pre-Room-tag Android rows once; their original destination is unrecoverable. */
@@ -73,25 +74,19 @@ export async function clearLegacyPresentedNotificationsOnce(
   const legacyIds = presented.flatMap((notification) => {
     const target = getBuzzNotificationTargetFromData(notification.request.content?.data);
     const tag = presentedNotificationIdentifierTag(notification.request.identifier);
-    return !target && (!tag || !ROOM_ID.test(tag)) ? [notification.request.identifier] : [];
+    return !target && (!tag || !ROOM_ID.test(tag.split(':', 1)[0]!)) ? [notification.request.identifier] : [];
   });
   await Promise.all(legacyIds.map((identifier) => api.dismissNotificationAsync(identifier)));
   await storage.setItem(LEGACY_PRESENTED_NOTIFICATIONS_CLEARED_KEY, '1');
 }
 
-/** Keep iOS's app icon badge aligned with the notifications still in its shade. */
+// APNs supplies the unread total on delivery and read clear. The shade can contain fewer entries.
 export async function reconcilePresentedNotificationBadge(
   api: PresentedNotificationApi,
-  platform: string,
+  _platform: string,
   pushLevel: PushLevel = 'attention',
 ): Promise<void> {
-  if (pushLevel === 'off') {
-    await api.setBadgeCountAsync(0);
-    return;
-  }
-  if (platform !== 'ios') return;
-  const presented = await api.getPresentedNotificationsAsync();
-  await api.setBadgeCountAsync(presented.length);
+  if (pushLevel === 'off') await api.setBadgeCountAsync(0);
 }
 
 /** Dismiss every presented push for the Room or corner that is now open. */
@@ -113,11 +108,11 @@ function isActionOutcome(notification: PresentedNotification): boolean {
   );
 }
 
-function presentedMessageId(notification: PresentedNotification): string | null {
-  const data = notification.request.content?.data;
-  if (!data || typeof data !== 'object') return null;
-  const messageId = (data as Record<string, unknown>).messageId;
-  return typeof messageId === 'string' && messageId ? messageId : null;
+function presentedMessageId(notification: PresentedNotification, channelId: string): string | null {
+  const target = getBuzzNotificationTargetFromData(notification.request.content?.data);
+  if (target) return target.messageId ?? null;
+  const tag = presentedNotificationIdentifierTag(notification.request.identifier);
+  return tag?.startsWith(channelId + ':') ? tag.slice(channelId.length + 1) : null;
 }
 
 type ChannelRead = {
@@ -130,7 +125,7 @@ type ChannelRead = {
 
 /**
  * Dismiss presented pushes for these Rooms or corners — the ones opened here,
- * or read on another device — and recount iOS's badge from the shade. With a
+ * or read on another device. With a
  * read cursor, only the read messages' notifications go: the cursor's own and
  * those the server lists as read. The server orders messages, so a newer one
  * stays unread even when iOS presented it at the same second.
@@ -138,7 +133,7 @@ type ChannelRead = {
 export async function dismissPresentedNotificationsForChannels(
   reads: readonly ChannelRead[],
   api: PresentedNotificationApi,
-  platform: string,
+  _platform: string,
   options: { keepActionOutcomes?: boolean } = {},
 ): Promise<void> {
   const readChannels = reads.flatMap((read) => {
@@ -153,7 +148,7 @@ export async function dismissPresentedNotificationsForChannels(
     readChannels.some((read) => {
       if (!presentedNotificationMatchesChannel(notification, read.channelId)) return false;
       if (!read.messageId) return true;
-      const messageId = presentedMessageId(notification);
+      const messageId = presentedMessageId(notification, read.channelId);
       return (
         messageId !== null &&
         (messageId === read.messageId || (read.readMessageIds ?? []).includes(messageId))
@@ -163,5 +158,4 @@ export async function dismissPresentedNotificationsForChannels(
       : [],
   );
   await Promise.all(matchingIds.map((identifier) => api.dismissNotificationAsync(identifier)));
-  if (platform === 'ios') await api.setBadgeCountAsync(presented.length - matchingIds.length);
 }

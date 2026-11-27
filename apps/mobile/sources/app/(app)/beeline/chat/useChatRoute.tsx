@@ -7,13 +7,13 @@ import { RoomSendPreview } from '@/buzz/room-send-list';
 import { useIsDesktop } from '@/utils/responsive';
 import { isDesktopShell } from '@/utils/isDesktopShell';
 
-type Props = [
+export type NotificationAnchor = {
+  notificationMessageId?: string;
+  notificationResponseId?: string;
+  notificationTarget?: string;
+};
 
-];
-
-export function useChatRoute([
-
-]: Props): [
+export function useChatRoute({ notificationMessageId, notificationResponseId, notificationTarget }: NotificationAnchor): [
   sendPreview: RoomSendPreview,
   decodedId: string,
   navigation: Omit<import("@react-navigation/core").NavigationProp<ReactNavigation.RootParamList>, "getState"> & { getState(): import("@react-navigation/routers").NavigationState | undefined; },
@@ -41,18 +41,12 @@ export function useChatRoute([
   // still run and still win.
   const {
     channelId,
-    notificationResponseId,
-    notificationTarget,
-    notificationMessageId,
     communityId,
     parent,
     title,
     returnTo,
   } = useLocalSearchParams<{
     channelId: string;
-    notificationResponseId?: string;
-    notificationTarget?: string;
-    notificationMessageId?: string;
     communityId?: string;
     parent?: string;
     title?: string;

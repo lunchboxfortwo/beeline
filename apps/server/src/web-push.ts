@@ -117,10 +117,16 @@ export function createWebPushSender(
           JSON.stringify({
             body: message.text.slice(0, 200),
             ...(message.type === 'message' && message.title ? { title: message.title } : {}),
-            url,
+            url: message.type === 'message'
+              ? url + '&' + new URLSearchParams({
+                  notificationMessageId: message.messageId,
+                  notificationResponseId: message.deliveryId ?? message.messageId,
+                })
+              : url,
+            ...(message.deliveryId ? { deliveryId: message.deliveryId } : {}),
             messageId: message.messageId,
             ...(cornerState ? { cornerState } : {}),
-            tag: message.collapseId ?? message.messageId,
+            tag: message.messageId,
             ...(message.type === 'message'
               ? { channelId: message.channelId, roomId: message.roomId }
               : {}),

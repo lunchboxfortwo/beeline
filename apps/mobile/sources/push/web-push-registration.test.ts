@@ -105,15 +105,44 @@ describe('Chrome push registration', () => {
   it('reports the currently open Room to the service worker and detaches on unmount', () => {
     pushOpenBuzzChannelId('room-1');
     try {
-      const stop = installWebPushForegroundResponder();
+      const navigate = vi.fn();
+      const stop = installWebPushForegroundResponder(navigate);
       const respond = addMessageListener.mock.calls[0]![1] as (event: unknown) => void;
       const postMessage = vi.fn();
       respond({ data: { type: 'beeline-web-push-open-room' }, ports: [{ postMessage }] });
       expect(postMessage).toHaveBeenCalledWith({ channelId: 'room-1' });
+      const path = '/beeline/chat/room-1?notificationMessageId=event';
+      respond({ data: { type: 'beeline-web-push-navigate', path }, ports: [{ postMessage }] });
+      expect(navigate).toHaveBeenCalledWith(path);
       stop();
       expect(removeMessageListener).toHaveBeenCalledWith('message', respond);
     } finally {
       releaseOpenBuzzChannelId('room-1');
     }
   });
+});
+
+it.each([true, false])('opens the service worker destination with a focused tab present = %s', async focused => {
+  const { readFileSync } = await import('node:fs');
+  const { runInNewContext } = await import('node:vm');
+  const path = '/beeline/chat/thread?notificationMessageId=card&notificationResponseId=delivery';
+  const origin = 'https://beeline.example';
+  const listeners = new Map();
+  const client = { focused, visibilityState: 'visible', url: origin, focus: vi.fn(),
+    postMessage: vi.fn((_data, ports) => ports[0].postMessage(true)) };
+  const openWindow = vi.fn();
+  runInNewContext(readFileSync(new URL('../../public/push-sw.js', import.meta.url), 'utf8'), {
+    URL, MessageChannel, setTimeout, clearTimeout,
+    self: { location: { origin }, clients: { matchAll: async () => focused ? [client] : [], openWindow },
+      addEventListener: (type: string, listener: Function) => listeners.set(type, listener) },
+  });
+  let work: Promise<void> | undefined;
+  listeners.get('notificationclick')({
+    notification: { close: vi.fn(), data: { path } }, waitUntil: (promise: Promise<void>) => { work = promise; },
+  });
+  await work;
+  if (focused) {
+    expect(client.postMessage.mock.calls[0]?.[0]).toEqual({ type: 'beeline-web-push-navigate', path });
+    expect(client.focus).toHaveBeenCalledOnce();
+  } else expect(openWindow).toHaveBeenCalledWith(origin + path);
 });

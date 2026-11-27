@@ -143,6 +143,7 @@ export function useChatTranscriptRenderer([
     (
       item: ChatDisplayMessage,
       {
+        landingMessageId,
         continued: attributionContinued,
         immediatelyPrecedingMessage,
         referencedMessage,
@@ -466,6 +467,7 @@ export function useChatTranscriptRenderer([
 
       const renderPills = (run: readonly ChatDisplayMessage[]) => (
         <TranscriptPills
+          targetId={landingMessageId}
           run={run}
           resolve={resolvePillIdentity}
           renderBody={renderSystemBody}

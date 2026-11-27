@@ -7,9 +7,17 @@ const WORKER_PATH = '/push-sw.js';
 const OWNER_KEY = '@beeline/web-push/owner';
 
 /** Let the worker make a bounded display decision for the focused web tab. */
-export function installWebPushForegroundResponder(): () => void {
+export function installWebPushForegroundResponder(navigate: (path: string) => void): () => void {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return () => {};
   const respond = (event: MessageEvent) => {
+    if (event.data?.type === 'beeline-web-push-navigate') {
+      const path = event.data.path;
+      if (typeof path === 'string' && path.startsWith('/beeline/')) {
+        navigate(path);
+        event.ports[0]?.postMessage(true);
+      }
+      return;
+    }
     if (event.data?.type !== 'beeline-web-push-open-room') return;
     event.ports[0]?.postMessage({ channelId: getOpenBuzzChannelId() });
   };

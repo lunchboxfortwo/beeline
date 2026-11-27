@@ -341,6 +341,7 @@ export function messageRosterPresentation(
 }
 
 export type RoomMessageRenderContext = RoomMessagePresentation & {
+  landingMessageId?: string;
   continued: boolean;
   immediatelyPrecedingMessage?: ChatDisplayMessage;
   referencedMessage?: ChatDisplayMessage;
@@ -404,7 +405,7 @@ export function useRoomMessageRenderItem({
           }
           referencedMessage={item.replyToId ? messageById.get(item.replyToId) : undefined}
           arrivalFlashing={messageContainsBoundary(item, arrivalFlashMessageId)}
-          sourceLandingFlashing={messageContainsBoundary(item, sourceLandingFlashMessageId)}
+          landingMessageId={messageContainsBoundary(item, sourceLandingFlashMessageId) ? sourceLandingFlashMessageId! : undefined}
         />
       );
     },
@@ -431,7 +432,8 @@ export const RoomMessageCell = React.memo(function RoomMessageCell({
   referencedMessage,
   startsNewMessages = false,
   arrivalFlashing = false,
-  sourceLandingFlashing = false,
+  landingMessageId,
+  sourceLandingFlashing = Boolean(landingMessageId),
   firstBylineOfDay,
   untaggedHint,
   deliveryFailed,
@@ -447,6 +449,7 @@ export const RoomMessageCell = React.memo(function RoomMessageCell({
   referencedMessage?: ChatDisplayMessage;
   startsNewMessages?: boolean;
   arrivalFlashing?: boolean;
+  landingMessageId?: string;
   sourceLandingFlashing?: boolean;
 }) {
   return withLedgerDayCaption(
@@ -456,6 +459,7 @@ export const RoomMessageCell = React.memo(function RoomMessageCell({
     >
       {startsNewMessages && <NewMessagesRule />}
       {render(item, {
+        landingMessageId,
         continued,
         immediatelyPrecedingMessage,
         referencedMessage,

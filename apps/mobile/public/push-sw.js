@@ -1,4 +1,4 @@
-function focusedClientHasTarget(client, channelId, roomId) {
+function focusedClientHasTarget(client, channelId) {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     const finish = (matches) => {
@@ -9,7 +9,7 @@ function focusedClientHasTarget(client, channelId, roomId) {
     const timer = setTimeout(() => finish(false), 120);
     channel.port1.onmessage = (event) => {
       const openId = event.data?.channelId;
-      finish(typeof openId === 'string' && (openId === channelId || openId === roomId));
+      finish(typeof openId === 'string' && openId === channelId);
     };
     try {
       client.postMessage({ type: 'beeline-web-push-open-room' }, [channel.port2]);
@@ -28,7 +28,7 @@ async function targetAlreadyOpen(payload) {
     client.focused && client.visibilityState === 'visible' &&
     new URL(client.url).origin === self.location.origin);
   return (await Promise.all(focused.map((client) =>
-    focusedClientHasTarget(client, channelId, roomId)))).some(Boolean);
+    focusedClientHasTarget(client, channelId ?? roomId)))).some(Boolean);
 }
 
 self.addEventListener('push', (event) => {
@@ -61,8 +61,24 @@ self.addEventListener('notificationclick', (event) => {
     const url = new URL(path, self.location.origin);
     if (url.origin !== self.location.origin) return;
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const existing = clients.find((client) => new URL(client.url).origin === url.origin);
+    const sameOrigin = clients.filter((client) => new URL(client.url).origin === url.origin);
+    const existing = sameOrigin.find((client) => client.focused) ?? sameOrigin[0];
     if (existing) {
+      if (existing.focused && existing.visibilityState === 'visible') {
+        const handled = await new Promise((resolve) => {
+          const channel = new MessageChannel();
+          const timeout = setTimeout(() => { channel.port1.close(); resolve(false); }, 250);
+          channel.port1.onmessage = () => { clearTimeout(timeout); channel.port1.close(); resolve(true); };
+          try {
+            existing.postMessage({ type: 'beeline-web-push-navigate', path }, [channel.port2]);
+          } catch {
+            clearTimeout(timeout);
+            channel.port1.close();
+            resolve(false);
+          }
+        });
+        if (handled) return existing.focus();
+      }
       await existing.navigate(url.href);
       return existing.focus();
     }

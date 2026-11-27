@@ -172,6 +172,7 @@ export function pillItems(run: readonly ChatDisplayMessage[], resolve: PillIdent
 
 /** One transcript row of pills: a lone agent message, a stop, a GitHub event or a folded run. */
 export function TranscriptPills({
+  targetId,
   run,
   resolve,
   renderBody,
@@ -181,6 +182,7 @@ export function TranscriptPills({
   onOpenCorner,
   cornerId,
 }: {
+  targetId?: string;
   run: readonly ChatDisplayMessage[];
   resolve: PillIdentityResolver;
 } & PillHandlers) {
@@ -191,7 +193,7 @@ export function TranscriptPills({
   return (
     // The ledger's bylined entry rhythm: 24 at a speaker change on both sides of the pills.
     <LedgerEntryFrame hasByline testID={`chat-message-${run[0]?.id ?? ''}`}>
-      <PillRow items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />
+      <PillRow targetId={targetId} items={items} testID={`pill-row-${run[0]?.id ?? ''}`} />
     </LedgerEntryFrame>
   );
 }
