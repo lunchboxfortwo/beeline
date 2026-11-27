@@ -141,8 +141,8 @@ export class LiveConnection {
   private readonly paintOwners = new Map<string, Registration>();
   private recovery?: { generation: number; promise: Promise<void> };
   private recovering = false;
-  /** Tracks a replacement socket opened after a silent timeout until the caller's read confirms it. */
-  private silentReplacement?: { afterGeneration: number };
+  /** Tracks a replacement socket opened after a silent timeout until the caller's Room read confirms it. */
+  private silentReplacement?: { afterGeneration: number; roomId?: string; claimed: boolean };
   private outageRetry?: ReturnType<typeof setTimeout>;
   private notificationActions = 0;
   private requestId = 0;
@@ -233,12 +233,33 @@ export class LiveConnection {
     const session = failureSession;
     let failed: boolean | undefined;
     const observed = !TELEMETRY_OPERATIONS.includes(operation);
-    const confirmingSilentReplacement =
+    const requestRoomId =
+      args && typeof args === 'object' && 'roomId' in args && typeof args.roomId === 'string'
+        ? args.roomId
+        : undefined;
+    const activeSilentReplacement =
       observed &&
       options.reconnectAttempt !== true &&
       !this.recovering &&
-      Boolean(this.silentReplacement && this.socketGeneration >= this.silentReplacement.afterGeneration);
-    let reconnected = options.reconnectAttempt === true || this.recovering || confirmingSilentReplacement;
+      this.silentReplacement &&
+      this.socketGeneration >= this.silentReplacement.afterGeneration &&
+      this.socketGeneration <= this.silentReplacement.afterGeneration + 1
+        ? this.silentReplacement
+        : undefined;
+    const confirmingSilentReplacement = Boolean(
+      activeSilentReplacement &&
+      !activeSilentReplacement.claimed &&
+      (activeSilentReplacement.roomId === undefined ||
+        (operation === 'readRoom' && requestRoomId === activeSilentReplacement.roomId)),
+    );
+    if (confirmingSilentReplacement && activeSilentReplacement) {
+      activeSilentReplacement.claimed = true;
+    }
+    const expectedReplacementGeneration = activeSilentReplacement
+      ? activeSilentReplacement.afterGeneration + 1
+      : undefined;
+    let reconnected =
+      options.reconnectAttempt === true || this.recovering || Boolean(activeSilentReplacement);
     let generation = this.socketGeneration;
     let sent: { socket: WebSocket; generation: number; activityAtSend: number } | undefined;
     const outcome = (value: boolean, socketGeneration: number) => {
@@ -274,7 +295,14 @@ export class LiveConnection {
           this.socket === sent.socket &&
           this.socketGeneration === sent.generation
         ) {
-          await this.recoverSilentSocket(sent.socket, sent.generation, sent.activityAtSend, current, options.signal);
+          await this.recoverSilentSocket(
+            sent.socket,
+            sent.generation,
+            sent.activityAtSend,
+            current,
+            options.signal,
+            requestRoomId,
+          );
           throw error;
         }
         if (reconnected || !failed || !current() || options.signal?.aborted) throw error;
@@ -304,20 +332,21 @@ export class LiveConnection {
       throw error;
 
     } finally {
-      const confirmedSilentReplacement = confirmingSilentReplacement && Boolean(this.silentReplacement);
-      if (confirmingSilentReplacement) this.silentReplacement = undefined;
+      const confirmedSilentReplacement =
+        confirmingSilentReplacement && this.silentReplacement === activeSilentReplacement;
+      if (confirmedSilentReplacement) this.silentReplacement = undefined;
       // Deadlines, cancellation, server refusals and background/old-account work
       // never infer an outage. Only a failed replacement can show the banner.
       if (current() && (failed === false || (reconnected && failed === true))) {
         const recovered = connectionFailure() && !failed;
         setConnectionFailure(failed);
         if (recovered && isOpen(this.socket)) this.publishConnected();
-        if (confirmedSilentReplacement && failed === false) {
-          const confirmedRoomId =
-            operation === 'readRoom' && typeof (args as { roomId?: unknown }).roomId === 'string'
-              ? (args as { roomId: string }).roomId
-              : undefined;
-          this.refreshRoom(undefined, confirmedRoomId);
+        if (
+          confirmedSilentReplacement &&
+          failed === false &&
+          generation === expectedReplacementGeneration
+        ) {
+          this.refreshRoom(undefined, activeSilentReplacement?.roomId ?? requestRoomId);
         }
       }
       this.reconnectAfterOutage();
@@ -588,7 +617,7 @@ export class LiveConnection {
     if (this.socket !== socket) return;
     const wasConnected = !this.connecting;
     const confirmingSilentReplacement = Boolean(
-      this.silentReplacement && this.socketGeneration > this.silentReplacement.afterGeneration,
+      this.silentReplacement && this.socketGeneration === this.silentReplacement.afterGeneration + 1,
     );
     if (confirmingSilentReplacement) this.silentReplacement = undefined;
     const requestOwnsRecovery = [...this.requests.values()].some(request =>
@@ -665,12 +694,12 @@ export class LiveConnection {
     return promise;
   }
 
-  private replaceSilentSocket(generation: number): void {
+  private replaceSilentSocket(generation: number, roomId?: string): void {
     // Drop the confirmed dead socket and admit one replacement without issuing
-    // an extra workspace read. The caller's recovery read confirms the new
+    // an extra workspace read. The caller's recovery Room read confirms the new
     // socket and owns the outage banner if that replacement fails.
     this.dropConnection();
-    this.silentReplacement = { afterGeneration: generation };
+    this.silentReplacement = { afterGeneration: generation, roomId, claimed: false };
     this.reconnectNow();
   }
 
@@ -680,13 +709,14 @@ export class LiveConnection {
     activityAtSend: number,
     current: () => boolean,
     signal?: AbortSignal,
+    roomId?: string,
   ): Promise<boolean> {
     if (this.socket !== socket || this.socketGeneration !== generation || !current() || signal?.aborted) {
       return false;
     }
     if (!isOpen(socket)) {
       if (socket.readyState > 1) {
-        this.replaceSilentSocket(generation);
+        this.replaceSilentSocket(generation, roomId);
         return true;
       }
       return false;
@@ -705,7 +735,7 @@ export class LiveConnection {
     ) {
       return false;
     }
-    this.replaceSilentSocket(generation);
+    this.replaceSilentSocket(generation, roomId);
     return true;
   }
 

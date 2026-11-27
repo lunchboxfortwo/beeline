@@ -308,6 +308,56 @@ describe('the one phone socket', () => {
     expect(Socket.instances).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('binds silent-socket replacement confirmation strictly to Stop’s recovery readRoom even when an unrelated RPC replies first', async () => {
+    const { connection } = setup();
+    const roomAListener = vi.fn();
+    const roomBListener = vi.fn();
+    await connection.register([{ '#h': ['a'] }], roomAListener);
+    await connection.register([{ '#h': ['b'] }], roomBListener);
+    const silent = await open();
+    silent.autoPong = false;
+
+    // A subscribeConnected listener fires an unrelated RPC as soon as the replacement opens.
+    let connectedRpc: Promise<unknown> | undefined;
+    const unsubscribeConnected = connection.subscribeConnected(() => {
+      connectedRpc = connection.request('readChats', { workspaceId: 'w' });
+    });
+    try {
+      const stop = connection
+        .request('cancelAgentTurn', { roomId: 'a', requestId: 'req-1', agentId: 'carbon' }, { timeoutMs: 100, recoverSilentSocket: true })
+        .catch(error => error);
+      await vi.advanceTimersByTimeAsync(2_600);
+      expect(await stop).toBeInstanceOf(MonolithRequestTimeoutError);
+
+      const recoveryRead = connection.request('readRoom', { roomId: 'a' });
+      const replacement = await open();
+      await tick();
+      expect(replacement.requests().map(frame => frame.op)).toEqual(['readRoom', 'readChats']);
+      expect(replacement.requests().some(frame => frame.op === 'readWorkspaces')).toBe(false);
+
+      // The unrelated RPC replies first: it must NOT claim confirmation or invalidate Room a.
+      replacement.reply({ chats: [] }, 1);
+      await expect(connectedRpc).resolves.toEqual({ chats: [] });
+      await tick();
+      expect(roomAListener).not.toHaveBeenCalled();
+      expect(roomBListener).not.toHaveBeenCalled();
+      expect(replacement.requests().filter(frame => frame.op === 'readRoom')).toHaveLength(1);
+
+      // Only Stop's recovery readRoom confirms the replacement and refreshes other open rooms.
+      replacement.reply({ room: { id: 'a', archived: true }, latestAgentTurns: [] }, 0);
+      await expect(recoveryRead).resolves.toEqual({ room: { id: 'a', archived: true }, latestAgentTurns: [] });
+      await tick();
+      expect(roomAListener).not.toHaveBeenCalled();
+      expect(roomBListener).toHaveBeenCalledTimes(1);
+      expect(roomBListener).toHaveBeenCalledWith({
+        monolithLive: { type: 'invalidate', roomId: 'b', reason: 'reconnect' },
+      });
+      expect(replacement.requests().filter(frame => frame.op === 'readRoom')).toHaveLength(1);
+      expect(useConnectionFailure()).toBe(false);
+    } finally {
+      unsubscribeConnected();
+    }
+  });
   it('preserves a healthy socket and in-flight voiceJoin when Stop times out but the socket answers ping', async () => {
     const { connection } = setup();
     const stop = connection
