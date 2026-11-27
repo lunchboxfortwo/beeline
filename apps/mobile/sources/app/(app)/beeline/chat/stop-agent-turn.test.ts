@@ -122,14 +122,15 @@ describe('half-open silent socket recovery', () => {
     expect(FakeSocket.instances).toHaveLength(2);
     expect(useConnectionFailure()).toBe(false);
 
-    // Recovery readRoom runs on the replacement socket, never on the dead socket, and cancelAgentTurn is not replayed.
+    // Recovery readRoom confirms the replacement socket on its own: neither readWorkspaces nor cancelAgentTurn is sent.
     const freshSocket = FakeSocket.instances[1]!;
     freshSocket.open();
     await vi.advanceTimersByTimeAsync(0);
     expect(deadSocket.requests().map(r => r.op)).toEqual(['cancelAgentTurn']);
-    expect(freshSocket.requests().map(r => r.op)).toEqual(['readWorkspaces', 'readRoom']);
-    freshSocket.reply({ workspaces: [] }, 0);
-    freshSocket.reply({ room: { id: 'room-a', archived: true }, latestAgentTurns: [] }, 1);
+    expect(freshSocket.requests().map(r => r.op)).toEqual(['readRoom']);
+    expect(freshSocket.requests().some(r => r.op === 'readWorkspaces')).toBe(false);
+    expect(freshSocket.requests().some(r => r.op === 'cancelAgentTurn')).toBe(false);
+    freshSocket.reply({ room: { id: 'room-a', archived: true }, latestAgentTurns: [] }, 0);
     await expect(roomReadPromise).resolves.toEqual({ room: { id: 'room-a', archived: true }, latestAgentTurns: [] });
     expect(useConnectionFailure()).toBe(false);
   });

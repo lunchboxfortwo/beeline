@@ -263,10 +263,12 @@ describe('the one phone socket', () => {
     socket.reply({ call: { id: 'call' } }, 1); await join;
     expect(Socket.instances).toHaveLength(1);
   });
-  it('replaces a half-open silent socket after a timed-out Stop without replaying the write or scheduling idle polls', async () => {
+  it('replaces a half-open silent socket after a timed-out Stop using only the recovery readRoom, without readWorkspaces, replayed Stop, or idle polls', async () => {
     const { connection } = setup();
-    const invalidated = vi.fn();
-    await connection.register([{ '#h': ['a'] }], invalidated);
+    const roomAListener = vi.fn();
+    const roomBListener = vi.fn();
+    await connection.register([{ '#h': ['a'] }], roomAListener);
+    await connection.register([{ '#h': ['b'] }], roomBListener);
     const silent = await open();
     silent.autoPong = false;
     const stop = connection
@@ -283,18 +285,19 @@ describe('the one phone socket', () => {
     expect(silent.readyState).toBe(3);
     expect(Socket.instances).toHaveLength(2);
     expect(useConnectionFailure()).toBe(false);
-    // A recovery Room read triggered on Stop timeout runs on the fresh socket, never the dead one.
+    // The recovery Room read itself confirms the replacement socket without an extra readWorkspaces.
     const recoveryRead = connection.request('readRoom', { roomId: 'a' });
     const replacement = await open();
     expect(replacement).not.toBe(silent);
-    expect(replacement.requests().map(frame => frame.op)).toEqual(['readWorkspaces', 'readRoom']);
+    expect(replacement.requests().map(frame => frame.op)).toEqual(['readRoom']);
+    expect(replacement.requests().some(frame => frame.op === 'readWorkspaces')).toBe(false);
     expect(replacement.requests().some(frame => frame.op === 'cancelAgentTurn')).toBe(false);
-    replacement.reply({ workspaces: [] }, 0);
-    replacement.reply({ room: { id: 'a', archived: true }, latestAgentTurns: [] }, 1);
+    replacement.reply({ room: { id: 'a', archived: true }, latestAgentTurns: [] }, 0);
     await expect(recoveryRead).resolves.toEqual({ room: { id: 'a', archived: true }, latestAgentTurns: [] });
     await tick();
-    expect(invalidated).toHaveBeenCalledWith({
-      monolithLive: { type: 'invalidate', roomId: 'a', reason: 'reconnect' },
+    expect(roomAListener).not.toHaveBeenCalled();
+    expect(roomBListener).toHaveBeenCalledWith({
+      monolithLive: { type: 'invalidate', roomId: 'b', reason: 'reconnect' },
     });
     expect(useConnectionFailure()).toBe(false);
     // No periodic polls or heartbeats ever run afterward.
@@ -339,7 +342,7 @@ describe('the one phone socket', () => {
     expect(useConnectionFailure()).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
-  it('announces the connection banner only if the silent-socket replacement itself fails, without a third socket', async () => {
+  it.each(['open', 'read'] as const)('announces the connection banner only if the silent-socket replacement %s fails, without a third socket or readWorkspaces', async stage => {
     const { connection } = setup();
     const stop = connection
       .request('cancelAgentTurn', { roomId: 'a', requestId: 'req-1', agentId: 'carbon' }, { timeoutMs: 100, recoverSilentSocket: true })
@@ -349,9 +352,14 @@ describe('the one phone socket', () => {
     await vi.advanceTimersByTimeAsync(2_600);
     expect(await stop).toBeInstanceOf(MonolithRequestTimeoutError);
     const recoveryRead = connection.request('readRoom', { roomId: 'a' }).catch(error => error);
+    if (stage === 'read') {
+      const replacement = await open();
+      expect(replacement.requests().map(frame => frame.op)).toEqual(['readRoom']);
+    }
     await failRecovery();
     expect(await recoveryRead).toBeInstanceOf(PhoneSocketDisconnectedError);
     expect(Socket.instances).toHaveLength(2);
+    expect(Socket.instances[1]!.requests().some(frame => frame.op === 'readWorkspaces')).toBe(false);
     expect(useConnectionFailure()).toBe(true);
   });
   it('a confirming read deadline never diagnoses a broken socket or schedules another attempt', async () => {

@@ -141,6 +141,8 @@ export class LiveConnection {
   private readonly paintOwners = new Map<string, Registration>();
   private recovery?: { generation: number; promise: Promise<void> };
   private recovering = false;
+  /** Tracks a replacement socket opened after a silent timeout until the caller's read confirms it. */
+  private silentReplacement?: { afterGeneration: number };
   private outageRetry?: ReturnType<typeof setTimeout>;
   private notificationActions = 0;
   private requestId = 0;
@@ -184,6 +186,7 @@ export class LiveConnection {
       this.identity++;
       this.recovery = undefined;
       this.recovering = false;
+      this.silentReplacement = undefined;
       resetConnectionFailure();
       this.viewEpoch++;
       this.viewing.clear();
@@ -229,7 +232,13 @@ export class LiveConnection {
     const identity = this.identity;
     const session = failureSession;
     let failed: boolean | undefined;
-    let reconnected = options.reconnectAttempt === true || this.recovering;
+    const observed = !TELEMETRY_OPERATIONS.includes(operation);
+    const confirmingSilentReplacement =
+      observed &&
+      options.reconnectAttempt !== true &&
+      !this.recovering &&
+      Boolean(this.silentReplacement && this.socketGeneration >= this.silentReplacement.afterGeneration);
+    let reconnected = options.reconnectAttempt === true || this.recovering || confirmingSilentReplacement;
     let generation = this.socketGeneration;
     let sent: { socket: WebSocket; generation: number; activityAtSend: number } | undefined;
     const outcome = (value: boolean, socketGeneration: number) => {
@@ -240,7 +249,6 @@ export class LiveConnection {
       sent = { socket, generation: socketGeneration, activityAtSend };
     };
     const current = () => !this.disposed && this.foreground && identity === this.identity && session === failureSession;
-    const observed = !TELEMETRY_OPERATIONS.includes(operation);
     const startedAt=Date.now();
     let diagnostic=observed ? this.deps.telemetry?.origin() : undefined;
     if (diagnostic && operation==='createWorkspace') {
@@ -296,12 +304,21 @@ export class LiveConnection {
       throw error;
 
     } finally {
+      const confirmedSilentReplacement = confirmingSilentReplacement && Boolean(this.silentReplacement);
+      if (confirmingSilentReplacement) this.silentReplacement = undefined;
       // Deadlines, cancellation, server refusals and background/old-account work
       // never infer an outage. Only a failed replacement can show the banner.
       if (current() && (failed === false || (reconnected && failed === true))) {
         const recovered = connectionFailure() && !failed;
         setConnectionFailure(failed);
         if (recovered && isOpen(this.socket)) this.publishConnected();
+        if (confirmedSilentReplacement && failed === false) {
+          const confirmedRoomId =
+            operation === 'readRoom' && typeof (args as { roomId?: unknown }).roomId === 'string'
+              ? (args as { roomId: string }).roomId
+              : undefined;
+          this.refreshRoom(undefined, confirmedRoomId);
+        }
       }
       this.reconnectAfterOutage();
     }
@@ -570,6 +587,10 @@ export class LiveConnection {
   private socketFailed(socket: WebSocket): void {
     if (this.socket !== socket) return;
     const wasConnected = !this.connecting;
+    const confirmingSilentReplacement = Boolean(
+      this.silentReplacement && this.socketGeneration > this.silentReplacement.afterGeneration,
+    );
+    if (confirmingSilentReplacement) this.silentReplacement = undefined;
     const requestOwnsRecovery = [...this.requests.values()].some(request =>
       !TELEMETRY_OPERATIONS.includes(request.operation));
     this.dropConnection(true);
@@ -577,7 +598,7 @@ export class LiveConnection {
     // pending. Telemetry intentionally cannot reconnect itself; a diagnostic
     // upload must not swallow the only signal that makes the Room read again.
     // The confirming replacement retains its existing one-attempt budget.
-    if (!this.recovering && AppState.currentState === 'active') {
+    if (!this.recovering && !confirmingSilentReplacement && AppState.currentState === 'active') {
       // Reopen established push coverage even when a Room waits for admission
       // before reading. Failed admission alone must not open another socket.
       if (wasConnected && !requestOwnsRecovery) this.reconnectNow();
@@ -608,6 +629,7 @@ export class LiveConnection {
     // A suspended app or changed network can lose TCP without receiving close.
     // OPEN is then only local state. Retire it before reads or sends can use it;
     // lifecycle events do not diagnose an outage or replay an unknown write.
+    this.silentReplacement = undefined;
     if (isOpen(this.socket)) this.dropConnection();
     this.reconnectNow();
     this.refreshRoom();
@@ -643,6 +665,15 @@ export class LiveConnection {
     return promise;
   }
 
+  private replaceSilentSocket(generation: number): void {
+    // Drop the confirmed dead socket and admit one replacement without issuing
+    // an extra workspace read. The caller's recovery read confirms the new
+    // socket and owns the outage banner if that replacement fails.
+    this.dropConnection();
+    this.silentReplacement = { afterGeneration: generation };
+    this.reconnectNow();
+  }
+
   private async recoverSilentSocket(
     socket: WebSocket,
     generation: number,
@@ -655,8 +686,7 @@ export class LiveConnection {
     }
     if (!isOpen(socket)) {
       if (socket.readyState > 1) {
-        this.dropConnection();
-        void this.reconnectAfterFailure(generation).then(() => this.refreshRoom(), () => undefined);
+        this.replaceSilentSocket(generation);
         return true;
       }
       return false;
@@ -675,10 +705,7 @@ export class LiveConnection {
     ) {
       return false;
     }
-    // Confirmed silent/half-open socket: replace it without replaying the
-    // ambiguous write, and refresh open rooms once the replacement confirms.
-    this.dropConnection();
-    void this.reconnectAfterFailure(generation).then(() => this.refreshRoom(), () => undefined);
+    this.replaceSilentSocket(generation);
     return true;
   }
 
@@ -744,13 +771,15 @@ export class LiveConnection {
   notePushedMessage(roomId: string): void {
     if (this.roomReferences.has(roomId)) this.refreshRoom(roomId);
   }
-  refreshRoom(roomId?: string): void {
+  refreshRoom(roomId?: string, excludeRoomId?: string): void {
     for (const registration of this.registrations) {
       if (registration.closed || (roomId && !registration.roomIds.has(roomId))) continue;
+      const targetRoomId = roomId ?? [...registration.roomIds].find((id) => id !== excludeRoomId);
+      if (excludeRoomId && !roomId && registration.roomIds.size > 0 && !targetRoomId) continue;
       registration.listener({
         monolithLive: {
           type: 'invalidate',
-          roomId: roomId ?? registration.roomIds.values().next().value ?? '',
+          roomId: targetRoomId ?? '',
           reason: roomId ? 'resync' : 'reconnect',
         },
       });
@@ -807,6 +836,7 @@ export class LiveConnection {
   }
   dispose(): void {
     this.disposed = true;
+    this.silentReplacement = undefined;
     clearTimeout(this.outageRetry);
     this.identity++;
     resetConnectionFailure();
