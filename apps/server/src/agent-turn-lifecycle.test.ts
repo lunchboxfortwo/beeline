@@ -76,6 +76,18 @@ it('keeps empty batch requests owed until the schedule is explicitly acknowledge
   expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2',[R,H])).rows).toEqual([]);
 });
 
+it('settles only the schedule after a successful empty scheduled batch', async () => {
+  const schedule = await ask(), human = await ask();
+  await db.query("UPDATE agent_commands SET reason='schedule' WHERE id=$1", [schedule.id]);
+  const invocation = { id: 'scheduled-batch', requestId: schedule.turnRequestId };
+  await daemon.execute('startAgentTurn', { roomId: R, requestId: invocation.requestId, invocationId: invocation.id,
+    batchedCommandIds: [human.id] }, A);
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: schedule.id, invocation, text: '',
+    harnessEnded: true, silentCompletion: true, queuedRequestIds: [human.id] }, A);
+  expect((await readAgentCommands(db, A, R)).commands.map(item => item.id)).toEqual([human.id]);
+  expect((await db.query('SELECT id FROM messages WHERE room_id=$1 AND author_id<>$2', [R, H])).rows).toEqual([]);
+});
+
 it('projects a working turn at claim before any agent activity or model output exists',async()=>{
   const command=await ask();
   const room=await phone.readRoom(R,H);

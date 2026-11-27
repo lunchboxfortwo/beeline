@@ -16,6 +16,8 @@ export interface StoredAnswer {
   readonly failureReason?: string;
   /** The harness ended; unanswered requests remain owed. */
   readonly harnessEnded?: boolean;
+  /** A successful empty return can acknowledge a scheduled wake on replay. */
+  readonly silentCompletion?: boolean;
   /** The item left the queue after a committed reply, before the harness returned. */
   readonly finishesAnsweredItem?: true;
   readonly invocation?: import('@beeline/api-contract/daemon').AgentInvocation;

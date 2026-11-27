@@ -374,11 +374,12 @@ export class AgentRunner {
       const answer = await place.session.deliver(item, batch, invocation);
       retirement.throwIfAborted();
       place.turnStarted = undefined;
-      // Empty background work closes quietly; an unanswered request stays owed.
       const steps = answer.text && answer.steps.length ? { steps: answer.steps } : {};
       const pendingBatch = batch.filter((next) =>
         this.latest.some((listed) => listed.id === next.id),
       );
+      const silentCompletion = !answer.text && answer.stopReason === 'end_turn' &&
+        pendingBatch.some((next) => next.reason === 'schedule');
       if (pendingBatch.length || this.completed.has(item.id))
         await this.store({
           itemId: (pendingBatch[0] ?? item).id,
@@ -390,6 +391,7 @@ export class AgentRunner {
           queuedRequestIds: pendingBatch.slice(1).map((next) => next.id),
           text: answer.text,
           harnessEnded: true,
+          ...(silentCompletion ? { silentCompletion: true } : {}),
           ...steps,
         });
       retirement.throwIfAborted();
@@ -441,6 +443,9 @@ export class AgentRunner {
                 invocation,
                 failureReason: redactToolDetail(distillTurnFailureReason(error).text).slice(0, 2_000),
               });
+          } else if (item.reason === 'schedule') {
+            // Retry the same wake on the next queue delivery.
+            place.waiting.unshift(item);
           } else if (
             !this.stopped &&
             this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN
@@ -592,6 +597,7 @@ export class AgentRunner {
           text: answer.text,
           presentation: 'message',
           ...(answer.harnessEnded ? { harnessEnded: true } : {}),
+          ...(answer.silentCompletion ? { silentCompletion: true } : {}),
           ...(answer.invocation ? { invocation: answer.invocation } : {}),
           ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
           ...(answer.steps ? { steps: answer.steps } : {}),
@@ -620,7 +626,7 @@ export class AgentRunner {
               (this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_ID ||
                 this.baseConfig.agentEnv?.BEELINE_FREE_AGENT_MODEL_TOKEN);
             if (hosted)
-              for (const item of pending)
+              for (const item of pending.filter((next) => next.reason !== 'schedule'))
                 await api.execute('startAgentTurn', {
                   roomId: item.roomId,
                   requestId: item.turnRequestId,
@@ -628,15 +634,13 @@ export class AgentRunner {
                   available: false,
                   failureReason: answer.failureReason ?? 'Agent harness ended without a public answer',
                 });
-            // Hosted turns close visibly; personal helpers retain the owed request
-            // for their next queue delivery after the server refused an empty answer.
+            // Pending schedules and personal requests can run on the next delivery.
             await this.answers.remove(answer);
             if (this.isCurrentAnswer(answer)) {
               this.stored.delete(answer.itemId);
               this.durable.delete(answer);
-              if (!hosted)
-                for (const id of [answer.itemId, ...(answer.queuedRequestIds ?? [])])
-                  this.answered.delete(id);
+              for (const item of pending)
+                if (!hosted || item.reason === 'schedule') this.answered.delete(item.id);
             }
           }
         }
