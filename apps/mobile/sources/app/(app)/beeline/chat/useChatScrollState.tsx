@@ -61,12 +61,19 @@ export function useChatScrollState([
   sendPreviewRef.current = sendPreview;
   const phoneRowKey = useCallback(
     (rowId: string) => `${transcriptWindowIdRef.current}:${sendPreviewRef.current.key(rowId)}`, []);
-  const [measuredPhoneRowKeys] = useState(() => new Set<string>());
+  const [phoneRowLayouts] = useState(() => new Map<string, { y: number; height: number }>());
   const [phoneScrollList] = useState(() =>
     phoneTranscriptList(
       () => flatListRef.current,
-      (rowId) => measuredPhoneRowKeys.has(phoneRowKey(rowId)),
+      (rowId) => phoneRowLayouts.has(phoneRowKey(rowId)),
       readPhoneScrollOffsetRef,
+      (rowId) => {
+        const layout = phoneRowLayouts.get(phoneRowKey(rowId));
+        const viewportHeight = readPhoneListHeightRef().current;
+        if (!layout || !viewportHeight) return null;
+        const offset = readPhoneScrollOffsetRef().current;
+        return layout.y + layout.height > offset && layout.y < offset + viewportHeight;
+      },
     ),
   );
   const [desktopScrollList] = useState(() =>
@@ -182,7 +189,7 @@ export function useChatScrollState([
               if (index === 0 && last?.key === cellKey) {
                 scrollController.holdReadingPosition(height - last.height, item.id);
               }
-              measuredPhoneRowKeys.add(cellKey);
+              phoneRowLayouts.set(cellKey, event.nativeEvent.layout);
               if (scrollController.isLanding()) scrollController.observeLayout();
             }}
           />

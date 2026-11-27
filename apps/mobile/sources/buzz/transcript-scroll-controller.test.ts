@@ -1,10 +1,10 @@
 import { expect, it, vi } from 'vitest';
 import { createTranscriptScrollController, desktopTranscriptList, phoneTranscriptList } from './transcript-scroll-controller';
 
-function transcript(step = 1) {
+function transcript(step = 1, currentOffset?: () => number, isRowVisible?: (id: string) => boolean) {
   const rows = ['live', 'unread', 'read'].map(id => ({ id }));
   if (step < 0) rows.reverse();
-  const list = { toRow: vi.fn(() => true), toNewest: vi.fn(), toOffset: vi.fn(),
+  const list = { currentOffset, isRowVisible, toRow: vi.fn(() => true), toNewest: vi.fn(), toOffset: vi.fn(),
     toEstimatedRow: vi.fn(), shiftBy: vi.fn() };
   const frames: Array<() => void> = [];
   const controller = createTranscriptScrollController({
@@ -32,10 +32,39 @@ it.each([1, -1])('aligns the preceding read row before settling a visible unread
   expect(list.toNewest).not.toHaveBeenCalled();
 });
 
-it('falls back to New when the preceding read row fills the viewport', () => {
-  const { controller, rows, list, flush } = transcript();
+it('holds a short unread transcript when a clamped scroll emits no visibility change', () => {
+  const { controller, rows, list, flush } = transcript(1, () => 0);
   controller.observeVisibleRows(rows);
   controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  flush();
+  expect(controller.isLanding()).toBe(true);
+  flush();
+  expect(controller.isLanding()).toBe(false);
+  expect(controller.isHoldingLanding()).toBe(true);
+  expect(list.toRow).toHaveBeenCalledTimes(1);
+});
+
+it('uses measured visibility when a clamped context scroll still hides New', () => {
+  let offset = 0;
+  const { controller, rows, list, flush } = transcript(1, () => offset, () => offset > 0);
+  list.toRow.mockReturnValueOnce(true).mockImplementationOnce(() => { offset = 600; return true; });
+  controller.observeVisibleRows(rows);
+  controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  flush();
+  flush();
+  expect(list.toRow.mock.calls).toEqual([[2, 'read', 'top'], [1, 'unread', 'top']]);
+  expect(controller.isLanding()).toBe(true);
+  flush();
+  expect(controller.isHoldingLanding()).toBe(true);
+});
+
+it('falls back to New when the preceding read row fills the viewport', () => {
+  let offset = 0;
+  const { controller, rows, list, flush } = transcript(1, () => offset);
+  list.toRow.mockImplementation(() => { offset += 600; return true; });
+  controller.observeVisibleRows(rows);
+  controller.request({ kind: 'firstUnread', messageId: 'unread' });
+  flush();
   flush();
   expect(controller.isLanding()).toBe(true);
   expect(list.toRow.mock.calls).toEqual([[2, 'read', 'top']]);

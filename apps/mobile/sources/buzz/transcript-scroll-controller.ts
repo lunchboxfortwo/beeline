@@ -47,6 +47,8 @@ export type TranscriptScrollCancelReason = 'replaced' | 'drag' | 'cancelled';
 
 /** The calls a platform list answers. Only the adapters below implement it. */
 export type TranscriptScrollList = {
+  currentOffset?(): number | null;
+  isRowVisible?(rowId: string): boolean | null;
   contextFitsViewport?(contextRowId: string, unreadRowId: string): boolean;
   toNewest(): void;
   /** False when the list cannot reach the row yet (not measured or not drawn). */
@@ -135,6 +137,7 @@ type Active = {
   readonly destination: TranscriptScrollDestination;
   scrolled: boolean;
   following: boolean;
+  scrollAttempt: number;
   lastScrollVisibilitySeq: number;
   contextScrolled: boolean;
   skipContextRow: boolean;
@@ -247,7 +250,10 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
         target = contextIndex;
       }
     }
-    current.lastScrollVisibilitySeq = visibilitySeq;
+    const beforeOffset = list.currentOffset?.() ?? null;
+    const scrollVisibilitySeq = visibilitySeq;
+    const scrollAttempt = ++current.scrollAttempt;
+    current.lastScrollVisibilitySeq = scrollVisibilitySeq;
     if (!list.toRow(target, rows[target]!.id, align)) {
       // Scroll near the row so the list draws and measures it. A list that
       // has nothing left to draw sends no later pass by itself, and a row
@@ -260,6 +266,23 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       current.scrolled = true;
       options.onScrolled?.(destination, rowId);
     }
+    if (!list.currentOffset && !list.isRowVisible) return;
+    schedule(() => {
+      if (active !== current || current.scrollAttempt !== scrollAttempt ||
+          visibilitySeq !== scrollVisibilitySeq || rows !== options.rows()) return;
+      let visible = list.isRowVisible?.(rowId) ?? null;
+      // A clamped scroll can leave viewability silent. Its previous report
+      // still describes this viewport only if the offset and rows survived.
+      if (visible === null && beforeOffset !== null && list.currentOffset?.() === beforeOffset &&
+          visibleRowsOf === rows) {
+        visible = options.rowIndex(destination, visibleRows) >= 0;
+      }
+      if (visible) land(current, rowId);
+      else if (visible === false && current.contextScrolled) {
+        current.skipContextRow = true;
+        attempt(current);
+      }
+    });
   };
 
   const request = (destination: TranscriptScrollDestination, following = false) => {
@@ -267,7 +290,7 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
     end('replaced');
     const current: Active = {
       destination, scrolled: false, following,
-      lastScrollVisibilitySeq: visibilitySeq, contextScrolled: false, skipContextRow: false,
+      scrollAttempt: 0, lastScrollVisibilitySeq: visibilitySeq, contextScrolled: false, skipContextRow: false,
     };
     active = current;
     if (destination.kind === 'offset') {
@@ -455,12 +478,15 @@ export function phoneTranscriptList(
   getList: () => PhoneList | null,
   isMeasured: (rowId: string) => boolean,
   getOffsetRef?: () => { current: number },
+  isRowVisible?: (rowId: string) => boolean | null,
 ): TranscriptScrollList & {
   scrollToIndexFailed(info: { averageItemLength: number }): void;
 } {
   let failed = false;
   let averageItemLength = 0;
   return {
+    currentOffset: () => getOffsetRef?.().current ?? null,
+    isRowVisible,
     toNewest() {
       getList()?.scrollToOffset({ offset: 0, animated: false });
     },
@@ -498,11 +524,12 @@ type DesktopNode = {
   scrollTop: number;
   readonly scrollHeight: number;
   readonly clientHeight?: number;
+  getBoundingClientRect?(): { top: number; bottom: number };
 };
 
 type DesktopRowNode = {
   scrollIntoView(options: { block: 'start' | 'center' }): void;
-  getBoundingClientRect?(): { top: number };
+  getBoundingClientRect?(): { top: number; bottom?: number };
 };
 
 /** The desktop transcript: a plain scrollable DOM node with one node per row. */
@@ -511,6 +538,13 @@ export function desktopTranscriptList(
   getRowNode: (rowId: string) => DesktopRowNode | undefined,
 ): TranscriptScrollList {
   return {
+    currentOffset: () => getScrollNode()?.scrollTop ?? null,
+    isRowVisible(rowId) {
+      const viewport = getScrollNode()?.getBoundingClientRect?.();
+      const row = getRowNode(rowId)?.getBoundingClientRect?.();
+      if (!viewport || !row || row.bottom === undefined || viewport.bottom <= viewport.top) return null;
+      return row.bottom > viewport.top && row.top < viewport.bottom;
+    },
     contextFitsViewport(contextId, unreadId) {
       const height = getScrollNode()?.clientHeight;
       const context = getRowNode(contextId)?.getBoundingClientRect?.();
