@@ -64,6 +64,45 @@ it('updates the iOS badge after reading a Room that never produced a push claim'
   } finally { await db.close(); }
 });
 
+it('clears an accepted iOS alert after its badge write fails', async () => {
+  const db = new PgliteDatabase();
+  try {
+    await setup(db);
+    await db.query("UPDATE push_devices SET platform='ios'");
+    await post(db, 'mention');
+    const query = db.query.bind(db);
+    const badgeError = new Error('badge storage unavailable');
+    let statusAtFailedWrite: string | undefined;
+    vi.spyOn(db, 'query').mockImplementation(async (sql, values) => {
+      if (statusAtFailedWrite === undefined && sql.includes('UPDATE push_devices SET last_badge_count')) {
+        const claim = await query<{ status: string }>("SELECT status FROM push_delivery_claims WHERE message_id='mention'");
+        statusAtFailedWrite = claim.rows[0]!.status;
+        throw badgeError;
+      }
+      return query(sql, values);
+    });
+    const send = vi.fn().mockResolvedValue(undefined);
+    const clearRead = vi.fn().mockResolvedValue(undefined);
+    const loop = new PushDeliveryLoop(db, undefined, { send, clearRead });
+    const count = await loop.runOnce();
+    expect(send).toHaveBeenCalledOnce();
+    expect(statusAtFailedWrite).toBe('delivered');
+    expect((await db.query("SELECT status FROM push_delivery_claims WHERE message_id='mention'")).rows)
+      .toEqual([{ status: 'delivered' }]);
+    expect(count).toBe(1);
+    expect((await db.query("SELECT last_badge_count FROM push_devices WHERE token='proof-device'")).rows)
+      .toEqual([{ last_badge_count: 1 }]);
+
+    await db.query(`INSERT INTO room_read_marks(room_id,identity_id,message_created_at,message_id)
+      SELECT room_id,$1,created_at,id FROM messages WHERE id='mention'`, [person]);
+    await loop.runOnce();
+    expect(clearRead).toHaveBeenLastCalledWith('proof-device', [expect.objectContaining({ messageId: 'mention' })], 0);
+    expect((await db.query("SELECT status,read_cleared_at IS NOT NULL AS cleared FROM push_delivery_claims")).rows)
+      .toEqual([{ status: 'delivered', cleared: true }]);
+    expect(send).toHaveBeenCalledOnce();
+  } finally { await db.close(); }
+});
+
 it('never retries an abandoned claim when a server restarts', async () => {
   const db = new PgliteDatabase();
   try {

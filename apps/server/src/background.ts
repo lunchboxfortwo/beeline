@@ -176,8 +176,13 @@ export class PushDeliveryLoop {
   }
 
   private async recordBadge(token: string, viewer: string, badge: number): Promise<void> {
-    await this.database.query(`UPDATE push_devices SET last_badge_count=$3
-      WHERE token=$1 AND identity_id=$2 AND platform='ios' AND last_badge_count IS DISTINCT FROM $3`, [token, viewer, badge]);
+    try {
+      await this.database.query(`UPDATE push_devices SET last_badge_count=$3
+        WHERE token=$1 AND identity_id=$2 AND platform='ios' AND last_badge_count IS DISTINCT FROM $3`, [token, viewer, badge]);
+    } catch (error) {
+      // Badge reconciliation retries a stale count independently of the alert claim.
+      captureServerError(error, { background_job: 'push-badge' });
+    }
   }
 
   /** Batch delivered claims at or before each read mark, or in archived threads, into one silent push per device. */
@@ -658,61 +663,51 @@ export class PushDeliveryLoop {
       badges.set(viewer, badge);
       return badge;
     }
-    const slotSends = new Map<string, Promise<void>>();
+    const slotSends = new Map<string, Promise<number | undefined>>();
     const workerResults = await Promise.all(
       claimedDeliveries.map(async ({ candidate, message }) => {
-          let localDelivered = 0;
-
-            try {
-              const sender =
-                candidate.platform === 'ios'
-                  ? this.iosSender!
-                  : candidate.platform === 'web'
-                    ? this.webSender!
-                    : this.sender!;
-              const slot = `${candidate.token}:${candidate.collapse_id ?? candidate.message_id}`;
-              const sending = (slotSends.get(slot) ?? Promise.resolve())
-                .catch(() => undefined)
-                .then(async () => {
-                  const unreadCount = candidate.platform === 'ios'
-                    ? await badgeFor(this.database, candidate.identity_id) : undefined;
-                  if (Date.now() >= expiryByKey.get(JSON.stringify([candidate.message_id,candidate.token]))!)
-                    throw new Error('Push expired before provider send');
-                  await sender.send(candidate.token, {
-                    deliveryId: randomUUID(),
-                    ...(unreadCount !== undefined ? { unreadCount } : {}),
-                    ...message,
-                    recipientIdentityId: candidate.identity_id,
-                  });
-                  if (unreadCount !== undefined) await this.recordBadge(candidate.token, candidate.identity_id, unreadCount);
-                });
-              slotSends.set(slot, sending);
-              await sending;
-              await this.database.query(
-                `UPDATE push_delivery_claims SET status='delivered',completed_at=now() WHERE message_id=$1 AND device_token=$2`,
-                [candidate.message_id, candidate.token],
-              );
-              localDelivered += 1;
-            } catch (error) {
-              await this.database.query(
-                `UPDATE push_delivery_claims
-                 SET status='failed',completed_at=now(),error=$3
-                 WHERE message_id=$1 AND device_token=$2`,
-                [
-                  candidate.message_id,
-                  candidate.token,
-                  error instanceof Error ? error.message : String(error),
-                ],
-              );
-              if (isUnregisteredPushToken(error))
-                await this.database.query(`DELETE FROM push_devices WHERE token=$1`, [
-                  candidate.token,
-                ]);
-            }
-          return localDelivered;
-        }),
+        let sentBadge: number | undefined;
+        try {
+          const sender = candidate.platform === 'ios' ? this.iosSender!
+            : candidate.platform === 'web' ? this.webSender! : this.sender!;
+          const slot = `${candidate.token}:${candidate.collapse_id ?? candidate.message_id}`;
+          const sending = (slotSends.get(slot) ?? Promise.resolve())
+            .catch(() => undefined)
+            .then(async () => {
+              const unreadCount = candidate.platform === 'ios'
+                ? await badgeFor(this.database, candidate.identity_id) : undefined;
+              if (Date.now() >= expiryByKey.get(JSON.stringify([candidate.message_id,candidate.token]))!)
+                throw new Error('Push expired before provider send');
+              await sender.send(candidate.token, {
+                deliveryId: randomUUID(),
+                ...(unreadCount !== undefined ? { unreadCount } : {}),
+                ...message,
+                recipientIdentityId: candidate.identity_id,
+              });
+              return unreadCount;
+            });
+          slotSends.set(slot, sending);
+          sentBadge = await sending;
+        } catch (error) {
+          await this.database.query(
+            `UPDATE push_delivery_claims
+             SET status='failed',completed_at=now(),error=$3
+             WHERE message_id=$1 AND device_token=$2`,
+            [candidate.message_id, candidate.token, error instanceof Error ? error.message : String(error)],
+          );
+          if (isUnregisteredPushToken(error))
+            await this.database.query('DELETE FROM push_devices WHERE token=$1', [candidate.token]);
+          return 0;
+        }
+        await this.database.query(
+          `UPDATE push_delivery_claims SET status='delivered',completed_at=now() WHERE message_id=$1 AND device_token=$2`,
+          [candidate.message_id, candidate.token],
+        );
+        if (sentBadge !== undefined) await this.recordBadge(candidate.token, candidate.identity_id, sentBadge);
+        return 1;
+      }),
     );
-    delivered = workerResults.reduce((sum, count) => sum + count, 0);
+    delivered = workerResults.reduce<number>((sum, count) => sum + count, 0);
     return delivered;
   }
 }
