@@ -10,7 +10,7 @@ vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ t
 vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: (props: any) => React.createElement('IdentityMark', props) }));
 
 import { PillRow, type PillEvent, type PillItem, type PillRunEntry } from './PillRow';
-import { Copy, T } from '@/ui/grammar';
+import { Copy, T, ThreadGlyph } from '@/ui/grammar';
 import { SYSTEM_IDENTITY_PUBKEY } from '@/buzz/system-identity';
 
 const items: PillItem[] = [
@@ -346,7 +346,7 @@ describe('PillRow', () => {
             const pill = tree.root.find((node: any) => node.type === 'Button' && node.props.testID === 'event-pill');
             expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-system-face')).toHaveLength(1);
             expect(pill.findAll((node: any) => node.type === 'YStack' && node.props.testID === 'pill-github-face')).toHaveLength(0);
-            expect(pill.findAll((node: any) => node.type === 'Icon.CornerDownRight')).toHaveLength(1);
+            expect(pill.findAllByType(ThreadGlyph)).toHaveLength(1);
             expect(strings(pill)).toEqual([]);
             expect(pill.props['aria-label']).toBe('Read Beeline event: Opened thread github-event-pills, 20:45');
             act(() => pill.props.onPress());

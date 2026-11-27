@@ -15,6 +15,8 @@ vi.mock('@/components/buzz/MemberRosterRow', () => ({
 vi.mock('@/buzz/agent-display', () => ({ resolveAgentDisplayIdentity: (pubkey: string) => ({ name: pubkey }) }));
 import { ChannelSuggestionMenu, MentionSuggestionMenu } from './MentionSuggestionMenu';
 import { CHANNEL_MENTION_PUBKEY } from '@/buzz/room-participants';
+import { channelSuggestionCandidates } from '@/buzz/channel-suggestions';
+import { ThreadGlyph } from '@/ui/grammar';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,4 +76,57 @@ it('uses one title and keeps the keyboard window at three rows with this chat fi
   const scroll = tree.root.find((node: any) => node.type === 'ScrollView');
   expect(scroll.props.maxHeight).toBe(3 * 56);
   expect(tree.root.findAll((node: any) => node.type === 'ListItem')[0].props.testID).toBe('channel-suggestion-beeline');
+});
+
+it('renders thread candidates from channelSuggestionCandidates with a centered ThreadGlyph beside the single-line thread name while keeping non-thread row layout unchanged', () => {
+  const candidates = channelSuggestionCandidates(
+    [
+      { id: 'r1', name: 'beeline', repositoryName: 'lunchboxfortwo/beeline' },
+      { id: 'r2', name: 'ops', repositoryName: 'lunchboxfortwo/ops' },
+    ],
+    { name: 'beeline' },
+    [{ id: 'c1', name: 'thread-glyph-center', activityAt: 1_000_000 }],
+  );
+  const threadCandidate = candidates.find((c) => c.kind === 'corner');
+  const repoCandidate = candidates.find((c) => c.kind === 'room' && c.id === 'r2');
+  expect(threadCandidate?.subtitle).toBeUndefined();
+  expect(repoCandidate?.subtitle).toBe('lunchboxfortwo/ops');
+
+  act(() => {
+    tree = create(
+      <ChannelSuggestionMenu
+        query=""
+        matches={candidates}
+        overflow={0}
+        highlightedIndex={0}
+        keyboardOpen
+        nowMs={(1_000_000 + 60) * 1000}
+        onSelect={() => undefined}
+      />,
+    );
+  });
+
+  const threadRow = row('channel-suggestion-beeline/thread-glyph-center');
+  expect(threadRow.props.alignItems).toBe('center');
+  expect(threadRow.findAllByType(ThreadGlyph)).toHaveLength(1);
+  expect(threadRow.findByType('Svg').props).toMatchObject({ viewBox: '0 0 24 24', width: 14, height: 14 });
+  expect(threadRow.findAllByType('Path').map((p: any) => p.props.d)).toEqual([
+    'M15 7L20 12L15 17',
+    'M4 1.5v6.5a4 4 0 0 0 4 4h12',
+  ]);
+  // Thread candidate carries only its single-line name and age, so the centered mark points straight at the name.
+  expect(threadRow.findAll((n: any) => n.type === 'Text').map((n: any) => n.props.children)).toEqual([
+    'thread-glyph-center',
+    '1m',
+  ]);
+
+  // Repository chat row keeps its existing centered layout with # icon and repository subtitle.
+  const repoRow = row('channel-suggestion-ops');
+  expect(repoRow.props.alignItems).toBe('center');
+  expect(repoRow.findAll((n: any) => n.type === 'Icon.Hash')).toHaveLength(1);
+  expect(repoRow.findAllByType(ThreadGlyph)).toHaveLength(0);
+  expect(repoRow.findAll((n: any) => n.type === 'Text').map((n: any) => n.props.children)).toEqual([
+    'ops',
+    'lunchboxfortwo/ops',
+  ]);
 });

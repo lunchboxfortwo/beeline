@@ -172,7 +172,8 @@ it('sets the state mark right after the thread name, centred on its line, with t
     expect(runs.at(-1)).toBe(box.parent);
     expect(box.parent.children.at(-1)).toBe(box);
   }
-  expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,paddingTop:'0.5',alignSelf:'flex-start',justifyContent:'center'});
+  expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',justifyContent:'center'});
+  expect(byTestID(tree,'thread-arrow-box')[0].props.paddingTop).toBeUndefined();
   expect(byTestID(tree,'thread-bar-arrow-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',justifyContent:'center'});
   const assigneeBox = byTestID(tree,'thread-assignee-box')[0];
   expect(assigneeBox.props).toMatchObject({height:31,justifyContent:'center'});

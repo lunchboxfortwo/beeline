@@ -73,6 +73,7 @@ vi.mock('@/buzz/surface-storage', () => {
   };
 });
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
+import { ThreadGlyph, typeStyle } from '@/ui/grammar';
 import { resetClientState } from '@/sync/client-reset';
 import { scheduleTrigger, scheduleWhere, subscriptionWhere, subscriptionTitle, subscriptionWhen } from '@/buzz/scheduled-work';
 import ScheduledWork, { orderScheduledWork } from './schedules';
@@ -125,6 +126,13 @@ it('lists every entry as one row in the shared grammar, each opening its own pag
     expect(row('scheduled-work-daily').props).toMatchObject({ label: 'Morning summary' });
     expect(row('scheduled-work-video').props).toMatchObject({ label: 'Post youtube video' });
     expect(row('scheduled-work-video').props.leading).toBeTruthy();
+    const videoRow = row('scheduled-work-video');
+    const threadGlyph = videoRow.findByType(ThreadGlyph);
+    expect(threadGlyph.props.size).toBe(18);
+    const glyphSlot = videoRow.findAll(
+      (n: any) => n.type === 'YStack' && n.props.height === typeStyle('body', 'medium').lineHeight && n.props.justifyContent === 'center',
+    );
+    expect(glyphSlot.some((slot: any) => slot.findAllByType(ThreadGlyph).length === 1)).toBe(true);
     expect(row('scheduled-work-daily').props.leading).toBeUndefined();
     expect(row('subscription-sub').props.leading).toBeUndefined();
     expect(row('subscription-sub').props).toMatchObject({ label: 'Triage new issues', detail: 'On new issue in owner/widgets\n@Hoots · this chat' });

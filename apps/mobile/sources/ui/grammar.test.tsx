@@ -12,7 +12,8 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 const insets = vi.hoisted(() => ({ top: 24, bottom: 48, left: 0, right: 0 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => insets }));
-import { Btn, ChatName, HEIGHT, Indent, OverlaySheet, PlaceHeader, ScreenHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, TYPE_SCALE, useStep, type TextSize } from './grammar';
+import { CornerDownRight, Hash } from 'lucide-react-native';
+import { Btn, ChatName, Glyph, HEIGHT, Indent, Inked, OverlaySheet, PlaceHeader, ScreenHeader, SheetFrame, STEP_PRESETS, T, TextSizeContext, ThreadGlyph, TYPE_SCALE, useStep, type TextSize } from './grammar';
 
 beforeEach(() => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -238,4 +239,50 @@ it('disables native includeFontPadding on T while preserving points() and keepin
         if (hadDocument) (globalThis as any).document = prevDocument;
         else delete (globalThis as any).document;
     }
+});
+
+it('centers ThreadGlyph horizontal arrow shaft and arrowhead tip at y=12 without clipping strong strokes, and routes CornerDownRight through both Glyph and Inked', () => {
+    const assertCenteredSvg = (tree: any, size: number, strokeWidth: number, expectedColor?: string) => {
+        const svg = tree.root.findByType('Svg');
+        expect(svg.props).toMatchObject({ viewBox: '0 0 24 24', width: size, height: size });
+        const paths = svg.findAllByType('Path');
+        expect(paths).toHaveLength(2);
+        const [head, stem] = paths;
+        expect(head.props.d).toBe('M15 7L20 12L15 17');
+        expect(stem.props.d).toBe('M4 1.5v6.5a4 4 0 0 0 4 4h12');
+        for (const p of paths) {
+            expect(p.props).toMatchObject({ fill: 'none', strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round' });
+            if (expectedColor) expect(p.props.stroke).toBe(expectedColor);
+        }
+        // Top stem cap stays inside the 24x24 viewBox even at strong strokeWidth (2.3).
+        const stemStartY = Number(stem.props.d.match(/^M4\s+([\d.]+)/)?.[1]);
+        expect(stemStartY - strokeWidth / 2).toBeGreaterThan(0);
+    };
+
+    let direct: any;
+    act(() => { direct = create(<ThreadGlyph size={18} strokeWidth={2.3} color="ink" />); });
+    assertCenteredSvg(direct, 18, 2.3, 'ink');
+    act(() => direct.unmount());
+
+    let viaGlyph: any;
+    act(() => { viaGlyph = create(<Glyph icon={CornerDownRight} size={16} />); });
+    assertCenteredSvg(viaGlyph, 16, 1.7, 'secondary');
+    act(() => viaGlyph.unmount());
+
+    let viaStrongGlyph: any;
+    act(() => { viaStrongGlyph = create(<Glyph icon={CornerDownRight} size={18} accent strong />); });
+    assertCenteredSvg(viaStrongGlyph, 18, 2.3, 'needsYou');
+    act(() => viaStrongGlyph.unmount());
+
+    let viaInked: any;
+    act(() => { viaInked = create(<Inked glyph={CornerDownRight} color="secondary" size={13} strokeWidth={1.7} />); });
+    assertCenteredSvg(viaInked, 13, 1.7, 'secondary');
+    act(() => viaInked.unmount());
+
+    // Non-thread icons continue passing through unchanged.
+    let hashTree: any;
+    act(() => { hashTree = create(<Glyph icon={Hash} size={16} />); });
+    expect(hashTree.root.findAll((n: any) => n.type === 'Icon.Hash')).toHaveLength(1);
+    expect(hashTree.root.findAll((n: any) => n.type === 'Svg')).toHaveLength(0);
+    act(() => hashTree.unmount());
 });
