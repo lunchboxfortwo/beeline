@@ -16,6 +16,15 @@ import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
 import { dependencyRequest, prepareWorkspaceDependencies, workspaceDependenciesDir } from './dependency-generation.js';
 
+const appArmorUsernsRestriction = '/proc/sys/kernel/apparmor_restrict_unprivileged_userns';
+
+async function prepareSandboxError(output: string): Promise<string> {
+  if (!/^(?:bwrap:[^\n]*\b(?:mount|overlay)\b|mount:)[^\n]*(?:permission denied|operation not permitted)/im.test(output)) return output;
+  if ((await readFile(appArmorUsernsRestriction, 'utf8').catch(() => '')).trim() !== '1') return output;
+  return 'The sandbox mount was denied while AppArmor restricts unprivileged user namespaces. '
+    + 'Ask the host owner to update bubblewrap and its AppArmor profile so bubblewrap can mount temporary overlays.';
+}
+
 async function mobilePreparationRequested(path: string): Promise<boolean> {
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     .catch(() => undefined);
@@ -225,7 +234,8 @@ async function readyCheckout(input: {
     if (scripts.build) steps.push(['npm', 'run', 'build']);
   }
   if (!steps.length) return undefined;
-  if (!config.bwrapPath)
+  const { bwrapPath } = config;
+  if (!bwrapPath)
     return 'packages were not installed and the build step did not run: this host has no OS sandbox to run the repository scripts in.';
   const git = (args: string[]) => runOwnedFile('git', ['-C', path, ...args]);
   // An unchanged clean tree keeps the packages and build it was prepared with.
@@ -261,6 +271,8 @@ async function readyCheckout(input: {
   // The sandbox keeps /tmp private and /var/tmp read-only; tests write here.
   const tmp = await mkdtemp('/var/tmp/beeline-prepare-');
   try {
+    const nativeMaskMounts = await runOwnedFile(bwrapPath, ['--help'])
+      .then(({ stdout }) => /^\s+--tmp-overlay\s/m.test(stdout), () => false);
     const environment: NodeJS.ProcessEnv = {
       PATH: process.env.PATH ?? '',
       HOME: '/tmp',
@@ -271,7 +283,8 @@ async function readyCheckout(input: {
     };
     async function run(executable: string, args: string[], cwd = path) {
       const command = wrapAgentCommand({
-        bwrapPath: config.bwrapPath,
+        bwrapPath,
+        nativeMaskMounts,
         spec: {
           mode: 'readonly',
           cwd,
@@ -290,10 +303,10 @@ async function readyCheckout(input: {
         maxBuffer: 64 * 1024 * 1024,
         // Turbo otherwise caches beside a linked worktree's Git storage, outside the checkout.
         env: environment,
-      }).catch((error: { stderr?: string; stdout?: string; message?: string }) => {
+      }).catch(async (error: { stderr?: string; stdout?: string; message?: string }) => {
         const output = (error.stderr || error.stdout || error.message || '').trim().slice(-1500);
         throw new Error(
-          `Checkout at ${path} is not ready: ${[executable, ...args].join(' ')} failed:\n${output}`,
+          `Checkout at ${path} is not ready: ${[executable, ...args].join(' ')} failed:\n${await prepareSandboxError(output)}`,
         );
       });
     }

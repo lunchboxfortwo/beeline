@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -16,8 +16,20 @@ import { workspaceDependenciesDir } from './dependency-generation.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 
 const exec = promisify(execFile);
+const host = vi.hoisted(() => ({ restrictUserNamespaces: false }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...fs,
+    readFile: (...args: Parameters<typeof fs.readFile>) =>
+      host.restrictUserNamespaces && args[0] === '/proc/sys/kernel/apparmor_restrict_unprivileged_userns'
+        ? Promise.resolve('1\n')
+        : fs.readFile(...args),
+  };
+});
 const roots: string[] = [];
 afterEach(async () => {
+  host.restrictUserNamespaces = false;
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -293,9 +305,10 @@ async function fixture(
     workspaceRoot: join(root, 'place'),
     operatorHome: join(root, 'operator'),
     agentEnv: {},
-    bwrapPath: '/usr/bin/bwrap',
+    bwrapPath: 'bwrap',
   } as unknown as BodyConfig;
   return {
+    root,
     source,
     config,
     restore,
@@ -349,6 +362,54 @@ it('installs a pnpm checkout from its lockfile before building', async () => {
   expect(result).toContain('Checkout ready at ');
   const path = result.slice('Checkout ready at '.length).split(' on ')[0]!;
   expect(await readFile(join(path, 'dist', 'built.txt'), 'utf8')).toBe('v1\n');
+});
+
+async function denyChildMount(root: string) {
+  await writeFile(join(root, 'bin', 'mount'), [
+    '#!/bin/sh',
+    'echo "mount: /dev/shm/beeline-masks/0/lower: permission denied" >&2',
+    'exit 32',
+  ].join('\n'), { mode: 0o755 });
+}
+
+const nativeOverlaySupported = /^\s+--tmp-overlay\s/m.test(spawnSync('bwrap', ['--help'], { encoding: 'utf8' }).stdout ?? '');
+
+it.skipIf(!nativeOverlaySupported)('prepares pnpm with masks and read-only host paths when child mount is denied', async () => {
+  const f = await fixture({ build: 'node build.mjs' }, {}, 'pnpm');
+  await denyChildMount(f.root);
+  const hostDir = join(f.config.operatorHome!, '.config');
+  await mkdir(hostDir, { recursive: true });
+  await writeFile(join(hostDir, 'settings'), 'host');
+  await writeFile(join(f.source, 'build.mjs'), `
+    import assert from 'node:assert/strict';
+    import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+    const hostDir = ${JSON.stringify(hostDir)};
+    assert.equal(readFileSync('node_modules/dep/package.json', 'utf8').includes('dep'), true);
+    assert.equal(readFileSync(hostDir + '/settings', 'utf8'), 'host');
+    assert.throws(() => writeFileSync(hostDir + '/settings', 'changed'), { code: 'EROFS' });
+    assert.deepEqual(readdirSync(hostDir + '/beeline'), []);
+    writeFileSync(hostDir + '/beeline/temporary', 'sandbox');
+  `);
+  await commit(f.source, 'native-masks');
+
+  await expect(f.prepare('room')).resolves.toContain('Checkout ready at ');
+  expect(await readFile(join(hostDir, 'settings'), 'utf8')).toBe('host');
+  expect(existsSync(join(hostDir, 'beeline'))).toBe(false);
+});
+
+it('names the AppArmor restriction and fix when bubblewrap cannot set up the masks', async () => {
+  const f = await fixture({}, {}, 'pnpm');
+  await denyChildMount(f.root);
+  const run = wait.runOwnedFile;
+  vi.spyOn(wait, 'runOwnedFile').mockImplementation((file, args, options) =>
+    file === 'bwrap' && args[0] === '--help'
+      ? Promise.resolve({ stdout: 'bubblewrap without native overlays', stderr: '' })
+      : run(file, args, options));
+  host.restrictUserNamespaces = true;
+
+  await expect(f.prepare('room')).rejects.toThrow(
+    /AppArmor restricts unprivileged user namespaces\. Ask the host owner to update bubblewrap and its AppArmor profile/,
+  );
 });
 
 it('prepare says the checkout is not ready when no OS sandbox can run its scripts', async () => {

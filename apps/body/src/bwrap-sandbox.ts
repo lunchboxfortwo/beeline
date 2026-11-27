@@ -556,8 +556,24 @@ export function buildBwrapArgv(input: {
   cwd: string;
   command: string;
   args?: string[];
+  nativeMaskMounts?: boolean;
 }): WrappedCommand {
   const overlays = input.plan.overlays ?? [];
+  const scratchAlias = input.plan.scratchAlias;
+  const missingMasks = input.plan.masks.filter(mask => mask.create);
+  const mountpointParents = missingMasks.map(mask => {
+    let parent = dirname(mask.path);
+    while (!lstatSync(parent, { throwIfNoEntry: false })) parent = dirname(parent);
+    return parent;
+  });
+  // Bubblewrap follows a symlink at a bind destination. Replace the host's
+  // short scratch link with a directory in the private overlay first.
+  if (scratchAlias) mountpointParents.push(dirname(scratchAlias.path));
+  const parents = normalize(mountpointParents).filter((parent, _index, all) => !all.some(other =>
+    other !== parent && parent.startsWith(`${other}/`)));
+  // Keep the private root, /tmp and /dev mounts and the session's /proc.
+  const nativeMaskMounts = input.nativeMaskMounts && !scratchAlias && parents.every(parent =>
+    parent !== '/' && !/^\/(dev|proc|tmp)(\/|$)/.test(parent));
   const args = [
     // sd_bus rejects peers whose PID cannot be resolved in its namespace.
     ...(input.plan.userBus ? [] : ['--unshare-pid']),
@@ -579,6 +595,9 @@ export function buildBwrapArgv(input: {
   }
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
+  if (nativeMaskMounts) {
+    for (const parent of parents) args.push('--overlay-src', parent, '--tmp-overlay', parent);
+  }
   const bridgeSocketDirs = (input.plan.bridgeSockets ?? []).flatMap(({ path, fallback }) => {
     const directory = dirname(path);
     if (!directory.startsWith('/var/tmp/')) return [];
@@ -608,9 +627,12 @@ export function buildBwrapArgv(input: {
       args.push('--tmpfs', mask.path);
     } else args.push('--ro-bind', '/dev/null', mask.path);
   }
+  // Only the empty masks and explicit writable binds should remain writable.
+  if (nativeMaskMounts) {
+    for (const parent of parents) args.push('--remount-ro', parent);
+  }
   // Optional harness roots may be absent.
   for (const path of input.plan.writable) args.push('--bind-try', path, path);
-  const scratchAlias = input.plan.scratchAlias;
   if (scratchAlias) args.push('--bind', scratchAlias.source, scratchAlias.path);
   for (const path of input.plan.sealed ?? []) args.push('--ro-bind', path, path);
   args.push('--chdir', input.cwd);
@@ -627,18 +649,7 @@ export function buildBwrapArgv(input: {
   } else {
     args.push('--', input.command, ...(input.args ?? []));
   }
-  const missingMasks = input.plan.masks.filter(mask => mask.create);
-  if (!missingMasks.length && !scratchAlias) return { command: input.bwrapPath, args };
-  const mountpointParents = missingMasks.map(mask => {
-    let parent = dirname(mask.path);
-    while (!lstatSync(parent, { throwIfNoEntry: false })) parent = dirname(parent);
-    return parent;
-  });
-  // Bubblewrap follows a symlink at a bind destination. Replace the host's
-  // short scratch link with a directory in the private overlay first.
-  if (scratchAlias) mountpointParents.push(dirname(scratchAlias.path));
-  const parents = normalize(mountpointParents).filter((parent, _index, all) => !all.some(other =>
-    other !== parent && parent.startsWith(`${other}/`)));
+  if (!parents.length || nativeMaskMounts) return { command: input.bwrapPath, args };
   // Writable grants and private state must bind the host inode, rather than
   // writing into the temporary overlay. /dev is replaced by the inner bwrap,
   // hiding these original-parent aliases before the agent starts.
@@ -677,6 +688,7 @@ export function wrapAgentCommand(input: {
   spec: SandboxSessionSpec;
   command: string;
   args?: string[];
+  nativeMaskMounts?: boolean;
 }): WrappedCommand {
   if (!input.bwrapPath) return { command: input.command, args: [...(input.args ?? [])] };
   return buildBwrapArgv({
@@ -685,5 +697,6 @@ export function wrapAgentCommand(input: {
     cwd: input.spec.cwd,
     command: input.command,
     args: input.args,
+    nativeMaskMounts: input.nativeMaskMounts,
   });
 }
