@@ -8,10 +8,10 @@ import { sessionCredentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } f
 import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { agentGitIdentity } from './agent-git-identity.js';
-import { materializeAgentCornerCheckout } from './agent-corner-checkout.js';
+import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { rememberStorageOwner } from './storage-owners.js';
-import { KernelLockBusyError, withKernelLock } from './kernel-lock.js';
+import { withKernelLockWhenFree } from './kernel-lock.js';
 import { prepareCodegraphIndex } from './codegraph.js';
 import type { BodyConfig } from './config.js';
 import { dependencyRequest, prepareWorkspaceDependencies, workspaceDependenciesDir } from './dependency-generation.js';
@@ -146,16 +146,17 @@ export function roomCheckoutPath(input: {
 }
 
 /** A read-only copy of a Room's repository at its target branch. */
-export async function materializeRoomCheckout(input: {
+async function materializeRoomCheckout(input: {
+  path: string;
   roomId: string;
   workspaceId: string;
   supervisorRoot: string;
   remote: string;
   targetBranch: string;
   token?: string;
-}): Promise<string> {
+}): Promise<void> {
   const remote = roomCheckoutRemote(input.remote);
-  const path = roomCheckoutPath(input);
+  const { path } = input;
   const checkoutId = basename(path);
   await rememberStorageOwner(input.supervisorRoot, {
     workspaceId: input.workspaceId,
@@ -164,32 +165,29 @@ export async function materializeRoomCheckout(input: {
     itemId: checkoutId,
   });
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  return withKernelLock(`room-checkout:${path}`, async () => {
-    const env = input.token ? githubGitEnv(input.token) : process.env;
-    if (!existsSync(resolve(path, '.git')))
-      await runOwnedFile(
-        'git',
-        ['clone', '--no-checkout', ...CRASH_SAFE_CLONE_ARGS, remote, path],
-        { env, maxBuffer: 4 * 1024 * 1024 },
-      );
-    await runOwnedFile('git', ['-C', path, 'config', 'gc.pruneExpire', 'never']);
-    await fetchRepositoryCache({
-      gitDir: resolve(path, '.git'),
-      label: `room-checkouts/${checkoutId}`,
-      args: [
-        '--prune',
-        'origin',
-        `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`,
-      ],
-      env,
-    });
+  const env = input.token ? githubGitEnv(input.token) : process.env;
+  if (!existsSync(resolve(path, '.git')))
     await runOwnedFile(
       'git',
-      ['-C', path, 'checkout', '--detach', '--force', `origin/${input.targetBranch}`],
+      ['clone', '--no-checkout', ...CRASH_SAFE_CLONE_ARGS, remote, path],
       { env, maxBuffer: 4 * 1024 * 1024 },
     );
-    return path;
+  await runOwnedFile('git', ['-C', path, 'config', 'gc.pruneExpire', 'never']);
+  await fetchRepositoryCache({
+    gitDir: resolve(path, '.git'),
+    label: `room-checkouts/${checkoutId}`,
+    args: [
+      '--prune',
+      'origin',
+      `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`,
+    ],
+    env,
   });
+  await runOwnedFile(
+    'git',
+    ['-C', path, 'checkout', '--detach', '--force', `origin/${input.targetBranch}`],
+    { env, maxBuffer: 4 * 1024 * 1024 },
+  );
 }
 
 /**
@@ -341,12 +339,7 @@ async function npmInstallIdentity(root: string, mobile = false): Promise<string>
   return createHash('sha256').update(JSON.stringify(contents)).digest('hex');
 }
 
-/**
- * The `workspace` tool: make (or refresh) this agent's copy of the place's
- * repository and index it. It runs only when the agent asks, and every
- * failure comes back to the agent as text.
- */
-export async function prepareWorkspace(input: {
+interface WorkspaceInput {
   api: DaemonApiClient;
   config: BodyConfig;
   supervisorRoot: string;
@@ -354,27 +347,71 @@ export async function prepareWorkspace(input: {
   agent: { name: string; publicKey: string };
   placeId: string;
   parentRoomId?: string;
-}): Promise<string> {
+}
+
+const pendingCheckouts = new Map<string, Promise<string>>();
+
+/** Session prepare and workspace share this agent's in-flight checkout result. */
+export function prepareWorkspace(input: WorkspaceInput): Promise<string> {
+  const key = JSON.stringify([
+    resolve(input.supervisorRoot),
+    input.agent.publicKey,
+    input.placeId,
+    input.parentRoomId,
+  ]);
+  const pending = pendingCheckouts.get(key);
+  if (pending) return pending;
+  const prepared = prepareCheckout(input).finally(() => pendingCheckouts.delete(key));
+  pendingCheckouts.set(key, prepared);
+  return prepared;
+}
+
+async function prepareCheckout(input: WorkspaceInput): Promise<string> {
   const repositoryRoom = input.parentRoomId ?? input.placeId;
   const repository = await input.api.execute('getRoomRepositoryState', { roomId: repositoryRoom });
   if (repository.resolution !== 'repository' || !repository.remote)
     return 'This place has no repository; there is nothing to check out.';
+  const { remote } = repository;
   const targetBranch = repository.targetBranch || 'main';
-  const token = repository.remote.startsWith('file://')
+  const token = remote.startsWith('file://')
     ? undefined
     : (await input.api.execute('getRoomGitHubToken', { roomId: repositoryRoom })).token;
-  let path: string;
+  const path = input.parentRoomId
+    ? agentCornerCheckoutPaths(input.supervisorRoot, input.placeId, input.agent.publicKey).path
+    : roomCheckoutPath({ ...input, roomId: input.placeId, remote, targetBranch });
+  // Cover materialization through indexing, including recovery of abandoned staging.
+  const lock = `${input.parentRoomId ? 'thread' : 'room'}-checkout:${path}`;
+  return withKernelLockWhenFree(lock, () =>
+    prepareCheckoutAtPath(input, { path, remote, targetBranch, token }),
+  );
+}
+
+async function prepareCheckoutAtPath(
+  input: WorkspaceInput,
+  {
+    path,
+    remote,
+    targetBranch,
+    token,
+  }: {
+    path: string;
+    remote: string;
+    targetBranch: string;
+    token?: string;
+  },
+): Promise<string> {
   let gitCommonDir: string | undefined;
   let brief: string | undefined;
-  let branch = targetBranch;
+  let where = `${targetBranch} (read-only)`;
   if (input.parentRoomId) {
     const restore = await input.api.execute('getCornerRestoreState', { cornerId: input.placeId });
     brief = restore.brief?.spec;
-    branch =
+    const branch =
       restore.featureBranch ?? `feature/corner-${input.placeId.replaceAll('-', '').slice(0, 12)}`;
-    ({ path, gitCommonDir } = await materializeCornerWorktree({
+    where = `branch ${branch} (target ${targetBranch})`;
+    ({ gitCommonDir } = await materializeCornerWorktree({
       cornerId: input.placeId,
-      remote: repository.remote,
+      remote,
       targetBranch,
       featureBranch: branch,
       token: token ?? '',
@@ -410,72 +447,33 @@ export async function prepareWorkspace(input: {
           console.warn(`[body] thread ${input.placeId} working state not posted:`, error),
         );
   } else {
-    try {
-      path = await materializeRoomCheckout({
-        roomId: input.placeId,
-        workspaceId: input.workspaceId,
-        supervisorRoot: input.supervisorRoot,
-        remote: repository.remote,
-        targetBranch,
-        ...(token ? { token } : {}),
-      });
-    } catch (error) {
-      if (error instanceof KernelLockBusyError)
-        return checkoutBusy(
-          roomCheckoutPath({
-            ...input,
-            roomId: input.placeId,
-            remote: repository.remote,
-            targetBranch,
-          }),
-          error,
-        );
-      throw error;
-    }
-  }
-  const ready = async () => {
-    const notReady = await readyCheckout({
+    await materializeRoomCheckout({
       path,
-      config: input.config,
+      roomId: input.placeId,
+      workspaceId: input.workspaceId,
       supervisorRoot: input.supervisorRoot,
-      agentId: input.agent.publicKey,
-      ...(gitCommonDir ? { gitCommonDir } : {}),
-      ...(brief ? { brief } : {}),
+      remote,
+      targetBranch,
+      ...(token ? { token } : {}),
     });
-    const indexed = await prepareCodegraphIndex(input.config, path, {
-      readonly: !input.parentRoomId,
-    });
-    return { notReady, indexed };
-  };
-  // The two workspace entry points can prepare the same checkout concurrently.
-  let notReady: string | undefined;
-  let indexed: boolean;
-  try {
-    ({ notReady, indexed } = await withKernelLock(
-      `${input.parentRoomId ? 'thread' : 'room'}-checkout:${path}`,
-      ready,
-      {
-        step: `agent ${input.agent.publicKey.slice(0, 12)} preparing the checkout`,
-      },
-    ));
-  } catch (error) {
-    if (error instanceof KernelLockBusyError) return checkoutBusy(path, error);
-    throw error;
   }
-  const where = input.parentRoomId
-    ? `branch ${branch} (target ${targetBranch})`
-    : `${targetBranch} (read-only)`;
-  return [
-    notReady
-      ? `Checkout at ${path} on ${where} is not ready: ${notReady}`
-      : `Checkout ready at ${path} on ${where}.`,
-    indexed
-      ? 'The code index is ready.'
-      : 'The code index was not built; use the shell and file tools.',
-  ].join(' ');
-}
-
-/** Agents in one Room share its checkout; one prepares it at a time and the others are told so at once. */
-function checkoutBusy(path: string, error: KernelLockBusyError): string {
-  return `Checkout at ${path} is being prepared by another agent (pid ${error.holder.pid || 'unknown'}, since ${error.holder.since}). Call workspace again to read it once that finishes.`;
+  const notReady = await readyCheckout({
+    path,
+    config: input.config,
+    supervisorRoot: input.supervisorRoot,
+    agentId: input.agent.publicKey,
+    ...(gitCommonDir ? { gitCommonDir } : {}),
+    ...(brief ? { brief } : {}),
+  });
+  const indexed = await prepareCodegraphIndex(input.config, path, {
+    readonly: !input.parentRoomId,
+  });
+  const indexStatus = indexed
+    ? 'The code index is ready.'
+    : 'The code index was not built; use the shell and file tools.';
+  if (notReady) return `Checkout at ${path} on ${where} is not ready: ${notReady} ${indexStatus}`;
+  const head = (
+    await runOwnedFile('git', ['-C', path, 'rev-parse', '--verify', 'HEAD'])
+  ).stdout.trim();
+  return `Checkout ready at ${path} on ${where}. HEAD is ${head}. ${indexStatus}`;
 }

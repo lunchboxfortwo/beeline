@@ -85,7 +85,7 @@ async function linkSeedRepository(seed: string, staging: string): Promise<void> 
 
 /**
  * Clone immutable local objects with hard links, never refs or alternates.
- * One coordinator owns each corner+agent setup; there are no checkout locks.
+ * The workspace coordinator holds the checkout lock while this runs.
  * The source cache remains recovery evidence until ordinary archive cleanup.
  */
 export async function materializeAgentCornerCheckout(input: {
@@ -105,9 +105,10 @@ export async function materializeAgentCornerCheckout(input: {
     throw new Error('refusing symlinked agent checkout');
   const creating = !existsSync(resolve(paths.gitCommonDir, 'HEAD'));
   const label = `repositories/${basename(paths.gitCommonDir)}`;
+  const staging = `${paths.gitCommonDir}.creating`;
+  // A stopped owner may have installed HEAD before it could remove staging.
+  await rm(staging, { recursive: true, force: true });
   if (creating) {
-    const staging = `${paths.gitCommonDir}.creating`;
-    await rm(staging, { recursive: true, force: true });
     try {
       try {
         await linkSeedRepository(input.sourceGitDir, staging);
@@ -211,6 +212,7 @@ export async function materializeAgentCornerCheckout(input: {
     });
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', 'extensions.worktreeConfig', 'true']);
   const gitFile = resolve(paths.path, '.git');
+  const pendingFiles = resolve(paths.gitCommonDir, 'beeline-worktree-pending');
   const attached =
     existsSync(gitFile) &&
     (await git(['-C', paths.path, 'rev-parse', '--absolute-git-dir']).then(
@@ -222,6 +224,8 @@ export async function materializeAgentCornerCheckout(input: {
     const marker = await lstat(gitFile).catch(() => undefined);
     if (marker && !marker.isFile()) throw new Error('refusing invalid agent checkout Git marker');
     const hasFiles = (await readdir(paths.path)).some((entry) => entry !== '.git');
+    // Keep track of an empty worktree across interruptions after .git is linked.
+    if (!hasFiles) await writeFile(pendingFiles, '');
     // A lost .git file need not lose the index (including staged work). Reuse
     // only the registration that names this exact checkout, never another one.
     const registrations = resolve(paths.gitCommonDir, 'worktrees');
@@ -259,11 +263,20 @@ export async function materializeAgentCornerCheckout(input: {
         await rm(temporary, { recursive: true, force: true });
       }
     }
-    // An emptied bound folder needs its files back. Never overwrite surviving
-    // files; for a populated folder the existing bytes become local changes.
-    if (!hasFiles) await git(['-C', paths.path, 'checkout-index', '--all']);
   }
   await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
+  if (existsSync(pendingFiles)) {
+    const index = (await git(['-C', paths.path, 'rev-parse', '--git-path', 'index'])).stdout.trim();
+    if (!existsSync(resolve(paths.path, index)))
+      await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
+    // Restore only missing paths from the index and keep any surviving files.
+    const missing = (
+      await git(['-C', paths.path, '-c', 'core.quotePath=true', 'ls-files', '--deleted'])
+    ).stdout;
+    if (missing)
+      await runOwnedFile('git', ['-C', paths.path, 'checkout-index', '--stdin'], { input: missing });
+    await rm(pendingFiles);
+  }
   // An import an older helper left unfinished is never resumed from here.
   if (await readFile(resolve(paths.gitCommonDir, 'beeline-legacy-pending'), 'utf8').catch(() => ''))
     throw new Error('legacy thread import source changed');
