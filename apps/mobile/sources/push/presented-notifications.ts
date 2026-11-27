@@ -80,19 +80,13 @@ export async function clearLegacyPresentedNotificationsOnce(
   await storage.setItem(LEGACY_PRESENTED_NOTIFICATIONS_CLEARED_KEY, '1');
 }
 
-/** Keep iOS's app icon badge aligned with the notifications still in its shade. */
+// APNs supplies the unread total on delivery and read clear. The shade can contain fewer entries.
 export async function reconcilePresentedNotificationBadge(
   api: PresentedNotificationApi,
-  platform: string,
+  _platform: string,
   pushLevel: PushLevel = 'attention',
 ): Promise<void> {
-  if (pushLevel === 'off') {
-    await api.setBadgeCountAsync(0);
-    return;
-  }
-  if (platform !== 'ios') return;
-  const presented = await api.getPresentedNotificationsAsync();
-  await api.setBadgeCountAsync(presented.length);
+  if (pushLevel === 'off') await api.setBadgeCountAsync(0);
 }
 
 /** Dismiss every presented push for the Room or corner that is now open. */
@@ -131,7 +125,7 @@ type ChannelRead = {
 
 /**
  * Dismiss presented pushes for these Rooms or corners — the ones opened here,
- * or read on another device — and recount iOS's badge from the shade. With a
+ * or read on another device. With a
  * read cursor, only the read messages' notifications go: the cursor's own and
  * those the server lists as read. The server orders messages, so a newer one
  * stays unread even when iOS presented it at the same second.
@@ -139,7 +133,7 @@ type ChannelRead = {
 export async function dismissPresentedNotificationsForChannels(
   reads: readonly ChannelRead[],
   api: PresentedNotificationApi,
-  platform: string,
+  _platform: string,
   options: { keepActionOutcomes?: boolean } = {},
 ): Promise<void> {
   const readChannels = reads.flatMap((read) => {
@@ -164,5 +158,4 @@ export async function dismissPresentedNotificationsForChannels(
       : [],
   );
   await Promise.all(matchingIds.map((identifier) => api.dismissNotificationAsync(identifier)));
-  if (platform === 'ios') await api.setBadgeCountAsync(presented.length - matchingIds.length);
 }

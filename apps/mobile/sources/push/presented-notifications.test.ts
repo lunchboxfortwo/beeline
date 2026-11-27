@@ -12,7 +12,7 @@ it('dismisses a read card from an Expo envelope while a later unread card stays 
   };
   await dismissPresentedNotificationsForChannels([{ channelId: 'chat', messageId: 'cursor', readMessageIds: ['read'] }], api, 'ios');
   expect(api.dismissNotificationAsync.mock.calls).toEqual([['read'], ['cursor']]);
-  expect(api.setBadgeCountAsync).toHaveBeenCalledWith(1);
+  expect(api.setBadgeCountAsync).not.toHaveBeenCalled();
 });
 
 it('uses a foreign Android notification tag to clear only the read message in its own Room', async () => {

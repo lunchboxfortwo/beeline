@@ -62,7 +62,7 @@ export interface PushSender {
     ),
   ): Promise<void>;
   /** iOS and Android: a silent push that clears these conversations from the shade. */
-  clearRead?(token: string, reads: readonly ReadClear[]): Promise<void>;
+  clearRead?(token: string, reads: readonly ReadClear[], unreadCount?: number): Promise<void>;
 }
 
 const PUSH_TITLE_LENGTH = 40;
@@ -188,12 +188,13 @@ export class PushDeliveryLoop {
     const due = await this.database.query<{
       token: string;
       platform: 'ios' | 'android';
+      identity_id: string;
       channel_ids: string[];
       message_ids: string[];
       read_message_ids: string[];
     }>(
       // Registered-device claims beyond any cap remain due for a later push.
-      `SELECT device.token,device.platform,batch.channel_ids,batch.message_ids,batch.read_message_ids
+      `SELECT device.token,device.identity_id,device.platform,batch.channel_ids,batch.message_ids,batch.read_message_ids
        FROM push_devices device
        CROSS JOIN LATERAL (
          SELECT array_agg(pending.room_id ORDER BY pending.sort_at,pending.room_id) channel_ids,
@@ -259,7 +260,11 @@ export class PushDeliveryLoop {
       while (pending.length) {
         const reads = batch(pending);
         try {
-          await sender.clearRead(row.token, reads);
+          if (row.platform === 'ios') {
+            await sender.clearRead(row.token, reads, await pushUnreadCount(this.database, row.identity_id));
+          } else {
+            await sender.clearRead(row.token, reads);
+          }
           await this.database.query(
             `UPDATE push_delivery_claims SET read_cleared_at=now()
              WHERE device_token=$1 AND message_id=ANY($2::text[])`,

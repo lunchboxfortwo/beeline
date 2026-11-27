@@ -114,14 +114,14 @@ export function apnsPushRequest(
 /** Apple rejects a push whose JSON payload is larger than this. */
 export const APNS_MAX_PAYLOAD_BYTES = 4096;
 
-function readClearPayload(reads: readonly ReadClear[]): Record<string, unknown> {
-  return { aps: { 'content-available': 1 }, ...readClearPushData(reads) };
+function readClearPayload(reads: readonly ReadClear[], badge?: number): Record<string, unknown> {
+  return { aps: { 'content-available': 1, ...(badge !== undefined ? { badge } : {}) }, ...readClearPushData(reads) };
 }
 
 /** The longest prefix of these reads whose read-clear payload fits APNs's size limit. */
 export function apnsReadClearBatch(reads: readonly ReadClear[]): ReadClear[] {
   return readClearBatch(reads, (batch) =>
-    Buffer.byteLength(JSON.stringify(readClearPayload(batch))) <= APNS_MAX_PAYLOAD_BYTES);
+    Buffer.byteLength(JSON.stringify(readClearPayload(batch, 2147483647))) <= APNS_MAX_PAYLOAD_BYTES);
 }
 
 /** A batched low-priority background push with no alert. */
@@ -130,14 +130,15 @@ export function apnsReadClearRequest(
   reads: readonly ReadClear[],
   bundleId: string,
   providerToken: string,
+  badge?: number,
 ): { headers: OutgoingHttpHeaders; payload: Record<string, unknown> } {
   return {
     headers: {
       ...apnsHeaders(token, bundleId, providerToken),
-      'apns-push-type': 'background',
+      'apns-push-type': badge === undefined ? 'background' : 'alert',
       'apns-priority': '5',
     },
-    payload: readClearPayload(reads),
+    payload: readClearPayload(reads, badge),
   };
 }
 
@@ -217,8 +218,9 @@ export class ApnsPushProvider implements PushSender {
   async clearRead(
     token: string,
     reads: readonly ReadClear[],
+    badge?: number,
   ): Promise<void> {
-    await this.#post(apnsReadClearRequest(token, reads, this.#bundleId, this.#token()));
+    await this.#post(apnsReadClearRequest(token, reads, this.#bundleId, this.#token(), badge));
   }
 
   async #post(request: {

@@ -201,7 +201,7 @@ describe('background advisory-lock ownership', () => {
       expect(clearRead).toHaveBeenCalledOnce();
       expect(clearRead).toHaveBeenLastCalledWith(ios, [
         { channelId: room, messageId: reply, readMessageIds: [second, first] },
-      ]);
+      ], expect.any(Number));
     } finally {
       await db.close();
     }
@@ -323,7 +323,7 @@ describe('background advisory-lock ownership', () => {
       ).runOnce();
       expect(clearRead).toHaveBeenLastCalledWith(ios, [
         { channelId: room, messageId: after, readMessageIds: [] },
-      ]);
+      ], expect.any(Number));
     } finally {
       await db.close();
     }
@@ -858,7 +858,7 @@ describe('background advisory-lock ownership', () => {
       expect(iosClear).toHaveBeenCalledOnce();
       expect(iosClear).toHaveBeenLastCalledWith(ios, [
         { channelId: thread, messageId: second, readMessageIds: [first] },
-      ]);
+      ], expect.any(Number));
       // Subsequent ticks do not re-clear already cleared claims, and open threads stay untouched.
       androidClear.mockClear();
       iosClear.mockClear();
