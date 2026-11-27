@@ -820,6 +820,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   queuedRequestIds?: readonly string[];
   batchCommandIds?: readonly string[];
   harnessEnded?: boolean;
+  silentCompletion?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   invocationId?: string;
   outputFiles?: Attachment[];
@@ -904,7 +905,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
             completedNow = true;
             return { ...receipt, ...(prior ? { id: prior.id, messageId: prior.id, published: true, stored: true, visible: true, delivered: true } : {}), completed: true };
           }
-          if (!item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
+          const silentSchedule = item.reason === 'schedule' && input.harnessEnded === true &&
+            input.silentCompletion === true && Boolean(input.invocationId);
+          if (!silentSchedule && !item.public_reply_id && !payload?.automatic && !isBackgroundCommand(item.reason) && !isInformationalReply(item.reason,payload?.messageAsk)) {
             if (input.harnessEnded) await db.query('SELECT * FROM beeline_interrupt_agent_turn($1,$2,$3,NULL,NULL)',[agentId,item.room_id,item.turn_request_id]);
             return {...receipt, answered:false};
           }

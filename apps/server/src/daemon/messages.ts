@@ -43,8 +43,8 @@ import { currentAgentInvocation } from '../agent-invocation.js';
       return { ...(saved.stored ? {id:saved.id,messageId:saved.id,createdAt:saved.createdAt} : {}),
         completed:false,published:saved.stored,stored:saved.stored,visible:saved.visible,receipt:saved.receipt };
     }
-    const { roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,replyToMessageId } = input;
-    return answerQueuedMessage(ctx.database,agentId,{roomId,requestId,text,steps,queuedRequestIds,harnessEnded,invocation,invocationId:invocationId ?? invocation?.id,replyToMessageId});
+    const { roomId,requestId,text,steps,queuedRequestIds,harnessEnded,silentCompletion,invocation,replyToMessageId } = input;
+    return answerQueuedMessage(ctx.database,agentId,{roomId,requestId,text,steps,queuedRequestIds,harnessEnded,silentCompletion,invocation,invocationId:invocationId ?? invocation?.id,replyToMessageId});
   }
 
   export async function daemonPostAgentAttachment(ctx: DaemonContext, input: Input<'postAgentAttachment'>, agentId: string) {

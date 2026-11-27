@@ -500,6 +500,8 @@ export type PostRoomMessageInput = TurnOutputAuthority &
   RoomInput & {
     /** Helper closing receipt; unanswered requests remain owed. */
     readonly harnessEnded?: boolean;
+    /** The harness completed without output, so a scheduled wake may close quietly. */
+    readonly silentCompletion?: boolean;
     readonly invocation?: import('./daemon-operations.js').AgentInvocation;
     readonly requestId?: string;
     /** Other queue items answered by this combined reply, in the same chat. */

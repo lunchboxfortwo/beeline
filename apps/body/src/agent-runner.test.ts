@@ -355,15 +355,18 @@ it('posts an already stored answer when the outbox becomes unwritable afterwards
 });
 
 
-it.each(['empty','failed'])('leaves an %s scheduled answer owed and delivers the pending request again',async outcome=>{
-  const f=await fixture(),item={...f.item('empty-closing'),reason:'schedule'};
+it.each([
+  ['cancelled', false], ['failed', false], ['failed', true],
+] as const)('retries a %s scheduled turn (hosted=%s)',async (outcome, hosted)=>{
+  const f=await fixture(undefined, hosted),item={...f.item('empty-closing'),reason:'schedule'};
   if(outcome==='failed') harness.deliver.mockRejectedValueOnce(new Error('harness disconnected'));
-  else harness.deliver.mockResolvedValueOnce({text:'',steps:[],toolCalls:[],cleanup:async()=>{}});
+  else harness.deliver.mockResolvedValueOnce({text:'',stopReason:'cancelled',steps:[],toolCalls:[],cleanup:async()=>{}});
   f.execute.mockImplementation(async name=>name==='postRoomMessage'?{id:'owed',createdAt:1,answered:false}:{id:'status',createdAt:1});
   f.changed([item]);
   await vi.waitFor(()=>expect(f.execute).toHaveBeenCalledWith('postRoomMessage',expect.objectContaining({text:'',requestId:item.turnRequestId})));
   await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
-  expect(f.execute.mock.calls.some(call=>call[0]==='markAgentTurnSilent')).toBe(false);
+  expect(f.execute.mock.calls.find(call=>call[0]==='postRoomMessage')?.[1]).not.toHaveProperty('silentCompletion');
+  expect(f.execute).not.toHaveBeenCalledWith('startAgentTurn',expect.objectContaining({available:false}));
   f.execute.mockResolvedValue({id:'posted',createdAt:1});
   f.changed([item]);
   await vi.waitFor(async()=>expect(await new AnswerStore(join(f.root,'answers')).all()).toEqual([]));
@@ -383,6 +386,8 @@ it.each(['end_turn', 'cancelled'])('closes only background items in an empty rec
   f.changed([schedule, tag, event]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
     requestId: schedule.id, queuedRequestIds: [tag.id, event.id], text: '', harnessEnded: true })));
+  expect(f.execute.mock.calls.find(call=>call[0]==='postRoomMessage')?.[1].silentCompletion)
+    .toBe(stopReason === 'end_turn' ? true : undefined);
   await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
   f.changed([tag]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
@@ -506,14 +511,15 @@ it('batches pending input in its own chat, including live input after reconnect'
   expect(harness.deliver).toHaveBeenCalledWith(second,[second]);
 });
 
-it('replays a durable empty harness completion without running the agent again', async () => {
+it('replays a durable silent schedule completion without running the agent again', async () => {
+  const invocation = { id: 'original-invocation', requestId: 'silent' };
   vi.spyOn(AnswerStore.prototype, 'all').mockResolvedValueOnce([{
-    itemId: 'silent', roomId: 'room', requestId: 'silent', text: '', harnessEnded: true,
+    itemId: 'silent', roomId: 'room', requestId: 'silent', text: '', harnessEnded: true, silentCompletion: true, invocation,
   }]);
   const f = await fixture();
-  f.changed([f.item('silent')]);
+  f.changed([{ ...f.item('silent'), reason: 'schedule' }]);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
-    requestId: 'silent', text: '', harnessEnded: true,
+    requestId: 'silent', text: '', harnessEnded: true, silentCompletion: true, invocation,
   })));
   expect(harness.deliver).not.toHaveBeenCalled();
 });

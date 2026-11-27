@@ -92,6 +92,43 @@ it.each([OWNER, OTHER_AGENT, null, AGENT])('Reproduction schedule-report-owner: 
   } finally { await database.close(); }
 });
 
+it('retries a failed scheduled turn and removes the same wake after a silent success', async () => {
+  const database = await fixture();
+  try {
+    const daemon = new DaemonService(database, new LiveHub());
+    const scheduleId = randomUUID();
+    await database.query(`INSERT INTO agent_schedules(id,workspace_id,room_id,agent_id,creator_id,owner_id,cadence,message,max_runs,next_run_at)
+      VALUES($1,$2,$3,$4,$4,$5,'{"kind":"interval","everyMinutes":1}','Check work',1,now()-interval '1 second')`,
+      [scheduleId, WORKSPACE, ROOM, AGENT, OWNER]);
+    expect(await new AgentScheduleLoop(database).runOnce()).toBe(1);
+    const readQueue = () => daemon.execute('getAgentCommands', { roomId: ROOM }, AGENT);
+    const [wake] = (await readQueue()).commands;
+    const requestId = wake!.turnRequestId;
+    const authority = { roomId: ROOM, requestId };
+
+    const failed = { id: randomUUID(), requestId };
+    await daemon.execute('startAgentTurn', { ...authority, invocationId: failed.id }, AGENT);
+    await daemon.execute('postAgentTurnReceipt', { ...authority, invocation: failed, outcome: 'failed', reason: 'Harness exit' }, AGENT);
+    await expect(daemon.execute('postRoomMessage', { ...authority, invocation: failed, harnessEnded: true, text: '' }, AGENT))
+      .resolves.toMatchObject({ completed: false, published: false });
+    expect((await readQueue()).commands.map(command => command.sourceMessageId)).toEqual([wake!.sourceMessageId]);
+
+    const retry = { id: randomUUID(), requestId };
+    await daemon.execute('startAgentTurn', { ...authority, invocationId: retry.id }, AGENT);
+    const closing = { ...authority, invocation: retry, harnessEnded: true, silentCompletion: true, text: '' };
+    for (const receipt of [closing, closing]) {
+      await expect(daemon.execute('postRoomMessage', receipt, AGENT))
+        .resolves.toMatchObject({ completed: true, published: false });
+    }
+    expect((await readQueue()).commands).toEqual([]);
+    expect((await database.query(`SELECT command.state, command.result_message_id, turn.status
+      FROM agent_commands command JOIN agent_turns turn USING (agent_id, room_id)
+      WHERE command.id=$1 AND turn.request_id=command.turn_request_id`, [wake!.id])).rows)
+      .toEqual([{ state: 'complete', result_message_id: null, status: 'complete' }]);
+    expect((await database.query('SELECT id FROM messages WHERE room_id=$1 AND author_id=$2', [ROOM, AGENT])).rows).toEqual([]);
+  } finally { await database.close(); }
+});
+
 describe('agent schedule cadence', () => {
   it('keeps interval cadence while skipping missed occurrences', () => {
     const cadence: RoomScheduleCadence = { kind: 'interval', everyMinutes: 5 };
