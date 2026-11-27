@@ -28,62 +28,72 @@ const pendingCommands = async (agentId: string) => (await rootFixture.db.query<{
 )).rows.map((row) => row.reason);
 
 describe('CI gate from base-branch protection', () => {
-  it('NO-CI-1: an unprotected repo PR with workflow files but no checks merges with no reviewer', async () => {
+  it('NO-CI-1: an unprotected repo PR with no workflows merges when it opens', async () => {
     await openPr();
-    // Workflow files exist but never register for this head (path filters).
     rootFixture.rollupState = null;
-    rootFixture.workflowCount = 2;
     rootFixture.registeredCount = 0;
     vi.mocked(rootFixture.operations.landCorner).mockRestore();
     const merge = vi.spyOn(rootFixture.app, 'mergePullRequest').mockResolvedValue(undefined);
     await opened();
     expect(merge).toHaveBeenCalledWith(77, 101, 'owner/widgets', 614, SHA);
-    // People see the same checks read as before: nothing has reported.
-    expect(await gate()).toMatchObject({ checks: 'pending', checkCount: 0, reviewerExists: false });
+    expect(await gate()).toMatchObject({ checks: 'passed', checkCount: 0, mergeAllowed: true });
   });
 
-  it('NO-CI-2: an unprotected repo PR wakes the reviewer even without any reported checks', async () => {
+  it('Reproduction 1: an approved PR on an unprotected base waits for all head checks', async () => {
     await openPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     rootFixture.rollupState = null;
     rootFixture.workflowCount = 2;
-    rootFixture.registeredCount = 0;
-    await opened();
-    expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);
-    expect(await gate()).toMatchObject({
-      checks: 'pending', checkCount: 0, mergeAllowed: false,
-      blockedReason: 'no yes on this head',
-      reviewerWake: {
-        status: 'dispatched',
-        detail: 'Review started for @reviewer without waiting on checks (no required checks); checks are currently pending.',
-      },
-    });
-    rootFixture.rollupState = 'PENDING';
-    expect(await gate()).toMatchObject({
-      checks: 'pending',
-      reviewerWake: {
-        status: 'dispatched',
-        detail: 'Review started for @reviewer without waiting on checks (no required checks); checks are currently pending.',
-      },
-    });
-    rootFixture.rollupState = 'FAILURE';
-    expect(await gate()).toMatchObject({
-      checks: 'failed',
-      reviewerWake: {
-        status: 'dispatched',
-        detail: 'Review started for @reviewer without waiting on checks (no required checks); checks are currently failing.',
-      },
-    });
-    expect(await pendingCommands(REVIEWER)).toEqual(['corner_review_dispatch']);
-    rootFixture.rollupState = 'SUCCESS';
-    await opened();
-    await rootFixture.db.query(`SELECT beeline_finish_agent_command(id,'complete',NULL,NULL)
-      FROM agent_commands WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`, [C, REVIEWER]);
+    vi.mocked(rootFixture.operations.landCorner).mockRestore();
+    const merge = vi.spyOn(rootFixture.app, 'mergePullRequest').mockResolvedValue(undefined);
+
     await opened();
     expect(await pendingCommands(REVIEWER)).toEqual([]);
-    expect((await rootFixture.db.query(`SELECT id FROM agent_commands
-      WHERE room_id=$1 AND agent_id=$2 AND reason='corner_review_dispatch'`, [C, REVIEWER])).rowCount).toBe(1);
-    expect(rootFixture.operations.landCorner).not.toHaveBeenCalled();
+    expect(merge).not.toHaveBeenCalled();
+
+    await rootFixture.daemon.execute('approveCornerMerge', { cornerId: C, headSha: SHA }, REVIEWER);
+
+    rootFixture.rollupState = 'PENDING';
+    await opened();
+    expect(await gate()).toMatchObject({
+      checks: 'pending', checkCount: 1, approved: true, mergeAllowed: false,
+      reviewerWake: { status: 'waiting' },
+    });
+    expect(await pendingCommands(REVIEWER)).toEqual([]);
+    expect(merge).not.toHaveBeenCalled();
+
+    rootFixture.rollupState = 'SUCCESS';
+    rootFixture.rollupContexts = { totalCount: 3, nodes: [
+      { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      { __typename: 'CheckRun', name: 'docs', status: 'COMPLETED', conclusion: 'SKIPPED' },
+      { __typename: 'CheckRun', name: 'lint', status: 'COMPLETED', conclusion: 'NEUTRAL' },
+    ] };
+    await rootFixture.operations.processWebhook('check_run', {
+      action: 'completed', installation: { id: 77 }, repository: { full_name: 'owner/widgets' },
+      check_run: { name: 'test', status: 'completed', conclusion: 'success', head_sha: SHA,
+        check_suite: { head_branch: cornerFeatureBranch(C), head_sha: SHA } },
+    });
+    expect(merge).toHaveBeenCalledTimes(1);
+    expect(merge).toHaveBeenCalledWith(77, 101, 'owner/widgets', 614, SHA);
+  });
+
+  it('names a failed head check when refusing a merge on an unprotected base', async () => {
+    await openPr();
+    rootFixture.rollupState = 'FAILURE';
+    rootFixture.rollupContexts = { totalCount: 101, pageInfo: { endCursor: 'next' }, nodes:
+      Array.from({ length: 100 }, (_, index) => ({
+        __typename: 'CheckRun', name: `shard ${index + 1}`, status: 'COMPLETED', conclusion: 'SUCCESS',
+      })),
+    };
+    rootFixture.rollupPages.next = { totalCount: 101, nodes: [
+      { __typename: 'StatusContext', context: 'deploy/preview', state: 'FAILURE' },
+    ] };
+    const merge = vi.spyOn(rootFixture.app, 'mergePullRequest').mockResolvedValue(undefined);
+
+    expect(await rootFixture.daemon.execute('mergeCorner', { cornerId: C }, REVIEWER)).toMatchObject({
+      status: 'blocked', blocker: expect.stringContaining('deploy/preview'),
+    });
+    expect(merge).not.toHaveBeenCalled();
   });
 
   it('renders a queued check-triggered review from the current check rollup on the same head', async () => {
@@ -104,11 +114,11 @@ describe('CI gate from base-branch protection', () => {
     expect(wake?.source.body).not.toContain('Checks passed');
   });
 
-  it('NO-CI-3: a legacy cached passing gate waits for an explicit green checks read', async () => {
+  it.each(['passing', null])('NO-CI-3: a legacy cached %s gate waits for an explicit green checks read', async checks => {
     await openPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
     await rootFixture.db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle || $2::jsonb WHERE corner_id=$1`,
-      [C, JSON.stringify({ checks: 'pending', ciGate: { headSha: SHA, checks: 'passing' } })]);
+      [C, JSON.stringify({ checks: 'pending', ciGate: { headSha: SHA, checks } })]);
     await advanceCorner(rootFixture.db, C, { kind: 'reconcile' });
     expect(await pendingCommands(REVIEWER)).toEqual([]);
     expect(await gate()).toMatchObject({ checks: 'passed', reviewerWake: { status: 'dispatched' } });
@@ -140,8 +150,6 @@ describe('CI gate from base-branch protection', () => {
       state: 'pending' as const, total: checks.length, failing: [], checks,
       ...(required ? { required: required.map((name) => ({ name, appId: null })) } : {}),
     });
-    expect(ciGateChecks(rollup([], []))).toBe('passed');
-    expect(ciGateChecks(rollup([{ name: 'lint', status: 'failed' }], []))).toBe('passed');
     expect(ciGateChecks(rollup([], ['test']))).toBe('pending');
     expect(ciGateChecks(rollup([{ name: 'test', status: 'passed' }, { name: 'lint', status: 'failed' }], ['test']))).toBe('passed');
     expect(ciGateChecks(rollup([{ name: 'test', status: 'failed' }], ['test']))).toBe('failed');

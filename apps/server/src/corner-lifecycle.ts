@@ -599,8 +599,7 @@ async function writeCornerAdvance(
           const ciGate = (corner.lifecycle as { ciGate?: { required?: true; checks: string | null } }).ciGate;
           const wakeCause = event.kind === 'brief-revised' ? 'brief-revised'
             : corner.lifecycle.checks === 'passing' ? 'checks-passed'
-            : ciGate?.required ? 'required-checks-passed'
-            : ciGate?.checks === null ? 'no-required-checks' : 'review-dispatched';
+            : ciGate?.required ? 'required-checks-passed' : 'review-dispatched';
           const queued = await queueReviewerCommand(db, {
             roomId: cornerId,
             agentId: reviewer,

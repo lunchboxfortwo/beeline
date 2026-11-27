@@ -45,7 +45,7 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           repositoryIds: [Number(target.repository_id)],
         });
         claim?.assertActive();
-        // The base branch's protection names the head's CI gate.
+        // Required checks override the head's full rollup.
         const rollup = options?.snapshot?.rollup ?? await ctx.app.readCommitCheckRollup(
           token.token, repository, checkHeadSha, admitted.pr.targetBranch || undefined);
         claim?.assertActive();
@@ -123,7 +123,8 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
         };
         const planCheckRefresh = (current: CornerLifecycleView) => {
           const completedWithoutChecks = rollup.total === 0 && !rollup.pendingRegistrations &&
-            current.checks === 'passing' && current.checksSummary?.total === 0;
+            ((rollup.required?.length === 0 && rollup.state === 'passed') ||
+              (current.checks === 'passing' && current.checksSummary?.total === 0));
           const summary = {
             status:
               failedChecks.length ? ('failing' as const) : completedWithoutChecks ? ('passing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
@@ -152,8 +153,8 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           const becameFailing = reportFailure;
           // A gate that opens before the displayed checks settle wakes review and
           // landing without a check note.
-          const gateOpened = ciGate && (ciGate.checks ?? 'passing') === 'passing' && summary.status !== 'passing' &&
-            cornerGateChecks(current, checkHeadSha, ciGate.required ? 'review' : 'merge') !== 'passing';
+          const gateOpened = ciGate?.required && ciGate.checks === 'passing' && summary.status !== 'passing' &&
+            cornerGateChecks(current, checkHeadSha, 'review') !== 'passing';
           const suite = /check suite/i.test(providerCheck.name);
           const failureName = becameFailing || suite
             ? failedChecks.find(item => !/check suite/i.test(item.name))?.name

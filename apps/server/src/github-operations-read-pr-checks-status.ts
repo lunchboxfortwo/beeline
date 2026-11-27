@@ -96,7 +96,7 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
       await moveStoredCornerHead(ctx, input.cornerId, number, storedHead, pr.headSha);
       corner.lifecycle = await ctx.lifecycle(input.cornerId);
     }
-    // Branch protection on the base branch names the head's CI gate.
+    // Required checks override the head's full rollup.
     const baseBranch = pr.baseRef || corner.lifecycle.pr?.targetBranch || undefined;
     let rollup = await ctx.app.readCommitCheckRollup(
       target.token,
@@ -115,6 +115,13 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
       zeroChecksConfirmed = absent && !rollup.pendingRegistrations && latestPr.headSha === pr.headSha && rollup.total === 0 &&
         !rollup.required?.length;
     }
+    const noWorkflows = rollup.total === 0 && rollup.state === 'passed' && rollup.required?.length === 0;
+    if (noWorkflows && !zeroChecksConfirmed) {
+      const latestPr = await ctx.app.readPullRequest(target.token, target.repository, number);
+      if (latestPr.headSha !== pr.headSha || latestPr.baseRef !== pr.baseRef ||
+        latestPr.state !== pr.state || latestPr.merged !== pr.merged)
+        throw new Error('GitHub pull request changed during the check read');
+    }
     // A completed worker handoff can establish that this head genuinely has no
     // checks. Before that point a null rollup is only the ordinary race between
     // opening a PR and GitHub registering its workflows, so it remains pending.
@@ -125,7 +132,8 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
       corner.lifecycle.checksSummary?.total === 0 &&
       corner.lifecycle.pr?.headSha === pr.headSha;
     const checks = completedWithoutChecks ? ('passed' as const) : rollup.state;
-    const gateChecks = rollup.required ? ciGateChecks(rollup) : checks;
+    const gateChecks = rollup.required?.length ? ciGateChecks(rollup) : checks;
+    const failedNames = rollup.checks.filter((check) => check.status === 'failed').slice(0, 10).map((check) => check.name);
     // A confirmed zero-check completion records its own green after this read.
     const observedGate = cornerCiGate(rollup, pr.headSha);
     const storedGate = storedCornerCiGate(corner.lifecycle, pr.headSha);
@@ -138,8 +146,8 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
     // The live read and phone header must retain the same provider snapshot.
     // Reuse the event path, including its head/age guards and review transition,
     // without fetching GitHub again. Explicit reads of another PR cannot change
-    // this corner, and zero-check completion retains its worker-only authority.
-    if (!corner.archived && !pr.merged && (rollup.total > 0 || refreshEmptyGreen || gateChanged) && corner.author_id &&
+    // this corner. Worker completion can confirm a head whose workflows did not register.
+    if (!corner.archived && !pr.merged && (rollup.total > 0 || noWorkflows || refreshEmptyGreen || gateChanged) && corner.author_id &&
       corner.lifecycle.pr?.number === number && corner.lifecycle.pr.headSha === pr.headSha &&
       (mergeabilityChanged || corner.lifecycle.checksSummary?.total !== rollup.total ||
         JSON.stringify(corner.lifecycle.checksSummary?.checks) !== JSON.stringify(rollup.checks) ||
@@ -172,12 +180,13 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
       configuredReviewerId,
       reviewerHandle: corner.reviewer_handle,
       checks,
-      gateChecks: rollup.required ? gateChecks : checks,
+      gateChecks,
       reviewWoken: corner.review_woken,
       wakeCause: corner.review_wake_cause,
     });
     const mergeDecision = cornerMergeability({
       checks: gateChecks,
+      failedCheckNames: rollup.required?.length === 0 ? failedNames : undefined,
       approved: gate.approved,
       reviewerExists: gate.reviewerExists,
       held: gate.held,
@@ -209,10 +218,7 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           .filter((check) => check.status === 'pending')
           .slice(0, 10)
           .map((check) => check.name),
-        failedNames: rollup.checks
-          .filter((check) => check.status === 'failed')
-          .slice(0, 10)
-          .map((check) => check.name),
+        failedNames,
       },
       pullRequest: pr.url,
       headSha: pr.headSha,
