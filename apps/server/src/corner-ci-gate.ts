@@ -1,16 +1,31 @@
 import type { GitHubCheckRollup } from '@beeline/auth/github';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
+import type { CornerCheckSummary } from './corner-machine.js';
 
-/** Older cached verdicts do not say whether any checks were required. */
+/** A null verdict clears the required-check override. */
 export type CornerCiGate = { headSha: string; checks: 'passing' | 'pending' | 'failing' | null; required?: true };
 
+export function cachedZeroCheckSource(lifecycle: CornerLifecycleView): CornerCheckSummary['zeroCheckSource'] {
+  const summary: CornerCheckSummary | undefined = lifecycle.checksSummary;
+  if (lifecycle.checks !== 'passing' || summary?.total !== 0) return undefined;
+  // Older passing empty summaries came from worker completion.
+  return summary.zeroCheckSource ?? 'worker-completion';
+}
+
+export function zeroCheckSource(rollup: GitHubCheckRollup, lifecycle?: CornerLifecycleView): CornerCheckSummary['zeroCheckSource'] {
+  if (rollup.total !== 0 || rollup.pendingRegistrations) return undefined;
+  if (rollup.state === 'passed' && rollup.required?.length === 0) return 'workflow-count';
+  if (rollup.state === 'pending' && lifecycle && cachedZeroCheckSource(lifecycle) === 'worker-completion')
+    return 'worker-completion';
+  return undefined;
+}
+
 /**
- * The gate verdict for a rollup read with its base branch. A rollup without
- * the base branch's protection keeps the whole-rollup verdict.
+ * Required checks override the whole-rollup verdict when the base names any.
  */
 export function ciGateChecks(rollup: GitHubCheckRollup): GitHubCheckRollup['state'] {
   const required = rollup.required;
-  if (!required) return rollup.state;
+  if (!required?.length) return rollup.state;
   const passed = rollup.passedContexts ??
     rollup.checks.filter((check) => check.status === 'passed').map((check) => ({ name: check.name, appId: null }));
   let pending = false;
@@ -45,7 +60,6 @@ export function cornerGateChecks(
   purpose: 'merge' | 'review' = 'merge',
 ): CornerLifecycleView['checks'] | undefined {
   const gate = storedCornerCiGate(lifecycle, headSha);
-  if (gate && (purpose === 'merge' || gate.checks === null)) return gate.checks ?? 'passing';
   return (gate?.required ? gate.checks : undefined) ?? (purpose === 'review'
     ? lifecycle?.checksSummary?.status ?? lifecycle?.checks
     : lifecycle?.checks ?? lifecycle?.checksSummary?.status);
@@ -54,7 +68,6 @@ export function cornerGateChecks(
 /** Review follows the head's gate once branch protection has been read. */
 export function cornerReviewChecksSql(lifecycle: string): string {
   return `COALESCE(CASE WHEN ${lifecycle}->'ciGate'->>'headSha'=${lifecycle}->'pr'->>'headSha'
-    THEN CASE WHEN ${lifecycle}->'ciGate'->'checks'='null'::jsonb THEN 'passing'
-      WHEN ${lifecycle}->'ciGate'->>'required'='true' THEN ${lifecycle}->'ciGate'->>'checks' END
+    AND ${lifecycle}->'ciGate'->>'required'='true' THEN ${lifecycle}->'ciGate'->>'checks'
     END,${lifecycle}->'checksSummary'->>'status',${lifecycle}->>'checks')`;
 }

@@ -165,6 +165,7 @@ export type CornerMergeGate = {
 
 export type CornerMergeabilityInput = {
   checks: string;
+  failedCheckNames?: readonly string[];
   approved: boolean;
   reviewerExists: boolean;
   held: boolean;
@@ -180,7 +181,9 @@ export function cornerMergeability(input: CornerMergeabilityInput) {
   const reasons = [
     input.merged ? 'the pull request is already merged' : '',
     input.archived ? 'the corner is closed' : '',
-    input.checks !== 'passed' ? `checks are ${input.checks}` : '',
+    input.checks !== 'passed'
+      ? `checks are ${input.checks}${input.failedCheckNames?.length ? ` (${input.failedCheckNames.join(', ')})` : ''}`
+      : '',
     !input.reviewerExists || input.approved ? '' : 'no yes on this head',
     input.held
       ? `a hold stands${input.holds.length ? `: ${input.holds.map((hold) => `${hold.id}${hold.holderName ? ` (${hold.holderName}, ${hold.holderId ?? ''})` : ''}`).join('; ')}` : ''}`

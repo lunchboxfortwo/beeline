@@ -67,7 +67,9 @@ export let head: string;
 
 export let rollupState: string | null;
 
-export let rollupContexts: { totalCount: number; nodes: Record<string, unknown>[] } | undefined;
+type RollupContexts = { totalCount: number; nodes: Record<string, unknown>[]; pageInfo?: { endCursor: string } };
+export let rollupContexts: RollupContexts | undefined;
+let rollupPages: Record<string, RollupContexts>;
 
 export let mergeableState: string | undefined;
 
@@ -152,6 +154,7 @@ beforeEach(async () => {
   head = SHA;
   rollupState = 'SUCCESS';
   rollupContexts = undefined;
+  rollupPages = {};
   mergeableState = undefined;
   pullBaseSha = undefined;
   mainHead = 'd'.repeat(40);
@@ -230,7 +233,7 @@ beforeEach(async () => {
       });
     if (url.endsWith('/branches/main')) return Response.json({ commit: { sha: mainHead } });
     if (url.endsWith('/graphql')) {
-      const variables = JSON.parse(String(init?.body)).variables as { expression: string };
+      const variables = JSON.parse(String(init?.body)).variables as { expression: string; after?: string };
       return Response.json({
         data: {
           repository: {
@@ -241,7 +244,7 @@ beforeEach(async () => {
                   ? null
                   : {
                       state: rollupState,
-                      contexts: rollupContexts ?? {
+                      contexts: (variables.after ? rollupPages[variables.after] : rollupContexts) ?? {
                         totalCount: 1,
                         nodes: [
                           {
@@ -328,6 +331,7 @@ get app(){return app;}, set app(value: typeof app){app=value;},
 get head(){return head;}, set head(value: typeof head){head=value;},
 get rollupState(){return rollupState;}, set rollupState(value: typeof rollupState){rollupState=value;},
 get rollupContexts(){return rollupContexts;}, set rollupContexts(value: typeof rollupContexts){rollupContexts=value;},
+get rollupPages(){return rollupPages;},
 get mergeableState(){return mergeableState;}, set mergeableState(value: typeof mergeableState){mergeableState=value;},
 get pullBaseSha(){return pullBaseSha;}, set pullBaseSha(value: typeof pullBaseSha){pullBaseSha=value;},
 get mainHead(){return mainHead;}, set mainHead(value: typeof mainHead){mainHead=value;},

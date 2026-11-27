@@ -428,41 +428,49 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
     if (!owner || !name || !/^[a-f0-9]{40,64}$/i.test(headSha)) {
       throw new Error('invalid GitHub commit check target');
     }
-    const response = await ctx.service.request(`${ctx.config.apiBaseUrl}/graphql`, {
-      method: 'POST',
-      headers: { ...githubHeaders(accessToken), 'content-type': 'application/json' },
-      signal: AbortSignal.timeout(15_000),
-      body: JSON.stringify({
-        query: `query CommitCheckRollup($owner:String!,$name:String!,$expression:String!){
-          repository(owner:$owner,name:$name){object(expression:$expression){... on Commit{
-            oid statusCheckRollup{state contexts(first:100){totalCount nodes{
-              __typename
-              ... on CheckRun{name status conclusion detailsUrl checkSuite{app{databaseId}}}
-              ... on StatusContext{context state description targetUrl}
+    const readRollup = async (after?: string) => {
+      const response = await ctx.service.request(`${ctx.config.apiBaseUrl}/graphql`, {
+        method: 'POST',
+        headers: { ...githubHeaders(accessToken), 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+        body: JSON.stringify({
+          query: `query CommitCheckRollup($owner:String!,$name:String!,$expression:String!,$after:String){
+            repository(owner:$owner,name:$name){object(expression:$expression){... on Commit{
+              oid statusCheckRollup{state contexts(first:100,after:$after){totalCount pageInfo{endCursor} nodes{
+                __typename
+                ... on CheckRun{name status conclusion detailsUrl checkSuite{app{databaseId}}}
+                ... on StatusContext{context state description targetUrl}
+              }}}
             }}}
-          }}}
-        }`,
-        variables: { owner, name, expression: headSha },
-      }),
-    });
-    const body = await jsonObject(response, 'GitHub commit check rollup');
-    if (Array.isArray(body.errors) && body.errors.length) {
-      throw new Error('GitHub commit check rollup returned errors');
-    }
-    const repository = body.data as Record<string, unknown> | undefined;
-    const object = (repository?.repository as Record<string, unknown> | undefined)?.object as
-      Record<string, unknown> | undefined;
-    if (object?.oid !== headSha) throw new Error('GitHub commit check rollup head mismatch');
-    const rollup = object.statusCheckRollup as Record<string, unknown> | null | undefined;
-    // The base branch's protection names the CI gate; the caller decides with it.
+          }`,
+          variables: { owner, name, expression: headSha, after },
+        }),
+      });
+      const body = await jsonObject(response, 'GitHub commit check rollup');
+      if (Array.isArray(body.errors) && body.errors.length) {
+        throw new Error('GitHub commit check rollup returned errors');
+      }
+      const data = body.data as Record<string, unknown> | undefined;
+      const object = (data?.repository as Record<string, unknown> | undefined)?.object as
+        Record<string, unknown> | undefined;
+      if (object?.oid !== headSha) throw new Error('GitHub commit check rollup head mismatch');
+      return object.statusCheckRollup as Record<string, unknown> | null | undefined;
+    };
+    const rollup = await readRollup();
     const required = baseBranch === undefined
       ? {}
       : { required: await ctx.service.readRequiredChecks(accessToken, fullName, baseBranch) };
-    if (!rollup) return {
-      state: 'pending', total: 0, failing: [], checks: [],
-      pendingRegistrations: await ctx.service.hasUnfinishedChecks(accessToken, fullName, headSha),
-      ...required, passedContexts: [],
+    const usesWholeRollup = required.required?.length === 0;
+    const emptyRollup = async (): Promise<GitHubCheckRollup> => {
+      const pendingRegistrations = await ctx.service.hasUnfinishedChecks(accessToken, fullName, headSha);
+      const absent = usesWholeRollup && !pendingRegistrations &&
+        !await repositoryHasWorkflows(ctx.service, accessToken, fullName);
+      return {
+        state: absent ? 'passed' : 'pending', total: 0, failing: [], checks: [],
+        pendingRegistrations, ...required, passedContexts: [],
+      };
     };
+    if (!rollup) return emptyRollup();
     const state =
       rollup.state === 'SUCCESS'
         ? ('passed' as const)
@@ -476,8 +484,23 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
     if (!contexts || typeof contexts.totalCount !== 'number' || !Array.isArray(contexts.nodes)) {
       throw new Error('GitHub commit check rollup contexts are invalid');
     }
+    if (usesWholeRollup && contexts.totalCount === 0 && state !== 'failed') return emptyRollup();
+
+    const nodes: unknown[] = [...contexts.nodes];
+    let page = contexts;
+    const cursors = new Set<string>();
+    while (usesWholeRollup && nodes.length < contexts.totalCount) {
+      const after = (page.pageInfo as { endCursor?: unknown } | undefined)?.endCursor;
+      if (typeof after !== 'string' || !after || cursors.has(after))
+        throw new Error('GitHub commit check rollup is incomplete');
+      cursors.add(after);
+      page = (await readRollup(after))?.contexts as Record<string, unknown>;
+      if (!Array.isArray(page?.nodes) || !page.nodes.length)
+        throw new Error('GitHub commit check rollup is incomplete');
+      nodes.push(...page.nodes);
+    }
     const reported: { name: string; appId: number | null }[] = [];
-    const checks = contexts.nodes.flatMap((value) => {
+    const checks = nodes.flatMap((value) => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
       const context = value as Record<string, unknown>;
       const isRun = context.__typename === 'CheckRun';
@@ -515,7 +538,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
     // check still has to come from the GitHub App branch protection names.
     let total = contexts.totalCount;
     let pending = await ctx.service.hasUnfinishedChecks(accessToken, fullName, headSha);
-    if (!pending && state === 'passed') {
+    if (!pending && state === 'passed' && !usesWholeRollup) {
       const missing = await ctx.service.missingRequiredChecks(
         accessToken, fullName, headSha, reported,
       );
@@ -526,7 +549,8 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
       }
     }
     return {
-      state: pending ? 'pending' : state,
+      state: pending || (usesWholeRollup && state === 'passed' && checks.some((check) => check.status !== 'passed'))
+        ? 'pending' : state,
       pendingRegistrations: pending,
       total,
       failing: checks.filter((check) => check.status === 'failed').map((check) => check.name),
@@ -621,6 +645,14 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
   }
 
 
+  async function repositoryHasWorkflows(service: GitHubAppClient, accessToken: string, fullName: string): Promise<boolean> {
+    const workflows = await service.readRepositoryJson(accessToken, fullName, 'actions/workflows?per_page=1');
+    if (typeof workflows.total_count !== 'number' || workflows.total_count < 0)
+      throw new Error('GitHub workflow count is invalid');
+    return workflows.total_count > 0;
+  }
+
+
   /** Empty rollups can precede registration; establish absence independently. */
   export async function gitHubAppClientConfirmNoChecks(ctx: { service: GitHubAppClient; config: Required<GitHubAppConfig> }, accessToken: string, fullName: string, headSha: string): Promise<boolean> {
     if (!/^[a-f0-9]{40,64}$/i.test(headSha)) throw new Error('invalid GitHub commit check target');
@@ -630,10 +662,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonObject, githubHeaders, GitHubInst
     } catch {
       // Permission reads are optional; retain the workflow registration proof.
     }
-    const workflows = await ctx.service.readRepositoryJson(accessToken, fullName, 'actions/workflows?per_page=1');
-    if (typeof workflows.total_count !== 'number' || workflows.total_count < 0)
-      throw new Error('GitHub workflow count is invalid');
-    if (workflows.total_count === 0) return true;
+    if (!await repositoryHasWorkflows(ctx.service, accessToken, fullName)) return true;
     // Inspect registration within this explicit read. Time alone cannot
     // authorize another provider observation or establish future absence.
     const [suites, runs] = await Promise.all([

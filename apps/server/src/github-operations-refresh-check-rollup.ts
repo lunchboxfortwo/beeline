@@ -9,7 +9,7 @@ import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js'
 import { archiveCornerState, lockCornerArchivalAuthority } from './corner-close.js';
 import { recordCornerGithubFact, advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle, type CornerEvent } from './corner-lifecycle.js';
 import { routeSystemCommand } from './agent-command.js';
-import { cornerCiGate, cornerGateChecks, type CornerCiGate } from './corner-ci-gate.js';
+import { cornerCiGate, cornerGateChecks, zeroCheckSource, type CornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
 import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
@@ -45,7 +45,7 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           repositoryIds: [Number(target.repository_id)],
         });
         claim?.assertActive();
-        // The base branch's protection names the head's CI gate.
+        // Required checks override the head's full rollup.
         const rollup = options?.snapshot?.rollup ?? await ctx.app.readCommitCheckRollup(
           token.token, repository, checkHeadSha, admitted.pr.targetBranch || undefined);
         claim?.assertActive();
@@ -122,11 +122,10 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           return fetchStartedAt >= latestFetch;
         };
         const planCheckRefresh = (current: CornerLifecycleView) => {
-          const completedWithoutChecks = rollup.total === 0 && !rollup.pendingRegistrations &&
-            current.checks === 'passing' && current.checksSummary?.total === 0;
+          const source = zeroCheckSource(rollup, current);
           const summary = {
             status:
-              failedChecks.length ? ('failing' as const) : completedWithoutChecks ? ('passing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
+              failedChecks.length ? ('failing' as const) : source ? ('passing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
                 ? ('passing' as const)
                 : rollup.state === 'failed' && interruptedOnly && checksSettled(rollup.checks)
                   ? ('unknown' as const)
@@ -138,6 +137,7 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
               ? failedChecks.map(item => item.name)
               : rollup.failing.filter(name => !interruptedNames.has(name)),
             checks: rollup.checks,
+            ...(source ? { zeroCheckSource: source } : {}),
             updatedAt: Math.floor(fetchStartedAt),
             fetchStartedAt,
           };
@@ -152,8 +152,8 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           const becameFailing = reportFailure;
           // A gate that opens before the displayed checks settle wakes review and
           // landing without a check note.
-          const gateOpened = ciGate && (ciGate.checks ?? 'passing') === 'passing' && summary.status !== 'passing' &&
-            cornerGateChecks(current, checkHeadSha, ciGate.required ? 'review' : 'merge') !== 'passing';
+          const gateOpened = ciGate?.required && ciGate.checks === 'passing' && summary.status !== 'passing' &&
+            cornerGateChecks(current, checkHeadSha, 'review') !== 'passing';
           const suite = /check suite/i.test(providerCheck.name);
           const failureName = becameFailing || suite
             ? failedChecks.find(item => !/check suite/i.test(item.name))?.name
