@@ -154,19 +154,29 @@ for (const [state, glyph, idle] of [['waiting', 'needs-you', false], ['working',
   });
 }
 
-it('sets the state mark right after the thread name, centred on its line, with the arrow first', () => {
+it('sets the state mark right after the thread name, centred on its line, with the arrow and assignee anchored to line 1', () => {
+  const assignee = { pubkey: 'jb', kind: 'agent' as const, name: 'Jellybean' };
+  const h: ThreadHeaderData = {
+    ...reconnect,
+    workItem: { id: 'w1', roomId: 'r1', chatId: 'c1', chatName: 'beeline', threadName: 'release-corner', title: 'release-corner', state: 'in-progress', assignee, openedBy: assignee, createdAt: 1, updatedAt: 2 },
+  };
   let tree:any;
-  act(()=>{tree=create(<><ThreadTitleBlock h={reconnect}/><ThreadBar h={reconnect} collapsed openChat={()=>{}}/></>);});
-  expect(byTestID(tree,'thread-title-row')[0].props.alignItems).toBe('center');
-  for (const [name, height] of [['thread-title', 31], ['thread-bar-name', 19]] as const) {
+  act(()=>{tree=create(<><ThreadTitleBlock h={h}/><ThreadBar h={h} collapsed openChat={()=>{}}/></>);});
+  expect(byTestID(tree,'thread-title-row')[0].props.alignItems).toBe('flex-start');
+  expect(byTestID(tree,'thread-bar-title')[0].props.alignItems).toBe('flex-start');
+  for (const [name, height, pad] of [['thread-title', 31, '0.5'], ['thread-bar-name', 19, undefined]] as const) {
     const box = byTestID(tree, `${name}-state`)[0];
     expect(box.props).toMatchObject({height,alignItems:'center',justifyContent:'center'});
+    expect(box.props.paddingTop).toBe(pad);
     const runs = byTestID(tree, name)[0].children.filter((child: any) => typeof child !== 'string');
     expect(runs.at(-1)).toBe(box.parent);
     expect(box.parent.children.at(-1)).toBe(box);
   }
-  expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,alignSelf:'flex-start',justifyContent:'center'});
+  expect(byTestID(tree,'thread-arrow-box')[0].props).toMatchObject({height:31,paddingTop:'0.5',alignSelf:'flex-start',justifyContent:'center'});
   expect(byTestID(tree,'thread-bar-arrow-box')[0].props).toMatchObject({height:19,alignSelf:'flex-start',justifyContent:'center'});
+  const assigneeBox = byTestID(tree,'thread-assignee-box')[0];
+  expect(assigneeBox.props).toMatchObject({height:31,justifyContent:'center'});
+  expect(assigneeBox.findByProps({label:'Change assignee'}).props.hitSlop).toBe(10);
   act(()=>tree.unmount());
 });
 for (const theme of ['light_stone','dark_stone','light_brass','dark_brass']) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ListItem, Separator, Switch, XStack, YStack } from 'tamagui';
 import { Archive, Lock } from 'lucide-react-native';
-import { Btn, Copy, Glyph, HEIGHT, SheetFrame, T } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, SheetFrame, T, typeStyle, useTextSize } from '@/ui/grammar';
 
 /**
  * ⋯ on a thread (header B): Lock thread, Close thread, Cancel. Closing the
@@ -87,6 +87,10 @@ export function CornerActionsSheet({
       setSaving(false);
     }
   };
+  const textSize = useTextSize();
+  const bodyLine = typeStyle('body', textSize).lineHeight;
+  const headingLine = typeStyle('heading', textSize).lineHeight;
+  const lockSlot = Math.max(28, bodyLine);
   return (
     <SheetFrame open={visible} close={dismiss} title={title} testID="corner-actions-sheet">
       {closeOffered && (
@@ -104,26 +108,31 @@ export function CornerActionsSheet({
           accessibilityState={{ checked: locked, disabled: lockDisabled }}
           testID="lock-corner-action"
         >
-          <YStack paddingTop="0.5">
+          <YStack height={lockSlot} justifyContent="center">
             <Glyph icon={Lock} size={18} />
           </YStack>
           <YStack flex={1} minWidth={0} gap="1">
-            <Copy>Lock thread</Copy>
+            <XStack alignItems="center">
+              <YStack width={0} height={lockSlot} />
+              <Copy>Lock thread</Copy>
+            </XStack>
             <Copy small quiet>
               Stops agents and members from closing this thread, including after a merge. Admins can
               still close it.
             </Copy>
           </YStack>
-          <Switch
-            checked={locked}
-            disabled={lockDisabled}
-            onCheckedChange={(value: boolean) => void changeLock(value)}
-            backgroundColor={locked ? 'needsYou' : 'highlight'}
-            aria-label="Lock thread"
-            testID="lock-corner-switch"
-          >
-            <Switch.Thumb backgroundColor="ink" />
-          </Switch>
+          <YStack height={lockSlot} justifyContent="center">
+            <Switch
+              checked={locked}
+              disabled={lockDisabled}
+              onCheckedChange={(value: boolean) => void changeLock(value)}
+              backgroundColor={locked ? 'needsYou' : 'highlight'}
+              aria-label="Lock thread"
+              testID="lock-corner-switch"
+            >
+              <Switch.Thumb backgroundColor="ink" />
+            </Switch>
+          </YStack>
         </ListItem>
       )}
       {closeOffered && <Separator borderColor="stroke" />}
@@ -141,7 +150,7 @@ export function CornerActionsSheet({
           accessibilityRole="button"
           testID="close-corner-action"
         >
-          <YStack paddingTop="0.5">
+          <YStack height={headingLine} justifyContent="center">
             <Glyph icon={Archive} size={18} />
           </YStack>
           <YStack flex={1} minWidth={0} gap="1">

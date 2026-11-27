@@ -674,3 +674,16 @@ it('R12b: the Squire installer reads on commit and stays idle for five minutes',
   expect(operations.filter(name => name === 'readConnectorInstall')).toHaveLength(1);
   console.log('R12b Demonstrated installer operations:', operations.join(', '));
 });
+
+it('aligns connect step rows to max(28, bodyLine) without paddingTop hacks', async () => {
+  const renderer = await render();
+  await pair(renderer);
+  await advancePolls();
+  const progress = renderer.root.findByProps({ testID: 'connect-install-progress' });
+  expect(progress.findAll((n: any) => n.props?.paddingTop === '0.5')).toHaveLength(0);
+  const step0 = renderer.root.findByProps({ testID: 'connect-step-0-done' });
+  expect(step0.props.alignItems).toBe('flex-start');
+  const dotSlot = step0.find((n: any) => n.type === 'YStack' && n.props.height === 28 && n.props.justifyContent === 'center');
+  expect(dotSlot.findAll((n: any) => n.props?.testID === 'connect-step-0-dot').length).toBeGreaterThan(0);
+  expect(step0.findAll((n: any) => n.type === 'YStack' && n.props.width === 0 && n.props.height === 28)).toHaveLength(1);
+});

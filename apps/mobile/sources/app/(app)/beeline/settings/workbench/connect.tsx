@@ -16,7 +16,7 @@ import {
   type ConnectorInstallState,
   type ConnectorInstallStep,
 } from '@/buzz/workbench';
-import { Btn, Copy, Section, T } from '@/ui/grammar';
+import { Btn, Copy, Section, T, typeStyle, useTextSize } from '@/ui/grammar';
 import { ConnectorFooter, ConnectorFrame, ConnectorLoading, ConnectorNote, ConnectorRow } from '@/ui/screens/settings/connectors/ConnectorParts';
 import { StepBar, StepDot, type ConnectBarPart, type ConnectStepState } from '@/ui/screens/settings/connectors/ConnectSteps';
 
@@ -275,6 +275,7 @@ function ConnectToolFlow() {
     });
   };
   const signInLabel = squire ? 'Sign in to Google' : `Sign in to ${connectorName}`;
+  const stepSlot = Math.max(28, typeStyle('body', useTextSize()).lineHeight);
 
   return (
     <ConnectorFrame title={showSteps && squire ? `Connect ${machineName}` : connectorName} back={() => router.back()}
@@ -342,10 +343,15 @@ function ConnectToolFlow() {
             <StepBar parts={parts} testID="connect-step-bar" />
           </YStack>
           {shown.map((step, index) => (
-            <XStack key={step.key} gap="3" testID={`connect-step-${index}-${step.state}`}>
-              <StepDot state={step.state} testID={`connect-step-${index}-dot`} />
-              <YStack flex={1} minWidth={0} gap="1" paddingTop="0.5">
-                <Copy quiet={step.state === 'todo'}>{step.title}</Copy>
+            <XStack key={step.key} gap="3" alignItems="flex-start" testID={`connect-step-${index}-${step.state}`}>
+              <YStack height={stepSlot} justifyContent="center">
+                <StepDot state={step.state} testID={`connect-step-${index}-dot`} />
+              </YStack>
+              <YStack flex={1} minWidth={0} gap="1">
+                <XStack alignItems="center">
+                  <YStack width={0} height={stepSlot} />
+                  <Copy quiet={step.state === 'todo'}>{step.title}</Copy>
+                </XStack>
                 {step.detail ? (
                   <T v="meta" color={step.state === 'failed' ? 'removed' : step.state === 'current' ? 'needsYou' : 'secondary'}
                     testID={step.error ? 'connect-error' : `connect-step-${index}-detail`}>

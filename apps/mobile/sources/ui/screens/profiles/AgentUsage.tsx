@@ -5,7 +5,7 @@ import { RefreshCw } from 'lucide-react-native';
 import { readUsageRefreshOutcome, type AgentUsage, type UsageRefreshOutcome } from '@beeline/api-contract/phone';
 import { usageProvider } from '@/buzz/agent-usage';
 import { USAGE_REFRESH_CLIENT_TIMEOUT_MS, usageCell } from './usage-cell';
-import { Btn, Copy, Glyph, Section, T, Spinner } from '@/ui/grammar';
+import { Btn, Copy, Glyph, HEIGHT, Section, T, Spinner, typeStyle, useTextSize } from '@/ui/grammar';
 
 /**
  * Owner-only Usage: one column per window (or allowance, or spend), the note
@@ -46,6 +46,8 @@ export function AgentUsage({ usage, harness, onRefresh }: { usage?: AgentUsage; 
     };
     const machine = usage?.machine;
     const reading = `Refreshing · reading ${usageProvider(harness, Boolean(usage?.spend))}${machine ? ` on ${machine}` : ''}`;
+    const bodyLine = typeStyle('body', useTextSize()).lineHeight;
+    const multiLineFooter = Boolean(shared || stamp || refreshing);
     return (
         <Section title="Usage" testID="agent-usage">
             {columns.length ? (
@@ -68,7 +70,7 @@ export function AgentUsage({ usage, harness, onRefresh }: { usage?: AgentUsage; 
                     <Separator borderColor="stroke" />
                 </>
             ) : null}
-            <XStack paddingVertical="3" gap="3" alignItems="flex-start">
+            <XStack paddingVertical="3" gap="3" alignItems={multiLineFooter ? 'flex-start' : 'center'}>
                 <YStack flex={1} minWidth={0} gap="1">
                     <Copy testID="agent-usage-note">{note}</Copy>
                     {shared ? <Copy small quiet testID="agent-usage-shared">{shared}</Copy> : null}
@@ -76,8 +78,21 @@ export function AgentUsage({ usage, harness, onRefresh }: { usage?: AgentUsage; 
                         : stamp ? <T v="meta" color={muted ? 'needsYou' : 'secondary'} testID="agent-usage-stamp">{stamp}</T> : null}
                 </YStack>
                 {refreshable && onRefresh ? (
-                    refreshing ? <Spinner testID="agent-usage-refreshing" />
-                        : <Btn kind="icon" label="Refresh usage" onPress={refresh} testID="agent-usage-refresh"><Glyph icon={RefreshCw} size={16} /></Btn>
+                    refreshing ? (
+                        <YStack width={HEIGHT.control} height={multiLineFooter ? bodyLine : HEIGHT.control} alignItems="center" justifyContent="center">
+                            <Spinner testID="agent-usage-refreshing" />
+                        </YStack>
+                    ) : (
+                        <Btn kind="icon" label="Refresh usage" onPress={refresh} alignItems={multiLineFooter ? 'flex-start' : 'center'} padding="0" testID="agent-usage-refresh">
+                            {multiLineFooter ? (
+                                <YStack height={bodyLine} justifyContent="center">
+                                    <Glyph icon={RefreshCw} size={16} />
+                                </YStack>
+                            ) : (
+                                <Glyph icon={RefreshCw} size={16} />
+                            )}
+                        </Btn>
+                    )
                 ) : null}
             </XStack>
         </Section>

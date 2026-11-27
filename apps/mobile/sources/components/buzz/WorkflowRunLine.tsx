@@ -21,7 +21,7 @@ import {
   workflowStepMeta,
 } from '@/buzz/workflow-run-copy';
 import { isGeneratedAgentAvatarUrl } from '@/buzz/identity-mark';
-import { Inked, T } from '@/ui/grammar';
+import { Inked, STEP, T, typeStyle, useTextSize } from '@/ui/grammar';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
 import { CHEVRON_ROW_SIZE, ChevronGlyph } from './ChevronGlyph';
 import { ContentTarget } from './IndexRow';
@@ -32,8 +32,7 @@ import { IdentityMark } from './IdentityMark';
 const CLOCK = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
 const CIRCLE = 20;
-/** The circle's top within a step row, and the line's x (the circle's centre). */
-const CIRCLE_TOP = 8;
+/** The rail line's x (the circle's centre). */
 const LINE_X = 28;
 /** Where a step's copy column starts, right of the rail and its halo. */
 const COPY_X = 56;
@@ -59,14 +58,14 @@ function segmentTone(above: WorkflowLineStep, below: WorkflowLineStep): SegmentT
 }
 
 /** A 2pt piece of the line, solid brass or quiet: above the circle, or from below it to the row's foot. */
-function Segment({ tone, below, testID }: { tone: SegmentTone; below: boolean; testID?: string }) {
+function Segment({ tone, below, circleTop, testID }: { tone: SegmentTone; below: boolean; circleTop: number; testID?: string }) {
   return (
     <YStack
       position="absolute"
       left={LINE_X - 1}
       width={2}
-      top={below ? CIRCLE_TOP + CIRCLE : 0}
-      height={below ? undefined : CIRCLE_TOP}
+      top={below ? circleTop + CIRCLE : 0}
+      height={below ? undefined : circleTop}
       bottom={below ? 0 : undefined}
       backgroundColor={tone === 'brass' ? 'needsYou' : 'strongStroke'}
       testID={testID ? `${testID}-${tone}` : undefined}
@@ -289,10 +288,13 @@ function StepRow({
   const hasDetail = Boolean(draft || final || gateLine || visit?.openedCorners?.length);
   const [expanded, setExpanded] = useState(true);
   const open = expanded || !hasDetail;
+  const titleLine = typeStyle(current ? 'heading' : 'body', useTextSize()).lineHeight;
+  const rowSlot = Math.max(CIRCLE, titleLine);
+  const circleTop = STEP['2'] + (rowSlot - CIRCLE) / 2;
   return (
     <YStack position="relative" testID={testID}>
-      {above ? <Segment below={false} testID={`${testID}-above`} tone={above} /> : null}
-      {below ? <Segment below testID={`${testID}-below`} tone={below} /> : null}
+      {above ? <Segment below={false} circleTop={circleTop} testID={`${testID}-above`} tone={above} /> : null}
+      {below ? <Segment below circleTop={circleTop} testID={`${testID}-below`} tone={below} /> : null}
       <XStack
         accessibilityHint={hasDetail ? (expanded ? 'Hides this step’s output' : 'Shows this step’s output') : undefined}
         accessibilityLabel={label}
@@ -304,7 +306,7 @@ function StepRow({
         paddingRight="4"
         testID={`${testID}-header`}
       >
-        <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={CIRCLE_TOP}>
+        <YStack position="absolute" left={LINE_X - CIRCLE / 2} top={circleTop}>
           {current ? <WorkflowWorkingMark
             kind={step.kind} holder={detail.run?.holder}
             viewerHolds={run.viewerHolds}
@@ -318,7 +320,7 @@ function StepRow({
             {meta ? <T v="meta" color="secondary">{` · ${meta}`}</T> : null}
           </T>
         </YStack>
-        <XStack alignItems="center" gap="2" paddingTop="2" opacity={dimmed}>
+        <XStack height={rowSlot} marginTop="2" alignItems="center" gap="2" opacity={dimmed}>
           {assignee ? <Assignee actor={assignee} testID={testID} viewer={isViewer} /> : null}
           {reachedAt !== undefined ? (
             <T v="code" color="secondary" testID={`${testID}-duration`}>{CLOCK.format(new Date(reachedAt * 1_000))}</T>

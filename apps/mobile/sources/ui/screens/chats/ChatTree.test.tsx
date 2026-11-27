@@ -501,8 +501,50 @@ it.each([undefined, 'human', 'agent'] as const)('shows a running call only for a
   } as unknown as ChatListItem;
   act(() => { tree = create(<ChatRow item={chat} now={1_700_000_010_000} first onOpen={() => {}} onPin={() => {}} onOpenThread={() => {}} />); });
   try {
-    const preview = byTestID(tree, `room-${ROOM}-preview`);
+  const preview = byTestID(tree, `room-${ROOM}-preview`);
     if (kind === 'agent') expect(preview.props.children).toBe('Ongoing call');
     else expect(preview.props.children).not.toBe('Ongoing call');
   } finally { act(() => tree.unmount()); }
 });
+
+it.each(['small', 'medium', 'large'] as const)(
+  'centers ThreadLine content in the 44pt row without vertical flex on Text and pins marks to line 1 at %s text size',
+  (size: TextSize) => {
+    const metaLines: Record<TextSize, number> = { small: 18, medium: 19, large: 22 };
+    const slot = metaLines[size];
+    const twoRows = {
+      ...item,
+      openCorners: [
+        { id: 'single', name: 'issues-triage', state: 'waiting', blocker: ON_VIEWER },
+        { id: 'working', name: 'acp-tool-outputs', state: 'waiting', workingAgentName: 'Crayon', blocker: ON_VIEWER },
+      ],
+    } as unknown as ChatListItem;
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(
+        <TextSizeContext.Provider value={size}>
+          <ChatRow item={twoRows} viewer={VIEWER} now={1_700_000_000_000} first onOpen={vi.fn()} onPin={vi.fn()} onOpenThread={vi.fn()} />
+        </TextSizeContext.Provider>,
+      );
+    });
+    try {
+      for (const id of ['single', 'working']) {
+        const rowNode = byTestID(tree, `thread-row-${id}`);
+        expect(rowNode.props.minHeight).toBe(44);
+        expect(rowNode.props.alignItems).toBe('center');
+        const group = rowNode.find((n: any) => n.type === 'XStack' && n.props.flex === 1);
+        expect(group.props.alignItems).toBe('flex-start');
+        const parts = group.children.filter((c: any) => typeof c !== 'string');
+        expect(parts).toHaveLength(3);
+        expect(parts[0].props).toMatchObject({ height: slot, alignItems: 'center' });
+        expect(parts[0].findAll((n: any) => n.type === 'Icon.CornerDownRight')).toHaveLength(1);
+        const titleText = parts[1].findAll((n: any) => n.type === 'Text')[0];
+        expect(titleText.props.flex).toBeUndefined();
+        expect(parts[2].props).toMatchObject({ width: 18, height: slot, alignItems: 'center', justifyContent: 'center' });
+        expect(parts[2].findAll((n: any) => n.type === 'WorkStateMark')).toHaveLength(1);
+      }
+    } finally {
+      act(() => tree.unmount());
+    }
+  },
+);

@@ -14,7 +14,7 @@ import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-r
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, G, Path } from 'react-native-svg';
-import type { ColorValue, ViewProps, ViewStyle } from 'react-native';
+import type { ColorValue, TextStyle, ViewProps, ViewStyle } from 'react-native';
 import { QR_INK, QR_PAPER, SCRIM } from '@beeline/design-tokens';
 export { KeyboardBody, OverlaySheet, SheetFrame, SheetRow, SheetScroll, type OverlaySheetProps } from './grammar-overlay';
 
@@ -102,11 +102,19 @@ export function useStep(): (s: Step) => number {
     return React.useCallback((s: Step) => STEP_PRESETS[size][s], [size]);
 }
 
+const NO_FONT_PADDING: TextStyle = { includeFontPadding: false };
 type TextProps = React.ComponentProps<typeof Text>;
 /** The whole type scale. Nothing else may set a font, size or weight. */
-export function T({ v = 'body', regular = false, children, ...rest }: { v?: Variant; regular?: boolean; children?: React.ReactNode } & Omit<TextProps, 'fontSize' | 'fontFamily' | 'fontWeight' | 'lineHeight'>) {
-    const style = points({ ...typeStyle(v, useTextSize()), ...(regular ? { fontFamily: REGULAR } : null) });
-    return <Text {...style} fontWeight="400" flexShrink={1} color="ink" {...rest}>{children}</Text>;
+export function T({ v = 'body', regular = false, style: styleProp, children, ...rest }: { v?: Variant; regular?: boolean; children?: React.ReactNode } & Omit<TextProps, 'fontSize' | 'fontFamily' | 'fontWeight' | 'lineHeight'>) {
+    const type = points({ ...typeStyle(v, useTextSize()), ...(regular ? { fontFamily: REGULAR } : null) });
+    // Android's default font padding inflates Space Grotesk's winAscent headroom above glyphs;
+    // keep it off on native (iOS ignores includeFontPadding; verified clipping-free on Android
+    // across accents, combining marks, descenders, emoji fallback, and Large text) while
+    // leaving web DOM style props untouched.
+    const nativeStyle = typeof document === 'undefined'
+        ? (styleProp ? [NO_FONT_PADDING, styleProp] : NO_FONT_PADDING)
+        : styleProp;
+    return <Text {...type} fontWeight="400" flexShrink={1} color="ink" {...rest} {...(nativeStyle ? { style: nativeStyle as any } : null)}>{children}</Text>;
 }
 
 /** Body or meta copy in ink, secondary or brass. */

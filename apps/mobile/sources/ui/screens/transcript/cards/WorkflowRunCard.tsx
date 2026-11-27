@@ -4,7 +4,7 @@ import React, { useMemo } from 'react';
 import { Card, XStack, YStack } from 'tamagui';
 import { Workflow } from 'lucide-react-native';
 import { identityHandle, type WorkflowRunDetailView } from '@beeline/api-contract/phone';
-import { Copy, Glyph, T } from '@/ui/grammar';
+import { Copy, Glyph, T, typeStyle, useTextSize } from '@/ui/grammar';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { observeRoomResource, useObservedResource } from '@/buzz/use-observed-resource';
 import { useRoomWorkflowRun } from '@/buzz/use-room-workflow-run';
@@ -71,24 +71,37 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
     const headline = workflowRunHeadline(detail.run);
     const starter = workflowStarterLine(detail.run);
     const name = workflowDisplayName(detail.run.workflowSlug);
+    const textSize = useTextSize();
+    const headingLine = typeStyle('heading', textSize).lineHeight;
+    const metaLine = typeStyle('meta', textSize).lineHeight;
+    const stepSlot = Math.max(20, metaLine);
+    const railTop = Math.max(0, (stepSlot - 20) / 2);
     return (
         <Card backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="md" padding="3" gap="3"
             testID="workflow-run" aria-label={`Workflow ${name}: ${headline}`}>
             <XStack gap="2" alignItems="flex-start">
-                <YStack paddingTop="0.5"><Glyph icon={Workflow} size={16} accent={active} /></YStack>
+                <YStack height={headingLine} justifyContent="center"><Glyph icon={Workflow} size={16} accent={active} /></YStack>
                 <YStack flex={1} minWidth={0}>
                     <Copy strong>{name}</Copy>
                     <Copy small quiet testID="workflow-run-headline">{starter ? `${headline} · ${starter}` : headline}</Copy>
                 </YStack>
-                {active ? <WorkflowWorkingMark kind={detail.contract.handoffs[detail.run.state]?.kind}
-                    holder={detail.run.holder} viewerHolds={detail.run.viewerHolds} size={16} /> : null}
+                {active ? (
+                    <YStack height={headingLine} justifyContent="center">
+                        <WorkflowWorkingMark kind={detail.contract.handoffs[detail.run.state]?.kind}
+                            holder={detail.run.holder} viewerHolds={detail.run.viewerHolds} size={16} />
+                    </YStack>
+                ) : null}
             </XStack>
             <YStack>
                 {steps.map((step, index) => {
                     const last = index === steps.length - 1;
+                    const prevDone = index > 0 && steps[index - 1]?.status === 'done';
                     return (
                         <XStack key={step.key} gap="3" alignItems="stretch" testID={`workflow-step-${step.status}`}>
                             <YStack width={20} alignItems="center">
+                                {railTop > 0 ? (
+                                    <YStack height={railTop} width={2} backgroundColor={index > 0 ? (prevDone ? 'needsYou' : 'strongStroke') : 'transparent'} />
+                                ) : null}
                                 {step.status === 'current' ? <WorkflowWorkingMark kind={step.kind}
                                     holder={detail.run.holder} viewerHolds={detail.run.viewerHolds} />
                                     : <WorkflowStepCircle status={step.status} />}
@@ -97,10 +110,13 @@ export function WorkflowRunCardView({ detail }: { detail: WorkflowRunDetailView 
                                 )}
                             </YStack>
                             <YStack flex={1} minWidth={0} paddingBottom={last ? '0' : '3'}>
-                                <T v={step.status === 'current' ? 'metaStrong' : 'meta'} color={step.status === 'pending' ? 'secondary' : 'ink'}>
-                                    {step.name}
-                                    {step.who ? <T v="meta" color="secondary">{` · ${step.who}`}</T> : null}
-                                </T>
+                                <XStack alignItems="center">
+                                    <YStack width={0} height={stepSlot} />
+                                    <T v={step.status === 'current' ? 'metaStrong' : 'meta'} color={step.status === 'pending' ? 'secondary' : 'ink'}>
+                                        {step.name}
+                                        {step.who ? <T v="meta" color="secondary">{` · ${step.who}`}</T> : null}
+                                    </T>
+                                </XStack>
                                 {step.note ? (
                                     <T v="meta" color={step.status === 'current' ? 'needsYou' : 'secondary'} numberOfLines={2}>{step.note}</T>
                                 ) : null}
