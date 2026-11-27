@@ -7,6 +7,7 @@ export type CornerCheckSummary = NonNullable<CornerLifecycleView['checksSummary'
   reportedFailing?: readonly string[];
   attempt?: number;
   statusChangedAt?: number;
+  zeroCheckSource?: 'workflow-count' | 'worker-completion';
 };
 
 export type CornerCheckObservation = {

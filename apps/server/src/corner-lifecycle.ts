@@ -974,6 +974,7 @@ async function writeCornerGithubFact(db: SqlDatabase, cornerId: string,
     case 'zero-checks-confirmed':
       return Boolean((await db.query(`UPDATE corner_github_cache SET lifecycle=lifecycle || $2::jsonb WHERE corner_id=$1`,
         [cornerId, JSON.stringify({ checks: 'passing', checksSummary: { status: 'passing', total: 0, failing: [], checks: [],
+          zeroCheckSource: 'worker-completion',
           updatedAt: Math.floor((await db.query<{ now: number }>(`SELECT extract(epoch FROM clock_timestamp())::double precision now`)).rows[0]!.now),
           fetchStartedAt: fact.fetchStartedAt } })])).rowCount);
   }

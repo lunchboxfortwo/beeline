@@ -9,7 +9,7 @@ import { GITHUB_SUBJECT, systemLine, type SystemPhrase } from './system-line.js'
 import { archiveCornerState, lockCornerArchivalAuthority } from './corner-close.js';
 import { recordCornerGithubFact, advanceCorner, planCornerCheckObservation, checksSettled, actionsJobId, lockCornerLifecycle, type CornerEvent } from './corner-lifecycle.js';
 import { routeSystemCommand } from './agent-command.js';
-import { cornerCiGate, cornerGateChecks, type CornerCiGate } from './corner-ci-gate.js';
+import { cornerCiGate, cornerGateChecks, zeroCheckSource, type CornerCiGate } from './corner-ci-gate.js';
 import { GitHubOperations, CornerWebhookTarget, checkFact, jobErrorLines, text, hash } from './github-operations.js';
 import type { GitHubWebhookClaim } from './github-webhook-claim.js';
 
@@ -122,12 +122,10 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
           return fetchStartedAt >= latestFetch;
         };
         const planCheckRefresh = (current: CornerLifecycleView) => {
-          const completedWithoutChecks = rollup.total === 0 && !rollup.pendingRegistrations &&
-            ((rollup.required?.length === 0 && rollup.state === 'passed') ||
-              (current.checks === 'passing' && current.checksSummary?.total === 0));
+          const source = zeroCheckSource(rollup, current);
           const summary = {
             status:
-              failedChecks.length ? ('failing' as const) : completedWithoutChecks ? ('passing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
+              failedChecks.length ? ('failing' as const) : source ? ('passing' as const) : rollup.total === 0 && rollup.state !== 'pending' ? ('unknown' as const) : rollup.state === 'passed'
                 ? ('passing' as const)
                 : rollup.state === 'failed' && interruptedOnly && checksSettled(rollup.checks)
                   ? ('unknown' as const)
@@ -139,6 +137,7 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
               ? failedChecks.map(item => item.name)
               : rollup.failing.filter(name => !interruptedNames.has(name)),
             checks: rollup.checks,
+            ...(source ? { zeroCheckSource: source } : {}),
             updatedAt: Math.floor(fetchStartedAt),
             fetchStartedAt,
           };

@@ -1,8 +1,24 @@
 import type { GitHubCheckRollup } from '@beeline/auth/github';
 import type { CornerLifecycleView } from '@beeline/api-contract/phone';
+import type { CornerCheckSummary } from './corner-machine.js';
 
 /** A null verdict clears the required-check override. */
 export type CornerCiGate = { headSha: string; checks: 'passing' | 'pending' | 'failing' | null; required?: true };
+
+export function cachedZeroCheckSource(lifecycle: CornerLifecycleView): CornerCheckSummary['zeroCheckSource'] {
+  const summary: CornerCheckSummary | undefined = lifecycle.checksSummary;
+  if (lifecycle.checks !== 'passing' || summary?.total !== 0) return undefined;
+  // Older passing empty summaries came from worker completion.
+  return summary.zeroCheckSource ?? 'worker-completion';
+}
+
+export function zeroCheckSource(rollup: GitHubCheckRollup, lifecycle?: CornerLifecycleView): CornerCheckSummary['zeroCheckSource'] {
+  if (rollup.total !== 0 || rollup.pendingRegistrations) return undefined;
+  if (rollup.state === 'passed' && rollup.required?.length === 0) return 'workflow-count';
+  if (rollup.state === 'pending' && lifecycle && cachedZeroCheckSource(lifecycle) === 'worker-completion')
+    return 'worker-completion';
+  return undefined;
+}
 
 /**
  * Required checks override the whole-rollup verdict when the base names any.

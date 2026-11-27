@@ -39,6 +39,18 @@ describe('CI gate from base-branch protection', () => {
     expect(await gate()).toMatchObject({ checks: 'passed', checkCount: 0, mergeAllowed: true });
   });
 
+  it('blocks the same head when a newly configured workflow has yet to register', async () => {
+    await openPr();
+    rootFixture.rollupState = null;
+    rootFixture.registeredCount = 0;
+    await opened();
+    expect(await gate()).toMatchObject({ headSha: SHA, checks: 'passed', checkCount: 0, mergeAllowed: true });
+
+    rootFixture.workflowCount = 1;
+    expect(await gate()).toMatchObject({ headSha: SHA, checks: 'pending', checkCount: 0, mergeAllowed: false });
+    expect(await rootFixture.operations.lifecycle(C)).toMatchObject({ checks: 'pending', checksSummary: { total: 0 } });
+  });
+
   it('Reproduction 1: an approved PR on an unprotected base waits for all head checks', async () => {
     await openPr();
     await rootFixture.db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`, [R, REVIEWER]);
