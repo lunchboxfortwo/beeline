@@ -4,10 +4,6 @@ import * as React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { expect, it } from 'vitest';
 import { useRoomMessageStore } from '@/buzz/room-message-store';
-import { publishPhoneLiveEvent } from '@/sync/transport/phone-live-events';
-import { applyChatListDelta } from '@/buzz/chat-list-delta';
-import { roomMessageRecord } from '@/buzz/room-message-records';
-import { identityScope } from '@/buzz/identity-records';
 import BuzzChat from './[channelId]';
 import { type ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import { type RoomViewMessage } from '@beeline/buzz-client';
@@ -68,6 +64,10 @@ it('isolates transcript windows, outbox and late send completion when a route ch
 });
 
 it('shows a list-delivered reply after background cache eviction without waiting for another Room read', async () => {
+  const { publishPhoneLiveEvent } = await import('@/sync/transport/phone-live-events');
+  const { applyChatListDelta } = await import('@/buzz/chat-list-delta');
+  const { roomMessageRecord } = await import('@/buzz/room-message-records');
+  const { identityScope } = await import('@/buzz/identity-records');
   const view = roomView('room-a');
   const agent = { pubkey: 'niglet', kind: 'agent' as const, name: 'Niglet' };
   const sent: RoomViewMessage = { id: 'human-tag', text: '@niglet help me pair an agent', createdAt: 10,
@@ -113,7 +113,7 @@ it('shows a list-delivered reply after background cache eviction without waiting
     expect(roomMessageRecord(identityScope('https://relay.test', 'viewer'), 'room-a', message.id)).toEqual(message);
     expect(current.roomSurface?.latestAgentTurns).toEqual([finish.turn]);
     expect(current.roomSurface?.latestAgentTurns.some(turn => turn.status === 'working')).toBe(false);
-    await act(async () => current.readRoom());
+    await act(async () => { void current.readRoom(); });
     await act(async () => controls.responses.at(-1)!.apply({ ...view, messages: [sent, message], latestAgentTurns: [finish.turn] }));
     expect(visible()).toContain(message.text);
     expect(current.roomSurface?.latestAgentTurns).toEqual([finish.turn]);
