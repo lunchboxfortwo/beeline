@@ -14,7 +14,7 @@ import {
   useScheduledWork,
 } from '@/buzz/scheduled-work';
 import { ErrorBanner } from '@/components/buzz/ErrorBanner';
-import { Copy, Glyph, Inked, Row, Screen, Section, T } from '@/ui/grammar';
+import { Copy, Glyph, Inked, Row, Screen, Section, T, typeStyle, useTextSize } from '@/ui/grammar';
 
 function first(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -62,6 +62,7 @@ export default function ScheduledWork() {
   const subscriptions = work?.subscriptions ?? [];
   const entries = orderScheduledWork(schedules, subscriptions);
 
+  const line = typeStyle('body', useTextSize()).lineHeight;
   const openSchedule = (schedule: RoomScheduleView) =>
     router.push({ pathname: '/beeline/settings/schedule', params: { roomId: roomId!, scheduleId: schedule.id } });
 
@@ -73,7 +74,7 @@ export default function ScheduledWork() {
       : subscriptionWhen({ ...entry.value, paused: false }, work?.isDirectMessage);
     const where = value.corner ? cornerShortTitle(work?.roomName, value.corner.name, value.corner.id) : 'this chat';
     return <Row key={value.id} label={title}
-      leading={value.corner ? <Glyph icon={CornerDownRight} size={18} /> : undefined}
+      leading={value.corner ? <YStack height={line} justifyContent="center"><Glyph icon={CornerDownRight} size={18} /></YStack> : undefined}
       detail={`${value.paused ? 'Paused · ' : ''}${trigger}\n@${agent} · ${where}`}
       last={index === entries.length - 1}
       onPress={() => entry.kind === 'schedule' ? openSchedule(entry.value) : router.push({

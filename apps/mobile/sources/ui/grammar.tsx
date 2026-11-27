@@ -10,7 +10,7 @@ import {
     YStack,
     useTheme,
 } from 'tamagui';
-import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, Hash } from 'lucide-react-native';
+import { ArrowLeft, Check, ChevronRight, Copy as CopyIcon, CornerDownRight, Hash } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming, type AnimatedProps, type AnimatedStyle } from 'react-native-reanimated';
 import Svg, { Circle, G, Path } from 'react-native-svg';
@@ -125,12 +125,40 @@ export function Copy({ children, quiet = false, small = false, strong = false, a
     return <T v={v} color={accent ? 'needsYou' : quiet ? 'secondary' : 'ink'} {...rest}>{children}</T>;
 }
 
+/**
+ * The thread glyph (↳) in a 24×24 viewBox with its horizontal arrow shaft and
+ * arrowhead tip centered at y = 12 (Lucide's CornerDownRight places them at y = 15,
+ * pointing below the vertical center of adjacent labels). The vertical stem starts
+ * at y = 1.5 so even strong strokes (2.3) keep a 0.35-unit top cap margin without clipping.
+ */
+export function ThreadGlyph({ size = 16, color = 'currentColor', strokeWidth = 1.7, testID }: {
+    size?: number; color?: ColorValue; strokeWidth?: number; testID?: string;
+}) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" testID={testID}>
+            <Path d="M15 7L20 12L15 17" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M4 1.5v6.5a4 4 0 0 0 4 4h12" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+    );
+}
+
+/** True when an icon prop is Lucide's CornerDownRight (guards partial test mocks that omit it). */
+function isThreadIcon(icon: unknown): boolean {
+    try {
+        return icon === CornerDownRight;
+    } catch {
+        return false;
+    }
+}
+
 type IconComponent = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 /** Icons: lucide outline at 16 or 20, 1.7 stroke, secondary; brass when it means you. */
 export function Glyph({ icon: Icon, size = 20, accent = false, color, strong = false }: { icon: IconComponent; size?: 14 | 16 | 18 | 20; accent?: boolean; color?: 'ink' | 'primaryInk' | 'removed'; strong?: boolean }) {
     const t = useTheme() as Record<string, { val: string } | undefined>;
     const ink = color ? t[color]?.val : accent ? t.needsYou?.val : t.secondary?.val;
-    return <Icon size={size} color={ink} strokeWidth={strong ? 2.3 : 1.7} />;
+    const strokeWidth = strong ? 2.3 : 1.7;
+    if (isThreadIcon(Icon)) return <ThreadGlyph size={size} color={ink} strokeWidth={strokeWidth} />;
+    return <Icon size={size} color={ink} strokeWidth={strokeWidth} />;
 }
 
 export type ButtonKind = 'primary' | 'secondary' | 'icon' | 'quiet' | 'destructive' | 'accent';
@@ -460,6 +488,10 @@ function useTypeStyle(v: Variant, color: ColorToken = 'ink'): import('react-nati
  */
 export function Inked<P extends { color?: ColorValue }>({ color, glyph: Glyph, ...rest }: { color: ColorToken; glyph: React.ComponentType<P> } & Omit<P, 'color'>) {
     const ink = (useTheme() as Record<string, { val: string } | undefined>)[color]?.val;
+    if (isThreadIcon(Glyph)) {
+        const { size, strokeWidth, testID } = rest as { size?: number; strokeWidth?: number; testID?: string };
+        return <ThreadGlyph size={size} strokeWidth={strokeWidth} testID={testID} color={ink} />;
+    }
     return <Glyph {...(rest as unknown as P)} color={ink} />;
 }
 

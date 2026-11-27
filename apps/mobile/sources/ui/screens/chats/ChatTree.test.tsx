@@ -29,7 +29,7 @@ vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
 import type { ChatListItem } from '@beeline/buzz-client';
 import { ChatRow, ChatRowDivider, JoinableChats, NEW_THREAD_HOLD_MS } from './ChatTree';
 import { WorkStateMark } from '@/ui/screens/tags/WorkMarks';
-import { TextSizeContext, type TextSize } from '@/ui/grammar';
+import { TextSizeContext, ThreadGlyph, type TextSize } from '@/ui/grammar';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -151,7 +151,12 @@ it('shows the repository picture on the chat row and its thread row as ↳, name
   expect(threadRow.findByType(WorkStateMark).props.state).toBe('needs-you');
   const host = threadRow.findAll((node: any) => typeof node.type === 'string')[0]!;
   const parts = host.children.filter((child: any) => typeof child !== 'string');
-  expect(parts[0].findAll((node: any) => node.type === 'Icon.CornerDownRight')).toHaveLength(1);
+  expect(parts[0].findAllByType(ThreadGlyph)).toHaveLength(1);
+  expect(parts[0].findByType('Svg').props).toMatchObject({ viewBox: '0 0 24 24', width: 16, height: 16 });
+  expect(parts[0].findAllByType('Path').map((p: any) => p.props.d)).toEqual([
+    'M15 7L20 12L15 17',
+    'M4 1.5v6.5a4 4 0 0 0 4 4h12',
+  ]);
   expect(parts.at(-1).findAll((node: any) => node.type === 'WorkStateMark')).toHaveLength(1);
   // The thread under the chat carries the needs-you mark; the chat row does not repeat it.
   expect(tree.root.findAll((node: any) => node.props?.testID === 'status-mark')).toHaveLength(0);
@@ -456,7 +461,7 @@ it('keeps B as the default and permits the local avatar-column C comparison, ↳
   let tree!: ReactTestRenderer;
   act(() => { tree = create(<ChatRow {...props} />); });
   const thread = () => byTestID(tree, 'thread-row-thread');
-  const icons = () => thread().findAll((node: any) => typeof node.type === 'string' && node.type === 'Icon.CornerDownRight');
+  const icons = () => thread().findAllByType(ThreadGlyph);
   expect(icons()).toHaveLength(1);
   expect(tree.root.findByType('RepositoryMark').props.size).toBe(36);
   act(() => tree.update(<ChatRow {...props} threadLayout="C" />));
@@ -537,7 +542,12 @@ it.each(['small', 'medium', 'large'] as const)(
         const parts = group.children.filter((c: any) => typeof c !== 'string');
         expect(parts).toHaveLength(3);
         expect(parts[0].props).toMatchObject({ height: slot, alignItems: 'center' });
-        expect(parts[0].findAll((n: any) => n.type === 'Icon.CornerDownRight')).toHaveLength(1);
+        expect(parts[0].findAllByType(ThreadGlyph)).toHaveLength(1);
+        expect(parts[0].findByType('Svg').props).toMatchObject({ viewBox: '0 0 24 24', width: 16, height: 16 });
+        expect(parts[0].findAllByType('Path').map((p: any) => p.props.d)).toEqual([
+          'M15 7L20 12L15 17',
+          'M4 1.5v6.5a4 4 0 0 0 4 4h12',
+        ]);
         const titleText = parts[1].findAll((n: any) => n.type === 'Text')[0];
         expect(titleText.props.flex).toBeUndefined();
         expect(parts[2].props).toMatchObject({ width: 18, height: slot, alignItems: 'center', justifyContent: 'center' });

@@ -127,7 +127,7 @@ export function ThreadTitleBlock({ h, openBrief, openPr, blockRef, onBlockLayout
             paddingHorizontal={inset ? "4" : "0"} paddingTop={inset ? "4" : "0"} paddingBottom="3" gap="2" borderBottomWidth={1} borderColor="stroke"
             testID="thread-title-block">
             <XStack gap="2" alignItems="flex-start" testID="thread-title-row">
-                <YStack height={lineHeight} paddingTop="0.5" alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
+                <YStack height={lineHeight} alignSelf="flex-start" justifyContent="center" testID="thread-arrow-box"><Glyph icon={CornerDownRight} size={18} /></YStack>
                 <YStack flex={1} minWidth={0}><ThreadName title={h.title} v="title" regular={headerMark(h)?.state !== 'needs-you'} testID="thread-title" trail={<HeaderMark h={h} />} /></YStack>
                 {h.workItem ? (
                     <YStack height={Math.max(26, lineHeight)} justifyContent="center" testID="thread-assignee-box">
