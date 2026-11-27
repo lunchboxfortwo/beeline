@@ -261,6 +261,10 @@ export interface SandboxMountPlan {
   sealed?: string[];
   /** Paths bind-mounted read-write, deduplicated and sorted. */
   writable: string[];
+  /** Short session TMPDIR mounted from the real scratch directory. */
+  scratchAlias?: { path: string; source: string };
+  /** Helper socket directories to keep on their original filesystem. */
+  hostSocketDirs?: string[];
   /** Copy-on-write layers mounted over shared dependency trees; see {@link DependencyLayer}. */
   overlays?: DependencyLayer[];
   /**
@@ -304,6 +308,8 @@ export interface SandboxSessionSpec {
   harnessHomeStateDirs?: string[];
   /** This Room's `TMPDIR`, when `agent-home.ts` relocated it. */
   tmpDir?: string;
+  /** Sockets served by the helper outside the session. */
+  hostSocketPaths?: Array<string | undefined>;
   /** Git common directory backing a corner's linked worktree. */
   gitCommonDir?: string;
   /** Shared dependency trees, each writable through this checkout's own layer. */
@@ -397,12 +403,21 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
     grant.writable && resolve(grant.path) === resolve(spec.userRuntimeDir!)) &&
     lstatSync(spec.userRuntimeDir, { throwIfNoEntry: false })?.isDirectory()
     ? resolve(spec.userRuntimeDir) : undefined;
+  const tmpDir = spec.tmpDir && resolve(spec.tmpDir);
+  let scratchAlias: SandboxMountPlan['scratchAlias'];
+  if (tmpDir && /^\/var\/tmp\/beeline-[0-9a-f]{12}$/.test(tmpDir) &&
+      lstatSync(tmpDir, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    try {
+      const source = realpathSync(tmpDir);
+      if (lstatSync(source).isDirectory()) scratchAlias = { path: tmpDir, source };
+    } catch { /* An unavailable scratch path remains an optional bind. */ }
+  }
   // Harness bookkeeping, both modes — see the module comment for why a Room
   // cannot have this read-only. No part of any repository is in here.
   const harnessState = [
     ...(spec.harnessStateDirs ?? []),
     ...(spec.harnessHomeStateDirs ?? []),
-    spec.tmpDir,
+    scratchAlias?.source ?? spec.tmpDir,
   ];
   const writable = normalize(
     spec.mode === 'edit'
@@ -431,12 +446,18 @@ export function sandboxMountPlan(spec: SandboxSessionSpec): SandboxMountPlan {
     ...(spec.harnessHomeStateDirs ?? []),
   ]).filter((path) => isUnderTmp(path) && path !== '/tmp' && !writable.includes(path));
   const readOnly = tmpRestores;
+  const hostSocketDirs = scratchAlias
+    ? normalize(spec.hostSocketPaths?.map(path => path && dirname(path)) ?? [])
+      .filter(path => path.startsWith('/var/tmp/'))
+    : [];
   return {
     ownerPaths,
     ...(userBus ? { userBus } : {}),
     readOnly,
     ...(spec.sealedPaths?.length ? { sealed: spec.sealedPaths } : {}),
     writable,
+    ...(scratchAlias ? { scratchAlias } : {}),
+    ...(hostSocketDirs.length ? { hostSocketDirs } : {}),
     ...(spec.dependencyLayers?.length ? { overlays: spec.dependencyLayers } : {}),
     masks: [...(spec.maskPaths ?? []),
       ...[...new Set(['/run/docker.sock', '/var/run/docker.sock', ...(spec.userRuntimeDir ? [resolve(spec.userRuntimeDir, 'docker.sock')] : [])]
@@ -465,9 +486,11 @@ const OVERLAY_BOOTSTRAP = [
   'exec "$@"',
 ].join('\n');
 
-/** Create missing mask mountpoints on namespace-only copies of their parents. */
-const MASK_MOUNTPOINT_BOOTSTRAP = [
+/** Prepare mountpoints on namespace-only copies of their parents. */
+const MOUNTPOINT_BOOTSTRAP = [
   'set -eu',
+  'scratch_link=$1',
+  'shift',
   'scratch=/dev/shm/beeline-masks',
   'mkdir "$scratch"',
   'i=0',
@@ -481,6 +504,10 @@ const MASK_MOUNTPOINT_BOOTSTRAP = [
   'shift',
   'while [ "$1" != -- ]; do mkdir -p -- "$1"; shift; done',
   'shift',
+  'if [ -n "$scratch_link" ]; then',
+  '  if [ -L "$scratch_link" ]; then rm -- "$scratch_link"; fi',
+  '  mkdir -p -- "$scratch_link"',
+  'fi',
   'exec "$@"',
 ].join('\n');
 
@@ -494,6 +521,7 @@ export function sandboxAllowsWrite(plan: SandboxMountPlan, path: string): boolea
   if (plan.userBus && covers(plan.userBus)) allowed = true;
   for (const mask of plan.masks) if (covers(mask.path)) allowed = false;
   for (const root of plan.writable) if (covers(root)) allowed = true;
+  if (plan.scratchAlias && covers(plan.scratchAlias.path)) allowed = true;
   for (const layer of plan.overlays ?? []) if (covers(layer.tree)) allowed = true;
   for (const root of plan.sealed ?? []) if (covers(root)) allowed = false;
   return allowed;
@@ -536,6 +564,8 @@ export function buildBwrapArgv(input: {
   }
   args.push('--proc', '/proc', '--tmpfs', '/tmp');
   for (const path of input.plan.readOnly) args.push('--ro-bind', path, path);
+  const hostSocketDirs = input.plan.hostSocketDirs ?? [];
+  for (const path of hostSocketDirs) args.push('--ro-bind-try', path, path);
   for (const binding of input.plan.ownerPaths ?? [])
     args.push(binding.writable ? '--bind-try' : '--ro-bind-try', binding.path, binding.path);
   if (input.plan.userBus) {
@@ -555,6 +585,8 @@ export function buildBwrapArgv(input: {
   }
   // Optional harness roots may be absent.
   for (const path of input.plan.writable) args.push('--bind-try', path, path);
+  const scratchAlias = input.plan.scratchAlias;
+  if (scratchAlias) args.push('--bind', scratchAlias.source, scratchAlias.path);
   for (const path of input.plan.sealed ?? []) args.push('--ro-bind', path, path);
   args.push('--chdir', input.cwd);
   // The sandbox must not outlive the daemon that owns the session.
@@ -571,20 +603,27 @@ export function buildBwrapArgv(input: {
     args.push('--', input.command, ...(input.args ?? []));
   }
   const missingMasks = input.plan.masks.filter(mask => mask.create);
-  if (!missingMasks.length) return { command: input.bwrapPath, args };
-  const parents = normalize(missingMasks.map(mask => {
+  if (!missingMasks.length && !scratchAlias) return { command: input.bwrapPath, args };
+  const mountpointParents = missingMasks.map(mask => {
     let parent = dirname(mask.path);
     while (!lstatSync(parent, { throwIfNoEntry: false })) parent = dirname(parent);
     return parent;
-  })).filter((parent, _index, all) => !all.some(other =>
+  });
+  // Bubblewrap follows a symlink at a bind destination. Replace the host's
+  // short scratch link with a directory in the private overlay first.
+  if (scratchAlias) mountpointParents.push(dirname(scratchAlias.path));
+  const parents = normalize(mountpointParents).filter((parent, _index, all) => !all.some(other =>
     other !== parent && parent.startsWith(`${other}/`)));
   // Writable grants and private state must bind the host inode, rather than
   // writing into the temporary overlay. /dev is replaced by the inner bwrap,
   // hiding these original-parent aliases before the agent starts.
   // Read-only restores keep the overlay's namespace-only mask mountpoints.
+  // Helper socket directories must keep their original inodes for connection.
   for (let i = 0; i < args.length && args[i] !== '--'; i++) {
-    if (!['--bind', '--bind-try', '--dev-bind-try'].includes(args[i]!)) continue;
+    const flag = args[i]!;
     const source = args[i + 1]!;
+    if (!['--bind', '--bind-try', '--dev-bind-try'].includes(flag) &&
+        !(flag === '--ro-bind-try' && hostSocketDirs.includes(source))) continue;
     const parentIndex = parents.findIndex(parent => source === parent || source.startsWith(`${parent}/`));
     if (parentIndex !== -1) args[i + 1] = `/dev/shm/beeline-masks/${parentIndex}/lower${source.slice(parents[parentIndex]!.length)}`;
     i += 2;
@@ -599,8 +638,8 @@ export function buildBwrapArgv(input: {
     '--unshare-user', '--uid', '0', '--gid', '0',
     ...['CAP_SYS_ADMIN', 'CAP_DAC_OVERRIDE', 'CAP_SETFCAP'].flatMap(cap => ['--cap-add', cap]),
     '--bind', '/', '/', '--dev-bind', '/dev', '/dev', '--tmpfs', '/dev/shm',
-    '--die-with-parent', '--', 'sh', '-c', MASK_MOUNTPOINT_BOOTSTRAP, 'beeline-mask-mountpoints',
-    ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
+    '--die-with-parent', '--', 'sh', '-c', MOUNTPOINT_BOOTSTRAP, 'beeline-mountpoints',
+    scratchAlias?.path ?? '', ...parents, '--', ...missingMasks.map(mask => mask.path), '--', input.bwrapPath,
     ...(overlays.length ? [] : ['--unshare-user', '--uid', String(process.getuid!()), '--gid', String(process.getgid!()), '--cap-drop', 'ALL']),
     ...args,
   ] };

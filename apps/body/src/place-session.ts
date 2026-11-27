@@ -489,6 +489,7 @@ export class PlaceSession {
       harnessStateDirs: stateDirs,
       harnessHomeStateDirs: homeStateDirs,
       ...(tmpDir ? { tmpDir } : {}),
+      hostSocketPaths: [config.browserShareHostSocket, config.registryMcpBrokerSocket],
       additionalWritablePaths: [
         ...harnessLoginWritablePaths(config.agentKind, operatorHome),
         ...(corner && config.workspaceRoot ? [config.workspaceRoot] : []),
