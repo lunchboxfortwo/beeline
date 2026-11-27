@@ -860,6 +860,9 @@ jobs:
       - name: Test release preflight, failure intake and governor regressions
         run: node --test --test-concurrency=1 packages/scripts/release-bookkeeping.test.mjs packages/scripts/unified-release.test.mjs packages/scripts/release-channel.test.mjs packages/scripts/helper-downloads.test.mjs packages/scripts/build-beeline-bundle.test.mjs packages/scripts/helper-carry.test.mjs packages/scripts/merge-beeline-bundles.test.mjs packages/scripts/release-helper-proof.test.mjs packages/scripts/release-sequence.test.mjs packages/scripts/release-gate.test.mjs packages/scripts/release-local.test.mjs packages/scripts/release-local-policy.test.mjs packages/scripts/pr-store-build.test.mjs packages/scripts/ota-launch-proof.test.mjs packages/scripts/npm-package-visibility.test.mjs packages/scripts/smoke-helper-package.test.mjs       packages/scripts/release-artifact-allowlist.test.mjs packages/scripts/assert-mobile-release-origin.test.mjs packages/scripts/rollout-schema.test.mjs packages/scripts/release-test-report.test.mjs packages/scripts/ci-release-contract.test.mjs packages/scripts/github-app-installation-token.test.mjs
         if: steps.changes.outputs.run == 'true'
+      - name: Test Cloudflare Pages deployment polling
+        run: node --test packages/scripts/deploy-pages.test.mjs
+        if: steps.changes.outputs.run == 'true'
       - name: Refuse release state in artifacts and caches
         run: node packages/scripts/release-artifact-allowlist.mjs
         if: steps.changes.outputs.run == 'true'

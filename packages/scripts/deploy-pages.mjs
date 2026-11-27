@@ -9,6 +9,13 @@ const executeFile = promisify(execFile);
 const packageSpec = 'wrangler@4.165.0';
 const projectName = 'usebeeline';
 
+class PagesApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
 function pagesApi({ token, accountId, fetchImpl = fetch }) {
   if (!token) throw new Error('CLOUDFLARE_PAGES_TOKEN is required for website publication');
   if (!/^[a-f0-9]{32}$/.test(accountId ?? '')) throw new Error('CLOUDFLARE_ACCOUNT_ID is required for website publication');
@@ -18,20 +25,31 @@ function pagesApi({ token, accountId, fetchImpl = fetch }) {
       method: body ? 'POST' : 'GET', body, headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(30_000),
     });
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(`Pages ${body ? 'deployment' : 'read'} failed: HTTP ${response.status} ${result.errors?.map(error => error.message).join(', ') ?? ''}`);
+    const result = await response.json().catch(error => {
+      if (response.status !== 404) throw error;
+    });
+    if (!response.ok || !result.success) {
+      const message = result?.errors?.map(error => error.message).join(', ') ?? '';
+      throw new PagesApiError(`Pages ${body ? 'deployment' : 'read'} failed: HTTP ${response.status} ${message}`, response.status);
+    }
     return result.result;
   };
 }
 
-async function awaitPagesDeployment(api, id) {
+async function awaitPagesDeployment(api, id, wait = delay) {
   if (!/^[a-f0-9-]+$/.test(id ?? '')) throw new Error('Pages returned an invalid deployment ID');
-  for (let i = 0; i < 20; i++) {
-    const deployment = await api(`/deployments/${id}`);
-    const stage = deployment.latest_stage;
-    if (stage?.name === 'deploy' && stage.status === 'success') return deployment;
-    if (['failure', 'canceled'].includes(stage?.status)) throw new Error(`Pages deployment ${id} failed`);
-    await delay(3000);
+  const attempts = 20;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const deployment = await api(`/deployments/${id}`);
+      const stage = deployment.latest_stage;
+      if (stage?.name === 'deploy' && stage.status === 'success') return deployment;
+      if (['failure', 'canceled'].includes(stage?.status)) throw new Error(`Pages deployment ${id} failed`);
+    } catch (error) {
+      // Pages can accept an upload before its deployment is visible to reads.
+      if (!(error instanceof PagesApiError) || error.status !== 404 || attempt === attempts) throw error;
+    }
+    await wait(3000);
   }
   throw new Error(`Pages deployment ${id} did not finish`);
 }
@@ -73,7 +91,7 @@ export async function stagePages({ directory, sha, branch, token, accountId, out
   console.log(`Staged Pages preview ${deployment.url}`);
 }
 
-export async function publishPages(staged, sha, env, fetchImpl) {
+export async function publishPages(staged, sha, env, fetchImpl, wait) {
   const api = pagesApi({ token: env.CLOUDFLARE_PAGES_TOKEN, accountId: env.CLOUDFLARE_ACCOUNT_ID, fetchImpl });
   const body = new FormData();
   body.set('branch', 'main');
@@ -81,5 +99,5 @@ export async function publishPages(staged, sha, env, fetchImpl) {
   body.set('manifest', JSON.stringify(staged.manifest));
   for (const [name, contents] of Object.entries(staged.files)) body.set(name, new File([contents], name));
   const deployment = await api('/deployments', body);
-  await awaitPagesDeployment(api, deployment.id);
+  await awaitPagesDeployment(api, deployment.id, wait);
 }

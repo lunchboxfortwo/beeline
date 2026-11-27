@@ -48,7 +48,7 @@
     "prompt-audit": "node --import tsx packages/scripts/prompt-audit.mjs",
     "prompt:nightly": "node --import tsx packages/scripts/prompt-nightly.mjs",
     "test:prompt-cases": "node --import tsx --test packages/scripts/prompt-truthfulness.test.mjs packages/scripts/prompt-messaging-replay.test.mjs packages/scripts/prompt-audit.test.mjs && node --import tsx packages/scripts/prompt-cases.ts && node --import tsx packages/scripts/prompt-surface.ts --check",
-    "test:deploy": "node --test packages/scripts/desktop-r2.test.mjs packages/scripts/unified-release.test.mjs packages/scripts/release-channel.test.mjs packages/scripts/release-promote.test.mjs packages/scripts/helper-downloads.test.mjs packages/scripts/npm-package-visibility.test.mjs packages/scripts/smoke-helper-package.test.mjs packages/scripts/release-artifact-allowlist.test.mjs",
+    "test:deploy": "node --test packages/scripts/deploy-pages.test.mjs packages/scripts/desktop-r2.test.mjs packages/scripts/unified-release.test.mjs packages/scripts/release-channel.test.mjs packages/scripts/release-promote.test.mjs packages/scripts/helper-downloads.test.mjs packages/scripts/npm-package-visibility.test.mjs packages/scripts/smoke-helper-package.test.mjs packages/scripts/release-artifact-allowlist.test.mjs",
     "test:web-deploy": "node --test packages/scripts/verify-web-deployment.test.mjs",
     "check:app-association-drift": "node packages/scripts/check-app-association-drift.mjs",
     "test:play": "node --test packages/scripts/play-token.test.mjs",
