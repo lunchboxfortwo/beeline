@@ -15,7 +15,7 @@ import {
 import { ScrollView, XStack, YStack, useTheme } from 'tamagui';
 import { Spinner, useTextSize } from '@/ui/grammar';
 import { NativeTypeInput, NativeTypeMeasure } from '@/ui/grammar-root';
-import { groknight } from '@/buzz/groknight';
+import { typeRoles } from '@beeline/design-tokens';
 import { HullDialog } from './HullDialog';
 import { COMPOSER_GLYPH_SIZE } from './MicGlyph';
 import { VoiceAgentStrip, VoiceBar } from './VoiceBar';
@@ -125,7 +125,7 @@ type Props = {
 };
 
 export const COMPOSER_SINGLE_LINE_INPUT_HEIGHT = 26;
-export const COMPOSER_MAX_INPUT_HEIGHT = 4 * groknight.type.body.lineHeight;
+export const COMPOSER_MAX_INPUT_HEIGHT = 4 * typeRoles.body.lineHeight;
 const NO_TAG_HANDLES: ReadonlySet<string> = new Set();
 
 export function ConversationComposer(props: Props) {

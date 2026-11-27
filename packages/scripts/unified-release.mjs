@@ -27,6 +27,7 @@ export const COMPONENT_PATH_RULES = [
   // bundled change needs fresh installers; desktop does not receive OTA.
   { prefix: 'packages/api-contract/', components: ['server', 'helper', 'mobile-ota', 'desktop'] },
   { prefix: 'packages/buzz-client/', components: ['helper', 'mobile-ota', 'desktop'] },
+  { prefix: 'packages/design-tokens/', components: ['server', 'mobile-ota', 'desktop', 'website'] },
   { prefix: 'packages/nostr/', components: ['helper', 'mobile-ota', 'desktop'] },
   { prefix: 'packages/net/', components: ['desktop'] },
   { prefix: 'apps/mobile/sources/', components: ['mobile-ota', 'desktop', 'website'] },

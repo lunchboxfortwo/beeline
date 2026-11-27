@@ -9,6 +9,9 @@
     "paths": {
       "@/*": [
         "./sources/*"
+      ],
+      "@beeline/design-tokens": [
+        "../../packages/design-tokens/src/index.ts"
       ]
     },
     "jsx": "react-jsx",

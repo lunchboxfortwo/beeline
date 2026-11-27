@@ -11,6 +11,7 @@ const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..'
 const DEFAULT_SOURCE_ROOT = join(REPOSITORY_ROOT, 'apps/site');
 const REQUIRED_STATIC_PATHS = [
   'index.html',
+  'stone.css',
   'favicon.ico',
   'apple-touch-icon.png',
   'icon-512.png',

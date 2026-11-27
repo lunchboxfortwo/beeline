@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
 import { resolveThemeRootedNames } from './calm-lint';
-import { space } from './groknight';
+import { space } from '@beeline/design-tokens';
 
 /**
  * The design lint (docs/DESIGN.md → Enforcement). Each rule names one convention
@@ -23,7 +23,6 @@ export const DESIGN_RADII: ReadonlySet<number> = new Set([0, 3, 8, 10, 14]);
 /** Files exempt from one rule, each with the decision that licenses it. */
 export const DESIGN_ALLOWLIST: Readonly<Record<DesignRule, Readonly<Record<string, string>>>> = {
   colour: {
-    'buzz/groknight.ts': 'The token source: every theme colour is defined here.',
     'buzz/brand.json': 'The brand mark colour.',
     'buzz/beeline-glyph.ts': 'The Beeline mark paints its own brand colours in both themes.',
     'buzz/faces/animals.tsx': 'Identity faces: per-identity colours are the identity, not chrome.',

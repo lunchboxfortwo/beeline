@@ -3,7 +3,7 @@ import * as React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { beelineThemes } from '@/buzz/groknight';
+import { beelineThemes } from '@beeline/design-tokens';
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');

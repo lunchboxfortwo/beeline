@@ -252,7 +252,7 @@ vi.mock('react-native', async () => {
 
 // The theme has to be live before the screen evaluates, because the mocked
 // StyleSheet.create calls the screen's theme-taking factory as it imports.
-import { beelineThemes } from '@/buzz/groknight';
+import { beelineThemes } from '@beeline/design-tokens';
 import IdentitySettingsScreen from './identity';
 import { mobileSurfaceCache } from '@/buzz/surface-storage';
 import { openExternalUrl } from '@/utils/open-external-url';

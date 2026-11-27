@@ -62,25 +62,27 @@ describe('public invite website', () => {
     expect(replace).toHaveBeenCalledWith(`https://backend.composio.dev/api/v1/auth-apps/add${carried}`);
   });
 
-  it('renders one Stone join action without exposing the invite token', () => {
+  it('renders one Stone join action from shared stone.css without exposing the invite token', () => {
     const landing = repoFile('apps/site/join/index.html');
-    const colors = [...landing.matchAll(/#[0-9a-f]{6}/gi)].map(([color]) => color);
+    const stoneCss = repoFile('apps/site/stone.css');
 
     expect(landing.match(/<(?:a|button)\b/gi)).toHaveLength(1);
+    expect(landing).toContain('href="/stone.css"');
+    expect(landing).toContain('href="/marketing/fonts.css"');
     expect(landing).toContain('id="join-workspace"');
-    expect(landing).toContain('background: #171717');
-    expect(landing).toContain('background: #222222');
+    expect(landing).toContain('background: var(--canvas)');
+    expect(landing).toContain('background: var(--raised)');
     expect(landing).toContain('Resolving invite…');
-    expect(landing).toContain('If Beeline is not installed');
+    expect(landing).toContain('If Beeline is not');
+    expect(landing).not.toContain('IBM Plex Sans');
     expect(landing).not.toContain('Copy invite code');
     expect(landing).not.toContain('id="invite-code"');
-    expect(colors.length).toBeGreaterThan(0);
-    expect(
-      colors.every((color) => {
-        const [, red, green, blue] = color.match(/^#(..)(..)(..)$/i) ?? [];
-        return (red === green && green === blue) || color.toLowerCase() === '#fafaf9';
-      }),
-    ).toBe(true);
+    expect(landing.match(/#[0-9a-f]{6}/gi)).toBeNull();
+    expect(stoneCss).toContain('--canvas: #171717;');
+    expect(stoneCss).toContain('--raised: #222222;');
+    expect(stoneCss).toContain('@media (prefers-color-scheme: light)');
+    expect(stoneCss).toContain('--canvas: #fafaf9;');
+    expect(stoneCss).toContain('--raised: #f5f5f4;');
   });
 
   it('resolves the public preview from the monolith through the server API', async () => {

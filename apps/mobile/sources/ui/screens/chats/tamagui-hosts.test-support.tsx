@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { groknight } from '@/buzz/groknight';
+import { brass } from '@beeline/design-tokens';
 
 /**
  * Host-element stand-ins for Tamagui, lucide and react-native-svg, so screen
@@ -96,10 +96,10 @@ export function tamaguiHosts(layout?: () => boolean) {
     Switch: compound('Switch', ['Thumb']),
     Tabs: compound('Tabs', ['List', 'Tab', 'Content']),
     useTheme: () => ({
-      ink: { val: groknight.textPrimary },
-      secondary: { val: groknight.textSecondary },
-      canvas: { val: groknight.bgBase },
-      needsYou: { val: groknight.accent },
+      ink: { val: brass.obsidian.textPrimary },
+      secondary: { val: brass.obsidian.textSecondary },
+      canvas: { val: brass.obsidian.bgBase },
+      needsYou: { val: brass.obsidian.accent },
     }),
     useThemeName: () => 'dark_brass',
   };

@@ -73,7 +73,7 @@ export type IdentityMarkProps = AgentIdentityMarkProps | NonAgentIdentityMarkPro
 // animals use, framed the same way (build spec → Identity marks). The gold
 // alive ring is drawn around the plate.
 
-/** The one box radius in the product (`groknight.radius`). */
+/** The one box radius in the product (`radii.house` in `@beeline/design-tokens`). */
 const FACE_PLATE_RADIUS = 3;
 
 // The alive ring sits `ALIVE_RING_PAD` (`buzz/identity-mark.ts`) outside the

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { XStack, YStack } from 'tamagui';
-import { typeRoles } from '@/buzz/groknight';
+import { typeRoles } from '@beeline/design-tokens';
 import Svg, { Path } from 'react-native-svg';
 import { Inked, T } from '@/ui/grammar';
 import { DECORATIVE_GLYPH_PROPS } from './decorative-glyph';

@@ -11,7 +11,7 @@ import {
     pinAndroidLaunchAppearance,
 } from './buzz/android-launch-appearance';
 import { resolveAppAppearance } from './buzz/app-appearance-seed';
-import { canvasColor } from './buzz/groknight';
+import { canvasColor } from '@beeline/design-tokens';
 
 /**
  * Light or dark for the whole app. Settings → Appearance writes it; the grammar

@@ -15,7 +15,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useThemeName } from 'tamagui';
-import { beelineThemes } from '@/buzz/groknight';
+import { beelineThemes } from '@beeline/design-tokens';
 import {
   GLYPH_STROKE,
   RELEASE_PAINT_MS,

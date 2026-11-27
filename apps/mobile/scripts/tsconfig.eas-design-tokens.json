@@ -1,0 +1,10 @@
+{
+  "extends": "../../../packages/scripts/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "../../../packages/design-tokens/dist",
+    "rootDir": "../../../packages/design-tokens/src",
+    "preserveSymlinks": true
+  },
+  "include": ["../../../packages/design-tokens/src/**/*"],
+  "exclude": ["../../../packages/design-tokens/src/**/*.test.ts"]
+}
