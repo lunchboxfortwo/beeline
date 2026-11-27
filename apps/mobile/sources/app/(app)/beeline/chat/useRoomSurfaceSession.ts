@@ -549,7 +549,7 @@ export function useRoomSurfaceSession({
     [bindingsRef],
   );
 
-  const readRoom = useCallback(() => { void readRoomRef.current?.(); }, []);
+  const readRoom = useCallback(() => readRoomRef.current?.() ?? Promise.resolve(), []);
   const retryOutbox = useCallback(async (eventIds: readonly string[]) => {
     try {
       const results = await outboxRef.current?.retry(eventIds);
