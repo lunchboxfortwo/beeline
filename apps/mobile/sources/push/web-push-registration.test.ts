@@ -7,8 +7,6 @@ import {
 } from './web-push-registration';
 import { pushOpenBuzzChannelId, releaseOpenBuzzChannelId } from '@/buzz/open-room-tracker';
 
-const navigate = vi.hoisted(() => vi.fn());
-vi.mock('expo-router', () => ({ router: { navigate } }));
 const operation = vi.hoisted(() => vi.fn());
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: operation }));
 
@@ -107,7 +105,8 @@ describe('Chrome push registration', () => {
   it('reports the currently open Room to the service worker and detaches on unmount', () => {
     pushOpenBuzzChannelId('room-1');
     try {
-      const stop = installWebPushForegroundResponder();
+      const navigate = vi.fn();
+      const stop = installWebPushForegroundResponder(navigate);
       const respond = addMessageListener.mock.calls[0]![1] as (event: unknown) => void;
       const postMessage = vi.fn();
       respond({ data: { type: 'beeline-web-push-open-room' }, ports: [{ postMessage }] });
