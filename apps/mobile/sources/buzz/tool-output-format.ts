@@ -803,7 +803,7 @@ export function buildToolSheetPresentation(params: {
         : 'No output captured for this step.';
     return finalize({
       blocks: [{ kind: 'empty', heading, ...(detail ? { detail } : {}) }],
-      autoExpandZone2: Boolean(params.command?.trim()),
+      autoExpandZone2: Boolean(params.command?.trim() || params.input?.trim()),
       silentCommandOnly: Boolean(params.command?.trim() && !params.input?.trim()),
       rawLabel: params.command?.trim() ? 'Command' : 'Raw arguments',
     });

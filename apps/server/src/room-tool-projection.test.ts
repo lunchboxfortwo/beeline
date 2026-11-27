@@ -119,7 +119,7 @@ describe('stored tool output disclosure', () => {
                 { kind: 'resource', mode: 'link', uri: 'mcp://linear/issues?token=supersecret&page=2' },
               ],
             },
-            // Malformed historical item: wrong JSON types for files, exitCode, omittedCount
+            // Malformed historical item: wrong JSON types and out-of-range PostgreSQL integers
             {
               kind: 'tool',
               title: 'Malformed historical',
@@ -129,6 +129,23 @@ describe('stored tool output disclosure', () => {
               files: 'not-an-array',
               blocks: 'not-an-array',
               plan: 'not-an-object',
+            },
+            // Out-of-range numeric values beyond 32-bit PostgreSQL integer bounds
+            {
+              kind: 'tool',
+              title: 'Out-of-range integers',
+              status: 'completed',
+              exitCode: 9999999999999,
+              omittedCount: 2147483648,
+              files: [
+                {
+                  path: 'apps/server/src/overflow.ts',
+                  addedLines: 3000000000,
+                  removedLines: 99999999999,
+                  line: 2147483648,
+                  endLine: 4294967296,
+                },
+              ],
             },
           ]),
         ],
@@ -141,7 +158,7 @@ describe('stored tool output disclosure', () => {
 
       const list = await readRoomTools(db, { roomId: room, anchor: message }, viewer);
       const items = list.messages[0]!.activity!;
-      expect(items).toHaveLength(3);
+      expect(items).toHaveLength(4);
 
       // Item 0: sanitized display path, line/endLine preserved, hasDetail=false, no toolOutput
       expect(items[0]).toMatchObject({
@@ -171,10 +188,19 @@ describe('stored tool output disclosure', () => {
         hasDetail: false,
       });
 
+      // Item 3: out-of-range integers dropped cleanly instead of aborting PostgreSQL cast
+      expect(items[3]).toEqual({
+        kind: 'tool',
+        title: 'Out-of-range integers',
+        status: 'completed',
+        files: [{ path: 'apps/server/src/overflow.ts' }],
+        hasDetail: false,
+      });
+
       // Full SQL response ALSO sanitizes display paths & URI secrets while leaving patch hunks faithful!
       const full = await readRoomTools(db, { roomId: room, anchor: message, messageId: message }, viewer);
       const fullItems = full.messages[0]!.activity!;
-      expect(fullItems).toHaveLength(3);
+      expect(fullItems).toHaveLength(4);
       expect(fullItems[0]!.files?.[0]?.path).toBe('skills/beeline-connecting-services/SKILL.md');
       expect(fullItems[1]!.files?.[0]?.path).toBe('apps/mobile/ChatTree.tsx');
       // Patch hunk kept faithful (not rewritten by display prefix stripper)
@@ -188,6 +214,67 @@ describe('stored tool output disclosure', () => {
       });
       expect(fullItems[1]!.sanitized).toBe(true);
       expect(JSON.stringify(full)).not.toContain('supersecret');
+    } finally {
+      await db.close();
+    }
+  });
+
+  it('emits a fetch handle when list projection clips title, summary, command, or input and restores full text on open', async () => {
+    const db = new PgliteDatabase();
+    const viewer = 'a'.repeat(64);
+    const agent = 'b'.repeat(64);
+    const workspace = '11111111-1111-4111-8111-111111111111';
+    const room = '22222222-2222-4222-8222-222222222222';
+    const message = 'f'.repeat(64);
+    const longTitle = `Long title ${'t'.repeat(250)} END_TITLE`;
+    const longSummary = `Long summary ${'s'.repeat(210)} END_SUMMARY`;
+    const longCommand = `echo ${'c'.repeat(520)} END_COMMAND`;
+    const longInput = JSON.stringify({ query: `${'q'.repeat(520)} END_INPUT` });
+    try {
+      await migrate(db);
+      await db.query(`INSERT INTO identities(id,kind,name) VALUES($1,'human','Reader'),($2,'agent','Writer')`, [viewer, agent]);
+      await db.query(`INSERT INTO workspaces(id,name) VALUES($1,'Proof')`, [workspace]);
+      await db.query(`INSERT INTO rooms(id,workspace_id,created_by,name) VALUES($1,$2,$3,'proof')`, [room, workspace, viewer]);
+      await db.query(`INSERT INTO memberships(room_id,workspace_id,identity_id,role) VALUES($1,$2,$3,'member'),(NULL,$2,$3,'member')`, [room, workspace, viewer]);
+      await db.query(
+        `INSERT INTO messages(id,room_id,author_id,text,presentation,activity) VALUES($1,$2,$3,'','activity',$4::jsonb)`,
+        [
+          message,
+          room,
+          agent,
+          JSON.stringify([
+            { kind: 'tool', title: longTitle, status: 'completed' },
+            { kind: 'tool', title: 'Summary clipped', summary: longSummary, status: 'completed' },
+            { kind: 'tool', title: 'Command clipped', command: longCommand, status: 'completed' },
+            { kind: 'tool', title: 'Input clipped', input: longInput, status: 'completed' },
+          ]),
+        ],
+      );
+
+      const list = await readRoomTools(db, { roomId: room, anchor: message }, viewer);
+      const items = list.messages[0]!.activity!;
+      expect(items).toHaveLength(4);
+      items.forEach((item, index) => {
+        expect(item.hasDetail).toBe(true);
+        expect(item.toolOutput).toEqual({
+          roomId: room,
+          anchor: message,
+          messageId: message,
+          itemIndex: index,
+          hasDetail: true,
+        });
+      });
+      expect(items[0]!.title).not.toContain('END_TITLE');
+      expect(items[1]!.summary).not.toContain('END_SUMMARY');
+      expect(items[2]!.command).not.toContain('END_COMMAND');
+      expect(items[3]!.input).not.toContain('END_INPUT');
+
+      const opened = await readRoomTools(db, { roomId: room, anchor: message, messageId: message }, viewer);
+      const fullItems = opened.messages[0]!.activity!;
+      expect(fullItems[0]!.title).toBe(longTitle);
+      expect(fullItems[1]!.summary).toBe(longSummary);
+      expect(fullItems[2]!.command).toBe(longCommand);
+      expect(fullItems[3]!.input).toBe(longInput);
     } finally {
       await db.close();
     }

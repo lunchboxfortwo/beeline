@@ -25,13 +25,32 @@ const isTool = `message.presentation='activity' AND message.deleted_at IS NULL A
     WHERE jsonb_typeof(item)='object' AND item->>'kind'='tool'
   )`;
 
+const PG_INT_MIN = -2147483648;
+const PG_INT_MAX = 2147483647;
+
+function safeSignedIntSql(expr: string): string {
+  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^-?[0-9]{1,10}$' AND (${expr}#>>'{}')::bigint BETWEEN ${PG_INT_MIN} AND ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END`;
+}
+
+function safeNonNegativeIntSql(expr: string): string {
+  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^[0-9]{1,10}$' AND (${expr}#>>'{}')::bigint <= ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END`;
+}
+
+function safePositiveIntSql(expr: string): string {
+  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^[1-9][0-9]{0,9}$' AND (${expr}#>>'{}')::bigint <= ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END`;
+}
+
 /**
  * Cheap bounded presence expression in SQL (no list-time diff parsing, every
  * JSONB shape guarded with `jsonb_typeof` before array expansion or casts).
- * True when the stored item holds server-side detail withheld from the list row.
+ * True when the stored item holds server-side detail withheld or clipped from the list row.
  */
 const hasStoredDetailSql = `COALESCE((
   COALESCE(item->'outputHidden' = 'true'::jsonb, false)
+  OR (jsonb_typeof(item->'title')='string' AND length(item->>'title')>240)
+  OR (jsonb_typeof(item->'summary')='string' AND length(item->>'summary')>200)
+  OR (jsonb_typeof(item->'command')='string' AND length(item->>'command')>500)
+  OR (jsonb_typeof(item->'input')='string' AND length(item->>'input')>500)
   OR (
     jsonb_typeof(item->'output')='string'
     AND length(btrim(item->>'output'))>0
@@ -45,9 +64,15 @@ const hasStoredDetailSql = `COALESCE((
   OR (jsonb_typeof(item->'blocks')='array' AND jsonb_array_length(item->'blocks')>0)
   OR (
     jsonb_typeof(item->'files')='array'
-    AND EXISTS(
-      SELECT 1 FROM jsonb_array_elements(item->'files') f
-      WHERE jsonb_typeof(f)='object' AND jsonb_typeof(f->'diff')='string' AND length(btrim(f->>'diff'))>0
+    AND (
+      jsonb_array_length(item->'files')>8
+      OR EXISTS(
+        SELECT 1 FROM jsonb_array_elements(item->'files') f
+        WHERE jsonb_typeof(f)='object' AND (
+          (jsonb_typeof(f->'diff')='string' AND length(btrim(f->>'diff'))>0)
+          OR (jsonb_typeof(f->'path')='string' AND length(f->>'path')>260)
+        )
+      )
     )
   )
   OR (
@@ -66,10 +91,10 @@ const listActivitySql = `(
       'operation',CASE WHEN jsonb_typeof(item->'operation')='string' THEN left(item->>'operation',64) ELSE NULL END,
       'status',CASE WHEN jsonb_typeof(item->'status')='string' THEN left(item->>'status',32) ELSE NULL END,
       'summary',CASE WHEN jsonb_typeof(item->'summary')='string' THEN left(item->>'summary',200) ELSE NULL END,
-      'exitCode',CASE WHEN jsonb_typeof(item->'exitCode')='number' AND (item->>'exitCode') ~ '^-?[0-9]+$' THEN (item->>'exitCode')::integer ELSE NULL END,
+      'exitCode',${safeSignedIntSql(`item->'exitCode'`)},
       'signal',CASE WHEN jsonb_typeof(item->'signal')='string' AND length(btrim(item->>'signal'))>0 THEN left(item->>'signal',32) ELSE NULL END,
       'outputTruncated',CASE WHEN item->'outputTruncated'='true'::jsonb THEN true ELSE NULL END,
-      'omittedCount',CASE WHEN jsonb_typeof(item->'omittedCount')='number' AND (item->>'omittedCount') ~ '^[1-9][0-9]*$' THEN (item->>'omittedCount')::integer ELSE NULL END,
+      'omittedCount',${safePositiveIntSql(`item->'omittedCount'`)},
       'terminalOnly',CASE WHEN item->'terminalOnly'='true'::jsonb THEN true ELSE NULL END,
       'outputHidden',CASE WHEN item->'outputHidden'='true'::jsonb THEN true ELSE NULL END,
       'sanitized',CASE WHEN item->'sanitized'='true'::jsonb THEN true ELSE NULL END,
@@ -85,10 +110,10 @@ const listActivitySql = `(
           'path',left(file->>'path',260),
           'status',CASE WHEN jsonb_typeof(file->'status')='string' THEN left(file->>'status',32) ELSE NULL END,
           'diffTruncated',CASE WHEN file->'diffTruncated'='true'::jsonb THEN true ELSE NULL END,
-          'addedLines',CASE WHEN jsonb_typeof(file->'addedLines')='number' AND (file->>'addedLines') ~ '^[0-9]+$' THEN (file->>'addedLines')::integer ELSE NULL END,
-          'removedLines',CASE WHEN jsonb_typeof(file->'removedLines')='number' AND (file->>'removedLines') ~ '^[0-9]+$' THEN (file->>'removedLines')::integer ELSE NULL END,
-          'line',CASE WHEN jsonb_typeof(file->'line')='number' AND (file->>'line') ~ '^[1-9][0-9]*$' THEN (file->>'line')::integer ELSE NULL END,
-          'endLine',CASE WHEN jsonb_typeof(file->'endLine')='number' AND (file->>'endLine') ~ '^[1-9][0-9]*$' THEN (file->>'endLine')::integer ELSE NULL END
+          'addedLines',${safeNonNegativeIntSql(`file->'addedLines'`)},
+          'removedLines',${safeNonNegativeIntSql(`file->'removedLines'`)},
+          'line',${safePositiveIntSql(`file->'line'`)},
+          'endLine',${safePositiveIntSql(`file->'endLine'`)}
         )) ORDER BY file_ord)
         FROM (
           SELECT value AS file, ordinality AS file_ord
