@@ -4,8 +4,11 @@ import type { MessageSendState } from '@/buzz/message-outbox';
 import { appErrorCopy } from '@/buzz/app-error-copy';
 import { Modal } from '@/modal';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import { AppState, Platform } from 'react-native';
-import { dismissPresentedNotificationsForChannel, dismissPresentedNotificationsForChannels } from '@/push/presented-notifications';
+import { AppState } from 'react-native';
+import {
+  dismissNativePresentedNotificationsForChannel,
+  dismissNativePresentedNotificationsForChannels,
+} from '@/push/presented-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import type { RoomRepositoryResult } from '@beeline/api-contract/phone';
@@ -301,10 +304,8 @@ export function useRoomSurfaceSession({
   useEffect(() => {
     if (!isFocused || roomSurface?.room.id !== channelId || lastShadeRead.current === readStamp) return;
     lastShadeRead.current = readStamp;
-    if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
     if (roomSurface.viewer.readCursor?.firstUnreadMessageId !== null) return;
-    void import('expo-notifications').then(api =>
-      dismissPresentedNotificationsForChannel(channelId, api, Platform.OS)).catch(error =>
+    void dismissNativePresentedNotificationsForChannel(channelId).catch(error =>
       console.log('Failed to dismiss read notifications:', error));
   }, [channelId, isFocused, readStamp, roomSurface]);
   const identityVersion = useIdentityRecords();
@@ -442,12 +443,13 @@ export function useRoomSurfaceSession({
       const roomId = channelIdRef.current;
       const viewport = readViewportRef.current;
       void roomClientRef.current?.markRead(roomId, messageId).then(async () => {
-        if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
         const boundaries = viewport?.roomId === roomId ? readBoundaries(viewport.chronological) : [];
         const end = boundaries.findIndex(row => row.id === messageId);
         const readMessageIds = boundaries.slice(0, end + 1).map(row => row.id);
-        await dismissPresentedNotificationsForChannels([{ channelId: roomId, messageId, readMessageIds }],
-          await import('expo-notifications'), Platform.OS, { keepActionOutcomes: true });
+        await dismissNativePresentedNotificationsForChannels(
+          [{ channelId: roomId, messageId, readMessageIds }],
+          { keepActionOutcomes: true },
+        );
       }).catch(() => undefined);
     }, undefined, () => roomClientRef.current !== null);
   }

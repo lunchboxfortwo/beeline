@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { getBuzzNotificationTargetFromData } from '@/utils/notificationRouting';
 import type { PushLevel } from '@beeline/api-contract/phone';
 import { ACTION_OUTCOME_DATA_KEY } from './notification-actions';
@@ -115,13 +116,36 @@ function presentedMessageId(notification: PresentedNotification, channelId: stri
   return tag?.startsWith(channelId + ':') ? tag.slice(channelId.length + 1) : null;
 }
 
-type ChannelRead = {
+export type ChannelRead = {
   channelId: string;
   /** The server read cursor: the last read message. Absent = clear everything. */
   messageId?: string | null;
   /** The other read messages the server pushed to this device. */
   readMessageIds?: readonly string[];
 };
+
+function isNativeNotificationPlatform(): boolean {
+  return Platform.OS === 'ios' || Platform.OS === 'android';
+}
+
+/** Dismiss every presented push for an open Room or corner on native platforms. */
+export async function dismissNativePresentedNotificationsForChannel(
+  channelId: string,
+): Promise<void> {
+  if (!isNativeNotificationPlatform()) return;
+  const api = await import('expo-notifications');
+  await dismissPresentedNotificationsForChannel(channelId, api, Platform.OS);
+}
+
+/** Dismiss presented pushes for read Rooms or corners on native platforms. */
+export async function dismissNativePresentedNotificationsForChannels(
+  reads: readonly ChannelRead[],
+  options: { keepActionOutcomes?: boolean } = {},
+): Promise<void> {
+  if (!isNativeNotificationPlatform()) return;
+  const api = await import('expo-notifications');
+  await dismissPresentedNotificationsForChannels(reads, api, Platform.OS, options);
+}
 
 /**
  * Dismiss presented pushes for these Rooms or corners — the ones opened here,
