@@ -43,6 +43,7 @@ export class SessionResources {
   private commandThreads?: { value: Context['threads']; receivedAt: number };
   private commandTasks?: { value: AgentCommand['tasks']; receivedAt: number };
   readonly status: Partial<Record<keyof Context | 'setup' | 'checkout', string>> = {};
+  private preparation?: Promise<void>;
   private readonly connections = new Map<string, Promise<string>>();
   private writes = Promise.resolve();
   private rpcId = 0;
@@ -57,8 +58,8 @@ export class SessionResources {
       cachePath: string;
       brokerSocket?: string;
       configured(): Promise<void>;
-      /** The `workspace` tool's checkout; returns its result text. */
-      checkout?(): Promise<string>;
+      /** Register the shared checkout now and start it once the home is ready. */
+      checkout?(homeReady: Promise<void>): Promise<string>;
       squireMcp?(input: { tool?: unknown; args?: unknown }): Promise<unknown>;
       /** A fresh configuration read landed. */
       onConfiguration?(value: Context['configuration'] | undefined): void;
@@ -166,13 +167,23 @@ export class SessionResources {
       });
   }
 
-  async prepare(): Promise<void> {
+  prepare(): Promise<void> {
+    return (this.preparation ??= this.prepareResources().finally(() => {
+      this.preparation = undefined;
+    }));
+  }
+
+  private async prepareResources(): Promise<void> {
+    this.status.setup = 'loading';
+    if (this.options.checkout) this.status.checkout = 'loading';
     try {
-      await this.options.configured();
-      if (this.options.checkout) this.status.checkout = await this.options.checkout();
+      const homeReady = Promise.resolve().then(() => this.options.configured());
+      const [, checkout] = await Promise.all([homeReady, this.options.checkout?.(homeReady)]);
+      if (checkout !== undefined) this.status.checkout = checkout;
       this.status.setup = 'ready';
     } catch (error) {
       this.status.setup = String(error);
+      if (this.options.checkout) this.status.checkout = String(error);
       throw error;
     }
   }

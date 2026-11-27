@@ -163,16 +163,19 @@ export class PlaceSession {
       cachePath: resolve(root, 'session-context.json'),
       brokerSocket: options.config.registryMcpBrokerSocket,
       configured: () => this.prepareOptionalHome(),
-      checkout: () =>
-        prepareWorkspace({
-          api: options.api,
-          config: options.config,
-          supervisorRoot: options.runtime.supervisorRoot,
-          workspaceId: options.workspaceId,
-          agent: options.agent,
-          placeId: options.placeId,
-          ...(options.parentRoomId ? { parentRoomId: options.parentRoomId } : {}),
-        }),
+      checkout: (homeReady) =>
+        prepareWorkspace(
+          {
+            api: options.api,
+            config: options.config,
+            supervisorRoot: options.runtime.supervisorRoot,
+            workspaceId: options.workspaceId,
+            agent: options.agent,
+            placeId: options.placeId,
+            ...(options.parentRoomId ? { parentRoomId: options.parentRoomId } : {}),
+          },
+          homeReady,
+        ),
       squireMcp: (input) => this.requestSquire(input),
       onConfiguration: (configuration) => this.selectionRead(configuration),
     });

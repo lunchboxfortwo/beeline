@@ -85,7 +85,7 @@ async function linkSeedRepository(seed: string, staging: string): Promise<void> 
 
 /**
  * Clone immutable local objects with hard links, never refs or alternates.
- * One coordinator owns each corner+agent setup; there are no checkout locks.
+ * The workspace coordinator holds the checkout lock while this runs.
  * The source cache remains recovery evidence until ordinary archive cleanup.
  */
 export async function materializeAgentCornerCheckout(input: {
@@ -105,9 +105,10 @@ export async function materializeAgentCornerCheckout(input: {
     throw new Error('refusing symlinked agent checkout');
   const creating = !existsSync(resolve(paths.gitCommonDir, 'HEAD'));
   const label = `repositories/${basename(paths.gitCommonDir)}`;
+  const staging = `${paths.gitCommonDir}.creating`;
+  // A stopped owner may have installed HEAD before it could remove staging.
+  await rm(staging, { recursive: true, force: true });
   if (creating) {
-    const staging = `${paths.gitCommonDir}.creating`;
-    await rm(staging, { recursive: true, force: true });
     try {
       try {
         await linkSeedRepository(input.sourceGitDir, staging);
@@ -211,6 +212,7 @@ export async function materializeAgentCornerCheckout(input: {
     });
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', 'extensions.worktreeConfig', 'true']);
   const gitFile = resolve(paths.path, '.git');
+  const pendingFiles = resolve(paths.gitCommonDir, 'beeline-worktree-pending');
   const attached =
     existsSync(gitFile) &&
     (await git(['-C', paths.path, 'rev-parse', '--absolute-git-dir']).then(
@@ -222,17 +224,33 @@ export async function materializeAgentCornerCheckout(input: {
     const marker = await lstat(gitFile).catch(() => undefined);
     if (marker && !marker.isFile()) throw new Error('refusing invalid agent checkout Git marker');
     const hasFiles = (await readdir(paths.path)).some((entry) => entry !== '.git');
-    // A lost .git file need not lose the index (including staged work). Reuse
-    // only the registration that names this exact checkout, never another one.
+    // Keep track of an empty worktree across interruptions after .git is linked.
+    if (!hasFiles) await writeFile(pendingFiles, '');
+    // A lost .git file need not lose the index (including staged work).
+    const checkoutParent = dirname(paths.path);
+    const canonicalParent = await realpath(checkoutParent);
+    const canonicalGitFile = resolve(canonicalParent, basename(paths.path), '.git');
     const registrations = resolve(paths.gitCommonDir, 'worktrees');
     let registration: string | undefined;
+    let abandonedWorktree: string | undefined;
     for (const entry of await readdir(registrations).catch(() => [] as string[])) {
       const candidate = resolve(registrations, entry);
-      const target = await readFile(resolve(candidate, 'gitdir'), 'utf8').catch(() => '');
-      if (resolve(target.trim()) === gitFile) {
+      const gitdir = await readFile(resolve(candidate, 'gitdir'), 'utf8').catch(() => '');
+      const target = resolve(candidate, gitdir.trim());
+      if (target === gitFile || target === canonicalGitFile) {
         registration = candidate;
         break;
       }
+      const worktree = dirname(target);
+      const temporary = dirname(worktree);
+      if (
+        target === resolve(temporary, 'worktree', '.git') &&
+        [checkoutParent, canonicalParent].includes(dirname(temporary)) &&
+        /^\.reattach-[A-Za-z0-9]{6}$/.test(basename(temporary)) &&
+        (await readFile(resolve(candidate, 'HEAD'), 'utf8').catch(() => '')).trim() ===
+          `ref: refs/heads/${input.branch}`
+      )
+        abandonedWorktree = worktree;
     }
     if (registration) {
       await writeFile(gitFile, `gitdir: ${registration}\n`);
@@ -240,7 +258,21 @@ export async function materializeAgentCornerCheckout(input: {
     } else {
       // Register at an empty temporary path, then move only the Git marker.
       // Bound checkout folders keep their inode and surviving files in place.
-      const temporary = await mkdtemp(resolve(dirname(paths.path), '.reattach-'));
+      if (abandonedWorktree) {
+        // The checkout lock is held, so this earlier temporary attachment is abandoned.
+        for (const path of [dirname(abandonedWorktree), abandonedWorktree])
+          if ((await lstat(path).catch(() => undefined))?.isSymbolicLink())
+            throw new Error('refusing symlinked temporary agent checkout');
+        await git([
+          `--git-dir=${paths.gitCommonDir}`,
+          'worktree',
+          'remove',
+          '--force',
+          '--force',
+          abandonedWorktree,
+        ]);
+      }
+      const temporary = await mkdtemp(resolve(checkoutParent, '.reattach-'));
       try {
         const worktree = resolve(temporary, 'worktree');
         await git([
@@ -259,11 +291,20 @@ export async function materializeAgentCornerCheckout(input: {
         await rm(temporary, { recursive: true, force: true });
       }
     }
-    // An emptied bound folder needs its files back. Never overwrite surviving
-    // files; for a populated folder the existing bytes become local changes.
-    if (!hasFiles) await git(['-C', paths.path, 'checkout-index', '--all']);
   }
   await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
+  if (existsSync(pendingFiles)) {
+    const index = (await git(['-C', paths.path, 'rev-parse', '--git-path', 'index'])).stdout.trim();
+    if (!existsSync(resolve(paths.path, index)))
+      await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
+    // Restore only missing paths from the index and keep any surviving files.
+    const missing = (
+      await git(['-C', paths.path, '-c', 'core.quotePath=true', 'ls-files', '--deleted'])
+    ).stdout;
+    if (missing)
+      await runOwnedFile('git', ['-C', paths.path, 'checkout-index', '--stdin'], { input: missing });
+    await rm(pendingFiles);
+  }
   // An import an older helper left unfinished is never resumed from here.
   if (await readFile(resolve(paths.gitCommonDir, 'beeline-legacy-pending'), 'utf8').catch(() => ''))
     throw new Error('legacy thread import source changed');

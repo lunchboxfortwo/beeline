@@ -2,10 +2,14 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { BodyConfig } from './config.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
+import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
+import { SessionResources } from './session-resources.js';
+import * as wait from './wait.js';
 import { prepareWorkspace } from './workspace-checkout.js';
 import { wrapAgentCommand } from './bwrap-sandbox.js';
 import { workspaceDependenciesDir } from './dependency-generation.js';
@@ -14,6 +18,7 @@ import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
@@ -33,6 +38,195 @@ const commit = async (source: string, version: string) => {
     version,
   ]);
 };
+
+async function threadCheckout(configured = async () => {}) {
+  const root = await mkdtemp(`${testTmpDir()}/beeline-checkout-`);
+  roots.push(root);
+  const source = join(root, 'source');
+  await exec('git', ['init', '-b', 'main', source]);
+  await commit(source, 'v1');
+  const repository = { resolution: 'repository', remote: `file://${source}`, targetBranch: 'main' };
+  const readRepository = vi.fn(async () => repository);
+  const postWorking = vi.fn(async () => ({}));
+  const api = {
+    execute: (name: string) => {
+      if (name === 'getRoomRepositoryState') return readRepository();
+      if (name === 'getCornerRestoreState') return Promise.resolve({});
+      if (name === 'postCornerRemoteState') return postWorking();
+      throw new Error(`Unexpected repository operation ${name}`);
+    },
+  } as unknown as DaemonApiClient;
+  const placeId = 'thread';
+  const agent = { name: 'Proof', publicKey: 'a'.repeat(64) };
+  const location = { api, placeId, parentRoomId: 'room', workspaceId: 'workspace' };
+  const workspace = (homeReady?: Promise<void>) =>
+    prepareWorkspace(
+      { ...location, config: {} as BodyConfig, supervisorRoot: root, agent },
+      homeReady,
+    );
+  const session = new SessionResources({
+    ...location,
+    agentId: agent.publicKey,
+    cachePath: join(root, 'session.json'),
+    configured,
+    checkout: workspace,
+  });
+  return {
+    source,
+    readRepository,
+    postWorking,
+    workspace,
+    session,
+    ...agentCornerCheckoutPaths(root, placeId, agent.publicKey),
+  };
+}
+
+it('workspace joins session prepare while agent home setup is pending', async () => {
+  const reached = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const f = await threadCheckout(() => {
+    reached.resolve();
+    return resume.promise;
+  });
+  const prepare = f.session.prepare();
+  await Promise.race([reached.promise, prepare]);
+  const workspace = f.workspace();
+  const returnedDuringSetup = await Promise.race([
+    workspace.then(() => true, () => true),
+    setImmediate(false),
+  ]);
+  const readsDuringSetup = f.readRepository.mock.calls.length;
+  resume.resolve();
+  const [ready] = await Promise.all([workspace, prepare]);
+
+  expect(returnedDuringSetup).toBe(false);
+  expect(readsDuringSetup).toBe(0);
+  expect(f.readRepository).toHaveBeenCalledTimes(1);
+  expect(f.postWorking).toHaveBeenCalledTimes(1);
+  const head = (await exec('git', ['-C', f.source, 'rev-parse', 'HEAD'])).stdout.trim();
+  expect(ready).toContain(`HEAD is ${head}.`);
+  expect(ready).toBe(f.session.status.checkout);
+});
+
+it('workspace joins session prepare for the same checkout and returns its prepared head', async () => {
+  const f = await threadCheckout();
+  const reached = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const runGit = wait.runOwnedFile;
+  vi.spyOn(wait, 'runOwnedFile').mockImplementation(async (file, args, options) => {
+    if (file === 'git' && args[0] === `--git-dir=${f.gitCommonDir}.creating` && args[1] === 'fsck') {
+      reached.resolve();
+      await resume.promise;
+    }
+    return runGit(file, args, options);
+  });
+  const prepare = f.session.prepare();
+  await Promise.race([reached.promise, prepare]);
+  const lock = await wait.tryLock(`thread-checkout:${f.path}`);
+  if (lock.held) await lock.release();
+  else lock.close();
+  const workspace = f.workspace();
+  const returnedDuringPrepare = await Promise.race([
+    workspace.then(() => true, () => true),
+    setImmediate(false),
+  ]);
+  const readsDuringPrepare = f.readRepository.mock.calls.length;
+  resume.resolve();
+  const [ready] = await Promise.all([workspace, prepare]);
+
+  expect(lock.held).toBe(false);
+  expect(returnedDuringPrepare).toBe(false);
+  expect(readsDuringPrepare).toBe(1);
+  expect(f.postWorking).toHaveBeenCalledTimes(1);
+  expect(ready).toContain(`Checkout ready at ${f.path}`);
+  expect(ready).toBe(f.session.status.checkout);
+  const head = (await exec('git', ['-C', f.source, 'rev-parse', 'HEAD'])).stdout.trim();
+  expect(ready).toContain(`HEAD is ${head}.`);
+  expect((await exec('git', ['-C', f.path, 'rev-parse', 'HEAD'])).stdout.trim()).toBe(head);
+});
+
+it('clears abandoned Git staging after the Git directory was already installed', async () => {
+  const f = await threadCheckout();
+  await f.workspace();
+  // A stopped owner may have moved HEAD into place but never cleaned this directory.
+  const staging = `${f.gitCommonDir}.creating`;
+  await mkdir(staging);
+  await writeFile(join(staging, 'leftover'), 'abandoned');
+  await commit(f.source, 'v2');
+
+  expect(await f.workspace()).toContain(`Checkout ready at ${f.path}`);
+  expect(existsSync(staging)).toBe(false);
+  expect(await readFile(join(f.path, 'version.txt'), 'utf8')).toBe('v2\n');
+});
+
+it('session prepare clears the previous ready status while the checkout is at the old head', async () => {
+  const f = await threadCheckout();
+  await f.session.prepare();
+  await commit(f.source, 'v2');
+  const reached = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const readRepository = f.readRepository.getMockImplementation()!;
+  f.readRepository.mockImplementationOnce(async () => {
+    reached.resolve();
+    await resume.promise;
+    return readRepository();
+  });
+  const prepare = f.session.prepare();
+  await Promise.race([reached.promise, prepare]);
+  try {
+    expect(await readFile(join(f.path, 'version.txt'), 'utf8')).toBe('v1\n');
+    expect(f.session.status).toMatchObject({ checkout: 'loading', setup: 'loading' });
+  } finally {
+    resume.resolve();
+    await prepare;
+  }
+  expect(f.session.status.setup).toBe('ready');
+  expect(f.session.status.checkout).toContain(`Checkout ready at ${f.path}`);
+  expect(await readFile(join(f.path, 'version.txt'), 'utf8')).toBe('v2\n');
+});
+
+it('finishes installing tracked files after an interrupted worktree attachment', async () => {
+  const f = await threadCheckout();
+  await writeFile(join(f.source, 'keep.txt'), 'original\n');
+  await commit(f.source, 'v2');
+  const runGit = wait.runOwnedFile;
+  const git = vi.spyOn(wait, 'runOwnedFile').mockImplementation(async (file, args, options) => {
+    if (file === 'git' && args.includes('checkout-index')) {
+      await writeFile(join(f.path, 'keep.txt'), 'local edit\n');
+      throw new Error('worktree install interrupted');
+    }
+    return runGit(file, args, options);
+  });
+  await expect(f.workspace()).rejects.toThrow('worktree install interrupted');
+  git.mockRestore();
+  expect(existsSync(join(f.path, '.git'))).toBe(true);
+  expect(existsSync(join(f.path, 'version.txt'))).toBe(false);
+
+  expect(await f.workspace()).toContain(`Checkout ready at ${f.path}`);
+  expect(await readFile(join(f.path, 'version.txt'), 'utf8')).toBe('v2\n');
+  expect(await readFile(join(f.path, 'keep.txt'), 'utf8')).toBe('local edit\n');
+});
+
+it('installs tracked files on retry after Git registers a temporary worktree', async () => {
+  const f = await threadCheckout();
+  const runGit = wait.runOwnedFile;
+  const git = vi.spyOn(wait, 'runOwnedFile').mockImplementation(async (file, args, options) => {
+    const result = await runGit(file, args, options);
+    if (file === 'git' && args[1] === 'worktree' && args[2] === 'add')
+      throw new Error('worktree attachment stopped after registration');
+    return result;
+  });
+  await expect(f.workspace()).rejects.toThrow('worktree attachment stopped after registration');
+  git.mockRestore();
+  const linkedWorktrees = () =>
+    exec('git', [`--git-dir=${f.gitCommonDir}`, 'worktree', 'list', '--porcelain']);
+  expect((await linkedWorktrees()).stdout).toContain('/.reattach-');
+  expect(existsSync(join(f.path, '.git'))).toBe(false);
+
+  expect(await f.workspace()).toContain(`Checkout ready at ${f.path}`);
+  expect(await readFile(join(f.path, 'version.txt'), 'utf8')).toBe('v1\n');
+  expect((await linkedWorktrees()).stdout).not.toContain('/.reattach-');
+});
 
 /** A repository whose first test run needs installed packages and built output. */
 async function fixture(
