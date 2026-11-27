@@ -66,6 +66,7 @@ import { stateDir as joinedSessionStateDir } from './session-join/store.js';
 import { SessionResources } from './session-resources.js';
 import {
   RunningModelReporter,
+  launchModelSelection,
   reconcileStartupModel,
   switchLiveModel,
   type RunningModelReport,
@@ -463,18 +464,9 @@ export class PlaceSession {
       ]
         .filter(Boolean)
         .join(delimiter);
-    const knownModels = this.resources.context.modelCatalog?.find(
-      (option) => option.category === 'model',
-    );
-    const launchSelection =
-      selection.model && knownModels?.options.some((option) => option.id === selection.model)
-        ? selection
-        : selection.model
-          ? {}
-          : undefined;
     const agentArgs = agentArgsWithModelSelection(
       { kind: config.agentKind, command, args: config.agentArgs ?? [] },
-      launchSelection,
+      launchModelSelection(selection, this.resources.context.modelCatalog),
     );
     const { stateDirs, tmpDir } = harnessStateDirsFromEnv(agentEnv);
     this.scratch = tmpDir;
