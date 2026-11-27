@@ -15,7 +15,8 @@ vi.mock('@/components/buzz/MemberRosterRow', () => ({
 vi.mock('@/buzz/agent-display', () => ({ resolveAgentDisplayIdentity: (pubkey: string) => ({ name: pubkey }) }));
 import { ChannelSuggestionMenu, MentionSuggestionMenu } from './MentionSuggestionMenu';
 import { CHANNEL_MENTION_PUBKEY } from '@/buzz/room-participants';
-import { TextSizeContext, ThreadGlyph, typeStyle, type TextSize } from '@/ui/grammar';
+import { channelSuggestionCandidates } from '@/buzz/channel-suggestions';
+import { ThreadGlyph } from '@/ui/grammar';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -77,56 +78,55 @@ it('uses one title and keeps the keyboard window at three rows with this chat fi
   expect(tree.root.findAll((node: any) => node.type === 'ListItem')[0].props.testID).toBe('channel-suggestion-beeline');
 });
 
-it.each(['small', 'medium', 'large'] as const)(
-  'aligns the thread mark to the thread name line when a suggestion carries a subtitle (%s text size)',
-  (size: TextSize) => {
-    const nameLine = typeStyle('metaStrong', size).lineHeight;
-    const markSlot = Math.max(28, nameLine);
-    const expectedInset = (markSlot - nameLine) / 2;
-    const withSubtitle = {
-      kind: 'corner' as const,
-      id: 'c-sub',
-      token: 'beeline/thread-glyph-center',
-      name: 'thread-glyph-center',
-      subtitle: '#beeline · active',
-      activityAt: 1_000_000,
-    };
-    const withoutSubtitle = {
-      kind: 'corner' as const,
-      id: 'c-plain',
-      token: 'beeline/one-row-header',
-      name: 'one-row-header',
-      activityAt: 1_000_000,
-    };
-    act(() => {
-      tree = create(
-        <TextSizeContext.Provider value={size}>
-          <ChannelSuggestionMenu
-            query="beeline/"
-            matches={[withSubtitle, withoutSubtitle]}
-            overflow={0}
-            highlightedIndex={0}
-            keyboardOpen
-            nowMs={(1_000_000 + 60) * 1000}
-            onSelect={() => undefined}
-          />
-        </TextSizeContext.Provider>,
-      );
-    });
+it('renders thread candidates from channelSuggestionCandidates with a centered ThreadGlyph beside the single-line thread name while keeping non-thread row layout unchanged', () => {
+  const candidates = channelSuggestionCandidates(
+    [
+      { id: 'r1', name: 'beeline', repositoryName: 'lunchboxfortwo/beeline' },
+      { id: 'r2', name: 'ops', repositoryName: 'lunchboxfortwo/ops' },
+    ],
+    { name: 'beeline' },
+    [{ id: 'c1', name: 'thread-glyph-center', activityAt: 1_000_000 }],
+  );
+  const threadCandidate = candidates.find((c) => c.kind === 'corner');
+  const repoCandidate = candidates.find((c) => c.kind === 'room' && c.id === 'r2');
+  expect(threadCandidate?.subtitle).toBeUndefined();
+  expect(repoCandidate?.subtitle).toBe('lunchboxfortwo/ops');
 
-    const subRow = row('channel-suggestion-beeline/thread-glyph-center');
-    const subInner = subRow.find((n: any) => n.type === 'XStack' && n.props.flex === 1);
-    expect(subInner.props.alignItems).toBe('flex-start');
-    const subMark = subRow.find((n: any) => n.type === 'YStack' && n.props.testID === 'channel-suggestion-beeline/thread-glyph-center-mark');
-    expect(subMark.props).toMatchObject({ width: 28, height: markSlot, justifyContent: 'center' });
-    expect(subMark.findAllByType(ThreadGlyph)).toHaveLength(1);
-    const subInset = subRow.find((n: any) => n.type === 'YStack' && n.props.testID === 'channel-suggestion-beeline/thread-glyph-center-name-inset');
-    expect(subInset.props.height).toBe(expectedInset);
-    expect(subInset.props.height + nameLine / 2).toBe(markSlot / 2);
+  act(() => {
+    tree = create(
+      <ChannelSuggestionMenu
+        query=""
+        matches={candidates}
+        overflow={0}
+        highlightedIndex={0}
+        keyboardOpen
+        nowMs={(1_000_000 + 60) * 1000}
+        onSelect={() => undefined}
+      />,
+    );
+  });
 
-    const plainRow = row('channel-suggestion-beeline/one-row-header');
-    const plainInner = plainRow.find((n: any) => n.type === 'XStack' && n.props.flex === 1);
-    expect(plainInner.props.alignItems).toBe('center');
-    expect(plainRow.findAll((n: any) => n.props?.testID === 'channel-suggestion-beeline/one-row-header-name-inset')).toHaveLength(0);
-  },
-);
+  const threadRow = row('channel-suggestion-beeline/thread-glyph-center');
+  expect(threadRow.props.alignItems).toBe('center');
+  expect(threadRow.findAllByType(ThreadGlyph)).toHaveLength(1);
+  expect(threadRow.findByType('Svg').props).toMatchObject({ viewBox: '0 0 24 24', width: 14, height: 14 });
+  expect(threadRow.findAllByType('Path').map((p: any) => p.props.d)).toEqual([
+    'M15 7L20 12L15 17',
+    'M4 1.5v6.5a4 4 0 0 0 4 4h12',
+  ]);
+  // Thread candidate carries only its single-line name and age, so the centered mark points straight at the name.
+  expect(threadRow.findAll((n: any) => n.type === 'Text').map((n: any) => n.props.children)).toEqual([
+    'thread-glyph-center',
+    '1m',
+  ]);
+
+  // Repository chat row keeps its existing centered layout with # icon and repository subtitle.
+  const repoRow = row('channel-suggestion-ops');
+  expect(repoRow.props.alignItems).toBe('center');
+  expect(repoRow.findAll((n: any) => n.type === 'Icon.Hash')).toHaveLength(1);
+  expect(repoRow.findAllByType(ThreadGlyph)).toHaveLength(0);
+  expect(repoRow.findAll((n: any) => n.type === 'Text').map((n: any) => n.props.children)).toEqual([
+    'ops',
+    'lunchboxfortwo/ops',
+  ]);
+});

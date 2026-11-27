@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, ListItem, XStack, YStack } from 'tamagui';
 import { X } from 'lucide-react-native';
-import { Btn, Glyph, HEIGHT, T, typeStyle, useTextSize } from '@/ui/grammar';
+import { Btn, Glyph, HEIGHT, T } from '@/ui/grammar';
 
 /**
  * The composer's suggestion card (build spec → Composer and suggestions): a
@@ -12,7 +12,6 @@ import { Btn, Glyph, HEIGHT, T, typeStyle, useTextSize } from '@/ui/grammar';
 
 /** One row's fixed height, also the unit of a menu's scroll window. */
 export const SUGGESTION_ROW_HEIGHT = HEIGHT.sheetRow;
-const MARK_SIZE = 28;
 
 type IconComponent = React.ComponentProps<typeof Glyph>['icon'];
 
@@ -50,16 +49,13 @@ export function SuggestionRow({ mark, name, nameAccent = false, detail, trailing
     selected: boolean; first: boolean; label: string; role?: 'button' | 'checkbox' | 'switch';
     state: { selected?: boolean; checked?: boolean }; onPress: () => void; testID: string;
 }) {
-    const nameLine = typeStyle('metaStrong', useTextSize()).lineHeight;
-    const markSlot = mark ? Math.max(MARK_SIZE, nameLine) : nameLine;
-    const alignToName = Boolean(mark && detail);
-    const nameInset = alignToName ? Math.max(0, (markSlot - nameLine) / 2) : 0;
     return (
         <ListItem
             minHeight={HEIGHT.sheetRow}
             height={SUGGESTION_ROW_HEIGHT}
             padding="0"
             paddingHorizontal={mark ? "1" : "0"}
+            gap="3"
             alignItems="center"
             justifyContent="flex-start"
             borderRadius="sm"
@@ -72,23 +68,12 @@ export function SuggestionRow({ mark, name, nameAccent = false, detail, trailing
             accessibilityState={state}
             testID={testID}
         >
-            <XStack flex={1} minWidth={0} gap="3" alignItems={alignToName ? 'flex-start' : 'center'}>
-                {mark ? (
-                    <YStack width={MARK_SIZE} height={markSlot} flexShrink={0} alignItems="center" justifyContent="center" testID={`${testID}-mark`}>
-                        {mark}
-                    </YStack>
-                ) : null}
-                <YStack flex={1} minWidth={0}>
-                    {nameInset > 0 ? <YStack height={nameInset} testID={`${testID}-name-inset`} /> : null}
-                    <T v="metaStrong" color={nameAccent ? 'needsYou' : 'ink'} numberOfLines={1}>{name}</T>
-                    {detail ? <T v="meta" color="secondary" numberOfLines={1}>{detail}</T> : null}
-                </YStack>
-                {trailing ? (
-                    <YStack height={alignToName ? markSlot : undefined} flexShrink={0} justifyContent="center">
-                        {trailing}
-                    </YStack>
-                ) : null}
-            </XStack>
+            {mark ? <YStack width={28} alignItems="center">{mark}</YStack> : null}
+            <YStack flex={1} minWidth={0}>
+                <T v="metaStrong" color={nameAccent ? 'needsYou' : 'ink'} numberOfLines={1}>{name}</T>
+                {detail ? <T v="meta" color="secondary" numberOfLines={1}>{detail}</T> : null}
+            </YStack>
+            {trailing}
         </ListItem>
     );
 }
