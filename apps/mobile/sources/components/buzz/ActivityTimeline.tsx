@@ -519,6 +519,7 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
       <ToolOutputSheet
         command={sheetLine?.command}
         input={sheetLine?.input}
+        summary={sheetLine?.summary}
         receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
         rawOutput={sheetLine?.rawOutput}
@@ -603,6 +604,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
       <ToolOutputSheet
         command={sheetLine?.command}
         input={sheetLine?.input}
+        summary={sheetLine?.summary}
         receipt={sheetLine?.receipt}
         detail={sheetLine?.detail}
         rawOutput={sheetLine?.rawOutput}

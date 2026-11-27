@@ -32,6 +32,7 @@ export type ToolOutputSheetProps = {
   subtitle?: string;
   command?: string | null;
   input?: string | null;
+  summary?: string | null;
   receipt?: string | null;
   detail: string | null | undefined;
   rawOutput?: string | null;
@@ -96,6 +97,7 @@ export function ToolOutputSheet({
   subtitle,
   command,
   input,
+  summary,
   receipt,
   detail,
   rawOutput,
@@ -132,6 +134,7 @@ export function ToolOutputSheet({
         subtitle,
         command,
         input,
+        summary,
         receipt,
         detail,
         rawOutput,
@@ -154,6 +157,7 @@ export function ToolOutputSheet({
       subtitle,
       command,
       input,
+      summary,
       receipt,
       detail,
       rawOutput,

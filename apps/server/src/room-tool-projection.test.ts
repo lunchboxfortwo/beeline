@@ -147,7 +147,13 @@ describe('stored tool output disclosure', () => {
                 },
               ],
             },
-          ]),
+          ]).replace(
+            /\]$/,
+            `,${[
+              // Exact JSON numbers outside 64-bit PostgreSQL bigint range (kept verbatim so JSONB stores huge numeric values)
+              '{"kind":"tool","title":"Out-of-range bigint","status":"completed","exitCode":99999999999999999999999999999,"omittedCount":9223372036854775808,"plan":{"items":"not-an-array"},"files":[{"path":"apps/server/src/bigint-overflow.ts","addedLines":99999999999999999999999999999,"removedLines":-99999999999999999999999999999,"line":1e30,"endLine":99999999999999999999}]}',
+            ].join(',')}]`,
+          ),
         ],
       );
 
@@ -158,7 +164,7 @@ describe('stored tool output disclosure', () => {
 
       const list = await readRoomTools(db, { roomId: room, anchor: message }, viewer);
       const items = list.messages[0]!.activity!;
-      expect(items).toHaveLength(4);
+      expect(items).toHaveLength(5);
 
       // Item 0: sanitized display path, line/endLine preserved, hasDetail=false, no toolOutput
       expect(items[0]).toMatchObject({
@@ -197,10 +203,19 @@ describe('stored tool output disclosure', () => {
         hasDetail: false,
       });
 
+      // Item 4: JSON numbers outside 64-bit PostgreSQL bigint range dropped cleanly without aborting cast
+      expect(items[4]).toEqual({
+        kind: 'tool',
+        title: 'Out-of-range bigint',
+        status: 'completed',
+        files: [{ path: 'apps/server/src/bigint-overflow.ts' }],
+        hasDetail: false,
+      });
+
       // Full SQL response ALSO sanitizes display paths & URI secrets while leaving patch hunks faithful!
       const full = await readRoomTools(db, { roomId: room, anchor: message, messageId: message }, viewer);
       const fullItems = full.messages[0]!.activity!;
-      expect(fullItems).toHaveLength(4);
+      expect(fullItems).toHaveLength(5);
       expect(fullItems[0]!.files?.[0]?.path).toBe('skills/beeline-connecting-services/SKILL.md');
       expect(fullItems[1]!.files?.[0]?.path).toBe('apps/mobile/ChatTree.tsx');
       // Patch hunk kept faithful (not rewritten by display prefix stripper)

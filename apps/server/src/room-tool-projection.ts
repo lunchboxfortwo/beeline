@@ -29,20 +29,20 @@ const PG_INT_MIN = -2147483648;
 const PG_INT_MAX = 2147483647;
 
 function safeSignedIntSql(expr: string): string {
-  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^-?[0-9]{1,10}$' AND (${expr}#>>'{}')::bigint BETWEEN ${PG_INT_MIN} AND ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END`;
+  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^-?[0-9]{1,10}$' THEN CASE WHEN (${expr}#>>'{}')::bigint BETWEEN ${PG_INT_MIN} AND ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END ELSE NULL END`;
 }
 
 function safeNonNegativeIntSql(expr: string): string {
-  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^[0-9]{1,10}$' AND (${expr}#>>'{}')::bigint <= ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END`;
+  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^[0-9]{1,10}$' THEN CASE WHEN (${expr}#>>'{}')::bigint <= ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END ELSE NULL END`;
 }
 
 function safePositiveIntSql(expr: string): string {
-  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^[1-9][0-9]{0,9}$' AND (${expr}#>>'{}')::bigint <= ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END`;
+  return `CASE WHEN jsonb_typeof(${expr})='number' AND (${expr}#>>'{}') ~ '^[1-9][0-9]{0,9}$' THEN CASE WHEN (${expr}#>>'{}')::bigint <= ${PG_INT_MAX} THEN (${expr}#>>'{}')::integer ELSE NULL END ELSE NULL END`;
 }
 
 /**
  * Cheap bounded presence expression in SQL (no list-time diff parsing, every
- * JSONB shape guarded with `jsonb_typeof` before array expansion or casts).
+ * JSONB shape guarded with `CASE WHEN jsonb_typeof(...)` before array expansion or casts).
  * True when the stored item holds server-side detail withheld or clipped from the list row.
  */
 const hasStoredDetailSql = `COALESCE((
@@ -61,25 +61,20 @@ const hasStoredDetailSql = `COALESCE((
       AND (jsonb_typeof(item->'command')<>'string' OR length(btrim(item->>'command'))=0)
     )
   )
-  OR (jsonb_typeof(item->'blocks')='array' AND jsonb_array_length(item->'blocks')>0)
-  OR (
-    jsonb_typeof(item->'files')='array'
-    AND (
-      jsonb_array_length(item->'files')>8
-      OR EXISTS(
-        SELECT 1 FROM jsonb_array_elements(item->'files') f
-        WHERE jsonb_typeof(f)='object' AND (
-          (jsonb_typeof(f->'diff')='string' AND length(btrim(f->>'diff'))>0)
-          OR (jsonb_typeof(f->'path')='string' AND length(f->>'path')>260)
-        )
+  OR CASE WHEN jsonb_typeof(item->'blocks')='array' THEN jsonb_array_length(item->'blocks')>0 ELSE false END
+  OR CASE WHEN jsonb_typeof(item->'files')='array' THEN (
+    jsonb_array_length(item->'files')>8
+    OR EXISTS(
+      SELECT 1 FROM jsonb_array_elements(item->'files') f
+      WHERE jsonb_typeof(f)='object' AND (
+        (jsonb_typeof(f->'diff')='string' AND length(btrim(f->>'diff'))>0)
+        OR (jsonb_typeof(f->'path')='string' AND length(f->>'path')>260)
       )
     )
-  )
-  OR (
-    jsonb_typeof(item->'plan')='object'
-    AND jsonb_typeof(item->'plan'->'items')='array'
-    AND jsonb_array_length(item->'plan'->'items')>0
-  )
+  ) ELSE false END
+  OR CASE WHEN jsonb_typeof(item->'plan')='object' THEN (
+    CASE WHEN jsonb_typeof(item->'plan'->'items')='array' THEN jsonb_array_length(item->'plan'->'items')>0 ELSE false END
+  ) ELSE false END
   OR jsonb_typeof(item->'requestedBy')='object'
 ), false)`;
 

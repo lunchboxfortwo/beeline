@@ -375,6 +375,7 @@ export function buildToolSheetPresentation(params: {
   subtitle?: string;
   command?: string | null;
   input?: string | null;
+  summary?: string | null;
   receipt?: string | null;
   detail?: string | null;
   rawOutput?: string | null;
@@ -775,11 +776,19 @@ export function buildToolSheetPresentation(params: {
     });
   }
 
-  // Empty / observed exit 0 / terminal-only / failed-empty
+  // Empty / observed exit 0 / terminal-only / summary-only / failed-empty
   if (!cleanedSource.trim()) {
+    const shownSummary =
+      !params.outputHidden && params.summary?.trim()
+        ? sanitizeIdsInText(params.summary.trim(), params.lookup)
+        : undefined;
+    const summaryAddsDetail = Boolean(
+      shownSummary && shownSummary.replace(/\s+/g, ' ') !== title.replace(/\s+/g, ' '),
+    );
     if (params.exitCode === 0 && params.command?.trim()) {
       return finalize({
         blocks: [
+          ...(summaryAddsDetail ? [{ kind: 'caption' as const, text: shownSummary! }] : []),
           {
             kind: 'empty',
             heading: 'Exited (0) · no output',
@@ -787,8 +796,19 @@ export function buildToolSheetPresentation(params: {
           },
         ],
         autoExpandZone2: true,
+        zone1ShowsMonoVerbatim: summaryAddsDetail,
         silentCommandOnly: true,
         rawLabel: 'Command',
+      });
+    }
+    if (summaryAddsDetail) {
+      return finalize({
+        blocks: [{ kind: 'caption', text: shownSummary! }],
+        autoExpandZone2: Boolean(params.command?.trim() || params.input?.trim()),
+        zone1ShowsMonoVerbatim: true,
+        silentCommandOnly: Boolean(params.command?.trim() && !params.input?.trim()),
+        rawLabel: params.command?.trim() ? 'Command' : 'Raw arguments',
+        rawTextOverride: rawText || shownSummary,
       });
     }
     const heading = params.signal

@@ -184,4 +184,67 @@ describe('universal ACP twin-item fetch & missing-item handling', () => {
 
     await act(async () => renderer.unmount());
   });
+
+  it('opens a clipped-summary row and renders the full restored summary in the sheet when it is the only unseen detail', async () => {
+    toolReader.mockReset();
+    const roomId = '22222222-2222-4222-8222-222222222222';
+    const anchor = 'f'.repeat(64);
+    const author = { pubkey: 'b'.repeat(64), kind: 'agent' as const, name: 'Worker' };
+    const fullSummary = `Checked repository status and summarized findings ${'s'.repeat(210)} END_RESTORED_SUMMARY`;
+    const clippedSummary = fullSummary.slice(0, 200);
+    const listMessage = {
+      id: anchor,
+      text: '',
+      createdAt: 1,
+      presentation: 'activity' as const,
+      author,
+      activity: [
+        {
+          kind: 'tool' as const,
+          title: 'Summary clipped',
+          status: 'completed',
+          summary: clippedSummary,
+          hasDetail: true,
+          toolOutput: { roomId, anchor, messageId: anchor, itemIndex: 0, hasDetail: true },
+        },
+      ],
+    };
+
+    toolReader.mockResolvedValueOnce({ roomId, messages: [listMessage] });
+    const renderer = render(
+      <TurnStepsLine
+        items={[{ kind: 'tool', id: 'agg-summary', title: '1 step', toolGroup: { roomId, anchor, count: 1 } }]}
+      />,
+    );
+    await act(async () => expandRun(renderer, 'agg-summary'));
+
+    const row = renderer.root.findByProps({ testID: `tool-ledger-line-${anchor}:0` });
+    const pressable = row.findAll((n: any) => n.type === 'XStack' && typeof n.props.onPress === 'function')[0];
+    expect(pressable).toBeTruthy();
+
+    toolReader.mockResolvedValueOnce({
+      roomId,
+      messages: [
+        {
+          ...listMessage,
+          activity: [
+            {
+              kind: 'tool' as const,
+              title: 'Summary clipped',
+              status: 'completed',
+              summary: fullSummary,
+            },
+          ],
+        },
+      ],
+    });
+    await act(async () => pressable.props.onPress());
+
+    const caption = renderer.root.findByProps({ testID: 'tool-output-caption-0' });
+    expect(caption.props.children).toBe(fullSummary);
+    expect(renderedText(renderer)).toContain('END_RESTORED_SUMMARY');
+    expect(renderedText(renderer)).not.toContain('No output captured for this step.');
+
+    await act(async () => renderer.unmount());
+  });
 });
