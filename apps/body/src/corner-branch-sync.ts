@@ -70,14 +70,13 @@ export async function syncCornerBranch(input: {
   if (local === remote || (await contains(local, remote))) return 'unchanged';
   // Exclude node_modules only from the untracked scan. Prepared dependencies
   // can be symlinks, which a directory-only gitignore rule does not match.
+  // Keep file paths so a symlink in a removed workspace remains visible.
   const tracked = await git(['status', '--porcelain=v1', '--untracked-files=no']);
   const untracked = await git([
     'ls-files',
     '--others',
     '--exclude-standard',
     '--exclude=node_modules/',
-    '--directory',
-    '--no-empty-directory',
     '-z',
   ]);
   const dirtyPaths = tracked.split('\n').filter(Boolean).map((entry) => entry.slice(3));

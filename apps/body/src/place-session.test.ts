@@ -714,7 +714,7 @@ async function branchRefreshFixture() {
     await git(other, 'push', 'origin', branch);
     return (await git(other, 'rev-parse', 'HEAD')).stdout.trim();
   }
-  return { ...f, root, folder, branch, git, push };
+  return { ...f, root, folder, other, branch, git, push };
 }
 
 it("brings another agent's push into an existing thread checkout before the next turn", async () => {
@@ -758,6 +758,35 @@ it('refreshes a reviewer checkout on the next wake with dependency install outpu
     expect((await git(folder, 'rev-parse', 'HEAD')).stdout.trim()).toBe(head);
     expect(await readFile(join(folder, 'node_modules', 'package.js'), 'utf8')).toBe('root dependency');
     expect(await readFile(join(localInstall, 'package.js'), 'utf8')).toBe('workspace dependency');
+  } finally {
+    await f.session.dispose();
+  }
+});
+
+it('refreshes a reviewer checkout with a dependency symlink left by a removed workspace', async () => {
+  const f = await branchRefreshFixture();
+  const { root, folder, other, git } = f;
+  const wake = { ...f.item, reason: 'corner_review_dispatch' };
+  const dependencyLink = join(folder, 'packages', 'sample', 'node_modules');
+  const store = join(root, 'dependencies');
+  await mkdir(store);
+  await writeFile(join(store, 'package.js'), 'workspace dependency');
+  await symlink(store, dependencyLink, 'dir');
+  await git(other, 'rm', 'packages/sample/index.js');
+  const removal = await f.push('remove sample workspace');
+
+  await f.session.start(wake);
+  try {
+    await f.session.deliver(wake, []);
+    expect((await git(folder, 'rev-parse', 'HEAD')).stdout.trim()).toBe(removal);
+    expect(await readFile(join(dependencyLink, 'package.js'), 'utf8')).toBe('workspace dependency');
+
+    const head = await f.push('new head after workspace removal');
+    await f.session.deliver({ ...wake, id: 'next-review', turnRequestId: 'next-review' }, []);
+
+    expect((await git(folder, 'rev-parse', 'HEAD')).stdout.trim()).toBe(head);
+    expect(f.prompt.mock.calls[1]?.[1]).not.toContain('could not be refreshed');
+    expect(await readFile(join(dependencyLink, 'package.js'), 'utf8')).toBe('workspace dependency');
   } finally {
     await f.session.dispose();
   }
