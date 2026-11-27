@@ -9,7 +9,6 @@ import type { DesktopArtifactSelection } from '@/buzz/desktop-artifact-pane';
 import { artifactFormat, wrapArtifactMarkup } from '@/buzz/artifact';
 import {
   fetchArtifactBytes,
-  fetchArtifactText,
   subscribeArtifactBytesPurge,
   openArtifactInBrowserOrExplain,
 } from '@/buzz/artifact-link';
@@ -19,12 +18,12 @@ import { ArtifactText } from '@/components/buzz/ArtifactMedia';
 import { useCopiedToast } from '@/components/buzz/CopiedToast';
 import { ZoomableArtifactImage } from '@/components/buzz/ZoomableArtifactImage';
 import { ArtifactPdfView } from '@/components/buzz/ArtifactPdfView';
-import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
+import { ArtifactMarkdown, ArtifactMarkdownBody } from './ArtifactMarkdown';
 import { RunnableArtifact } from './RunnableArtifact';
-import { DocumentFrame, TypedView } from '@/ui/grammar';
+import { DocumentFrame } from '@/ui/grammar';
 import {
   useFilePaging, ViewerAction, ViewerBody, ViewerHeader, ViewerNotice, ViewerPager, ViewerPlaceholder,
-  ViewerPosition, ViewerScreen, ViewerScroll,
+  ViewerPosition, ViewerScreen,
 } from '@/ui/screens/viewers/ViewerChrome';
 
 /**
@@ -100,13 +99,11 @@ export function DesktopArtifactPane({
       </ViewerHeader>
       <ViewerBody key={attachment?.url}>
         {markdown ? (
-          <ViewerScroll testID="desktop-artifact-markdown">
-            <TypedView view={MonoMarkdown} markdown={markdown.text} document />
-          </ViewerScroll>
+          <ArtifactMarkdownBody markdown={markdown.text} testID="desktop-artifact-markdown" />
         ) : !attachment ? null : format === 'game' ? (
           <RunnableArtifact key={runKey} attachment={attachment} />
         ) : format === 'markdown' ? (
-          <DesktopArtifactMarkdown attachment={attachment} />
+          <ArtifactMarkdown attachment={attachment} testIDPrefix="desktop-artifact" />
         ) : format === 'html' || format === 'svg' ? (
           <DesktopArtifactFrame attachment={attachment} format={format} />
         ) : format === 'image' ? (
@@ -167,33 +164,4 @@ export function DesktopArtifactFrame({
     return <DocumentFrame srcDoc={html} sandbox="" title={attachment.name} testID="desktop-artifact-frame" paper />;
   }
   return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
-}
-
-function DesktopArtifactMarkdown({ attachment }: { attachment: AttachmentReference }) {
-  const recovery = useArtifactRecoveryGeneration();
-  const [markdown, setMarkdown] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let live = true;
-    const controller = new AbortController();
-    const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); setMarkdown(null); setFailed(true); });
-    setMarkdown(null); setFailed(false);
-    void fetchArtifactText(attachment, { signal: controller.signal })
-      .then((text) => {
-        if (live && !controller.signal.aborted) setMarkdown(text);
-      })
-      .catch((cause) => {
-        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
-      });
-    return () => {
-      live = false; controller.abort(); stopPurge();
-    };
-  }, [attachment, recovery]);
-  if (failed) return <ViewerNotice title="Page unavailable" testID="desktop-artifact-failed" />;
-  if (markdown == null) return <ViewerPlaceholder text="Loading…" testID="desktop-artifact-loading" />;
-  return (
-    <ViewerScroll testID="desktop-artifact-markdown">
-      <TypedView view={MonoMarkdown} markdown={markdown} document />
-    </ViewerScroll>
-  );
 }

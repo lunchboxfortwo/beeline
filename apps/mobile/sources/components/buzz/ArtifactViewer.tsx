@@ -2,19 +2,19 @@ import { appReadErrorCopy } from '@/buzz/app-error-copy';
 import { useArtifactRecoveryGeneration } from '@/buzz/use-artifact-recovery';
 import React, { useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import { FillView, TypedView } from '@/ui/grammar';
+import { FillView } from '@/ui/grammar';
 import { Copy as CopyIcon, RefreshCw, Share2 } from 'lucide-react-native';
 import type { AttachmentReference } from '@beeline/buzz-client';
 
 import { artifactFormat, createInitialLoadGuard, wrapArtifactMarkup } from '@/buzz/artifact';
 import { authorKindLine } from '@/buzz/artifact-group';
-import { artifactPdfLocalUri, fetchArtifactBytes, fetchArtifactText, openArtifactInBrowserOrExplain, subscribeArtifactBytesPurge } from '@/buzz/artifact-link';
+import { artifactPdfLocalUri, fetchArtifactBytes, openArtifactInBrowserOrExplain, subscribeArtifactBytesPurge } from '@/buzz/artifact-link';
 import { artifactWebViewProps } from '@/components/buzz/artifact-webview';
 import { useSandboxWebView, useSandboxWebViewStatus } from '@/components/buzz/sandbox-webview';
 import { ArtifactText } from '@/components/buzz/ArtifactMedia';
 import { ZoomableArtifactImage } from '@/components/buzz/ZoomableArtifactImage';
 import { ArtifactPdfView } from '@/components/buzz/ArtifactPdfView';
-import { MonoMarkdown } from '@/components/buzz/MonoMarkdown';
+import { ArtifactMarkdown, ArtifactMarkdownBody } from './ArtifactMarkdown';
 import { CodeHighlighter } from '@/components/buzz/CodeHighlighter';
 import type { CodeDocument } from '@/buzz/code-document';
 import * as Clipboard from 'expo-clipboard';
@@ -140,9 +140,9 @@ export function ArtifactViewerScreen({
         ) : format === 'notice' ? (
           <ViewerPlaceholder text={notice!.message} testID="artifact-viewer-notice" />
         ) : markdown ? (
-          <ArtifactViewerMarkdownBody markdown={markdown.text} />
+          <ArtifactMarkdownBody markdown={markdown.text} testID="artifact-viewer-markdown" />
         ) : format === 'markdown' ? (
-          <ArtifactViewerMarkdown attachment={attachment!} />
+          <ArtifactMarkdown attachment={attachment!} testIDPrefix="artifact-viewer" />
         ) : format === 'image' ? (
           <ZoomableArtifactImage
             key={attachment!.url}
@@ -244,37 +244,4 @@ export function ArtifactViewerSandbox({
     );
   }
   return <ViewerPlaceholder text="Loading…" testID="artifact-viewer-loading" />;
-}
-
-function ArtifactViewerMarkdown({ attachment }: { attachment: AttachmentReference }) {
-  const recovery = useArtifactRecoveryGeneration();
-  const [markdown, setMarkdown] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let live = true;
-    const controller = new AbortController();
-    const stopPurge = subscribeArtifactBytesPurge(attachment, () => { controller.abort(); setMarkdown(null); setFailed(true); });
-    setMarkdown(null); setFailed(false);
-    void fetchArtifactText(attachment, { signal: controller.signal })
-      .then((text) => {
-        if (live && !controller.signal.aborted) setMarkdown(text);
-      })
-      .catch((cause) => {
-        if (live && !controller.signal.aborted) setFailed(Boolean(appReadErrorCopy(cause)));
-      });
-    return () => {
-      live = false; controller.abort(); stopPurge();
-    };
-  }, [attachment, recovery]);
-  if (failed) return <ViewerNotice title="Page unavailable" testID="artifact-viewer-failed" />;
-  if (markdown == null) return <ViewerPlaceholder text="Loading…" testID="artifact-viewer-loading" />;
-  return <ArtifactViewerMarkdownBody markdown={markdown} />;
-}
-
-function ArtifactViewerMarkdownBody({ markdown }: { markdown: string }) {
-  return (
-    <ViewerScroll testID="artifact-viewer-markdown">
-      <TypedView view={MonoMarkdown} markdown={markdown} document />
-    </ViewerScroll>
-  );
 }
