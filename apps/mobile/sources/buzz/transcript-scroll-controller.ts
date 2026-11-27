@@ -47,12 +47,12 @@ export type TranscriptScrollCancelReason = 'replaced' | 'drag' | 'cancelled';
 
 /** The calls a platform list answers. Only the adapters below implement it. */
 export type TranscriptScrollList = {
-  currentOffset?(): number | null;
   isRowVisible?(rowId: string): boolean | null;
   contextFitsViewport?(contextRowId: string, unreadRowId: string): boolean;
   toNewest(): void;
   /** False when the list cannot reach the row yet (not measured or not drawn). */
-  toRow(index: number, rowId: string, align: TranscriptRowAlign): boolean;
+  // A no-op is a reached row alignment that could not move the viewport.
+  toRow(index: number, rowId: string, align: TranscriptRowAlign): boolean | 'no-op';
   /** Scroll near a row the list could not reach, so its neighbours measure. */
   toEstimatedRow(index: number): void;
   toOffset(offset: number): void;
@@ -250,11 +250,11 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
         target = contextIndex;
       }
     }
-    const beforeOffset = list.currentOffset?.() ?? null;
     const scrollVisibilitySeq = visibilitySeq;
     const scrollAttempt = ++current.scrollAttempt;
     current.lastScrollVisibilitySeq = scrollVisibilitySeq;
-    if (!list.toRow(target, rows[target]!.id, align)) {
+    const result = list.toRow(target, rows[target]!.id, align);
+    if (!result) {
       // Scroll near the row so the list draws and measures it. A list that
       // has nothing left to draw sends no later pass by itself, and a row
       // request waiting for one never lands.
@@ -266,15 +266,14 @@ export function createTranscriptScrollController<Row extends TranscriptScrollRow
       current.scrolled = true;
       options.onScrolled?.(destination, rowId);
     }
-    if (!list.currentOffset && !list.isRowVisible) return;
+    // A native scroll may still be in flight when the next JS frame runs.
+    // Only a proven no-op can reuse the current viewport.
+    if (result !== 'no-op') return;
     schedule(() => {
       if (active !== current || current.scrollAttempt !== scrollAttempt ||
           visibilitySeq !== scrollVisibilitySeq || rows !== options.rows()) return;
       let visible = list.isRowVisible?.(rowId) ?? null;
-      // A clamped scroll can leave viewability silent. Its previous report
-      // still describes this viewport only if the offset and rows survived.
-      if (visible === null && beforeOffset !== null && list.currentOffset?.() === beforeOffset &&
-          visibleRowsOf === rows) {
+      if (visible === null && visibleRowsOf === rows) {
         visible = options.rowIndex(destination, visibleRows) >= 0;
       }
       if (visible) land(current, rowId);
@@ -466,6 +465,18 @@ type PhoneList = {
   scrollToOffset(params: { offset: number; animated: boolean }): void;
 };
 
+type PhoneRowLayout = { y: number; height: number };
+type PhoneListGeometry = {
+  row(id: string): PhoneRowLayout | undefined;
+  viewportHeight(): number;
+  contentHeight(): number;
+};
+
+function phoneTargetOffset(row: PhoneRowLayout, viewport: number, content: number, position: number) {
+  const target = row.y - position * (viewport - row.height);
+  return Math.max(0, Math.min(target, content - viewport));
+}
+
 /**
  * The inverted phone FlatList. Offset 0 is the newest end, and view position 1
  * puts a row's start at the top of the viewport. Pass `scrollToIndexFailed`
@@ -478,15 +489,29 @@ export function phoneTranscriptList(
   getList: () => PhoneList | null,
   isMeasured: (rowId: string) => boolean,
   getOffsetRef?: () => { current: number },
-  isRowVisible?: (rowId: string) => boolean | null,
+  geometry?: PhoneListGeometry,
 ): TranscriptScrollList & {
   scrollToIndexFailed(info: { averageItemLength: number }): void;
 } {
   let failed = false;
   let averageItemLength = 0;
   return {
-    currentOffset: () => getOffsetRef?.().current ?? null,
-    isRowVisible,
+    isRowVisible(rowId) {
+      const row = geometry?.row(rowId);
+      const viewport = geometry?.viewportHeight();
+      const offset = getOffsetRef?.().current;
+      if (!row || !viewport || offset === undefined) return null;
+      return row.y + row.height > offset && row.y < offset + viewport;
+    },
+    contextFitsViewport(contextId, unreadId) {
+      const context = geometry?.row(contextId);
+      const unread = geometry?.row(unreadId);
+      const viewport = geometry?.viewportHeight();
+      const content = geometry?.contentHeight();
+      if (!context || !unread || !viewport || !content) return true;
+      const offset = phoneTargetOffset(context, viewport, content, 1);
+      return context.height < viewport && unread.y + unread.height > offset && unread.y < offset + viewport;
+    },
     toNewest() {
       getList()?.scrollToOffset({ offset: 0, animated: false });
     },
@@ -494,8 +519,18 @@ export function phoneTranscriptList(
       const list = getList();
       if (!list) return false;
       failed = false;
-      list.scrollToIndex({ index, viewPosition: align === 'top' ? 1 : 0.5, animated: false });
-      return !failed && isMeasured(rowId);
+      const viewPosition = align === 'top' ? 1 : 0.5;
+      const row = geometry?.row(rowId);
+      const viewport = geometry?.viewportHeight() ?? 0;
+      const content = geometry?.contentHeight() ?? 0;
+      const offset = getOffsetRef?.().current;
+      list.scrollToIndex({ index, viewPosition, animated: false });
+      if (failed || !isMeasured(rowId)) return false;
+      if (!geometry) return true;
+      if (!row || viewport <= 0 || content <= 0) return false;
+      if (content <= viewport) return 'no-op';
+      const target = phoneTargetOffset(row, viewport, content, viewPosition);
+      return offset !== undefined && Math.abs(target - offset) <= 1 ? 'no-op' : true;
     },
     toEstimatedRow(index) {
       // Variable-height rows cannot provide getItemLayout. Scroll near the
@@ -528,7 +563,7 @@ type DesktopNode = {
 };
 
 type DesktopRowNode = {
-  scrollIntoView(options: { block: 'start' | 'center' }): void;
+  scrollIntoView(options: { block: 'start' | 'center'; behavior: 'instant' }): void;
   getBoundingClientRect?(): { top: number; bottom?: number };
 };
 
@@ -538,7 +573,6 @@ export function desktopTranscriptList(
   getRowNode: (rowId: string) => DesktopRowNode | undefined,
 ): TranscriptScrollList {
   return {
-    currentOffset: () => getScrollNode()?.scrollTop ?? null,
     isRowVisible(rowId) {
       const viewport = getScrollNode()?.getBoundingClientRect?.();
       const row = getRowNode(rowId)?.getBoundingClientRect?.();
@@ -558,8 +592,10 @@ export function desktopTranscriptList(
     toRow(_index, rowId, align) {
       const row = getRowNode(rowId);
       if (!row) return false;
-      row.scrollIntoView({ block: align === 'top' ? 'start' : 'center' });
-      return true;
+      const node = getScrollNode();
+      const before = node?.scrollTop;
+      row.scrollIntoView({ block: align === 'top' ? 'start' : 'center', behavior: 'instant' });
+      return node && node.scrollTop === before ? 'no-op' : true;
     },
     toEstimatedRow() {},
     toOffset(offset) {

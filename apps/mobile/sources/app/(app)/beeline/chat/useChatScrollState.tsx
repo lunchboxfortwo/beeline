@@ -67,12 +67,10 @@ export function useChatScrollState([
       () => flatListRef.current,
       (rowId) => phoneRowLayouts.has(phoneRowKey(rowId)),
       readPhoneScrollOffsetRef,
-      (rowId) => {
-        const layout = phoneRowLayouts.get(phoneRowKey(rowId));
-        const viewportHeight = readPhoneListHeightRef().current;
-        if (!layout || !viewportHeight) return null;
-        const offset = readPhoneScrollOffsetRef().current;
-        return layout.y + layout.height > offset && layout.y < offset + viewportHeight;
+      {
+        row: (id) => phoneRowLayouts.get(phoneRowKey(id)),
+        viewportHeight: () => readPhoneListHeightRef().current,
+        contentHeight: () => readPhoneContentHeightRef().current,
       },
     ),
   );

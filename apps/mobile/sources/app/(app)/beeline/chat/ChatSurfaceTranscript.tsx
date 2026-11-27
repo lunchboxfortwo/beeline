@@ -254,6 +254,7 @@ export const ChatSurfaceTranscript = React.memo(function ChatSurfaceTranscript({
                   onLayout={(event) => {
                     phoneListHeightRef.current = event.nativeEvent.layout.height;
                     phoneUnderfill.observeListHeight(event.nativeEvent.layout.height);
+                    if (scrollController.isLanding()) scrollController.observeLayout();
                   }}
                   onContentSizeChange={(_width, height) => {
                     transcriptPositions.observeContentSize(height);
