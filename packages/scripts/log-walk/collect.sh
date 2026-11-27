@@ -23,12 +23,15 @@ flyctl="${LOG_COLLECT_FLYCTL:-flyctl}"
 window="${LOG_COLLECT_WINDOW_SECONDS:-600}"
 grace="${LOG_COLLECT_KILL_AFTER_SECONDS:-30}"
 pause="${LOG_COLLECT_PAUSE_SECONDS:-5}"
+max_age=900
+started_at="$(date +%s)"
 
 stream_logs() {
   local failure status
   # Pass stdout through fd 3 and classify stderr without storing Fly's response.
+  # Keep Fly in the worker's process group so the parent can stop it on failure.
   failure=$(
-    CI=1 FLY_ACCESS_TOKEN="$token" timeout -k "$grace" "$window" "$flyctl" logs -a "$app" 2>&1 >&3 3>&- |
+    CI=1 FLY_ACCESS_TOKEN="$token" timeout --foreground -k "$grace" "$window" "$flyctl" logs -a "$app" 2>&1 >&3 3>&- |
       awk '
         {
           line = tolower($0)
@@ -51,28 +54,97 @@ stream_logs() {
   esac
 }
 
+latest_raw_timestamp() {
+  local day timestamp
+  local days=("$dir"/20*.log)
+  for (( day=${#days[@]} - 1; day >= 0; day-- )); do
+    timestamp="$(tac -- "${days[day]}" | awk '$1 ~ /^20[0-9][0-9]-/ { print $1; exit }')"
+    if [[ -n $timestamp ]]; then
+      printf '%s\n' "$timestamp"
+      return
+    fi
+  done
+}
+
+watch_freshness() {
+  local first_check=true last='' last_at="$started_at" timestamp age remaining
+  while true; do
+    timestamp="$(latest_raw_timestamp)"
+    if [[ -n $timestamp && $timestamp != "$last" ]]; then
+      last="$timestamp"
+      last_at="$(date -u -d "$last" +%s)" || return 1
+    fi
+    age=$(( $(date +%s) - last_at ))
+    remaining=$(( max_age - age + 1 ))
+    if (( remaining <= 0 )); then
+      if [[ $first_check == false ]]; then
+        printf 'Raw logs for %s are stale: %s seconds without a fresh entry (limit %s seconds, last timestamp: %s).\n' \
+          "$app" "$age" "$max_age" "${last:-none}" >&2
+        return 1
+      fi
+      # Give Fly up to 30 seconds to catch up after starting with stale files.
+      remaining="$(awk -v window="$window" 'BEGIN { print (window > 0 && window < 30 ? window : 30) }')"
+    fi
+    first_check=false
+    sleep "$remaining" || return 1
+  done
+}
+
 # mawk buffers piped input unless told otherwise; gawk has no such flag.
 awk_flags=()
 awk -W version 2>&1 | grep -q mawk && awk_flags=(-W interactive)
-while true; do
-  # Last timestamp already written, so a reconnect's replayed buffer is skipped
-  # (lines in that same second too, or each reconnect would duplicate them).
-  days=("$dir"/20*.log)  # Day files sort by name, so the last is the newest.
-  last="$(tail -qn1 "${days[-1]}" 2>/dev/null | cut -d' ' -f1)"
-  # Reconnect every window in case the stream hangs silently. flyctl can catch
-  # SIGTERM and never exit (2026-10-31: wedged for two days), so -k kills it.
-  stream_logs 3>&1 \
-    | sed -u 's/\x1b\[[0-9;]*m//g' \
-    | awk "${awk_flags[@]}" -v dir="$dir" -v last="$last" '
-        $1 ~ /^20[0-9][0-9]-/ { if ($1 <= last) next; f = dir "/" substr($1, 1, 10) ".log" }
-        f == "" { next }
-        # Lines without a timestamp (proxy error details) go to the current day file.
-        { print >> f; fflush(f) }'
-  result=${PIPESTATUS[0]}
-  if [[ $result == 77 ]]; then
-    auth_failed 'Fly rejected the stored deploy token for this app'
-  fi
-  # Keep 8 days.
-  find "$dir" -name '*.log' -mtime +8 -delete
-  sleep "$pause"
-done
+shopt -s nullglob
+
+collect_forever() {
+  local last result
+  while true; do
+    # Skip timestamps already written when Fly replays its buffered logs.
+    last="$(latest_raw_timestamp)"
+    # Reconnect every window in case the stream hangs silently. flyctl can catch
+    # SIGTERM and never exit (2026-10-31: wedged for two days), so -k kills it.
+    stream_logs 3>&1 \
+      | sed -u 's/\x1b\[[0-9;]*m//g' \
+      | awk "${awk_flags[@]}" -v dir="$dir" -v last="$last" '
+          $1 ~ /^20[0-9][0-9]-/ { if ($1 <= last) next; f = dir "/" substr($1, 1, 10) ".log" }
+          f == "" { next }
+          # Lines without a timestamp (proxy error details) go to the current day file.
+          { print >> f; fflush(f) }'
+    result=${PIPESTATUS[0]}
+    if [[ $result == 77 ]]; then
+      auth_failed 'Fly rejected the stored deploy token for this app'
+    fi
+    # Keep 8 days.
+    find "$dir" -name '*.log' -mtime +8 -delete
+    sleep "$pause"
+  done
+}
+
+stream_pid=''
+watchdog_pid=''
+stop_jobs() {
+  local pid
+  for pid in "$watchdog_pid" "$stream_pid"; do
+    if [[ -n $pid ]]; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    fi
+  done
+  wait 2>/dev/null
+}
+trap stop_jobs EXIT
+trap 'exit 1' USR1
+trap 'exit 143' TERM
+trap 'exit 130' INT
+
+# Give each job a process group. The watchdog can interrupt the parent's wait
+# and stop the entire stream pipeline without waiting for Fly's kill grace.
+set -m
+(set +m; collect_forever) &
+stream_pid=$!
+(
+  set +m
+  watch_freshness
+  kill -USR1 "$$"
+) &
+watchdog_pid=$!
+set +m
+wait "$stream_pid"

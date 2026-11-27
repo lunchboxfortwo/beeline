@@ -19,10 +19,17 @@ Raw logs land at
 The systemd journal records stream failures and authentication errors.
 
 `collect.sh` reconnects `flyctl logs` every ten minutes, forcibly terminating
-streams that ignore SIGTERM. systemd restarts the collector if it dies.
+streams that ignore SIGTERM. The freshness check runs alongside the stream. If
+the newest raw entry is more than fifteen minutes old, the collector reports the
+timestamp to the journal and exits. After a restart with stale logs, Fly gets a
+short chance to catch up. For an empty log directory, the fifteen minutes start
+when the collector starts. systemd restarts the collector after a staleness
+failure.
 Collectors keep eight days of logs. If Fly rejects the token or systemd cannot
 load it, the affected service stays failed. Restart it after the credential is
 repaired.
 
 Run `bash packages/scripts/log-walk/test-systemd.sh` with a running user
 manager to test the credential setup failure using a disposable service.
+Run `bash packages/scripts/log-walk/test-collect.sh` to test raw log freshness
+with a simulated Fly stream.
