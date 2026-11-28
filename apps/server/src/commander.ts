@@ -411,8 +411,8 @@ export async function notifyCommanderCornerClosed(
         from: { agent: SYSTEM_AUTHOR_ID, place: cornerId },
         to: { agent: route.recipient, place: route.returnRoom },
       },
-      replyAddress,
       automatic: true,
+      ...(replyAddress ? { replyAddress } : {}),
     },
   });
 }

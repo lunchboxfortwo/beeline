@@ -326,19 +326,20 @@ it('recovers a green head whose earlier GitHub note never dispatched its reviewe
   });
 });
 
-it('wakes no parent Room agent on a corner merge without a merged subscription', async () => {
+it('wakes only the commanding agent with corner_closed on a corner merge, not other parent Room agents', async () => {
   await landCorner('Do work');
-  // B opened the corner; opening it no longer earns a turn when it lands.
-  expect(await commands(B, R)).toEqual([]);
+  // B opened the corner and receives the silent-capable corner_closed wake; other members do not.
+  expect(await commands(B, R)).toEqual([expect.objectContaining({ reason: 'corner_closed' })]);
   expect(await commands(A, R)).toEqual([]);
-  expect((await rootFixture.db.query(`SELECT 1 FROM agent_commands WHERE room_id=$1`, [R])).rowCount).toBe(0);
+  expect((await rootFixture.db.query(`SELECT reason,agent_id FROM agent_commands WHERE room_id=$1`, [R])).rows)
+    .toEqual([{ reason: 'corner_closed', agent_id: B }]);
 });
 
-it('ignores legacy Room merged subscriptions; lifecycle watches own merge delivery', async () => {
+it('ignores legacy Room merged subscriptions while waking only the commander with corner_closed', async () => {
   await rootFixture.db.query(`UPDATE memberships SET event_subscriptions='["merged"]'::jsonb WHERE room_id=$1 AND identity_id=$2`, [R, A]);
   await landCorner('Ship the widget');
   expect(await commands(A, R)).toEqual([]);
-  expect(await commands(B, R)).toEqual([]);
+  expect(await commands(B, R)).toEqual([expect.objectContaining({ reason: 'corner_closed' })]);
 });
 
 it('records its own corner objective without a second wake or resetting the authorized chain', async () => {
