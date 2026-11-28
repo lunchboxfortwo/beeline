@@ -50,12 +50,12 @@ import { openRouterRoutingInput } from './openrouter-routing.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import { itemPrompt, memberTasks, memberThreads, offlineBatchPrompt } from './place-prompt.js';
+import { createPlaceSquireRelay } from './place-session-squire.js';
 import {
   assembleSessionPrompt,
   cornerHasRepositoryWork,
   type PromptSurface,
 } from './prompt-assembly.js';
-import { resourceCallFacts } from './resource-mcp-facade.js';
 import { roomPermissionDecision, unsandboxedPermissionDecision } from './room-permissions.js';
 import { beelineAgentMcpServer, readOnlyMcpServer } from './room-session.js';
 import { LiveTurnSteps } from './live-turn-steps.js';
@@ -71,7 +71,6 @@ import {
   switchLiveModel,
   type RunningModelReport,
 } from './session-running-model.js';
-import { SquireTaskRelay } from './squire-task-relay.js';
 import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
@@ -133,7 +132,7 @@ export class PlaceSession {
   private surface: PromptSurface = 'room';
   private names = new Map<string, string>();
   private readonly warm: WarmTranscript;
-  private readonly squireRelay: SquireTaskRelay;
+  private readonly squireRelay;
   /** The item being answered, for run_granted_command. */
   current?: AgentCommand;
   currentInvocation?: AgentInvocation;
@@ -184,48 +183,8 @@ export class PlaceSession {
     });
     this.running = new RunningModelReporter(options.api, options.agent.publicKey);
     this.warm = new WarmTranscript({ path: resolve(root, 'agent-home', 'warm-transcript.json') });
-    const api = options.api;
-    const roomId = options.placeId;
-    const logged = (label: string) => (error: unknown) => console.error(`[body] ${label}:`, error);
-    this.squireRelay = new SquireTaskRelay(
-      options.agent.publicKey,
-      roomId,
-      async (call) =>
-        (
-          await api.execute('authorizeResourceCall', {
-            roomId: call.roomId,
-            requestId: call.requestId,
-            target: 'squire',
-            ...resourceCallFacts({ method: 'tools/call', params: { name: call.tool } }),
-          })
-        ).allowed === true,
-      options.config.operatorHome ?? homedir(),
-      undefined,
-      (decision) => {
-        void api
-          .execute('postSquireApprovalDecision', { roomId, ...decision })
-          .catch(logged('Squire approval decision not published'));
-      },
-      (sessionId) => {
-        void api
-          .execute('endComputerSession', { roomId, sessionId })
-          .catch(logged('Squire session end not published'));
-      },
-      async (lease) => (await api.execute('refreshComputerSession', { roomId, ...lease })).live,
-      (url, siteUrl) => {
-        void api
-          .execute('forgetSquireSignIn', { url, ...(siteUrl ? { siteUrl } : {}) })
-          .catch(logged('Squire sign-in removal failed'));
-      },
-      async (service) =>
-        (await api.execute('readAgentWorkbench', { roomId })).apps?.find(
-          (app) =>
-            app.appKey === service.trim().toLowerCase() &&
-            app.transport === 'squire-api' &&
-            app.status === 'connected',
-        )?.connectionReference,
-      () => api.refreshMachineVault(),
-    );
+    const { api, agent, placeId, config } = options;
+    this.squireRelay = createPlaceSquireRelay(api, agent.publicKey, placeId, config.operatorHome);
   }
 
   /** What run_granted_command needs from this place. */
