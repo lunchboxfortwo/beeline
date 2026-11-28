@@ -247,4 +247,107 @@ describe('universal ACP twin-item fetch & missing-item handling', () => {
 
     await act(async () => renderer.unmount());
   });
+
+  it('preserves a recorded failure in the collapsed summary across partial remote pagination pages and folds loaded consecutive reads', async () => {
+    toolReader.mockReset();
+    const roomId = '22222222-2222-4222-8222-222222222222';
+    const anchor = 'a'.repeat(64);
+    const page2Anchor = 'b'.repeat(64);
+    const author = { pubkey: 'c'.repeat(64), kind: 'agent' as const, name: 'Worker' };
+
+    const page1 = {
+      roomId,
+      next: 'cursor-page-2',
+      messages: [
+        {
+          id: anchor,
+          text: '',
+          createdAt: 1,
+          presentation: 'activity' as const,
+          author,
+          activity: [
+            {
+              kind: 'tool' as const,
+              title: 'Read',
+              operation: 'read',
+              status: 'completed',
+              files: [{ path: 'apps/mobile/sources/components/buzz/ThreadHeader.tsx' }],
+            },
+            {
+              kind: 'tool' as const,
+              title: 'Read',
+              operation: 'read',
+              status: 'completed',
+              files: [{ path: 'apps/mobile/sources/components/buzz/ChevronGlyph.tsx' }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const page2 = {
+      roomId,
+      messages: [
+        {
+          id: page2Anchor,
+          text: '',
+          createdAt: 2,
+          presentation: 'activity' as const,
+          author,
+          activity: [
+            {
+              kind: 'tool' as const,
+              title: 'Bash',
+              operation: 'execute',
+              command: 'vitest run sources/buzz/alignment',
+              status: 'failed',
+              exitCode: 1,
+              output: "Cannot find package 'vitest'",
+            },
+          ],
+        },
+      ],
+    };
+
+    toolReader.mockResolvedValueOnce(page1).mockResolvedValueOnce(page2);
+
+    const renderer = render(
+      <TurnStepsLine
+        items={[
+          {
+            kind: 'tool',
+            id: 'agg-fail',
+            title: '3 steps',
+            status: 'failed',
+            toolGroup: { roomId, anchor, count: 3 },
+          },
+        ]}
+      />,
+    );
+
+    // Before fetch: unloaded remote placeholder shows honest Steps + recorded failure.
+    expect(renderer.root.findByProps({ testID: 'tool-run-group-agg-fail' }).props.accessibilityLabel).toBe(
+      'Steps · 1 failed, expandable',
+    );
+
+    // After page 1 loads 2 passing reads with more pages remaining: recorded failure stays visible
+    // and consecutive loaded reads fold into one Checked row.
+    await act(async () => expandRun(renderer, 'agg-fail'));
+    expect(renderer.root.findByProps({ testID: 'tool-run-group-agg-fail' }).props.accessibilityLabel).toBe(
+      'Checked files · 1 failed, expandable',
+    );
+    expect(
+      renderer.root.findByProps({ testID: `tool-read-fold-read-fold-${anchor}:0` }),
+    ).toBeTruthy();
+
+    // After page 2 loads the actual failed test step (no more remote pages): summary upgrades cleanly.
+    await act(async () =>
+      renderer.root.findByProps({ testID: 'tool-run-more-agg-fail' }).props.onPress(),
+    );
+    expect(renderer.root.findByProps({ testID: 'tool-run-group-agg-fail' }).props.accessibilityLabel).toBe(
+      'Ran tests · 1 failed, expandable',
+    );
+
+    await act(async () => renderer.unmount());
+  });
 });

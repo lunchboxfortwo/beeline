@@ -429,14 +429,16 @@ function ToolRunGroupRow({
         setLoading(false);
       });
   };
-  const summaryParts = useMemo(
-    () =>
-      toolRunSummaryParts(remoteUnloaded ? run.lines : lines, {
-        remoteUnloaded,
-        ...(remoteUnloaded ? { failed: run.failed } : {}),
-      }),
-    [lines, remoteUnloaded, run.failed, run.lines],
-  );
+  const summaryParts = useMemo(() => {
+    const loadedFailed = lines.filter(
+      (line) => line.outcome === 'failure' && !line.startupWarning,
+    ).length;
+    const failedCount = hasRemote ? Math.max(run.failed, loadedFailed) : loadedFailed;
+    return toolRunSummaryParts(remoteUnloaded ? run.lines : lines, {
+      remoteUnloaded,
+      failed: failedCount,
+    });
+  }, [hasRemote, lines, remoteUnloaded, run.failed, run.lines]);
   const summary = summaryParts.map((part) => part.text).join(' · ');
   const pressHandler = (item: ToolLedgerLine) =>
     item.inspectable ? () => onPressLine?.(item) : undefined;
