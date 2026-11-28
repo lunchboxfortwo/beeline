@@ -178,7 +178,7 @@ describe('Beeline tool surface across harnesses', () => {
 
   it.each([[''], [7], [null]])('rejects requestId %j on a direct call before stripping it', async requestId => {
     await expect(callAgentTool('wake', { action: 'pause', scheduleId: 'sched-1', requestId }, 'bad-request-id'))
-      .rejects.toThrow('wake: invalid arguments; requestId must be a non-empty string');
+      .rejects.toThrow(/wake: invalid arguments/);
   });
 
   it('runs a stdio call with an explicit requestId and forwards it to the session and daemon', async () => {

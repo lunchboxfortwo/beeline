@@ -362,12 +362,11 @@ export async function callAgentTool(
   toolCallId: string,
 ): Promise<string> {
   if (name === 'message') return executeAgentTool(name, args, toolCallId);
-  const { requestId, ...input } = args;
-  // Check an explicit requestId before it is stripped; later validation never sees it.
-  if (requestId !== undefined && (typeof requestId !== 'string' || !requestId))
-    throw new Error(`${name}: invalid arguments; requestId must be a non-empty string; follow the advertised schema`);
-  return commandRequest.run({ requestId: requestId as string | undefined }, () =>
-    executeAgentTool(name, input, toolCallId),
+  // requestId stays in the arguments so executeResourceTool validates it
+  // before stripping it; a malformed one never reaches the command lookup.
+  const { requestId } = args;
+  return commandRequest.run({ requestId: typeof requestId === 'string' ? requestId : undefined }, () =>
+    executeAgentTool(name, args, toolCallId),
   );
 }
 
@@ -382,17 +381,20 @@ export async function executeAgentTool(
 
 async function executeResourceTool(
   name: string,
-  args: JsonObject,
+  input: JsonObject,
   toolCallId: string,
 ): Promise<string> {
   if (
     name === 'read' &&
-    args.cursor !== undefined &&
-    (!args.cursor || typeof args.cursor !== 'object' || Array.isArray(args.cursor))
+    input.cursor !== undefined &&
+    (!input.cursor || typeof input.cursor !== 'object' || Array.isArray(input.cursor))
   )
     throw new Error('read: pass the returned next object unchanged as cursor');
-  const removed = normalizeAgentToolArgs(name, args);
-  validateAdvertisedToolInput(advertisedAgentTool(name), args);
+  const removed = normalizeAgentToolArgs(name, input);
+  validateAdvertisedToolInput(advertisedAgentTool(name), input);
+  // callAgentTool already carries a valid requestId as command context.
+  const { requestId: _requestId, ...valid } = input;
+  let args: JsonObject = valid;
   const addressed = {
     ...args,
     ...(typeof args.address === 'string' ? { cornerId: args.address } : {}),
