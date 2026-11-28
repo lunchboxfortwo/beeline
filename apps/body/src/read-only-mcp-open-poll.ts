@@ -11,6 +11,7 @@ import { Check, Errors } from 'typebox/value';
 import {
   CAPABILITY_ROUTES,
   CAPABILITY_TOOLS,
+  REQUEST_ID_PROPERTY,
   SCRATCH_ROUTES,
   agentToolsFor,
   placeBeelineApps,
@@ -150,10 +151,12 @@ export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObje
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
   // and may share a name (e.g. workflow read) with an ordinary tool.
-  validateToolInput(
-    { ...tool, inputSchema: { ...toolValidationSchema(tool.name), ...tool.inputSchema } },
-    args,
-  );
+  // requestId is not advertised, but explicit callers may still pass it on
+  // every tool except message; it is checked here and stripped by callAgentTool.
+  const inputSchema = { ...toolValidationSchema(tool.name), ...tool.inputSchema };
+  if (tool.name !== 'message')
+    inputSchema.properties = { ...(inputSchema.properties as JsonObject | undefined), requestId: REQUEST_ID_PROPERTY };
+  validateToolInput({ ...tool, inputSchema }, args);
 }
 
 /** Name a string that misses its advertised length, including a matching allOf branch. */
@@ -359,9 +362,11 @@ export async function callAgentTool(
   toolCallId: string,
 ): Promise<string> {
   if (name === 'message') return executeAgentTool(name, args, toolCallId);
-  const { requestId, ...input } = args;
+  // requestId stays in the arguments so executeResourceTool validates it
+  // before stripping it; a malformed one never reaches the command lookup.
+  const { requestId } = args;
   return commandRequest.run({ requestId: typeof requestId === 'string' ? requestId : undefined }, () =>
-    executeAgentTool(name, input, toolCallId),
+    executeAgentTool(name, args, toolCallId),
   );
 }
 
@@ -376,17 +381,20 @@ export async function executeAgentTool(
 
 async function executeResourceTool(
   name: string,
-  args: JsonObject,
+  input: JsonObject,
   toolCallId: string,
 ): Promise<string> {
   if (
     name === 'read' &&
-    args.cursor !== undefined &&
-    (!args.cursor || typeof args.cursor !== 'object' || Array.isArray(args.cursor))
+    input.cursor !== undefined &&
+    (!input.cursor || typeof input.cursor !== 'object' || Array.isArray(input.cursor))
   )
     throw new Error('read: pass the returned next object unchanged as cursor');
-  const removed = normalizeAgentToolArgs(name, args);
-  validateAdvertisedToolInput(advertisedAgentTool(name), args);
+  const removed = normalizeAgentToolArgs(name, input);
+  validateAdvertisedToolInput(advertisedAgentTool(name), input);
+  // callAgentTool already carries a valid requestId as command context.
+  const { requestId: _requestId, ...valid } = input;
+  let args: JsonObject = valid;
   const addressed = {
     ...args,
     ...(typeof args.address === 'string' ? { cornerId: args.address } : {}),

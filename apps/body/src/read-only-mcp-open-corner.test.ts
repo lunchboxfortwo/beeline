@@ -199,3 +199,19 @@ it('forwards structured receipts and provenance from openCorner, closeCorner, wa
   expect(listedText).toContain('replies to @lunchboxfortwo');
   expect(listedText).toContain('approved by @lunchboxfortwo (msg-1)');
 });
+
+it('forwards an explicit requestId that tools no longer advertise to the session command lookup', async () => {
+  const lookup = vi.spyOn(sessionTools, 'sessionCommandContext').mockResolvedValue({ roomId: 'parent', requestId: 'req-explicit' });
+  for (const [key, value] of Object.entries({
+    BEELINE_DAEMON_ROOM_ID: 'parent', BEELINE_DAEMON_BASE_URL: 'http://daemon.test', BEELINE_DAEMON_TOKEN: 'fixture',
+  })) vi.stubEnv(key, value);
+  const bodies: Record<string, unknown>[] = [];
+  vi.stubGlobal('fetch', async (_url: URL, init: RequestInit) => {
+    bodies.push(JSON.parse(String(init.body)));
+    return Response.json({ paused: true, receipt: 'Paused' });
+  });
+  const result = JSON.parse(await callAgentTool('wake', { action: 'pause', scheduleId: 'sched-1', requestId: 'req-explicit' }, 'call-pause'));
+  expect(result.receipt).toBe('Paused');
+  expect(lookup).toHaveBeenCalledWith('req-explicit');
+  expect(bodies.at(-1)).toMatchObject({ roomId: 'parent', requestId: 'req-explicit' });
+});

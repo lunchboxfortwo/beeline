@@ -132,13 +132,95 @@ export function toolValidationSchema(name: string): Record<string, unknown> | un
   return tool ? structuredClone(invocationTool(tool).inputSchema) : undefined;
 }
 
+type SchemaBranch = Record<string, unknown>;
+type BranchText = { conditions: string[]; text: string };
+
+/**
+ * One branch as `key=value: field,field,no field`. A branch that only fixes a
+ * value and needs nothing else returns undefined: the enum already offers it.
+ * Unknown shapes fall back to JSON so no rule is lost.
+ */
+function branchSummary(branch: SchemaBranch): BranchText | undefined {
+  const json = { conditions: [], text: JSON.stringify(branch) };
+  const known = new Set(['properties', 'required', 'not', 'if', 'then']);
+  if (Object.keys(branch).some(key => !known.has(key))) return json;
+  if (branch.if !== undefined || branch.then !== undefined) {
+    const { if: condition, then, ...rest } = branch;
+    if (!condition || !then || Object.keys(rest).length) return json;
+    const when = branchParts(condition as SchemaBranch, true);
+    const body = branchParts(then as SchemaBranch, false);
+    if (!when || !body) return json;
+    return { conditions: [], text: `if ${when.conditions.join(',')}: ${body.fields.join(',') || 'no other limits'}` };
+  }
+  const parts = branchParts(branch, false);
+  if (!parts) return json;
+  if (!parts.fields.length) return parts.conditions.length ? undefined : json;
+  return { conditions: parts.conditions, text: parts.fields.join(',') };
+}
+
+function branchParts(branch: SchemaBranch, condition: boolean): { conditions: string[]; fields: string[] } | undefined {
+  const conditions: string[] = [];
+  const fields: string[] = [];
+  const conditionKeys = new Set<string>();
+  for (const [key, value] of Object.entries((branch.properties ?? {}) as Record<string, SchemaBranch>)) {
+    const { const: exact, enum: options, type, maxLength, ...other } = value;
+    if (Object.keys(other).length) return undefined;
+    if (exact !== undefined) { conditions.push(`${key}=${String(exact)}`); conditionKeys.add(key); }
+    else if (Array.isArray(options)) { conditions.push(`${key}=${options.join('|')}`); conditionKeys.add(key); }
+    else if (typeof maxLength === 'number' && (type === undefined || type === 'string')) fields.push(`${key} max ${maxLength} chars`);
+    else return undefined;
+  }
+  const required = Array.isArray(branch.required) ? branch.required as string[] : [];
+  if (!condition) fields.unshift(...required.filter(key => !conditionKeys.has(key)));
+  const not = branch.not as SchemaBranch | undefined;
+  if (not) {
+    const excluded = Array.isArray(not.required) && Object.keys(not).length === 1
+      ? not.required as string[]
+      : Array.isArray(not.anyOf) && Object.keys(not).length === 1 && (not.anyOf as SchemaBranch[]).every(item => Array.isArray(item.required) && Object.keys(item).length === 1)
+        ? (not.anyOf as SchemaBranch[]).flatMap(item => item.required as string[])
+        : undefined;
+    if (!excluded) return undefined;
+    fields.push(`no ${excluded.join('/')}`);
+  }
+  return { conditions, fields };
+}
+
+/** Joins branches, naming a shared leading condition once: `kind=fact (action=save: a; action=delete: b)`. */
+function joinBranches(branches: BranchText[]): string {
+  const out: string[] = [];
+  for (let index = 0; index < branches.length;) {
+    const [first, ...rest] = branches[index]!.conditions;
+    let end = index + 1;
+    while (first && rest.length && end < branches.length && branches[end]!.conditions[0] === first && branches[end]!.conditions.length > 1) end++;
+    const label = (branch: BranchText, skip: number) => {
+      const conditions = branch.conditions.slice(skip).join(',');
+      return conditions ? `${conditions}: ${branch.text}` : branch.text;
+    };
+    out.push(end - index > 1
+      ? `${first} (${branches.slice(index, end).map(branch => label(branch, 1)).join('; ')})`
+      : label(branches[index]!, 0));
+    index = end;
+  }
+  return out.join('; ');
+}
+
+/** Compact, deterministic text for root combinators, generated from the same schema Beeline validates against. */
+export function combinationSummary(schema: Record<string, unknown>): string {
+  const sentences: string[] = [];
+  for (const [key, label] of [['anyOf', 'Needs'], ['oneOf', 'Needs exactly one'], ['allOf', 'Rules']] as const) {
+    const branches = schema[key];
+    if (!Array.isArray(branches)) continue;
+    const texts = (branches as SchemaBranch[]).map(branchSummary).filter((branch): branch is BranchText => !!branch);
+    if (texts.length) sentences.push(`${label}: ${joinBranches(texts)}.`);
+  }
+  return sentences.join(' ');
+}
+
+/** Advertised tools omit requestId; validateAdvertisedToolInput still accepts and checks it. */
 export function providerCompatibleTool(tool: ToolDefinition): ToolDefinition {
-  tool = invocationTool(tool);
   const { anyOf, oneOf, allOf, ...inputSchema } = tool.inputSchema;
-  const combinations = { ...(anyOf ? { anyOf } : {}), ...(oneOf ? { oneOf } : {}), ...(allOf ? { allOf } : {}) };
-  return Object.keys(combinations).length
-    ? { ...tool, inputSchema, description: `${tool.description} Argument combinations (validated by Beeline): ${JSON.stringify(combinations)}` }
-    : tool;
+  const summary = combinationSummary({ anyOf, oneOf, allOf });
+  return summary ? { ...tool, inputSchema, description: `${tool.description} ${summary}` } : tool;
 }
 
 
@@ -158,7 +240,7 @@ export function agentToolsFor(
   const tools = minimalTools(cornerTurn).filter(tool =>
     (institutionalMemoryEnabled || !['search', 'remember'].includes(tool.name)) &&
     (operatorAgent || !['send_operator_system_dm','read_operator_system_dm'].includes(tool.name)));
-  if (commandRunnerAvailable) tools.push(invocationTool(RUNNER_TOOL), invocationTool(WORKSPACE_TOOL));
+  if (commandRunnerAvailable) tools.push(structuredClone(RUNNER_TOOL), structuredClone(WORKSPACE_TOOL));
   if (!nativeIoProven) tools.push(...scratchTools(cornerTurn && !repositoryCorner));
   return freeAgent ? tools.map(tool => {
     if (tool.name !== 'connect') return tool;
