@@ -68,7 +68,7 @@ it('sends a received picture to an image-capable harness as image content, bound
   }
 });
 
-it('mounts the CodeGraph tools and the operator host MCP routes into the session', async () => {
+it('preserves bundled MCP wires when mounting operator host routes', async () => {
   const f = await fixture(true);
   f.config.agentKind = 'claude';
   f.config.codegraphCommand = '/opt/codegraph';
@@ -76,6 +76,9 @@ it('mounts the CodeGraph tools and the operator host MCP routes into the session
     join(f.config.operatorHome!, '.claude.json'),
     JSON.stringify({
       mcpServers: {
+        codegraph: { command: 'operator-codegraph', args: ['serve', '--mcp'] },
+        'beeline-agent': { command: 'operator-agent' },
+        'beeline-readonly-mcp': { command: 'operator-inspection' },
         linear: { command: 'linear-mcp', args: ['--stdio'] },
       },
     }),
@@ -93,10 +96,17 @@ it('mounts the CodeGraph tools and the operator host MCP routes into the session
       },
     ]
   )[0].mcpServers;
-  expect(servers.find((server) => server.name === 'codegraph')).toMatchObject({
+  expect(servers.filter((server) => server.name === 'codegraph')).toMatchObject([{
     command: '/opt/codegraph',
     args: ['serve', '--mcp', '--path', f.session.folder()],
-  });
+  }]);
+  expect(servers.filter((server) => server.name === 'beeline-agent')).toMatchObject([
+    { command: f.config.readonlyMcpCommand },
+  ]);
+  expect(servers).not.toContainEqual(expect.objectContaining({
+    name: 'beeline-readonly-mcp',
+    env: expect.arrayContaining([{ name: 'BEELINE_RESOURCE_TARGET', value: 'beeline-readonly-mcp' }]),
+  }));
   const linear = servers.find((server) => server.name === 'linear');
   expect(linear?.env).toEqual(
     expect.arrayContaining([{ name: 'BEELINE_RESOURCE_TARGET', value: 'linear' }]),

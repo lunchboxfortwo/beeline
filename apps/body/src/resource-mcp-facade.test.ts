@@ -3,15 +3,109 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { expect, it, vi } from 'vitest';
 import { authorizeResourceMessage } from './resource-mcp-facade.js';
-import { TurnStoppedError } from './turn-stop.js';
+
+it.each(['codegraph', 'beeline'])('connects %s before a prompt and gates its tool calls', async target => {
+  const root = await mkdtemp(join(tmpdir(), 'resource-facade-'));
+  const command = { roomId: 'room', requestId: 'prompt', itemId: 'd'.repeat(64) };
+  let current: typeof command | null = null;
+  let cancelled = false;
+  let commandReads = 0;
+  const calls: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk);
+    if (request.url === '/session') {
+      commandReads++;
+      response.end(JSON.stringify(current));
+      return;
+    }
+    calls.push({
+      path: request.url,
+      commandId: request.headers['x-beeline-command-id'],
+      body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+    });
+    response.writeHead(cancelled ? 403 : 200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(cancelled ? { error: 'command turn cancelled' } : { allowed: true }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const { port } = server.address() as { port: number };
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const authPath = join(root, 'auth.json');
+  const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./resource-mcp-facade.ts', import.meta.url))], {
+    env: { ...process.env, BEELINE_RESOURCE_TARGET: target, BEELINE_RESOURCE_AUTH_FILE: authPath,
+      BEELINE_GRANT_RUNNER_URL: baseUrl, BEELINE_GRANT_RUNNER_TOKEN: 'fixture',
+      BEELINE_RESOURCE_LAUNCH: JSON.stringify({ command: process.execPath, args: ['-e', `
+        let initialized = false;
+        let toolCalls = 0;
+        require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+          const { id, method } = JSON.parse(line);
+          if (method === 'notifications/initialized') initialized = true;
+          if (id === undefined) return;
+          const result = method === 'initialize' ? { protocolVersion: '2024-11-05' }
+            : method === 'tools/list' ? { tools: initialized ? [{ name: 'lookup' }] : [] }
+            : method === 'tools/call' ? { toolCalls: ++toolCalls } : {};
+          process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
+        });
+      `] }) },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+  const output = createInterface({ input: child.stdout });
+  const closed = once(child, 'close');
+  let id = 0;
+  const request = async (method: string, params?: object) => {
+    const reply = once(output, 'line');
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) + '\n');
+    const [line] = await Promise.race([
+      reply,
+      closed.then(() => { throw new Error(`Resource facade exited while waiting for ${method}`); }),
+    ]);
+    const message = JSON.parse(line);
+    expect(message.id).toBe(id);
+    return message;
+  };
+  try {
+    expect(await request('initialize')).toHaveProperty('result.protocolVersion', '2024-11-05');
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+    expect(await request('ping')).toHaveProperty('result', {});
+    expect(await request('tools/list')).toHaveProperty('result.tools', [{ name: 'lookup' }]);
+    expect(commandReads).toBe(0);
+
+    await writeFile(authPath, JSON.stringify({ baseUrl, daemonToken: 'test', placeId: 'room' }));
+    const tool = { name: 'lookup' };
+    expect(await request('tools/call', tool)).toHaveProperty('error.code', -32001);
+    expect(calls).toEqual([]);
+
+    current = command;
+    expect(await request('tools/call', tool)).toHaveProperty('result.toolCalls', 1);
+    cancelled = true;
+    expect(await request('tools/call', tool)).toHaveProperty('error.code', -32001);
+    expect(await closed).toEqual([1, null]);
+    const authorization = {
+      path: '/v1/daemon/operations/authorizeResourceCall',
+      commandId: command.itemId,
+      body: { roomId: command.roomId, requestId: command.requestId, target, operation: 'lookup' },
+    };
+    expect(calls).toEqual([authorization, authorization]);
+    expect(commandReads).toBe(3);
+  } finally {
+    child.kill('SIGTERM');
+    await closed;
+    output.close();
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 it.each(['command output authority rejected', 'command turn cancelled', 'command already completed'])(
-  'ends a stale MCP generation on %s instead of authorizing queued pings', async error => {
+  'ends a stale MCP generation on %s instead of authorizing queued tool calls', async error => {
     const root = await mkdtemp(join(process.cwd(), '.resource-facade-'));
     const calls: unknown[] = [];
     const server = createServer((request, response) => {
@@ -43,9 +137,9 @@ it.each(['command output authority rejected', 'command turn cancelled', 'command
     try {
       const exited = once(child, 'exit');
       child.stdin.end(Array.from({ length: 4 }, (_, id) =>
-        JSON.stringify({ jsonrpc: '2.0', id, method: 'ping' })).join('\n') + '\n');
+        JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'lookup' } })).join('\n') + '\n');
       await exited;
-      expect(calls).toEqual([expect.objectContaining({ requestId: 'cancelled-command', consume: false })]);
+      expect(calls).toEqual([expect.objectContaining({ requestId: 'cancelled-command', operation: 'lookup' })]);
     } finally {
       child.kill('SIGKILL');
       server.closeAllConnections();
@@ -95,11 +189,11 @@ it.each(['revocation', 'stdin close', 'SIGTERM'] as const)('kills the resource t
     const exited = once(child, 'exit');
     if (ending === 'revocation') {
       revoked = true;
-      child.stdin.write(Array.from({ length: 4 }, (_, id) => JSON.stringify({ jsonrpc: '2.0', id: id + 2, method: 'ping' })).join('\n') + '\n');
+      child.stdin.write(Array.from({ length: 4 }, (_, id) => JSON.stringify({ jsonrpc: '2.0', id: id + 2, method: 'tools/call' })).join('\n') + '\n');
     } else if (ending === 'stdin close') child.stdin.end();
     else child.kill('SIGTERM');
     await exited;
-    expect(calls).toBe(ending === 'revocation' ? 2 : 1);
+    expect(calls).toBe(ending === 'revocation' ? 1 : 0);
     expect(() => process.kill(resourcePid!, 0)).toThrow();
   } finally {
     child.kill('SIGKILL');
@@ -111,7 +205,7 @@ it.each(['revocation', 'stdin close', 'SIGTERM'] as const)('kills the resource t
   }
 });
 
-it('keeps permission denial per-call and ends an invalidated local generation without HTTP', async () => {
+it('keeps permission denial per-call and refuses inactive commands without HTTP', async () => {
   const root = await mkdtemp(join(process.cwd(), '.resource-facade-'));
   const authPath = join(root, 'auth.json');
   const message = { jsonrpc: '2.0', id: 1, method: 'tools/call' };
@@ -128,7 +222,7 @@ it('keeps permission denial per-call and ends an invalidated local generation wi
     command.mockResolvedValue({ roomId: 'room', requestId: 'request', itemId: 'd'.repeat(64) });
     expect(await authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).toBe(true);
     command.mockResolvedValue(undefined);
-    await expect(authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).rejects.toBeInstanceOf(TurnStoppedError);
+    expect(await authorizeResourceMessage(message, 'files', authPath, true, fetchImpl)).toBe(false);
     expect(calls).toBe(2);
   } finally { vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }); }
 });

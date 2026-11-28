@@ -39,11 +39,10 @@ export const MCP_RESOURCE_TARGET_KEY = 'beeline_resource_target';
 export const MCP_RESOURCE_GATE_KEY = 'beeline_resource_gate';
 export const MCP_RESOURCE_GATE_TRANSPORT = 'transport';
 
-const DISCOVERY = new Set(['initialize', 'ping', 'tools/list']);
+const HANDSHAKE = new Set(['initialize', 'notifications/initialized', 'ping', 'tools/list']);
 /** Discovery and notifications never spend a Once grant. */
 export const NON_CONSUMING = new Set([
-  ...DISCOVERY,
-  'notifications/initialized',
+  ...HANDSHAKE,
   'notifications/cancelled',
   'notifications/progress',
   'notifications/roots/list_changed',
@@ -585,8 +584,10 @@ export async function authorizeResourceMessage(
 ): Promise<boolean> {
   if (!message || Array.isArray(message) || typeof message !== 'object') return false;
   if (typeof message.method !== 'string') return false;
+  // Harnesses negotiate MCP and discover tools before the first prompt arrives.
+  if (HANDSHAKE.has(message.method)) return true;
   const { auth, context } = await resourceCommand(authFile);
-  if (!context) throw new TurnStoppedError('resource generation is no longer active');
+  if (!context) return false;
   const response = await fetchImpl(
     new URL('/v1/daemon/operations/authorizeResourceCall', auth.baseUrl),
     {
