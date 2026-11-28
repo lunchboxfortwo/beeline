@@ -1,11 +1,11 @@
 import type { ChatDisplayMessage } from '@/buzz/room-view-presentation';
 import React from 'react';
 import { YStack } from 'tamagui';
-import { CornerDownRight, type LucideProps } from 'lucide-react-native';
-import { Inked, T } from '@/ui/grammar';
+import { T } from '@/ui/grammar';
 
 import { TranscriptNavigationRow } from './IndexRow';
 import { RepositoryLifecycleRow } from './PrLifecycleCard';
+import { TranscriptActionLead } from './TranscriptActionLead';
 import { lifecycleCornerTitle, type NotificationLifecycleRun } from '@/buzz/pr-lifecycle';
 
 /** Standalone adapters use the same child row as grouped runs. */
@@ -94,14 +94,7 @@ export const DaemonFactCard = React.memo(function DaemonFactCard({
         <TranscriptNavigationRow
           testID={`backlog-added-row-${message.id}`}
           singleDestination
-          leading={
-            <Inked<LucideProps>
-              glyph={CornerDownRight}
-              color="secondary"
-              size={13}
-              strokeWidth={1.7}
-            />
-          }
+          leading={<TranscriptActionLead />}
           trailing={
             targetRoomId && onOpenBacklog
               ? {

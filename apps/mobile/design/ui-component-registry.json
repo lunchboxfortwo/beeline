@@ -409,6 +409,9 @@
       "TOOL_OUTPUT_SHEET_MAX_WIDTH",
       "ToolOutputSheet"
     ],
+    "components/buzz/TranscriptActionLead.tsx": [
+      "TranscriptActionLead"
+    ],
     "components/buzz/TranscriptCard.tsx": [
       "ActionButton",
       "CardRow",
