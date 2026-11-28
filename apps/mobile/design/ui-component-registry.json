@@ -5,6 +5,7 @@
     "components/buzz/ActivityTimeline.tsx": [
       "ActivityTimeline",
       "ToolLedgerLineRow",
+      "ToolReadFoldRow",
       "ToolRunGroupRow",
       "TurnStepsLine"
     ],

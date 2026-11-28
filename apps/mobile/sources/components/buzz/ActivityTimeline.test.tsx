@@ -133,7 +133,7 @@ describe('one-line tool ledger', () => {
     expect(renderedText(renderer)).not.toContain('FAILED');
   });
 
-  it('keeps the steps disclosure borderless with down-closed / up-open chevron and left guide bar', () => {
+  it('keeps the steps disclosure borderless with down-closed / up-open chevron and flush-left rows', () => {
     const renderer = render(<TurnStepsLine items={TOOLS} />);
     const [row] = hostNodes(renderer, /^tool-run-group-read$/);
     expect(row.props.minHeight).toBeGreaterThanOrEqual(44);
@@ -148,8 +148,9 @@ describe('one-line tool ledger', () => {
     )[0];
     expect(openChevron.props.direction).toBe('up');
     const list = renderer.root.findByProps({ testID: 'tool-run-list-read' });
-    expect(list.props.borderLeftColor).toBe('strongStroke');
-    expect(list.props.borderLeftWidth).toBe(1.5);
+    expect(list.props.borderLeftWidth).toBeUndefined();
+    expect(list.props.marginLeft).toBeUndefined();
+    expect(list.props.paddingLeft).toBeUndefined();
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(2);
     expandRun(renderer, 'read');
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
@@ -208,14 +209,15 @@ describe('one-line tool ledger', () => {
     );
   });
 
-  it('names failed steps in brass and omits settled verdict glyphs', () => {
+  it('names failed steps in monochrome bold ink and omits settled verdict glyphs', () => {
     const renderer = render(<ActivityTimeline active={false} items={TOOLS} />);
     expandRun(renderer, 'read');
     expect(renderedText(renderer)).toContain('Failed');
     expect(renderedText(renderer)).not.toContain('✗');
     expect(renderedText(renderer)).not.toContain('✓');
     const failed = renderer.root.findAllByType('Text').find((node: any) => node.props.children === 'Failed');
-    expect(failed.props.color).toBe('needsYou');
+    expect(failed.props.color).toBe('ink');
+    expect(failed.props.fontFamily).toBe('SpaceGrotesk-SemiBold');
   });
 
   it('the live turn’s last step carries the spinner, not a verdict glyph', () => {
@@ -312,11 +314,11 @@ describe('grouping consecutive steps', () => {
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
     expect(hostNodes(renderer, /^tool-run-group-/)).toHaveLength(1);
     expect(renderer.root.findByProps({ testID: 'tool-run-group-a' }).props.accessibilityLabel).toBe(
-      `${count} ${count === 1 ? 'step' : 'steps'}, expandable`,
+      'Ran command, expandable',
     );
   });
 
-  it('an unbroken longer run folds into one summary line (design 2026-08-24)', () => {
+  it('an unbroken longer run folds into one outcome-only summary line with bold ink failures', () => {
     const renderer = render(
       <ActivityTimeline
         active={false}
@@ -332,10 +334,12 @@ describe('grouping consecutive steps', () => {
     );
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
     const group = renderer.root.findByProps({ testID: 'tool-run-group-a' });
-    expect(group.props.accessibilityLabel).toBe('6 steps · 4 failed, expandable');
+    expect(group.props.accessibilityLabel).toBe('Ran command · 4 failed, expandable');
     expect(group.props.accessibilityState).toEqual({ expanded: false });
-    // The failure count is brass — the group's second place colour is spent.
     expect(renderedText(renderer)).toContain('4 failed');
+    const failNode = renderer.root.findAllByType('Text').find((node: any) => node.props.children === '4 failed');
+    expect(failNode.props.color).toBe('ink');
+    expect(failNode.props.fontFamily).toBe('SpaceGrotesk-SemiBold');
     expect(
       renderer.root.findAll(
         (node: { type: unknown; props: { style?: unknown } }) =>
@@ -384,7 +388,7 @@ describe('grouping consecutive steps', () => {
       />,
     );
     expect(renderer.root.findByProps({ testID: 'tool-run-group-a' }).props.accessibilityLabel).toBe(
-      '4 steps, expandable',
+      'Ran command, expandable',
     );
   });
 });
@@ -407,11 +411,11 @@ describe('a reply’s steps line', () => {
     tool('t4', 'order'),
   ];
 
-  it('counts notes apart from steps in the collapsed summary', () => {
+  it('summarizes mixed tools and notes without step or note counts', () => {
     const renderer = render(<TurnStepsLine items={STEPS} />);
     const group = renderer.root.findByProps({ testID: 'tool-run-group-n1' });
-    expect(group.props.accessibilityLabel).toBe('4 steps · 2 notes, expandable');
-    expect(JSON.stringify(group.findByType('Text' as never).props.children)).toContain('2 notes');
+    expect(group.props.accessibilityLabel).toBe('Ran command, expandable');
+    expect(group.props.accessibilityLabel).not.toMatch(/\d+\s+steps/);
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
   });
 
@@ -447,7 +451,7 @@ describe('a reply’s steps line', () => {
     );
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-n1' }).props.accessibilityLabel,
-    ).toBe('1 step · 1 note, expandable');
+    ).toBe('Checked tools, expandable');
     expandRun(renderer, 'n1');
     expect(
       renderer.root
@@ -460,7 +464,7 @@ describe('a reply’s steps line', () => {
     const renderer = render(<TurnStepsLine items={[note('n1', 'Checked.')]} />);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-n1' }).props.accessibilityLabel,
-    ).toBe('1 note, expandable');
+    ).toBe('Note, expandable');
   });
 
   it('a reply with no steps renders nothing', () => {
@@ -800,10 +804,14 @@ describe('folded historical transcripts', () => {
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-tool-1' }).props.accessibilityLabel,
-    ).toBe('6 steps, expandable');
+    ).toBe('Checked files, expandable');
 
     expandRun(renderer, 'tool-1');
-    expect(hostNodes(renderer, /^tool-observation-fold-/)).toHaveLength(0);
+    const readFold = renderer.root.findByProps({ testID: 'tool-read-fold-read-fold-tool-1' });
+    expect(readFold).toBeTruthy();
+    expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(0);
+    const foldPress = readFold.findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0];
+    act(() => foldPress.props.onPress());
     expect(hostNodes(renderer, /^tool-ledger-line-/)).toHaveLength(6);
     expect(
       renderer.root.findByProps({ testID: 'tool-ledger-line-tool-8' }).findAll((node: any) => node.type === 'XStack' && typeof node.props.onPress === 'function')[0]?.props.onPress,
@@ -844,7 +852,7 @@ describe('folded historical transcripts', () => {
       hostNodes(renderer, /^tool-run-group-/).map(
         (node: { props: { accessibilityLabel?: string } }) => node.props.accessibilityLabel,
       ),
-    ).toEqual(['7 steps, expandable']);
+    ).toEqual(['Checked files, expandable']);
   });
 
   it('drops thinking-only rows while retaining summary tool lines', () => {
@@ -887,7 +895,7 @@ describe('folded historical transcripts', () => {
     expect(hostNodes(renderer, /^tool-run-group-/)).toHaveLength(1);
     expect(
       renderer.root.findByProps({ testID: 'tool-run-group-anonymous-0' }).props.accessibilityLabel,
-    ).toBe('6 steps · 4 failed, expandable');
+    ).toBe('Ran command · 4 failed, expandable');
   });
 });
 
@@ -907,7 +915,7 @@ it('keeps MCP machine labels without duplicating or recasing the tool name', () 
 });
 
 
-it('retains uniform brass Failed with no duplicate cross for a failed named MCP tool', () => {
+it('retains uniform monochrome ink Failed with no duplicate cross for a failed named MCP tool', () => {
   const renderer = render(<TurnStepsLine items={[{
     kind: 'tool', id: 'mcp-failure', title: 'mcp__example__read_file',
     command: 'mcp__example__read_file example.ts', input: 'example.ts',
@@ -919,7 +927,7 @@ it('retains uniform brass Failed with no duplicate cross for a failed named MCP 
   expect(texts.map((node: any) => node.props.children)).toContain('read_file example.ts');
   const failed = texts.find((node: any) => node.props.children === 'Failed');
   expect(failed).toBeDefined();
-  expect(failed.props.color).toBe('needsYou');
+  expect(failed.props.color).toBe('ink');
   expect(renderedText(renderer)).not.toContain('✗');
   expect(texts.map((node: any) => node.props.children)).not.toContain('Read_file');
 });
@@ -937,7 +945,7 @@ it.each([ActivityTimeline, TurnStepsLine].flatMap(Component => [
   toolReader.mockResolvedValueOnce({roomId,messages:[message],next:'tool-anchor'});
   const renderer=render(<Component items={[{kind:'tool',id:'aggregate',title:'200 steps',toolGroup:{roomId,anchor,count:200}}]}/>);
   expect(toolReader).not.toHaveBeenCalled();
-  expect(renderer.root.findByProps({testID:'tool-run-group-aggregate'}).props.accessibilityLabel).toContain('200 steps');
+  expect(renderer.root.findByProps({testID:'tool-run-group-aggregate'}).props.accessibilityLabel).toBe('Steps, expandable');
   await act(async()=>expandRun(renderer,'aggregate'));
   expect(toolReader).toHaveBeenCalledTimes(1);expect(toolReader.mock.calls[0][0]).toMatchObject({roomId,anchor});
   toolReader.mockResolvedValueOnce({roomId,messages:[{...message,activity:[{kind:'tool',title:'Synthetic tool',status,output}]}]});

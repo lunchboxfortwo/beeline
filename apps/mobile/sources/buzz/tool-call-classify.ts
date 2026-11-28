@@ -643,10 +643,10 @@ function describeToolSummary(args: Record<string, unknown> | undefined): McpCall
       list: 'listed',
       listed: 'listed',
       read: 'read',
-      search: 'found',
-      searched: 'found',
-      find: 'found',
-      found: 'found',
+      search: 'searched',
+      searched: 'searched',
+      find: 'searched',
+      found: 'searched',
       check: 'checked',
       checked: 'checked',
       update: 'updated',
@@ -779,7 +779,7 @@ export function describeMcpCall(
       const scope = readField(args, ['scope'])?.toLowerCase();
       const base = scope === 'memory' ? 'memory' : scope === 'history' ? 'history' : 'Beeline';
       return {
-        verb: 'found',
+        verb: 'searched',
         object: query ? `${base} · ${query}` : base,
         observational: true,
       };
@@ -894,7 +894,7 @@ export function describeMcpCall(
         return { verb: 'listed', object: path ? displayFilePath(path) : 'files', observational: true };
       }
       if (action === 'search') {
-        return { verb: 'found', object: query || 'code', observational: true };
+        return { verb: 'searched', object: query || 'code', observational: true };
       }
       if (action && ['log', 'show', 'diff', 'status'].includes(action)) {
         return { verb: 'git', object: action, observational: true };
@@ -907,7 +907,7 @@ export function describeMcpCall(
       return { verb: 'listed', object: path ? displayFilePath(path) : 'files', observational: true };
     }
     if (tool === 'search_text') {
-      return { verb: 'found', object: query || 'code', observational: true };
+      return { verb: 'searched', object: query || 'code', observational: true };
     }
     if (tool.startsWith('git_')) {
       return { verb: 'git', object: tool.slice(4), observational: true };
@@ -916,7 +916,7 @@ export function describeMcpCall(
   }
 
   if (server === 'codegraph') {
-    return { verb: 'found', object: query || 'code graph', observational: true };
+    return { verb: 'searched', object: query || 'code graph', observational: true };
   }
 
   const summary = describeToolSummary(args);

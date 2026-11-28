@@ -148,22 +148,25 @@ describe('Reproduction tool-ledger-32233', () => {
     },
   ];
 
-  it('demotes startup warning, renders flat single-item rows without observation sub-folders, and puts Raw arguments behind toggle', () => {
+  it('demotes startup warning, folds consecutive read checks into one expandable Checked row, and puts Raw arguments behind toggle', () => {
     const renderer = render(<TurnStepsLine items={ITEMS_32233} />);
     const group = renderer.root.findByProps({ testID: 'tool-run-group-boot-warn' });
-    expect(group.props.accessibilityLabel).toBe('5 steps, expandable');
+    expect(group.props.accessibilityLabel).toBe('Checked schedules, expandable');
     expect(renderedText(renderer)).not.toContain('failed');
 
     expandRun(renderer, 'boot-warn');
+    const foldRow = renderer.root.findByProps({ testID: 'tool-read-fold-read-fold-read-skill' });
+    expect(foldRow).toBeTruthy();
+    expect(renderedText(renderer)).toContain('5 checks');
+    const foldPress = foldRow.findAll((n: any) => n.type === 'XStack' && typeof n.props.onPress === 'function')[0];
+    act(() => foldPress.props.onPress());
+
     const expandedText = renderedText(renderer);
     expect(expandedText).toContain('Startup note');
     expect(expandedText).not.toContain('Action failed');
     expect(expandedText).not.toContain('the code');
     expect(expandedText).not.toContain('a file');
     expect(expandedText).not.toContain('mcp.beeline-agent.wake');
-    expect(
-      renderer.root.findAllByProps({ testID: 'tool-observation-fold-obs-read-skill' }),
-    ).toHaveLength(0);
     expect(expandedText).toContain('waiting-and-wakes/SKILL.md');
     expect(
       renderer.root
@@ -331,7 +334,7 @@ describe('Reproduction tool-ledger-32233', () => {
       />,
     );
     const trigger = renderer.root.findByProps({ testID: 'tool-run-group-handoff-1' });
-    expect(trigger.props.accessibilityLabel).toBe('1 step, expandable');
+    expect(trigger.props.accessibilityLabel).toBe('Sent to @crayon, expandable');
     expect(renderedText(renderer)).not.toContain('784c96');
     expect(renderedText(renderer)).not.toContain('b71a2a24');
 
@@ -340,6 +343,14 @@ describe('Reproduction tool-ledger-32233', () => {
     expect(openText).toContain('@crayon');
     expect(openText).toContain('#helper-index-flake');
     expect(openText).not.toContain('784c96');
+    // Zero accent color tokens on row verbs or @handles
+    const handoffColors = renderer.root
+      .findByProps({ testID: 'tool-ledger-line-handoff-1' })
+      .findAllByType('Text')
+      .map((n: any) => n.props.color);
+    expect(handoffColors).not.toContain('needsYou');
+    expect(handoffColors).not.toContain('added');
+    expect(handoffColors).not.toContain('removed');
 
     const rowPress = renderer.root
       .findByProps({ testID: 'tool-ledger-line-handoff-1' })
@@ -349,5 +360,84 @@ describe('Reproduction tool-ledger-32233', () => {
     expect(card).toBeTruthy();
     expect(renderedText(renderer)).toContain('Ruby → Crayon');
     expect(renderedText(renderer)).toContain('Write the read-only snapshot to its own file');
+  });
+
+  it('renders flush-left monochrome Stone rows with Searched verb, aligned verb column, folded reads, and zero accent colors on stats', () => {
+    const webRenderer = render(
+      <TurnStepsLine
+        items={[
+          {
+            kind: 'tool',
+            id: 'ws-1',
+            title: 'search_web',
+            toolKind: 'search',
+            input: JSON.stringify({ query: '"Claude Code" OpenCode agent activity progress' }),
+            output: 'Claude Code and OpenCode interleave prose and tool steps chronologically.\n\nhttps://docs.anthropic.com/en/docs/claude-code',
+            status: 'completed',
+          },
+          {
+            kind: 'tool',
+            id: 'ws-2',
+            title: 'search_web',
+            toolKind: 'search',
+            input: JSON.stringify({ query: 'AI agent chat UI tool call collapsed summary' }),
+            output: 'Modern tools show outcome summaries instead of step counts.',
+            status: 'completed',
+          },
+        ]}
+      />,
+    );
+    expect(webRenderer.root.findByProps({ testID: 'tool-run-group-ws-1' }).props.accessibilityLabel).toBe(
+      'Searched web, expandable',
+    );
+    expandRun(webRenderer, 'ws-1');
+    const webText = renderedText(webRenderer);
+    expect(webText).toContain('Searched');
+    expect(webText).not.toContain('Found');
+    expect(webRenderer.root.findByProps({ testID: 'tool-ledger-line-ws-1' })).toBeTruthy();
+    expect(webRenderer.root.findByProps({ testID: 'tool-ledger-line-ws-2' })).toBeTruthy();
+
+    const codeRenderer = render(
+      <TurnStepsLine
+        items={[
+          { kind: 'tool', id: 'r1', title: 'Read', toolKind: 'read', files: [{ path: 'src/ThreadHeader.tsx' }], status: 'completed' },
+          { kind: 'tool', id: 'r2', title: 'Read', toolKind: 'read', files: [{ path: 'src/ChevronGlyph.tsx' }], status: 'completed' },
+          { kind: 'tool', id: 'r3', title: 'Read', toolKind: 'read', files: [{ path: 'src/ActivityTimeline.tsx' }], status: 'completed' },
+          {
+            kind: 'tool',
+            id: 'e1',
+            title: 'Edit',
+            toolKind: 'edit',
+            files: [{ path: 'src/ChevronGlyph.tsx', status: 'M', addedLines: 2, removedLines: 1, diff: '@@ -1 +1 @@\n-a\n+b\n+c' }],
+            status: 'completed',
+          },
+          {
+            kind: 'tool',
+            id: 't1',
+            title: 'Bash',
+            toolKind: 'execute',
+            command: 'vitest run sources/buzz/alignment',
+            status: 'completed',
+          },
+        ]}
+      />,
+    );
+    expect(codeRenderer.root.findByProps({ testID: 'tool-run-group-r1' }).props.accessibilityLabel).toBe(
+      'Edited ChevronGlyph.tsx · ran tests, expandable',
+    );
+    expandRun(codeRenderer, 'r1');
+    const list = codeRenderer.root.findByProps({ testID: 'tool-run-list-r1' });
+    expect(list.props.borderLeftWidth).toBeUndefined();
+    const fold = codeRenderer.root.findByProps({ testID: 'tool-read-fold-read-fold-r1' });
+    expect(JSON.stringify(fold.toJSON?.() ?? renderedText(codeRenderer))).toContain(
+      '3 files · ThreadHeader.tsx, ChevronGlyph.tsx +1',
+    );
+    const editRow = codeRenderer.root.findByProps({ testID: 'tool-ledger-line-e1' });
+    const editColors = editRow.findAllByType('Text').map((n: any) => n.props.color);
+    expect(editColors).not.toContain('added');
+    expect(editColors).not.toContain('removed');
+    expect(editColors).not.toContain('needsYou');
+    const editedVerb = editRow.findAllByType('Text').find((n: any) => n.props.children === 'Edited');
+    expect(editedVerb.props.minWidth).toBe(68);
   });
 });
