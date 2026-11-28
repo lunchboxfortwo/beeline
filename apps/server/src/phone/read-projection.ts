@@ -189,6 +189,10 @@ export function decorateAttachments<Message extends RoomViewMessage>(
 }
 
 
+function isWorkflowRunEnd(status: unknown): status is 'done' | 'failed' | 'abandoned' {
+  return status === 'done' || status === 'failed' || status === 'abandoned';
+}
+
 export function projectedMessage(
   row: MessageRow,
   publicOrigin: string,
@@ -237,6 +241,8 @@ export function projectedMessage(
     ...(!row.deleted_at && row.source_client ? { sourceClient: row.source_client } : {}),
     presentation: row.deleted_at ? 'system' : row.presentation,
     ...(systemTranscript ? { systemTranscript } : {}),
+    ...(row.card_type === 'workflow-handoff' && isWorkflowRunEnd(row.card?.status)
+      ? { workflowRunEnd: row.card.status } : {}),
     ...(row.deleted_at ? { deleted: true } : {}),
     ...(row.bookmarked ? { bookmarked: true } : {}),
     ...(row.feedback_reported ? { feedbackReported: true } : {}),

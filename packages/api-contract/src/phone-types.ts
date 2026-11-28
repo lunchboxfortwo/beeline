@@ -237,6 +237,8 @@ export type RoomViewMessage = {
   /** The structured event behind a server-phrased system line or card header;
    *  absent on rows written before the one system-line grammar. */
   readonly systemEvent?: SystemEvent;
+  /** How a workflow run ended, on the run card that ended it; absent while the run is live. */
+  readonly workflowRunEnd?: import('./phone-operations.js').WorkflowRunStatus;
   /** Proof that this exact message belongs to this Room, for reply signing. */
   readonly reference?: KnownMessageReference;
   readonly liveTurnId?: string;

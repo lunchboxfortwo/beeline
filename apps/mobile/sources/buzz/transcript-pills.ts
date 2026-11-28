@@ -11,7 +11,7 @@ type PillFields = Pick<
   | 'voiceCall' | 'onboarding' | 'choice' | 'appSignIn' | 'agentSignIn' | 'connectorOffer'
   | 'notificationLifecycleRun' | 'walletTx' | 'walletInsufficient' | 'walletDelegation'
   | 'targetBranchProposal' | 'corner' | 'githubEvent' | 'daemonFact' | 'systemEvent'
-  | 'systemTranscript' | 'durableFact' | 'presentation'
+  | 'systemTranscript' | 'durableFact' | 'presentation' | 'workflowRunEnd'
 >;
 
 export function hasCardBody(message: PillFields): boolean {
@@ -50,7 +50,19 @@ export function isHiddenSystemLine(message: PillFields): boolean {
   return kind === 'schedule-ran' ||
     kind === 'computer-session-activity' || kind === 'connector-offer-decided' ||
     kind === 'squire-approval-decided' || kind === 'grant-decided' ||
+    isRoutineWorkflowLine(message) ||
     Boolean(message.voiceCall && !message.voiceCall.endedAt);
+}
+
+/**
+ * A workflow run's start, handoffs and gate answers, and a normal finish: the
+ * gate card and the run card already show these. A run that fails or is
+ * cancelled keeps its line, because the run card is gone by then. Matches only
+ * the `workflow-handoff` event, never a gate's choice card.
+ */
+function isRoutineWorkflowLine(message: PillFields): boolean {
+  return message.systemEvent?.kind === 'workflow-handoff' &&
+    message.workflowRunEnd !== 'failed' && message.workflowRunEnd !== 'abandoned';
 }
 
 export function isPillMessage(message: PillFields): boolean {

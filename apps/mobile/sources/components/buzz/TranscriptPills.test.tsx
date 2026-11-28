@@ -334,8 +334,8 @@ const voice = { id: ROOM, roomId: ROOM, startedAt: 1_800_000_000, participants: 
 const systemCases: { name: string; patch: Partial<RoomViewMessage>; opened: string; copy?: string; visibleOnArrival?: boolean }[] = [
   { name: 'plain workflow expiry', patch: { presentation: 'system', systemTranscript: notice, text: mockHeading },
     opened: bodyId, copy: mockHeading },
-  { name: 'kinded workflow handoff', visibleOnArrival: true, patch: { presentation: 'card', systemTranscript: card, author: agent,
-    systemEvent: { kind: 'workflow-handoff', subject: { kind: 'agent', name: 'Agent' }, verb: 'passed approval' } }, opened: bodyId },
+  { name: 'failed workflow handoff', visibleOnArrival: true, patch: { presentation: 'card', systemTranscript: card, author: agent,
+    workflowRunEnd: 'failed', systemEvent: { kind: 'workflow-handoff', subject: { kind: 'agent', name: 'Agent' }, verb: 'passed approval' } }, opened: bodyId },
   { name: 'plain notice', patch: { presentation: 'system', text: 'Ada joined' }, opened: bodyId, copy: 'Ada joined' },
   { name: 'ended call', patch: { presentation: 'system', voiceCall: { ...voice, endedAt: 1_800_000_003 },
     text: 'Voice call ended' }, opened: bodyId, copy: 'Voice call ended' },
