@@ -43,6 +43,8 @@ export async function fixture(corner = false, temporaryRoot = tmpdir()) {
       },
     })),
     sessionPrompt: prompt,
+    supportsStructuredSystemPrompt: false,
+    promptDelivery: () => undefined,
     canLoadSession: () => false,
     canPromptWithImages: () => false,
   });

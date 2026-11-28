@@ -6,6 +6,7 @@ import { explainAgentProgramFailure } from './agent-command.js';
 import { harnessTurnTokens } from './harness-turn-tokens.js';
 
 import { installPiSystemPrompt, piCompactionMarker } from './pi-session-instructions.js';
+import { readPiTurnRecord } from './pi-turn-record.js';
 
 import type { SessionMode } from './config.js';
 import { cornerAutonomyModeCandidates, roomModeCandidates } from './harness-capabilities.js';
@@ -192,11 +193,10 @@ export async function acpClientSessionNew(
   const sessionId = raw.sessionId as string | undefined;
   if (!sessionId) throw new Error('session/new missing sessionId');
   if (!ctx.osSandbox) await ctx.applySessionMode(sessionId, raw, opts.mode);
-  if (ctx.codexBlockDelivery)
-    ctx.promptDeliveries.set(
-      sessionId,
-      new CodexPromptDelivery(isPiAcpHarness(ctx.agentLabel) ? undefined : opts.systemPrompt),
-    );
+  // Every adapter can invalidate its session rules by reporting compaction.
+  const instructions = (ctx.supportsStructuredSystemPrompt || ctx.codexBlockDelivery) &&
+    !isPiAcpHarness(ctx.agentLabel) ? opts.systemPrompt : undefined;
+  ctx.promptDeliveries.set(sessionId, new CodexPromptDelivery(instructions));
   return { sessionId, raw };
 }
 
@@ -236,7 +236,7 @@ export async function acpClientSessionLoad(
   const result = await ctx.request('session/load', params);
   const raw = result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
   if (!ctx.osSandbox) await ctx.applySessionMode(opts.sessionId, raw, opts.mode);
-  if (ctx.codexBlockDelivery) ctx.promptDeliveries.set(opts.sessionId, new CodexPromptDelivery());
+  ctx.promptDeliveries.set(opts.sessionId, new CodexPromptDelivery());
   return { sessionId: opts.sessionId, raw };
 }
 
@@ -342,21 +342,30 @@ export async function acpClientSessionPrompt(
   ctx.activePromptSessions.add(sessionId);
 
   try {
+    const startedAt = Date.now();
     const result = await ctx.request('session/prompt', {
       sessionId,
       prompt: typeof text === 'string' ? [{ type: 'text', text }] : [...text],
     }) as { stopReason?: string };
     const agentText = finalAgentMessageText(updates, ctx.agentLabel);
+    const stopReason = result?.stopReason ?? 'end_turn';
+    // Pi ACP maps a provider refusal to end_turn. The native record distinguishes
+    // a failed attempt (which may have streamed partial text) from a final answer.
+    const piTurn = isPiAcpHarness(ctx.agentLabel) && (stopReason === 'end_turn' || stopReason === 'error')
+      ? await readPiTurnRecord({ agentEnv: ctx.agentEnv, sessionId, startedAt })
+      : undefined;
+    const providerError = piTurn?.kind === 'error' ? piTurn.text : undefined;
 
     const toolCalls = [...toolCallEntries(updates), ...asyncTasks.values()];
-    completed = true;
+    completed = result?.stopReason !== 'cancelled';
     const tokenUsage = harnessTurnTokens(result, updates);
 
     return {
-      stopReason: result?.stopReason ?? 'end_turn',
+      stopReason,
       updates,
       agentText,
       toolCalls,
+      ...(providerError ? { providerError } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
     };
   } finally {

@@ -1,30 +1,32 @@
 # Codex prompt delivery
 
-Beeline sends session rules through `session/new`, then omits unchanged context
-blocks from warm turns on the verified Codex ACP path. Codex settings, native
-tools, imported skills, and transcript selection/budgeting remain unchanged.
+Beeline supplies session rules when it creates an ACP conversation. When the
+harness advertises structured `systemPrompt` support, the first user prompt
+uses the rules already supplied by `session/new`. Claude and Pi keep their
+adapter-specific system instructions. Pi's rules stay in `SYSTEM.md` through
+compaction, so rule delivery does not depend on reading its compaction marker.
+Other adapters receive a fallback copy in the first successful prompt of each
+fresh conversation.
 
-`AcpClient` enables `CodexPromptDelivery` only for `codex-acp` reporting version
-`2.3.0` and structured `systemPrompt` support. This installed adapter stores the
-append text as developer instructions and emits automatic/manual
-`compaction_update` notifications when the client advertises
-`session.compaction`. Unknown versions and missing capabilities retain full
-turn delivery. This conservative version guard should be expanded only after
-measuring a new adapter's instruction and compaction behavior.
+In `PlaceSession`, successful prompts let later turns reuse the rules already
+in the conversation. ACP compaction notifications invalidate the delivery state
+for any adapter, including during an active prompt. The next prompt restores
+the rules. Codex ACP versions `2.3.0` and `2.10.0` support structured system
+prompts. The installed `2.10.0` adapter stores the append text as developer
+instructions and reports compaction when the client advertises
+`session.compaction`. A failed or cancelled prompt also clears the delivery state.
 
-Each confirmed conversation has an in-memory hash map. Successful session
-creation seeds only the rules already accepted by the adapter. Successful prompt
-completion commits staged block hashes. A failed prompt, native load, compaction,
-new process, or missing cache restores full block delivery; fresh sessions deliver
-rules through session creation rather than repeating them in the first user
-prompt. Native loads deliberately do not reuse a previous process's cache.
-Compaction invalidates in-flight stages too. Empty replacements explicitly clear
-previously delivered blocks.
+The cache begins empty after a native load, so the first prompt after load
+restores any rules that use the turn prefix. Adapters without compaction signals
+reuse their successful delivery during the live session.
+Beeline has no signal to restore fallback rules after silent compaction in
+that session. Starting a new conversation restores its startup delivery. The
+Cursor bridge starts a new CLI invocation per turn and supplies the stored
+rules to each invocation.
 
-Cached blocks: rules, members, memory, corners, objective, generated title, brief,
-checkout, and available app list. Task, transcript, resume, reviewer target,
-workspace-core task-start instruction, and lifecycle instructions remain per-turn.
-Follow-up delivery nudges do not participate in the block cache.
+`PlaceSession` tracks the session rules alone. The proof below records the
+earlier rollout that also tracked members, memory, corners, objective,
+generated title, brief, checkout, and available apps.
 
 ## Reproduced
 

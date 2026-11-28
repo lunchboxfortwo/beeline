@@ -441,6 +441,7 @@ export async function prepareRoomAgentCredentials(
     input.skillReleaseId ?? runningBeelineReleaseId(),
     agentSkillDir(input.agentKind),
     input.isReviewer ?? false,
+    input.agentEnv?.BEELINE_THREAD_SKILLS === '1',
   ).catch((error) => console.warn(`[body] skills not provisioned under ${root}:`, error));
   return env;
 }

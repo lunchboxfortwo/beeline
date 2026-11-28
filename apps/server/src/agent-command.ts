@@ -803,6 +803,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   /** Publish this text even after a same-place reply (a review verdict, for example). */
   keepFinal?: boolean;
   silentCompletion?: boolean;
+  providerError?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   invocationId?: string;
   outputFiles?: Attachment[];
@@ -861,7 +862,10 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       return { commandId: item.id, completed: true, published: false };
     }
     const payload = item?.private_payload;
-    const messageText = repairAgentPost(item?.reason === 'voice_order' ? cleanVoiceReply(input.text,item.name) : input.text).text.trim();
+    const providerError = input.providerError === true && input.harnessEnded === true && Boolean(input.invocationId);
+    // A tool may have delivered a reply before the helper received the queue update.
+    const text = providerError && item?.public_reply_id ? '' : input.text;
+    const messageText = repairAgentPost(item?.reason === 'voice_order' ? cleanVoiceReply(text,item.name) : text).text.trim();
     if (item?.state === 'cancelled') refuseStoppedMessage(false);
     if (item) {
       const receipt = {commandId: item.id, completed: item.state === 'complete', published: Boolean(item.public_reply_id),
@@ -869,6 +873,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           stored:true,visible:true,delivered:true} : {})};
       if (!input.explicitReply) {
         const files = input.outputFiles ?? item.answer_attachments ?? [];
+        if (providerError && item.state === 'complete') return receipt;
         if (item.stop_requested_at || item.state === 'complete' && !item.result_message_id && (payload?.automatic || isBackgroundCommand(item.reason))) return receipt;
         if (!input.publicPost && !messageText && !files.length && !input.sharedReplyId) {
           if (item.state === 'complete') return receipt;
@@ -933,7 +938,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         if (existing && item.state === 'complete')
           return {...receipt, id:existing, messageId:existing, published:true, stored:true, visible:true, delivered:true};
         if (input.sharedReplyId && files.length) await db.query("UPDATE agent_commands SET answer_attachments='[]' WHERE id=$1",[item.id]);
-        const ended = await endAgentTurn(db,item,'complete',null,saved.id);
+        const failed = providerError && item.reason === 'human_tag' && Boolean(messageText);
+        const ended = await endAgentTurn(db,item,failed ? 'failed' : 'complete',null,saved.id);
         if (ended) await wakePeerMessageSender(db,item,{kind:'answer',outputId:saved.id,text:messageText,attachments:files,batchCommandIds:input.batchCommandIds,invocationId:input.invocationId ?? input.invocation?.id});
         completedNow = true;
         return {...saved, commandId:item.id, messageId:saved.id, completed:true, published:true, delivered:true};
