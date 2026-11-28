@@ -3,7 +3,8 @@ import { GitHubAppClient } from './github.js';
 
 const HEAD_SHA = 'a'.repeat(40);
 const OTHER_SHA = 'b'.repeat(40);
-const BOOTSTRAP_MESSAGE = 'Initial commit (Beeline repository bootstrap)';
+const bootstrapMessage = (target: string) =>
+  `Initial commit (Beeline repository bootstrap; target: ${target})`;
 
 function makeApp() {
   return new GitHubAppClient({ appId: '1', slug: 'beeline-test', privateKey: 'unused' });
@@ -33,7 +34,7 @@ it('bootstraps an empty repository on its default branch without passing branch 
   const put = requests.find((entry) => entry.method === 'PUT');
   expect(put?.path).toBe('/repos/acme/wargame/contents/README.md');
   expect(put?.body).toEqual({
-    message: BOOTSTRAP_MESSAGE,
+    message: bootstrapMessage('main'),
     content: Buffer.from('# wargame\n').toString('base64'),
   });
   expect(put?.body).not.toHaveProperty('branch');
@@ -69,7 +70,7 @@ it('resumes target-branch creation on retry after README succeeds and the first 
       return Response.json({
         sha: HEAD_SHA,
         parents: [],
-        commit: { message: BOOTSTRAP_MESSAGE },
+        commit: { message: bootstrapMessage('develop') },
         files: [{ filename: 'README.md', status: 'added' }],
       });
     }
@@ -96,6 +97,59 @@ it('resumes target-branch creation on retry after README succeeds and the first 
   expect(putCalls).toBe(1);
   expect(refAttempts).toBe(2);
   expect(targetCreated).toBe(true);
+});
+
+it('leaves a later missing target branch untouched after a completed bootstrap on main', async () => {
+  const app = makeApp();
+  let defaultCreated = false;
+  let commitMessage = '';
+  const createdRefs: string[] = [];
+  vi.spyOn(app, 'request').mockImplementation(async (url, init) => {
+    const parsed = new URL(String(url));
+    const method = init?.method ?? 'GET';
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches/main') {
+      return defaultCreated
+        ? Response.json({ name: 'main', commit: { sha: HEAD_SHA } })
+        : Response.json({ message: 'Branch not found' }, { status: 404 });
+    }
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches/develop')
+      return Response.json({ message: 'Branch not found' }, { status: 404 });
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches')
+      return Response.json(defaultCreated ? [{ name: 'main', commit: { sha: HEAD_SHA } }] : []);
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame')
+      return Response.json({ name: 'wargame', default_branch: 'main' });
+    if (method === 'PUT' && parsed.pathname === '/repos/acme/wargame/contents/README.md') {
+      const body = JSON.parse(String(init?.body)) as { message: string };
+      commitMessage = body.message;
+      defaultCreated = true;
+      return Response.json({ commit: { sha: HEAD_SHA } }, { status: 201 });
+    }
+    if (method === 'GET' && parsed.pathname === `/repos/acme/wargame/commits/${HEAD_SHA}`) {
+      return Response.json({
+        sha: HEAD_SHA,
+        parents: [],
+        commit: { message: commitMessage },
+        files: [{ filename: 'README.md', status: 'added' }],
+      });
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/acme/wargame/git/refs') {
+      createdRefs.push(String(init?.body));
+      return Response.json({}, { status: 201 });
+    }
+    throw new Error(`Unexpected request: ${method} ${parsed.pathname}`);
+  });
+
+  expect(await app.bootstrapEmptyRepository('token', 'acme/wargame', 'main')).toEqual({
+    status: 'bootstrapped',
+    headSha: HEAD_SHA,
+  });
+  expect(commitMessage).toBe(bootstrapMessage('main'));
+
+  // Switching the room target to a missing `develop` branch must not create `develop`.
+  expect(await app.bootstrapEmptyRepository('token', 'acme/wargame', 'develop')).toEqual({
+    status: 'missing-branch',
+  });
+  expect(createdRefs).toEqual([]);
 });
 
 it('skips writes when targetBranch already exists', async () => {

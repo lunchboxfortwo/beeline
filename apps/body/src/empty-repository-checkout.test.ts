@@ -15,7 +15,8 @@ import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 const exec = promisify(execFile);
 const git = async (...args: string[]) => (await exec('git', args)).stdout.trim();
 const roots: string[] = [];
-const BOOTSTRAP_MESSAGE = 'Initial commit (Beeline repository bootstrap)';
+const bootstrapMessage = (target: string) =>
+  `Initial commit (Beeline repository bootstrap; target: ${target})`;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -62,7 +63,7 @@ it('bootstrapEmptyGitHubRemote resumes target-branch creation on retry after REA
       putCalls += 1;
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       expect(body).toEqual({
-        message: BOOTSTRAP_MESSAGE,
+        message: bootstrapMessage('develop'),
         content: Buffer.from('# wargame\n').toString('base64'),
       });
       expect(body).not.toHaveProperty('branch');
@@ -73,7 +74,7 @@ it('bootstrapEmptyGitHubRemote resumes target-branch creation on retry after REA
       return Response.json({
         sha: headSha,
         parents: [],
-        commit: { message: BOOTSTRAP_MESSAGE },
+        commit: { message: bootstrapMessage('develop') },
         files: [{ filename: 'README.md', status: 'added' }],
       });
     }
@@ -113,6 +114,58 @@ it('bootstrapEmptyGitHubRemote resumes target-branch creation on retry after REA
   expect(putCalls).toBe(1);
   expect(refAttempts).toBe(2);
   expect(targetCreated).toBe(true);
+
+  // A completed bootstrap on main must leave a later missing develop branch untouched.
+  let mainBootstrapped = false;
+  let mainCommitMessage = '';
+  const fetchCompletedMain: typeof fetch = async (url, init) => {
+    const parsed = new URL(String(url));
+    const method = init?.method ?? 'GET';
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches/main') {
+      return mainBootstrapped
+        ? Response.json({ name: 'main', commit: { sha: headSha } })
+        : Response.json({ message: 'Branch not found' }, { status: 404 });
+    }
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches/develop')
+      return Response.json({ message: 'Branch not found' }, { status: 404 });
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches')
+      return Response.json(mainBootstrapped ? [{ name: 'main', commit: { sha: headSha } }] : []);
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame')
+      return Response.json({ name: 'wargame', default_branch: 'main' });
+    if (method === 'PUT' && parsed.pathname === '/repos/acme/wargame/contents/README.md') {
+      const body = JSON.parse(String(init?.body)) as { message: string };
+      mainCommitMessage = body.message;
+      mainBootstrapped = true;
+      return Response.json({ commit: { sha: headSha } }, { status: 201 });
+    }
+    if (method === 'GET' && parsed.pathname === `/repos/acme/wargame/commits/${headSha}`) {
+      return Response.json({
+        sha: headSha,
+        parents: [],
+        commit: { message: mainCommitMessage },
+        files: [{ filename: 'README.md', status: 'added' }],
+      });
+    }
+    throw new Error(`Unexpected write after completed main bootstrap: ${method} ${parsed.pathname}`);
+  };
+  expect(
+    await bootstrapEmptyGitHubRemote({
+      remote: 'https://github.com/acme/wargame.git',
+      targetBranch: 'main',
+      token: 'ghs_test',
+      apiBaseUrl: 'https://api.github.test',
+      fetchImpl: fetchCompletedMain,
+    }),
+  ).toBe(true);
+  expect(
+    await bootstrapEmptyGitHubRemote({
+      remote: 'https://github.com/acme/wargame.git',
+      targetBranch: 'develop',
+      token: 'ghs_test',
+      apiBaseUrl: 'https://api.github.test',
+      fetchImpl: fetchCompletedMain,
+    }),
+  ).toBe(false);
 
   // A non-empty repository whose sole commit is not a Beeline bootstrap commit is left untouched.
   const fetchNonBootstrap: typeof fetch = async (url) => {
@@ -155,7 +208,13 @@ it('thread checkout bootstraps an empty remote, resumes a failed custom target b
     attempts += 1;
     if (attempts === 1) {
       // Simulate README commit succeeding on default branch while target branch ref creation fails.
-      initialHead = await seedRemoteCommit(remote, 'main', 'README.md', '# wargame\n', BOOTSTRAP_MESSAGE);
+      initialHead = await seedRemoteCommit(
+        remote,
+        'main',
+        'README.md',
+        '# wargame\n',
+        bootstrapMessage('develop'),
+      );
       throw new Error('GitHub branch bootstrap failed: HTTP 502');
     }
     // Retry resumes target-branch creation from the verified bootstrap commit on main.

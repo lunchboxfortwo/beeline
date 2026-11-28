@@ -421,13 +421,21 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
     | { readonly status: 'bootstrapped'; readonly headSha: string }
     | { readonly status: 'missing-branch' };
 
-  const BEELINE_BOOTSTRAP_COMMIT_MESSAGE = 'Initial commit (Beeline repository bootstrap)';
+  function bootstrapCommitMessage(targetBranch: string): string {
+    return `Initial commit (Beeline repository bootstrap; target: ${targetBranch})`;
+  }
 
-  function isBootstrapCommit(commit: Record<string, unknown>): boolean {
+  function isBootstrapCommit(
+    commit: Record<string, unknown>,
+    expectedTargetBranch: string,
+  ): boolean {
     const parents = commit.parents;
     if (!Array.isArray(parents) || parents.length !== 0) return false;
     const message = (commit.commit as { message?: unknown } | undefined)?.message;
-    if (typeof message !== 'string' || message.trim() !== BEELINE_BOOTSTRAP_COMMIT_MESSAGE)
+    if (
+      typeof message !== 'string' ||
+      message.trim() !== bootstrapCommitMessage(expectedTargetBranch)
+    )
       return false;
     const files = commit.files;
     if (!Array.isArray(files) || files.length !== 1) return false;
@@ -523,7 +531,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
         ),
         'GitHub bootstrap commit verification',
       );
-      if (!isBootstrapCommit(commit)) return { status: 'missing-branch' };
+      if (!isBootstrapCommit(commit, branch)) return { status: 'missing-branch' };
       const headSha = await createTargetBranchRef(soleHeadSha);
       return { status: 'bootstrapped', headSha };
     };
@@ -559,7 +567,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
         method: 'PUT',
         headers: { ...githubHeaders(accessToken), 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: BEELINE_BOOTSTRAP_COMMIT_MESSAGE,
+          message: bootstrapCommitMessage(branch),
           content: Buffer.from(`# ${repoName}\n`).toString('base64'),
         }),
         signal: AbortSignal.timeout(15_000),

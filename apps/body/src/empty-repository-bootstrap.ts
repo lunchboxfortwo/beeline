@@ -1,6 +1,8 @@
 import { ask } from './wait.js';
 
-const BEELINE_BOOTSTRAP_COMMIT_MESSAGE = 'Initial commit (Beeline repository bootstrap)';
+function bootstrapCommitMessage(targetBranch: string): string {
+  return `Initial commit (Beeline repository bootstrap; target: ${targetBranch})`;
+}
 
 function githubRepositoryPath(remote: string): { path: string; name: string } | undefined {
   const match = remote.match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/i);
@@ -30,11 +32,17 @@ async function readErrorMessage(response: Response): Promise<string | undefined>
   }
 }
 
-function isBootstrapCommit(commit: Record<string, unknown>): boolean {
+function isBootstrapCommit(
+  commit: Record<string, unknown>,
+  expectedTargetBranch: string,
+): boolean {
   const parents = commit.parents;
   if (!Array.isArray(parents) || parents.length !== 0) return false;
   const message = (commit.commit as { message?: unknown } | undefined)?.message;
-  if (typeof message !== 'string' || message.trim() !== BEELINE_BOOTSTRAP_COMMIT_MESSAGE)
+  if (
+    typeof message !== 'string' ||
+    message.trim() !== bootstrapCommitMessage(expectedTargetBranch)
+  )
     return false;
   const files = commit.files;
   if (!Array.isArray(files) || files.length !== 1) return false;
@@ -140,7 +148,7 @@ export async function bootstrapEmptyGitHubRemote(input: {
       );
     }
     const commit = (await commitResponse.json()) as Record<string, unknown>;
-    if (!isBootstrapCommit(commit)) return false;
+    if (!isBootstrapCommit(commit, branch)) return false;
     return createTargetBranchRef(soleHeadSha);
   };
 
@@ -179,7 +187,7 @@ export async function bootstrapEmptyGitHubRemote(input: {
     method: 'PUT',
     headers: githubHeaders(input.token, true),
     body: JSON.stringify({
-      message: BEELINE_BOOTSTRAP_COMMIT_MESSAGE,
+      message: bootstrapCommitMessage(branch),
       content: Buffer.from(`# ${repoName}\n`).toString('base64'),
     }),
   });
