@@ -1,5 +1,5 @@
 import type { AgentCommand, AgentPlaceReset } from '@beeline/api-contract/daemon';
-import { mkdtemp,readFile,rm } from 'node:fs/promises';
+import { mkdtemp,readdir,readFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
@@ -97,18 +97,34 @@ it('a configuration change refreshes configuration without rereading every optio
 });
 
 it('a place first seen after a configuration change starts reading the changed settings before its first start', async () => {
-  const f=await fixture();
-  f.changed([f.item('before')]);
+  const f = await fixture();
+  const before = f.item('before');
+  const elsewhere = { ...f.item('elsewhere'), roomId: 'other-room', returnRoomId: 'other-room' };
+  const removals = new Map([[before.id, deferred<void>()], [elsewhere.id, deferred<void>()]]);
+  const remove = AnswerStore.prototype.remove;
+  vi.spyOn(AnswerStore.prototype, 'remove').mockImplementation(async function (this: AnswerStore, answer) {
+    await remove.call(this, answer);
+    removals.get(answer.itemId)?.resolve();
+  });
+
+  f.changed([before]);
   await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledOnce());
   f.configChanged();
   expect(harness.configurationChanged).toHaveBeenCalledOnce();
-  f.changed([{...f.item('elsewhere'),roomId:'other-room',returnRoomId:'other-room'}]);
+  f.changed([elsewhere]);
   await vi.waitFor(()=>expect(harness.deliver).toHaveBeenCalledTimes(2));
   // The new place was marked before its first start, so it cannot start from
   // a cached selection that predates the change.
   expect(harness.configurationChanged).toHaveBeenCalledTimes(2);
   expect(harness.configurationChanged.mock.invocationCallOrder[1]).toBeLessThan(
     harness.start.mock.invocationCallOrder.at(-1)!);
+
+  // The runner removes each saved answer after its post succeeds.
+  await Promise.all([...removals.values()].map(({ promise }) => promise));
+  for (const requestId of removals.keys()) {
+    expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({ requestId }));
+  }
+  expect(await readdir(join(f.root, 'answers'))).toEqual([]);
 });
 
 it('reannounces an active turn after registration without delivering its prompt again', async () => {

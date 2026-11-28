@@ -6,6 +6,7 @@ import { explainAgentProgramFailure } from './agent-command.js';
 import { harnessTurnTokens } from './harness-turn-tokens.js';
 
 import { installPiSystemPrompt, piCompactionMarker } from './pi-session-instructions.js';
+import { readPiTurnRecord } from './pi-turn-record.js';
 
 import type { SessionMode } from './config.js';
 import { cornerAutonomyModeCandidates, roomModeCandidates } from './harness-capabilities.js';
@@ -342,21 +343,30 @@ export async function acpClientSessionPrompt(
   ctx.activePromptSessions.add(sessionId);
 
   try {
+    const startedAt = Date.now();
     const result = await ctx.request('session/prompt', {
       sessionId,
       prompt: typeof text === 'string' ? [{ type: 'text', text }] : [...text],
     }) as { stopReason?: string };
     const agentText = finalAgentMessageText(updates, ctx.agentLabel);
+    const stopReason = result?.stopReason ?? 'end_turn';
+    // Pi ACP maps a provider refusal to end_turn. The native record distinguishes
+    // a failed attempt (which may have streamed partial text) from a final answer.
+    const piTurn = isPiAcpHarness(ctx.agentLabel) && (stopReason === 'end_turn' || stopReason === 'error')
+      ? await readPiTurnRecord({ agentEnv: ctx.agentEnv, sessionId, startedAt })
+      : undefined;
+    const providerError = piTurn?.kind === 'error' ? piTurn.text : undefined;
 
     const toolCalls = [...toolCallEntries(updates), ...asyncTasks.values()];
     completed = true;
     const tokenUsage = harnessTurnTokens(result, updates);
 
     return {
-      stopReason: result?.stopReason ?? 'end_turn',
+      stopReason,
       updates,
       agentText,
       toolCalls,
+      ...(providerError ? { providerError } : {}),
       ...(tokenUsage ? { tokenUsage } : {}),
     };
   } finally {

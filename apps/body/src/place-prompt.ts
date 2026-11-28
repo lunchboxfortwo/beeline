@@ -203,7 +203,13 @@ function itemPromptContext(item: AgentCommand, options: {
       ? [`Reply with quoteMsgId "${item.sourceMessageId}".`] : []),
     ...(context ? [context] : []),
     ...(options.asks ? [options.asks] : []),
-    ...(personTag && !options.batched ? ['Reply to the message below. A greeting or ping only needs a short final answer.'] : []),
+    ...(personTag && !options.batched
+      ? [
+          context?.includes('<recent_chat_context>')
+            ? 'Reply ONLY to the message below. For a greeting or ping, give a short reply with no tool calls and do not mention or act on earlier chat context above. Use earlier chat context only when the message below refers to it.'
+            : 'Reply to the message below. A greeting or ping only needs a short final answer.',
+        ]
+      : []),
     ...(personTag ? message : []),
   ].join('\n');
 }

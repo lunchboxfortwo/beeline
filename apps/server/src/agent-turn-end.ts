@@ -6,8 +6,8 @@ import { systemText } from './message-origin.js';
 import { systemLine } from './system-line.js';
 
 /** Every terminal write to a queue item goes through this database function:
- * the answer was posted (complete), or Stop cancelled it. A terminal replay
- * changes nothing. Legacy failed outcomes remain readable during upgrades.
+ * a posted answer completes the item, including a provider refusal on a failed
+ * turn, or Stop cancels it. A terminal replay changes nothing.
  * Nothing else ends an item; a dropped helper leaves it pending.
  */
 export const AGENT_TURN_END_SCHEMA = `

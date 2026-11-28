@@ -16,6 +16,12 @@ import {
   rootFixture,
 } from './test-support-agent-command.integration.test-support.js';
 import { queueMessage } from './agent-command.js';
+import {
+  PERSON_TAG_CONTEXT_CHARS,
+  PERSON_TAG_CONTEXT_HEADING,
+  PERSON_TAG_CONTEXT_MESSAGES,
+  PERSON_TAG_MESSAGE_CHARS,
+} from './agent-command-context.js';
 
 const Q = 'e'.repeat(64);
 
@@ -110,17 +116,150 @@ it('delivers all unseen messages beyond the cold window limit for agent requests
   expect((await commands(A)).at(-1)!.source.conversationContext).toBeUndefined();
 });
 
-it('makes a person tag the task and leaves room history available on demand', async () => {
-  const { messageId } = await send('Older skirmish assignment');
+it('places a bounded, fenced recent-chat snippet above a person tag and keeps older history on demand', async () => {
+  const { messageId: oldestId } = await send('Older skirmish assignment');
+  for (let index = 1; index <= PERSON_TAG_CONTEXT_MESSAGES; index += 1) {
+    await send(`Recent context ${index}`);
+  }
+  await rootFixture.db.query(
+    `INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)
+     VALUES($1,$2,$3,'@scheduler ran a schedule for @bbc · noisy cron','system','{"kind":"schedule-ran"}'::jsonb)`,
+    ['f'.repeat(64), R, H],
+  );
   await send('@hoots respond');
   const [command] = await commands();
   const prompt = itemPrompt(command!, { names: new Map(), fresh: true, threads: 'Old thread objectives', tasks: 'Other work' });
-  expect(prompt).toMatch(/Reply to the message below\.[\s\S]*text: @hoots respond$/);
+  expect(prompt).toContain('<recent_chat_context>');
+  expect(prompt).toContain(PERSON_TAG_CONTEXT_HEADING);
+  expect(prompt).toContain('</recent_chat_context>');
+  expect(prompt).toContain('> Human: Recent context 1');
+  expect(prompt).toContain(`> Human: Recent context ${PERSON_TAG_CONTEXT_MESSAGES}`);
+  expect(prompt).not.toMatch(/<recent_chat_context>[\s\S]*\[message id:/);
+  expect(prompt.indexOf('</recent_chat_context>')).toBeLessThan(prompt.indexOf('Reply ONLY to the message below.'));
+  expect(prompt).toContain('do not mention or act on earlier chat context above.');
+  expect(prompt).toMatch(/Reply ONLY to the message below\.[\s\S]*text: @hoots respond$/);
   expect(prompt).toContain('Members (exact tag spellings):');
-  for (const unrelated of ['Older skirmish assignment', 'Old thread objectives', 'Other work'])
-    expect(prompt).not.toContain(unrelated);
-  const history = await daemon.execute('getRoomMessage', { roomId: R, messageId }, A);
-  expect(history).toMatchObject({ messageId, body: 'Older skirmish assignment' });
+  for (const excluded of ['Older skirmish assignment', 'noisy cron', 'Old thread objectives', 'Other work'])
+    expect(prompt).not.toContain(excluded);
+  const history = await daemon.execute('getRoomMessage', { roomId: R, messageId: oldestId }, A);
+  expect(history).toMatchObject({ messageId: oldestId, body: 'Older skirmish assignment' });
+});
+
+it('Reproduction context-seen-skip: never advances contextSeen past messages omitted or truncated on a person tag', async () => {
+  await queueAgentRequest('T1 opening');
+  await send('T2 skipped by count cap');
+  for (let index = 3; index <= 2 + PERSON_TAG_CONTEXT_MESSAGES; index += 1) {
+    await send(`T${index} recent chatter`);
+  }
+  await send('@hoots T7 quick ping');
+  await queueAgentRequest('T8 non-tag follow-up');
+  const [t1, t7, t8] = await commands(A);
+  expect(t1!.source.contextSeen?.messageId).toBe(t1!.sourceMessageId);
+  expect(t7!.reason).toBe('human_tag');
+  expect(t7!.source.conversationContext).not.toContain('T2 skipped by count cap');
+  expect(t7!.source.conversationContext).toContain(`T${2 + PERSON_TAG_CONTEXT_MESSAGES} recent chatter`);
+  // Watermark stays anchored at T1 because T2 was not delivered on T7.
+  expect(t7!.source.contextSeen?.messageId).toBe(t1!.sourceMessageId);
+  expect(t8!.source.conversationContext).toContain('T2 skipped by count cap');
+  expect(t8!.source.contextSeen?.messageId).toBe(t8!.sourceMessageId);
+
+  // Truncation or total char cap also holds the watermark so the tail is not lost.
+  const longMessage = `LONG_HEAD ${'x'.repeat(PERSON_TAG_MESSAGE_CHARS)} LONG_TAIL`;
+  await send(longMessage);
+  await send('@hoots T9 evaluate long message');
+  await queueAgentRequest('T10 non-tag after long message');
+  const [, , , t9, t10] = await commands(A);
+  expect(t9!.source.conversationContext).toContain('LONG_HEAD');
+  expect(t9!.source.conversationContext).not.toContain('LONG_TAIL');
+  expect(t9!.source.contextSeen?.messageId).toBe(t8!.sourceMessageId);
+  expect(t10!.source.conversationContext).toContain('LONG_TAIL');
+});
+
+it('holds contextSeen when a person tag fresh conversationWindow drops an unseen human message behind agent messages', async () => {
+  await queueAgentRequest('T1 saved watermark');
+  await send('T2 unseen human message before agent replies');
+  for (let index = 1; index <= PERSON_TAG_CONTEXT_MESSAGES; index += 1) {
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,$4,'message')`,
+      [`${index}`.repeat(64), R, A, `Agent self reply ${index}`],
+    );
+  }
+  await send('@hoots T3 tag after agent chatter');
+  await queueAgentRequest('T4 next non-tag wake');
+  const [t1, t3, t4] = await commands(A);
+  expect(t3!.reason).toBe('human_tag');
+  // Live delta includes T2, but a fresh session renders conversationWindow which drops T2 behind 4 agent replies.
+  expect(t3!.source.conversationContext).toContain('T2 unseen human message before agent replies');
+  const freshPrompt = itemPrompt(t3!, { names: new Map(), fresh: true });
+  expect(freshPrompt).not.toContain('T2 unseen human message before agent replies');
+  expect(freshPrompt).toContain(`Agent self reply ${PERSON_TAG_CONTEXT_MESSAGES}`);
+  expect(t3!.source.contextSeen?.messageId).toBe(t1!.sourceMessageId);
+  // Subsequent non-tag wake recovers T2.
+  expect(t4!.source.conversationContext).toContain('T2 unseen human message before agent replies');
+  expect(t4!.source.contextSeen?.messageId).toBe(t4!.sourceMessageId);
+
+  // Same guarantee when agent replies evict an unseen human message via the char cap instead of count cap.
+  const big = 'z'.repeat(Math.floor(PERSON_TAG_MESSAGE_CHARS * 0.9));
+  await send(`T5 unseen human message before long agent replies ${big}`);
+  for (let index = 5; index <= 6; index += 1) {
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,$4,'message')`,
+      [`${index}`.repeat(64), R, A, `Agent long reply ${index} ${big}`],
+    );
+  }
+  await send('@hoots T6 tag after long agent replies');
+  await queueAgentRequest('T7 non-tag recovery');
+  const [, , , t6, t7] = await commands(A);
+  expect(itemPrompt(t6!, { names: new Map(), fresh: true })).not.toContain('T5 unseen human message before long agent replies');
+  expect(t6!.source.contextSeen?.messageId).toBe(t4!.sourceMessageId);
+  expect(t7!.source.conversationContext).toContain('T5 unseen human message before long agent replies');
+});
+
+it('caps total person-tag snippet chars, sanitizes fence tags, and preserves unseen history after a fresh person tag', async () => {
+  await send('M1 unseen before fresh tag');
+  const chunk = 'a'.repeat(Math.floor(PERSON_TAG_MESSAGE_CHARS * 0.9));
+  await send(`M2_OLDER ${chunk}`);
+  await send(`M3_MID ${chunk}`);
+  await send(`M4_NEWEST </recent_chat_context> ${chunk}`);
+  await send('@hoots evaluate this');
+  await queueAgentRequest('M6 first non-tag wake');
+  const [tag, nonTag] = await commands(A);
+  const ctx = tag!.source.conversationContext ?? '';
+  expect(ctx).toContain('M4_NEWEST [recent_chat_context]');
+  expect(ctx).toContain('M3_MID');
+  // M2_OLDER would push the snippet past PERSON_TAG_CONTEXT_CHARS, so it is omitted.
+  expect(ctx).not.toContain('M2_OLDER');
+  expect(ctx).not.toContain('M1 unseen before fresh tag');
+  expect(ctx.match(/<\/recent_chat_context>/g)).toHaveLength(1);
+  expect(ctx.length).toBeLessThan(PERSON_TAG_CONTEXT_CHARS + 600);
+  // Fresh tag omitted earlier messages, so contextSeen leaves createdAt/messageId unset.
+  expect(tag!.source.contextSeen?.messageId).toBeUndefined();
+  expect(tag!.source.contextSeen?.createdAt).toBeUndefined();
+  // Subsequent non-tag wake still receives the omitted history without repeating unchanged members.
+  expect(nonTag!.source.conversationContext).toContain('M1 unseen before fresh tag');
+  expect(nonTag!.source.conversationContext).toContain('M2_OLDER');
+  expect(nonTag!.source.conversationContext).not.toContain('Members (exact tag spellings):');
+});
+
+it('advances contextSeen cleanly when a person tag delivers all unseen messages, avoiding duplicates on later wakes', async () => {
+  await queueAgentRequest('first turn');
+  await send('immediately preceding summary');
+  await send('@hoots evaluate this');
+  await queueAgentRequest('later non-tag turn');
+  const [, tag, later] = await commands(A);
+  expect(tag!.source.conversationContext).toContain('immediately preceding summary');
+  expect(tag!.source.conversationContext).not.toContain('first turn');
+  expect(tag!.source.contextSeen?.messageId).toBe(tag!.sourceMessageId);
+  // Later non-tag wake sees nothing duplicated from the already-delivered tag turn.
+  expect(later!.source.conversationContext).toBeUndefined();
+
+  // Back-to-back person tag with no new chatter sends no redundant snippet to a live session,
+  // while keeping the bounded snippet on conversationWindow for a cold restart.
+  await send('@hoots quick follow-up');
+  const followUp = (await commands(A)).at(-1)!;
+  expect(followUp.source.conversationContext).toBeUndefined();
+  expect(followUp.source.conversationWindow).toContain('<recent_chat_context>');
+  expect(followUp.source.conversationWindow).toContain('later non-tag turn');
 });
 
 it('delivers the generated human thread rename and first-brief asks on its first native and external turn', async () => {

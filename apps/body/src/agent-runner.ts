@@ -378,7 +378,10 @@ export class AgentRunner {
       const pendingBatch = batch.filter((next) =>
         this.latest.some((listed) => listed.id === next.id),
       );
-      const silentCompletion = !answer.text && answer.stopReason === 'end_turn' &&
+      const providerError = pendingBatch[0]?.reason === 'human_tag' && answer.providerError
+        ? redactToolDetail(answer.providerError)
+        : undefined;
+      const silentCompletion = !providerError && !answer.text && answer.stopReason === 'end_turn' &&
         pendingBatch.some((next) => next.reason === 'schedule');
       if (pendingBatch.length || this.completed.has(item.id))
         await this.store({
@@ -389,8 +392,9 @@ export class AgentRunner {
           resetId: place.resetId,
           ...(!pendingBatch.length ? { finishesAnsweredItem: true } : {}),
           queuedRequestIds: pendingBatch.slice(1).map((next) => next.id),
-          text: answer.text,
+          text: providerError ?? answer.text,
           harnessEnded: true,
+          ...(providerError ? { providerError: true } : {}),
           ...(silentCompletion ? { silentCompletion: true } : {}),
           ...steps,
         });
@@ -598,6 +602,7 @@ export class AgentRunner {
           presentation: 'message',
           ...(answer.harnessEnded ? { harnessEnded: true } : {}),
           ...(answer.silentCompletion ? { silentCompletion: true } : {}),
+          ...(answer.providerError ? { providerError: true } : {}),
           ...(answer.invocation ? { invocation: answer.invocation } : {}),
           ...(answer.queuedRequestIds?.length ? { queuedRequestIds: answer.queuedRequestIds } : {}),
           ...(answer.steps ? { steps: answer.steps } : {}),
