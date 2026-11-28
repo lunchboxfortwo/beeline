@@ -363,7 +363,10 @@ export async function callAgentTool(
 ): Promise<string> {
   if (name === 'message') return executeAgentTool(name, args, toolCallId);
   const { requestId, ...input } = args;
-  return commandRequest.run({ requestId: typeof requestId === 'string' ? requestId : undefined }, () =>
+  // Check an explicit requestId before it is stripped; later validation never sees it.
+  if (requestId !== undefined && (typeof requestId !== 'string' || !requestId))
+    throw new Error(`${name}: invalid arguments; requestId must be a non-empty string; follow the advertised schema`);
+  return commandRequest.run({ requestId: requestId as string | undefined }, () =>
     executeAgentTool(name, input, toolCallId),
   );
 }

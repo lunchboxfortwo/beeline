@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { Check } from 'typebox/value';
 import { institutionalMemoryKeywords } from '@beeline/api-contract/daemon';
@@ -174,6 +176,54 @@ describe('Beeline tool surface across harnesses', () => {
     expect(() => validateAdvertisedToolInput(advertisedAgentTool('message'), { type: 'reply', quoteMsgId: 'q1', text: 'Done' })).not.toThrow();
   });
 
+  it.each([[''], [7], [null]])('rejects requestId %j on a direct call before stripping it', async requestId => {
+    await expect(callAgentTool('wake', { action: 'pause', scheduleId: 'sched-1', requestId }, 'bad-request-id'))
+      .rejects.toThrow('wake: invalid arguments; requestId must be a non-empty string');
+  });
+
+  it('runs a stdio call with an explicit requestId and forwards it to the session and daemon', async () => {
+    const received: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const server = createServer((request, response) => {
+      let text = '';
+      request.on('data', chunk => { text += chunk; });
+      request.on('end', () => {
+        const body = JSON.parse(text || '{}') as Record<string, unknown>;
+        received.push({ path: request.url ?? '', body });
+        response.setHeader('content-type', 'application/json');
+        response.end(JSON.stringify(request.url === '/session'
+          ? { roomId: 'room-1', requestId: body.requestId }
+          : { paused: true, receipt: 'Paused fixture schedule' }));
+      });
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('BEELINE_')));
+    const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./read-only-mcp.ts', import.meta.url))], {
+      env: { ...env, BEELINE_MCP_SURFACE: 'agent', BEELINE_NATIVE_IO_PROVEN: '1', BEELINE_DAEMON_ROOM_ID: 'room-1',
+        BEELINE_DAEMON_BASE_URL: url, BEELINE_DAEMON_TOKEN: 'fixture', BEELINE_GRANT_RUNNER_URL: url, BEELINE_GRANT_RUNNER_TOKEN: 'fixture' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    try {
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
+      const closed = new Promise<number | null>((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+      child.stdin.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'wake', arguments: { action: 'pause', scheduleId: 'sched-1', requestId: 'req-stdio' } } }) + '\n');
+      expect(await closed, stderr).toBe(0);
+      const response = JSON.parse(stdout.trim()) as { result: { isError?: boolean; content: Array<{ text: string }> } };
+      expect(response.result.isError, response.result.content[0]?.text).not.toBe(true);
+      expect(JSON.parse(response.result.content[0]!.text)).toMatchObject({ paused: true, receipt: 'Paused fixture schedule' });
+      expect(received.find(call => call.path === '/session')?.body).toMatchObject({ action: 'command', requestId: 'req-stdio' });
+      expect(received.find(call => call.path.endsWith('/setAgentWakePaused'))?.body)
+        .toMatchObject({ roomId: 'room-1', requestId: 'req-stdio', scheduleId: 'sched-1', paused: true });
+    } finally {
+      child.kill();
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+
   it('names only live tools and fields in managed skills, schemas and prompts', () => {
     const tools = agentToolsFor(true, false, true, true, true, true, false);
     const surface = [
@@ -213,7 +263,6 @@ describe('Beeline tool surface across harnesses', () => {
       const requests = [
         { jsonrpc: '2.0', id: 1, method: 'tools/list' },
         ...invalidInputs.map(([name, args], index) => ({ jsonrpc: '2.0', id: index + 2, method: 'tools/call', params: { name, arguments: { ...args, requestId: 'req-1' } } })),
-        { jsonrpc: '2.0', id: 100, method: 'tools/call', params: { name: 'wake', arguments: { action: 'pause', scheduleId: 'sched-1', requestId: 'req-1' } } },
         { jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: 'wake', arguments: { action: 'pause', scheduleId: 'sched-1', requestId: 7 } } },
       ];
       child.stdin.end(requests.map(request => JSON.stringify(request)).join('\n') + '\n');
@@ -225,9 +274,6 @@ describe('Beeline tool surface across harnesses', () => {
       expect(tools).toEqual(agentToolsFor(true, false, false, false, true, true, true));
       expect(tools.every(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toBe(true);
       expect(tools.filter(tool => 'requestId' in (tool.inputSchema.properties as object)).map(tool => tool.name)).toEqual([]);
-      // A valid call carrying requestId passes validation and stops only at the missing host.
-      const accepted = responses.find(response => response.id === 100)!.result.content?.[0]?.text;
-      expect(accepted).not.toMatch(/invalid arguments|unknown fields/);
       expect(responses.find(response => response.id === 101)!.result.content?.[0]?.text).toMatch(/wake: invalid arguments/);
       for (let index = 0; index < invalidInputs.length; index++) {
         const response = responses.find(response => response.id === index + 2)!;
