@@ -2,7 +2,7 @@ import * as sessionTools from './session-tool-connection.js';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,10 +38,13 @@ it.each(['codegraph', 'beeline'])('connects %s before a prompt and gates its too
   const { port } = server.address() as { port: number };
   const baseUrl = `http://127.0.0.1:${port}`;
   const authPath = join(root, 'auth.json');
+  const started = join(root, 'upstream-started');
   const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./resource-mcp-facade.ts', import.meta.url))], {
     env: { ...process.env, BEELINE_RESOURCE_TARGET: target, BEELINE_RESOURCE_AUTH_FILE: authPath,
+      FIXTURE_MCP_STARTED: started,
       BEELINE_GRANT_RUNNER_URL: baseUrl, BEELINE_GRANT_RUNNER_TOKEN: 'fixture',
       BEELINE_RESOURCE_LAUNCH: JSON.stringify({ command: process.execPath, args: ['-e', `
+        require('node:fs').writeFileSync(process.env.FIXTURE_MCP_STARTED, '');
         let initialized = false;
         let toolCalls = 0;
         require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
@@ -71,19 +74,21 @@ it.each(['codegraph', 'beeline'])('connects %s before a prompt and gates its too
     return message;
   };
   try {
-    expect(await request('initialize')).toHaveProperty('result.protocolVersion', '2024-11-05');
+    expect(await request('initialize', { protocolVersion: '2024-11-05' })).toHaveProperty('result.protocolVersion', '2024-11-05');
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
     expect(await request('ping')).toHaveProperty('result', {});
-    expect(await request('tools/list')).toHaveProperty('result.tools', [{ name: 'lookup' }]);
+    expect(await request('tools/list')).toHaveProperty('result.tools', []);
     expect(commandReads).toBe(0);
 
     await writeFile(authPath, JSON.stringify({ baseUrl, daemonToken: 'test', placeId: 'room' }));
     const tool = { name: 'lookup' };
     expect(await request('tools/call', tool)).toHaveProperty('error.code', -32001);
     expect(calls).toEqual([]);
+    await expect(access(started)).rejects.toMatchObject({ code: 'ENOENT' });
 
     current = command;
     expect(await request('tools/call', tool)).toHaveProperty('result.toolCalls', 1);
+    expect(await request('tools/list')).toHaveProperty('result.tools', [{ name: 'lookup' }]);
     cancelled = true;
     expect(await request('tools/call', tool)).toHaveProperty('error.code', -32001);
     expect(await closed).toEqual([1, null]);
@@ -92,8 +97,13 @@ it.each(['codegraph', 'beeline'])('connects %s before a prompt and gates its too
       commandId: command.itemId,
       body: { roomId: command.roomId, requestId: command.requestId, target, operation: 'lookup' },
     };
-    expect(calls).toEqual([authorization, authorization]);
-    expect(commandReads).toBe(3);
+    expect(calls).toEqual([
+      { ...authorization, body: { ...authorization.body, consume: false } },
+      authorization,
+      { ...authorization, body: { roomId: command.roomId, requestId: command.requestId, target, consume: false } },
+      authorization,
+    ]);
+    expect(commandReads).toBe(5);
   } finally {
     child.kill('SIGTERM');
     await closed;
@@ -183,17 +193,21 @@ it.each(['revocation', 'stdin close', 'SIGTERM'] as const)('kills the resource t
   const output = createInterface({ input: child.stdout });
   let resourcePid: number | undefined;
   try {
-    const reply = once(output, 'line');
+    const initialized = once(output, 'line');
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) + '\n');
+    expect(JSON.parse((await initialized)[0]).result.serverInfo.name).toBe('beeline-resource-facade');
+    expect(calls).toBe(0);
+    const reply = once(output, 'line');
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
     resourcePid = JSON.parse((await reply)[0]).result.pid;
     const exited = once(child, 'exit');
     if (ending === 'revocation') {
       revoked = true;
-      child.stdin.write(Array.from({ length: 4 }, (_, id) => JSON.stringify({ jsonrpc: '2.0', id: id + 2, method: 'tools/call' })).join('\n') + '\n');
+      child.stdin.write(Array.from({ length: 4 }, (_, id) => JSON.stringify({ jsonrpc: '2.0', id: id + 3, method: 'tools/call' })).join('\n') + '\n');
     } else if (ending === 'stdin close') child.stdin.end();
     else child.kill('SIGTERM');
     await exited;
-    expect(calls).toBe(ending === 'revocation' ? 1 : 0);
+    expect(calls).toBe(ending === 'revocation' ? 3 : 2);
     expect(() => process.kill(resourcePid!, 0)).toThrow();
   } finally {
     child.kill('SIGKILL');

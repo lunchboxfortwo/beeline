@@ -138,7 +138,7 @@ describe('agent orders act for the issuing owner', () => {
     const command = await order();
     const turn = await claim(command);
     const scratch = await mkdtemp(join(tmpdir(), 'beeline-order-facade-'));
-    let upstreamCalls = 0;
+    const upstreamCalls: string[] = [];
     const server = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -149,8 +149,15 @@ describe('agent orders act for the issuing owner', () => {
         return;
       }
       if (request.url === '/squire') {
-        upstreamCalls++;
-        response.end(JSON.stringify({ jsonrpc: '2.0', id: input.id, result: { serverInfo: { name: 'Squire fixture' } } }));
+        upstreamCalls.push(input.method);
+        if (input.id === undefined) {
+          response.writeHead(202).end();
+          return;
+        }
+        const result = input.method === 'tools/list'
+          ? { tools: [{ name: 'lookup', inputSchema: { type: 'object' } }] }
+          : input.method === 'tools/call' ? { content: [] } : { serverInfo: { name: 'Squire fixture' } };
+        response.end(JSON.stringify({ jsonrpc: '2.0', id: input.id, result }));
         return;
       }
       try {
@@ -164,7 +171,7 @@ describe('agent orders act for the issuing owner', () => {
     const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     const authPath = join(scratch, 'auth.json');
     await writeFile(authPath, JSON.stringify({ baseUrl, daemonToken: 'fixture', placeId: turn.roomId }));
-    const initialize = async () => {
+    const runFacade = async () => {
       const child = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../../body/src/resource-mcp-facade.ts', import.meta.url))], {
         env: { ...process.env, BEELINE_RESOURCE_TARGET: 'squire', BEELINE_RESOURCE_AUTH_FILE: authPath,
           BEELINE_GRANT_RUNNER_URL: baseUrl, BEELINE_GRANT_RUNNER_TOKEN: 'fixture',
@@ -175,19 +182,34 @@ describe('agent orders act for the issuing owner', () => {
       child.stdout.on('data', data => { output += data; });
       child.stderr.on('data', data => { errors += data; });
       const exit = new Promise<number | null>((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
-      child.stdin.end(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
+      child.stdin.end([
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'lookup' } },
+      ].map(message => JSON.stringify(message)).join('\n') + '\n');
       const timeout = setTimeout(() => child.kill(), 10_000);
       try {
         expect(await exit, errors).toBe(0);
-        return JSON.parse(output);
+        return output.trim().split('\n').map(line => JSON.parse(line));
       } finally { clearTimeout(timeout); child.kill(); }
     };
     try {
-      expect(await initialize()).toMatchObject({ result: { serverInfo: { name: 'Squire fixture' } } });
-      expect(upstreamCalls).toBe(1);
+      const handshake = { id: 1, result: { serverInfo: { name: 'beeline-resource-facade' } } };
+      expect(await runFacade()).toMatchObject([
+        handshake,
+        { id: 2, result: { tools: [{ name: 'lookup' }] } },
+        { id: 3, result: { content: [] } },
+      ]);
+      const allowedCalls = ['initialize', 'notifications/initialized', 'tools/list', 'tools/call'];
+      expect(upstreamCalls).toEqual(allowedCalls);
       await db.query('UPDATE agent_commands SET root_command_id=$2,root_source_message_id=$2 WHERE id=$1', [command.id, 'missing-root']);
-      expect(await initialize()).toMatchObject({ error: { code: -32001 } });
-      expect(upstreamCalls).toBe(1);
+      expect(await runFacade()).toMatchObject([
+        handshake,
+        { id: 2, result: { tools: [] } },
+        { id: 3, error: { code: -32001 } },
+      ]);
+      expect(upstreamCalls).toEqual(allowedCalls);
     } finally {
       await new Promise<void>(resolve => server.close(() => resolve()));
       await rm(scratch, { recursive: true, force: true });

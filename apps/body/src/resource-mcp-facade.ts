@@ -4,13 +4,14 @@ import { boundToolResponse } from './tool-output-budget.js';
 import { squireApprovalAction, type SquireApprovalDetails } from '@beeline/api-contract/phone';
 /** Host MCP transport gate. Authorization belongs to each call, not the harness session. */
 import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import type { ChildProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { TurnStoppedError } from './turn-stop.js';
-import { ask, onEnd, runOwned } from './wait.js';
+import { answer, ask, onEnd, runOwned } from './wait.js';
 
 export const RESOURCE_FACADE_FLAG = '--resource-mcp-facade';
 export function resourceFacadeArgs(): string[] {
@@ -39,10 +40,12 @@ export const MCP_RESOURCE_TARGET_KEY = 'beeline_resource_target';
 export const MCP_RESOURCE_GATE_KEY = 'beeline_resource_gate';
 export const MCP_RESOURCE_GATE_TRANSPORT = 'transport';
 
-const HANDSHAKE = new Set(['initialize', 'notifications/initialized', 'ping', 'tools/list']);
 /** Discovery and notifications never spend a Once grant. */
 export const NON_CONSUMING = new Set([
-  ...HANDSHAKE,
+  'initialize',
+  'notifications/initialized',
+  'ping',
+  'tools/list',
   'notifications/cancelled',
   'notifications/progress',
   'notifications/roots/list_changed',
@@ -584,8 +587,6 @@ export async function authorizeResourceMessage(
 ): Promise<boolean> {
   if (!message || Array.isArray(message) || typeof message !== 'object') return false;
   if (typeof message.method !== 'string') return false;
-  // Harnesses negotiate MCP and discover tools before the first prompt arrives.
-  if (HANDSHAKE.has(message.method)) return true;
   const { auth, context } = await resourceCommand(authFile);
   if (!context) return false;
   const response = await fetchImpl(
@@ -659,7 +660,8 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
       await postSquireLoginWall(loginWall, authFile).catch(() => {});
     }
   };
-  const authorizedResponseIds = new Set<string>();
+  type ReceiveReply = (message: Record<string, unknown>) => void | Promise<void>;
+  const responseHandlers = new Map<string, ReceiveReply>();
   let child: ChildProcess | undefined;
   let stopped = false;
   const transport = new AbortController();
@@ -670,7 +672,7 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
     lines.close();
     process.stdin.destroy();
     squireRequests.clear();
-    authorizedResponseIds.clear();
+    responseHandlers.clear();
     // Keep this transport in the harness's process group/resource scope so
     // turn cancellation also tears down any resource grandchildren.
     child?.kill('SIGKILL');
@@ -701,9 +703,11 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
           const key = messageIdKey(message.id);
-          if (!key || !authorizedResponseIds.delete(key)) return;
-          await observeSquireResponse(message);
-          process.stdout.write(`${await boundToolResponse(message)}\n`);
+          if (!key) return;
+          const receive = responseHandlers.get(key);
+          if (!receive) return;
+          responseHandlers.delete(key);
+          await receive(message);
         } catch {
           // Personal-resource output is visible only as a correlated JSON-RPC response.
         }
@@ -716,37 +720,149 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
     return started;
   };
   let session: string | undefined;
+  const sendReply: ReceiveReply = async (message) => {
+    await observeSquireResponse(message);
+    process.stdout.write(`${await boundToolResponse(message)}\n`);
+  };
+  const forward = async (message: Record<string, unknown>, receive = sendReply): Promise<void> => {
+    const expectedId = messageIdKey(message.id);
+    if (command) {
+      const started = resourceChild();
+      if (expectedId) responseHandlers.set(expectedId, receive);
+      started.stdin!.write(`${JSON.stringify(message)}\n`);
+      return;
+    }
+    // The MCP client reads this process's stdout: the wait stays silent.
+    const response = await ask(
+      { url: launch.url! },
+      {
+        method: 'POST',
+        headers: {
+          ...launch.headers,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...(session ? { 'mcp-session-id': session } : {}),
+        },
+        body: JSON.stringify(message),
+        signal: transport.signal,
+      },
+    );
+    if (!response.ok) throw new Error('resource transport refused the call');
+    session = response.headers.get('mcp-session-id') ?? session;
+    if (response.status === 202 || response.status === 204) return;
+    if (response.headers.get('content-type')?.includes('text/event-stream')) {
+      if (!expectedId) return;
+      const reader = response.body?.getReader();
+      if (!reader) return;
+      let buffer = '';
+      const decoder = new TextDecoder();
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          let end: number;
+          while ((end = buffer.indexOf('\n')) >= 0) {
+            const row = buffer.slice(0, end).trimEnd();
+            buffer = buffer.slice(end + 1);
+            if (!row.startsWith('data:')) continue;
+            const reply = JSON.parse(row.slice(5).trim()) as Record<string, unknown>;
+            if (messageIdKey(reply.id) !== expectedId) continue;
+            await receive(reply);
+            return;
+          }
+        }
+      } finally {
+        await reader.cancel();
+      }
+    } else {
+      const body = await response.text();
+      if (body) {
+        const reply = JSON.parse(body) as Record<string, unknown>;
+        if (!expectedId || messageIdKey(reply.id) !== expectedId)
+          throw new Error('resource transport returned an unrelated response');
+        await receive(reply);
+      }
+    }
+  };
+  let initializeParams: Record<string, unknown> | undefined;
+  const initializeUpstream = async () => {
+    if (!initializeParams) return;
+    const initialize = { jsonrpc: '2.0', id: randomUUID(), method: 'initialize', params: initializeParams };
+    initializeParams = undefined;
+    const reply = await answer<Record<string, unknown>>(
+      'resource MCP initialize',
+      command ? [transport.signal, [process.stdin, 'end']] : [transport.signal],
+      (settle) => {
+        void forward(initialize, settle.resolve).then(() => {
+          if (!command) settle.reject(new Error('resource transport did not answer initialize'));
+        }, settle.reject);
+      },
+    );
+    if (!record(reply.result)) throw new Error('resource transport refused initialize');
+    await forward({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  };
+  const authorize = (message: Record<string, unknown>, consume: boolean) =>
+    authorizeResourceMessage(message, target, authFile, consume, undefined, transport.signal)
+      .catch(error => {
+        if (message.method === 'tools/list') return false;
+        throw error;
+      });
   const lines = createInterface({ input: process.stdin });
   // Serialize calls so Once cannot be used by two requests before consumption.
   let pending = Promise.resolve();
   lines.on('line', (line) => {
     pending = pending.then(async () => {
       if (stopped) return;
-      let message: Record<string, unknown>;
+      let message: Record<string, unknown> | undefined;
       try {
-        message = JSON.parse(line) as Record<string, unknown>;
+        message = record(JSON.parse(line));
       } catch {
         return;
       }
+      if (!message || typeof message.method !== 'string') return;
+      const { method, id } = message;
+      const localReply = (result: Record<string, unknown>) => {
+        if (id !== undefined) process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
+      };
       try {
+        // The facade owns client startup. Only the command gate can open the upstream.
+        if (method === 'initialize') {
+          initializeParams = record(message.params) ?? {};
+          localReply({
+            protocolVersion: shortString(initializeParams.protocolVersion) ?? '2025-06-18',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'beeline-resource-facade', version: '1.0.0' },
+          });
+          return;
+        }
+        if (method === 'notifications/initialized') return;
+        if (method === 'ping') {
+          localReply({});
+          return;
+        }
+        let allowed = await authorize(message, !initializeParams && spendsGrant);
+        if (allowed && initializeParams) {
+          await initializeUpstream().catch(error => {
+            process.exitCode = 1;
+            stop();
+            throw error;
+          });
+          // Recheck the active command after opening the upstream transport.
+          allowed = await authorize(message, spendsGrant);
+        }
+        if (!allowed) {
+          if (method !== 'tools/list') throw new Error('resource approval required');
+          localReply({ tools: [] });
+          return;
+        }
         let upstream = message;
         if (target === 'squire') {
           upstream = squireApprovalCall(message);
-          if (message.method === 'tools/list' && message.id !== undefined)
-            squireRequests.set(JSON.stringify(message.id), { message });
+          if (method === 'tools/list' && id !== undefined)
+            squireRequests.set(JSON.stringify(id), { message });
         }
-        if (
-          !(await authorizeResourceMessage(
-            message,
-            target,
-            authFile,
-            spendsGrant,
-            undefined,
-            transport.signal,
-          ))
-        )
-          throw new Error('resource approval required');
-        if (target === 'squire' && message.method === 'tools/call') {
+        if (target === 'squire' && method === 'tools/call') {
           const call = record(message.params);
           const tool = shortString(call?.name);
           const navigationUrl = drivenUrlIn(tool, record(call?.arguments));
@@ -755,82 +871,17 @@ export function runResourceFacade(env: NodeJS.ProcessEnv = process.env): void {
             (tool?.startsWith('operate_') && !SQUIRE_NAVIGATION_TOOLS.has(tool)
               ? activeSquireBrowserUrl
               : undefined);
-          if (message.id !== undefined)
-            squireRequests.set(JSON.stringify(message.id), {
+          if (id !== undefined)
+            squireRequests.set(JSON.stringify(id), {
               message,
               ...(activeSquireBrowserUrl ? { drivenUrl: activeSquireBrowserUrl } : {}),
             });
         }
-        if (command) {
-          const started = resourceChild();
-          const key = messageIdKey(message.id);
-          if (key) authorizedResponseIds.add(key);
-          started.stdin!.write(`${JSON.stringify(upstream)}\n`);
-          return;
-        }
-        // The MCP client reads this process's stdout: the wait stays silent.
-        const response = await ask(
-          { url: launch.url! },
-          {
-            method: 'POST',
-            headers: {
-              ...launch.headers,
-              'content-type': 'application/json',
-              accept: 'application/json, text/event-stream',
-              ...(session ? { 'mcp-session-id': session } : {}),
-            },
-            body: JSON.stringify(upstream),
-            signal: transport.signal,
-          },
-        );
-        if (!response.ok) throw new Error('resource transport refused the call');
-        session = response.headers.get('mcp-session-id') ?? session;
-        if (response.status === 202 || response.status === 204) return;
-        if (response.headers.get('content-type')?.includes('text/event-stream')) {
-          const expectedId = messageIdKey(message.id);
-          if (!expectedId) return;
-          const reader = response.body?.getReader();
-          if (!reader) return;
-          let buffer = '';
-          const decoder = new TextDecoder();
-          try {
-            for (;;) {
-              const chunk = await reader.read();
-              if (chunk.done) break;
-              buffer += decoder.decode(chunk.value, { stream: true });
-              let end: number;
-              while ((end = buffer.indexOf('\n')) >= 0) {
-                const row = buffer.slice(0, end).trimEnd();
-                buffer = buffer.slice(end + 1);
-                if (!row.startsWith('data:')) continue;
-                const data = row.slice(5).trim();
-                const result = JSON.parse(data) as { id?: unknown };
-                if (messageIdKey(result.id) !== expectedId) continue;
-                await observeSquireResponse(result as Record<string, unknown>);
-                process.stdout.write(
-                  `${await boundToolResponse(result as Record<string, unknown>)}\n`,
-                );
-                return;
-              }
-            }
-          } finally {
-            await reader.cancel();
-          }
-        } else {
-          const body = await response.text();
-          if (body) {
-            const result = JSON.parse(body) as { id?: unknown };
-            const expectedId = messageIdKey(message.id);
-            if (!expectedId || messageIdKey(result.id) !== expectedId)
-              throw new Error('resource transport returned an unrelated response');
-            await observeSquireResponse(result as Record<string, unknown>);
-            process.stdout.write(`${await boundToolResponse(result as Record<string, unknown>)}\n`);
-          }
-        }
+        await forward(upstream);
       } catch (error) {
-        if (message.id !== undefined)
+        if (id !== undefined)
           process.stdout.write(
-            `${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32001, message: 'Resource access requires approval from its owner for this requester, or the resource is unavailable.' } })}\n`,
+            `${JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32001, message: 'Resource access requires approval from its owner for this requester, or the resource is unavailable.' } })}\n`,
           );
         if (error instanceof TurnStoppedError) {
           process.exitCode = 1;
