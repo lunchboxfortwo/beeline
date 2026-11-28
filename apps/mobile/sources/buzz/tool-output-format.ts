@@ -10,22 +10,27 @@ import { stripRecognizedDisplayPrefix } from './tool-display-paths';
 import {
   cleanToolOutputText,
   formatBytesCompact,
+  formatProseLinkLabel,
   formatScalarValue,
   humanizeFieldKey,
+  parseReadableProse,
   parseStrictSearchMatches,
   parseTolerantJson,
   type ParsedJsonResult,
   type SheetMatchGroup,
+  type SheetProseLink,
 } from './tool-output-parsers';
 
 export {
   cleanToolOutputText,
   formatBytesCompact,
   humanizeFieldKey,
+  parseReadableProse,
   parseStrictSearchMatches,
   parseTolerantJson,
   type ParsedJsonResult,
   type SheetMatchGroup,
+  type SheetProseLink,
 };
 
 export type SheetKvRow = {
@@ -133,6 +138,13 @@ export type ToolSheetBody =
       kind: 'kv-card';
       receipt?: string;
       rows: SheetKvRow[];
+    }
+  | {
+      kind: 'prose';
+      receipt?: string;
+      paragraphs: string[];
+      links?: SheetProseLink[];
+      truncated?: boolean;
     }
   | {
       kind: 'mono';
@@ -370,9 +382,55 @@ function buildCopyLabel(opts: {
   return 'Copy raw';
 }
 
+function extractJsonProseBlock(
+  obj: Record<string, unknown>,
+  opts: { shownReceipt?: string; isWebSearch?: boolean; truncated?: boolean },
+): Extract<ToolSheetBody, { kind: 'prose' }> | undefined {
+  const keys = Object.keys(obj).filter((k) => k !== '_omittedCount' && k !== 'receipt');
+  if (keys.length === 0 || keys.length > 4) return undefined;
+  const textKey = ['summary', 'answer', 'response'].find(
+    (k) => typeof obj[k] === 'string' && (obj[k] as string).trim().length >= 40,
+  );
+  if (!textKey) return undefined;
+  const parsedProse = parseReadableProse(String(obj[textKey]), { isWebSearch: opts.isWebSearch || true });
+  if (!parsedProse) return undefined;
+  const links: SheetProseLink[] = [...(parsedProse.links ?? [])];
+  const seen = new Set(links.map((l) => l.url.toLowerCase()));
+  const linkArrayKey = ['citations', 'sources', 'urls', 'links', 'results'].find((k) =>
+    Array.isArray(obj[k]),
+  );
+  if (linkArrayKey) {
+    for (const entry of obj[linkArrayKey] as unknown[]) {
+      if (typeof entry === 'string' && /^https?:\/\//i.test(entry.trim())) {
+        const url = entry.trim();
+        if (!seen.has(url.toLowerCase())) {
+          seen.add(url.toLowerCase());
+          links.push({ label: formatProseLinkLabel(url), url });
+        }
+      } else if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        const rec = entry as Record<string, unknown>;
+        const url = typeof rec.url === 'string' ? rec.url.trim() : typeof rec.href === 'string' ? rec.href.trim() : '';
+        if (url && /^https?:\/\//i.test(url) && !seen.has(url.toLowerCase())) {
+          seen.add(url.toLowerCase());
+          const label = typeof rec.title === 'string' && rec.title.trim() ? rec.title.trim() : undefined;
+          links.push({ label: formatProseLinkLabel(url, label), url });
+        }
+      }
+    }
+  }
+  return {
+    kind: 'prose',
+    ...(opts.shownReceipt ? { receipt: opts.shownReceipt } : {}),
+    paragraphs: parsedProse.paragraphs,
+    ...(links.length ? { links } : {}),
+    ...(opts.truncated ? { truncated: true } : {}),
+  };
+}
+
 export function buildToolSheetPresentation(params: {
   title: string;
   subtitle?: string;
+  searchScope?: 'web' | 'code' | 'history' | 'memory' | 'tools';
   command?: string | null;
   input?: string | null;
   summary?: string | null;
@@ -422,9 +480,26 @@ export function buildToolSheetPresentation(params: {
     }
   }
   const description = typeof inputObj?.description === 'string' ? inputObj.description.trim() : undefined;
+  const isWebSearch = Boolean(
+    params.searchScope === 'web' ||
+      /\b(?:web[_ -]?search|search[_ -]?web)\b/i.test(title) ||
+      (/^searched\b/i.test(title) &&
+        typeof inputObj?.query === 'string' &&
+        !('path' in inputObj) &&
+        !('pattern' in inputObj) &&
+        !('scope' in inputObj) &&
+        !('app' in inputObj)),
+  );
   if (description && !subtitle && description !== title) {
     subtitle = description;
+  } else if (isWebSearch && !subtitle) {
+    subtitle = 'web search';
   }
+  const allowProseFormatting =
+    !params.command?.trim() &&
+    params.outcome !== 'failure' &&
+    !params.signal &&
+    !(typeof params.exitCode === 'number' && params.exitCode !== 0);
 
   const badges: SheetBadge[] = [];
   let statusLine: string | undefined;
@@ -603,7 +678,20 @@ export function buildToolSheetPresentation(params: {
           if (matches) {
             rendered.push({ kind: 'matches', groups: matches, ...(block.truncated ? { truncated: true } : {}) });
           } else {
-            rendered.push({ kind: 'mono', text: cleaned, ...(block.truncated ? { truncated: true } : {}) });
+            const prose = allowProseFormatting
+              ? parseReadableProse(cleaned, { isWebSearch })
+              : undefined;
+            if (prose) {
+              rendered.push({
+                kind: 'prose',
+                ...(rendered.length === 0 && shownReceipt ? { receipt: shownReceipt } : {}),
+                paragraphs: prose.paragraphs,
+                ...(prose.links ? { links: prose.links } : {}),
+                ...(block.truncated ? { truncated: true } : {}),
+              });
+            } else {
+              rendered.push({ kind: 'mono', text: cleaned, ...(block.truncated ? { truncated: true } : {}) });
+            }
           }
         }
       } else if (block.kind === 'json') {
@@ -760,6 +848,21 @@ export function buildToolSheetPresentation(params: {
       : json.truncated || params.outputTruncated
         ? 'Truncated'
         : undefined;
+    if (allowProseFormatting && json.value && typeof json.value === 'object' && !Array.isArray(json.value)) {
+      const proseBlock = extractJsonProseBlock(json.value as Record<string, unknown>, {
+        shownReceipt,
+        isWebSearch,
+        truncated: Boolean(badge),
+      });
+      if (proseBlock) {
+        return finalize({
+          blocks: [proseBlock],
+          badge,
+          rawLabel: params.input?.trim() ? 'Arguments & raw' : 'Raw JSON',
+          isJson: true,
+        });
+      }
+    }
     const rawLabel = params.command?.trim() ? 'Raw command & JSON' : 'Raw JSON';
     const block = jsonToSheetBlock(json, {
       shownReceipt,
@@ -844,18 +947,38 @@ export function buildToolSheetPresentation(params: {
     });
   }
 
+  // Readable prose / web search output
+  const isTruncatedText = Boolean(params.outputTruncated || cleanedSource.includes('[… omitted …]'));
+  if (allowProseFormatting) {
+    const prose = parseReadableProse(cleanedSource, { isWebSearch });
+    if (prose) {
+      return finalize({
+        blocks: [
+          {
+            kind: 'prose',
+            ...(shownReceipt ? { receipt: shownReceipt } : {}),
+            paragraphs: prose.paragraphs,
+            ...(prose.links ? { links: prose.links } : {}),
+            ...(isTruncatedText ? { truncated: true } : {}),
+          },
+        ],
+        badge: isTruncatedText ? 'Bounded' : undefined,
+        rawLabel: params.input?.trim() ? 'Arguments & raw' : 'Raw output',
+      });
+    }
+  }
+
   // Plain CLI logs / mono text
-  const isTruncatedMono = Boolean(params.outputTruncated || cleanedSource.includes('[… omitted …]'));
   return finalize({
     blocks: [
       {
         kind: 'mono',
         receipt: shownReceipt,
         text: cleanedSource,
-        ...(isTruncatedMono ? { truncated: true } : {}),
+        ...(isTruncatedText ? { truncated: true } : {}),
       },
     ],
-    badge: isTruncatedMono ? 'Bounded' : undefined,
+    badge: isTruncatedText ? 'Bounded' : undefined,
     zone1ShowsMonoVerbatim: true,
     rawLabel: params.command?.trim() ? 'Invocation' : 'Arguments',
   });

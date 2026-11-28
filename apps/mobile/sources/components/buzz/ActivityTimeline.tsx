@@ -7,12 +7,12 @@ import { ScrollView, XStack, YStack } from 'tamagui';
 import { Spinner, T, TypedView } from '@/ui/grammar';
 import type { AgentActivityItem } from '@/sync/transport/rig-transport';
 import { buildTurnActivity } from '@/buzz/activity-timeline';
-import { formatToolCallDuration } from '@/buzz/tool-call-row';
 import type { ToolIdentityLookup } from '@/buzz/tool-identity-lookup';
 import {
+  foldConsecutiveReadLines,
   groupToolLedgerRuns,
-  toolGroupSummary,
   toolLedgerLines,
+  toolRunSummaryParts,
   type ToolLedgerLine,
   type ToolLedgerRun,
 } from '@/buzz/tool-ledger';
@@ -67,15 +67,19 @@ function lineAccessibilityLabel(line: ToolLedgerLine): string {
   if (line.kind !== 'thought') parts.push(OUTCOME_WORDS[line.outcome]);
   if (line.signal) parts.push(`signalled ${line.signal}`);
   if (line.stat?.kind === 'diff') parts.push(`+${line.stat.added} -${line.stat.removed}`);
+  else if (line.stat?.kind === 'exit') parts.push(line.stat.text);
   else if (line.stat?.kind === 'text') parts.push(line.stat.text);
   if (line.reason) parts.push(line.reason);
   return parts.join(', ');
 }
 
+/** Fixed leading verb column width so Space Grotesk row verbs align cleanly. */
+const VERB_COLUMN_MIN_WIDTH = 68;
+
 /**
- * Shared 3-part transcript step row: verb, 2-line wrapped subject (tail ellipsis),
- * quiet right stat column, optional subagent origin line, and `>` chevron ONLY
- * when opening reveals an additional stored fact.
+ * Shared 3-part transcript step row: fixed-width verb column, 2-line wrapped
+ * subject (tail ellipsis), quiet right stat column, optional subagent origin
+ * line, and `>` chevron ONLY when opening reveals an additional stored fact.
  */
 function ToolLedgerLineRow({
   line,
@@ -94,6 +98,8 @@ function ToolLedgerLineRow({
     return (
       <TranscriptNavigationRow
         divider={divider}
+        dividerWidth={1}
+        quietChevron
         testID={testID}
         singleDestination={Boolean(onPress)}
         trailing={
@@ -108,7 +114,7 @@ function ToolLedgerLineRow({
         }
       >
         <XStack alignItems="flex-start" gap="2" minWidth={0}>
-          <T v="meta" color="secondary" flexShrink={0} numberOfLines={1}>
+          <T v="meta" color="secondary" minWidth={VERB_COLUMN_MIN_WIDTH} flexShrink={0} numberOfLines={1}>
             Startup note
           </T>
           <T v="meta" color="secondary" flex={1} minWidth={0} numberOfLines={2}>
@@ -121,7 +127,7 @@ function ToolLedgerLineRow({
   if (line.kind === 'note') {
     // Interim agent prose sits inline in the flat list without a trailing chevron.
     return (
-      <TranscriptNavigationRow divider={divider} testID={testID}>
+      <TranscriptNavigationRow divider={divider} dividerWidth={1} quietChevron testID={testID}>
         <YStack width="100%" minWidth={0}>
           <TypedView view={MonoMarkdown} v="meta" markdown={line.label} />
         </YStack>
@@ -142,12 +148,15 @@ function ToolLedgerLineRow({
   const labelSegments = isHumanTargetRow ? line.label.split(/((?:^|\s)[@#][A-Za-z0-9._-]+)/g) : null;
   const originText = originCopy(line.origin);
   const quietReceipt = !onPress && line.outcome === 'success';
+  const showVerbColumn = !hasNamedAction || line.outcome === 'failure';
 
   return (
     <TranscriptNavigationRow
       testID={testID}
       singleDestination={Boolean(onPress)}
       divider={divider}
+      dividerWidth={1}
+      quietChevron
       trailing={
         onPress
           ? {
@@ -171,62 +180,71 @@ function ToolLedgerLineRow({
             {originText}
           </T>
         ) : null}
-        <XStack alignItems="flex-start" gap="2" minWidth={0}>
-          {(!hasNamedAction || line.outcome === 'failure') &&
-          !(labelSegments && labelSegments.length > 1 && line.outcome !== 'failure') ? (
+        <XStack alignItems="flex-start" gap="2" width="100%" minWidth={0}>
+          {showVerbColumn ? (
             <T
               v={line.outcome === 'failure' ? 'metaStrong' : 'meta'}
-              color={line.outcome === 'failure' ? 'needsYou' : quietReceipt ? 'secondary' : 'ink'}
+              color={line.outcome === 'failure' ? 'ink' : 'secondary'}
+              minWidth={VERB_COLUMN_MIN_WIDTH}
               flexShrink={0}
               numberOfLines={1}
             >
               {verb}
             </T>
           ) : null}
-          {!redundantFailureLabel ? (
-            labelSegments && labelSegments.length > 1 ? (
-              <T v="meta" color={quietReceipt ? 'secondary' : 'ink'} numberOfLines={2} flex={1} minWidth={48}>
-                {!hasNamedAction && line.outcome !== 'failure' ? `${verb} ` : ''}
-                {labelSegments.map((part, index) => {
-                  const match = part.match(/^(\s*)([@#][A-Za-z0-9._-]+)$/);
-                  if (!match) return <React.Fragment key={index}>{part}</React.Fragment>;
-                  return (
-                    <React.Fragment key={index}>
-                      {match[1]}
-                      <T v="metaStrong" color="needsYou">
-                        {match[2]}
-                      </T>
-                    </React.Fragment>
-                  );
-                })}
+          <YStack flex={1} minWidth={48} gap="0.5">
+            {!redundantFailureLabel ? (
+              labelSegments && labelSegments.length > 1 ? (
+                <T
+                  v="meta"
+                  color={quietReceipt ? 'secondary' : 'ink'}
+                  ellipsizeMode="tail"
+                  numberOfLines={2}
+                >
+                  {labelSegments.map((part, index) => {
+                    const match = part.match(/^(\s*)([@#][A-Za-z0-9._-]+)$/);
+                    if (!match) return <React.Fragment key={index}>{part}</React.Fragment>;
+                    return (
+                      <React.Fragment key={index}>
+                        {match[1]}
+                        <T v="metaStrong" color="ink">
+                          {match[2]}
+                        </T>
+                      </React.Fragment>
+                    );
+                  })}
+                </T>
+              ) : (
+                <T
+                  v={line.subjectMono ? 'code' : 'meta'}
+                  color={quietReceipt ? 'secondary' : 'ink'}
+                  ellipsizeMode="tail"
+                  numberOfLines={2}
+                >
+                  {line.label}
+                </T>
+              )
+            ) : null}
+            {line.outcome === 'failure' && line.reason ? (
+              <T v="meta" color="secondary" width="100%" minWidth={0} testID={`activity-reason-${line.id}`}>
+                {line.reason}
               </T>
-            ) : (
-              <T
-                v={line.subjectMono ? 'code' : 'meta'}
-                color={quietReceipt ? 'secondary' : 'ink'}
-                ellipsizeMode="tail"
-                numberOfLines={2}
-                flex={1}
-                minWidth={48}
-              >
-                {line.label}
-              </T>
-            )
-          ) : null}
+            ) : null}
+          </YStack>
           {line.stat ? (
-            line.stat.kind === 'signal' ? (
-              <T v="code" color="removed" flexShrink={0} fontVariant={['tabular-nums']} numberOfLines={1}>
+            line.stat.kind === 'signal' || line.stat.kind === 'exit' ? (
+              <T v="code" color="ink" flexShrink={0} fontVariant={['tabular-nums']} numberOfLines={1}>
                 {line.stat.text}
               </T>
             ) : line.stat.kind === 'diff' ? (
               <XStack alignItems="center" gap="1" flexShrink={0}>
                 {line.stat.added > 0 ? (
-                  <T v="code" color="added" fontVariant={['tabular-nums']} numberOfLines={1}>
+                  <T v="code" color="ink" fontVariant={['tabular-nums']} numberOfLines={1}>
                     {`+${line.stat.added}`}
                   </T>
                 ) : null}
                 {line.stat.removed > 0 ? (
-                  <T v="code" color="removed" fontVariant={['tabular-nums']} numberOfLines={1}>
+                  <T v="code" color="secondary" fontVariant={['tabular-nums']} numberOfLines={1}>
                     {`-${line.stat.removed}`}
                   </T>
                 ) : null}
@@ -238,14 +256,9 @@ function ToolLedgerLineRow({
             )
           ) : null}
           {showVerdict && line.outcome === 'running' ? (
-            <Spinner testID={`activity-verdict-${line.id}`} />
+            <Spinner color="secondary" testID={`activity-verdict-${line.id}`} />
           ) : null}
         </XStack>
-        {line.outcome === 'failure' && line.reason ? (
-          <T v="meta" color="secondary" width="100%" minWidth={0} testID={`activity-reason-${line.id}`}>
-            {line.reason}
-          </T>
-        ) : null}
       </YStack>
     </TranscriptNavigationRow>
   );
@@ -317,6 +330,7 @@ function useToolOutput(lookup?: ToolIdentityLookup) {
           verb: full.verb ?? next.verb,
           subjectMono: full.subjectMono ?? next.subjectMono,
           stat: full.stat ?? next.stat,
+          searchScope: full.searchScope ?? next.searchScope,
           summary: full.summary ?? next.summary,
           exitCode: full.exitCode ?? next.exitCode,
           signal: full.signal ?? next.signal,
@@ -358,9 +372,9 @@ function useToolOutput(lookup?: ToolIdentityLookup) {
 }
 
 /**
- * One quiet step-count disclosure — `5 steps · 1 failed ⌄` — that opens into
- * one flat single-item-per-row list behind a left guide bar (~5 visible rows
- * scrollable when >5 rows).
+ * One quiet outcome-focused disclosure — `Edited ChevronGlyph.tsx · ran tests ⌄` —
+ * that opens flush on the message text edge into 1px hairline-separated rows
+ * with consecutive read-only checks folded into an expandable `Checked` row.
  */
 function ToolRunGroupRow({
   run,
@@ -372,6 +386,7 @@ function ToolRunGroupRow({
   onPressLine?: (line: ToolLedgerLine) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [expandedFolds, setExpandedFolds] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState<ToolLedgerLine[]>([]);
   const [remoteIndex, setRemoteIndex] = useState(0);
   const [cursor, setCursor] = useState<string | undefined>();
@@ -380,7 +395,16 @@ function ToolRunGroupRow({
   const pending = React.useRef(false);
   const remote = run.lines.flatMap((line) => (line.toolGroup ? [line.toolGroup] : []));
   const hasRemote = remoteIndex < remote.length;
-  const lines = remote.length ? [...run.lines.filter((line) => !line.toolGroup), ...loaded] : run.lines;
+  const lines = useMemo(
+    () => (remote.length ? [...run.lines.filter((line) => !line.toolGroup), ...loaded] : run.lines),
+    [loaded, remote.length, run.lines],
+  );
+  const remoteUnloaded = remote.length > 0 && loaded.length === 0;
+  const displayItems = useMemo(() => foldConsecutiveReadLines(lines), [lines]);
+  const visibleRowCount = displayItems.reduce(
+    (sum, item) => sum + (item.kind === 'read-fold' && expandedFolds[item.id] ? 1 + item.lines.length : 1),
+    0,
+  );
   const load = () => {
     const group = remote[remoteIndex];
     if (!group || pending.current) return;
@@ -405,11 +429,18 @@ function ToolRunGroupRow({
         setLoading(false);
       });
   };
-  const duration = formatToolCallDuration(run.durationMs);
-  const summary = toolGroupSummary(run.count, run.failed, run.durationMs, run.notes);
-  const steps = run.count > 0 || run.notes === 0;
+  const summaryParts = useMemo(
+    () =>
+      toolRunSummaryParts(remoteUnloaded ? run.lines : lines, {
+        remoteUnloaded,
+        ...(remoteUnloaded ? { failed: run.failed } : {}),
+      }),
+    [lines, remoteUnloaded, run.failed, run.lines],
+  );
+  const summary = summaryParts.map((part) => part.text).join(' · ');
   const pressHandler = (item: ToolLedgerLine) =>
     item.inspectable ? () => onPressLine?.(item) : undefined;
+
   return (
     <LedgerLogGroup testID={`tool-run-container-${run.id}`}>
       <LedgerDisclosure
@@ -424,46 +455,73 @@ function ToolRunGroupRow({
         accessibilityState={{ expanded }}
         rowTestID={`tool-run-group-${run.id}`}
       >
-        {steps ? `${run.count} ${run.count === 1 ? 'step' : 'steps'}` : null}
-        {run.failed ? <T v="meta" color="needsYou">{` · ${run.failed} failed`}</T> : null}
-        {run.notes ? `${steps ? ' · ' : ''}${run.notes} ${run.notes === 1 ? 'note' : 'notes'}` : null}
-        {duration ? ` · ${duration}` : null}
+        {summaryParts.map((part, index) => (
+          <React.Fragment key={`${part.text}-${index}`}>
+            {index > 0 ? ' · ' : null}
+            {part.emphasis === 'strong' ? (
+              <T v="metaStrong" color="ink">
+                {part.text}
+              </T>
+            ) : (
+              part.text
+            )}
+          </React.Fragment>
+        ))}
       </LedgerDisclosure>
       {expanded ? (
-        <YStack
-          marginTop="1"
-          marginLeft="1"
-          paddingLeft="3"
-          borderLeftWidth={1.5}
-          borderLeftColor="strongStroke"
-          testID={`tool-run-list-${run.id}`}
-        >
-          {lines.length > 5 ? (
+        <YStack marginTop="1" width="100%" minWidth={0} testID={`tool-run-list-${run.id}`}>
+          {visibleRowCount > 5 ? (
             <ScrollView
               nestedScrollEnabled
               maxHeight={FLAT_LEDGER_SCROLL_MAX_HEIGHT}
               testID={`tool-run-scroll-${run.id}`}
             >
-              {lines.map((line, index) => (
-                <ToolLedgerLineRow
-                  key={line.id}
-                  line={line}
-                  divider={index > 0}
-                  onPress={pressHandler(line)}
-                  testID={`tool-ledger-line-${line.id}`}
-                />
-              ))}
+              {displayItems.map((item, index) =>
+                item.kind === 'line' ? (
+                  <ToolLedgerLineRow
+                    key={item.line.id}
+                    line={item.line}
+                    divider={index > 0}
+                    onPress={pressHandler(item.line)}
+                    testID={`tool-ledger-line-${item.line.id}`}
+                  />
+                ) : (
+                  <ToolReadFoldRow
+                    key={item.id}
+                    fold={item}
+                    divider={index > 0}
+                    expanded={Boolean(expandedFolds[item.id])}
+                    onToggle={() =>
+                      setExpandedFolds((previous) => ({ ...previous, [item.id]: !previous[item.id] }))
+                    }
+                    onPressLine={onPressLine}
+                  />
+                ),
+              )}
             </ScrollView>
           ) : (
-            lines.map((line, index) => (
-              <ToolLedgerLineRow
-                key={line.id}
-                line={line}
-                divider={index > 0}
-                onPress={pressHandler(line)}
-                testID={`tool-ledger-line-${line.id}`}
-              />
-            ))
+            displayItems.map((item, index) =>
+              item.kind === 'line' ? (
+                <ToolLedgerLineRow
+                  key={item.line.id}
+                  line={item.line}
+                  divider={index > 0}
+                  onPress={pressHandler(item.line)}
+                  testID={`tool-ledger-line-${item.line.id}`}
+                />
+              ) : (
+                <ToolReadFoldRow
+                  key={item.id}
+                  fold={item}
+                  divider={index > 0}
+                  expanded={Boolean(expandedFolds[item.id])}
+                  onToggle={() =>
+                    setExpandedFolds((previous) => ({ ...previous, [item.id]: !previous[item.id] }))
+                  }
+                  onPressLine={onPressLine}
+                />
+              ),
+            )
           )}
           {hasRemote ? (
             <LedgerDisclosure
@@ -479,6 +537,74 @@ function ToolRunGroupRow({
         </YStack>
       ) : null}
     </LedgerLogGroup>
+  );
+}
+
+function ToolReadFoldRow({
+  fold,
+  divider,
+  expanded,
+  onToggle,
+  onPressLine,
+}: {
+  fold: Extract<ReturnType<typeof foldConsecutiveReadLines>[number], { kind: 'read-fold' }>;
+  divider: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onPressLine?: (line: ToolLedgerLine) => void;
+}) {
+  const foldText = fold.detail ? `${fold.lead} · ${fold.detail}` : fold.lead;
+  return (
+    <>
+      <TranscriptNavigationRow
+        testID={`tool-read-fold-${fold.id}`}
+        singleDestination
+        divider={divider}
+        dividerWidth={1}
+        quietChevron
+        chevronDirection={expanded ? 'up' : 'down'}
+        trailing={{
+          onPress: onToggle,
+          accessibilityLabel: `Checked ${foldText}, expandable`,
+          accessibilityRole: 'button',
+          accessibilityState: { expanded },
+          accessibilityHint: 'Shows each checked item',
+        }}
+      >
+        <XStack alignItems="flex-start" gap="2" width="100%" minWidth={0}>
+          <T
+            v="meta"
+            color="secondary"
+            minWidth={VERB_COLUMN_MIN_WIDTH}
+            flexShrink={0}
+            numberOfLines={1}
+          >
+            Checked
+          </T>
+          <T
+            v="meta"
+            color="secondary"
+            ellipsizeMode="tail"
+            numberOfLines={2}
+            flex={1}
+            minWidth={48}
+          >
+            {foldText}
+          </T>
+        </XStack>
+      </TranscriptNavigationRow>
+      {expanded
+        ? fold.lines.map((child) => (
+            <ToolLedgerLineRow
+              key={child.id}
+              line={child}
+              divider
+              onPress={child.inspectable ? () => onPressLine?.(child) : undefined}
+              testID={`tool-ledger-line-${child.id}`}
+            />
+          ))
+        : null}
+    </>
   );
 }
 
@@ -517,6 +643,7 @@ export const TurnStepsLine = React.memo(function TurnStepsLine({
         <ToolRunGroupRow key={run.id} lookup={lookup} onPressLine={openLine} run={run} />
       ))}
       <ToolOutputSheet
+        searchScope={sheetLine?.searchScope}
         command={sheetLine?.command}
         input={sheetLine?.input}
         summary={sheetLine?.summary}
@@ -602,6 +729,7 @@ export const ActivityTimeline = React.memo(function ActivityTimeline({
         ) : null}
       </TranscriptLine>
       <ToolOutputSheet
+        searchScope={sheetLine?.searchScope}
         command={sheetLine?.command}
         input={sheetLine?.input}
         summary={sheetLine?.summary}

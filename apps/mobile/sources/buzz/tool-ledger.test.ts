@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildTurnActivity, type TurnActivityAction } from './activity-timeline';
-import { groupToolLedgerRuns, toolGlyph, toolGroupSummary, toolLedgerLines } from './tool-ledger';
+import {
+  foldConsecutiveReadLines,
+  groupToolLedgerRuns,
+  toolGlyph,
+  toolGroupSummary,
+  toolLedgerLines,
+  toolRunSummaryParts,
+} from './tool-ledger';
 
 const step = (patch: Partial<TurnActivityAction> & { id: string }): TurnActivityAction => ({
   kind: 'tool',
@@ -273,25 +280,140 @@ describe('notes in a run', () => {
     expect(group!.lines.map((line) => line.id)).toEqual(['n1', 'a', 'n2', 'b']);
   });
 
-  it('reads `4 steps · 2 notes · 18s`, and `1 note` with no steps', () => {
-    expect(toolGroupSummary(4, 0, 18_000, 2)).toBe('4 steps · 2 notes · 18.0s');
-    expect(toolGroupSummary(4, 1, undefined, 1)).toBe('4 steps · 1 failed · 1 note');
-    expect(toolGroupSummary(0, 0, undefined, 1)).toBe('1 note');
+  it('summarizes notes-only runs without step counts', () => {
+    const [singleNote] = groupToolLedgerRuns(
+      toolLedgerLines([step({ id: 'n1', kind: 'note', label: 'one' })]),
+    );
+    const [multiNotes] = groupToolLedgerRuns(
+      toolLedgerLines([
+        step({ id: 'n1', kind: 'note', label: 'one' }),
+        step({ id: 'n2', kind: 'note', label: 'two' }),
+      ]),
+    );
+    expect(toolGroupSummary(singleNote!)).toBe('Note');
+    expect(toolGroupSummary(multiNotes!)).toBe('Notes');
   });
 });
 
-describe('toolGroupSummary', () => {
-  it('reads `6 steps · 2 failed · 48s`', () => {
-    expect(toolGroupSummary(6, 2, 48_000)).toBe('6 steps · 2 failed · 48.0s');
+describe('toolGroupSummary (outcome-only)', () => {
+  it('names real outcomes without step, read, or query counts', () => {
+    const webTurn = toolLedgerLines([
+      step({
+        id: 'w1',
+        toolKind: 'search',
+        weight: 'observation',
+        title: 'search_web',
+        input: JSON.stringify({ query: '"Claude Code" OpenCode agent activity progress' }),
+      }),
+      step({
+        id: 'w2',
+        toolKind: 'search',
+        weight: 'observation',
+        title: 'search_web',
+        input: JSON.stringify({ query: 'AI agent chat UI tool call collapsed summary' }),
+      }),
+    ]);
+    expect(toolGroupSummary(webTurn)).toBe('Searched web');
+    expect(toolGroupSummary(webTurn)).not.toMatch(/\d+\s+(?:steps?|queries|files)/i);
+
+    const codingTurn = toolLedgerLines([
+      step({ id: 'r1', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/ThreadHeader.tsx' }] }),
+      step({ id: 'r2', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/ChevronGlyph.tsx' }] }),
+      step({ id: 'r3', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/ActivityTimeline.tsx' }] }),
+      step({
+        id: 'e1',
+        toolKind: 'edit',
+        weight: 'mutation',
+        title: 'Edit',
+        files: [{ path: 'src/ChevronGlyph.tsx', status: 'M', addedLines: 2, removedLines: 1, diff: '+a' }],
+      }),
+      step({
+        id: 't1',
+        toolKind: 'execute',
+        weight: 'command',
+        title: 'Bash',
+        command: 'vitest run sources/buzz/alignment',
+      }),
+    ]);
+    expect(toolGroupSummary(codingTurn)).toBe('Edited ChevronGlyph.tsx · ran tests');
   });
 
-  it('a clean run carries no failed segment', () => {
-    expect(toolGroupSummary(6, 0, 48_000)).toBe('6 steps · 48.0s');
+  it('marks failure emphasis via typography weight rather than step counts', () => {
+    const failTurn = toolLedgerLines([
+      step({
+        id: 'f1',
+        toolKind: 'execute',
+        weight: 'failure',
+        title: 'Bash',
+        command: 'vitest run sources/buzz/alignment',
+        outcome: 'failure',
+        exitCode: 1,
+        reason: 'Missing dependency: vitest',
+      }),
+      step({
+        id: 'i1',
+        toolKind: 'execute',
+        weight: 'command',
+        title: 'Bash',
+        command: 'pnpm install --frozen-lockfile',
+      }),
+      step({
+        id: 't2',
+        toolKind: 'execute',
+        weight: 'command',
+        title: 'Bash',
+        command: 'vitest run sources/buzz/alignment',
+      }),
+    ]);
+    const parts = toolRunSummaryParts(failTurn);
+    expect(parts).toEqual([
+      { text: 'Ran tests' },
+      { text: '1 failed', emphasis: 'strong' },
+    ]);
+    expect(toolGroupSummary(failTurn)).toBe('Ran tests · 1 failed');
   });
 
-  it('one step, and no duration below the floor', () => {
-    expect(toolGroupSummary(1, 0, undefined)).toBe('1 step');
-    expect(toolGroupSummary(4, 0, 500)).toBe('4 steps');
+  it('falls back honestly to Steps for unloaded remote toolGroup placeholders', () => {
+    const remoteLines = toolLedgerLines([
+      step({
+        id: 'agg',
+        title: '200 steps',
+        toolGroup: { roomId: '11111111-1111-4111-8111-111111111111', anchor: 'a', count: 200 },
+      }),
+    ]);
+    expect(toolGroupSummary(remoteLines)).toBe('Steps');
+    expect(toolGroupSummary(remoteLines, { remoteUnloaded: true })).toBe('Steps');
+    expect(toolRunSummaryParts(remoteLines, { remoteUnloaded: true, failed: 1 })).toEqual([
+      { text: 'Steps' },
+      { text: '1 failed', emphasis: 'strong' },
+    ]);
+  });
+});
+
+describe('foldConsecutiveReadLines', () => {
+  it('folds 2+ consecutive read-only checks into one expandable Checked row while keeping edits, failures, single reads, and web searches flat', () => {
+    const lines = toolLedgerLines([
+      step({ id: 'r1', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/ThreadHeader.tsx' }] }),
+      step({ id: 'r2', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/ChevronGlyph.tsx' }] }),
+      step({ id: 'r3', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/ActivityTimeline.tsx' }] }),
+      step({ id: 'e1', toolKind: 'edit', weight: 'mutation', title: 'Edit', files: [{ path: 'src/ChevronGlyph.tsx', status: 'M' }] }),
+      step({ id: 'r4', toolKind: 'read', weight: 'observation', title: 'Read', files: [{ path: 'src/IndexRow.tsx' }] }),
+      step({ id: 'w1', toolKind: 'search', weight: 'observation', title: 'search_web', input: JSON.stringify({ query: 'one' }) }),
+      step({ id: 'w2', toolKind: 'search', weight: 'observation', title: 'search_web', input: JSON.stringify({ query: 'two' }) }),
+    ]);
+
+    const display = foldConsecutiveReadLines(lines);
+    expect(display).toHaveLength(5);
+    expect(display[0]).toMatchObject({
+      kind: 'read-fold',
+      count: 3,
+      lead: '3 files',
+      detail: 'ThreadHeader.tsx, ChevronGlyph.tsx +1',
+    });
+    expect(display[1]).toMatchObject({ kind: 'line', line: { id: 'e1' } });
+    expect(display[2]).toMatchObject({ kind: 'line', line: { id: 'r4' } });
+    expect(display[3]).toMatchObject({ kind: 'line', line: { id: 'w1' } });
+    expect(display[4]).toMatchObject({ kind: 'line', line: { id: 'w2' } });
   });
 });
 

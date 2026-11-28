@@ -335,3 +335,138 @@ export function formatBytesCompact(bytes: number | undefined): string | undefine
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+export type SheetProseLink = {
+  label: string;
+  url: string;
+};
+
+export type ParsedProseResult = {
+  paragraphs: string[];
+  links?: SheetProseLink[];
+};
+
+const CODE_OR_LOG_LINE =
+  /^(?:PASS|FAIL|SKIP|RUN|✓|✗|●|\s*at\s+\S+\s*\(|sh:\s*\d*:|npm\s+(?:ERR!|warn)|pnpm\s+|import\s+|export\s+|const\s+|let\s+|function\s+|class\s+|interface\s+|type\s+|return\s+|SELECT\s+|INSERT\s+|UPDATE\s+|@@\s+-\d+|---\s+\S+|\+\+\+\s+\S+|\[…\s*omitted\s*…\])/;
+
+const SOURCES_HEADING = /^(?:#{1,4}\s*)?(?:sources?|citations?|references?|links?)\s*:?\s*$/i;
+const STANDALONE_URL_LINE = /^(?:[-*•]\s*|\[\d+\]\s*|\d+\.\s*)?(?:\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/\S+))\s*$/i;
+const INLINE_MARKDOWN_LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+
+export function formatProseLinkLabel(url: string, explicitLabel?: string): string {
+  const cleanUrl = url.replace(/[),.;]+$/, '');
+  const trimmedLabel = explicitLabel?.trim();
+  if (trimmedLabel && !/^https?:\/\//i.test(trimmedLabel)) {
+    return trimmedLabel;
+  }
+  return cleanUrl.replace(/^https?:\/\/(?:www\.)?/i, '').replace(/\/+$/, '');
+}
+
+/**
+ * Parse natural-language prose or web-search answers into clean paragraphs and
+ * separated citation/link lines. Explicitly rejects terminal logs, source code,
+ * stack traces, and short CLI status lines so command logs stay mono.
+ */
+export function parseReadableProse(
+  raw: string,
+  options?: { isWebSearch?: boolean },
+): ParsedProseResult | undefined {
+  const normalized = raw.replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return undefined;
+
+  const rawLines = normalized.split('\n');
+  if (
+    rawLines.some(
+      (line) =>
+        LOG_LEVEL_OR_TIMESTAMP.test(line.trim()) ||
+        WINDOWS_DRIVE_PATH.test(line.trim()) ||
+        CODE_OR_LOG_LINE.test(line),
+    )
+  ) {
+    return undefined;
+  }
+
+  const codeSyntaxHits = rawLines.filter((line) =>
+    /[{};]$|=>|\b(?:const|let|var|def|fn|func|struct|impl|SELECT|FROM|WHERE)\b/.test(line.trim()),
+  ).length;
+  if (codeSyntaxHits >= 2 || (rawLines.length > 0 && codeSyntaxHits / rawLines.length > 0.35)) {
+    return undefined;
+  }
+
+  const links: SheetProseLink[] = [];
+  const seenUrls = new Set<string>();
+  const addLink = (rawUrl: string, explicitLabel?: string) => {
+    const url = rawUrl.replace(/[),.;]+$/, '');
+    const key = url.toLowerCase();
+    if (!url || seenUrls.has(key)) return;
+    seenUrls.add(key);
+    links.push({ label: formatProseLinkLabel(url, explicitLabel), url });
+  };
+
+  const bodyLines: string[] = [];
+  let inSourcesSection = false;
+
+  for (const line of rawLines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (!inSourcesSection) bodyLines.push('');
+      continue;
+    }
+    if (SOURCES_HEADING.test(trimmed)) {
+      inSourcesSection = true;
+      continue;
+    }
+    const standalone = trimmed.match(STANDALONE_URL_LINE);
+    if (standalone) {
+      const mdLabel = standalone[1];
+      const mdUrl = standalone[2];
+      const bareUrl = standalone[3];
+      if (mdUrl) addLink(mdUrl, mdLabel);
+      else if (bareUrl) addLink(bareUrl);
+      continue;
+    }
+    if (inSourcesSection) {
+      const anyUrl = trimmed.match(/https?:\/\/[^\s)]+/i)?.[0];
+      if (anyUrl) {
+        const before = trimmed
+          .replace(/^[-*•]\s*|\[\d+\]\s*|\d+\.\s*/, '')
+          .replace(anyUrl, '')
+          .replace(/[—–:\-|]+$/, '')
+          .trim();
+        addLink(anyUrl, before || undefined);
+        continue;
+      }
+      inSourcesSection = false;
+    }
+    const cleanedLine = trimmed.replace(INLINE_MARKDOWN_LINK, (_full, label: string, url: string) => {
+      addLink(url, label);
+      return label;
+    });
+    bodyLines.push(cleanedLine);
+  }
+
+  const paragraphs = bodyLines
+    .join('\n')
+    .split(/\n{2,}/)
+    .map((block) => block.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  if (paragraphs.length === 0) return undefined;
+
+  const fullBody = paragraphs.join(' ');
+  const words = fullBody.split(/\s+/).filter(Boolean);
+  if (!options?.isWebSearch) {
+    const hasSentencePunctuation = /[.!?](?:\s|$)/.test(fullBody);
+    const hasNaturalWords = words.length >= 10 && words.filter((w) => /[A-Za-z]{2,}/.test(w)).length >= 7;
+    if (!hasNaturalWords || (!hasSentencePunctuation && links.length === 0)) {
+      return undefined;
+    }
+  } else if (words.length < 3 && links.length === 0) {
+    return undefined;
+  }
+
+  return {
+    paragraphs,
+    ...(links.length ? { links } : {}),
+  };
+}

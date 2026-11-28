@@ -141,7 +141,7 @@ describe('toolCallLabel', () => {
     ).toBe('tool-call-row.ts');
   });
 
-  it('carries the search pattern in the subject and exact hit count in the right stat column', () => {
+  it('carries the search pattern in the subject, maps search calls to searched (never found), and puts exact hits in stat', () => {
     const model = toolCallRowModel(
       step({
         id: 's',
@@ -151,8 +151,45 @@ describe('toolCallLabel', () => {
         output: '12 matches across 3 files',
       }),
     );
+    expect(model.verb).toBe('searched');
+    expect(model.searchScope).toBe('code');
     expect(model.label).toBe('toolCallRow');
     expect(model.stat).toEqual({ kind: 'text', text: '12 hits' });
+
+    const webSearch = toolCallRowModel(
+      step({
+        id: 'ws',
+        toolKind: 'search',
+        title: 'search_web',
+        input: JSON.stringify({ query: '"Claude Code" OpenCode agent activity progress' }),
+      }),
+    );
+    expect(webSearch.verb).toBe('searched');
+    expect(webSearch.searchScope).toBe('web');
+    expect(webSearch.label).toBe('"Claude Code" OpenCode agent activity progress');
+
+    const mcpSearch = toolCallRowModel(
+      step({
+        id: 'ms',
+        toolKind: 'other',
+        title: 'mcp.beeline-agent.search',
+        input: JSON.stringify({ scope: 'history', query: 'tool list' }),
+      }),
+    );
+    expect(mcpSearch.verb).toBe('searched');
+    expect(mcpSearch.searchScope).toBe('history');
+
+    const failedExit = toolCallRowModel(
+      step({
+        id: 'ex',
+        toolKind: 'execute',
+        title: 'Bash',
+        command: 'vitest run',
+        outcome: 'failure',
+        exitCode: 1,
+      }),
+    );
+    expect(failedExit.stat).toEqual({ kind: 'exit', text: 'exit 1' });
 
     // Never fabricates/displays hit counts on truncated excerpts
     const truncatedModel = toolCallRowModel(
