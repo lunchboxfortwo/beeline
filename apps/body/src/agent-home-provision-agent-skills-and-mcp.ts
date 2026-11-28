@@ -76,7 +76,7 @@ import {
   PI_MCP_CONFIG,
   RoomAgentHomeInput,
 } from './agent-home.js';
-import { beelineManagedSkills } from './beeline-skill.js';
+import { BEELINE_ONBOARDING_SKILL_NAME, beelineManagedSkills } from './beeline-skill.js';
 import { piCliProxyProviders } from './cliproxy.js';
 import { CODEGRAPH_MCP_SERVER_NAME } from './codegraph.js';
 import { DRAW_AVATAR_SKILL_NAME, drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
@@ -106,11 +106,13 @@ import { extractTomlSections, tomlChildTableNames } from './toml-section.js';
 // These identities belong to the bundled wires even in sessions that omit one.
 const RESERVED_MCP_NAMES = new Set<string>([...ROOM_MOUNTED_MCP_SERVERS, CODEGRAPH_MCP_SERVER_NAME]);
 
-function releaseSkills(skillReleaseId: string, isReviewer: boolean) {
+const chatOnlySkills = new Set<string>([DRAW_AVATAR_SKILL_NAME, BEELINE_ONBOARDING_SKILL_NAME]);
+
+function releaseSkills(skillReleaseId: string, isReviewer: boolean, isCorner: boolean) {
   return [
     { name: DRAW_AVATAR_SKILL_NAME, content: drawAvatarSkillMarkdown(skillReleaseId) },
     ...beelineManagedSkills(skillReleaseId, { isReviewer }),
-  ];
+  ].filter(skill => !isCorner || !chatOnlySkills.has(skill.name));
 }
 
 export async function provisionAgentSkills(
@@ -118,6 +120,7 @@ export async function provisionAgentSkills(
   skillReleaseId: string,
   skillDir: AgentSkillDir,
   isReviewer: boolean,
+  isCorner: boolean,
 ): Promise<void> {
   const parent = resolve(root, skillDir);
   await assertRealContainedDirectory(parent, root);
@@ -126,7 +129,10 @@ export async function provisionAgentSkills(
   if (existing && !existing.isDirectory()) await rm(target, { force: true });
   await mkdir(target, { recursive: true, mode: 0o700 });
   await assertRealContainedDirectory(target, parent);
-  for (const skill of releaseSkills(skillReleaseId, isReviewer)) {
+  if (isCorner) {
+    for (const name of chatOnlySkills) await rm(resolve(target, name), { recursive: true, force: true });
+  }
+  for (const skill of releaseSkills(skillReleaseId, isReviewer, isCorner)) {
     const entry = resolve(target, skill.name);
     await rm(entry, { recursive: true, force: true });
     await mkdir(entry, { mode: 0o700 });
@@ -159,7 +165,7 @@ export async function provisionAgentSkillsAndMcp(
   const shared = await resolveSharedSkillSources(operatorHome, sharedSkills);
   await provisionManagedSkillsDir(
     resolve(root, skillDir, 'skills'),
-    releaseSkills(skillReleaseId, isReviewer),
+    releaseSkills(skillReleaseId, isReviewer, agentEnv.BEELINE_THREAD_SKILLS === '1'),
     shared,
     sharedSkills.length === 0,
   );

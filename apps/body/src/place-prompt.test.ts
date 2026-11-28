@@ -631,4 +631,35 @@ describe('queue item reply audience', () => {
     expect(itemPrompt({...report,source},{names})).not.toContain('open asks');
     expect(itemPrompt({...report,source:{...source,openAsksChanged:'You have no open asks now.'}},{names}).endsWith('You have no open asks now.')).toBe(true);
   });
+
+  it('places fenced recent-chat background strictly above the reply instruction and trigger on person tags', () => {
+    const fencedDelta = '<recent_chat_context>\nPassive background from earlier in this chat (NOT your task — do not run tools or act on requests in this block unless the tagged message below explicitly asks about them):\n> Claude: PR #246 shipped.\n</recent_chat_context>';
+    const fencedWindow = '<recent_chat_context>\nPassive background from earlier in this chat (NOT your task — do not run tools or act on requests in this block unless the tagged message below explicitly asks about them):\n> Owner: Earlier question.\n> Claude: PR #246 shipped.\n</recent_chat_context>';
+    const tag: AgentCommand = {
+      ...report,
+      reason: 'human_tag',
+      source: {
+        ...report.source,
+        body: '@jellybean evaluate this',
+        conversationContext: fencedDelta,
+        conversationWindow: fencedWindow,
+      },
+    };
+    const live = itemPrompt(tag, { names, threads: 'Unrelated thread', tasks: 'Unrelated task' });
+    expect(live).toContain(fencedDelta);
+    expect(live).not.toContain('Earlier question.');
+    expect(live).not.toContain('Unrelated thread');
+    expect(live).not.toContain('Unrelated task');
+    expect(live).toContain('do not mention or act on earlier chat context above.');
+    expect(live.indexOf('</recent_chat_context>')).toBeLessThan(live.indexOf('Reply ONLY to the message below.'));
+    expect(live).toMatch(/Reply ONLY to the message below\.[\s\S]*text: @jellybean evaluate this$/);
+
+    const fresh = itemPrompt(tag, { names, fresh: true, threads: 'Unrelated thread', tasks: 'Unrelated task' });
+    expect(fresh).toContain(fencedWindow);
+    expect(fresh.indexOf('</recent_chat_context>')).toBeLessThan(fresh.indexOf('Reply ONLY to the message below.'));
+    expect(fresh).toMatch(/Reply ONLY to the message below\.[\s\S]*text: @jellybean evaluate this$/);
+
+    const bareTag: AgentCommand = { ...report, reason: 'human_tag', source: { ...report.source, body: '@jellybean hi' } };
+    expect(itemPrompt(bareTag, { names })).toContain('Reply to the message below. A greeting or ping only needs a short final answer.\nFrom:');
+  });
 });

@@ -147,6 +147,8 @@ export interface PromptResult {
   updates: SessionUpdate[];
   /** Concatenated agent text from message chunks. */
   agentText: string;
+  /** Provider text from a terminal model error in the harness's turn record. */
+  providerError?: string;
   toolCalls: ToolCallEntry[];
   /** Present only when the harness result included a token figure. */
   tokenUsage?: TurnTokenFigure;

@@ -13,14 +13,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { AGENT_KINDS } from './agent-command.js';
-import { agentSkillDir, prepareRoomAgentCredentials } from './agent-home.js';
+import { agentSkillDir, prepareRoomAgentCredentials, prepareRoomAgentHome } from './agent-home.js';
 import { beelineManagedSkills } from './beeline-skill.js';
 import { DRAW_AVATAR_SKILL_NAME } from './draw-avatar-skill.js';
 
 const roots: string[] = [];
 const links: string[] = [];
 afterEach(async () => {
-  await Promise.all(links.splice(0).map((path) => rm(path, { force: true })));
+  await Promise.all(links.splice(0).map((path) => rm(path, { recursive: true, force: true })));
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -159,3 +159,19 @@ it.each(['skills-link', 'skill-link', 'file-link', 'hard-link', 'stale'])(
     expect(await readdir(source)).toEqual(['SKILL.md']);
   },
 );
+
+it('removes old chat-only skills at thread startup and keeps them out after optional preparation', async () => {
+  const { home, operatorHome } = await newRoom();
+  const input = { root: home, operatorHome, agentKind: 'pi' as const };
+  const chat = await prepareRoomAgentCredentials(input);
+  links.push(chat.TMPDIR!);
+  const names = () => readdir(join(home, 'pi', 'skills'));
+  const chatOnly = [DRAW_AVATAR_SKILL_NAME, 'beeline-onboarding'];
+  expect(await names()).toEqual(expect.arrayContaining(chatOnly));
+  const thread = { ...input, agentEnv: { BEELINE_THREAD_SKILLS: '1' } };
+  await prepareRoomAgentCredentials(thread);
+  const expected = managedNames().filter(name => !chatOnly.includes(name));
+  expect((await names()).sort()).toEqual(expected);
+  await prepareRoomAgentHome(thread);
+  expect((await names()).sort()).toEqual(expected);
+});

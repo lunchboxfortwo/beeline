@@ -82,6 +82,7 @@ describe('readPiTurnRecord', () => {
     expect(record).toEqual({
       kind: 'error',
       status: 402,
+      text: 'This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford 10381. To increase, visit https://openrouter.ai/settings/credits and add more credits',
       reason:
         'provider error 402: This request requires more credits, or fewer max_tokens. You requested up to 131072 tokens, but can only afford 10381. To increase, visit https://openrouter.ai/settings/credits and add more credits',
     });
@@ -95,7 +96,15 @@ describe('readPiTurnRecord', () => {
       kind: 'error',
       status: 429,
       reason: 'provider error 429: rate limited',
+      text: 'rate limited',
     });
+  });
+
+  it('ignores a provider error recorded before the current prompt began', async () => {
+    const { agentEnv } = await piHome(
+      userTurn + assistant({ content: [], stopReason: 'error', errorMessage: '429: rate limited' }),
+    );
+    expect(await readPiTurnRecord({ agentEnv, sessionId: SESSION_ID, startedAt: 3 })).toBeUndefined();
   });
 
   it('reports an assistant message that carries no text as empty with its stop reason', async () => {
@@ -143,11 +152,13 @@ describe('summarizeProviderError', () => {
     expect(summarizeProviderError('402: {"error":{"message":"insufficient credits"}}')).toEqual({
       status: 402,
       reason: 'provider error 402: insufficient credits',
+      text: 'insufficient credits',
     });
   });
-  it('keeps a plain first line when there is no status', () => {
+  it('keeps the provider text and uses its first line for the diagnostic reason', () => {
     expect(summarizeProviderError('fetch failed\n  at node:internal')).toEqual({
       reason: 'provider error: fetch failed',
+      text: 'fetch failed\n  at node:internal',
     });
   });
 });

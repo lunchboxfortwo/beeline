@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { agentToolsFor } from './minimal-tool-surface.js';
 import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -106,4 +108,62 @@ it('asks the Beeline server before a Squire call and keeps its refusal', async (
   } finally {
     server.close();
   }
+});
+
+it('lists concise purposes and retrieves only the requested Beeline schemas over stdio', async () => {
+  const definitions = agentToolsFor(true, false, false, false, true, true, true);
+  // Use the shipped catalog and echo call parameters so metadata and arguments are observable.
+  const server = `
+    const tools = JSON.parse(process.argv[1]);
+    require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+      const { id, method, params } = JSON.parse(line);
+      const result = method === 'tools/list' ? { tools }
+        : { content: [{ type: 'text', text: JSON.stringify(params) }] };
+      console.log(JSON.stringify({ id, result }));
+    });
+  `;
+  const tools: Tool[] = [];
+  loadBridge(piMcpBridgeSource([{ name: 'beeline-agent', command: process.execPath,
+    args: ['-e', server, JSON.stringify(definitions)] }]), spawn, vi.fn())({
+    registerTool: (tool: Tool) => tools.push(tool),
+  });
+  const execute = async (params: object) => {
+    const result = await tools[0]!.execute('test-id', params) as { content: [{ text: string }] };
+    return result.content[0].text;
+  };
+  const catalog = await execute({});
+  expect(Buffer.byteLength(catalog)).toBeLessThanOrEqual(2500);
+  expect(catalog).toContain('describe:');
+  expect(catalog).toContain('query:');
+  for (const tool of definitions) expect(catalog.split('\n').some(line => line.startsWith(tool.name + ' — '))).toBe(true);
+  const selected = definitions.filter(tool => ['read', 'message'].includes(tool.name));
+  const full = (tool: typeof definitions[number]) => ({
+    name: tool.name, description: tool.description, inputSchema: tool.inputSchema,
+  });
+  expect(JSON.parse(await execute({ describe: 'message, read' }))).toEqual(selected.map(full));
+  expect(JSON.parse(await execute({ describe: 'unknown' }))).toEqual([]);
+  expect(JSON.parse(await execute({ query: 'APPROVAL' }))).toEqual(definitions.filter(tool =>
+    (tool.name + ' ' + tool.description).toLowerCase().includes('approval')).map(full));
+  expect(JSON.parse(await execute({ name: 'read', arguments: { facet: 'session' } }))).toEqual({
+    name: 'read', arguments: { facet: 'session' }, _meta: { beelineToolCallId: 'test-id' },
+  });
+});
+
+it('keeps both ends of an oversized third-party call or tool error', async () => {
+  const server = `
+    require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+      const { id, params } = JSON.parse(line);
+      const result = { content: [{ type: 'text', text: 'START' + '界'.repeat(20000) + 'END' }],
+        isError: params?.name === 'fail' };
+      console.log(JSON.stringify({ id, result }));
+    });
+  `;
+  const tools: Tool[] = [];
+  loadBridge(piMcpBridgeSource([{ name: 'codegraph', command: process.execPath, args: ['-e', server] }]),
+    spawn, vi.fn())({ registerTool: (tool: Tool) => tools.push(tool) });
+  const result = await tools[0]!.execute('call', { name: 'search' }) as { content: [{ text: string }] };
+  const text = result.content[0].text;
+  expect(text).toMatch(/^START.*Output truncated.*END$/s);
+  expect(Buffer.byteLength(text)).toBeLessThan(13000);
+  await expect(tools[0]!.execute('call', { name: 'fail' })).rejects.toThrow(text);
 });

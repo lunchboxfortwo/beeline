@@ -103,6 +103,7 @@ export interface PlaceSessionOptions {
 
 export interface Answer {
   readonly text: string;
+  readonly providerError?: string;
   readonly steps: NonNullable<DaemonOperationMap['postRoomMessage']['input']['steps']>;
   readonly stopReason: string;
   readonly toolCalls: readonly ToolCallEntry[];
@@ -116,7 +117,7 @@ export interface Answer {
  * One live harness conversation for one place (Room, DM or corner) of one
  * agent. Optional context and capabilities load after delivery and are read
  * with session tools; startup uses cached facts or disclosed defaults. A
- * harness failure or empty result cannot complete an unanswered human request.
+ * result with neither answer text nor a provider error leaves a human request owed.
  */
 export class PlaceSession {
   client?: AcpClient;
@@ -901,6 +902,7 @@ export class PlaceSession {
     }
     return {
       text,
+      ...(result.providerError ? { providerError: result.providerError } : {}),
       steps,
       stopReason: result.stopReason,
       toolCalls: result.toolCalls,
