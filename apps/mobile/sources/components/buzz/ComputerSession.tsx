@@ -164,16 +164,16 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   const fullViewer = React.useSyncExternalStore(subscribeViewers,
     () => fullViewers.has(session.id) || (Platform.OS !== 'web' && fullViewers.size > 0), () => false);
   const [authorized, setAuthorized] = React.useState<{ id: string; access: string | null }>({ id: session.id, access: null });
-  const [streamState, setStreamState] = React.useState<{ id: string; status: 'ended' | 'unavailable' } | null>(null);
-  const [recheckingId, setRecheckingId] = React.useState<string | null>(null);
+  const [streamState, setStreamState] = React.useState<{ id: string; status: 'ended' | 'unavailable' | 'checking' } | null>(null);
+  const [probeStream, setProbeStream] = React.useState<{ id: string; attempt: number } | null>(null);
   const [streamAttempt, setStreamAttempt] = React.useState(0);
   const access = (authorized.id === session.id && authorized.access) ? authorized.access : (session.access ?? null);
+  const checking = session.status === 'live' && streamState?.id === session.id && streamState.status === 'checking';
   const effectiveStatus = session.status === 'ended'
     ? 'ended'
     : streamState?.id === session.id
-      ? streamState.status
+      ? (streamState.status === 'checking' ? 'unavailable' : streamState.status)
       : session.status;
-  const checking = recheckingId === session.id;
   const owner = React.useRef({ id: session.id, mounted: true });
   owner.current.id = session.id;
   React.useEffect(() => {
@@ -183,6 +183,13 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   const captureRef = React.useRef<(() => Promise<string | null>) | null>(null);
   const requested = React.useRef<string | undefined>(undefined);
   const retriedAccess = React.useRef<string | undefined>(undefined);
+  const attemptRef = React.useRef(0);
+  React.useEffect(() => {
+    if (!visible && streamState?.id === session.id && streamState.status === 'checking') {
+      setProbeStream(null);
+      setStreamState({ id: session.id, status: 'unavailable' });
+    }
+  }, [visible, streamState, session.id]);
   React.useEffect(() => {
     if (!visible || effectiveStatus !== 'live' || session.access || requested.current === session.id) return;
     requested.current = session.id;
@@ -211,8 +218,10 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
     try {
       freshAccess = (await monolithPhoneOperation('openComputerSession', { id: session.id })).access;
     } catch {
-      if (owner.current.mounted && owner.current.id === session.id)
+      if (owner.current.mounted && owner.current.id === session.id) {
+        setProbeStream(null);
         setStreamState({ id: session.id, status: 'unavailable' });
+      }
       Modal.alert('Could not open browser', 'The live browser is unavailable. Use Check again to reconnect.');
       return;
     }
@@ -225,23 +234,26 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   };
   const recheckBrowser = async () => {
     if (!visible || session.status !== 'live' || checking) return;
-    setRecheckingId(session.id);
+    setProbeStream(null);
+    setStreamState({ id: session.id, status: 'checking' });
     try {
       const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
       if (!owner.current.mounted || owner.current.id !== session.id) return;
       retriedAccess.current = undefined;
+      const nextAttempt = ++attemptRef.current;
       setAuthorized({ id: session.id, access: freshAccess });
-      setStreamState(null);
-      setStreamAttempt((attempt) => attempt + 1);
+      setStreamAttempt(nextAttempt);
+      setProbeStream({ id: session.id, attempt: nextAttempt });
     } catch {
-      if (owner.current.mounted && owner.current.id === session.id)
+      if (owner.current.mounted && owner.current.id === session.id) {
+        setProbeStream(null);
         setStreamState({ id: session.id, status: 'unavailable' });
-    } finally {
-      if (owner.current.mounted && owner.current.id === session.id) setRecheckingId(null);
+      }
     }
   };
   const handlePreviewAccessRejected = () => {
-    if (session.access || retriedAccess.current === session.id) {
+    if (checking || session.access || retriedAccess.current === session.id) {
+      setProbeStream(null);
       setStreamState({ id: session.id, status: 'unavailable' });
       return;
     }
@@ -252,24 +264,39 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
         if (owner.current.mounted && owner.current.id === session.id) setAuthorized({ id: session.id, access: token });
       })
       .catch(() => {
-        if (owner.current.mounted && owner.current.id === session.id)
+        if (owner.current.mounted && owner.current.id === session.id) {
+          setProbeStream(null);
           setStreamState({ id: session.id, status: 'unavailable' });
+        }
       });
   };
   const live = effectiveStatus === 'live' && Boolean(access);
+  const probing = checking && probeStream?.id === session.id && Boolean(access);
   return (
     <BrowserCard
       status={effectiveStatus}
       title={session.title}
       live={live}
-      frame={live && visible && !fullViewer ? (
+      frame={(live || probing) && visible && !fullViewer ? (
         <ComputerStream
           key={`${session.id}:${streamAttempt}`}
           session={{ ...session, access: access! }}
           preview
           captureRef={captureRef}
-          onEnded={() => setStreamState({ id: session.id, status: 'ended' })}
-          onUnavailable={() => setStreamState({ id: session.id, status: 'unavailable' })}
+          onFirstFrame={() => {
+            if (streamState?.id === session.id && streamState.status === 'checking') {
+              setProbeStream(null);
+              setStreamState(null);
+            }
+          }}
+          onEnded={() => {
+            setProbeStream(null);
+            setStreamState({ id: session.id, status: 'ended' });
+          }}
+          onUnavailable={() => {
+            setProbeStream(null);
+            setStreamState({ id: session.id, status: 'unavailable' });
+          }}
           onAccessRejected={handlePreviewAccessRejected}
         />
       ) : null}

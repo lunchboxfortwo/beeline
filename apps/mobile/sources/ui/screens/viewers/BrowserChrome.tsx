@@ -24,7 +24,7 @@ export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowse
         <Card backgroundColor="canvas" borderWidth={1} borderColor="strongStroke" borderRadius="transcript" overflow="hidden" width="100%" marginTop="2" testID={testID}>
             <ListItem padding="0" backgroundColor="canvas" onPress={live ? onOpen : undefined} accessibilityRole={live ? "button" : undefined} accessibilityLabel={live ? `Open ${title} browser` : title}>
                 <YStack flex={1}>
-                    {live ? <YStack height={218} width="100%" backgroundColor="canvas" pointerEvents="none" testID="computer-session-preview">{frame}</YStack> : null}
+                    {frame ? <YStack height={live ? 218 : 1} width={live ? "100%" : 1} opacity={live ? 1 : 0} position={live ? "relative" : "absolute"} overflow="hidden" backgroundColor="canvas" pointerEvents="none" testID={live ? "computer-session-preview" : "computer-session-probe"}>{frame}</YStack> : null}
                     <YStack paddingHorizontal="4" paddingVertical="2" gap="1"><Copy strong numberOfLines={1}>{title}</Copy><Copy small quiet>{ended ? 'Session ended' : unavailable ? 'Browser unavailable' : 'Live browser'}</Copy></YStack>
                 </YStack>
             </ListItem>
