@@ -69,6 +69,20 @@ it('a retried reply with files returns the saved reply and posts once', async ()
   expect(await notes()).toEqual([closing]);
 });
 
+it('a retried reply to a deleted question returns the saved reply and posts once', async () => {
+  const request = await ask({ agent: H, place: CHAT });
+  const invocation = { id: randomUUID(), requestId: request.id };
+  await daemon.execute('startAgentTurn', { roomId: CHAT, requestId: request.id, invocationId: invocation.id }, B);
+  await upload(request.id);
+  await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1', [request.id]);
+  const send = () => daemon.execute('message', { type: 'reply', roomId: CHAT, requestId: request.id, invocation,
+    quoteMsgId: request.id, text: 'Morning card.', transportRequestId: 'retry-deleted' }, B);
+  const first = await send();
+  const retry = await send();
+  expect(retry.messageId).toBe(first.messageId);
+  expect(await posts()).toEqual([{ text: 'Morning card.', files: ['insights.json'] }]);
+});
+
 it('a transport ID reused in another chat does not copy the earlier reply\'s files', async () => {
   const send = async (place: string, upload_: boolean) => {
     const request = await sendMessage(db, { route: { from: { agent: H, place }, to: { agent: B, place } }, text: 'Send me a morning card.' });

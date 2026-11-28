@@ -46,11 +46,12 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       // Files uploaded this turn go with a reply to a person in this place.
       // Elsewhere they stay with the closing text, so this place still gets them.
       // A retry of a saved reply to this request and destination sends the
-      // files that reply already took, so it is not posted again.
+      // files that reply already took, so it is not posted again. The stored
+      // route names the recipient even when the quoted message was deleted.
       const replayed = id ? (await db.query<{ attachments: CommandRow['answer_attachments'] }>(
         `SELECT attachments FROM messages WHERE id=$1 AND author_id=$2 AND room_id=$3
-           AND request_id=$4 AND reply_to_message_id=$5`,
-        [id, agent, to.place, parent.turn_request_id, quote])).rows[0] : undefined;
+           AND request_id=$4 AND card->'route'->'to'->>'agent'=$5`,
+        [id, agent, to.place, parent.turn_request_id, to.agent])).rows[0] : undefined;
       if (replayed) attachments = replayed.attachments?.length ? replayed.attachments : undefined;
       else if (parent.answer_attachments?.length && to.place === input.roomId &&
           (await db.query("SELECT 1 FROM identities WHERE id=$1 AND kind='human'", [to.agent])).rowCount)
