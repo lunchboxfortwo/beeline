@@ -16,7 +16,7 @@ import { queuedWorkflowWakeDetail,squireDecisionDetail,type WorkflowWakeCard } f
 import { repairAgentPost } from './agent-post-text.js';
 import { subscriptionPromptBody } from './agent-subscriptions.js';
 import { endAgentTurn, PERSON_STOP_REASON } from './agent-turn-end.js';
-import { recordAnswerActivity } from './answer-activity.js';
+import { recordAnswerActivity,recordSuppressedFinal } from './answer-activity.js';
 import { CornerAccessDatabase } from './corner-access-database.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
 import { currentIdleReportSql } from './corner-idle.js';
@@ -820,6 +820,8 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   queuedRequestIds?: readonly string[];
   batchCommandIds?: readonly string[];
   harnessEnded?: boolean;
+  /** Publish this text even after a same-place reply (a review verdict, for example). */
+  keepFinal?: boolean;
   silentCompletion?: boolean;
   invocation?: import('@beeline/api-contract/daemon').AgentInvocation;
   invocationId?: string;
@@ -856,6 +858,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
     return unanswered ? { ...saved, completed: false, answered: false } : saved;
   });
   let completedNow = false;
+  let suppressedFinal = false;
   const published = await database.transaction<AnswerReceipt>(async db => {
     const item = (await db.query<CommandRow & { public_reply_id: string | null;
       name: string; stop_requested_at: Date | null; public_reply_at: Date | null; room_archived: boolean; self_closed: boolean }>(
@@ -920,6 +923,23 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           'SELECT id,created_at,deleted_at FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3', [outputId,item.room_id,agentId])).rows[0] : undefined;
         if (previous) return { ...receipt, id: previous.id, messageId: previous.id, published: true,
           createdAt: Math.floor(new Date(previous.created_at).getTime() / 1000), delivered: true, stored: true, visible: !previous.deleted_at };
+        // The agent already replied in this place during the turn. Its closing
+        // text goes to the turn's activity, not into the chat a second time.
+        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length
+          && item.state === 'complete' && item.result_message_id) {
+          const reply = (await db.query<{ id: string; created_at: Date }>(
+            `SELECT id,created_at FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3
+               AND deleted_at IS NULL AND presentation='message'`,
+            [item.result_message_id, item.room_id, agentId])).rows[0];
+          if (reply) {
+            await recordSuppressedFinal(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), roomId: item.room_id,
+              agentId, requestId: item.turn_request_id, text: messageText, steps: input.steps});
+            suppressedFinal = true;
+            completedNow = true;
+            return { ...receipt, id: reply.id, messageId: reply.id, createdAt: Math.floor(new Date(reply.created_at).getTime() / 1000),
+              completed: true, published: true, delivered: true, stored: true, visible: true };
+          }
+        }
         const existing = input.sharedReplyId;
         const saved = existing ? {id: existing, stored: true, visible: true} : await queueMessage(db,{
           kind:'post',roomId:item.room_id,authorId:agentId,text:modelText(messageText),agentIds:[],
@@ -974,7 +994,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
   const messageId = published.messageId;
   if (completedNow) {
     const after=()=>Promise.all([
-        ...(messageId ? [
+        ...(messageId && !suppressedFinal ? [
           observeQueuedAnswer(database,messageId,agentId).catch(error=>console.warn('[answer] optional onboarding observation omitted:',error)),
           recordStarPromptReply(database,{roomId:input.roomId,agentId,requestId:input.requestId ?? '',messageId})
             .catch(error=>console.warn('[answer] optional star reply counter omitted:',error)),

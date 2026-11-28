@@ -37,3 +37,34 @@ export async function recordAnswerActivity(db: SqlDatabase, agentId: string, mes
   if (input.steps) await db.query('UPDATE messages SET activity=$2::jsonb WHERE id=$1 AND author_id=$3',
     [messageId,replySteps(input.steps),agentId]);
 }
+
+/**
+ * A turn's closing text that was not posted because the agent already replied
+ * in the same place. It stays readable in the turn's activity: the turn's
+ * steps, then the text as notes.
+ */
+export async function recordSuppressedFinal(db: SqlDatabase, input: {
+  id: string; roomId: string; agentId: string; requestId: string; text: string; steps?: unknown;
+}): Promise<void> {
+  let steps: unknown[] = [];
+  try {
+    if (replySteps(input.steps)) steps = input.steps as unknown[];
+  } catch {
+    // Invalid steps never block the turn; the closing text is still kept.
+  }
+  const notes = [];
+  for (let at = 0; at < input.text.length; at += MAX_REPLY_NOTE_LENGTH)
+    notes.push({kind:'note', title:'Note', text:input.text.slice(at, at + MAX_REPLY_NOTE_LENGTH), ...(at ? {continues:true} : {})});
+  let activity: string | null;
+  try {
+    activity = replySteps([...steps, ...notes].slice(-MAX_REPLY_STEPS));
+  } catch {
+    activity = replySteps(notes.slice(0, MAX_REPLY_STEPS));
+  }
+  if (!activity) return;
+  await db.query(
+    `INSERT INTO messages(id,room_id,author_id,text,presentation,request_id,activity,agent_model)
+     VALUES($1,$2,$3,'','activity',$4,$5::jsonb,(SELECT selected_model FROM agents WHERE agent_id=$3))
+     ON CONFLICT(id) DO NOTHING`,
+    [input.id, input.roomId, input.agentId, input.requestId, activity]);
+}

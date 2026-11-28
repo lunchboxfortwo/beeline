@@ -286,7 +286,7 @@ import { unreadablePrivateHandoffSql } from '../private-handoff-access.js';
         if (roomId !== input.cornerId || !requestId || (invocation && invocation.requestId !== requestId))
           throw new CommandRefusalError('command output authority rejected: no command row', 409);
         // Close the review as a normal turn before its approval can archive the corner.
-        const verdict = await answerQueuedMessage(db, agentId, { roomId, requestId, text, invocation, harnessEnded: true });
+        const verdict = await answerQueuedMessage(db, agentId, { roomId, requestId, text, invocation, harnessEnded: true, keepFinal: true });
         if (!verdict.completed || !verdict.published || !verdict.messageId)
           throw new CommandRefusalError(verdict.receipt ?? 'command output authority rejected: no command row', 409);
         messageId = verdict.messageId;
