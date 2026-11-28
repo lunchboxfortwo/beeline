@@ -1,6 +1,7 @@
 import { closeAgentAsk } from './agent-open-asks.js';
 import { startQueuedCommand } from './test-fixtures/queued-turn.test-support.js';
 import { advanceCorner } from './corner-lifecycle.js';
+import { threadActivityLabel } from '@beeline/api-contract/phone';
 import { SYSTEM_IDENTITY_ID } from '@beeline/api-contract/system-identity';
 import { cornerReportWaiting } from './corner-state.js';
 import { cornerWaitingReportSql } from './corner-waiting-report.js';
@@ -381,26 +382,43 @@ it('Reproduction CORNER-REVIEW-ROLE: a dispatched reviewer stays Review after Ro
     [C,JSON.stringify({lifecycle:'in-review',checks:'passing',pr:{number:1,headSha:'review-head'}})]);
   await db.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,system_event)
     VALUES('review-source',$1,$2,'Review requested','system',$3::jsonb)`,
-    [C,COMMANDER,JSON.stringify({kind:'check-passed',object:{headSha:'review-head'}})]);
+    [C,COMMANDER,JSON.stringify({kind:'check-passed',subject:{kind:'github',name:'GitHub'},verb:'passed a check',object:{headSha:'review-head'}})]);
   const dispatch=await createAgentCommand(db,{id:'review-dispatch',roomId:C,agentId:REVIEWER,
     sourceMessageId:'review-source',reason:'corner_review_dispatch'});
   expect(dispatch).toBeTruthy();
   await db.query(`UPDATE agent_commands SET review_context=$2::jsonb WHERE id=$1`, [dispatch!.id,
     JSON.stringify({cornerId:C,headSha:'review-head',pullRequest:1,briefRevision:0})]);
   const serviceStates=async()=>[await state(),(await phone.readCorners(ROOM,HUMAN))!.corners[0]!.state];
-  // A queued reviewer keeps the corner in review during its pickup window.
+  const headerReviewing = async () => {
+    const corner = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
+    const room = (await phone.readRoom(C, HUMAN))!;
+    const activeTurn = room.latestAgentTurns.find((entry) => entry.agentPubkey === REVIEWER && entry.status === 'working');
+    return {
+      label: threadActivityLabel(corner),
+      turnRole: activeTurn?.role,
+    };
+  };
+  // A queued reviewer keeps the corner in review during its pickup window, without naming an active reviewer until the turn runs.
   expect(await serviceStates()).toEqual(['review','review']);
+  expect(await headerReviewing()).toEqual({ label: undefined, turnRole: undefined });
   await startQueuedCommand(daemon, { roomId:C, commandId:dispatch!.id }, REVIEWER);
   expect(await serviceStates()).toEqual(['review','review']);
+  expect(await headerReviewing()).toEqual({ label: 'Reviewer is reviewing', turnRole: 'review' });
+  // Changing or clearing the configured reviewer mid-review preserves both the Review state and "is reviewing" until the turn ends.
+  await db.query(`UPDATE rooms SET reviewer_agent_id=$2 WHERE id=$1`,[ROOM, COMMANDER]);
+  expect(await serviceStates()).toEqual(['review','review']);
+  expect(await headerReviewing()).toEqual({ label: 'Reviewer is reviewing', turnRole: 'review' });
   await db.query(`UPDATE rooms SET reviewer_agent_id=NULL WHERE id=$1`,[ROOM]);
   expect(await serviceStates()).toEqual(['review','review']);
+  expect(await headerReviewing()).toEqual({ label: 'Reviewer is reviewing', turnRole: 'review' });
   await runCornerAttention(db);
   // The review gap notice now reaches the commander in this corner; no idle alert joins it.
   expect((await commanderFlags()).filter(c=>c.source.body.includes(' is idle.'))).toHaveLength(0);
   await end(REVIEWER,40);
   // With no reviewer configured, the completed turn creates no review handback.
   expect(await serviceStates()).toEqual(['idle','idle']);
-  console.info('Demonstrated CORNER-REVIEW-ROLE: getCornerRestoreState and PhoneService.readCorners preserve Review across reviewer settings changes, then leave Review on turn completion');
+  expect(await headerReviewing()).toEqual({ label: undefined, turnRole: undefined });
+  console.info('Demonstrated CORNER-REVIEW-ROLE: getCornerRestoreState, PhoneService.readCorners, and PhoneService.readRoom preserve Review and reviewing label across reviewer settings changes, then leave Review on turn completion');
 });
 
 // The production attention entrypoint and command inbox are the stand-in for a

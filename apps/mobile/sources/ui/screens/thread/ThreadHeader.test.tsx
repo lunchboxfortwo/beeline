@@ -249,6 +249,10 @@ it('says who the state names: the implementer working, the reviewer reviewing', 
   expect(tree.root.findAllByProps({ testID: 'thread-header-working' })).toHaveLength(0);
   act(() => tree.update(<ThreadBar h={{ ...reconnect, workingAgentName: 'Speedy' }} collapsed back={() => {}} openChat={() => {}} />));
   expect(tree.root.findByProps({ testID: 'thread-header-working' }).props.children).toBe('Speedy is reviewing');
+  // Live activityState can show working/reviewing without changing the server-driven lifecycle mark.
+  act(() => tree.update(<ThreadBar h={{ ...reconnect, state: 'idle', activityState: 'working', workingAgentName: 'Crayon' }} collapsed back={() => {}} openChat={() => {}} />));
+  expect(tree.root.findByProps({ testID: 'thread-header-working' }).props.children).toBe('Crayon is working');
+  expect(tree.root.findByType('WorkStateMark').props).toMatchObject({ state: 'in-progress', idle: true });
   act(() => tree.update(<ThreadBar h={reconnect} collapsed back={() => {}} openChat={() => {}} />));
   expect(tree.root.findAllByProps({ testID: 'thread-header-working' })).toHaveLength(0);
   act(() => tree.unmount());

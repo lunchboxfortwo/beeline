@@ -103,6 +103,7 @@ export interface AgentTurnRow {
   started_at: Date;
   created_at: Date;
   requested_by: string | null;
+  role?: 'review' | null;
 }
 
 export interface MemberRow extends IdentityRow {

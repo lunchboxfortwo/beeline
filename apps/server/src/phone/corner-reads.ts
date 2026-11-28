@@ -11,7 +11,7 @@ import { cornerOwnerSql } from '../corner-worker.js';
 import { turnRootMessageSql } from '../agent-command.js';
 import { ROOM_VIEW_AGENT_LIMIT, ROOM_VIEW_BRIEFING_LIMIT, ROOM_VIEW_MEMBER_LIMIT, ROOM_VIEW_MESSAGE_LIMIT, ROOM_VIEW_TOOL_ROW_LIMIT } from '@beeline/api-contract/phone';
 import type { CornerListView, RoomView, RoomViewMessage } from '@beeline/api-contract/phone';
-import { cornerFactsSql, cornerRowMine, cornerRowState, openCornerFactsSql, roomAttentionActorSql, roomNeedsYouSql, roomWorkingSql } from '../chat-corner-counts.js';
+import { cornerFactsSql, cornerReviewTurnSql, cornerRowMine, cornerRowState, openCornerFactsSql, roomAttentionActorSql, roomNeedsYouSql, roomWorkingSql } from '../chat-corner-counts.js';
 import { cornerRoomColumnsSql } from '../corner-row-projection.js';
 import { cornerOwedLookupSql } from '../corner-owed.js';
 import { visibleMessageSql, viewerReadCursorSql } from '../read-cursor.js';
@@ -194,8 +194,12 @@ import { phoneOptionalEnrichment } from './optional-enrichment.js';
              ELSE ${ROOM_VIEW_MEMBER_LIMIT} END FROM authorized_room)
          ), turn_rows AS (
            SELECT turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
-             requester.id requested_by
+             requester.id requested_by,
+             CASE WHEN room.parent_id IS NOT NULL AND turn.status='working' AND ${cornerReviewTurnSql('turn', 'room', 'parent', 'gh')}
+               THEN 'review' END role
            FROM authorized_room room
+           LEFT JOIN rooms parent ON parent.id=room.parent_id
+           LEFT JOIN corner_github_cache gh ON gh.corner_id=room.id
            CROSS JOIN LATERAL (
              -- Rank keys from the index; read only each agent's newest row.
              SELECT DISTINCT ON(agent_id) agent_id,request_id FROM agent_turns

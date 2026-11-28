@@ -140,6 +140,7 @@ import { projectedMessage, messageOrder } from './read-projection.js';
         startedAt: unix(turn.started_at),
         createdAt: unix(turn.created_at),
         ...(turn.requested_by ? { requestedBy: turn.requested_by } : {}),
+        ...(turn.role === 'review' ? { role: 'review' as const } : {}),
       }))
       .sort(
         (left, right) =>
