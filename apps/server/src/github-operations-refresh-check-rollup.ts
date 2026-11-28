@@ -408,7 +408,12 @@ import type { GitHubWebhookClaim } from './github-webhook-claim.js';
       const locked = current?.locked === true;
       // Locked standing corners retain their active work and wake sources after a merge.
       if (!locked) {
-        archived = await archiveCornerState(database, target.corner_id);
+        archived = await archiveCornerState(database, target.corner_id, {
+          prNumber: mergedPr?.number ?? pullRequest.number,
+          mergeCommitSha: pullRequest.mergeCommitSha,
+          title: mergedPr?.title ?? pullRequest.title,
+          url: mergedPr?.url ?? pullRequest.url,
+        });
         if (!archived) return;
       }
       updated = true;

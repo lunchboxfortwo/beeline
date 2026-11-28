@@ -726,3 +726,35 @@ it('records session end when the harness fails after its only request was answer
     requestId: item.id, harnessEnded: true, invocation: { id: expect.any(String), requestId: item.turnRequestId },
   })));
 });
+
+it.each([false, true])('completes a silent empty corner_closed turn cleanly without retry or hosted failure (hosted=%s)', async (hosted) => {
+  const f = await fixture(undefined, hosted);
+  const item = { ...f.item('corner-closed-wake'), reason: 'corner_closed' };
+  harness.deliver.mockResolvedValueOnce({ text: '', stopReason: 'end_turn', steps: [], toolCalls: [], cleanup: async () => {} });
+  f.execute.mockImplementation(async (name) =>
+    name === 'postRoomMessage' ? { commandId: item.id, completed: true, published: false } : { id: 'status', createdAt: 1 },
+  );
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: item.id, text: '', harnessEnded: true,
+  })));
+  await vi.waitFor(async () => expect(await new AnswerStore(join(f.root, 'answers')).all()).toEqual([]));
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  expect(f.execute).not.toHaveBeenCalledWith('startAgentTurn', expect.objectContaining({ available: false }));
+});
+
+it.each([false, true])('does not retry or fail a silent corner_closed wake even when an older server reports answered:false (hosted=%s)', async (hosted) => {
+  const f = await fixture(undefined, hosted);
+  const item = { ...f.item('corner-closed-legacy'), reason: 'corner_closed' };
+  harness.deliver.mockResolvedValueOnce({ text: '', stopReason: 'end_turn', steps: [], toolCalls: [], cleanup: async () => {} });
+  f.execute.mockImplementation(async (name) =>
+    name === 'postRoomMessage' ? { id: 'legacy', createdAt: 1, answered: false } : { id: 'status', createdAt: 1 },
+  );
+  f.changed([item]);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledWith('postRoomMessage', expect.objectContaining({
+    requestId: item.id, text: '', harnessEnded: true,
+  })));
+  await Promise.resolve();
+  expect(harness.deliver).toHaveBeenCalledTimes(1);
+  expect(f.execute).not.toHaveBeenCalledWith('startAgentTurn', expect.objectContaining({ available: false }));
+});

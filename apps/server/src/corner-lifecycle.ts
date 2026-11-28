@@ -8,13 +8,13 @@ import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash,randomBytes } from 'node:crypto';
 import { createAgentCommand,currentCornerCommandTargetSql,hasPendingCornerReview,type CommandRow } from './agent-command.js';
 import { activeClosingCornerCommands } from './agent-invocation.js';
-import { reportAgentAttention } from './commander.js';
+import { notifyCommanderCornerClosed,reportAgentAttention } from './commander.js';
 import { releaseArchivedCornerHolds } from './corner-holds.js';
-import { cornerIdleSql,type CornerIdleRow } from './corner-idle.js';
+import { alignProjectedIdle,cornerIdleSql,type CornerIdleRow } from './corner-idle.js';
 import { CORNER_IDLE_REPORT_BUDGET } from './corner-idle-budget.js';
 import { loadCorner,type CornerRow } from './corner-lifecycle-read-state.js';
 import { cornerMergeGate,independentReviewerConfigured,loadCornerReviewState,lockCornerArchivalAuthority,lockCornerLifecycle,noteReviewDispatchFailure,reachableReviewer } from './corner-lifecycle-review-state.js';
-import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerEvent,type CornerGithubFact,type RevisionWake } from './corner-lifecycle-values.js';
+import { OK,reviewChecksSql,type Applied,type CornerAdvance,type CornerClosedBy,type CornerEvent,type CornerGithubFact,type CornerMergeSummary,type RevisionWake } from './corner-lifecycle-values.js';
 import { transitionCorner,type CornerMachine,type CornerMachineFacts } from './corner-machine.js';
 import { deliverableCommandSql } from './chat-corner-counts.js';
 import { loadCornerWaiting } from './corner-waiting.js';
@@ -154,11 +154,12 @@ export async function cancelCornerAgentCommands(
   database: SqlDatabase,
   cornerId: string,
   preserveTurn?: { agentId: string; requestId?: string },
-): Promise<void> {
+): Promise<{ invocationId?: string; pendingIds: string[]; commandIds: string[] }> {
   await lockCornerArchivalAuthority(database);
   // Only the active invocation owned by an agent closing this thread mid-turn
   // may finish publishing its closing answer and queued attachments.
-  const preserved = preserveTurn ? await activeClosingCornerCommands(database, cornerId, preserveTurn) : [];
+  const closing = preserveTurn ? await activeClosingCornerCommands(database, cornerId, preserveTurn) : [];
+  const preserved = closing.filter(row => row.state === 'pending');
   const preservedIds = preserved.map(row => row.id);
   const preservedRequests = [...new Set(preserved.map(row => row.turn_request_id))];
   // Cancelling is the stop: a helper running one of these items sees it
@@ -178,6 +179,11 @@ export async function cancelCornerAgentCommands(
        AND NOT ($2::text IS NOT NULL AND agent_id=$2 AND request_id=ANY($3::text[]))`,
     [cornerId, preserved.length ? preserveTurn!.agentId : null, preservedRequests],
   );
+  return {
+    invocationId: closing[0]?.invocation_id,
+    pendingIds: preservedIds,
+    commandIds: closing.map(row => row.id),
+  };
 }
 
 
@@ -195,8 +201,16 @@ export async function backfillCornerLifecycleRuns(db: SqlDatabase): Promise<numb
 
 
 /** A confirmed merge is an event; callers never write archive state themselves. */
-export async function archiveCornerState(database: SqlDatabase, cornerId: string): Promise<boolean> {
-  return (await advanceCorner(database, cornerId, { kind: 'merged', contents: {} })).archived === true;
+export async function archiveCornerState(
+  database: SqlDatabase,
+  cornerId: string,
+  merge?: CornerMergeSummary,
+): Promise<boolean> {
+  return (await advanceCorner(database, cornerId, {
+    kind: 'merged',
+    contents: {},
+    ...(merge ? { merge } : {}),
+  })).archived === true;
 }
 
 
@@ -204,13 +218,14 @@ export async function archiveCorner(
   database: SqlDatabase,
   cornerId: string,
   preserveTurn?: { agentId: string; requestId?: string },
+  closeContext?: { outcome?: 'merged' | 'closed'; merge?: CornerMergeSummary; closedBy?: CornerClosedBy },
 ): Promise<boolean> {
   return database.transaction(async database => {
     await lockCornerLifecycle(database, cornerId);
     await lockCornerArchivalAuthority(database);
     if (!(await database.query(`SELECT 1 FROM rooms WHERE id=$1 AND parent_id IS NOT NULL FOR KEY SHARE`, [cornerId])).rowCount)
       throw new Error('thread not found');
-    await cancelCornerAgentCommands(database, cornerId, preserveTurn);
+    const preservedTurn = await cancelCornerAgentCommands(database, cornerId, preserveTurn);
     // An idle notice can already be in the helper's queue in the commander's place.
     await database.query(
       `SELECT beeline_finish_agent_command(id,'cancelled','corner_close',NULL) FROM agent_commands
@@ -226,7 +241,16 @@ export async function archiveCorner(
     await abandonCornerWorkflowRuns(database, cornerId);
     await deleteCornerWakeSources(database, [cornerId]);
     await releaseArchivedCornerHolds(database, [cornerId]);
-    return Boolean(changed.rowCount);
+    const archived = Boolean(changed.rowCount);
+    if (archived) {
+      await notifyCommanderCornerClosed(database, cornerId, {
+        outcome: closeContext?.outcome ?? 'closed',
+        merge: closeContext?.merge,
+        closedBy: closeContext?.closedBy,
+        preservedTurn,
+      });
+    }
+    return archived;
   });
 }
 
@@ -452,33 +476,6 @@ async function readCornerAdvance(
     return { corner, head, row, checkSource, facts };
 }
 
-
-/** The idle snapshot still sees the committed lifecycle. A projected check or
- * head change suppresses idle the same way the snapshot would after the write. */
-function alignProjectedIdle(
-  row: CornerIdleRow | undefined,
-  facts: CornerMachineFacts,
-  projected: CornerLifecycleView,
-  before: CornerLifecycleView,
-): void {
-  const suppresses = (lifecycle: CornerLifecycleView) => {
-    const summary = lifecycle.checksSummary as { status?: string; fetchStartedAt?: number } | undefined;
-    return lifecycle.checks === 'pending' || Boolean(
-      lifecycle.pr && summary?.status === 'unknown' && summary.fetchStartedAt === undefined,
-    );
-  };
-  if (suppresses(projected) && !suppresses(before)) {
-    facts.idleEligible = false;
-    if (row) row.suppressed = true;
-  }
-  const summary = projected.checksSummary as { statusChangedAt?: number; updatedAt?: number } | undefined;
-  const stamp = summary?.statusChangedAt ?? summary?.updatedAt;
-  if (row && typeof stamp === 'number' && Number(row.idle_since) < stamp) {
-    row.idle_since = String(stamp);
-  }
-}
-
-
 /** Holds the corner row lock: the machine transition and its effects only. */
 async function writeCornerAdvance(
   db: SqlDatabase,
@@ -489,9 +486,14 @@ async function writeCornerAdvance(
     const prior: CornerMachine = corner.machine ?? threadState({});
     const plan = transitionCorner(prior, { facts, event });
     if (plan.suppression) return { state: prior.state, accepted: false };
-    const archived = plan.state.state === 'archived' && !corner.archived &&
-      (event.kind === 'closed' || event.kind === 'merged' || corner.lifecycle.outcome === 'landed' || corner.lifecycle.pr?.mergedAt)
-      ? await archiveCorner(db, cornerId, event.kind === 'closed' ? event.preserveTurn : undefined) : false;
+    const isMerged = event.kind === 'merged' || corner.lifecycle.outcome === 'landed' || Boolean(corner.lifecycle.pr?.mergedAt);
+    const archived = plan.state.state === 'archived' && !corner.archived && (event.kind === 'closed' || isMerged)
+      ? await archiveCorner(db, cornerId, event.kind === 'closed' ? event.preserveTurn : undefined, {
+          outcome: isMerged ? 'merged' : 'closed',
+          ...(event.kind === 'merged' && event.merge ? { merge: event.merge } : {}),
+          ...(event.kind === 'closed' && event.closedBy ? { closedBy: event.closedBy } : {}),
+        })
+      : false;
     void archived;
     if (event.kind === 'closed') await db.query(
       `UPDATE corner_github_cache SET lifecycle=lifecycle||'{"lifecycle":"done","checks":"unknown"}'::jsonb WHERE corner_id=$1`, [cornerId]);

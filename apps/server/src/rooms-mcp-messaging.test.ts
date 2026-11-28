@@ -462,4 +462,34 @@ describe('connected agent message protocol',()=>{
     } finally { await scope.db.query('UPDATE rooms SET archived_at=NULL WHERE id=$1',[PUBLIC_CORNER]); }
   });
 
+  it('binds close_thread to the commander command room so closing from the parent chat archives without self-waking', async () => {
+    const { client, member } = await scope.connected();
+    const task = await humanTask(member, 'Open and then close a child thread');
+    const opened = await tools.ok(client, 'open_thread', {
+      room: ROOM,
+      commandId: task.id,
+      name: 'mcp-self-close',
+      objective: 'Verify MCP commander self-close',
+      implementer: await handle(AGENT),
+      brief: {
+        spec: 'Verify MCP commander self-close.',
+        repositoryWork: false,
+        approval: { sourceMessageId: task.messageId },
+      },
+    });
+    const closed = await tools.ok(client, 'close_thread', {
+      address: opened.address,
+      commandId: task.id,
+    });
+    expect(closed).toMatchObject({ receipt: expect.stringContaining('#mcp-self-close') });
+    expect(
+      (await scope.db.query<{ archived: boolean }>('SELECT archived_at IS NOT NULL archived FROM rooms WHERE id=$1', [opened.address]))
+        .rows[0]?.archived,
+    ).toBe(true);
+    const closeWakes = (await readAgentCommands(scope.db, member, ROOM)).commands.filter(
+      (cmd) => cmd.reason === 'corner_closed',
+    );
+    expect(closeWakes).toEqual([]);
+  });
+
 });

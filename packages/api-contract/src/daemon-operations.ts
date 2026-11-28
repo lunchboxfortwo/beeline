@@ -130,7 +130,7 @@ export type AgentPlaceReset = { readonly roomId: string; readonly id: string };
  * finish without a reply, so a run with nothing to say posts nothing. */
 const BACKGROUND_COMMAND_REASONS: ReadonlySet<string> = new Set(['subscribed_event',
   'computer_activity', 'watched_corner', 'corner_check', 'corner_review_dispatch', 'corner_review_needed',
-  'corner_merge_conflict', 'corner_land', 'corner_merge_refused', 'attention_report']);
+  'corner_merge_conflict', 'corner_land', 'corner_merge_refused', 'attention_report', 'corner_closed']);
 export function isBackgroundCommand(reason: string): boolean {
   return BACKGROUND_COMMAND_REASONS.has(reason);
 }

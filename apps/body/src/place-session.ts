@@ -906,15 +906,10 @@ export class PlaceSession {
       console.warn('[body] optional answer history omitted:', error);
     }
     return {
-      text,
+      text, steps, stopReason: result.stopReason, toolCalls: result.toolCalls,
       ...(result.providerError ? { providerError: result.providerError } : {}),
-      steps,
-      stopReason: result.stopReason,
-      toolCalls: result.toolCalls,
       ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
-      cleanup: async () => {
-        return stream.retract();
-      },
+      cleanup: () => stream.retract(),
     };
   }
 

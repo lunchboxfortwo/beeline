@@ -87,6 +87,16 @@ const scope5 = fixtureScope5();
     expect(text).not.toContain("The user hasn't heard from you in a while");
   });
 
+  it.each(['room', 'dm', 'code-corner'] as const)('explicitly instructs a corner_closed wake on %s not to print any message if no work is pending', (surface) => {
+    const text = assembleTurnPrompt({
+      surface,
+      task: { body: 'Thread #fix (id) merged and closed.', commandReason: 'corner_closed' },
+    }).text;
+    expect(text).toContain('Do not print any message in this turn if you have no pending work on this basis; end silently.');
+    expect(text).not.toContain('Reply to the human message');
+    expect(text).not.toContain('no_reply_needed');
+  });
+
   it.each(['human_tag', 'direct_message'])('preserves the reply owed on a %s turn', (commandReason) => {
     const text = assembleTurnPrompt({ surface: 'room', task: { body: 'What happened?', commandReason } }).text;
     expect(text).toContain('Reply to the human message that triggered this turn');

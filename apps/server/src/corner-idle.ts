@@ -1,3 +1,4 @@
+import type { CornerLifecycleView } from '@beeline/api-contract/phone';
 import { cornerIdleBudgetSql } from './corner-idle-budget.js';
 import { PERSON_STOP_REASON } from './agent-turn-end.js';
 import { cornerImplementerSql } from './corner-worker.js';
@@ -114,4 +115,29 @@ BEGIN
   ), false);
 END
 $idle_report$;`;
+}
+
+/** The idle snapshot still sees the committed lifecycle. A projected check or
+ * head change suppresses idle the same way the snapshot would after the write. */
+export function alignProjectedIdle(
+  row: CornerIdleRow | undefined,
+  facts: { idleEligible?: boolean },
+  projected: CornerLifecycleView,
+  before: CornerLifecycleView,
+): void {
+  const suppresses = (lifecycle: CornerLifecycleView) => {
+    const summary = lifecycle.checksSummary as { status?: string; fetchStartedAt?: number } | undefined;
+    return lifecycle.checks === 'pending' || Boolean(
+      lifecycle.pr && summary?.status === 'unknown' && summary.fetchStartedAt === undefined,
+    );
+  };
+  if (suppresses(projected) && !suppresses(before)) {
+    facts.idleEligible = false;
+    if (row) row.suppressed = true;
+  }
+  const summary = projected.checksSummary as { statusChangedAt?: number; updatedAt?: number } | undefined;
+  const stamp = summary?.statusChangedAt ?? summary?.updatedAt;
+  if (row && typeof stamp === 'number' && Number(row.idle_since) < stamp) {
+    row.idle_since = String(stamp);
+  }
 }

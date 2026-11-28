@@ -64,14 +64,14 @@ export async function currentInvocationCommand(db: SqlDatabase, agent: string, r
     [agent,room,Boolean(reply),reply?.quote ?? null])).rows[0];
 }
 
-/** Mark the calling agent's active self-closing invocation and return its pending commands to spare. */
+/** Mark the calling agent's active self-closing invocation and return its commands. */
 export async function activeClosingCornerCommands(
   db: SqlDatabase,
   cornerId: string,
   preserveTurn: { agentId: string; requestId?: string },
-): Promise<Array<{ id: string; turn_request_id: string }>> {
+): Promise<Array<{ id: string; turn_request_id: string; state: string; invocation_id: string }>> {
   return (
-    await db.query<{ id: string; turn_request_id: string }>(
+    await db.query<{ id: string; turn_request_id: string; state: string; invocation_id: string }>(
       preserveTurn.requestId
         ? `WITH active AS (
              SELECT command.id, inv.invocation_id, inv.batched_command_ids
@@ -94,12 +94,12 @@ export async function activeClosingCornerCommands(
              UPDATE agent_invocations inv SET self_closed=true
              FROM active
              WHERE inv.command_id=active.id AND inv.invocation_id=active.invocation_id
-             RETURNING active.id, active.batched_command_ids
+             RETURNING active.id, active.invocation_id, active.batched_command_ids
            )
-           SELECT item.id, item.turn_request_id
+           SELECT item.id, item.turn_request_id, item.state, marked.invocation_id
            FROM agent_commands item
            JOIN marked ON item.id=marked.id OR item.id=ANY(marked.batched_command_ids)
-           WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state='pending'`
+           WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state IN ('pending','complete')`
         : `WITH current_turn AS (
              SELECT request_id, invocation_id, status
              FROM agent_turns
@@ -118,12 +118,12 @@ export async function activeClosingCornerCommands(
              UPDATE agent_invocations inv SET self_closed=true
              FROM active
              WHERE inv.command_id=active.id AND inv.invocation_id=active.invocation_id
-             RETURNING active.id, active.batched_command_ids
+             RETURNING active.id, active.invocation_id, active.batched_command_ids
            )
-           SELECT item.id, item.turn_request_id
+           SELECT item.id, item.turn_request_id, item.state, marked.invocation_id
            FROM agent_commands item
            JOIN marked ON item.id=marked.id OR item.id=ANY(marked.batched_command_ids)
-           WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state='pending'`,
+           WHERE item.room_id=$1 AND item.agent_id=$2 AND item.state IN ('pending','complete')`,
       preserveTurn.requestId
         ? [cornerId, preserveTurn.agentId, preserveTurn.requestId]
         : [cornerId, preserveTurn.agentId],

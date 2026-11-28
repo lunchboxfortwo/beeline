@@ -1,6 +1,7 @@
 import { cornerRunOutcomeSql } from './corner-run.js';
 import type { SqlDatabase } from './database.js';
 import { advanceCorner } from './corner-lifecycle.js';
+import type { CornerClosedBy } from './corner-lifecycle-values.js';
 
 export { lockCornerArchivalAuthority, archiveCornerState, cancelCornerAgentCommands } from './corner-lifecycle.js';
 export { markOwnedCornersAbandoned } from './corner-lifecycle.js';
@@ -37,15 +38,21 @@ export async function closeCornerPullRequestBestEffort(
   }
 }
 
+export type CloseCornerStateOptions =
+  | { agentId: string; requestId?: string }
+  | { preserveTurn?: { agentId: string; requestId?: string }; closedBy?: CornerClosedBy };
+
 /** A close adapter emits its authorized event; the machine executes cleanup. */
 export async function closeCornerState(
   database: SqlDatabase,
   cornerId: string,
-  preserveTurn?: { agentId: string; requestId?: string },
+  options?: CloseCornerStateOptions,
 ) {
+  const normalized = options && 'agentId' in options ? { preserveTurn: options } : options;
   const outcome = await advanceCorner(database, cornerId, {
     kind: 'closed',
-    ...(preserveTurn ? { preserveTurn } : {}),
+    ...(normalized?.preserveTurn ? { preserveTurn: normalized.preserveTurn } : {}),
+    ...(normalized?.closedBy ? { closedBy: normalized.closedBy } : {}),
   });
   const corner = (await database.query<{ parent_id: string }>('SELECT parent_id FROM rooms WHERE id=$1 AND parent_id IS NOT NULL', [cornerId])).rows[0];
   if (!corner) throw new Error('thread not found');
