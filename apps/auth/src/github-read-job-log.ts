@@ -421,10 +421,27 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
     | { readonly status: 'bootstrapped'; readonly headSha: string }
     | { readonly status: 'missing-branch' };
 
+  const BEELINE_BOOTSTRAP_COMMIT_MESSAGE = 'Initial commit (Beeline repository bootstrap)';
+
+  function isBootstrapCommit(commit: Record<string, unknown>): boolean {
+    const parents = commit.parents;
+    if (!Array.isArray(parents) || parents.length !== 0) return false;
+    const message = (commit.commit as { message?: unknown } | undefined)?.message;
+    if (typeof message !== 'string' || message.trim() !== BEELINE_BOOTSTRAP_COMMIT_MESSAGE)
+      return false;
+    const files = commit.files;
+    if (!Array.isArray(files) || files.length !== 1) return false;
+    const file = files[0] as { filename?: unknown; status?: unknown } | undefined;
+    return file?.filename === 'README.md' && file?.status === 'added';
+  }
+
   /**
    * Seed an initial README.md commit on a completely empty GitHub repository so
-   * `targetBranch` exists for checkouts and pull requests. Non-empty repositories
-   * whose target branch is absent are left untouched.
+   * `targetBranch` exists for checkouts and pull requests. If a previous attempt
+   * already created Beeline's bootstrap commit on the default branch but failed
+   * before creating a different `targetBranch`, resume creating `targetBranch`
+   * from that verified bootstrap commit. Non-empty repositories with any other
+   * history are left untouched.
    */
   export async function gitHubAppClientBootstrapEmptyRepository(
     ctx: { service: GitHubAppClient; config: Required<GitHubAppConfig> },
@@ -434,9 +451,9 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
   ): Promise<BootstrapEmptyRepositoryResult> {
     const repoPath = repositoryPath(fullName);
     const branch = targetBranch.trim() || 'main';
-    const readBranch = async (): Promise<string | undefined> => {
+    const readBranch = async (name = branch): Promise<string | undefined> => {
       const response = await ctx.service.request(
-        `${ctx.config.apiBaseUrl}/repos/${repoPath}/branches/${encodeURIComponent(branch)}`,
+        `${ctx.config.apiBaseUrl}/repos/${repoPath}/branches/${encodeURIComponent(name)}`,
         { headers: githubHeaders(accessToken), signal: AbortSignal.timeout(15_000) },
       );
       if (response.status === 404) return undefined;
@@ -446,31 +463,94 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
         throw new Error('GitHub branch has no valid head');
       return sha;
     };
+    const createTargetBranchRef = async (headSha: string): Promise<string> => {
+      const refResponse = await ctx.service.request(
+        `${ctx.config.apiBaseUrl}/repos/${repoPath}/git/refs`,
+        {
+          method: 'POST',
+          headers: { ...githubHeaders(accessToken), 'content-type': 'application/json' },
+          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: headSha }),
+          signal: AbortSignal.timeout(15_000),
+        },
+      );
+      if (!refResponse.ok) {
+        if (refResponse.status === 422) {
+          const racedHead = await readBranch();
+          if (racedHead) return racedHead;
+        }
+        let message: string | undefined;
+        try {
+          const parsed = (await refResponse.json()) as { message?: unknown };
+          if (typeof parsed.message === 'string' && parsed.message) message = parsed.message;
+        } catch {}
+        throw new GitHubRequestError(
+          'GitHub branch bootstrap',
+          refResponse.status,
+          message,
+          responseRetryAfter(refResponse),
+        );
+      }
+      return headSha;
+    };
+    const readRepositoryInfo = async () => {
+      const repoBody = await jsonObject(
+        await ctx.service.request(
+          `${ctx.config.apiBaseUrl}/repos/${repoPath}`,
+          { headers: githubHeaders(accessToken), signal: AbortSignal.timeout(15_000) },
+        ),
+        'GitHub repository',
+      );
+      return {
+        defaultBranch:
+          typeof repoBody.default_branch === 'string' && repoBody.default_branch
+            ? repoBody.default_branch
+            : 'main',
+        repoName:
+          typeof repoBody.name === 'string' && repoBody.name
+            ? repoBody.name
+            : fullName.split('/')[1]!,
+      };
+    };
+    const resumeFromBootstrapCommit = async (
+      defaultBranch: string,
+      soleHeadSha: string,
+    ): Promise<BootstrapEmptyRepositoryResult> => {
+      if (branch === defaultBranch) return { status: 'missing-branch' };
+      const commit = await jsonObject(
+        await ctx.service.request(
+          `${ctx.config.apiBaseUrl}/repos/${repoPath}/commits/${encodeURIComponent(soleHeadSha)}`,
+          { headers: githubHeaders(accessToken), signal: AbortSignal.timeout(15_000) },
+        ),
+        'GitHub bootstrap commit verification',
+      );
+      if (!isBootstrapCommit(commit)) return { status: 'missing-branch' };
+      const headSha = await createTargetBranchRef(soleHeadSha);
+      return { status: 'bootstrapped', headSha };
+    };
+
     const existingHead = await readBranch();
     if (existingHead) return { status: 'already-initialized', headSha: existingHead };
 
     const branches = await jsonArray(
       await ctx.service.request(
-        `${ctx.config.apiBaseUrl}/repos/${repoPath}/branches?per_page=1`,
+        `${ctx.config.apiBaseUrl}/repos/${repoPath}/branches?per_page=2`,
         { headers: githubHeaders(accessToken), signal: AbortSignal.timeout(15_000) },
       ),
       'GitHub repository branches',
     );
-    if (branches.length > 0) return { status: 'missing-branch' };
-
-    const repoBody = await jsonObject(
-      await ctx.service.request(
-        `${ctx.config.apiBaseUrl}/repos/${repoPath}`,
-        { headers: githubHeaders(accessToken), signal: AbortSignal.timeout(15_000) },
-      ),
-      'GitHub repository',
-    );
-    const defaultBranch = typeof repoBody.default_branch === 'string' && repoBody.default_branch
-      ? repoBody.default_branch
-      : 'main';
-    const repoName = typeof repoBody.name === 'string' && repoBody.name
-      ? repoBody.name
-      : fullName.split('/')[1]!;
+    if (branches.length > 1) return { status: 'missing-branch' };
+    const { defaultBranch, repoName } = await readRepositoryInfo();
+    if (branches.length === 1) {
+      const sole = branches[0] as { name?: unknown; commit?: { sha?: unknown } };
+      const soleSha = sole.commit?.sha;
+      if (
+        sole.name !== defaultBranch ||
+        typeof soleSha !== 'string' ||
+        !/^[a-f0-9]{40,64}$/i.test(soleSha)
+      )
+        return { status: 'missing-branch' };
+      return resumeFromBootstrapCommit(defaultBranch, soleSha);
+    }
 
     // Omit `branch` on an empty repository so GitHub creates its default branch atomically.
     const putResponse = await ctx.service.request(
@@ -479,7 +559,7 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
         method: 'PUT',
         headers: { ...githubHeaders(accessToken), 'content-type': 'application/json' },
         body: JSON.stringify({
-          message: 'Initial commit',
+          message: BEELINE_BOOTSTRAP_COMMIT_MESSAGE,
           content: Buffer.from(`# ${repoName}\n`).toString('base64'),
         }),
         signal: AbortSignal.timeout(15_000),
@@ -489,6 +569,13 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
       if (putResponse.status === 409 || putResponse.status === 422) {
         const racedHead = await readBranch();
         if (racedHead) return { status: 'already-initialized', headSha: racedHead };
+        if (branch !== defaultBranch) {
+          const racedDefault = await readBranch(defaultBranch);
+          if (racedDefault) {
+            const resumed = await resumeFromBootstrapCommit(defaultBranch, racedDefault);
+            if (resumed.status !== 'missing-branch') return resumed;
+          }
+        }
       }
       let message: string | undefined;
       try {
@@ -508,32 +595,8 @@ import { GitHubAppClient, GitHubAppConfig, jsonArray, jsonObject, githubHeaders,
       throw new Error('GitHub repository bootstrap returned no commit SHA');
 
     if (branch !== defaultBranch) {
-      const refResponse = await ctx.service.request(
-        `${ctx.config.apiBaseUrl}/repos/${repoPath}/git/refs`,
-        {
-          method: 'POST',
-          headers: { ...githubHeaders(accessToken), 'content-type': 'application/json' },
-          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: headSha }),
-          signal: AbortSignal.timeout(15_000),
-        },
-      );
-      if (!refResponse.ok) {
-        if (refResponse.status === 422) {
-          const racedHead = await readBranch();
-          if (racedHead) return { status: 'bootstrapped', headSha: racedHead };
-        }
-        let message: string | undefined;
-        try {
-          const parsed = (await refResponse.json()) as { message?: unknown };
-          if (typeof parsed.message === 'string' && parsed.message) message = parsed.message;
-        } catch {}
-        throw new GitHubRequestError(
-          'GitHub branch bootstrap',
-          refResponse.status,
-          message,
-          responseRetryAfter(refResponse),
-        );
-      }
+      const createdTargetSha = await createTargetBranchRef(headSha);
+      return { status: 'bootstrapped', headSha: createdTargetSha };
     }
     return { status: 'bootstrapped', headSha };
   }

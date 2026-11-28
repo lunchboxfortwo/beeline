@@ -26,14 +26,18 @@ export function isMissingRemoteRefError(error: unknown): boolean {
   );
 }
 
+async function remoteHeadCount(gitDir: string, env?: NodeJS.ProcessEnv): Promise<number> {
+  const heads = (await git([`--git-dir=${gitDir}`, 'ls-remote', '--heads', 'origin'], env)).stdout
+    .trim();
+  return heads ? heads.split('\n').filter(Boolean).length : 0;
+}
+
 /** True only when `origin` advertises zero branch heads (an empty repository). */
 export async function isRemoteRepositoryEmpty(
   gitDir: string,
   env?: NodeJS.ProcessEnv,
 ): Promise<boolean> {
-  const heads = (await git([`--git-dir=${gitDir}`, 'ls-remote', '--heads', 'origin'], env)).stdout
-    .trim();
-  return heads.length === 0;
+  return (await remoteHeadCount(gitDir, env)) === 0;
 }
 
 /** Private refs let agents check out the same public branch independently. */
@@ -135,13 +139,22 @@ export async function materializeAgentCornerCheckout(input: {
       await fetchTarget();
       return 'fetched';
     } catch (error) {
-      if (!isMissingRemoteRefError(error) || !(await isRemoteRepositoryEmpty(gitDir, input.env)))
-        throw error;
-      if (input.onEmptyRemote && (await input.onEmptyRemote())) {
+      if (!isMissingRemoteRefError(error)) throw error;
+      const heads = await remoteHeadCount(gitDir, input.env);
+      if (heads === 0) {
+        if (input.onEmptyRemote && (await input.onEmptyRemote())) {
+          await fetchTarget();
+          return 'fetched';
+        }
+        return 'empty';
+      }
+      // A single branch on origin may be an interrupted Beeline bootstrap commit
+      // whose custom target branch was not created yet; let onEmptyRemote verify it.
+      if (heads === 1 && input.onEmptyRemote && (await input.onEmptyRemote())) {
         await fetchTarget();
         return 'fetched';
       }
-      return 'empty';
+      throw error;
     }
   };
   const staging = `${paths.gitCommonDir}.creating`;

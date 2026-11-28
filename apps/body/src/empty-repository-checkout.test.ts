@@ -15,43 +15,91 @@ import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
 const exec = promisify(execFile);
 const git = async (...args: string[]) => (await exec('git', args)).stdout.trim();
 const roots: string[] = [];
+const BOOTSTRAP_MESSAGE = 'Initial commit (Beeline repository bootstrap)';
 
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function seedRemoteCommit(bareRemote: string, branch: string, file: string, content: string) {
+async function seedRemoteCommit(
+  bareRemote: string,
+  branch: string,
+  file: string,
+  content: string,
+  message = 'Initial commit',
+) {
   const work = await mkdtemp(`${testTmpDir()}/beeline-empty-seed-`);
   roots.push(work);
   await git('init', '-b', branch, work);
   await writeFile(join(work, file), content);
   await git('-C', work, 'add', file);
-  await git('-C', work, '-c', 'user.name=Seed', '-c', 'user.email=seed@example.com', 'commit', '-m', 'Initial commit');
+  await git('-C', work, '-c', 'user.name=Seed', '-c', 'user.email=seed@example.com', 'commit', '-m', message);
   await git(`--git-dir=${bareRemote}`, 'fetch', `file://${work}`, `+refs/heads/${branch}:refs/heads/${branch}`);
   return git('-C', work, 'rev-parse', 'HEAD');
 }
 
-it('bootstrapEmptyGitHubRemote seeds an empty GitHub repository and skips non-empty ones', async () => {
+it('bootstrapEmptyGitHubRemote resumes target-branch creation on retry after README succeeds and first ref request fails', async () => {
   const headSha = 'd'.repeat(40);
-  const requests: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
-  const fetchEmpty: typeof fetch = async (url, init) => {
+  let defaultCreated = false;
+  let targetCreated = false;
+  let putCalls = 0;
+  let refAttempts = 0;
+  const fetchRetry: typeof fetch = async (url, init) => {
     const parsed = new URL(String(url));
     const method = init?.method ?? 'GET';
-    const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : undefined;
-    requests.push({ method, path: `${parsed.pathname}${parsed.search}`, ...(body ? { body } : {}) });
-    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches/develop')
-      return Response.json({ message: 'Branch not found' }, { status: 404 });
-    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches')
-      return Response.json([]);
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches/develop') {
+      return targetCreated
+        ? Response.json({ name: 'develop', commit: { sha: headSha } })
+        : Response.json({ message: 'Branch not found' }, { status: 404 });
+    }
+    if (method === 'GET' && parsed.pathname === '/repos/acme/wargame/branches') {
+      return Response.json(defaultCreated ? [{ name: 'main', commit: { sha: headSha } }] : []);
+    }
     if (method === 'GET' && parsed.pathname === '/repos/acme/wargame')
       return Response.json({ name: 'wargame', default_branch: 'main' });
-    if (method === 'PUT' && parsed.pathname === '/repos/acme/wargame/contents/README.md')
+    if (method === 'PUT' && parsed.pathname === '/repos/acme/wargame/contents/README.md') {
+      putCalls += 1;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body).toEqual({
+        message: BOOTSTRAP_MESSAGE,
+        content: Buffer.from('# wargame\n').toString('base64'),
+      });
+      expect(body).not.toHaveProperty('branch');
+      defaultCreated = true;
       return Response.json({ commit: { sha: headSha } }, { status: 201 });
-    if (method === 'POST' && parsed.pathname === '/repos/acme/wargame/git/refs')
-      return Response.json({ ref: 'refs/heads/develop', object: { sha: headSha } }, { status: 201 });
+    }
+    if (method === 'GET' && parsed.pathname === `/repos/acme/wargame/commits/${headSha}`) {
+      return Response.json({
+        sha: headSha,
+        parents: [],
+        commit: { message: BOOTSTRAP_MESSAGE },
+        files: [{ filename: 'README.md', status: 'added' }],
+      });
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/acme/wargame/git/refs') {
+      refAttempts += 1;
+      if (refAttempts === 1)
+        return Response.json({ message: 'Service Unavailable' }, { status: 503 });
+      const body = JSON.parse(String(init?.body)) as { ref: string; sha: string };
+      expect(body).toEqual({ ref: 'refs/heads/develop', sha: headSha });
+      targetCreated = true;
+      return Response.json({ ref: body.ref, object: { sha: body.sha } }, { status: 201 });
+    }
     throw new Error(`Unexpected request: ${method} ${parsed.pathname}`);
   };
+
+  await expect(
+    bootstrapEmptyGitHubRemote({
+      remote: 'https://github.com/acme/wargame.git',
+      targetBranch: 'develop',
+      token: 'ghs_test',
+      apiBaseUrl: 'https://api.github.test',
+      fetchImpl: fetchRetry,
+    }),
+  ).rejects.toThrow(/GitHub branch bootstrap failed: HTTP 503/);
+  expect(defaultCreated).toBe(true);
+  expect(targetCreated).toBe(false);
 
   expect(
     await bootstrapEmptyGitHubRemote({
@@ -59,62 +107,77 @@ it('bootstrapEmptyGitHubRemote seeds an empty GitHub repository and skips non-em
       targetBranch: 'develop',
       token: 'ghs_test',
       apiBaseUrl: 'https://api.github.test',
-      fetchImpl: fetchEmpty,
+      fetchImpl: fetchRetry,
     }),
   ).toBe(true);
-  expect(requests.find((r) => r.method === 'PUT')?.body).toEqual({
-    message: 'Initial commit',
-    content: Buffer.from('# wargame\n').toString('base64'),
-  });
-  expect(requests.find((r) => r.method === 'POST')?.body).toEqual({
-    ref: 'refs/heads/develop',
-    sha: headSha,
-  });
+  expect(putCalls).toBe(1);
+  expect(refAttempts).toBe(2);
+  expect(targetCreated).toBe(true);
 
-  // Non-empty repository whose targetBranch is absent must never be modified.
-  const fetchNonEmpty: typeof fetch = async (url) => {
+  // A non-empty repository whose sole commit is not a Beeline bootstrap commit is left untouched.
+  const fetchNonBootstrap: typeof fetch = async (url) => {
     const parsed = new URL(String(url));
-    if (parsed.pathname === '/repos/acme/wargame/branches/main')
+    if (parsed.pathname === '/repos/acme/wargame/branches/develop')
       return Response.json({ message: 'Branch not found' }, { status: 404 });
     if (parsed.pathname === '/repos/acme/wargame/branches')
-      return Response.json([{ name: 'master', commit: { sha: headSha } }]);
-    throw new Error(`Unexpected write to non-empty repository: ${parsed.pathname}`);
+      return Response.json([{ name: 'main', commit: { sha: headSha } }]);
+    if (parsed.pathname === '/repos/acme/wargame')
+      return Response.json({ name: 'wargame', default_branch: 'main' });
+    if (parsed.pathname === `/repos/acme/wargame/commits/${headSha}`)
+      return Response.json({
+        sha: headSha,
+        parents: [],
+        commit: { message: 'User initial commit' },
+        files: [{ filename: 'README.md', status: 'added' }],
+      });
+    throw new Error(`Unexpected write to non-bootstrap repository: ${parsed.pathname}`);
   };
   expect(
     await bootstrapEmptyGitHubRemote({
       remote: 'https://github.com/acme/wargame.git',
-      targetBranch: 'main',
+      targetBranch: 'develop',
       token: 'ghs_test',
       apiBaseUrl: 'https://api.github.test',
-      fetchImpl: fetchNonEmpty,
+      fetchImpl: fetchNonBootstrap,
     }),
   ).toBe(false);
 });
 
-it('thread checkout bootstraps an empty remote, branches off main, and pushes the feature branch', async () => {
+it('thread checkout bootstraps an empty remote, resumes a failed custom target branch on retry, and passes push/PR guards', async () => {
   const root = await mkdtemp(`${testTmpDir()}/beeline-empty-thread-`);
   roots.push(root);
   const remote = join(root, 'remote.git');
   await git('init', '--bare', '-b', 'main', remote);
 
   let initialHead = '';
+  let attempts = 0;
   const bootstrapEmptyRemote = vi.fn(async () => {
-    initialHead = await seedRemoteCommit(remote, 'main', 'README.md', '# wargame\n');
+    attempts += 1;
+    if (attempts === 1) {
+      // Simulate README commit succeeding on default branch while target branch ref creation fails.
+      initialHead = await seedRemoteCommit(remote, 'main', 'README.md', '# wargame\n', BOOTSTRAP_MESSAGE);
+      throw new Error('GitHub branch bootstrap failed: HTTP 502');
+    }
+    // Retry resumes target-branch creation from the verified bootstrap commit on main.
+    await git(`--git-dir=${remote}`, 'update-ref', 'refs/heads/develop', initialHead);
     return true;
   });
 
-  const { path } = await materializeCornerWorktree({
+  const input = {
     cornerId: 'thread1',
     remote: `file://${remote}`,
-    targetBranch: 'main',
+    targetBranch: 'develop',
     featureBranch: 'feature/corner-thread1',
     token: '',
     supervisorRoot: join(root, 'state'),
     committer: { name: 'Crayon', publicKey: 'a'.repeat(64) },
     bootstrapEmptyRemote,
-  });
+  };
 
-  expect(bootstrapEmptyRemote).toHaveBeenCalledTimes(1);
+  await expect(materializeCornerWorktree(input)).rejects.toThrow(/HTTP 502/);
+  const { path } = await materializeCornerWorktree(input);
+
+  expect(bootstrapEmptyRemote).toHaveBeenCalledTimes(2);
   expect(await git('-C', path, 'branch', '--show-current')).toBe('feature/corner-thread1');
   expect(await git('-C', path, 'rev-parse', 'HEAD')).toBe(initialHead);
   expect(await readFile(join(path, 'README.md'), 'utf8')).toBe('# wargame\n');
@@ -129,21 +192,21 @@ it('thread checkout bootstraps an empty remote, branches off main, and pushes th
       'git',
       ['push', '-u', 'origin', 'feature/corner-thread1'],
       'feature/corner-thread1',
-      'main',
+      'develop',
       async (source) => ({ branch: source ?? 'feature/corner-thread1' }),
     ),
   ).toBeUndefined();
   expect(
     await cornerGitHubCommandRefusal(
       'gh',
-      ['pr', 'create', '--title', 'Add app', '--body', 'Initial app', '--base', 'main', '--head', 'feature/corner-thread1'],
+      ['pr', 'create', '--title', 'Add app', '--body', 'Initial app', '--base', 'develop', '--head', 'feature/corner-thread1'],
       'feature/corner-thread1',
-      'main',
+      'develop',
     ),
   ).toBeUndefined();
   await git(`--git-dir=${remote}`, 'fetch', `file://${path}`, '+refs/heads/feature/corner-thread1:refs/heads/feature/corner-thread1');
   expect(await git(`--git-dir=${remote}`, 'rev-parse', 'refs/heads/feature/corner-thread1')).toBe(featureHead);
-  expect(await git(`--git-dir=${remote}`, 'merge-base', 'refs/heads/main', 'refs/heads/feature/corner-thread1')).toBe(initialHead);
+  expect(await git(`--git-dir=${remote}`, 'merge-base', 'refs/heads/develop', 'refs/heads/feature/corner-thread1')).toBe(initialHead);
 });
 
 it('refuses to bootstrap when a non-empty remote is missing targetBranch', async () => {
@@ -152,6 +215,7 @@ it('refuses to bootstrap when a non-empty remote is missing targetBranch', async
   const remote = join(root, 'remote.git');
   await git('init', '--bare', '-b', 'master', remote);
   await seedRemoteCommit(remote, 'master', 'README.md', '# existing\n');
+  await seedRemoteCommit(remote, 'release', 'README.md', '# release\n');
 
   const bootstrapEmptyRemote = vi.fn(async () => true);
   await expect(
@@ -167,6 +231,25 @@ it('refuses to bootstrap when a non-empty remote is missing targetBranch', async
     }),
   ).rejects.toThrow(/couldn't find remote ref|remote ref/i);
   expect(bootstrapEmptyRemote).not.toHaveBeenCalled();
+
+  // Even with a single existing branch, refusing bootstrap propagates the missing-ref error.
+  const singleBranchRemote = join(root, 'single.git');
+  await git('init', '--bare', '-b', 'master', singleBranchRemote);
+  await seedRemoteCommit(singleBranchRemote, 'master', 'README.md', '# user repo\n');
+  const refusedBootstrap = vi.fn(async () => false);
+  await expect(
+    materializeCornerWorktree({
+      cornerId: 'thread2',
+      remote: `file://${singleBranchRemote}`,
+      targetBranch: 'main',
+      featureBranch: 'feature/corner-thread2',
+      token: '',
+      supervisorRoot: join(root, 'state'),
+      committer: { name: 'Crayon', publicKey: 'a'.repeat(64) },
+      bootstrapEmptyRemote: refusedBootstrap,
+    }),
+  ).rejects.toThrow(/couldn't find remote ref|remote ref/i);
+  expect(refusedBootstrap).toHaveBeenCalledTimes(1);
 });
 
 it('handles empty read-only Room and unborn thread checkouts and advances once main appears', async () => {
