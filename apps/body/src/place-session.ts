@@ -46,9 +46,9 @@ import { agentOpenRouterKey } from './openrouter-key-usage.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
 import {
-  prepareGitHubLaunchers,
+  prepareGitHubLaunchers as installGitHubLaunchers,
   prepareOptionalHome,
-  refreshFeatureBranch,
+  refreshFeatureBranch as syncFeatureBranch,
   type PlaceHomeInput,
 } from './place-session-home.js';
 import { itemPrompt, memberTasks, memberThreads, offlineBatchPrompt } from './place-prompt.js';
@@ -373,7 +373,7 @@ export class PlaceSession {
     try {
       if (!this.alive || this.stale) await this.startFresh();
       signal.throwIfAborted();
-      await prepareGitHubLaunchers(this.homeInput());
+      await this.prepareGitHubLaunchers();
     } catch (error) {
       if (signal.aborted) void this.stop().catch(console.warn);
       throw error;
@@ -757,6 +757,22 @@ export class PlaceSession {
     };
   }
 
+  private prepareGitHubLaunchers(): Promise<void> {
+    return installGitHubLaunchers(this.homeInput());
+  }
+
+  /** A branch that could not be refreshed adds one note to the next prompt. */
+  private async refreshFeatureBranch(): Promise<void> {
+    const note = await syncFeatureBranch({
+      api: this.options.api,
+      folder: this.folder(),
+      placeId: this.options.placeId,
+      ...(this.options.parentRoomId ? { parentRoomId: this.options.parentRoomId } : {}),
+      resources: this.resources,
+    });
+    if (note) this.notes.push(note);
+  }
+
   /**
    * Hand one item to the session and wait for its answer. Throws only when
    * the harness itself fails; only background work may complete silently.
@@ -770,14 +786,7 @@ export class PlaceSession {
     const client = this.client!;
     const sessionId = this.sessionId!;
     const signal = this.retirement;
-    const branchNote = await refreshFeatureBranch({
-      api: this.options.api,
-      folder: this.folder(),
-      placeId: this.options.placeId,
-      ...(this.options.parentRoomId ? { parentRoomId: this.options.parentRoomId } : {}),
-      resources: this.resources,
-    });
-    if (branchNote) this.notes.push(branchNote);
+    await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
     // A received picture rides inline as before, within MAX_INLINE_IMAGE_BYTES each.
