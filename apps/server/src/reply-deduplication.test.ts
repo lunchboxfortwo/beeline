@@ -89,13 +89,15 @@ it('an earlier ask in the batch prevents a later reply from ending the native tu
 
 const activityNotes=async()=>(await db.query(`SELECT activity FROM messages WHERE author_id=$1 AND room_id=$2 AND presentation='activity'`,[B,CHAT])).rows
  .flatMap(row=>(row.activity as {kind:string;text?:string}[]).filter(step=>step.kind==='note').map(step=>step.text));
-it.each(['replyToMessage','native message'])('grunt-dup-1127: a same-place reply (%s) keeps the reworded closing text out of the chat',async path=>{
+it.each(['replyToMessage','native message','native message after the question is deleted'])('grunt-dup-1127: a same-place reply (%s) keeps the reworded closing text out of the chat',async path=>{
  const request=await task();
  const invocation={id:randomUUID(),requestId:request.id};
  const text='Squire needs an upgrade.';
  // The native message tool records the reply and leaves the owed command pending.
- if(path==='native message'){
+ if(path.startsWith('native message')){
   await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:request.id,invocationId:invocation.id},B);
+  // The stored reply then has no link to the deleted question.
+  if(path.endsWith('deleted'))await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1',[request.id]);
   await daemon.execute('message',{roomId:CHAT,type:'reply',quoteMsgId:request.id,text},B);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[request.id])).rows).toEqual([{state:'pending'}]);
  }else{

@@ -77,7 +77,8 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
     const replayed = existed && saved.messageId === id;
     if (parent && saved.messageId && !replayed && (quote || input.type === 'blocked')) await db.query(
-      'UPDATE agent_commands SET posted_reply_id=$2 WHERE id=$1', [parent.id,saved.messageId]);
+      // Only the reply tool records reply_tool_message_id; a later closing text checks it.
+      `UPDATE agent_commands SET posted_reply_id=$2${input.type === 'reply' ? ',reply_tool_message_id=$2' : ''} WHERE id=$1`, [parent.id,saved.messageId]);
     if (input.type === 'blocked' && saved.messageId && openBlockIds.length && !replayed) {
       const createdOpenBlock = (await db.query(`SELECT 1 FROM (${openBlocksSql('$1')}) block WHERE id=$2`, [input.roomId, saved.messageId])).rowCount > 0;
       if (createdOpenBlock) {

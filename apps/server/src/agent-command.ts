@@ -66,6 +66,7 @@ ALTER TABLE agent_commands DROP CONSTRAINT IF EXISTS agent_commands_room_id_sour
 ALTER TABLE agent_commands ALTER COLUMN source_message_id DROP NOT NULL;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS private_payload jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS posted_reply_id text;
+ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS reply_tool_message_id text;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS message jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS report_address jsonb;
 ALTER TABLE agent_commands ADD COLUMN IF NOT EXISTS answer_attachments jsonb NOT NULL DEFAULT '[]'::jsonb;
@@ -251,6 +252,7 @@ export type CommandRow = {
   source_message_id: string | null;
   private_payload: PrivateCommandPayload | null;
   posted_reply_id?: string | null;
+  reply_tool_message_id?: string | null;
   message?: AgentCommand['source'] | null;
   report_address?: { roomId: string; identityId: string } | null;
   answer_attachments?: PrivateCommandPayload['attachments'];
@@ -904,9 +906,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         // The agent already replied in this place during the turn. Its closing
         // text goes to the turn's activity, not into the chat a second time.
         // A native reply leaves the command pending, so the reply completes it.
-        const replyId = item.result_message_id ?? item.posted_reply_id, wakeId = replyableWake(item)?.id;
-        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length && replyId && wakeId) {
-          const reply = await holdFinalAfterReply(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), replyId, wakeId,
+        const replyId = item.reply_tool_message_id;
+        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length && replyId) {
+          const reply = await holdFinalAfterReply(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), replyId,
             roomId: item.room_id, agentId, requestId: item.turn_request_id, text: messageText, steps: input.steps});
           if (reply) {
             if (item.state !== 'complete') await endAgentTurn(db, item, 'complete', null, reply.id);
@@ -953,6 +955,7 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
       const saved = await sendMessage(db,{route:{from,to},text:messageText,ask:input.messageAsk,id,parent:item,replyTo:scheduleReply?.id ?? item.source_message_id ?? item.id});
       if (!saved.stored || !saved.messageId)
         return {...saved, commandId:item.id, completed:false, published:false, answered:false};
+      await db.query('UPDATE agent_commands SET reply_tool_message_id=$2 WHERE id=$1',[item.id,saved.messageId]);
       if (item.state === 'complete') await db.query('UPDATE agent_commands SET result_message_id=$2 WHERE id=$1',[item.id,saved.messageId]);
       else await endAgentTurn(db,item,'complete',null,saved.messageId);
       completedNow = true;

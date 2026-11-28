@@ -654,6 +654,7 @@
           "report_address": "The original commander escalation address is frozen at append so later orders or transcript changes cannot redirect a report.",
           "message": "The delivered source text, author and attachments must survive transcript edits and be readable without optional context joins.",
           "posted_reply_id": "A committed mid-turn reply suppresses closing-message publication and survives helper/server replacement.",
+          "reply_tool_message_id": "The reply tool's committed message, so a later closing text in the same place is held back even after the quoted wake is deleted.",
           "stop_requested_at": "A person stopped an answered item's still-open run; the helper must still cancel it after a reconnect.",
           "generation_id": {
             "reason": "Retired queue ownership storage; current requests do not read or write it, retained for preceding serving and rollback images.",

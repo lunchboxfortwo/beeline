@@ -41,20 +41,19 @@ export async function recordAnswerActivity(db: SqlDatabase, agentId: string, mes
 
 /**
  * A turn's closing text after the agent already replied in the same place.
- * Only a routed reply that quotes the turn's wake counts; a progress post in
- * the same chat carries no route and leaves the closing text published.
+ * Only a message the reply tool recorded counts; a progress post in the same
+ * chat leaves the closing text published.
  * When that reply is still visible, the text is not posted; it stays readable
  * in the turn's activity (the turn's steps, then the text as notes) and the
  * reply is returned. Otherwise nothing is written and the text posts normally.
  */
 export async function holdFinalAfterReply(db: SqlDatabase, input: {
-  id: string; replyId: string; wakeId: string; roomId: string; agentId: string; requestId: string; text: string; steps?: unknown;
+  id: string; replyId: string; roomId: string; agentId: string; requestId: string; text: string; steps?: unknown;
 }): Promise<{ id: string; created_at: Date } | undefined> {
   const reply = (await db.query<{ id: string; created_at: Date }>(
     `SELECT id,created_at FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3
-       AND deleted_at IS NULL AND presentation='message' AND reply_to_message_id=$4
-       AND card ? 'route' AND NOT card ? 'reportStatus'`,
-    [input.replyId, input.roomId, input.agentId, input.wakeId])).rows[0];
+       AND deleted_at IS NULL AND presentation='message'`,
+    [input.replyId, input.roomId, input.agentId])).rows[0];
   if (!reply) return undefined;
   let steps: unknown[] = [];
   try {
