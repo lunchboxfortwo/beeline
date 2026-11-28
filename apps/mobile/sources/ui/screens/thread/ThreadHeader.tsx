@@ -25,8 +25,10 @@ export type ThreadHeaderData = {
     chatTag: string | null;
     title: string;
     repositoryHomepageIcon?: string;
-    /** Undefined until the parent Room's corner row lands. */
+    /** Undefined until the parent Room's corner row lands. Owns the state mark. */
     state?: CornerState;
+    /** Live turn state for the activity line when different from `state`. */
+    activityState?: CornerState;
     workingAgentName?: string;
     /** The machine's reason alongside `state` (`backlog` on an idle thread). */
     reason?: CornerStateReason;
@@ -74,6 +76,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
     barRef?: React.Ref<View>; onBarLayout?: () => void;
 }) {
     const lineHeight = typeStyle('meta', useTextSize()).lineHeight;
+    const activity = threadActivityLabel({ state: h.activityState ?? h.state, workingAgentName: h.workingAgentName });
     return (
         <YStack backgroundColor="raised" borderBottomWidth={1} borderColor="stroke" testID="corner-session-header">
             <YStack ref={barRef as never} onLayout={onBarLayout}>
@@ -99,7 +102,7 @@ export function ThreadBar({ h, collapsed, expanded, back, openChat, expand, open
                                     <ThreadName title={h.title} v={headerMark(h)?.state === 'needs-you' ? "metaStrong" : "meta"} testID="thread-bar-name" trail={<HeaderMark h={h} />} />
                                 </ListItem>
                             ) : null}
-                            {threadActivityLabel(h) ? <T v="meta" color="needsYou" testID="thread-header-working">{threadActivityLabel(h)}</T> : null}
+                            {activity ? <T v="meta" color="needsYou" testID="thread-header-working">{activity}</T> : null}
                         </YStack>
                     </XStack>
                     {openActions ? (

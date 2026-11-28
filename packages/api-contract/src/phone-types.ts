@@ -684,6 +684,8 @@ export type RoomViewAgentTurn = {
    * already scrolled out of.
    */
   readonly requestedBy?: string;
+  /** Present when this turn runs a dispatched thread review (retains its role across reviewer setting changes). */
+  readonly role?: 'review';
 };
 
 

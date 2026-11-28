@@ -6,13 +6,14 @@ export type ThreadWaitFacts = { readonly workingAgentName?: string; readonly sta
 /**
  * A thread line's second line in lists, per viewer: "waiting on you" (`you`,
  * drawn semibold) for the person the thread waits on, "waiting on Claude"
- * for everyone else, then "review", "working", "backlog", "idle", "done"; one corner state drives both.
+ * for everyone else, then "review", "in progress", "backlog", "idle", "done"; one corner state drives both.
  */
 export function threadListLabel(thread: ThreadWaitFacts, viewer: string | undefined): { word: string; you: boolean } {
   if (threadActivityLabel(thread)) return { word: threadActivityLabel(thread)!, you: false };
   const work = threadWorkState(thread, viewer);
   if (work === 'needs-you') return { word: 'waiting on you', you: true };
   if (work === 'backlog' || work === 'done') return { word: work, you: false };
+  if (thread.state === 'working') return { word: 'in progress', you: false };
   if (thread.state !== 'waiting') return { word: thread.state, you: false };
   const name = thread.blocker?.personName?.trim();
   if (name) return { word: `waiting on ${name}`, you: false };

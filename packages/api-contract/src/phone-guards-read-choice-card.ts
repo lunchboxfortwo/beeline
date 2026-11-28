@@ -556,6 +556,7 @@ export function readAgentTurn(value: unknown): RoomViewAgentTurn | null {
     ...field('startedAt', integer(item.startedAt) ? item.startedAt : undefined),
     ...field('generationId', typeof item.generationId === 'string' ? item.generationId : undefined),
     ...field('requestedBy', typeof item.requestedBy === 'string' ? item.requestedBy : undefined),
+    ...field('role', item.role === 'review' ? ('review' as const) : undefined),
   };
 }
 

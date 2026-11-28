@@ -1,7 +1,7 @@
 import { useRecordedWorkItem } from '@/buzz/work-board-store';
 import React, { useCallback, useMemo } from 'react';
 import { router } from 'expo-router';
-import { cornerShortTitle, roomTitle, threadState as threadStateOf, type CornerState, type RoomView } from '@beeline/api-contract/phone';
+import { cornerShortTitle, roomTitle, threadState as threadStateOf, type CornerState, type RoomView, type RoomViewAgentTurn, type RoomViewIdentity } from '@beeline/api-contract/phone';
 import { navigateToRoom } from '@/buzz/corner-navigation';
 import { openExternalUrl } from '@/utils/open-external-url';
 import { Modal } from '@/modal';
@@ -9,7 +9,24 @@ import { openPlace } from '@/ui/shell/panel';
 import { ThreadTitleBlock, type ThreadHeaderData } from '@/ui/screens/thread/ThreadHeader';
 import { threadPrLine } from '@/ui/screens/thread/thread-status';
 import { useTitleBlockVisibility } from '@/ui/screens/thread/useTitleBlockVisibility';
+import { resolveAgentDisplayIdentity, type DisplayableAgent } from '@/buzz/agent-display';
+import { isAgentTurnActive } from '@/buzz/agent-presence';
 import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store';
+
+function resolveActiveTurnAgentName(
+  pubkey: string,
+  roomSurface: RoomView,
+  conversationIdentities?: ReadonlyMap<string, RoomViewIdentity>,
+  agentByPubkey?: ReadonlyMap<string, DisplayableAgent>,
+): string {
+  const identity =
+    conversationIdentities?.get(pubkey) ??
+    roomSurface.members.find((member) => member.identity.pubkey === pubkey)?.identity;
+  const detail = identity
+    ? { pubkey: identity.pubkey, displayName: identity.name }
+    : agentByPubkey?.get(pubkey);
+  return resolveAgentDisplayIdentity(pubkey, detail).name;
+}
 
 /**
  * Header B's data for a corner: the server corner state, viewer-specific
@@ -20,7 +37,8 @@ import { findRoomCornerRow, useRoomCornerRecord } from '@/buzz/room-corner-store
  */
 export function useChatThreadHeader({
   isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId, state,
-  objective, isArchived, isDesktop, positions,sourceMessageId,
+  objective, isArchived, isDesktop, positions, sourceMessageId,
+  conversationIdentities, agentByPubkey,
 }: {
   isCorner: boolean;
   sourceMessageId?:string;
@@ -33,6 +51,8 @@ export function useChatThreadHeader({
   isArchived: boolean;
   isDesktop: boolean;
   positions?: Parameters<typeof useTitleBlockVisibility>[1];
+  conversationIdentities?: ReadonlyMap<string, RoomViewIdentity>;
+  agentByPubkey?: ReadonlyMap<string, DisplayableAgent>;
 }) {
   const recordedWorkItem=useRecordedWorkItem(roomSurface?.room.workspaceId,sourceMessageId);
   const corners = useRoomCornerRecord(isCorner ? parentChannelId : undefined);
@@ -40,28 +60,88 @@ export function useChatThreadHeader({
   const openingSummary = corners?.summary?.openCorners.find((corner) => corner.id === decodedId);
   const parentName = roomSurface?.parent?.name ?? corners?.header?.room.name ?? null;
   const title = resolvedChannelName ?? openingRow?.corner.name ?? openingSummary?.name ?? null;
-  const threadState = state ?? openingRow?.state ?? openingSummary?.state;
+  const cachedState = state ?? openingRow?.state ?? openingSummary?.state;
+  const cachedWorkingAgentName = openingRow?.workingAgentName ?? openingSummary?.workingAgentName;
   const threadReason = openingRow?.reason ?? openingSummary?.reason;
   const prUrl = roomSurface?.cornerLifecycle?.pr?.url;
   const hasBrief = Boolean(roomSurface?.cornerBrief);
   const visibility = useTitleBlockVisibility(isCorner, positions);
 
+  // Keep `state` (and the header's lifecycle mark) tied to the server row, and
+  // derive only the activity label (`activityState` + `workingAgentName`) from
+  // the thread's own active turns once roomSurface loads, honoring the server's
+  // dispatched-review role even if the configured reviewer changes mid-review.
+  const { activityState, workingAgentName } = useMemo<{
+    activityState: CornerState | undefined;
+    workingAgentName: string | undefined;
+  }>(() => {
+    if (!roomSurface) {
+      return { activityState: undefined, workingAgentName: cachedWorkingAgentName };
+    }
+    const activeTurns = (roomSurface.latestAgentTurns ?? []).filter(isAgentTurnActive);
+    if (!activeTurns.length || isArchived) {
+      return { activityState: undefined, workingAgentName: undefined };
+    }
+    const nameOf = (pubkey: string) =>
+      resolveActiveTurnAgentName(pubkey, roomSurface, conversationIdentities, agentByPubkey);
+    const reviewerId =
+      roomSurface.room.reviewerAgentId ??
+      roomSurface.parent?.reviewerAgentId ??
+      corners?.header?.room.reviewerAgentId;
+    const implementerId = openingRow?.agent?.pubkey ?? roomSurface.cornerOpenerAgentId;
+    const isReviewerTurn = (turn: RoomViewAgentTurn) =>
+      turn.role === 'review' ||
+      (reviewerId !== undefined && turn.agentPubkey === reviewerId);
+    const reviewerTurn = activeTurns.find(isReviewerTurn);
+    const implementerTurn = implementerId
+      ? activeTurns.find((turn) => turn.agentPubkey === implementerId && turn !== reviewerTurn)
+      : activeTurns.find((turn) => turn !== reviewerTurn);
+    const peerTurn = activeTurns.find((turn) => turn !== implementerTurn && turn !== reviewerTurn);
+    const live = threadStateOf({
+      ended: isArchived,
+      implementerRunning: Boolean(implementerTurn),
+      reviewerActive: Boolean(reviewerTurn),
+      checksRunning: cachedState === 'review' && !reviewerTurn,
+      decisionOpen: cachedState === 'waiting',
+      backlog: threadReason === 'backlog',
+      peerRunning: Boolean(peerTurn),
+      implementer: implementerTurn?.agentPubkey,
+      reviewer: reviewerTurn?.agentPubkey,
+      peer: peerTurn?.agentPubkey,
+    });
+    return {
+      activityState: live.state,
+      workingAgentName: 'agent' in live && live.agent ? nameOf(live.agent) : undefined,
+    };
+  }, [
+    agentByPubkey,
+    cachedState,
+    cachedWorkingAgentName,
+    conversationIdentities,
+    corners?.header?.room.reviewerAgentId,
+    isArchived,
+    openingRow?.agent?.pubkey,
+    roomSurface,
+    threadReason,
+  ]);
+
   const thread = useMemo<ThreadHeaderData | undefined>(() => {
     if (!isCorner) return undefined;
     const prLine = threadPrLine(roomSurface?.cornerLifecycle, isArchived);
     return {
-      workingAgentName: openingRow?.workingAgentName ?? openingSummary?.workingAgentName,
+      workingAgentName,
+      ...(activityState ? { activityState } : {}),
       chatTag: parentName ? (roomTitle(parentName) ?? null) : null,
       repositoryHomepageIcon: roomSurface?.room.homepageIcon,
       title: cornerShortTitle(parentName, title, decodedId),
-      ...(threadState ? { state: threadState } : isArchived ? threadStateOf({ ended: true }) : {}),
+      ...(cachedState ? { state: cachedState } : isArchived ? threadStateOf({ ended: true }) : {}),
       ...(threadReason ? { reason: threadReason } : {}),
       workItem:recordedWorkItem??roomSurface?.workItem,
       people:roomSurface?.members.map(member=>member.identity),
       ...(prLine ? { prLine } : {}),
       ...(objective.trim() ? { objective: objective.trim() } : {}),
     };
-  }, [openingRow?.workingAgentName, openingSummary?.workingAgentName, decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, threadState, threadReason]);
+  }, [activityState, workingAgentName, decodedId, isArchived, isCorner, objective, parentName, title, roomSurface?.cornerLifecycle, roomSurface?.room.homepageIcon, roomSurface?.workItem, recordedWorkItem, roomSurface?.members, cachedState, threadReason]);
 
   const openBrief = useMemo(
     () => (isCorner && hasBrief ? () => openPlace({ kind: 'brief', roomId: decodedId }, isDesktop) : undefined),

@@ -89,7 +89,9 @@ export function cornerFactsSql(viewerExpr: string): {
       blocker.item_id waiting_item_id,blocker.reason waiting_reason,
       blocker.kind waiting_kind,blocker.person_name waiting_person_name,
       blocker.person_id waiting_person_id,
-      (SELECT identity.name FROM identities identity WHERE identity.id=f.machine->>'agent') working_agent_name,
+      (SELECT identity.name FROM identities identity WHERE identity.id=f.machine->>'agent'
+        AND EXISTS (SELECT 1 FROM agent_turns running
+          WHERE running.room_id=c.id AND running.agent_id=identity.id AND ${workingTurnFreshSql('running')})) working_agent_name,
       turn.status latest_turn_status,turn.created_at latest_turn_created_at,
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,
@@ -116,6 +118,27 @@ export function deliverableCommandSql(command: string): string {
     AND ${command}.state='pending'`;
 }
 
+/** Whether a thread turn carries the review role: configured reviewer or dispatched review command. */
+export function cornerReviewTurnSql(
+  turn: string,
+  corner: string,
+  parent: string,
+  githubCache: string,
+): string {
+  const reviewerAgent = `ANY(array_remove(ARRAY[${cornerReviewerSql(corner, parent)}],NULL))`;
+  const checkPassed = (source: string) =>
+    `${source}.system_event->>'kind'='check-passed'
+      AND ${source}.system_event->'object'->>'headSha'=${githubCache}.lifecycle->'pr'->>'headSha'`;
+  return `(${turn}.agent_id=${reviewerAgent}
+    OR EXISTS(SELECT 1 FROM agent_commands dispatched
+      WHERE dispatched.room_id=${turn}.room_id AND dispatched.agent_id=${turn}.agent_id
+        AND dispatched.turn_request_id=${turn}.request_id
+        AND ((dispatched.review_context IS NOT NULL AND dispatched.review_context->>'purpose' IS NULL)
+          OR dispatched.reason='corner_review_dispatch'
+          OR (dispatched.reason='subscribed_event' AND EXISTS(
+            SELECT 1 FROM messages source WHERE source.id=dispatched.source_message_id AND ${checkPassed('source')})))))`;
+}
+
 /** A running turn, or a command still waiting for one, retains the review role recorded by its dispatch.
  * Another agent's running turn is peer activity: it only keeps an otherwise idle thread from idling. */
 export function cornerWorkSql(): string {
@@ -124,14 +147,7 @@ export function cornerWorkSql(): string {
   const checkPassed = (source: string) =>
     `${source}.system_event->>'kind'='check-passed'
       AND ${source}.system_event->'object'->>'headSha'=gh.lifecycle->'pr'->>'headSha'`;
-  const reviewerTurn = `(t.agent_id=${reviewerAgent}
-    OR EXISTS(SELECT 1 FROM agent_commands dispatched
-      LEFT JOIN messages source ON source.id=dispatched.source_message_id
-      WHERE dispatched.room_id=t.room_id AND dispatched.agent_id=t.agent_id
-        AND dispatched.turn_request_id=t.request_id
-        AND ((dispatched.review_context IS NOT NULL AND dispatched.review_context->>'purpose' IS NULL)
-          OR dispatched.reason='corner_review_dispatch'
-          OR (dispatched.reason='subscribed_event' AND ${checkPassed('source')}))))`;
+  const reviewerTurn = cornerReviewTurnSql('t', 'c', 'parent', 'gh');
   const reviewerCommand = `(command.agent_id=${reviewerAgent}
     OR (command.review_context IS NOT NULL AND command.review_context->>'purpose' IS NULL)
     OR command.reason='corner_review_dispatch'

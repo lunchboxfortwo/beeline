@@ -53,6 +53,8 @@ describe('thread status (header B)', () => {
 
 it('names the agent the state names: working, reviewing, and never over a wait', () => {
   expect(threadListLabel({ state: 'working', workingAgentName: 'Ruby' }, undefined).word).toBe('Ruby is working');
+  // In-progress lifecycle with no active turn shows plain "in progress", not "working" or "<agent> is working".
+  expect(threadListLabel({ state: 'working' }, undefined)).toEqual({ word: 'in progress', you: false });
   // The #beeline screenshot: the reviewer running on a thread with a stale block reads as review.
   expect(threadListLabel({ state: 'review', workingAgentName: 'Speedy' }, undefined).word).toBe('Speedy is reviewing');
   expect(threadListLabel({ state: 'waiting', workingAgentName: 'Speedy' }, undefined).word).toBe('waiting on a reply');

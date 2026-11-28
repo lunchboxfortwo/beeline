@@ -14,7 +14,7 @@ import { taggedIdentityIdsSql } from '../message-mentions.js';
 import { type SqlDatabase } from '../database.js';
 import { readNeedsYouOrder, needsYouItems } from '../needs-you.js';
 import type { CommittedMessageLiveRow, LiveEvent } from '../live.js';
-import { roomAttentionActorSql, roomNeedsYouSql, roomWorkingSql } from '../chat-corner-counts.js';
+import { cornerReviewTurnSql, roomAttentionActorSql, roomNeedsYouSql, roomWorkingSql } from '../chat-corner-counts.js';
 import { visibleMessageSql, visibleChatMessageSql, viewerReadCursorSql } from '../read-cursor.js';
 import { readStarPrompt } from '../github-star-prompt.js';
 import type { PhoneContext } from './context.js';
@@ -111,11 +111,15 @@ import { phoneListRoomWorkflowRuns } from './schedules.js';
            )
            SELECT DISTINCT ON (authorized.identity_id) turn.request_id,turn.agent_id,turn.status,turn.started_at,turn.created_at,turn.version,
              requester.id requested_by,
+             CASE WHEN room.parent_id IS NOT NULL AND turn.status='working' AND ${cornerReviewTurnSql('turn', 'room', 'parent', 'gh')}
+               THEN 'review' END role,
              authorized.identity_id viewer_id,
              ${roomNeedsYouSql('room', 'authorized.identity_id')} deck_needs_you,
              ${roomWorkingSql('room')} deck_working,
              ${roomAttentionActorSql('room', 'authorized.identity_id')} deck_attention_actor
            FROM rooms room CROSS JOIN authorized CROSS JOIN latest_turn turn
+           LEFT JOIN rooms parent ON parent.id=room.parent_id
+           LEFT JOIN corner_github_cache gh ON gh.corner_id=room.id
            LEFT JOIN messages trigger ON trigger.id=${turnRootMessageSql('turn')}
            LEFT JOIN identities requester ON requester.id=trigger.author_id
              AND requester.kind='human'

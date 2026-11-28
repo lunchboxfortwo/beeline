@@ -21,7 +21,7 @@ Idle; an opening order, if present, supplies its first event. In order, first ma
 - **Idle:** nothing else remains; Backlog idle when parked, else another agent's
   running turn shows Working.
 
-The stored machine names the agent its state is about; rows read that name.
+The stored machine names the agent its state is about; rows read that name only while that agent has a running turn.
 
 Red checks wake the implementer with the recorded failing jobs. Green checks wake
 the independent configured reviewer inside the corner. Review uses the required
