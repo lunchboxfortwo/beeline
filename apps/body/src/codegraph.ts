@@ -142,6 +142,8 @@ Module._load = function (request, parent, isMain) {
 
 const READONLY_SQLITE_NODE_OPTION = `--import=data:text/javascript;base64,${Buffer.from(READONLY_SQLITE_PRELOAD_SOURCE).toString('base64')}`;
 
+export const CODEGRAPH_MCP_SERVER_NAME = 'codegraph';
+
 /** Release-owned, repository-scoped CodeGraph MCP server. */
 export function codegraphMcpServer(
   config: BodyConfig,
@@ -150,7 +152,7 @@ export function codegraphMcpServer(
 ): McpServerWire | undefined {
   if (!config.codegraphCommand) return undefined;
   return {
-    name: 'codegraph',
+    name: CODEGRAPH_MCP_SERVER_NAME,
     command: config.codegraphCommand,
     args: ['serve', '--mcp', '--path', resolve(cwd), ...(options.readonly ? ['--no-watch'] : [])],
     // One MCP child per harness session is easier to contain than a daemon

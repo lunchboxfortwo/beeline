@@ -78,6 +78,7 @@ import {
 } from './agent-home.js';
 import { beelineManagedSkills } from './beeline-skill.js';
 import { piCliProxyProviders } from './cliproxy.js';
+import { CODEGRAPH_MCP_SERVER_NAME } from './codegraph.js';
 import { DRAW_AVATAR_SKILL_NAME, drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
 import {
   grantedSquireHostRoute,
@@ -98,8 +99,12 @@ import {
   withOpenRouterModelRouting,
   type OpenRouterRoutingDecision,
 } from './openrouter-routing.js';
+import { ROOM_MOUNTED_MCP_SERVERS } from './read-only-policy.js';
 import { ensureSquireHostDir } from './squire-host.js';
 import { extractTomlSections, tomlChildTableNames } from './toml-section.js';
+
+// These identities belong to the bundled wires even in sessions that omit one.
+const RESERVED_MCP_NAMES = new Set<string>([...ROOM_MOUNTED_MCP_SERVERS, CODEGRAPH_MCP_SERVER_NAME]);
 
 function releaseSkills(skillReleaseId: string, isReviewer: boolean) {
   return [
@@ -551,7 +556,8 @@ export function hostImportedMcpDeclarations(
   const add = (servers: Record<string, unknown> | undefined) => {
     if (!servers) return;
     for (const [name, value] of Object.entries(servers)) {
-      if (isHostMcpDeclaration(name, value)) declarations[name] = recordValue(value) ?? {};
+      if (!RESERVED_MCP_NAMES.has(name) && isHostMcpDeclaration(name, value))
+        declarations[name] = recordValue(value) ?? {};
     }
   };
   for (const config of importedMcpConfigs(input.agentKind)) {
