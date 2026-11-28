@@ -829,7 +829,6 @@ export class PlaceSession {
           )
         : [];
     const delivery = this.turnPrefix ? client.promptDelivery(sessionId) : undefined;
-    if (delivery) await client.preparePromptDelivery(sessionId);
     signal.throwIfAborted();
     const options = {
       names: this.names,

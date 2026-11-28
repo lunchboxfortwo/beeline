@@ -3,8 +3,10 @@
 Beeline supplies session rules when it creates an ACP conversation. When the
 harness advertises structured `systemPrompt` support, the first user prompt
 uses the rules already supplied by `session/new`. Claude and Pi keep their
-adapter-specific system instructions. Other adapters receive a fallback copy
-in the first successful prompt of each fresh conversation.
+adapter-specific system instructions. Pi's rules stay in `SYSTEM.md` through
+compaction, so rule delivery does not depend on reading its compaction marker.
+Other adapters receive a fallback copy in the first successful prompt of each
+fresh conversation.
 
 In `PlaceSession`, successful prompts let later turns reuse the rules already
 in the conversation. For Codex ACP versions `2.3.0` and `2.10.0` with
