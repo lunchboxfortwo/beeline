@@ -43,6 +43,18 @@ export type CornerAdvance = {
 
 export type Applied = { ok: true; wake?: RevisionWake };
 
+export type CornerClosedBy = {
+  agentId: string;
+  roomId?: string;
+};
+
+export type CornerMergeSummary = {
+  prNumber?: number;
+  mergeCommitSha?: string;
+  title?: string;
+  url?: string;
+};
+
 export type CornerEvent =
   | {
       kind: 'open';
@@ -63,8 +75,8 @@ export type CornerEvent =
   /** The configured reviewer's PASS on this head; the server lands after commit. */
   | { kind: 'approval'; headSha: string; by: 'reviewer' }
   | { kind: 'merge-refused'; headSha: string; reason: string; confirmedUnmerged?: boolean }
-  | { kind: 'merged'; contents: Record<string, unknown> }
-  | { kind: 'closed'; preserveTurn?: { agentId: string; requestId?: string } }
+  | { kind: 'merged'; contents: Record<string, unknown>; merge?: CornerMergeSummary }
+  | { kind: 'closed'; preserveTurn?: { agentId: string; requestId?: string }; closedBy?: CornerClosedBy }
   /** update_work moved the thread into (true) or out of (false) Backlog. */
   | { kind: 'backlog'; backlog: boolean; command?: AgentCommandInput }
   | { kind: 'merge-conflict'; sourceMessageId: string }

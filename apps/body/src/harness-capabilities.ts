@@ -136,6 +136,18 @@ export function harnessEnforcement(agentCommand: string | undefined): HarnessPro
   };
 }
 
+/** Native file tools can be available even when the adapter's permission
+ * callbacks are unverified. For those adapters, use the tools only under
+ * Beeline's OS sandbox and retain the existing Room enforcement verdict. */
+export function harnessNativeIo(agentCommand: string | undefined): 'available' | 'sandboxed' | undefined {
+  if (!agentCommand) return;
+  if (/(^|[/\\])(agy|opencode|goose)(\.[a-z]+)?$/i.test(agentCommand)) return 'sandboxed';
+  if (
+    /(^|[/\\])(codex-acp|claude-(agent|code)-acp|pi-acp|grok|buzz-agent)(\.[a-z]+)?$/i.test(agentCommand) ||
+    CURSOR_HARNESS_COMMAND.test(agentCommand)
+  ) return 'available';
+}
+
 /**
  * Does this harness retain the session rules in its system slot, including
  * adapter-specific delivery outside ACP's top-level `systemPrompt` field?
@@ -153,10 +165,8 @@ export function harnessEnforcement(agentCommand: string | undefined): HarnessPro
  *    static fallback stays false so older and unknown adapters receive rules.
  *  - everything else (grok, buzz-agent, custom commands) is unverified.
  *
- * Callers use a `false` answer to ALSO deliver per-turn content that every
- * harness receives (turn prompts cannot be dropped by an adapter), so an
- * unverified harness must fail toward `false` — never assume delivery that
- * was not measured.
+ * A `false` answer lets the caller supply a fallback in a regular user prompt
+ * when the harness does not advertise structured system prompt support.
  */
 export function harnessHonorsSessionSystemPrompt(agentCommand: string | undefined): boolean {
   return Boolean(

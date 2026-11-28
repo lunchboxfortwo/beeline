@@ -182,13 +182,14 @@ export class AgentRunner {
     });
   }
 
-  private placeConfig(placeId: string): BodyConfig {
+  private placeConfig(placeId: string, isCorner: boolean): BodyConfig {
     const runtimeDir = dirname(this.configPath);
     const workspaceRoot =
       this.runtime.rooms.find((room) => room.channelId === placeId)?.root ??
       resolve(runtimeDir, 'rooms', placeId);
     return {
       ...this.baseConfig,
+      agentEnv: { ...this.baseConfig.agentEnv, BEELINE_THREAD_SKILLS: isCorner ? '1' : '0' },
       workspaceRoot,
       agentSharedAssetRoot: workspaceAssetRoot(
         this.runtime.supervisorRoot,
@@ -215,7 +216,7 @@ export class AgentRunner {
       session: new PlaceSession({
         agent: this.agent,
         runtime: this.runtime,
-        config: this.placeConfig(placeId),
+        config: this.placeConfig(placeId, Boolean(item.parentRoomId)),
         api: this.options.daemonApi,
         grantRunnerFile: resolve(dirname(this.configPath), 'session-tools.json'),
         placeId,

@@ -2,6 +2,7 @@ import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
+import { AcpClient } from './acp.js';
 import { GrantCommandRunner } from './grant-runner.js';
 import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
@@ -28,6 +29,74 @@ vi.mock('./squire-mcp-client.js', async (original) => ({
   ...(await original<typeof import('./squire-mcp-client.js')>()),
   sharedSquireMcpClient: vi.fn(),
 }));
+
+it.each([
+  { adapter: 'Codex', structured: true, pinned: true },
+  { adapter: 'unpinned structured', structured: true, pinned: false },
+  { adapter: 'fallback', structured: false, pinned: false },
+])('reuses and restores session rules for the $adapter adapter', async ({ structured, pinned }) => {
+  const f = await fixture();
+  if (pinned) f.config.agentBinary = 'codex-acp';
+  f.execute.mockImplementation(pendingRead);
+  const rules = 'Use the blue notebook for this session.';
+  f.session.resources.context.configuration = {
+    commands: [], yoloMode: false, soul: { name: 'Agent', instructions: rules },
+  };
+  const prompts: string[] = [];
+  const systemPrompts: unknown[] = [];
+  f.spawn.mockImplementation((options) => {
+    const client = new AcpClient(options);
+    vi.spyOn(client, 'startProcess').mockImplementation(async () => {
+      client.supportsStructuredSystemPrompt = structured;
+      client.codexBlockDelivery = pinned;
+    });
+    vi.spyOn(client, 'request').mockImplementation(async (method, params) => {
+      if (method === 'session/new') {
+        systemPrompts.push((params as { systemPrompt: unknown }).systemPrompt);
+        return { sessionId: 'live' };
+      }
+      if (method !== 'session/prompt') throw new Error(`Unexpected request ${method}`);
+      const { sessionId, prompt } = params as { sessionId: string; prompt: { text: string }[] };
+      if (prompt[0]!.text.includes('Reject first prompt')) throw new Error('Prompt rejected');
+      prompts.push(prompt[0]!.text);
+      if (prompt[0]!.text.includes('Compact now')) {
+        client.handleMessage({
+          method: 'session/update',
+          params: { sessionId, update: { sessionUpdate: 'compaction_update', status: 'completed' } },
+        });
+      }
+      return { stopReason: prompt[0]!.text.includes('Cancelled restore') ? 'cancelled' : 'end_turn' };
+    });
+    return client;
+  });
+  const turn = (body: string, offlineSeconds?: number) => f.session.deliver({
+    ...f.item, id: body, turnRequestId: body, source: { ...f.item.source, body }, offlineSeconds,
+  });
+  try {
+    await f.session.start(f.item);
+    expect(systemPrompts).toEqual([
+      structured
+        ? { mode: 'append', content: [{ type: 'text', text: expect.stringContaining(rules) }] }
+        : expect.stringContaining(rules),
+    ]);
+    if (!structured) await expect(turn('Reject first prompt')).rejects.toThrow('Prompt rejected');
+    for (const body of [
+      'First prompt', 'Warm prompt', 'Compact now', 'Cancelled restore', 'After compaction', 'Warm again',
+    ]) {
+      await turn(body, body === 'Warm prompt' ? 60 : undefined);
+      expect(prompts.at(-1)).toContain(body);
+    }
+    expect(prompts.map((prompt) => prompt.includes(rules))).toEqual([
+      !structured, false, false, true, true, false,
+    ]);
+    f.session.stale = true;
+    await f.session.start(f.item);
+    await turn('Fresh conversation');
+    expect(prompts.at(-1)?.includes(rules)).toBe(!structured);
+  } finally {
+    await f.session.dispose();
+  }
+});
 
 it('sends a received picture to an image-capable harness as image content, bounded per image', async () => {
   const f = await fixture();

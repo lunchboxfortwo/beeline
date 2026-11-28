@@ -1,6 +1,5 @@
 import { removeRetiredStarterTurnRule } from '@beeline/api-contract/beeline-guides';
 import { wall, type AgentCommand, type AgentInvocation, type DaemonOperationMap } from '@beeline/api-contract/daemon';
-import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
@@ -22,7 +21,6 @@ import {
   harnessStateDirsFromEnv,
   hostImportedMcpDeclarations,
   prepareRoomAgentCredentials,
-  prepareRoomAgentHome,
 } from './agent-home.js';
 import { machineCliProxy, machineCliProxyEndpoint } from './cliproxy.js';
 import { HostPlaces, startAgentProcess, stopAgentProcess } from './agent-process.js';
@@ -36,19 +34,23 @@ import {
 } from './bwrap-sandbox.js';
 import { codegraphMcpServer } from './codegraph.js';
 import { bodyAgentCommand, type BodyConfig } from './config.js';
-import { installCornerGitHubWrappers } from './corner-github-auth.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import type { GrantRunnerEndpoint, GrantRunnerRoom } from './grant-runner.js';
-import { harnessEnforcement, roomShellCapability } from './harness-capabilities.js';
+import { harnessNativeIo, roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { grantedHostRouteWires, grantedSquireHostRouteNames } from './host-mcp-route.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
 import { agentArgsWithModelSelection } from './model-config.js';
 import { agentOpenRouterKey } from './openrouter-key-usage.js';
-import { openRouterRoutingInput } from './openrouter-routing.js';
 import { installOwnedModelProvider } from './owned-model-install.js';
 import { installPiMcpBridge } from './pi-mcp-bridge.js';
+import {
+  prepareGitHubLaunchers as installGitHubLaunchers,
+  prepareOptionalHome,
+  refreshFeatureBranch as syncFeatureBranch,
+  type PlaceHomeInput,
+} from './place-session-home.js';
 import { itemPrompt, memberTasks, memberThreads, offlineBatchPrompt } from './place-prompt.js';
 import {
   assembleSessionPrompt,
@@ -76,9 +78,7 @@ import { CLIPROXY_SIGNED_OUT } from './turn-failure-reason.js';
 import { AgentTurnStream, durableReplyText } from './turn-stream.js';
 import { WarmTranscript } from './warm-transcript.js';
 import { agentCornerCheckoutPaths } from './agent-corner-checkout.js';
-import { runOwnedFile } from './wait.js';
-import { githubGitEnv, prepareWorkspace, roomCheckoutPath } from './workspace-checkout.js';
-import { syncCornerBranch } from './corner-branch-sync.js';
+import { prepareWorkspace, roomCheckoutPath } from './workspace-checkout.js';
 import { workspaceDependenciesDir } from './dependency-generation.js';
 
 export interface PlaceSessionOptions {
@@ -165,7 +165,7 @@ export class PlaceSession {
       parentRoomId: options.parentRoomId,
       cachePath: resolve(root, 'session-context.json'),
       brokerSocket: options.config.registryMcpBrokerSocket,
-      configured: () => this.prepareOptionalHome(),
+      configured: () => prepareOptionalHome(this.homeInput()),
       checkout: (homeReady) =>
         prepareWorkspace(
           {
@@ -504,10 +504,11 @@ export class PlaceSession {
       command,
       args: agentArgs,
     });
-    const nativeIoProven = harnessEnforcement(harnessLabel).enforcement !== 'unknown';
+    const nativeIo = harnessNativeIo(harnessLabel);
+    const sandboxNativeIo = nativeIo === 'sandboxed' && sandboxed;
     const shellCapability = roomShellCapability(harnessLabel, { osSandbox: sandboxed });
     const inspection =
-      (nativeIoProven && corner) || shellCapability === 'runs'
+      (nativeIo === 'available' && corner) || sandboxNativeIo || shellCapability === 'runs'
         ? undefined
         : await this.optional(
             'File inspection tools',
@@ -524,7 +525,7 @@ export class PlaceSession {
           ...(corner ? { cornerId: placeId, repositoryBacked: true } : {}),
           reviewer: configuration?.isReviewer === true,
           directMessage: repository?.directParticipants?.length === 2,
-          nativeIoProven,
+          nativeIoProven: nativeIo === 'available' || sandboxNativeIo,
           agentCommand: harnessLabel,
           attachRoot: folder,
           ...(attachScratchRoot ? { attachScratchRoot } : {}),
@@ -744,55 +745,32 @@ export class PlaceSession {
     });
   }
 
-  private async prepareOptionalHome(): Promise<void> {
-    const { config } = this.options;
-    const homeRoot = this.privateHomeRoot ?? config.agentHomeRoot;
-    const configuration = this.resources.context.configuration;
-    if (homeRoot)
-      await prepareRoomAgentHome({
-        root: homeRoot,
-        failClosed: true,
-        operatorHome: config.operatorHome,
-        agentKind: config.agentKind,
-        sharedSkills: config.sharedSkills,
-        agentEnv: config.agentEnv,
-        cliProxy: machineCliProxyEndpoint(),
-        isReviewer: configuration?.isReviewer === true,
-        ...openRouterRoutingInput(
-          config,
-          { model: configuration?.model ?? config.modelSelection?.model },
-          undefined,
-          {},
-        ),
-      });
-    await this.prepareGitHubLaunchers();
+  /** Home and branch helpers read the session's current home and resources. */
+  private homeInput(): PlaceHomeInput {
+    const { config, placeId, parentRoomId } = this.options;
+    return {
+      config,
+      placeId,
+      ...(parentRoomId ? { parentRoomId } : {}),
+      privateHomeRoot: () => this.privateHomeRoot,
+      resources: this.resources,
+    };
   }
 
-  private async prepareGitHubLaunchers(): Promise<void> {
-    const { config, parentRoomId, placeId } = this.options;
-    const homeRoot = this.privateHomeRoot ?? config.agentHomeRoot;
-    if (parentRoomId && config.runtimeConfigPath && homeRoot) {
-      const which = (name: string) =>
-        runOwnedFile('which', [name])
-          .then((result) => String(result.stdout).trim())
-          .catch(() => undefined);
-      const gitBinary = await which('git');
-      if (!gitBinary) throw new Error('git is not installed');
-      await installCornerGitHubWrappers({
-        root: homeRoot,
-        runtimeConfigPath: config.runtimeConfigPath,
-        roomId: parentRoomId,
-        cornerId: placeId,
-        cliEntrypoint: process.argv[1]!,
-        gitBinary,
-        ghBinary: await which('gh'),
-        featureBranch:
-          this.resources.context.restore?.featureBranch ??
-          `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`,
-        targetBranch: this.resources.context.repository?.targetBranch || 'main',
-        inheritedPath: config.agentEnv.PATH ?? process.env.PATH,
-      });
-    }
+  private prepareGitHubLaunchers(): Promise<void> {
+    return installGitHubLaunchers(this.homeInput());
+  }
+
+  /** A branch that could not be refreshed adds one note to the next prompt. */
+  private async refreshFeatureBranch(): Promise<void> {
+    const note = await syncFeatureBranch({
+      api: this.options.api,
+      folder: this.folder(),
+      placeId: this.options.placeId,
+      ...(this.options.parentRoomId ? { parentRoomId: this.options.parentRoomId } : {}),
+      resources: this.resources,
+    });
+    if (note) this.notes.push(note);
   }
 
   /**
@@ -811,20 +789,6 @@ export class PlaceSession {
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
-    const options = {
-      names: this.names,
-      notes: this.notes,
-      turnPrefix: this.turnPrefix,
-      threads: memberThreads(this.surface, this.resources.threadsForDelivery(batch.length ? batch : [item]), this.options),
-      tasks: memberTasks(this.surface, this.resources.tasksForDelivery(batch.length ? batch : [item])),
-      fresh: !this.windowDelivered,
-    };
-    this.windowDelivered = true;
-    const prompt =
-      batch.length > 1 || item.offlineSeconds !== undefined
-        ? offlineBatchPrompt(batch.length ? batch : [item], options)
-        : itemPrompt(item, options);
-    this.notes = [];
     // A received picture rides inline as before, within MAX_INLINE_IMAGE_BYTES each.
     const pictures = (batch.length ? batch : [item])
       .flatMap((next) => next.source.attachments ?? [])
@@ -842,7 +806,24 @@ export class PlaceSession {
               : [],
           )
         : [];
+    const delivery = this.turnPrefix ? client.promptDelivery(sessionId) : undefined;
     signal.throwIfAborted();
+    const options = {
+      names: this.names,
+      notes: this.notes,
+      turnPrefix: delivery
+        ? delivery.select([{ id: 'turn.session', text: this.turnPrefix }])[0]?.text
+        : client.supportsStructuredSystemPrompt ? '' : this.turnPrefix,
+      threads: memberThreads(this.surface, this.resources.threadsForDelivery(batch.length ? batch : [item]), this.options),
+      tasks: memberTasks(this.surface, this.resources.tasksForDelivery(batch.length ? batch : [item])),
+      fresh: !this.windowDelivered,
+    };
+    this.windowDelivered = true;
+    const prompt =
+      batch.length > 1 || item.offlineSeconds !== undefined
+        ? offlineBatchPrompt(batch.length ? batch : [item], options)
+        : itemPrompt(item, options);
+    this.notes = [];
     const stream = this.stream = new AgentTurnStream({
       api: this.options.api,
       agentId: this.options.agent.publicKey,
@@ -882,6 +863,7 @@ export class PlaceSession {
       const reply = result.agentText.trim();
       if (CLIPROXY_SIGNED_OUT.exec(reply)?.[0] === reply) throw wall('signed-in', reply);
     } catch (error) {
+      delivery?.invalidate();
       void stream.retract();
       throw error;
     } finally {
@@ -901,46 +883,11 @@ export class PlaceSession {
       console.warn('[body] optional answer history omitted:', error);
     }
     return {
-      text,
+      text, steps, stopReason: result.stopReason, toolCalls: result.toolCalls,
       ...(result.providerError ? { providerError: result.providerError } : {}),
-      steps,
-      stopReason: result.stopReason,
-      toolCalls: result.toolCalls,
       ...(result.tokenUsage ? { tokenUsage: result.tokenUsage } : {}),
-      cleanup: async () => {
-        return stream.retract();
-      },
+      cleanup: () => stream.retract(),
     };
-  }
-
-  /** Another agent may have pushed this thread's branch; bring an existing
-   * checkout onto it. A failure delivers anyway, with one line saying so. */
-  private async refreshFeatureBranch(): Promise<void> {
-    const { parentRoomId, placeId, api } = this.options;
-    const folder = this.folder();
-    if (!parentRoomId || !existsSync(resolve(folder, '.git'))) return;
-    const branch =
-      this.resources.context.restore?.featureBranch ??
-      `feature/corner-${placeId.replaceAll('-', '').slice(0, 12)}`;
-    try {
-      const remote = (
-        await runOwnedFile('git', ['-C', folder, 'remote', 'get-url', 'origin'])
-      ).stdout
-        .toString()
-        .trim();
-      const env = remote.startsWith('file://')
-        ? undefined
-        : githubGitEnv((await api.execute('getRoomGitHubToken', { roomId: parentRoomId })).token);
-      await syncCornerBranch({
-        worktreePath: folder,
-        featureBranch: branch,
-        ...(env ? { env } : {}),
-      });
-    } catch (error) {
-      this.notes.push(
-        `Your branch ${branch} could not be refreshed from origin (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); fetch and sync it yourself before relying on it.`,
-      );
-    }
   }
 
   /** Stop: end the running prompt now. A harness may ignore session/cancel,

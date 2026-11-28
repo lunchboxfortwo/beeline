@@ -31,6 +31,7 @@ async function fixture(parentRoomId?: string) {
   const client = Object.assign(new EventEmitter(), {
     isAlive: true, startProcess: vi.fn(async () => {}), stopProcess: vi.fn(async () => {}),
     sessionNew: vi.fn(async () => ({ sessionId: 'live', raw: {} })), sessionPrompt: prompt,
+    supportsStructuredSystemPrompt: false, promptDelivery: () => undefined,
     canLoadSession: () => false, canPromptWithImages: () => false,
   });
   const execute = vi.fn((name: string): Promise<unknown> => name === 'listRoomCorners'
