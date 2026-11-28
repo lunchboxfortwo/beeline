@@ -555,8 +555,6 @@ const CORNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
         throw new CommandRefusalError('This thread is locked. A person must unlock it before agents can close it.', 409);
       }
     };
-    await ctx.database.transaction(authorize);
-    await closeCornerPullRequestBestEffort(ctx.database, cornerId, ctx.closePullRequest);
     const preserveTurn =
       input.roomId === undefined || input.roomId === cornerId
         ? {
@@ -564,10 +562,18 @@ const CORNER_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
             ...(typeof input.requestId === 'string' && input.requestId ? { requestId: input.requestId } : {}),
           }
         : undefined;
+    const closedBy = {
+      agentId,
+      ...(typeof input.roomId === 'string' && input.roomId ? { roomId: input.roomId } : {}),
+    };
     const closed = await ctx.database.transaction(async database => {
       await authorize(database);
-      return closeCornerState(database, cornerId, preserveTurn);
+      return closeCornerState(database, cornerId, {
+        ...(preserveTurn ? { preserveTurn } : {}),
+        closedBy,
+      });
     });
+    await closeCornerPullRequestBestEffort(ctx.database, cornerId, ctx.closePullRequest);
     if (closed.archived) await deleteCornerBranchBestEffort(cornerId, ctx.github ? id => ctx.github!.deleteCornerBranch(id) : undefined);
     return daemonWriteResult(ctx, {
       receipt: cornerName ? `Closed thread #${cornerName}` : `Closed thread ${cornerId.slice(0, 8)}`,

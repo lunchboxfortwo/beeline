@@ -846,11 +846,13 @@ export const TURN_SECTIONS: readonly PromptSection<TurnPromptContext>[] = [
     layer: 'turn',
     surfaces: EVERYWHERE,
     render: ({ task, surface, brief }) => [
-      nonhumanSilentWake(task.commandReason)
-        ? 'Do not post an update merely because time has passed. With nothing to say, end silently.'
-        : ['human_tag', 'direct_message'].includes(task.commandReason ?? '')
-          ? 'Reply to the human message that triggered this turn. A progress reminder is relevant only while that human is still waiting for your reply to their own message.'
-        : '',
+      task.commandReason === 'corner_closed'
+        ? 'A thread you commanded closed. Do not print any message in this turn if you have no pending work on this basis; end silently.'
+        : nonhumanSilentWake(task.commandReason)
+          ? 'Do not post an update merely because time has passed. With nothing to say, end silently.'
+          : ['human_tag', 'direct_message'].includes(task.commandReason ?? '')
+            ? 'Reply to the human message that triggered this turn. A progress reminder is relevant only while that human is still waiting for your reply to their own message.'
+          : '',
       ROOMS.includes(surface)
         ? [
             `Current task from ${task.fromName ?? 'a chat member'}:`,

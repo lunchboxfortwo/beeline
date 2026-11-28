@@ -702,15 +702,15 @@ async function insertAgentCommand(db: SqlDatabase, input: AgentCommandInput, cha
     text: payload.text + (input.wakeNote ? `\n${input.wakeNote}` : ''),
     ...(chat.parent_id && payload.kind === 'order' && escalationIdentity && escalationRoom
       ? { escalation: { identityId: escalationIdentity, roomId: escalationRoom } } : {}),
-    returnIdentityId: payload.replyAddress?.agent ?? payload.route?.from.agent ?? (cornerWake ? undefined : payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
+    returnIdentityId: payload.replyAddress?.agent ?? (input.reason === 'corner_closed' ? undefined : payload.route?.from.agent) ?? (cornerWake ? undefined : payload.returnIdentityId ?? (payload.kind === 'order' ? payload.authorId
       : (parent?.agent_id === input.agentId && parentReturn!==input.agentId ? parentReturn : undefined) ?? chat.parent_source?.author_id)),
   } as PrivateCommandPayload;
-  const returnRoom = workflowOwner ? chat.id : payload?.replyAddress?.place ?? payload?.route?.from.place ?? (input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
+  const returnRoom = workflowOwner ? chat.id : payload?.replyAddress?.place ?? (input.reason === 'corner_closed' ? chat.id : payload?.route?.from.place) ?? (input.reason === 'schedule' || cornerWake ? chat.id : payload?.kind === 'order' ? payload.fromRoomId : payload || lifecycle
     ? (parent?.agent_id === input.agentId ? parent.return_room_id : undefined) ?? chat.parent_source?.room_id ?? parent?.return_room_id ?? chat.id : chat.id);
   const reviewSource = input.reason === 'report' ? input.reportSource ?? input.parent : input.parent;
   const selectedReview=chat.review?.agentId===input.agentId && chat.review.headSha &&
     ['corner_review_dispatch','subscribed_event','agent_tag','order','message'].includes(input.reason) ? chat.review : undefined;
-  const review = selectedReview ? {cornerId:selectedReview.cornerId,headSha:selectedReview.headSha,
+  const review = input.reason === 'corner_closed' ? null : selectedReview ? {cornerId:selectedReview.cornerId,headSha:selectedReview.headSha,
     pullRequest:selectedReview.pullRequest,briefRevision:selectedReview.briefRevision,checks:selectedReview.checks,
     ...(reviewSource?.review_context && ['order','message'].includes(input.reason)?{purpose:'repair'}:{})}
     : input.reason==='corner_review_needed' && chat.review ? {...chat.review,purpose:'repair'}

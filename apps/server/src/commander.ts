@@ -10,8 +10,9 @@ import { cornerOpenedFromSql,cornerOpeningSql } from './corner-opening.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import type { SqlDatabase } from './database.js';
 import type { AfterCommit } from './institutional-memory-embeddings.js';
-import { systemIdentityMention,systemLine } from './system-line.js';
-import type { AgentVoice,Composed,SystemAuthorId } from './message-origin.js';
+import { ensureSystemIdentity,systemIdentityMention,systemLine } from './system-line.js';
+import { SYSTEM_AUTHOR_ID,systemText,type AgentVoice,type Composed,type SystemAuthorId } from './message-origin.js';
+import { peerReplyWakeInput } from './peer-reply-wake.js';
 export { CommandRefusalError } from './command-refusal.js';
 
 /** A received block continues the recipient's work at the place where it was assigned. */
@@ -266,6 +267,153 @@ export async function reportAgentAttention(
       route:{from:{agent:agentId,place:roomId},to:{agent:route.recipient!,place:route.returnRoom!}},
       replyAddress,automatic:true,idleSince:options.idleSince,
       attachments:options.attachments ? [...options.attachments] : undefined},
+  });
+}
+
+export type CornerCloseWakeOptions = {
+  outcome: 'merged' | 'closed';
+  merge?: { prNumber?: number; mergeCommitSha?: string; title?: string; url?: string };
+  closedBy?: { agentId: string; roomId?: string };
+  preservedTurn?: { invocationId?: string; pendingIds: readonly string[]; commandIds: readonly string[] };
+};
+
+/**
+ * Wake an agent commander at its recorded return address when a thread archives,
+ * instructing it not to print any message if it has no pending work on this basis.
+ * Skips human commanders, archived return rooms, removed commanders, self-close
+ * from that same return address, and self-closing turns that already deliver a
+ * completion reply via `peerReplyWakeInput` (or an explicit reply).
+ */
+export async function notifyCommanderCornerClosed(
+  db: SqlDatabase,
+  cornerId: string,
+  options: CornerCloseWakeOptions,
+): Promise<CommandRow | undefined> {
+  const route = await commanderReportAddress(db, cornerId);
+  if (!route.recipient || !route.returnRoom) return undefined;
+  if (
+    options.closedBy?.agentId === route.recipient &&
+    options.closedBy.roomId?.toLowerCase() === route.returnRoom.toLowerCase()
+  ) {
+    return undefined;
+  }
+  const target = (
+    await db.query<{
+      corner_name: string | null;
+      pr_number: number | null;
+      merge_commit_sha: string | null;
+    }>(
+      `SELECT corner.name corner_name,
+              (gh.lifecycle->'pr'->>'number')::int pr_number,
+              gh.lifecycle->'pr'->>'mergeCommitSha' merge_commit_sha
+       FROM identities identity
+       JOIN rooms place ON place.id=$2 AND place.archived_at IS NULL
+       JOIN memberships member
+         ON member.room_id=COALESCE(place.parent_id,place.id)
+        AND member.identity_id=identity.id
+        AND member.removed_at IS NULL
+       JOIN rooms corner ON corner.id=$3
+       LEFT JOIN corner_github_cache gh ON gh.corner_id=corner.id
+       WHERE identity.id=$1 AND identity.kind='agent'
+       LIMIT 1`,
+      [route.recipient, route.returnRoom, cornerId],
+    )
+  ).rows[0];
+  if (!target) return undefined;
+  if (options.preservedTurn && options.preservedTurn.commandIds.length > 0) {
+    const alreadyReplied = await db.query(
+      `SELECT 1 FROM agent_commands child
+       WHERE child.agent_id=$1 AND child.room_id=$2
+         AND child.reason IN ('reply','message')
+         AND child.parent_command_id=ANY($3::text[])
+       LIMIT 1`,
+      [route.recipient, route.returnRoom, [...options.preservedTurn.commandIds]],
+    );
+    if (alreadyReplied.rowCount) return undefined;
+    if (options.preservedTurn.pendingIds.length > 0) {
+      const preservedCommands = (
+        await db.query<CommandRow>(
+          `SELECT * FROM agent_commands WHERE id=ANY($1::text[]) AND state='pending'`,
+          [[...options.preservedTurn.pendingIds]],
+        )
+      ).rows;
+      for (const item of preservedCommands) {
+        const peerWake = await peerReplyWakeInput(db, item, {
+          kind: 'answer',
+          outputId: 'self-close-check',
+          text: 'check',
+          batchCommandIds: options.preservedTurn.pendingIds,
+          invocationId: options.preservedTurn.invocationId,
+        });
+        if (
+          peerWake &&
+          peerWake.agentId === route.recipient &&
+          peerWake.roomId.toLowerCase() === route.returnRoom.toLowerCase()
+        ) {
+          return undefined;
+        }
+      }
+    }
+  }
+  const senderTask = (
+    await db.query<CommandRow>(
+      'SELECT * FROM agent_commands WHERE id=$1 AND agent_id=$2',
+      [route.incoming?.parent_command_id ?? route.parent?.id, route.recipient],
+    )
+  ).rows[0];
+  const candidateReply = senderTask ? (await recordedMessageRoute(db, senderTask)).from : undefined;
+  const replyAddress =
+    candidateReply &&
+    candidateReply.agent !== SYSTEM_IDENTITY_ID &&
+    (candidateReply.place.toLowerCase() === route.returnRoom.toLowerCase() ||
+      Boolean(
+        (
+          await db.query('SELECT 1 FROM rooms WHERE id=$1 AND archived_at IS NULL', [
+            candidateReply.place,
+          ])
+        ).rowCount,
+      ))
+      ? candidateReply
+      : undefined;
+  const prNumber = options.merge?.prNumber ?? target.pr_number ?? undefined;
+  const mergeCommitSha = options.merge?.mergeCommitSha ?? target.merge_commit_sha ?? undefined;
+  const label = target.corner_name ? `#${target.corner_name} (${cornerId})` : cornerId;
+  let summary: string;
+  if (options.outcome === 'merged') {
+    const details = [
+      prNumber ? `PR #${prNumber}` : '',
+      mergeCommitSha ? `merge commit ${mergeCommitSha}` : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    summary = `Thread ${label} merged${details ? ` (${details})` : ''} and closed.`;
+  } else {
+    summary = `Thread ${label} closed without merging.`;
+  }
+  const text = systemText(
+    `${summary} Do not print any message in this turn if you have no pending work on this basis; end silently.`,
+  );
+  await ensureSystemIdentity(db);
+  return queueMessage(db, {
+    id: createHash('sha256').update(`corner-closed:${cornerId}`).digest('hex'),
+    roomId: route.returnRoom,
+    agentId: route.recipient,
+    sourceMessageId: null,
+    reason: 'corner_closed',
+    allowArchivedOrigin: true,
+    parent: route.incoming ?? route.parent,
+    privatePayload: {
+      kind: 'lifecycle',
+      authorId: SYSTEM_AUTHOR_ID,
+      text,
+      fromRoomId: cornerId,
+      route: {
+        from: { agent: SYSTEM_AUTHOR_ID, place: cornerId },
+        to: { agent: route.recipient, place: route.returnRoom },
+      },
+      replyAddress,
+      automatic: true,
+    },
   });
 }
 

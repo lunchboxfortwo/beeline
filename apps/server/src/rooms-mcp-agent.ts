@@ -475,7 +475,13 @@ export class RoomsMcpAgentTools {
         return exec('approveCornerMerge', { cornerId, headSha, roomId: review.roomId, requestId: review.requestId, text: args.text });
       }
       case 'set_thread_hold': return turn((_, context) => exec('setCornerHold', { ...context, cornerId: addressArg(args.address), releaseHoldId: args.releaseHoldId, sourceMessageId: args.sourceMessageId }));
-      case 'close_thread': return exec('archiveCorner', { cornerId: addressArg(args.address) });
+      case 'close_thread': {
+        const bound = this.boundTurn.getStore();
+        return exec('archiveCorner', {
+          cornerId: addressArg(args.address),
+          ...(bound ? { roomId: bound.roomId, requestId: bound.requestId } : {}),
+        });
+      }
       case 'send_operator_system_dm': return turn((_, context) => exec('sendOperatorSystemDm', { ...context, agentId: member, recipients: args.recipients, text: args.text }));
       case 'read_operator_system_dm': return turn((_, context) => exec('readOperatorSystemDm', { ...context, agentId: member, sendId: args.sendId }));
       case 'dispatch_release': return turn((_, context) => exec('dispatchRoomWorkflow', { ...context, inputs: args.inputs }));
