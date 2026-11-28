@@ -159,8 +159,7 @@ const RESUME_KINDS = new Set(['grant-decided', 'connector-offer-decided', 'squir
  * What the session is told for one queue item, in the one message format
  * (`agentMessageText`), then the queue-time context: memory, then what this
  * session has not seen (the bounded window once for a fresh session, otherwise
- * only new messages and a changed brief or member list). The caller appends
- * open asks after the complete delivery, including when items are batched.
+ * only new messages and a changed brief or member list).
  */
 function itemPromptContext(item: AgentCommand, options: {
   names: ReadonlyMap<string, string>;
@@ -174,6 +173,8 @@ function itemPromptContext(item: AgentCommand, options: {
   tasks?: string;
   /** The session has not received the recent window yet. */
   fresh?: boolean;
+  asks?: string;
+  batched?: boolean;
 }): string {
   const source = item.source;
   const author = inboxItemAuthorName(source, options.names);
@@ -184,27 +185,32 @@ function itemPromptContext(item: AgentCommand, options: {
   const place = from.place === item.roomId ? item.roomName ?? options.names.get(item.roomId) ?? item.roomId
     : (from.place === item.returnRoomId ? item.returnRoomName : undefined) ?? options.names.get(from.place) ?? from.place;
   const context = options.fresh ? source.conversationWindow ?? source.conversationContext : source.conversationContext;
+  const personTag = item.reason === 'human_tag';
+  const wake = source.systemEvent?.kind === 'joined' && !source.attachments?.length && !source.replyToMessageId && !source.systemEvent.subscriptionId
+    ? `text: ${text}`
+    : agentMessageText({ from: author, place, id: source.id, text, attachments: attachmentMarkerLines(source.attachments) });
+  const message = [wake, ...(source.replyToExcerpt
+    ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
+    : [])];
   return [
     ...(options.turnPrefix ? [options.turnPrefix] : []),
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
-    ...(options.threads ? [options.threads] : []),
-    ...(options.tasks ? [options.tasks] : []),
-    source.systemEvent?.kind === 'joined' && !source.attachments?.length && !source.replyToMessageId && !source.systemEvent.subscriptionId
-      ? `text: ${text}`
-      : agentMessageText({ from: author, place, id: source.id,
-          text, attachments: attachmentMarkerLines(source.attachments) }),
-    ...(source.replyToExcerpt ? [`In reply to ${source.replyToAuthorName ?? 'a message'}: ${source.replyToExcerpt}`]
-      : []),
+    ...(!personTag && options.threads ? [options.threads] : []),
+    ...(!personTag && options.tasks ? [options.tasks] : []),
+    ...(!personTag ? message : []),
     ...(source.institutionalContext ? [source.institutionalContext] : []),
     ...(item.reason === 'schedule' && item.sourceMessageId !== source.id
       ? [`Reply with quoteMsgId "${item.sourceMessageId}".`] : []),
     ...(context ? [context] : []),
+    ...(options.asks ? [options.asks] : []),
+    ...(personTag && !options.batched ? ['Reply to the message below. A greeting or ping only needs a short final answer.'] : []),
+    ...(personTag ? message : []),
   ].join('\n');
 }
 
 export function itemPrompt(item: AgentCommand, options: Parameters<typeof itemPromptContext>[1]): string {
   const asks = options.fresh ? item.source.openAsks : item.source.openAsksChanged;
-  return [itemPromptContext(item, options), ...(asks ? [asks] : [])].join('\n');
+  return itemPromptContext(item, { ...options, asks });
 }
 
 /** One pending batch per chat. Repeated runs keep only the newest run's content;
@@ -213,6 +219,7 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
   const latestSchedule = new Map<string, AgentCommand>();
   for (const item of items) if (item.scheduleId) latestSchedule.set(item.scheduleId, item);
   const visible = items.filter(item => !item.scheduleId || latestSchedule.get(item.scheduleId) === item);
+  const hasOtherWake = visible.some(item => item.reason !== 'human_tag');
   const latest = items.at(-1)?.source;
   const asks = options.fresh || items.some(item => item.source.openAsksChanged !== undefined)
     ? latest?.openAsks ?? (options.fresh ? undefined : 'You have no open asks now.') : undefined;
@@ -222,11 +229,12 @@ export function offlineBatchPrompt(items: readonly AgentCommand[], options: Para
     ...(items[0]?.offlineSeconds !== undefined
       ? [`> You were offline for ${hours} h. These arrived while you were away and may be outdated.`] : []),
     'Follow the newest instructions when earlier discussion has moved on.',
+    ...(!hasOtherWake ? ['Answer these messages in your final response.'] : []),
     'The offline note, when present, is private context for you.',
     ...(options.notes?.length ? ['Session setup notes:', ...options.notes.map(note => `- ${note}`)] : []),
-    ...(options.threads ? [options.threads] : []),
-    ...(options.tasks ? [options.tasks] : []),
-    ...visible.map((item, index) => itemPromptContext(item, { names: options.names, fresh: index === 0 && options.fresh })),
+    ...(hasOtherWake && options.threads ? [options.threads] : []),
+    ...(hasOtherWake && options.tasks ? [options.tasks] : []),
+    ...visible.map((item, index) => itemPromptContext(item, { names: options.names, fresh: index === 0 && options.fresh, batched: true })),
     ...(asks ? [asks] : []),
   ].join('\n\n');
 }

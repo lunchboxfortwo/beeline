@@ -13,7 +13,7 @@ afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true
 
 const count = (text: string, part: string) => text.split(part).length - 1;
 
-it('a Pi chat turn names its open thread and checkout once, and its rules live once in SYSTEM.md', async () => {
+it('a Pi person tag omits unrelated thread work and gets its session rules once', async () => {
   const root = mkdtempSync(join(tmpdir(), 'beeline-pi-chat-turn-'));
   roots.push(root);
   const agent = { publicKey: 'grunt' };
@@ -73,13 +73,14 @@ it('a Pi chat turn names its open thread and checkout once, and its rules live o
     fresh: true,
   });
 
-  expect(turn).toContain(
+  expect(threads).toContain(
     'Current threads you belong to (use the exact address with read or message):\n' +
       `- game-3d (${thread.cornerId}), parent chat apm, created by grunt, PR #1, checkout ${checkout}: Move the 3D slice into the repository.`,
   );
-  expect(count(turn, thread.cornerId)).toBe(1);
-  expect(count(turn, checkout)).toBe(1);
+  expect(turn).not.toContain(thread.cornerId);
+  expect(turn).not.toContain(checkout);
   expect(turn).not.toContain('old-work');
+  expect(turn).toMatch(/Reply to the message below\.[\s\S]*text: @grunt the start button does not work on phones\. Please fix it\.$/);
   expect(session.systemPrompt).toContain('Code work happens only in a thread.');
   expect(session.systemPrompt).not.toContain('write/edit tools');
   expect(session.turnPrefix).toBe('');

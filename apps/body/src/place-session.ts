@@ -384,7 +384,7 @@ export class PlaceSession {
     this.stale = false;
     this.running.reset();
     this.notes = [
-      'Trusty Squire uses app_tool(app:"registry-mcp:squire"); discover operate_drive and use_credential there. A direct squire MCP startup failure does not establish that this route is unavailable.',
+      'Trusty Squire uses app_tool(app:"registry-mcp:squire").',
     ];
     this.windowDelivered = false;
     const sandbox = Boolean(this.options.config.bwrapPath);

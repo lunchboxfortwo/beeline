@@ -97,7 +97,8 @@ type Seen = NonNullable<NonNullable<CommandRow['message']>['contextSeen']>;
  * revision changed and the member list when membership changed. The previous
  * command's `contextSeen` is the per (agent, place) record of what was sent. A
  * fresh session instead renders `conversationWindow`, the bounded recent
- * window, stored only when it differs from the delta.
+ * window, stored only when it differs from the delta. Person tags can read
+ * earlier messages on demand.
  */
 async function attachQueuedConversation(
   db: SqlDatabase,
@@ -106,6 +107,7 @@ async function attachQueuedConversation(
 ): Promise<CommandRow> {
   if (command.reason === 'mcp_call' || !command.message || command.message.contextSeen)
     return command;
+  const includeHistory = command.reason !== 'human_tag';
   const previous = (
     await db.query<{ seen: Seen }>(
       `SELECT message->'contextSeen' seen FROM agent_commands WHERE agent_id=$1 AND room_id=$2 AND id<>$3
@@ -120,7 +122,7 @@ async function attachQueuedConversation(
         ])
       ).rows[0]
     : undefined;
-  const window = (
+  const window = includeHistory ? (
     await db.query<{ id: string; created_at: Date; author_id: string; name: string; text: string }>(
       `SELECT message.id,message.created_at,message.author_id,author.name,left(message.text,$3) text FROM messages message
      JOIN identities author ON author.id=message.author_id
@@ -129,7 +131,7 @@ async function attachQueuedConversation(
      ORDER BY message.created_at DESC,message.id DESC LIMIT $4`,
       [command.room_id, command.source_message_id, MESSAGE_CHARS, CONVERSATION_WINDOW_MESSAGES],
     )
-  ).rows.reverse();
+  ).rows.reverse() : [];
   const thread = (await db.query<{ title: string; kind: string }>(
     `SELECT name title,${cornerKindSql('rooms.id')} kind FROM rooms WHERE id=$1 AND parent_id IS NOT NULL`,
     [command.room_id],
@@ -168,7 +170,7 @@ async function attachQueuedConversation(
     ].join('\n\n');
   const withMembers = !previous || memberVersion !== previous.memberVersion;
   const full = render(window, 'Recent conversation here, oldest first:', true, withMembers);
-  const after = previous?.createdAt
+  const after = includeHistory && previous?.createdAt
     ? (
         await db.query<(typeof window)[number]>(
           `SELECT message.id,message.created_at,message.author_id,author.name,left(message.text,$3) text FROM messages message

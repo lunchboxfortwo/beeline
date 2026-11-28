@@ -9,18 +9,26 @@ import {
   R,
   C,
   W,
+  daemon,
+  db,
   commands,
   send,
   rootFixture,
 } from './test-support-agent-command.integration.test-support.js';
+import { queueMessage } from './agent-command.js';
 
 const Q = 'e'.repeat(64);
 
-it('queues only what a live session has not seen: new messages, and the member list once per change', async () => {
-  await send('@hoots first request');
+async function queueAgentRequest(text: string) {
+  const { messageId } = await send(text);
+  return queueMessage(db, { roomId: R, agentId: A, sourceMessageId: messageId, reason: 'message' });
+}
+
+it('queues only what a live session has not seen for agent requests: new messages, and the member list once per change', async () => {
+  await queueAgentRequest('first request');
   await send('Untagged chatter between requests');
-  await send('@hoots second request');
-  await send('@hoots third request');
+  await queueAgentRequest('second request');
+  await queueAgentRequest('third request');
   const [first, second, third] = await commands(A);
   // A session with no earlier command here gets the window.
   expect(first!.source.conversationContext).toContain('Members (exact tag spellings):');
@@ -49,8 +57,8 @@ it('queues only what a live session has not seen: new messages, and the member l
     [W, R, Q],
   );
   try {
-    await send('@hoots fourth request');
-    await send('@hoots fifth request');
+    await queueAgentRequest('fourth request');
+    await queueAgentRequest('fifth request');
     const [, , , fourth, fifth] = await commands(A);
     expect(fourth!.source.conversationContext).toContain('@quill — Quill (person)');
     expect(itemPrompt(fourth!, { names: new Map(), fresh: true })).toContain('@quill — Quill (person)');
@@ -88,20 +96,32 @@ it('delivers a thread brief with the first turn and again only when its revision
   );
 });
 
-it('delivers all unseen messages beyond the cold window limit', async () => {
-  await send('@hoots opening request');
+it('delivers all unseen messages beyond the cold window limit for agent requests', async () => {
+  await queueAgentRequest('opening request');
   for (let index = 0; index < 25; index++) await send(`Unseen chatter ${index}.`);
-  await send('@hoots next request');
+  await queueAgentRequest('next request');
   const next = (await commands(A)).at(-1)!;
   for (let index = 0; index < 25; index++)
     expect(next.source.conversationContext).toContain(`Unseen chatter ${index}.`);
   expect(next.source.conversationContext).not.toContain('opening request');
   expect(next.source.conversationWindow).not.toContain('Unseen chatter 0.');
   expect(next.source.conversationWindow).toContain('Unseen chatter 24.');
-  await send('@hoots another request');
+  await queueAgentRequest('another request');
   expect((await commands(A)).at(-1)!.source.conversationContext).toBeUndefined();
 });
 
+it('makes a person tag the task and leaves room history available on demand', async () => {
+  const { messageId } = await send('Older skirmish assignment');
+  await send('@hoots respond');
+  const [command] = await commands();
+  const prompt = itemPrompt(command!, { names: new Map(), fresh: true, threads: 'Old thread objectives', tasks: 'Other work' });
+  expect(prompt).toMatch(/Reply to the message below\.[\s\S]*text: @hoots respond$/);
+  expect(prompt).toContain('Members (exact tag spellings):');
+  for (const unrelated of ['Older skirmish assignment', 'Old thread objectives', 'Other work'])
+    expect(prompt).not.toContain(unrelated);
+  const history = await daemon.execute('getRoomMessage', { roomId: R, messageId }, A);
+  expect(history).toMatchObject({ messageId, body: 'Older skirmish assignment' });
+});
 
 it('delivers the generated human thread rename and first-brief asks on its first native and external turn', async () => {
   await rootFixture.db.query('UPDATE rooms SET name=$2 WHERE id=$1', [C, 'steady-amber-thread']);

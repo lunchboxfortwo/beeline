@@ -26,8 +26,8 @@ it.each(['native','HTTP'] as const)('%s reply uses the human tag that woke the c
    return Response.json(await daemon.execute(operation,input,B));
  });
  await expect(callAgentTool('message',{type:'reply',quoteMsgId:unrelated.id,text:'Unrelated answer'},'unrelated')).rejects.toThrow('woke this turn');
- await callAgentTool('message',{type:'reply',quoteMsgId:wake.id,text:'Explicit answer'},'current');
- expect(requests.at(-1)).toEqual({roomId:CHAT,type:'reply',quoteMsgId:wake.id,text:'Explicit answer'});
+ await callAgentTool('message',{type:'reply',text:'Answer'},'current');
+ expect(requests.at(-1)).toEqual({roomId:CHAT,type:'reply',text:'Answer'});
  expect((await db.query("SELECT room_id,reply_to_message_id,card->'route'->'to' recipient FROM messages WHERE author_id=$1",[B])).rows)
    .toEqual([{room_id:CHAT,reply_to_message_id:wake.id,recipient:{agent:H,place:CHAT}}]);
  // An installed helper may still send its previous turn's IDs. A matching quote wins.
