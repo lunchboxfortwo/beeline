@@ -5,7 +5,7 @@ import { cornerLifecycleSql } from './corner-github-cache.js';
 import { CommandRefusalError } from './command-refusal.js';
 import { cornerFeatureBranchSql } from './corner-branch.js';
 import { randomBytes } from 'node:crypto';
-import { GITHUB_IDENTITY_AUDIENCE, GitHubHttpError } from '@beeline/auth/github';
+import { GITHUB_IDENTITY_AUDIENCE, GitHubHttpError, type BootstrapEmptyRepositoryResult } from '@beeline/auth/github';
 import type { SqlDatabase } from './database.js';
 import { cornerImplementerSql } from './corner-worker.js';
 import { currentCornerBrief } from './corner-brief.js';
@@ -363,6 +363,42 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
       defaultBranch: repository.defaultBranch,
       private: repository.private,
     };
+  }
+
+
+  /** Seed an empty linked repository on GitHub so checkouts and PR threads have a base commit. */
+  export async function gitHubOperationsBootstrapEmptyRoomRepository(
+    ctx: GitHubOperations,
+    roomId: string,
+  ): Promise<BootstrapEmptyRepositoryResult | undefined> {
+    const row = (
+      await ctx.database.query<{
+        github_installation_id: string;
+        repository_id: string;
+        full_name: string;
+        repository_target_branch: string;
+      }>(
+        `SELECT r.github_installation_id,g.repository_id,g.full_name,r.repository_target_branch
+         FROM rooms r
+         JOIN github_repositories g ON g.installation_id=r.github_installation_id
+           AND g.active AND lower(g.full_name)=lower(regexp_replace(regexp_replace(
+             r.repository_remote,'^(git://|https://)github.com/','','i'), '\\.git$','','i'))
+         JOIN github_installations i ON i.installation_id=g.installation_id
+         WHERE r.id=$1 AND r.parent_id IS NULL AND r.archived_at IS NULL
+           AND r.repository_resolution='repository' AND i.status='active'`,
+        [roomId],
+      )
+    ).rows[0];
+    if (!row) return undefined;
+    const token = await ctx.app.installationToken(Number(row.github_installation_id), {
+      repositoryIds: [Number(row.repository_id)],
+      permissions: { contents: 'write' },
+    });
+    return ctx.app.bootstrapEmptyRepository(
+      token.token,
+      row.full_name,
+      row.repository_target_branch || 'main',
+    );
   }
 
 

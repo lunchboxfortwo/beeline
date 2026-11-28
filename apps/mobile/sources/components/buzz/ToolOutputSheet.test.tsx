@@ -403,4 +403,93 @@ describe('ToolOutputSheet (v3 result-first)', () => {
     expect(text).toContain('Unrecognized result block · custom_card');
     expect(text).toContain('Sanitized');
   });
+
+  it('uses monochrome Stone tokens for badges, status lines, checklists, and headers while keeping colors exclusively on diff lines', () => {
+    const diffSheet = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Edited ChevronGlyph.tsx"
+        outcome="failure"
+        signal="SIGKILL"
+        outputTruncated
+        files={[
+          {
+            path: 'apps/mobile/sources/components/buzz/ChevronGlyph.tsx',
+            status: 'M',
+            diff: '@@ -1,2 +1,2 @@\n-old line\n+new line',
+          },
+        ]}
+        detail=""
+      />,
+    );
+    // Badges use monochrome Stone borders/text, not red/amber.
+    const badge0 = diffSheet.root.findByProps({ testID: 'tool-output-badge' });
+    expect(badge0.props.borderColor).toBe('ink');
+    expect(badge0.findByType('Text').props.color).toBe('ink');
+    const badge1 = diffSheet.root.findByProps({ testID: 'tool-output-badge-1' });
+    expect(badge1.props.borderColor).toBe('strongStroke');
+    expect(badge1.findByType('Text').props.color).toBe('secondary');
+
+    // Diff file header status uses monochrome ink while diff lines keep added/removed.
+    const diff = diffSheet.root.findByProps({ testID: 'tool-output-diff' });
+    const diffTexts = diff.findAllByType('Text');
+    const fileStatus = diffTexts.find((n: any) => n.props.children === 'M');
+    expect(fileStatus.props.color).toBe('ink');
+    expect(diffTexts.some((n: any) => n.props.color === 'added' && n.props.children === '+new line')).toBe(true);
+    expect(diffTexts.some((n: any) => n.props.color === 'removed' && n.props.children === '-old line')).toBe(true);
+    expect(diffSheet.root.findByProps({ testID: 'tool-output-copy' }).props.variant).toBe('quiet');
+
+    // Checklist uses monochrome Stone (zero added/needsYou/removed).
+    const checklistSheet = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Updated plan"
+        plan={{
+          items: [
+            { step: 'Done item', status: 'completed' },
+            { step: 'Active item', status: 'in_progress' },
+            { step: 'Queued item', status: 'pending' },
+          ],
+        }}
+        detail=""
+      />,
+    );
+    const checklistColors = checklistSheet.root
+      .findByProps({ testID: 'tool-output-checklist' })
+      .findAllByType('Text')
+      .map((n: any) => n.props.color);
+    expect(checklistColors).not.toContain('added');
+    expect(checklistColors).not.toContain('needsYou');
+    expect(checklistColors).not.toContain('removed');
+  });
+
+  it('renders web search prose cleanly with separated links above collapsible Zone 2', () => {
+    const renderer = render(
+      <ToolOutputSheet
+        visible
+        onClose={() => undefined}
+        title="Searched “Claude Code” OpenCode agent activity progress"
+        searchScope="web"
+        input={JSON.stringify({ query: '"Claude Code" OpenCode agent activity progress' })}
+        detail={[
+          'Claude Code and OpenCode interleave prose and tool steps chronologically in one terminal stream, folding consecutive file reads into a single line.',
+          '',
+          'https://docs.anthropic.com/en/docs/claude-code',
+          'https://opencode.ai/docs/tui',
+        ].join('\n')}
+      />,
+    );
+    expect(renderer.root.findByType('HullActionSheetModal').props.subtitle).toBe('web search');
+    expect(renderer.root.findByProps({ testID: 'tool-output-prose' })).toBeTruthy();
+    expect(renderer.root.findByProps({ testID: 'tool-output-prose-links' })).toBeTruthy();
+    const text = treeText(renderer);
+    expect(text).toContain('docs.anthropic.com/en/docs/claude-code');
+    expect(text).toContain('opencode.ai/docs/tui');
+    expect(renderer.root.findByProps({ testID: 'tool-output-raw-toggle' })).toBeTruthy();
+    expect(renderer.root.findAllByProps({ testID: 'tool-output-raw-panel' })).toHaveLength(0);
+    act(() => renderer.root.findByProps({ testID: 'tool-output-raw-toggle' }).props.onPress());
+    expect(renderer.root.findByProps({ testID: 'tool-output-raw-panel' })).toBeTruthy();
+  });
 });

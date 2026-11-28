@@ -220,13 +220,14 @@ mergedDescribe27('read-only-mcp.order.test.ts', () => {
       },
       'call-3',
     );
+    m27_expect(fetch).toHaveBeenCalledOnce();
     m27_expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({
       type: 'normal', address: 'candy@11111111-1111-4111-8111-111111111111',
       text: 'Check the build',
     });
     const tool = m27_agentToolsFor(true, true).find((t) => t.name === 'message')!;
     m27_expect(tool.description).not.toMatch(/broadcast/i);
-    m27_expect(tool.description).toContain('addressed agent session');
+    m27_expect(tool.description).toMatch(/\bnormal asks the agent at address \(agentId@placeId\)/);
     m27_expect(Object.keys((tool.inputSchema as { properties: object }).properties)).toContain(
       'address',
     );

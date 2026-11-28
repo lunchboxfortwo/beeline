@@ -30,6 +30,7 @@ export const TOOL_OUTPUT_SHEET_MAX_WIDTH = Math.round(
 export type ToolOutputSheetProps = {
   title: string;
   subtitle?: string;
+  searchScope?: 'web' | 'code' | 'history' | 'memory' | 'tools';
   command?: string | null;
   input?: string | null;
   summary?: string | null;
@@ -95,6 +96,7 @@ function formatToolInput(input: string | null | undefined): string | undefined {
 export function ToolOutputSheet({
   title,
   subtitle,
+  searchScope,
   command,
   input,
   summary,
@@ -132,6 +134,7 @@ export function ToolOutputSheet({
       buildToolSheetPresentation({
         title,
         subtitle,
+        searchScope,
         command,
         input,
         summary,
@@ -155,6 +158,7 @@ export function ToolOutputSheet({
     [
       title,
       subtitle,
+      searchScope,
       command,
       input,
       summary,
@@ -249,8 +253,8 @@ export function ToolOutputSheet({
             <XStack flexWrap="wrap" alignItems="center" justifyContent="flex-start" gap="2">
               {presentation.statusLine ? (
                 <T
-                  v="code"
-                  color={presentation.statusTone === 'danger' ? 'removed' : 'secondary'}
+                  v={presentation.statusTone === 'danger' ? 'metaStrong' : 'code'}
+                  color={presentation.statusTone === 'danger' ? 'ink' : 'secondary'}
                   testID="tool-output-status"
                 >
                   {presentation.statusLine}
@@ -263,25 +267,13 @@ export function ToolOutputSheet({
                   paddingVertical="0.5"
                   borderRadius="sm"
                   borderWidth={1}
-                  borderColor={
-                    badge.tone === 'danger'
-                      ? 'removed'
-                      : badge.tone === 'accent'
-                        ? 'needsYou'
-                        : 'strongStroke'
-                  }
+                  borderColor={badge.tone === 'danger' ? 'ink' : 'strongStroke'}
                   backgroundColor="raised"
                   testID={index === 0 ? 'tool-output-badge' : `tool-output-badge-${index}`}
                 >
                   <T
-                    v="metaStrong"
-                    color={
-                      badge.tone === 'danger'
-                        ? 'removed'
-                        : badge.tone === 'accent'
-                          ? 'needsYou'
-                          : 'secondary'
-                    }
+                    v={badge.tone === 'danger' ? 'metaStrong' : 'code'}
+                    color={badge.tone === 'danger' ? 'ink' : 'secondary'}
                   >
                     {badge.label}
                   </T>
@@ -385,7 +377,7 @@ export function ToolOutputSheet({
                             >
                               <XStack alignItems="center" gap="2" flex={1} minWidth={0}>
                                 {file.status ? (
-                                  <T v="metaStrong" color="needsYou" flexShrink={0}>
+                                  <T v="metaStrong" color="ink" flexShrink={0}>
                                     {file.status}
                                   </T>
                                 ) : null}
@@ -638,13 +630,7 @@ export function ToolOutputSheet({
                           >
                             <T
                               v="code"
-                              color={
-                                item.status === 'completed'
-                                  ? 'added'
-                                  : item.status === 'in_progress'
-                                    ? 'needsYou'
-                                    : 'secondary'
-                              }
+                              color={item.status === 'pending' ? 'secondary' : 'ink'}
                               flexShrink={0}
                             >
                               {item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '●' : '○'}
@@ -734,7 +720,7 @@ export function ToolOutputSheet({
                                 {card.lead}
                               </T>
                               {card.badge ? (
-                                <T v="metaStrong" color="needsYou" flexShrink={0}>
+                                <T v="metaStrong" color="secondary" flexShrink={0}>
                                   {card.badge}
                                 </T>
                               ) : null}
@@ -749,6 +735,7 @@ export function ToolOutputSheet({
                         {hiddenLocalCards > 0 ? (
                           <Button
                             size="inline"
+                            variant="quiet"
                             label={`Show ${hiddenLocalCards} more`}
                             alignSelf="flex-start"
                             onPress={() => setShowAllCards(true)}
@@ -756,7 +743,7 @@ export function ToolOutputSheet({
                           />
                         ) : null}
                         {block.omittedCount ? (
-                          <T v="meta" color="needsYou" testID="tool-output-omitted-note">
+                          <T v="meta" color="secondary" testID="tool-output-omitted-note">
                             {`+ ${block.omittedCount} more ${block.itemNoun} omitted at the 4 KiB step cap`}
                           </T>
                         ) : null}
@@ -834,31 +821,37 @@ export function ToolOutputSheet({
                     );
                   }
 
+                  if (block.kind === 'prose') {
+                    return (
+                      <YStack gap="2" testID="tool-output-prose">
+                        <YStack backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="sm" padding="3" gap="2">
+                          {block.paragraphs.map((paragraph, pIndex) => (
+                            <T key={pIndex} v="body" color="ink" userSelect="text" testID={pIndex === 0 ? 'tool-output-text' : `tool-output-prose-${pIndex}`}>
+                              {paragraph}
+                            </T>
+                          ))}
+                          {block.links?.length ? (
+                            <YStack paddingTop="2" borderTopWidth={0.5} borderTopColor="stroke" gap="1" testID="tool-output-prose-links">
+                              {block.links.map((link, lIndex) => (
+                                <T key={`${link.url}-${lIndex}`} v="code" color="secondary" userSelect="text">
+                                  {link.label}
+                                </T>
+                              ))}
+                            </YStack>
+                          ) : null}
+                        </YStack>
+                      </YStack>
+                    );
+                  }
+
                   return (
                     <YStack gap="2">
                       {block.receipt ? (
-                        <YStack
-                          backgroundColor="raised"
-                          borderWidth={1}
-                          borderColor="stroke"
-                          borderRadius="sm"
-                          padding="3"
-                          testID="tool-output-receipt"
-                        >
-                          <T v="meta" color="ink" userSelect="text">
-                            {block.receipt}
-                          </T>
+                        <YStack backgroundColor="raised" borderWidth={1} borderColor="stroke" borderRadius="sm" padding="3" testID="tool-output-receipt">
+                          <T v="meta" color="ink" userSelect="text">{block.receipt}</T>
                         </YStack>
                       ) : null}
-                      <T
-                        v="code"
-                        color="ink"
-                        userSelect="text"
-                        width="100%"
-                        minWidth={0}
-                        flexShrink={1}
-                        testID="tool-output-text"
-                      >
+                      <T v="code" color="ink" userSelect="text" width="100%" minWidth={0} flexShrink={1} testID="tool-output-text">
                         {block.text}
                       </T>
                     </YStack>
@@ -939,6 +932,7 @@ export function ToolOutputSheet({
           {canCopy ? (
             <Button
               size="inline"
+              variant="quiet"
               alignSelf="center"
               label={copied ? 'Copied' : presentation.copyLabel}
               onPress={copy}

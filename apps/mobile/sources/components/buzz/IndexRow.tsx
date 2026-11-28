@@ -35,6 +35,9 @@ export function TranscriptNavigationRow({
   trailing,
   singleDestination = false,
   divider = false,
+  dividerWidth = HAIRLINE,
+  quietChevron = false,
+  chevronDirection = 'right',
   testID,
 }: {
   children: React.ReactNode;
@@ -43,6 +46,9 @@ export function TranscriptNavigationRow({
   trailing?: IndexRowTrailingPress;
   singleDestination?: boolean;
   divider?: boolean;
+  dividerWidth?: 0.5 | 1;
+  quietChevron?: boolean;
+  chevronDirection?: 'right' | 'down' | 'up';
   testID?: string;
 }) {
   const chevron = (
@@ -53,7 +59,12 @@ export function TranscriptNavigationRow({
       minWidth={singleDestination ? undefined : 44}
       alignItems={singleDestination ? undefined : 'center'}
     >
-      <Inked color="needsYou" glyph={ChevronGlyph} direction="right" size={CHEVRON_ROW_SIZE} />
+      <Inked
+        color={quietChevron ? 'secondary' : 'needsYou'}
+        glyph={ChevronGlyph}
+        direction={chevronDirection}
+        size={CHEVRON_ROW_SIZE}
+      />
     </YStack>
   );
   // Centred on the row's vertical axis.
@@ -68,7 +79,7 @@ export function TranscriptNavigationRow({
           minHeight={HEIGHT.control}
           alignItems="center"
           gap="2"
-          borderTopWidth={divider ? HAIRLINE : 0}
+          borderTopWidth={divider ? dividerWidth : 0}
           borderTopColor="stroke"
         >
           {glyph}
@@ -82,7 +93,7 @@ export function TranscriptNavigationRow({
       minHeight={HEIGHT.control}
       alignItems="center"
       gap="2"
-      borderTopWidth={divider ? HAIRLINE : 0}
+      borderTopWidth={divider ? dividerWidth : 0}
       borderTopColor="stroke"
       testID={testID}
     >

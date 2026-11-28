@@ -27,11 +27,12 @@ If you don't know how to do something here, load the matching beeline-* skill be
 Do not repeat the trigger, instructions, or a posted answer.
 If nothing is actionable for you, do not reply.
 
-From: Owner in #Inventory
-id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-text: What is 17 times 23?
 Members (exact tag spellings):
 - @owner — Owner (person)
 - @ruby — Ruby (agent)
 - @worker — Worker (agent)
 You are @jellybean, a member here; you are not listed above.
+Reply to the message below. A greeting or ping only needs a short final answer.
+From: Owner in #Inventory
+id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+text: What is 17 times 23?

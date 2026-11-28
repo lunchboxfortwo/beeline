@@ -56,6 +56,11 @@ describe('Beeline tool surface across harnesses', () => {
     await expect(callAgentTool(name, args, 'invalid-combination')).rejects.toThrow(name === 'request_grant' || name === 'connect' ? /Supply (action|purpose)/ : /invalid arguments/);
   });
 
+  it('explains how to answer when a malformed message call cannot post', async () => {
+    await expect(callAgentTool('message', { inReplyTo: 'request', text: 'The test passed.' }, 'bad-reply'))
+      .rejects.toThrow('Give the full answer in your final response, or send type "reply" with the full answer in text. The tool posts text immediately.');
+  });
+
   it('names the field and the limit when a value is too long', async () => {
     await expect(callAgentTool('remember', {
       kind: 'fact', action: 'save', subject_is_requester: false, canonical_key: 'deploy',

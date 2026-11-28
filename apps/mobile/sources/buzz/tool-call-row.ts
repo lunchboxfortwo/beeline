@@ -28,9 +28,9 @@ export const TOOL_CALL_DURATION_FLOOR_MS = 1000;
 const KIND_VERBS: Readonly<Record<string, string>> = {
   read: 'read',
   open: 'read',
-  search: 'found',
-  searched: 'found',
-  grep: 'found',
+  search: 'searched',
+  searched: 'searched',
+  grep: 'searched',
   fetch: 'fetched',
   fetched: 'fetched',
   list: 'listed',
@@ -86,11 +86,11 @@ const GENERIC_LEDGER_VERBS = new Set([
 /** A folded rollup row from an older transcript: `reading 8` is 8 read calls. */
 const PARTICIPLE_VERBS: Readonly<Record<string, string>> = {
   reading: 'read',
-  searching: 'found',
+  searching: 'searched',
   listing: 'listed',
   fetching: 'fetched',
   inspecting: 'read',
-  querying: 'found',
+  querying: 'searched',
   running: 'ran',
 };
 
@@ -109,8 +109,11 @@ const INLINE_SCRIPT_PATTERN =
 
 export type ToolRowStat =
   | { kind: 'signal'; text: string }
+  | { kind: 'exit'; text: string }
   | { kind: 'diff'; added: number; removed: number }
   | { kind: 'text'; text: string };
+
+export type ToolSearchScope = 'web' | 'code' | 'history' | 'memory' | 'tools';
 
 function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
@@ -332,7 +335,34 @@ type VerbObjectResult = {
   subjectMono?: boolean;
   replacedCommandBySummary?: boolean;
   searchHits?: string;
+  searchScope?: ToolSearchScope;
 };
+
+const WEB_SEARCH_TITLE = /^(?:search[_ -]?web|web[_ -]?search|google[_ -]?search)$/i;
+const LOCAL_SEARCH_TITLE = /^(?:grep|glob|ripgrep|rg|find|find_by_name|grep_search|search_files)$/i;
+
+function isWebSearchStep(step: TurnActivityAction, inputObj: unknown): boolean {
+  const title = oneLine(step.title);
+  if (WEB_SEARCH_TITLE.test(title) || /\b(?:web[_ -]?search|search[_ -]?web)\b/i.test(title)) {
+    return true;
+  }
+  if (LOCAL_SEARCH_TITLE.test(title)) return false;
+  if (step.files?.length || step.command) return false;
+  if (inputObj && typeof inputObj === 'object' && !Array.isArray(inputObj)) {
+    const rec = inputObj as Record<string, unknown>;
+    const hasQuery = typeof rec.query === 'string' && rec.query.trim().length > 0;
+    const hasLocalFields =
+      'pattern' in rec ||
+      'regex' in rec ||
+      'path' in rec ||
+      'directory' in rec ||
+      'glob' in rec ||
+      'scope' in rec ||
+      'app' in rec;
+    if (hasQuery && !hasLocalFields) return true;
+  }
+  return false;
+}
 
 function verbAndObject(
   step: TurnActivityAction,
@@ -342,7 +372,8 @@ function verbAndObject(
   const kind = step.toolKind?.toLowerCase();
   const mcp = parseMcpTool(step.title, step.command, step.input);
   const filesTarget = formatFilesTarget(step);
-  const inputFile = field(parsed(step.input), [
+  const inputObj = parsed(step.input);
+  const inputFile = field(inputObj, [
     'path',
     'file_path',
     'filePath',
@@ -353,11 +384,12 @@ function verbAndObject(
   const titleLower = oneLine(step.title).toLowerCase();
 
   if (titleLower === 'toolsearch' || titleLower === 'tool_search') {
-    const query = field(parsed(step.input), ['query', 'pattern']);
+    const query = field(inputObj, ['query', 'pattern']);
     return {
       verb: 'loaded',
       object: query ? `tools · ${query}` : 'tools',
       subjectMono: false,
+      searchScope: 'tools',
     };
   }
 
@@ -381,13 +413,22 @@ function verbAndObject(
   if (mcp) {
     const described = describeMcpCall(mcp, step.input, step.command, step.output, lookup);
     const hits =
-      described.verb === 'found' ? hitCount(output, step.outputTruncated) : undefined;
+      described.verb === 'searched' ? hitCount(output, step.outputTruncated) : undefined;
+    let searchScope: ToolSearchScope | undefined;
+    if (described.verb === 'searched') {
+      const scope = field(inputObj, ['scope'])?.toLowerCase();
+      if (scope === 'memory') searchScope = 'memory';
+      else if (scope === 'history') searchScope = 'history';
+      else if (mcp.tool.toLowerCase() === 'app_tool') searchScope = 'tools';
+      else searchScope = 'code';
+    }
     return {
       verb: described.verb,
       object: described.object,
       namedTool: described.namedTool,
       subjectMono: false,
       ...(hits ? { searchHits: hits } : {}),
+      ...(searchScope ? { searchScope } : {}),
     };
   }
 
@@ -408,13 +449,15 @@ function verbAndObject(
     return { verb: 'ran', object: redactDisplayPaths(command), subjectMono: true };
   }
 
-  if (kind === 'search' || kind === 'searched' || kind === 'grep') {
+  if (kind === 'search' || kind === 'searched' || kind === 'grep' || WEB_SEARCH_TITLE.test(oneLine(step.title))) {
     const pattern = searchPattern(step);
     const hits = hitCount(output, step.outputTruncated);
+    const web = isWebSearchStep(step, inputObj);
     return {
-      verb: 'found',
+      verb: 'searched',
       object: pattern || titleObject(step),
       subjectMono: false,
+      searchScope: web ? 'web' : 'code',
       ...(hits ? { searchHits: hits } : {}),
     };
   }
@@ -483,6 +526,9 @@ export function toolCallStat(
   if (step.signal) {
     return { kind: 'signal', text: step.signal };
   }
+  if (typeof step.exitCode === 'number' && step.exitCode !== 0) {
+    return { kind: 'exit', text: `exit ${step.exitCode}` };
+  }
   const files = step.files ?? [];
   if (
     files.length > 0 &&
@@ -520,9 +566,10 @@ export function toolCallRowModel(
   subjectMono: boolean;
   replacedCommandBySummary: boolean;
   stat?: ToolRowStat;
+  searchScope?: ToolSearchScope;
 } {
   const output = toolCallOutput(step.output);
-  const { verb, object, namedTool, subjectMono, replacedCommandBySummary, searchHits } =
+  const { verb, object, namedTool, subjectMono, replacedCommandBySummary, searchHits, searchScope } =
     verbAndObject(step, output, lookup);
   const generic = !namedTool && GENERIC_LEDGER_VERBS.has(verb);
   const rawLabel = generic ? object : `${verb} ${object}`;
@@ -536,6 +583,7 @@ export function toolCallRowModel(
     subjectMono: Boolean(subjectMono),
     replacedCommandBySummary: Boolean(replacedCommandBySummary),
     ...(stat ? { stat } : {}),
+    ...(searchScope ? { searchScope } : {}),
   };
 }
 

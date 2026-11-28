@@ -298,7 +298,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
         surface === 'room' &&
           [
             repositoryPending
-              ? 'This is a Beeline chat. Repository context loads through read(facet:session). Call workspace to make a read-only copy of its linked repository; the tool returns its path or the reason it is unavailable. Web search is available.'
+              ? 'This is a Beeline chat. For repository work, use workspace for a read-only checkout. Web search is available.'
               : repository
               ? `This is a Beeline chat. The repository filesystem is read-only here. The chat is bound to ${repository.name} (branch ${repository.branch}). Call workspace for a read-only checkout. Web search is available.`
               : 'This Beeline chat has no linked repository. Web search is available.',

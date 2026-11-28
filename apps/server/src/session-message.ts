@@ -20,7 +20,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
   const from = { agent, place: input.roomId };
   return database.transaction(async db => {
     if (typeof input.text !== 'string' || ['to','ask','question','brief','options'].some(field => field in input))
-      throw new CommandRefusalError('Use text with blocked, reply and quoteMsgId, or normal and address.',400);
+      throw new CommandRefusalError('Send text with type "reply", "blocked", or "normal".',400);
     let to: MessageAddress;
     let quote: string | undefined;
     let openBlockIds: string[] = [];
@@ -36,12 +36,12 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       if (!target) throw new CommandRefusalError('Address an agent session as agentId@placeId.',400);
       if (!target.allowed) throw new CommandRefusalError('A thread must address a thread agent session.', 400);
       to = {agent: target.agent, place: target.place};
-    } else if (input.type === 'reply' && typeof input.quoteMsgId === 'string' && input.address === undefined) {
+    } else if (input.type === 'reply' && input.address === undefined) {
       const wake = replyableWake(parent);
-      if (parent?.state !== 'pending' || input.quoteMsgId !== wake?.id)
-        throw new CommandRefusalError('Quote a message that woke this turn.', 400);
+      if (!wake || parent?.state !== 'pending' || (input.quoteMsgId !== undefined && input.quoteMsgId !== wake.id))
+        throw new CommandRefusalError('Quote a message that woke this turn, or omit quoteMsgId to reply to the current request.', 400);
       to = (await recordedMessageRoute(db, parent)).from;
-      quote = input.quoteMsgId;
+      quote = wake.id;
     } else if (input.type === 'blocked' && input.address === undefined && input.quoteMsgId === undefined) {
       const room = (await db.query<{ parent_id: string | null; created_by: string }>(
         'SELECT parent_id,created_by FROM rooms WHERE id=$1 FOR UPDATE', [input.roomId])).rows[0];
@@ -72,7 +72,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
           .rows.map((row) => row.id);
       }
     } else {
-      throw new CommandRefusalError('Use blocked alone, reply with quoteMsgId, or normal with address.',400);
+      throw new CommandRefusalError('Send type "reply" with text to answer this turn. Send type "normal" with text and address to ask another agent. Send type "blocked" with text to report a block.',400);
     }
     const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
     const replayed = existed && saved.messageId === id;

@@ -124,7 +124,7 @@ export function reconcileStartupModel(input: {
       option.category === 'model' && option.options.some((value) => value.id === selection.model),
   );
   const reconcilingModel = Boolean(selection.model && selection.model !== runningModel && available);
-  const configurationNote = `persona and reviewer skills use ${input.cached ? 'cached configuration' : 'the agent default'}. Optional context and capability status: read(facet:session).`;
+  const configurationNote = `persona and reviewer skills use ${input.cached ? 'cached configuration' : 'the agent default'}.`;
   const effortAxis = catalog.find((option) =>
     ['thought_level', 'effort', 'reasoning_effort'].includes(option.category),
   );

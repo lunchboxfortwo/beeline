@@ -239,6 +239,7 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
     args = { ...args, mode: args.action };
   const requestedAction = args.action;
   const requestedMode = args.mode;
+  const requestedMessageType = args.type;
   if (tool.name === 'link_request') normalizeApprovalIntent(args);
   if (
     (tool.name === 'request_grant' && args.mode !== 'list') ||
@@ -314,6 +315,10 @@ export function validateToolInput(tool: ToolDefinition, args: JsonObject): void 
     }
     const required = tool.inputSchema.required as string[] | undefined;
     const missing = required?.filter((field) => args[field] === undefined);
+    if (tool.name === 'read' && missing?.includes('facet'))
+      throw new Error('read requires facet. Send {"facet":"messages"} for this chat or {"facet":"addresses"} for place IDs.');
+    if (tool.name === 'message' && requestedMessageType !== 'normal' && requestedMessageType !== 'blocked')
+      throw new Error('message: invalid arguments. Give the full answer in your final response, or send type "reply" with the full answer in text. The tool posts text immediately.');
     const extra = Object.keys(args).filter(
       (field) => !(field in asObject(tool.inputSchema.properties)),
     );

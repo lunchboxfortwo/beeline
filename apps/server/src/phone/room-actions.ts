@@ -75,6 +75,15 @@ import { PhoneService } from '../phone-service.js';
     return startedAt > 0 && now - startedAt < CREATE_LOCK_TTL_MS;
   }
 
+  async function bootstrapLinkedEmptyRepository(ctx: PhoneContext, roomId: string): Promise<void> {
+    if (!ctx.github?.bootstrapEmptyRoomRepository) return;
+    try {
+      await ctx.github.bootstrapEmptyRoomRepository(roomId);
+    } catch (error) {
+      console.warn(`[server] empty repository bootstrap skipped for room ${roomId}:`, error);
+    }
+  }
+
   export async function phoneActOnRepositoryCard(ctx: PhoneContext, input: Input<'actOnRepositoryCard'>, viewerId: string): Promise<Output<'actOnRepositoryCard'>> {
     if (['create', 'link', 'install', 'organization'].includes(input.action)) await phoneRequireRoomWorkspaceManager(ctx, input.roomId, viewerId);
     else {
@@ -89,7 +98,7 @@ import { PhoneService } from '../phone-service.js';
           [input.cardId, input.roomId])).rows[0];
         const card = readRepositoryOnboardingCard(row?.card);
         if (!card || card.requesterId !== viewerId) throw new Error('repository card access denied');
-        if (card.status === 'settled') return { done: true as const, result: { selected: card.selected } };
+        if (card.status === 'settled') return { done: true as const, linkedNow: false, result: { selected: card.selected } };
         if (hasActiveCreateLock(row?.card)) {
           throw new CommandRefusalError('A repository creation is already in progress for this card. Wait for it to finish.', 409);
         }
@@ -120,7 +129,7 @@ import { PhoneService } from '../phone-service.js';
               }),
             ],
           );
-          return { done: true as const, result: { selected: recorded.requestedName } };
+          return { done: true as const, linkedNow: true, result: { selected: recorded.requestedName } };
         }
         if (!card.installationId) throw new Error('Install Beeline on all personal repositories first');
         const service = new PhoneService(database, ctx.publicOrigin, ctx.github, ctx.sendPushTest, ctx.live, true);
@@ -143,6 +152,7 @@ import { PhoneService } from '../phone-service.js';
         return { done: false as const, installationId: card.installationId, requestedName };
       });
       if (prepared.done) {
+        if (prepared.linkedNow) await bootstrapLinkedEmptyRepository(ctx, input.roomId);
         ctx.live?.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
         return prepared.result;
       }
@@ -200,7 +210,7 @@ import { PhoneService } from '../phone-service.js';
             [input.cardId, input.roomId])).rows[0];
           const card = readRepositoryOnboardingCard(row?.card);
           if (!card || card.requesterId !== viewerId) throw new Error('repository card access denied');
-          if (card.status === 'settled') return { selected: card.selected };
+          if (card.status === 'settled') return { linkedNow: false, result: { selected: card.selected } };
           const service = new PhoneService(database, ctx.publicOrigin, ctx.github, ctx.sendPushTest, ctx.live, true);
           await service.setRepository({ roomId: input.roomId, key: `github:${created.id}`, name: created.fullName,
             remote: `git://github.com/${created.fullName}`, targetBranch: created.defaultBranch,
@@ -218,10 +228,11 @@ import { PhoneService } from '../phone-service.js';
               }),
             ],
           );
-          return { selected: prepared.requestedName };
+          return { linkedNow: true, result: { selected: prepared.requestedName } };
         });
+        if (result.linkedNow) await bootstrapLinkedEmptyRepository(ctx, input.roomId);
         ctx.live?.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
-        return result;
+        return result.result;
       } catch (error) {
         await releaseCreateLock();
         throw error;
@@ -229,6 +240,7 @@ import { PhoneService } from '../phone-service.js';
     }
 
     let followup: { roomId: string; agentId: string; requesterId: string; kind: 'repository' } | undefined;
+    let linkedNow = false;
     // Serialize taps and make a retried response return the committed selection.
     const result = await ctx.database.transaction(async database => {
       const row = (await database.query<{ card: Record<string, unknown> | null }>(
@@ -279,8 +291,10 @@ import { PhoneService } from '../phone-service.js';
           repository: repository.fullName,
         }),
       ]);
+      linkedNow = true;
       return { selected };
     });
+    if (linkedNow) await bootstrapLinkedEmptyRepository(ctx, input.roomId);
     if (followup) await ctx.database.transaction(db => postRepositoryOnboarding(db, ctx.github, followup!));
     ctx.live?.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
     return result;
