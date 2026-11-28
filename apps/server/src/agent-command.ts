@@ -903,11 +903,13 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
           createdAt: Math.floor(new Date(previous.created_at).getTime() / 1000), delivered: true, stored: true, visible: !previous.deleted_at };
         // The agent already replied in this place during the turn. Its closing
         // text goes to the turn's activity, not into the chat a second time.
-        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length
-          && item.state === 'complete' && item.result_message_id) {
-          const reply = await holdFinalAfterReply(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), replyId: item.result_message_id,
+        // A native reply leaves the command pending, so the reply completes it.
+        const replyId = item.result_message_id ?? item.posted_reply_id;
+        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length && replyId) {
+          const reply = await holdFinalAfterReply(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), replyId,
             roomId: item.room_id, agentId, requestId: item.turn_request_id, text: messageText, steps: input.steps});
           if (reply) {
+            if (item.state !== 'complete') await endAgentTurn(db, item, 'complete', null, reply.id);
             suppressedFinal = true;
             completedNow = true;
             return { ...receipt, id: reply.id, messageId: reply.id, createdAt: Math.floor(new Date(reply.created_at).getTime() / 1000),

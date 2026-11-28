@@ -3,7 +3,7 @@ import { beginAgentInvocation } from './agent-invocation.js';
 import { it,expect } from 'vitest';
 import { sendMessage,replyToMessage } from './agent-messaging.js';
 import { answerQueuedMessage } from './agent-command.js';
-import { H,B,CHAT,OTHER,db } from './messaging.test-support.js';
+import { H,B,CHAT,OTHER,daemon,db } from './messaging.test-support.js';
 
 const task=()=>sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:CHAT}},text:'Please answer'});
 const answers=async(place=CHAT)=>(await db.query('SELECT id,text FROM messages WHERE author_id=$1 AND room_id=$2 AND presentation<>\'activity\'',[B,place])).rows;
@@ -89,11 +89,20 @@ it('an earlier ask in the batch prevents a later reply from ending the native tu
 
 const activityNotes=async()=>(await db.query(`SELECT activity FROM messages WHERE author_id=$1 AND room_id=$2 AND presentation='activity'`,[B,CHAT])).rows
  .flatMap(row=>(row.activity as {kind:string;text?:string}[]).filter(step=>step.kind==='note').map(step=>step.text));
-it('grunt-dup-1127: a same-place reply keeps the reworded closing text out of the chat',async()=>{
+it.each(['replyToMessage','native message'])('grunt-dup-1127: a same-place reply (%s) keeps the reworded closing text out of the chat',async path=>{
  const request=await task();
  const invocation={id:randomUUID(),requestId:request.id};
- await beginAgentInvocation(db,B,CHAT,request.id,invocation.id);
- const reply=await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Squire needs an upgrade.',invocation});
+ const text='Squire needs an upgrade.';
+ // The native message tool records the reply and leaves the owed command pending.
+ if(path==='native message'){
+  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:request.id,invocationId:invocation.id},B);
+  await daemon.execute('message',{roomId:CHAT,type:'reply',quoteMsgId:request.id,text},B);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[request.id])).rows).toEqual([{state:'pending'}]);
+ }else{
+  await beginAgentInvocation(db,B,CHAT,request.id,invocation.id);
+  await replyToMessage(db,B,{roomId:CHAT,id:request.id,text,invocation});
+ }
+ const reply=(await answers())[0]!;
  // The Claude SDK "no visible output" retry produces this text after the reply.
  const input={roomId:CHAT,requestId:request.id,text:'I replied in #grunt. Squire needs an upgrade before the next run.',harnessEnded:true,invocation,
   steps:[{kind:'tool',title:'message',operation:'tool',status:'completed'}]};
@@ -101,6 +110,8 @@ it('grunt-dup-1127: a same-place reply keeps the reworded closing text out of th
  expect(await answerQueuedMessage(db,B,input)).toMatchObject({messageId:reply.id,completed:true});
  expect((await answers()).map(row=>row.text)).toEqual(['Squire needs an upgrade.']);
  expect(await activityNotes()).toEqual([input.text]);
+ expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=$1',[request.id])).rows)
+  .toEqual([{state:'complete',result_message_id:reply.id}]);
 });
 it('a same-place reply suppresses closing text without an invocation too',async()=>{
  const request=await task();
