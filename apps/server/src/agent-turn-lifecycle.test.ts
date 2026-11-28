@@ -273,6 +273,18 @@ async function answeredWhileRunning(invocationId:string){
   return {c,invocation};
 }
 
+it('keeps the original reply when the model fails after already answering the tag', async () => {
+  const { c, invocation } = await answeredWhileRunning('failure-after-answer');
+  await daemon.execute('postRoomMessage', { roomId: R, requestId: c.id, invocation, harnessEnded: true,
+    providerError: true, text: 'Quota exhausted' }, A);
+  expect((await db.query('SELECT text FROM messages WHERE room_id=$1 AND author_id=$2', [R, A])).rows)
+    .toEqual([{ text: 'An answer during work.' }]);
+  expect((await db.query('SELECT status FROM agent_turns WHERE request_id=$1', [c.turnRequestId])).rows)
+    .toEqual([{ status: 'complete' }]);
+  expect((await db.query('SELECT ended FROM agent_invocations WHERE invocation_id=$1', [invocation.id])).rows)
+    .toEqual([{ ended: true }]);
+});
+
 it('ends the working line at the reply while the run stays open, and later work cannot bring it back', async () => {
   const {c,invocation}=await answeredWhileRunning('running-session');
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[c.id])).rows).toEqual([{state:'complete'}]);

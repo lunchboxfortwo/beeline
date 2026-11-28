@@ -502,6 +502,8 @@ export type PostRoomMessageInput = TurnOutputAuthority &
     readonly harnessEnded?: boolean;
     /** The harness completed without output, so a scheduled wake may close quietly. */
     readonly silentCompletion?: boolean;
+    /** The helper is answering a person-tagged turn with the provider's terminal error text. */
+    readonly providerError?: boolean;
     readonly invocation?: import('./daemon-operations.js').AgentInvocation;
     readonly requestId?: string;
     /** Other queue items answered by this combined reply, in the same chat. */

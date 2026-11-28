@@ -17,7 +17,7 @@ import { resolve } from 'node:path';
 
 export type PiTurnRecord =
   /** pi recorded a provider/model error for this turn. */
-  | { kind: 'error'; reason: string; status?: number }
+  | { kind: 'error'; reason: string; text?: string; status?: number }
   /** pi recorded an assistant message that carries no text. */
   | { kind: 'empty'; stopReason: string }
   /** pi recorded answer text the ACP stream never delivered. */
@@ -30,13 +30,14 @@ interface PiRecordedMessage {
   content?: unknown;
   stopReason?: unknown;
   errorMessage?: unknown;
+  timestamp?: unknown;
 }
 
 /**
  * pi phrases a provider refusal as `<status>: <body>` where the body is often
- * the provider's JSON. Keep the status and the human message, drop the rest.
+ * the provider's JSON. Keep its message for chat and a one-line reason for diagnostics.
  */
-export function summarizeProviderError(errorMessage: string): { reason: string; status?: number } {
+export function summarizeProviderError(errorMessage: string): { reason: string; text?: string; status?: number } {
   const trimmed = errorMessage.trim();
   const statusMatch = /^(\d{3}):\s*([\s\S]*)$/.exec(trimmed);
   const status = statusMatch ? Number(statusMatch[1]) : undefined;
@@ -60,11 +61,12 @@ export function summarizeProviderError(errorMessage: string): { reason: string; 
       /* not JSON; keep the text */
     }
   }
-  const firstLine = body.split(/\r?\n/).find((line) => line.trim()) ?? '';
+  const text = body.trim();
+  const firstLine = text.split(/\r?\n/, 1)[0];
   const reason = `provider error${status === undefined ? '' : ` ${status}`}${
     firstLine ? `: ${firstLine.trim()}` : ''
   }`;
-  return status === undefined ? { reason } : { reason, status };
+  return { reason, ...(text ? { text } : {}), ...(status === undefined ? {} : { status }) };
 }
 
 /**
@@ -140,6 +142,8 @@ function messageText(content: unknown): string {
 export async function readPiTurnRecord(input: {
   agentEnv: Record<string, string>;
   sessionId: string;
+  /** Ignore a previous turn if the current prompt did not reach Pi's session log. */
+  startedAt?: number;
 }): Promise<PiTurnRecord | undefined> {
   const file = await piSessionFilePath(input.agentEnv, input.sessionId);
   if (!file) return undefined;
@@ -169,14 +173,12 @@ export async function readPiTurnRecord(input: {
   }
   if (!sawUser && !last) return undefined;
   if (!last) return { kind: 'missing' };
+  if (input.startedAt !== undefined &&
+    (typeof last.timestamp !== 'number' || last.timestamp < input.startedAt)) return undefined;
   if (last.stopReason === 'error') {
     return {
       kind: 'error',
-      ...summarizeProviderError(
-        typeof last.errorMessage === 'string' && last.errorMessage.trim()
-          ? last.errorMessage
-          : 'unknown error',
-      ),
+      ...summarizeProviderError(typeof last.errorMessage === 'string' ? last.errorMessage : ''),
     };
   }
   const text = messageText(last.content);
