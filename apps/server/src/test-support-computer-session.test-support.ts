@@ -100,7 +100,7 @@ export function fixtureScope1() {
     }
     const path = new URL(request.url ?? '/', 'http://beeline.local').pathname;
     const status = /^\/s\/([A-Za-z0-9_-]{43})\/status$/.exec(path)?.[1];
-    if (status) { void serveComputerStatus(request, response, database, status); return; }
+    if (status) { void serveComputerStatus(request, response, database, status, live); return; }
     const id = /^\/s\/([A-Za-z0-9_-]{43})\/?$/.exec(path)?.[1];
     if (!id) { response.writeHead(404).end(); return; }
     void serveComputerSession(request, response, database, live, id);

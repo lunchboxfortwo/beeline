@@ -96,7 +96,7 @@ export async function route(
   }
   const computerStatus = /^\/s\/([A-Za-z0-9_-]{43})\/status$/.exec(url.pathname);
   if (method === 'GET' && computerStatus) {
-    await serveComputerStatus(request, response, options.database, computerStatus[1]!);
+    await serveComputerStatus(request, response, options.database, computerStatus[1]!, options.live);
     return;
   }
   if (method === 'GET' && url.pathname === '/v1/link/oauth/callback') {

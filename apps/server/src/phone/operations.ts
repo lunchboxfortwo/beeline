@@ -71,12 +71,12 @@ import { phoneReadConnectionDetail, phoneRevokeConnectionGrants } from './connec
     if (viewerId === REVIEW_IDENTITY_ID && REVIEW_LOCKED_OPERATIONS.has(name))
       throw new Error(REVIEW_IDENTITY_MESSAGE);
     if (name === 'openComputerSession') {
-      const access = await computerViewToken(ctx.database, (input as Input<'openComputerSession'>).id, viewerId);
+      const access = await computerViewToken(ctx.database, (input as Input<'openComputerSession'>).id, viewerId, ctx.live);
       if (!access) throw new Error('computer session access denied');
       return { access } as Output<Name>;
     }
     if (name === 'handbackComputerSession') {
-      await handBackComputerSession(ctx.database, (input as Input<'handbackComputerSession'>).id, viewerId);
+      await handBackComputerSession(ctx.database, (input as Input<'handbackComputerSession'>).id, viewerId, ctx.live);
       return undefined as Output<Name>;
     }
     if (name === 'endComputerSession') {

@@ -496,3 +496,197 @@ it('settles an unfinished preview capture when the session ends', async () => {
     await expect(capture).resolves.toBeNull();
   } finally { await act(async () => tree.unmount()); }
 });
+
+it('disables card click and actions when the preview stream reports computer-ended or HTTP 410', async () => {
+  for (const trigger of ['message', 'http410'] as const) {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+    const webview = tree.root.findByType('WebView');
+    await act(async () => {
+      if (trigger === 'message') webview.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-ended', id: session.id }) } });
+      else webview.props.onHttpError({ nativeEvent: { statusCode: 410 } });
+    });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-ended' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-recheck' })).toHaveLength(0);
+    expect(tree.root.findAllByType('WebView')).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+    expect(tree.root.findAllByType('Text').some((node: any) => node.props.children === 'Session ended')).toBe(true);
+    await act(async () => tree.unmount());
+  }
+});
+
+it('disables card click and actions when the preview stream stops loading, and restores Open only after a retry delivers a frame', async () => {
+  for (const trigger of ['unavailable', 'error', 'http503'] as const) {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+    const webview = tree.root.findByType('WebView');
+    await act(async () => {
+      if (trigger === 'unavailable') webview.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-unavailable', id: session.id }) } });
+      else if (trigger === 'error') webview.props.onError();
+      else webview.props.onHttpError({ nativeEvent: { statusCode: 503 } });
+    });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-recheck' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByType('WebView')).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+    expect(tree.root.findAllByType('Text').some((node: any) => node.props.children === 'Browser unavailable')).toBe(true);
+
+    // 1. Recheck while token fetch fails stays unavailable.
+    // 2. Recheck when token succeeds but tunnel is still down keeps Open disabled while probing, then returns to unavailable.
+    // 3. Recheck when token succeeds and the probe delivers its first frame restores Open on the same mounted card.
+    phoneOperation
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({ access: 'still-down-token' })
+      .mockResolvedValueOnce({ access: 'recovered-token' });
+
+    await act(async () => { await tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByType('WebView')).toHaveLength(0);
+
+    await act(async () => { await tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+    // Token refreshed, probe mounted — Open and card tap MUST stay disabled until a frame arrives.
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+    const downProbe = tree.root.findByType('WebView');
+    expect(downProbe.props.source.uri).toContain('access=still-down-token');
+    await act(async () => {
+      downProbe.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-unavailable', id: session.id }) } });
+    });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByType('WebView')).toHaveLength(0);
+
+    await act(async () => { await tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+    const liveProbe = tree.root.findByType('WebView');
+    expect(liveProbe.props.source.uri).toContain('access=recovered-token');
+    await act(async () => {
+      liveProbe.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-first-frame', id: session.id }) } });
+    });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-live' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-recheck' })).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeTypeOf('function');
+    expect(tree.root.findByType('WebView').props.source.uri).toContain('access=recovered-token');
+    await act(async () => tree.unmount());
+  }
+});
+
+it('keeps the live card intact if launching the external browser fails, and recovers via recheck once a frame arrives', async () => {
+  let tree!: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+  openExternalUrl.mockRejectedValueOnce(new Error('no browser app'));
+  await act(async () => { await tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })[0]!.props.onPress(); });
+  expect(Modal.alert).toHaveBeenCalledWith('Could not open browser', 'Could not launch the external browser. Try again.');
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-live' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+
+  phoneOperation.mockRejectedValueOnce(new Error('temporary disconnect')).mockResolvedValueOnce({ access: 'retried-token' });
+  await act(async () => { await tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })[0]!.props.onPress(); });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+  await act(async () => { await tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+  const probe = tree.root.findByType('WebView');
+  expect(probe.props.source.uri).toContain('access=retried-token');
+  await act(async () => {
+    probe.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-first-frame', id: session.id }) } });
+  });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-live' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+  expect(tree.root.findByType('WebView').props.source.uri).toContain('access=retried-token');
+  await act(async () => tree.unmount());
+});
+
+it('ignores a canceled retry that rejects late after returning from background and starting a newer retry', async () => {
+  let rejectFirst!: (error: Error) => void;
+  let resolveSecond!: (value: { access: string }) => void;
+  phoneOperation
+    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
+    .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+  let tree!: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+  await act(async () => {
+    tree.root.findByType('WebView').props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-unavailable', id: session.id }) } });
+  });
+  // Start first retry, then background while its access request is still pending.
+  await act(async () => { tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+  await act(async () => { foreground.state = 'background'; for (const listener of foreground.listeners) listener(); });
+  // Return to foreground and start a second retry.
+  await act(async () => { foreground.state = 'active'; for (const listener of foreground.listeners) listener(); });
+  await act(async () => { tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+  // Newer retry resolves first, mounting the probe preview.
+  await act(async () => { resolveSecond({ access: 'newer-token' }); });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+  expect(tree.root.findByType('WebView').props.source.uri).toContain('access=newer-token');
+  // Canceled first retry rejects late — must not tear down the newer probe preview.
+  await act(async () => { rejectFirst(new Error('stale failure')); });
+  const probe = tree.root.findByType('WebView');
+  expect(probe.props.source.uri).toContain('access=newer-token');
+  // Probe delivers its first frame — Open returns.
+  await act(async () => {
+    probe.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-first-frame', id: session.id }) } });
+  });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-live' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' }).length).toBeGreaterThan(0);
+  expect(tree.root.findByType('ListItem').props.onPress).toBeTypeOf('function');
+  await act(async () => tree.unmount());
+});
+
+it('disables web card click and actions when the iframe posts computer-unavailable or computer-ended', async () => {
+  const previous = Platform.OS;
+  const globals = globalThis as { window?: any };
+  const hadWindow = 'window' in globals;
+  const listeners = new Set<(event: MessageEvent) => void>();
+  globals.window = {
+    addEventListener: (_type: string, fn: (event: MessageEvent) => void) => { listeners.add(fn); },
+    removeEventListener: (_type: string, fn: (event: MessageEvent) => void) => { listeners.delete(fn); },
+  };
+  Platform.OS = 'web';
+  try {
+    for (const [type, expectedStatus] of [['computer-unavailable', 'unavailable'], ['computer-ended', 'ended']] as const) {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+      expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+      await act(async () => {
+        for (const listener of listeners) listener({ origin: 'https://server.usebeeline.app', data: { type, id: session.id } } as MessageEvent);
+      });
+      expect(tree.root.findAllByProps({ testID: `computer-session-card-${expectedStatus}` }).length).toBeGreaterThan(0);
+      expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+      expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+      await act(async () => tree.unmount());
+    }
+  } finally {
+    Platform.OS = previous;
+    if (!hadWindow) delete globals.window;
+  }
+});
+
+it('refreshes preview authorization once on 403 and disables the card if access is refused', async () => {
+  phoneOperation
+    .mockResolvedValueOnce({ access: 'initial-token' })
+    .mockRejectedValueOnce(new Error('computer session access denied'));
+  let tree!: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={{ ...session, access: undefined }} />); });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+  await act(async () => {
+    tree.root.findByType('WebView').props.onHttpError({ nativeEvent: { statusCode: 403 } });
+  });
+  expect(phoneOperation).toHaveBeenCalledTimes(2);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+  expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+  await act(async () => tree.unmount());
+});
