@@ -44,6 +44,13 @@ import { unix } from './values.js';
         );
       }
     });
+    if (!ctx.routingTransaction && input.githubInstallationId !== undefined && ctx.github?.bootstrapEmptyRoomRepository) {
+      try {
+        await ctx.github.bootstrapEmptyRoomRepository(input.roomId);
+      } catch (error) {
+        console.warn(`[server] empty repository bootstrap skipped for room ${input.roomId}:`, error);
+      }
+    }
     return phoneRoomRepository(ctx, input.roomId);
   }
 

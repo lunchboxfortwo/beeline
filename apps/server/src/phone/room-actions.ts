@@ -113,6 +113,13 @@ import { PhoneService } from '../phone-service.js';
       return { selected };
     });
     if (followup) {
+      if (['create', 'link'].includes(input.action) && ctx.github?.bootstrapEmptyRoomRepository) {
+        try {
+          await ctx.github.bootstrapEmptyRoomRepository(input.roomId);
+        } catch (error) {
+          console.warn(`[server] empty repository bootstrap skipped for room ${input.roomId}:`, error);
+        }
+      }
       await ctx.database.transaction(db => postRepositoryOnboarding(db, ctx.github, followup!));
       if (followup.kind === 'starters') await ctx.database.query(`UPDATE messages SET card=jsonb_set(card,'{status}','"settled"') WHERE id=$1`, [input.cardId]);
     }

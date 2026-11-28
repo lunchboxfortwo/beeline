@@ -73,6 +73,13 @@ import { normalizeHumanCornerTitle, UUID_PATTERN } from './values.js';
       );
       await joinWorkspaceMembersToPublicRoom(db, input.workspaceId, id);
     });
+    if (!ctx.routingTransaction && input.repositoryId !== undefined && ctx.github?.bootstrapEmptyRoomRepository) {
+      try {
+        await ctx.github.bootstrapEmptyRoomRepository(id);
+      } catch (error) {
+        console.warn(`[server] empty repository bootstrap skipped for room ${id}:`, error);
+      }
+    }
     return { id };
   }
 

@@ -8,7 +8,13 @@ import { sessionCredentialMaskPaths, siblingAgentMaskPaths, wrapAgentCommand } f
 import { runtimeDirectory } from './runtime.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import { agentGitIdentity } from './agent-git-identity.js';
-import { agentCornerCheckoutPaths, materializeAgentCornerCheckout } from './agent-corner-checkout.js';
+import {
+  agentCornerCheckoutPaths,
+  isMissingRemoteRefError,
+  isRemoteRepositoryEmpty,
+  materializeAgentCornerCheckout,
+} from './agent-corner-checkout.js';
+import { bootstrapEmptyGitHubRemote } from './empty-repository-bootstrap.js';
 import { CRASH_SAFE_CLONE_ARGS, fetchRepositoryCache } from './repository-cache-repair.js';
 import { rememberStorageOwner } from './storage-owners.js';
 import { withKernelLockWhenFree } from './kernel-lock.js';
@@ -90,6 +96,7 @@ export async function materializeCornerWorktree(input: {
   token: string;
   supervisorRoot: string;
   committer: { name: string; publicKey: string };
+  bootstrapEmptyRemote?: () => Promise<boolean>;
 }): Promise<{ path: string; gitCommonDir: string }> {
   const git = (args: string[], options: Parameters<typeof runOwnedFile>[2] = {}) =>
     runOwnedFile('git', args, options);
@@ -114,6 +121,16 @@ export async function materializeCornerWorktree(input: {
       await rm(staging, { recursive: true, force: true });
     }
   }
+  const onEmptyRemote =
+    input.bootstrapEmptyRemote ??
+    (!remote.startsWith('file://') && input.token
+      ? () =>
+          bootstrapEmptyGitHubRemote({
+            remote,
+            targetBranch: input.targetBranch,
+            token: input.token,
+          })
+      : undefined);
   const { path, gitCommonDir } = await materializeAgentCornerCheckout({
     root: input.supervisorRoot,
     cornerId: input.cornerId,
@@ -124,6 +141,7 @@ export async function materializeCornerWorktree(input: {
     startRef: `refs/heads/${input.targetBranch}`,
     targetBranch: input.targetBranch,
     env: githubGitEnv(input.token),
+    ...(onEmptyRemote ? { onEmptyRemote } : {}),
   });
   // materializeAgentCornerCheckout already pinned worktree config and the checkout's root.
   await git([
@@ -182,16 +200,28 @@ async function materializeRoomCheckout(input: {
       { env, maxBuffer: 4 * 1024 * 1024 },
     );
   await runOwnedFile('git', ['-C', path, 'config', 'gc.pruneExpire', 'never']);
-  await fetchRepositoryCache({
-    gitDir: resolve(path, '.git'),
-    label: `room-checkouts/${checkoutId}`,
-    args: [
-      '--prune',
-      'origin',
-      `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`,
-    ],
-    env,
-  });
+  const gitDir = resolve(path, '.git');
+  let empty = false;
+  try {
+    await fetchRepositoryCache({
+      gitDir,
+      label: `room-checkouts/${checkoutId}`,
+      args: [
+        '--prune',
+        'origin',
+        `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`,
+      ],
+      env,
+    });
+  } catch (error) {
+    if (!isMissingRemoteRefError(error) || !(await isRemoteRepositoryEmpty(gitDir, env)))
+      throw error;
+    empty = true;
+  }
+  if (empty) {
+    await runOwnedFile('git', ['-C', path, 'symbolic-ref', 'HEAD', `refs/heads/${input.targetBranch}`]);
+    return;
+  }
   await runOwnedFile(
     'git',
     ['-C', path, 'checkout', '--detach', '--force', `origin/${input.targetBranch}`],
@@ -250,7 +280,11 @@ async function readyCheckout(input: {
   const mobile = resolve(path, 'apps/mobile');
   const needsMobile = requestedMobile || /\bmobile\b/i.test(input.brief ?? '');
   const tree = [
-    (await git(['rev-parse', 'HEAD^{tree}'])).stdout.trim(),
+    (
+      await git(['rev-parse', 'HEAD^{tree}']).catch(() => ({
+        stdout: '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+      }))
+    ).stdout.trim(),
     createHash('sha256')
       .update(input.brief ?? '')
       .digest('hex'),
@@ -434,13 +468,27 @@ async function prepareCheckoutAtPath(
     }));
     // A checkout with no work of its own moves to the base just fetched.
     const base = `refs/remotes/origin/${targetBranch}`;
-    if (
-      await runOwnedFile('git', ['-C', path, 'merge-base', '--is-ancestor', 'HEAD', base]).then(
-        () => true,
-        () => false,
+    const hasHead = await runOwnedFile('git', ['-C', path, 'rev-parse', '--verify', 'HEAD']).then(
+      () => true,
+      () => false,
+    );
+    const hasBase = await runOwnedFile('git', ['-C', path, 'rev-parse', '--verify', base]).then(
+      () => true,
+      () => false,
+    );
+    if (hasHead && hasBase) {
+      if (
+        await runOwnedFile('git', ['-C', path, 'merge-base', '--is-ancestor', 'HEAD', base]).then(
+          () => true,
+          () => false,
+        )
       )
-    )
-      await runOwnedFile('git', ['-C', path, 'merge', '--ff-only', '--quiet', base]);
+        await runOwnedFile('git', ['-C', path, 'merge', '--ff-only', '--quiet', base]);
+    } else if (!hasHead && hasBase) {
+      const dirty = (await runOwnedFile('git', ['-C', path, 'status', '--porcelain'])).stdout.trim();
+      if (!dirty)
+        await runOwnedFile('git', ['-C', path, 'checkout', '--quiet', '-B', branch, base]);
+    }
     await rememberStorageOwner(input.supervisorRoot, {
       workspaceId: input.workspaceId,
       roomId: input.placeId,
@@ -486,8 +534,11 @@ async function prepareCheckoutAtPath(
     ? 'The code index is ready.'
     : 'The code index was not built; use the shell and file tools.';
   if (notReady) return `Checkout at ${path} on ${where} is not ready: ${notReady} ${indexStatus}`;
-  const head = (
-    await runOwnedFile('git', ['-C', path, 'rev-parse', '--verify', 'HEAD'])
-  ).stdout.trim();
-  return `Checkout ready at ${path} on ${where}. HEAD is ${head}. ${indexStatus}`;
+  const head = await runOwnedFile('git', ['-C', path, 'rev-parse', '--verify', 'HEAD']).then(
+    ({ stdout }) => stdout.trim(),
+    () => undefined,
+  );
+  return head
+    ? `Checkout ready at ${path} on ${where}. HEAD is ${head}. ${indexStatus}`
+    : `Checkout ready at ${path} on ${where} (repository is empty; no commits on ${targetBranch} yet). ${indexStatus}`;
 }
