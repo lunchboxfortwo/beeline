@@ -53,6 +53,22 @@ it('a reply to a person in this place carries the turn\'s files', async () => {
   expect(await notes()).toEqual([closing]);
 });
 
+it('a retried reply with files returns the saved reply and posts once', async () => {
+  const request = await ask({ agent: H, place: CHAT });
+  const invocation = { id: randomUUID(), requestId: request.id };
+  await daemon.execute('startAgentTurn', { roomId: CHAT, requestId: request.id, invocationId: invocation.id }, B);
+  await upload(request.id);
+  const send = () => daemon.execute('message', { type: 'reply', roomId: CHAT, requestId: request.id, invocation,
+    quoteMsgId: request.id, text: 'Morning card.', transportRequestId: 'retry-1' }, B);
+  const first = await send();
+  const retry = await send();
+  expect(retry.messageId).toBe(first.messageId);
+  expect(await posts()).toEqual([{ text: 'Morning card.', files: ['insights.json'] }]);
+  await answerQueuedMessage(db, B, { roomId: CHAT, requestId: request.id, text: closing, harnessEnded: true, invocation });
+  expect(await posts()).toEqual([{ text: 'Morning card.', files: ['insights.json'] }]);
+  expect(await notes()).toEqual([closing]);
+});
+
 it('a reply to a person in another place leaves the files with the closing text here', async () => {
   const request = await ask({ agent: H, place: OTHER });
   await turn(request.id, request.id);
