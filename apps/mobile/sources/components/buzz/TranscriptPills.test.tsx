@@ -11,7 +11,7 @@ vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-ho
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('@/ui/grammar', () => ({
   T: 'Text', Copy: 'Text', TypedView: 'View', Inked: 'Pressable', Btn: 'Button', Glyph: 'Glyph',
-  HEIGHT: { control: 44, row: 44 },
+  HEIGHT: { control: 44, row: 44 }, STEP: { '2': 8 },
 }));
 vi.mock('react-native-unistyles', () => ({
   StyleSheet: { create: () => ({}) },
