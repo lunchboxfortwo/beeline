@@ -8,10 +8,9 @@ import { dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import {
   SQUIRE_BROKER_FLAG,
+  prepareSquireBrokerService,
   squireHostRewriteEnv,
-  updateSquireBrokerInstall,
-  writeSquireBrokerUnitMarker,
-  type SquireInstallRunner,
+  type SquireBrokerPreparationOptions,
 } from './squire-host.js';
 import { isCanonicalInstalledLauncher } from './systemd.js';
 
@@ -303,31 +302,24 @@ export async function cleanupLaunchdAgentService(
 }
 
 export async function installLaunchdTrustySquireBrokerService(
-  options: {
+  options: SquireBrokerPreparationOptions & {
     env?: NodeJS.ProcessEnv;
     run?: LaunchdRunner;
     invocationPath?: string;
     restart?: boolean;
-    squireInstallRun?: SquireInstallRunner;
-    squireUpdateMode?: 'latest' | 'minimum';
   } = {},
 ): Promise<void> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   assertCanonicalInstalledLauncher(env, options.invocationPath);
-  const home = launchdHome(env);
-  writeSquireBrokerUnitMarker(home);
-  const install = await updateSquireBrokerInstall(home, {
-    ...(options.squireInstallRun ? { run: options.squireInstallRun } : {}),
-    mode: options.squireUpdateMode ?? 'latest',
-  });
+  const { home, changed: brokerChanged } = await prepareSquireBrokerService(env, options);
   await mkdir(resolve(home, 'Library', 'Logs', 'Beeline'), { recursive: true, mode: 0o700 });
   const plistPath = launchdBrokerPlistPath(env);
   const changed = await writeManagedFile(plistPath, launchdBrokerPlist(env), 0o600);
   const run = options.run ?? runLaunchctl;
   const domain = launchdUserDomain();
   const target = `${domain}/${LAUNCHD_BROKER_LABEL}`;
-  if (changed || install.changed || options.restart) await bootoutIfLoaded(run, target);
+  if (changed || brokerChanged || options.restart) await bootoutIfLoaded(run, target);
   await run(['enable', target]);
   // `RunAtLoad` starts the job as part of bootstrap; a job that is still loaded
   // was not replaced here, so it is the one that needs starting.

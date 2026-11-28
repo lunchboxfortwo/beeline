@@ -6,11 +6,10 @@ import { promisify } from 'node:util';
 import { assertLifecycleTestIsolation } from './lifecycle-test-guard.js';
 import { convergeNativeHelper } from './native-helper.js';
 import {
-TRUSTY_SQUIRE_BROKER_UNIT_NAME,
-trustySquireBrokerUnit,
-updateSquireBrokerInstall,
-writeSquireBrokerUnitMarker,
-type SquireInstallRunner,
+  TRUSTY_SQUIRE_BROKER_UNIT_NAME,
+  prepareSquireBrokerService,
+  trustySquireBrokerUnit,
+  type SquireBrokerPreparationOptions,
 } from './squire-host.js';
 
 const execFileAsync = promisify(execFile);
@@ -69,7 +68,7 @@ export function systemdBrokerUnitPath(env: NodeJS.ProcessEnv = process.env): str
  * Idempotent; enable --now keeps the daemon up for every façade.
  */
 export async function installTrustySquireBrokerService(
-  options: {
+  options: SquireBrokerPreparationOptions & {
     env?: NodeJS.ProcessEnv;
     run?: SystemdRunner;
     invocationPath?: string;
@@ -80,22 +79,12 @@ export async function installTrustySquireBrokerService(
      * activation and must be re-executed onto the new bundle.
      */
     restart?: boolean;
-    /** Injectable for tests; forwarded to `updateSquireBrokerInstall`. */
-    squireInstallRun?: SquireInstallRunner;
-    squireUpdateMode?: 'latest' | 'minimum';
   } = {},
 ): Promise<void> {
   const env = options.env ?? process.env;
   assertLifecycleTestIsolation(env, Boolean(options.run));
   assertCanonicalInstalledLauncher(env, options.invocationPath);
-  const home = env.HOME?.trim() || homedir();
-  writeSquireBrokerUnitMarker(home);
-  // Deliberate update point: pin the durable broker install before the unit
-  // (re)starts, so a crash-restart never has to touch npm at all.
-  const install = await updateSquireBrokerInstall(home, {
-    ...(options.squireInstallRun ? { run: options.squireInstallRun } : {}),
-    mode: options.squireUpdateMode ?? 'latest',
-  });
+  const { changed: brokerChanged } = await prepareSquireBrokerService(env, options);
   const path = systemdBrokerUnitPath(env);
   const content = trustySquireBrokerUnit();
   const existing = await readFile(path, 'utf8').catch(() => '');
@@ -110,7 +99,7 @@ export async function installTrustySquireBrokerService(
   // A rewritten unit (or an explicit update) must be re-executed: the running
   // elector keeps the old PATH until systemd restarts it. An unchanged,
   // already-running elector is left alone.
-  if (changed || install.changed || options.restart) {
+  if (changed || brokerChanged || options.restart) {
     await run(['restart', '--no-block', TRUSTY_SQUIRE_BROKER_UNIT_NAME]);
   } else {
     await run(['start', TRUSTY_SQUIRE_BROKER_UNIT_NAME]);

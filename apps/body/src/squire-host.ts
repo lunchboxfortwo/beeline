@@ -98,7 +98,7 @@ export const SQUIRE_BROKER_UNIT_MARKER_FILE = '.trusty-squire-broker-unit.json';
  * parent's dev/ino plus the profile directory's resolved name. A null
  * `accountBinding` is "unclaimed", which every client may join.
  */
-export function writeSquireBrokerUnitMarker(home: string): string {
+function writeSquireBrokerUnitMarker(home: string): void {
   const paths = ensureSquireHostDir(home);
   const profile = realpathSync.native(paths.profileDir);
   const parent = dirname(profile);
@@ -111,7 +111,6 @@ export function writeSquireBrokerUnitMarker(home: string): string {
     accountBinding: null,
   };
   writeFileSync(path, `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
-  return path;
 }
 
 /**
@@ -278,6 +277,26 @@ export function squireBrokerMeetsComputerUseMinimum(home: string): boolean {
   return (
     version !== undefined && compareSquireVersions(version, SQUIRE_COMPUTER_USE_MIN_VERSION) >= 0
   );
+}
+
+export type SquireBrokerPreparationOptions = {
+  /** Injectable package runner for tests. */
+  squireInstallRun?: SquireInstallRunner;
+  squireUpdateMode?: 'latest' | 'minimum';
+};
+
+/** Claim the profile and pin the broker package before the supervisor starts it. */
+export async function prepareSquireBrokerService(
+  env: NodeJS.ProcessEnv,
+  { squireInstallRun, squireUpdateMode }: SquireBrokerPreparationOptions,
+): Promise<{ home: string; changed: boolean }> {
+  const home = env.HOME?.trim() || homedir();
+  writeSquireBrokerUnitMarker(home);
+  const { changed } = await updateSquireBrokerInstall(home, {
+    ...(squireInstallRun ? { run: squireInstallRun } : {}),
+    mode: squireUpdateMode ?? 'latest',
+  });
+  return { home, changed };
 }
 
 /**
