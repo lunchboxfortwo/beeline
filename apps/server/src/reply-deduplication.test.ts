@@ -113,6 +113,18 @@ it.each(['replyToMessage','native message'])('grunt-dup-1127: a same-place reply
  expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=$1',[request.id])).rows)
   .toEqual([{state:'complete',result_message_id:reply.id}]);
 });
+it('a same-place progress post leaves the closing answer in the chat',async()=>{
+ const request=await task();
+ const invocation={id:randomUUID(),requestId:request.id};
+ await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:request.id,invocationId:invocation.id},B);
+ await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:request.id,invocation,text:'Working on it.'},B);
+ const progress=(await answers())[0]!;
+ expect((await db.query('SELECT posted_reply_id FROM agent_commands WHERE id=$1',[request.id])).rows).toEqual([{posted_reply_id:progress.id}]);
+ const final=await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'Here is the answer.',harnessEnded:true,invocation});
+ expect(final.messageId).not.toBe(progress.id);
+ expect((await answers()).map(row=>row.text).sort()).toEqual(['Here is the answer.','Working on it.']);
+ expect(await activityNotes()).toEqual([]);
+});
 it('a same-place reply suppresses closing text without an invocation too',async()=>{
  const request=await task();
  await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Done'});

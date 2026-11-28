@@ -904,9 +904,9 @@ export async function answerQueuedMessage(database: SqlDatabase, agentId: string
         // The agent already replied in this place during the turn. Its closing
         // text goes to the turn's activity, not into the chat a second time.
         // A native reply leaves the command pending, so the reply completes it.
-        const replyId = item.result_message_id ?? item.posted_reply_id;
-        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length && replyId) {
-          const reply = await holdFinalAfterReply(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), replyId,
+        const replyId = item.result_message_id ?? item.posted_reply_id, wakeId = replyableWake(item)?.id;
+        if (input.harnessEnded && !input.keepFinal && !input.publicPost && !input.sharedReplyId && !files.length && replyId && wakeId) {
+          const reply = await holdFinalAfterReply(db, {id: hash(`suppressed-final:${item.id}:${outputId}`), replyId, wakeId,
             roomId: item.room_id, agentId, requestId: item.turn_request_id, text: messageText, steps: input.steps});
           if (reply) {
             if (item.state !== 'complete') await endAgentTurn(db, item, 'complete', null, reply.id);
