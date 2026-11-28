@@ -89,19 +89,15 @@ it('bootstraps an empty repository when creating a room linked to it', async () 
   expect(bootstrapEmptyRepository).toHaveBeenCalledWith('inst-token', 'owner/wargame', 'main');
 });
 
-it('bootstraps an empty repository after onboarding card link commits and before reading starters', async () => {
+it('bootstraps an empty repository after onboarding card link commits and settles the card', async () => {
   const { github } = makeGitHub();
-  const order: string[] = [];
+  const bootstrapped: string[] = [];
   vi.spyOn(github, 'bootstrapEmptyRoomRepository').mockImplementation(async (roomId) => {
     // Confirm the room binding is already committed and visible outside the transaction.
     const row = (await db.query<{ repository_name: string | null }>(`SELECT repository_name FROM rooms WHERE id=$1`, [roomId])).rows[0];
     expect(row?.repository_name).toBe('owner/wargame');
-    order.push('bootstrap');
+    bootstrapped.push(roomId);
     return { status: 'bootstrapped', headSha: HEAD_SHA };
-  });
-  vi.spyOn(github, 'onboardingSignals').mockImplementation(async () => {
-    order.push('signals');
-    return { commits: [], failingChecks: [], issues: [], branches: ['main'], files: ['README.md'] };
   });
   const phone = new PhoneService(db, 'https://server.test', github);
   const card = await postRepositoryOnboarding(db, github, {
@@ -111,7 +107,9 @@ it('bootstraps an empty repository after onboarding card link commits and before
     kind: 'repository',
   });
   await phone.execute('actOnRepositoryCard', { roomId: ROOM, cardId: card.id, action: 'link', repositoryId: 42 }, OWNER);
-  expect(order).toEqual(['bootstrap', 'signals']);
+  expect(bootstrapped).toEqual([ROOM]);
+  const settled = (await phone.readRoom(ROOM, OWNER))?.messages.find(message => message.id === card.id)?.onboarding;
+  expect(settled).toMatchObject({ status: 'settled', resolution: 'linked', repository: 'owner/wargame' });
 });
 
 it('keeps the room repository binding when bootstrap fails transiently', async () => {

@@ -202,6 +202,7 @@ describe('retired chat notices', () => {
       'agent-command.found-merge-conflicts-in',
       'commander.ordered',
       'commander.reported-to',
+      'repository-onboarding.suggested-work',
     ];
     expect(retired.filter((key) => key in SYSTEM_MESSAGE_CATALOG)).toEqual([]);
   });

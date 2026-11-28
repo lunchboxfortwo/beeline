@@ -5,18 +5,28 @@ vi.mock('@/components/buzz/Button', async () => {
 vi.mock('expo-router', () => ({ useLocalSearchParams: () => mocks.params, router: { setParams: vi.fn((params) => { Object.assign(mocks.params, params); }) } }));
 vi.mock('@/components/buzz/ErrorBanner', () => ({ErrorBanner:(props:any)=>React.createElement('ErrorBanner',props)}));
 vi.mock('@/buzz/onboarding-rollout', () => ({ useRepositoryOnboarding: () => mocks.enabled }));
+vi.mock('@/components/buzz/HullDialog', async () => {
+  const React = await import('react');
+  return { HullDialogInput: (props: any) => React.createElement('HullDialogInput', props) };
+});
 import React from 'react';
 // @ts-expect-error react-test-renderer has no declarations in this workspace.
 import { act, create } from 'react-test-renderer';
 import { expect, it, vi } from 'vitest';
 import type { RepositoryOnboardingCard as Card } from '@beeline/api-contract/phone';
 const mocks = vi.hoisted(() => ({ enabled: true, params: {} as Record<string, string | undefined>, operation: vi.fn<(...args: any[]) => Promise<any>>(async () => ({})) }));
-vi.mock('@/components/buzz/IdentityMark', () => ({ IdentityMark: () => null }));
+vi.mock('@/components/buzz/IdentityMark', async () => {
+  const React = await import('react');
+  return { IdentityMark: (props: any) => React.createElement('IdentityMark', props) };
+});
 vi.mock('react-native', () => ({ AppState: {}, Platform: { OS: 'android' } }));
 vi.mock('tamagui', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).tamaguiHosts());
 vi.mock('lucide-react-native', async () => (await import('@/ui/screens/transcript/grammar-hosts.test-support')).lucideHosts());
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }) }));
-vi.mock('@/components/buzz/TranscriptCard', () => ({ TranscriptCard: (props: any) => React.createElement('TranscriptCard', props) }));
+vi.mock('@/components/buzz/TranscriptCard', async () => {
+  const React = await import('react');
+  return { TranscriptCard: (props: any) => React.createElement('TranscriptCard', props, props.children) };
+});
 vi.mock('@/sync/transport/monolith-operation', () => ({ monolithPhoneOperation: mocks.operation }));
 vi.mock('@/auth/auth-session', () => ({ authSessionOptions: () => ({}) }));
 vi.mock('@/auth/desktop-auth-session', () => ({ openAccountAuthSession: vi.fn(), subscribeToAuthUrls: vi.fn() }));
@@ -25,8 +35,8 @@ import { RepositoryOnboardingCard } from './RepositoryOnboardingCard';
 import { Platform } from 'react-native';
 const H='a'.repeat(64);
 const card: Card = { id:'b'.repeat(64), roomId:'11111111-1111-4111-8111-111111111111', agentId:'c'.repeat(64), requesterId:H,
-  kind:'repository', canLink:true, state:'repo_linked', status:'open', repository:'test/current', defaultName:'new-project-123456', installationId:77,
-  repositories:[{ id:42, fullName:'test/current', installationId:77, defaultBranch:'main', current:true }, { id:43, fullName:'test/other', installationId:77, defaultBranch:'main', current:false }], starters:[] };
+  kind:'repository', canLink:true, state:'repo_linked', status:'open', repository:'test/current', defaultName:'wargame', installationId:77, installationAccount:'lunchboxfortwo',
+  repositories:[{ id:42, fullName:'test/current', installationId:77, defaultBranch:'main', current:true }, { id:43, fullName:'test/other', installationId:77, defaultBranch:'main', current:false }] };
 it('R-GITHUB-PADDING: balances only the native actionable GitHub connect footer', async () => {
   const missing: Card = { ...card, repository: undefined, installationId: undefined, githubLinked: false };
   const cases = [
@@ -36,7 +46,6 @@ it('R-GITHUB-PADDING: balances only the native actionable GitHub connect footer'
     { os: 'android', value: card, expected: false },
     { os: 'android', value: { ...missing, canLink: false }, expected: false },
     { os: 'android', value: { ...missing, status: 'settled' as const }, expected: false },
-    { os: 'android', value: { ...missing, kind: 'starters' as const }, expected: false },
   ];
   try {
     for (const { os, value, expected } of cases) {
@@ -47,6 +56,58 @@ it('R-GITHUB-PADDING: balances only the native actionable GitHub connect footer'
       await act(async () => renderer.unmount());
     }
   } finally { Object.assign(Platform, { OS: 'android' }); }
+});
+it('renders the agent avatarUrl and face from live roster identity and falls back to author avatar', async () => {
+  let renderer: any;
+  await act(async () => {
+    renderer = create(
+      <RepositoryOnboardingCard
+        card={card}
+        viewerId={H}
+        author={{ pubkey: card.agentId, kind: 'agent', name: 'Crayon', avatar: 'https://server.test/v1/agent-avatars/author.png', face: 'fox' }}
+        agent={{ pubkey: card.agentId, displayName: 'Crayon', avatar: 'https://server.test/v1/agent-avatars/live.png', face: 'owl' }}
+      />,
+    );
+  });
+  expect(renderer.root.findByType('TranscriptCard').props.identity.props).toMatchObject({
+    kind: 'agent',
+    seed: card.agentId,
+    avatarUrl: 'https://server.test/v1/agent-avatars/live.png',
+    face: 'owl',
+    name: 'Crayon',
+  });
+  await act(async () => {
+    renderer.update(
+      <RepositoryOnboardingCard
+        card={card}
+        viewerId={H}
+        author={{ pubkey: card.agentId, kind: 'agent', name: 'Crayon', avatar: 'https://server.test/v1/agent-avatars/author.png', face: 'fox' }}
+      />,
+    );
+  });
+  expect(renderer.root.findByType('TranscriptCard').props.identity.props).toMatchObject({
+    avatarUrl: 'https://server.test/v1/agent-avatars/author.png',
+    face: 'fox',
+    name: 'Crayon',
+  });
+  await act(async () => renderer.unmount());
+});
+it('uses Link an org, lets the user edit the new repo name, and sends it on create', async () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  let renderer: any;
+  await act(async () => { renderer = create(<RepositoryOnboardingCard card={{ ...card, repository: undefined, state: 'no_repo_linked' }} viewerId={H} />); });
+  const tc = renderer.root.findByType('TranscriptCard');
+  expect(tc.props.actions.find((a: any) => a.testID === 'repo-card-org').label).toBe('Link an org');
+  const input = renderer.root.findByProps({ testID: 'repo-card-name-input' });
+  expect(input.props.value).toBe('wargame');
+  await act(async () => input.props.onChangeText('bad name'));
+  expect(renderer.root.findByType('TranscriptCard').props.actions.find((a: any) => a.testID === 'repo-card-create').disabled).toBe(true);
+  await act(async () => renderer.root.findByProps({ testID: 'repo-card-name-input' }).props.onChangeText('siege-wargame'));
+  const createAction = renderer.root.findByType('TranscriptCard').props.actions.find((a: any) => a.testID === 'repo-card-create');
+  expect(createAction.disabled).toBe(false);
+  await act(async () => createAction.onPress());
+  expect(mocks.operation).toHaveBeenCalledWith('actOnRepositoryCard', expect.objectContaining({ action: 'create', cardId: card.id, name: 'siege-wargame' }));
+  await act(async () => renderer.unmount());
 });
 it('marks the current repo and sends the other repository id to the server', async () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
@@ -69,12 +130,12 @@ it('opens the picker with the named repo pre-selected', async () => {
   expect(props.choices.find((choice: any) => choice.label === 'test/other').selected).toBe(true);
   expect(props.choices.find((choice: any) => choice.label === 'test/current').selected).toBe(true);
 });
-it('does not offer actions to another viewer or repeat a settled task', async () => {
+it('does not offer actions to another viewer and hides retired starters cards', async () => {
   let rendered: any;
   await act(async () => { rendered=create(<RepositoryOnboardingCard card={card} viewerId={'d'.repeat(64)} />); });
   expect(rendered.root.findByType('TranscriptCard').props.actions).toEqual([]);
-  await act(async () => { rendered.update(<RepositoryOnboardingCard card={{...card,kind:'starters',status:'settled',starters:[{id:'readme',title:'README',evidence:'Empty repo',task:'Document it'}]}} viewerId={H} />); });
-  expect(rendered.root.findByType('TranscriptCard').props.choices[0].onPress).toBeUndefined();
+  await act(async () => { rendered.update(<RepositoryOnboardingCard card={{...card, kind:'starters' as any}} viewerId={H} />); });
+  expect(rendered.toJSON()).toBeNull();
 });
 
 it('does not render a cached card when server eligibility is OFF', async () => {
@@ -167,20 +228,45 @@ it('R-GITHUB-CARD: keeps an operation failure local and retries the failed actio
   expect(cards[0].props.actions.map((a:any) => a.label)).toEqual(['Dismiss', 'Try again']);
   expect(cards[1].props.inlineError).toBeUndefined();
   await act(async () => cards[0].props.actions[1].onPress());
-  expect(mocks.operation).toHaveBeenLastCalledWith('actOnRepositoryCard', expect.objectContaining({action:'create',cardId:card.id}));
+  expect(mocks.operation).toHaveBeenLastCalledWith('actOnRepositoryCard', expect.objectContaining({action:'create',cardId:card.id,name:'wargame'}));
   expect(renderer.root.findAllByType('TranscriptCard')[0].props.inlineError).toBeUndefined();
+  await act(async () => renderer.unmount());
+});
+
+it('shows action-specific errors for create and link failures instead of GitHub connect copy', async () => {
+  mocks.params = {};
+  mocks.operation.mockRejectedValueOnce(new Error('Repository name already exists on this account.'));
+  let renderer: any;
+  await act(async () => { renderer = create(<RepositoryOnboardingCard card={card} viewerId={H} />); });
+  await act(async () => renderer.root.findByType('TranscriptCard').props.actions.find((a: any) => a.testID === 'repo-card-create').onPress());
+  expect(renderer.root.findByType('TranscriptCard').props.inlineError).toEqual({
+    title: "Couldn't create repository",
+    description: 'Repository name already exists on this account.',
+  });
   await act(async () => renderer.unmount());
 });
 
 it('collapses a linked repository using its existing name without inventing visibility', async () => {
   let renderer: any;
-  await act(async () => { renderer=create(<RepositoryOnboardingCard card={{...card,status:'settled'}} viewerId={H} />); });
+  await act(async () => { renderer=create(<RepositoryOnboardingCard card={{...card,status:'settled',resolution:'linked'}} viewerId={H} />); });
   const props=renderer.root.findByType('TranscriptCard').props;
   expect(props.title).toBe('Repository linked');
   expect(props.subline).toBe('test/current');
   expect(props.body).toBeUndefined();
   expect(props.actions).toEqual([]);
   expect(props.identity).toBeTruthy();
+  await act(async () => renderer.unmount());
+});
+it('renders a superseded switch card as replaced instead of Repository linked', async () => {
+  let renderer: any;
+  await act(async () => { renderer = create(<RepositoryOnboardingCard card={{ ...card, status: 'settled', resolution: 'superseded' }} viewerId={H} />); });
+  const props = renderer.root.findByType('TranscriptCard').props;
+  expect(props.title).toBe('Switch repository');
+  expect(props.subline).toBe('Replaced by a newer card');
+  expect(props.tier).toBe('record');
+  expect(props.body).toBeUndefined();
+  expect(props.choices).toEqual([]);
+  expect(props.actions).toEqual([]);
   await act(async () => renderer.unmount());
 });
 it('dismisses a failed connect permanently while preserving the installation result', async () => {

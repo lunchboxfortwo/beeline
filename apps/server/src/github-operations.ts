@@ -5,7 +5,6 @@ import { NotificationWork } from './notification-work.js';
 import { OwnerScheduleClock } from './owner-schedule-clock.js';
 import { setLiveCornerChecksReader } from './corner-live-checks.js';
 import { CommandRefusalError } from './command-refusal.js';
-import type { RepositorySignals } from './repository-onboarding.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { GitHubAppClient, GitHubOAuthClient, githubRetryDelay, transientGitHubError, type BootstrapEmptyRepositoryResult } from '@beeline/auth/github';
 import type { CornerLifecycleView, PhoneOperationMap } from '@beeline/api-contract/phone';
@@ -13,7 +12,7 @@ import type { CornerPullRequestResult } from '@beeline/api-contract/daemon';
 import type { SqlDatabase } from './database.js';
 import { type SystemPhrase } from './system-line.js';
 import { fireRepositorySubscriptions } from './agent-subscriptions.js';
-import { gitHubOperationsBeginIdentity, gitHubOperationsCompleteIdentity, gitHubOperationsBeginInstallation, gitHubOperationsCompleteInstallation, gitHubOperationsRefresh, gitHubOperationsRepositoryStarred, gitHubOperationsStarRepository, gitHubOperationsOnboardingSignals, gitHubOperationsCreateRepository, gitHubOperationsBootstrapEmptyRoomRepository, gitHubOperationsRoomAnchorTarget, gitHubOperationsRoomWorkflowTarget, gitHubOperationsAssertCornerReviewerNotAuthor, gitHubOperationsListRoomWorkflows, gitHubOperationsDispatchRoomWorkflow, gitHubOperationsDispatchProductionRelease, gitHubOperationsResolveUnregisteredCornerPullRequest, gitHubOperationsRefreshCornerReviewHead, gitHubOperationsPrChecksStatus } from './github-operations-begin-identity.js';
+import { gitHubOperationsBeginIdentity, gitHubOperationsCompleteIdentity, gitHubOperationsBeginInstallation, gitHubOperationsCompleteInstallation, gitHubOperationsRefresh, gitHubOperationsRepositoryStarred, gitHubOperationsStarRepository, gitHubOperationsCreateRepository, gitHubOperationsBootstrapEmptyRoomRepository, gitHubOperationsRoomAnchorTarget, gitHubOperationsRoomWorkflowTarget, gitHubOperationsAssertCornerReviewerNotAuthor, gitHubOperationsListRoomWorkflows, gitHubOperationsDispatchRoomWorkflow, gitHubOperationsDispatchProductionRelease, gitHubOperationsResolveUnregisteredCornerPullRequest, gitHubOperationsRefreshCornerReviewHead, gitHubOperationsPrChecksStatus } from './github-operations-begin-identity.js';
 import { gitHubOperationsReadPrChecksStatus, gitHubOperationsLandCorner, gitHubOperationsLandCornerOutcome, gitHubOperationsCloseCornerPullRequest, gitHubOperationsRecordClosedCornerPullRequest, gitHubOperationsReadCornerPullRequest, gitHubOperationsRefreshStaleMergeability } from './github-operations-read-pr-checks-status.js';
 import { gitHubOperationsReconcileQueuedCorners, gitHubOperationsRecordConfirmedCornerMerge, gitHubOperationsProcessBaseBranchPush, gitHubOperationsProcessRepositoryEvent, gitHubOperationsProcessCornerEvent } from './github-operations-reconcile-queued-corners.js';
 import { gitHubOperationsRefreshCheckRollup, gitHubOperationsLifecycle, gitHubOperationsUpdateLifecycle, gitHubOperationsSystemNote, gitHubOperationsMergeCorner, gitHubOperationsDeleteCornerBranch, gitHubOperationsSyncInstallation, gitHubOperationsListAdministeredInstallations, gitHubOperationsUserCanAdministerInstallation, gitHubOperationsAssertInstallationAccess } from './github-operations-refresh-check-rollup.js';
@@ -197,8 +196,6 @@ async refresh(viewerId: string): Promise<{
 async repositoryStarred(viewerId: string, fullName: string): Promise<boolean | 'unknown'> { return gitHubOperationsRepositoryStarred(this, viewerId, fullName); }
 /** Star `fullName` with the viewer's own token. False when GitHub refuses. */
 async starRepository(viewerId: string, fullName: string): Promise<boolean> { return gitHubOperationsStarRepository(this, viewerId, fullName); }
-/** Read signals with the Room's exact-repository installation token. */
-async onboardingSignals(roomId: string): Promise<RepositorySignals> { return gitHubOperationsOnboardingSignals(this, roomId); }
 async createRepository(viewerId: string, input: Input<'createGitHubRepository'>, database: SqlDatabase = this.database) { return gitHubOperationsCreateRepository(this, viewerId, input, database); }
 /** Seed an empty linked repository on GitHub so checkouts and PR threads have a base commit. */
 async bootstrapEmptyRoomRepository(roomId: string): Promise<BootstrapEmptyRepositoryResult | undefined> { return gitHubOperationsBootstrapEmptyRoomRepository(this, roomId); }

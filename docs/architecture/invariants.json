@@ -3787,6 +3787,9 @@
         "confirmed": "existing before the registry; weekly audit reviews"
       },
       "card": {
+        "creatingToken": "Per-card create lock token prevents overlapping GitHub repository creations across transactions and lets only its owner release or record the created repository ID.",
+        "creatingAt": "Per-card create lock timestamp bounds the in-flight repository creation lease so crashed requests do not lock a card permanently.",
+        "createdRepository": "Records the exact repository ID returned by a successful GitHub create so an interrupted link step recovers only that repository.",
         "route": "A message freezes its sender and destination tuples at send time; current membership and later tags cannot reconstruct them.",
         "expiresAt": "The recorded sign-in or approval expiry is retained on its card so reads and retries use the original provider deadline.",
         "runStatus": "Workflow run start cards persist the committed live or terminal status so assignment admission cannot wake a finished run.",

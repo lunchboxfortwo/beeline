@@ -8,7 +8,7 @@ export type ToolDefinition = { name: string; description: string; inputSchema: R
 
 export const CAPABILITY_ROUTES: Record<string, Record<string, string>> = {
   vault: { request: 'post_vault_save_card' },
-  "onboarding": {"welcome": "post_starter_welcome", "game": "post_starter_game", "invite": "post_chat_invite", "repository": "post_repository_card", "starters": "post_starters_card"},
+  "onboarding": {"welcome": "post_starter_welcome", "game": "post_starter_game", "invite": "post_chat_invite", "repository": "post_repository_card"},
   "workflow": {
     "save": "save_workflow",
     "describe": "load_workspace_skill",
@@ -62,8 +62,7 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
     game: { name: 'game', description: 'Start tic-tac-toe with the starter team when the person asks to play.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     welcome: { name: 'welcome', description: 'Post the signup welcome question in this chat to rerun onboarding. Manual runs are excluded from signup funnel counts.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     invite: { name: 'invite', description: 'Create an invite for the requester\'s own chat and print the invite link in this chat. Workspace manager membership is required.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-    repository: { name: 'repository', description: 'Post the chat repository card: create a private repo, link an installation repo, switch repos or add an organization. Pass repository to pre-select an installation repo by owner/repo or a unique repo name. A name that is not installed is not selected. Returns install_missing, no_repo_linked or repo_linked. Use this instead of settings or CLI instructions.', inputSchema: { type: 'object', additionalProperties: false, properties: { repository: { type: 'string', minLength: 1, maxLength: 200, description: 'Installation repo to pre-select, as owner/repo or a unique repo name.' } } } },
-    starters: { name: 'starters', description: 'Read recent commits, CI and open issues in the linked repository and post 3–4 one-tap tasks. Empty repositories get useful starting tasks. A selection starts work through the normal thread flow.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    repository: { name: 'repository', description: 'Post the chat repository card: create a private repo, link an installation repo, switch repos or link an organization. Pass repository to pre-select an existing installation repo (owner/repo or unique repo name) or pre-fill the new repo name if it does not exist yet. Returns install_missing, no_repo_linked or repo_linked. Use this instead of settings or CLI instructions.', inputSchema: { type: 'object', additionalProperties: false, properties: { repository: { type: 'string', minLength: 1, maxLength: 200, description: 'Existing installation repo to pre-select (owner/repo or unique repo name), or desired name for a new repository.' } } } },
   },
   "workflow": {
     "describe": {

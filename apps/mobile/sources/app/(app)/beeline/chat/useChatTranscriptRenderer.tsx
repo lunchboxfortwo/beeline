@@ -298,7 +298,7 @@ export function useChatTranscriptRenderer([
             agentHandle={item.authorIdentity?.kind === 'agent' ? item.authorIdentity.handle : undefined} />
           );
         }
-        if (item.onboarding) return <RepositoryOnboardingCard card={item.onboarding} viewerId={cacheViewerPubkey} author={item.authorIdentity} />;
+        if (item.onboarding) return <RepositoryOnboardingCard card={item.onboarding} viewerId={cacheViewerPubkey} author={item.authorIdentity} agent={agentFor(item.onboarding.agentId)} />;
         const choice = renderChoice(item);
         if (choice) return choice;
 

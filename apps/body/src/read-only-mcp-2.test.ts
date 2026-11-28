@@ -792,14 +792,15 @@ const scope24 = fixtureScope24();
 
 m26_it('discovers cards and chat invitations without an external connection and binds writes to the active turn',async()=>{
   const discovered=JSON.parse(await m26_callAgentTool('app_tool',{app:'beeline:onboarding'},'discover'));
-  m26_expect(discovered.tools.map((t:{name:string})=>t.name)).toEqual(m26_expect.arrayContaining(['welcome','game','invite','repository','starters']));
+  m26_expect(discovered.tools.map((t:{name:string})=>t.name)).toEqual(m26_expect.arrayContaining(['welcome','game','invite','repository']));
+  m26_expect(discovered.tools.map((t:{name:string})=>t.name)).not.toContain('starters');
   scope24.calls.length = 0;
   await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'welcome',args:{}});
   m26_expect(scope24.calls.find(call => call.name === 'postStarterWelcome')!.input).toMatchObject({roomId:'room-1',requestId:'request-1',taskId:'command-1'});
-  for (const tool of ['repository','starters']) await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool,args:{}});
-  m26_expect(scope24.calls.filter(call=>call.name === 'postRepositoryOnboarding').map(call=>call.name)).toEqual(['postRepositoryOnboarding','postRepositoryOnboarding']);
-  m26_expect(scope24.calls.filter(call=>call.name === 'postRepositoryOnboarding').map(call=>call.input.kind)).toEqual(['repository','starters']);
-  m26_expect(scope24.calls.find(call=>call.name === 'postRepositoryOnboarding')!.input).toMatchObject({roomId:'room-1',requestId:'request-1'});
+  await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'repository',args:{repository:'wargame'}});
+  m26_expect(scope24.calls.filter(call=>call.name === 'postRepositoryOnboarding').map(call=>call.input)).toEqual([
+    m26_expect.objectContaining({roomId:'room-1',requestId:'request-1',kind:'repository',repository:'wargame'}),
+  ]);
   await m26_callAgentTool('app_tool',{app:'beeline:onboarding',tool:'invite',args:{}});
   m26_expect(scope24.calls.filter(call=>call.name === 'postRoomInvite')).toEqual([{
     name:'postRoomInvite', input:{roomId:'room-1',requestId:'request-1',taskId:'command-1'},

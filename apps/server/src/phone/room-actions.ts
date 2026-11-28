@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { GitHubHttpError } from '@beeline/auth/github';
+import { CommandRefusalError } from '../command-refusal.js';
 import { phoneIdentity as identity } from '../phone-identity.js';
-import { postRepositoryOnboarding } from '../repository-onboarding.js';
+import { postRepositoryOnboarding, validateRepositoryName } from '../repository-onboarding.js';
 import { readRepositoryOnboardingCard } from '@beeline/api-contract/phone';
 import { settleWorkflowGate } from '../workflow-runs.js';
 import { answerRoomChoice, postRoomChoice, skipRoomChoice } from '../room-choice.js';
@@ -36,25 +39,238 @@ import { PhoneService } from '../phone-service.js';
     });
   }
 
+  const CREATE_LOCK_TTL_MS = 120_000;
+
+  type RecordedCreatedRepository = {
+    id: number;
+    fullName: string;
+    installationId: number;
+    defaultBranch: string;
+    requestedName: string;
+  };
+
+  function readRecordedCreatedRepository(raw: Record<string, unknown> | null | undefined): RecordedCreatedRepository | undefined {
+    const value = raw?.createdRepository;
+    if (!value || typeof value !== 'object') return undefined;
+    const item = value as Record<string, unknown>;
+    if (
+      typeof item.id !== 'number' || !Number.isSafeInteger(item.id) || item.id <= 0 ||
+      typeof item.installationId !== 'number' || !Number.isSafeInteger(item.installationId) || item.installationId <= 0 ||
+      typeof item.fullName !== 'string' || !item.fullName ||
+      typeof item.defaultBranch !== 'string' || !item.defaultBranch ||
+      typeof item.requestedName !== 'string' || !item.requestedName
+    ) return undefined;
+    return {
+      id: item.id,
+      fullName: item.fullName,
+      installationId: item.installationId,
+      defaultBranch: item.defaultBranch,
+      requestedName: item.requestedName,
+    };
+  }
+
+  function hasActiveCreateLock(raw: Record<string, unknown> | null | undefined, now = Date.now()): boolean {
+    if (typeof raw?.creatingToken !== 'string' || !raw.creatingToken) return false;
+    const startedAt = typeof raw.creatingAt === 'number' ? raw.creatingAt : 0;
+    return startedAt > 0 && now - startedAt < CREATE_LOCK_TTL_MS;
+  }
+
+  async function bootstrapLinkedEmptyRepository(ctx: PhoneContext, roomId: string): Promise<void> {
+    if (!ctx.github?.bootstrapEmptyRoomRepository) return;
+    try {
+      await ctx.github.bootstrapEmptyRoomRepository(roomId);
+    } catch (error) {
+      console.warn(`[server] empty repository bootstrap skipped for room ${roomId}:`, error);
+    }
+  }
+
   export async function phoneActOnRepositoryCard(ctx: PhoneContext, input: Input<'actOnRepositoryCard'>, viewerId: string): Promise<Output<'actOnRepositoryCard'>> {
     if (['create', 'link', 'install', 'organization'].includes(input.action)) await phoneRequireRoomWorkspaceManager(ctx, input.roomId, viewerId);
     else {
       if (!(await phoneHasRoomAccess(ctx, input.roomId, viewerId))) throw new Error('room access denied');
       await phoneRequireTopLevelChatMember(ctx, input.roomId, viewerId);
     }
-    let followup: { roomId: string; agentId: string; requesterId: string; kind: 'repository' | 'starters' } | undefined;
+    if (input.action === 'create') {
+      const lockToken = randomUUID();
+      const prepared = await ctx.database.transaction(async database => {
+        const row = (await database.query<{ card: Record<string, unknown> | null }>(
+          `SELECT card FROM messages WHERE id=$1 AND room_id=$2 AND card_type='repository-onboarding' FOR UPDATE`,
+          [input.cardId, input.roomId])).rows[0];
+        const card = readRepositoryOnboardingCard(row?.card);
+        if (!card || card.requesterId !== viewerId) throw new Error('repository card access denied');
+        if (card.status === 'settled') return { done: true as const, linkedNow: false, result: { selected: card.selected } };
+        if (hasActiveCreateLock(row?.card)) {
+          throw new CommandRefusalError('A repository creation is already in progress for this card. Wait for it to finish.', 409);
+        }
+        const requestedName = input.name !== undefined ? validateRepositoryName(input.name) : card.defaultName;
+        const recorded = readRecordedCreatedRepository(row?.card);
+        if (recorded) {
+          // Recover only the exact repository ID recorded from a successful create on this card.
+          if (recorded.requestedName.toLowerCase() !== requestedName.toLowerCase()) {
+            throw new CommandRefusalError(
+              `This card already created "${recorded.fullName}". Retry with "${recorded.requestedName}" or tap Link existing.`,
+              409,
+            );
+          }
+          const service = new PhoneService(database, ctx.publicOrigin, ctx.github, ctx.sendPushTest, ctx.live, true);
+          await service.setRepository({ roomId: input.roomId, key: `github:${recorded.id}`, name: recorded.fullName,
+            remote: `git://github.com/${recorded.fullName}`, targetBranch: recorded.defaultBranch,
+            githubInstallationId: recorded.installationId }, viewerId);
+          await database.query(
+            `UPDATE messages SET card=(card - 'creatingToken' - 'creatingAt' - 'createdRepository') || $2::jsonb,version=version+1 WHERE id=$1`,
+            [
+              input.cardId,
+              JSON.stringify({
+                status: 'settled',
+                resolution: 'created',
+                selected: recorded.requestedName,
+                repository: recorded.fullName,
+                defaultName: recorded.requestedName,
+              }),
+            ],
+          );
+          return { done: true as const, linkedNow: true, result: { selected: recorded.requestedName } };
+        }
+        if (!card.installationId) throw new Error('Install Beeline on all personal repositories first');
+        const service = new PhoneService(database, ctx.publicOrigin, ctx.github, ctx.sendPushTest, ctx.live, true);
+        await phoneRequireGitHub(ctx).refresh(viewerId);
+        const available = await service.listRepositories(viewerId);
+        const existing = available.repositories.find(r =>
+          r.installationId === card.installationId && r.fullName.split('/')[1]?.toLowerCase() === requestedName.toLowerCase(),
+        );
+        if (existing) {
+          throw new CommandRefusalError(
+            `Repository "${existing.fullName}" already exists. Choose a different name or tap Link existing.`,
+            409,
+          );
+        }
+        // Hold one active create lock per card while GitHub creates the repository.
+        await database.query(
+          `UPDATE messages SET card=card || jsonb_build_object('creatingToken', $2::text, 'creatingAt', $3::double precision) WHERE id=$1`,
+          [input.cardId, lockToken, Date.now()],
+        );
+        return { done: false as const, installationId: card.installationId, requestedName };
+      });
+      if (prepared.done) {
+        if (prepared.linkedNow) await bootstrapLinkedEmptyRepository(ctx, input.roomId);
+        ctx.live?.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
+        return prepared.result;
+      }
+      const releaseCreateLock = async () => {
+        await ctx.database.query(
+          `UPDATE messages SET card=card - 'creatingToken' - 'creatingAt' WHERE id=$1 AND card->>'creatingToken'=$2 AND card->>'status'='open'`,
+          [input.cardId, lockToken],
+        );
+      };
+      let created;
+      try {
+        created = await phoneRequireGitHub(ctx).createRepository(viewerId, {
+          installationId: prepared.installationId, name: prepared.requestedName, private: true,
+        }, ctx.database);
+      } catch (error) {
+        await releaseCreateLock();
+        if (error instanceof CommandRefusalError) throw error;
+        if (error instanceof GitHubHttpError && error.status === 422) {
+          const detail = error.detail?.trim();
+          if (detail && /name already exists|already exists on this account/i.test(detail)) {
+            throw new CommandRefusalError(
+              `Repository "${prepared.requestedName}" already exists on GitHub. Choose a different name or tap Link existing.`,
+              409,
+            );
+          }
+          throw new CommandRefusalError(
+            detail
+              ? `GitHub rejected creating "${prepared.requestedName}": ${detail}`
+              : `GitHub rejected creating "${prepared.requestedName}" (HTTP 422). Check the repository name and GitHub permissions, then try again.`,
+            400,
+          );
+        }
+        if (error instanceof GitHubHttpError && error.status >= 400 && error.status < 500) {
+          throw error;
+        }
+        if (error instanceof Error && /GitHub user authorization is required/i.test(error.message)) {
+          throw new CommandRefusalError(
+            'GitHub authorization is required to create a personal repository. Reconnect GitHub and try again.',
+            403,
+          );
+        }
+        if (error instanceof Error && /GitHub installation not found/i.test(error.message)) {
+          throw new CommandRefusalError(
+            'GitHub installation not found. Reconnect GitHub and try again.',
+            404,
+          );
+        }
+        throw new Error(
+          'GitHub did not confirm whether the repository was created. Check Link existing to link it if it appeared, or try again.',
+        );
+      }
+      const recordedCreated: RecordedCreatedRepository = {
+        id: created.id,
+        fullName: created.fullName,
+        installationId: created.installationId,
+        defaultBranch: created.defaultBranch,
+        requestedName: prepared.requestedName,
+      };
+      // Durably record the exact created repository ID before linking so only this repo can be recovered if linking fails.
+      await ctx.database.query(
+        `UPDATE messages SET card=card || jsonb_build_object('createdRepository', $2::jsonb) WHERE id=$1 AND card->>'creatingToken'=$3 AND card->>'status'='open'`,
+        [input.cardId, JSON.stringify(recordedCreated), lockToken],
+      );
+      try {
+        const result = await ctx.database.transaction(async database => {
+          const row = (await database.query<{ card: Record<string, unknown> | null }>(
+            `SELECT card FROM messages WHERE id=$1 AND room_id=$2 AND card_type='repository-onboarding' FOR UPDATE`,
+            [input.cardId, input.roomId])).rows[0];
+          const card = readRepositoryOnboardingCard(row?.card);
+          if (!card || card.requesterId !== viewerId) throw new Error('repository card access denied');
+          if (card.status !== 'open' || row?.card?.creatingToken !== lockToken) {
+            throw new CommandRefusalError(
+              `Repository "${created.fullName}" was created, but this card changed before linking. Tap Link existing to attach it.`,
+              409,
+            );
+          }
+          const service = new PhoneService(database, ctx.publicOrigin, ctx.github, ctx.sendPushTest, ctx.live, true);
+          await service.setRepository({ roomId: input.roomId, key: `github:${created.id}`, name: created.fullName,
+            remote: `git://github.com/${created.fullName}`, targetBranch: created.defaultBranch,
+            githubInstallationId: created.installationId }, viewerId);
+          await database.query(
+            `UPDATE messages SET card=(card - 'creatingToken' - 'creatingAt' - 'createdRepository') || $2::jsonb,version=version+1 WHERE id=$1`,
+            [
+              input.cardId,
+              JSON.stringify({
+                status: 'settled',
+                resolution: 'created',
+                selected: prepared.requestedName,
+                repository: created.fullName,
+                defaultName: prepared.requestedName,
+              }),
+            ],
+          );
+          return { linkedNow: true, result: { selected: prepared.requestedName } };
+        });
+        if (result.linkedNow) await bootstrapLinkedEmptyRepository(ctx, input.roomId);
+        ctx.live?.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
+        return result.result;
+      } catch (error) {
+        await releaseCreateLock();
+        throw error;
+      }
+    }
+
+    let followup: { roomId: string; agentId: string; requesterId: string; kind: 'repository' } | undefined;
+    let linkedNow = false;
     // Serialize taps and make a retried response return the committed selection.
     const result = await ctx.database.transaction(async database => {
-      const row = (await database.query<{ card: unknown }>(
+      const row = (await database.query<{ card: Record<string, unknown> | null }>(
         `SELECT card FROM messages WHERE id=$1 AND room_id=$2 AND card_type='repository-onboarding' FOR UPDATE`,
         [input.cardId, input.roomId])).rows[0];
       const card = readRepositoryOnboardingCard(row?.card);
       if (!card || card.requesterId !== viewerId) throw new Error('repository card access denied');
-      if (['create', 'link', 'refresh'].includes(input.action)) followup = { roomId: input.roomId, agentId: card.agentId, requesterId: viewerId, kind: input.action === 'refresh' ? 'repository' : 'starters' };
+      if (input.action === 'refresh') followup = { roomId: input.roomId, agentId: card.agentId, requesterId: viewerId, kind: 'repository' };
       if (card.status === 'settled') { followup = undefined; return { selected: card.selected }; }
-      const requestedSelection = input.action === 'create' ? card.defaultName : String(input.repositoryId);
-      if (['create', 'link'].includes(input.action) && card.selected && card.selected !== requestedSelection)
-        throw new Error('This card already linked a repository. Retry the same option or ask for a new card.');
+      if (input.action === 'link' && hasActiveCreateLock(row?.card)) {
+        throw new CommandRefusalError('A repository creation is already in progress for this card. Wait for it to finish.', 409);
+      }
       if (input.action === 'refresh') {
         await phoneRequireGitHub(ctx).refresh(viewerId);
         return {};
@@ -77,52 +293,27 @@ import { PhoneService } from '../phone-service.js';
           redirectUri: input.redirectUri, selectTarget: input.action === 'organization',
         });
       }
-      if (input.action === 'starter') {
-        if (card.kind !== 'starters') throw new Error('this card does not offer starter tasks');
-        const starter = card.starters.find(s => s.id === input.starterId);
-        if (!starter) throw new Error('starter not found');
-        const current = (await database.query<{ repository_name: string }>(
-          `SELECT repository_name FROM rooms WHERE id=$1`, [input.roomId])).rows[0];
-        if (current?.repository_name !== card.repository) throw new Error('Repository changed. Ask for fresh starters.');
-        const agent = (await database.query<{ handle: string }>(`SELECT beeline_room_handle(id,$2) handle FROM identities WHERE id=$1`, [card.agentId,input.roomId])).rows[0];
-        if (!agent?.handle) throw new Error('The offering agent is no longer available');
-        await service.sendMessage({ roomId: input.roomId,
-          text: `@${agent.handle} ${starter.title}\n${starter.task}\nStart this task now in a repository corner with a complete brief. Use this selection as approval. Keep the normal checks, independent review and merge gate.`,
-          mentions: [card.agentId] }, viewerId);
-      } else {
-        if (card.kind !== 'repository' || !['create', 'link'].includes(input.action)) throw new Error('invalid repository action');
-        let repository;
-        if (input.action === 'create') {
-          if (!card.installationId) throw new Error('Install Beeline on all personal repositories first');
-          // The per-card name lets a retry recover a repository created before a lost response.
-          await phoneRequireGitHub(ctx).refresh(viewerId);
-          const available = await service.listRepositories(viewerId);
-          repository = available.repositories.find(r => r.installationId === card.installationId && r.fullName.split('/')[1] === card.defaultName);
-          repository ??= await phoneRequireGitHub(ctx).createRepository(viewerId, {
-            installationId: card.installationId, name: card.defaultName, private: true,
-          }, database);
-        } else repository = card.repositories.find(r => r.id === input.repositoryId);
-        if (!repository) throw new Error('repository not found');
-        await service.setRepository({ roomId: input.roomId, key: `github:${repository.id}`, name: repository.fullName,
-          remote: `git://github.com/${repository.fullName}`, targetBranch: repository.defaultBranch,
-          githubInstallationId: repository.installationId }, viewerId);
-      }
-      const selected = input.action === 'starter' ? input.starterId! : input.action === 'create' ? card.defaultName : String(input.repositoryId);
-      await database.query(`UPDATE messages SET card=card || $2::jsonb,version=version+1 WHERE id=$1`,
-        [input.cardId, JSON.stringify({ status: followup ? 'open' : 'settled', selected })]);
+      if (input.action !== 'link') throw new Error('invalid repository action');
+      const repository = card.repositories.find(r => r.id === input.repositoryId);
+      if (!repository) throw new Error('repository not found');
+      await service.setRepository({ roomId: input.roomId, key: `github:${repository.id}`, name: repository.fullName,
+        remote: `git://github.com/${repository.fullName}`, targetBranch: repository.defaultBranch,
+        githubInstallationId: repository.installationId }, viewerId);
+      const selected = String(input.repositoryId);
+      await database.query(`UPDATE messages SET card=(card - 'creatingToken' - 'creatingAt' - 'createdRepository') || $2::jsonb,version=version+1 WHERE id=$1`, [
+        input.cardId,
+        JSON.stringify({
+          status: 'settled',
+          resolution: 'linked',
+          selected,
+          repository: repository.fullName,
+        }),
+      ]);
+      linkedNow = true;
       return { selected };
     });
-    if (followup) {
-      if (['create', 'link'].includes(input.action) && ctx.github?.bootstrapEmptyRoomRepository) {
-        try {
-          await ctx.github.bootstrapEmptyRoomRepository(input.roomId);
-        } catch (error) {
-          console.warn(`[server] empty repository bootstrap skipped for room ${input.roomId}:`, error);
-        }
-      }
-      await ctx.database.transaction(db => postRepositoryOnboarding(db, ctx.github, followup!));
-      if (followup.kind === 'starters') await ctx.database.query(`UPDATE messages SET card=jsonb_set(card,'{status}','"settled"') WHERE id=$1`, [input.cardId]);
-    }
+    if (linkedNow) await bootstrapLinkedEmptyRepository(ctx, input.roomId);
+    if (followup) await ctx.database.transaction(db => postRepositoryOnboarding(db, ctx.github, followup!));
     ctx.live?.publish({ type: 'invalidate', roomId: input.roomId, reason: 'message' });
     return result;
   }

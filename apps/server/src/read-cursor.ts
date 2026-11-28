@@ -14,6 +14,8 @@ export function visibleMessageSql(alias: string): string {
   // A schedule's run is kept in the routine's history, not the chat.
   return `${hiddenWakeCardSql(alias)}
       AND ${alias}.system_transcript->>'visibility' IS DISTINCT FROM 'hidden'
+      AND NOT (${alias}.card_type IS NOT DISTINCT FROM 'repository-onboarding'
+        AND ${alias}.card->>'kind' IS NOT DISTINCT FROM 'starters')
       AND NOT (${alias}.card_type IS NOT DISTINCT FROM 'github-corner-note'
         AND COALESCE(${alias}.system_event->>'verb','') IN ('opened a pull request','merged')
         AND EXISTS (SELECT 1 FROM rooms pr_thread

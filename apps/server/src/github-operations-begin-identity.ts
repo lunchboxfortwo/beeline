@@ -3,7 +3,6 @@ import { storeGitHubInstallations } from './github-installation-store.js';
 import type { InstallationSnapshot } from './github-installation-store.js';
 import { cornerLifecycleSql } from './corner-github-cache.js';
 import { CommandRefusalError } from './command-refusal.js';
-import type { RepositorySignals } from './repository-onboarding.js';
 import { cornerFeatureBranchSql } from './corner-branch.js';
 import { randomBytes } from 'node:crypto';
 import { GITHUB_IDENTITY_AUDIENCE, GitHubHttpError, type BootstrapEmptyRepositoryResult } from '@beeline/auth/github';
@@ -334,44 +333,6 @@ import { GitHubOperations, Input, hash, challenge, record, GitHubRecord, text, i
   export async function gitHubOperationsStarRepository(ctx: GitHubOperations, viewerId: string, fullName: string): Promise<boolean> {
     const token = (await ctx.userCredential(viewerId, ctx.database))?.token;
     return token ? ctx.app.starRepository(token, fullName) : false;
-  }
-
-
-  /** Read signals with the Room's exact-repository installation token. */
-  export async function gitHubOperationsOnboardingSignals(ctx: GitHubOperations, roomId: string): Promise<RepositorySignals> {
-    const room = (await ctx.database.query<{ repository_name: string; repository_target_branch: string }>(
-      `SELECT repository_name,repository_target_branch FROM rooms WHERE id=$1 AND repository_resolution='repository'`, [roomId])).rows[0];
-    if (!room) throw new Error('Link a repository before reading starters');
-    const token = await ctx.roomToken(roomId);
-    const read = (path: string) => ctx.app.issuesRequest(token.token, room.repository_name, 'GET', path);
-    const [commitsResult, issuesResult, branchesResult, treeResult] = await Promise.all([
-      read(`commits?sha=${encodeURIComponent(room.repository_target_branch)}&per_page=30`).catch(error => {
-        if (error instanceof GitHubHttpError && error.status === 409) return [];
-        throw error;
-      }),
-      read('issues?state=open&sort=created&direction=asc&per_page=50'),
-      read('branches?per_page=100'),
-      read(`git/trees/${encodeURIComponent(room.repository_target_branch)}?recursive=1`).catch(error => {
-        if (error instanceof GitHubHttpError && [404, 409].includes(error.status)) return { tree: [] };
-        throw error;
-      }),
-    ]);
-    const records = (value: unknown) => Array.isArray(value) ? value.map(record).filter((r): r is GitHubRecord => !!r) : [];
-    const commits = await Promise.all(records(commitsResult).slice(0, 10).map(async commit => {
-      const sha = text(commit.sha)!;
-      const detail = record(await read(`commits/${encodeURIComponent(sha)}`));
-      return { sha, message: text(record(commit.commit)?.message) ?? '',
-        files: records(detail?.files).map(file => text(file.filename)).filter((p): p is string => !!p) };
-    }));
-    const head = commits[0]?.sha;
-    const checks = head ? await ctx.app.readCommitCheckRollup(token.token, room.repository_name, head) : undefined;
-    return {
-      commits, failingChecks: checks?.failing ?? [],
-      issues: records(issuesResult).filter(issue => !issue.pull_request).map(issue => ({ number: integer(issue.number)!,
-        title: text(issue.title) ?? '', bug: records(issue.labels).some(label => /bug/i.test(String(label.name))) })),
-      branches: records(branchesResult).map(branch => text(branch.name)).filter((p): p is string => !!p),
-      files: records(record(treeResult)?.tree).map(file => text(file.path)).filter((p): p is string => !!p),
-    };
   }
 
 

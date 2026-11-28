@@ -671,7 +671,7 @@ describe('PhoneService.readRoom latency', () => {
   it('keeps another viewer’s repository setup card out of complete deck message records', async () => {
     const other = 'f'.repeat(64), id = 'e'.repeat(64);
     const card = { id, roomId: ROOM, agentId: '0'.repeat(64), requesterId: other, kind: 'repository',
-      state: 'no_repo_linked', status: 'open', canLink: false, defaultName: 'Private setup', repositories: [], starters: [] };
+      state: 'no_repo_linked', status: 'open', canLink: false, defaultName: 'Private setup', repositories: [] };
     await database.query(`INSERT INTO identities(id,kind,name,handle) VALUES($1,'human','Private reviewer','private-reviewer')`, [other]);
     await database.query(`INSERT INTO memberships(workspace_id,room_id,identity_id,role) VALUES($1,NULL,$2,'member'),($1,$3,$2,'member')`, [WORKSPACE, other, ROOM]);
     await database.query(`INSERT INTO messages(id,room_id,author_id,text,presentation,card_type,card,created_at)

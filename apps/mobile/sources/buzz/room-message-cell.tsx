@@ -263,6 +263,7 @@ function cardAgentPubkey(item: ChatDisplayMessage): string | undefined {
     item.writePermission?.agentPubkey ??
     item.grantRequest?.agent.pubkey ??
     item.squireApproval?.agent.pubkey ??
+    item.onboarding?.agentId ??
     item.choice?.agent.pubkey ??
     item.appSignIn?.agentId ??
     item.agentSignIn?.agentId ??

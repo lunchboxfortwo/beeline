@@ -38,6 +38,7 @@ export class GitHubHttpError extends Error {
     label: string,
     readonly status: number,
     readonly retryAfter?: string | null,
+    readonly detail?: string,
   ) {
     super(`${label} failed: HTTP ${status}`);
     if (this.rateLimited) {
@@ -48,6 +49,25 @@ export class GitHubHttpError extends Error {
   get rateLimited(): boolean {
     return (this.status === 403 || this.status === 429) && retryAfterTime(this.retryAfter) !== undefined;
   }
+}
+
+function githubErrorDetail(body: Record<string, unknown>): string | undefined {
+  const errors = Array.isArray(body.errors) ? body.errors : [];
+  const details = errors
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return undefined;
+      const item = entry as Record<string, unknown>;
+      const message = typeof item.message === 'string' ? item.message.trim() : '';
+      const field = typeof item.field === 'string' ? item.field.trim() : '';
+      const code = typeof item.code === 'string' ? item.code.trim() : '';
+      if (message) return message;
+      if (field && code) return `${field} (${code})`;
+      return undefined;
+    })
+    .filter((value): value is string => Boolean(value));
+  if (details.length) return details.join('; ').slice(0, 240);
+  const message = typeof body.message === 'string' ? body.message.trim() : '';
+  return message ? message.slice(0, 240) : undefined;
 }
 
 function retryAfterTime(value: string | null | undefined): number | undefined {
@@ -129,7 +149,7 @@ async function jsonResponseObject(
 
 export async function jsonObject(response: Response, label: string): Promise<Record<string, unknown>> {
   const body = await jsonResponseObject(response, label);
-  if (!response.ok) throw new GitHubHttpError(label, response.status, responseRetryAfter(response));
+  if (!response.ok) throw new GitHubHttpError(label, response.status, responseRetryAfter(response), githubErrorDetail(body));
   return body;
 }
 
