@@ -169,6 +169,7 @@ import { PhoneService } from '../phone-service.js';
         }, ctx.database);
       } catch (error) {
         await releaseCreateLock();
+        if (error instanceof CommandRefusalError) throw error;
         if (error instanceof GitHubHttpError && error.status === 422) {
           const detail = error.detail?.trim();
           if (detail && /name already exists|already exists on this account/i.test(detail)) {
@@ -186,6 +187,18 @@ import { PhoneService } from '../phone-service.js';
         }
         if (error instanceof GitHubHttpError && error.status >= 400 && error.status < 500) {
           throw error;
+        }
+        if (error instanceof Error && /GitHub user authorization is required/i.test(error.message)) {
+          throw new CommandRefusalError(
+            'GitHub authorization is required to create a personal repository. Reconnect GitHub and try again.',
+            403,
+          );
+        }
+        if (error instanceof Error && /GitHub installation not found/i.test(error.message)) {
+          throw new CommandRefusalError(
+            'GitHub installation not found. Reconnect GitHub and try again.',
+            404,
+          );
         }
         throw new Error(
           'GitHub did not confirm whether the repository was created. Check Link existing to link it if it appeared, or try again.',
@@ -210,7 +223,12 @@ import { PhoneService } from '../phone-service.js';
             [input.cardId, input.roomId])).rows[0];
           const card = readRepositoryOnboardingCard(row?.card);
           if (!card || card.requesterId !== viewerId) throw new Error('repository card access denied');
-          if (card.status === 'settled') return { linkedNow: false, result: { selected: card.selected } };
+          if (card.status !== 'open' || row?.card?.creatingToken !== lockToken) {
+            throw new CommandRefusalError(
+              `Repository "${created.fullName}" was created, but this card changed before linking. Tap Link existing to attach it.`,
+              409,
+            );
+          }
           const service = new PhoneService(database, ctx.publicOrigin, ctx.github, ctx.sendPushTest, ctx.live, true);
           await service.setRepository({ roomId: input.roomId, key: `github:${created.id}`, name: created.fullName,
             remote: `git://github.com/${created.fullName}`, targetBranch: created.defaultBranch,

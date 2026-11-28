@@ -146,6 +146,10 @@ it('refuses collisions, preserves non-collision 422 reasons, never links on unkn
   vi.mocked(github.createRepository).mockRejectedValueOnce(new GitHubHttpError('GitHub repository creation', 422, null, 'Repository creation is disabled by policy'));
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'policy-blocked' }, H)).rejects.toThrow(/Repository creation is disabled by policy/);
 
+  // Missing GitHub user authorization surfaces an authorization/reconnect error instead of an unknown-outcome prompt.
+  vi.mocked(github.createRepository).mockRejectedValueOnce(new Error('GitHub user authorization is required to create a personal repository'));
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'needs-auth' }, H)).rejects.toThrow(/Reconnect GitHub/i);
+
   // If a create times out before GitHub confirms and someone else creates a private repo with that name, retry must NOT silently link it.
   vi.mocked(github.createRepository).mockRejectedValueOnce(new Error('ETIMEDOUT'));
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'someone-elses' }, H)).rejects.toThrow(/Link existing/i);
@@ -153,7 +157,7 @@ it('refuses collisions, preserves non-collision 422 reasons, never links on unkn
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'someone-elses' }, H)).rejects.toThrow(/already exists/i);
   expect((await phone.readRoom(NAMED_R, H))?.repository).toBeUndefined();
 
-  // Overlapping concurrent creates on the same card allow only one active create; the second is rejected and creates no orphan repo.
+  // create -> refresh -> create with the first GitHub call paused keeps the lock intact and blocks the second create.
   let releaseFirst!: () => void;
   const firstStarted = new Promise<void>(resolve => {
     vi.mocked(github.createRepository).mockImplementationOnce(async (_viewer, input, database) => {
@@ -166,15 +170,16 @@ it('refuses collisions, preserves non-collision 422 reasons, never links on unkn
   });
   const first = phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'concurrent-one' }, H);
   await firstStarted;
+  await phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'refresh' }, H);
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'concurrent-two' }, H)).rejects.toThrow(/already in progress/i);
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'link', repositoryId: 42 }, H)).rejects.toThrow(/already in progress/i);
   releaseFirst();
   await first;
-  expect(github.createRepository).toHaveBeenCalledTimes(4);
+  expect(github.createRepository).toHaveBeenCalledTimes(5);
   expect((await phone.readRoom(NAMED_R, H))?.repository?.name).toBe('tester/concurrent-one');
   expect((await db.query(`SELECT 1 FROM github_repositories WHERE full_name='tester/concurrent-two'`)).rowCount).toBe(0);
 
-  // Recovery works ONLY by the exact repository ID recorded from a successful create whose linking step was interrupted.
+  // Recovery works ONLY by the exact repository ID recorded from a successful create whose linking step was interrupted, and survives a refresh.
   const recoveryCard = await postRepositoryOnboarding(db, github, { roomId: NAMED_R, agentId: A, requesterId: H, kind: 'repository' });
   const recordedId = nextRepoId++;
   await db.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES($1,77,'tester/recorded-rts','main',true,true)`, [recordedId]);
@@ -182,6 +187,7 @@ it('refuses collisions, preserves non-collision 422 reasons, never links on unkn
     `UPDATE messages SET card=card || jsonb_build_object('createdRepository', $2::jsonb) WHERE id=$1`,
     [recoveryCard.id, JSON.stringify({ id: recordedId, fullName: 'tester/recorded-rts', installationId: 77, defaultBranch: 'main', requestedName: 'recorded-rts' })],
   );
+  await phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: recoveryCard.id, action: 'refresh' }, H);
   const callsBeforeRecovery = vi.mocked(github.createRepository).mock.calls.length;
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: recoveryCard.id, action: 'create', name: 'different-name' }, H)).rejects.toThrow(/already created "tester\/recorded-rts"/i);
   await phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: recoveryCard.id, action: 'create', name: 'recorded-rts' }, H);
@@ -189,6 +195,24 @@ it('refuses collisions, preserves non-collision 422 reasons, never links on unkn
   const recoveredRoom = await phone.readRoom(NAMED_R, H);
   expect(recoveredRoom?.repository?.name).toBe('tester/recorded-rts');
   expect(recoveredRoom?.messages.find(m => m.id === recoveryCard.id)?.onboarding).toMatchObject({ status: 'settled', resolution: 'created', repository: 'tester/recorded-rts', defaultName: 'recorded-rts' });
+
+  // If the card changes (e.g. superseded) while GitHub create is in flight, token ownership rejects settling instead of claiming success.
+  const stolenCard = await postRepositoryOnboarding(db, github, { roomId: NAMED_R, agentId: A, requesterId: H, kind: 'repository' });
+  let releaseStolen!: () => void;
+  const stolenStarted = new Promise<void>(resolve => {
+    vi.mocked(github.createRepository).mockImplementationOnce(async (_viewer, input, database) => {
+      resolve();
+      await new Promise<void>(done => { releaseStolen = done; });
+      const id = nextRepoId++;
+      await database.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES($1,77,$2,'main',true,true)`, [id, `tester/${input.name}`]);
+      return { id, fullName: `tester/${input.name}`, installationId: 77, defaultBranch: 'main', private: true };
+    });
+  });
+  const stolenCreate = phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: stolenCard.id, action: 'create', name: 'superseded-mid-flight' }, H);
+  await stolenStarted;
+  await postRepositoryOnboarding(db, github, { roomId: NAMED_R, agentId: A2, requesterId: H, kind: 'repository' });
+  releaseStolen();
+  await expect(stolenCreate).rejects.toThrow(/changed before linking/i);
 });
 
 it('creates and links a custom-named private repository once when the same tap is retried', async () => {

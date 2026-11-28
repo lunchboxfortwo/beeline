@@ -96,7 +96,13 @@ export async function postRepositoryOnboarding(database: SqlDatabase, _github: G
       object: room.repository_name ?? systemMessage('repository-onboarding.choose-or-create-a-repository'), presentation: 'card',
       cardType: 'repository-onboarding', card: card as unknown as Record<string, unknown> });
     const applied = await database.query(`WITH applied AS (
-      UPDATE messages SET card=$2::jsonb WHERE id=$1 AND author_id=$3
+      UPDATE messages SET card=(
+        $2::jsonb || jsonb_strip_nulls(jsonb_build_object(
+          'creatingToken', card->'creatingToken',
+          'creatingAt', card->'creatingAt',
+          'createdRepository', card->'createdRepository'
+        ))
+      ) WHERE id=$1 AND author_id=$3
         AND card_type='repository-onboarding' AND card->>'status'='open' RETURNING id
     ), superseded AS (
       UPDATE messages SET card=card || '{"status":"settled","resolution":"superseded"}'::jsonb
