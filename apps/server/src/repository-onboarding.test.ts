@@ -131,43 +131,64 @@ it('links from the card, settles immediately with the linked repo without postin
   expect((await db.query(`SELECT lifecycle->'pr'->>'url' url FROM corner_facts WHERE corner_id=$1`,[corner])).rows[0]?.url).toBe('https://github.com/tester/project/pull/17');
 });
 
-it('refuses a fresh create colliding with an existing repo, recovers only a prior private attempt, and handles 422 conflicts', async () => {
+it('refuses collisions, preserves non-collision 422 reasons, never links on unknown outcome, recovers only by recorded repo ID, and blocks overlapping creates', async () => {
   vi.mocked(github.createRepository).mockClear();
   const card = await postRepositoryOnboarding(db, github, { roomId: NAMED_R, agentId: A, requesterId: H, kind: 'repository' });
-  // Colliding with an existing public or private repo on a fresh create must fail without calling createRepository or linking.
+  // Colliding with an existing public or private repo on a fresh create fails without calling createRepository or linking.
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'public-repo' }, H)).rejects.toThrow(/already exists/i);
   await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'project' }, H)).rejects.toThrow(/already exists/i);
   expect(github.createRepository).not.toHaveBeenCalled();
   expect((await phone.readRoom(NAMED_R, H))?.repository).toBeUndefined();
 
-  // A 422 from GitHub clears the pending create attempt and surfaces a conflict.
-  vi.mocked(github.createRepository).mockRejectedValueOnce(new GitHubHttpError('GitHub repository creation', 422));
-  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'taken-elsewhere' }, H)).rejects.toThrow(/already exists/i);
-  expect((await db.query<{ creating: string | null }>(`SELECT card->>'creatingName' creating FROM messages WHERE id=$1`, [card.id])).rows[0]?.creating).toBeNull();
+  // A 422 with a confirmed name collision reports already exists; another 422 preserves GitHub's actionable reason.
+  vi.mocked(github.createRepository).mockRejectedValueOnce(new GitHubHttpError('GitHub repository creation', 422, null, 'name already exists on this account'));
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'taken-elsewhere' }, H)).rejects.toThrow(/already exists on GitHub/i);
+  vi.mocked(github.createRepository).mockRejectedValueOnce(new GitHubHttpError('GitHub repository creation', 422, null, 'Repository creation is disabled by policy'));
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'policy-blocked' }, H)).rejects.toThrow(/Repository creation is disabled by policy/);
 
-  // Even after an interrupted create, a matching public repo is never linked.
-  vi.mocked(github.createRepository).mockImplementationOnce(async (_viewer, input, database) => {
-    const id = nextRepoId++;
-    await database.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES($1,77,$2,'main',false,true)`, [id, `tester/${input.name}`]);
-    throw new Error('transient connection drop');
-  });
-  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'raced-public' }, H)).rejects.toThrow(/transient connection drop/i);
-  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'raced-public' }, H)).rejects.toThrow(/already exists/i);
+  // If a create times out before GitHub confirms and someone else creates a private repo with that name, retry must NOT silently link it.
+  vi.mocked(github.createRepository).mockRejectedValueOnce(new Error('ETIMEDOUT'));
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'someone-elses' }, H)).rejects.toThrow(/Link existing/i);
+  await db.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES(901,77,'tester/someone-elses','main',true,true)`);
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'someone-elses' }, H)).rejects.toThrow(/already exists/i);
   expect((await phone.readRoom(NAMED_R, H))?.repository).toBeUndefined();
 
-  // Simulate an interrupted create where GitHub created a private repo before our final DB commit.
-  vi.mocked(github.createRepository).mockImplementationOnce(async (_viewer, input, database) => {
-    const id = nextRepoId++;
-    await database.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES($1,77,$2,'main',true,true)`, [id, `tester/${input.name}`]);
-    throw new Error('transient connection drop');
+  // Overlapping concurrent creates on the same card allow only one active create; the second is rejected and creates no orphan repo.
+  let releaseFirst!: () => void;
+  const firstStarted = new Promise<void>(resolve => {
+    vi.mocked(github.createRepository).mockImplementationOnce(async (_viewer, input, database) => {
+      resolve();
+      await new Promise<void>(done => { releaseFirst = done; });
+      const id = nextRepoId++;
+      await database.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES($1,77,$2,'main',true,true)`, [id, `tester/${input.name}`]);
+      return { id, fullName: `tester/${input.name}`, installationId: 77, defaultBranch: 'main', private: true };
+    });
   });
-  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'recovered-rts' }, H)).rejects.toThrow(/transient connection drop/i);
-  // Retrying the exact same attempt recovers the private repo without calling createRepository again.
-  await phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'recovered-rts' }, H);
-  expect(github.createRepository).toHaveBeenCalledTimes(3);
+  const first = phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'concurrent-one' }, H);
+  await firstStarted;
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'create', name: 'concurrent-two' }, H)).rejects.toThrow(/already in progress/i);
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: card.id, action: 'link', repositoryId: 42 }, H)).rejects.toThrow(/already in progress/i);
+  releaseFirst();
+  await first;
+  expect(github.createRepository).toHaveBeenCalledTimes(4);
+  expect((await phone.readRoom(NAMED_R, H))?.repository?.name).toBe('tester/concurrent-one');
+  expect((await db.query(`SELECT 1 FROM github_repositories WHERE full_name='tester/concurrent-two'`)).rowCount).toBe(0);
+
+  // Recovery works ONLY by the exact repository ID recorded from a successful create whose linking step was interrupted.
+  const recoveryCard = await postRepositoryOnboarding(db, github, { roomId: NAMED_R, agentId: A, requesterId: H, kind: 'repository' });
+  const recordedId = nextRepoId++;
+  await db.query(`INSERT INTO github_repositories(repository_id,installation_id,full_name,default_branch,private,active) VALUES($1,77,'tester/recorded-rts','main',true,true)`, [recordedId]);
+  await db.query(
+    `UPDATE messages SET card=card || jsonb_build_object('createdRepository', $2::jsonb) WHERE id=$1`,
+    [recoveryCard.id, JSON.stringify({ id: recordedId, fullName: 'tester/recorded-rts', installationId: 77, defaultBranch: 'main', requestedName: 'recorded-rts' })],
+  );
+  const callsBeforeRecovery = vi.mocked(github.createRepository).mock.calls.length;
+  await expect(phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: recoveryCard.id, action: 'create', name: 'different-name' }, H)).rejects.toThrow(/already created "tester\/recorded-rts"/i);
+  await phone.execute('actOnRepositoryCard', { roomId: NAMED_R, cardId: recoveryCard.id, action: 'create', name: 'recorded-rts' }, H);
+  expect(vi.mocked(github.createRepository).mock.calls.length).toBe(callsBeforeRecovery);
   const recoveredRoom = await phone.readRoom(NAMED_R, H);
-  expect(recoveredRoom?.repository?.name).toBe('tester/recovered-rts');
-  expect(recoveredRoom?.messages.find(m => m.id === card.id)?.onboarding).toMatchObject({ status: 'settled', resolution: 'created', repository: 'tester/recovered-rts', defaultName: 'recovered-rts' });
+  expect(recoveredRoom?.repository?.name).toBe('tester/recorded-rts');
+  expect(recoveredRoom?.messages.find(m => m.id === recoveryCard.id)?.onboarding).toMatchObject({ status: 'settled', resolution: 'created', repository: 'tester/recorded-rts', defaultName: 'recorded-rts' });
 });
 
 it('creates and links a custom-named private repository once when the same tap is retried', async () => {
