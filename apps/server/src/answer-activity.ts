@@ -1,4 +1,5 @@
 import type { SqlDatabase } from './database.js';
+import { assertMemberTranscript } from './message-origin.js';
 
 export const MAX_REPLY_STEPS = 2_000;
 
@@ -39,13 +40,19 @@ export async function recordAnswerActivity(db: SqlDatabase, agentId: string, mes
 }
 
 /**
- * A turn's closing text that was not posted because the agent already replied
- * in the same place. It stays readable in the turn's activity: the turn's
- * steps, then the text as notes.
+ * A turn's closing text after the agent already replied in the same place.
+ * When that reply is still visible, the text is not posted; it stays readable
+ * in the turn's activity (the turn's steps, then the text as notes) and the
+ * reply is returned. Otherwise nothing is written and the text posts normally.
  */
-export async function recordSuppressedFinal(db: SqlDatabase, input: {
-  id: string; roomId: string; agentId: string; requestId: string; text: string; steps?: unknown;
-}): Promise<void> {
+export async function holdFinalAfterReply(db: SqlDatabase, input: {
+  id: string; replyId: string; roomId: string; agentId: string; requestId: string; text: string; steps?: unknown;
+}): Promise<{ id: string; created_at: Date } | undefined> {
+  const reply = (await db.query<{ id: string; created_at: Date }>(
+    `SELECT id,created_at FROM messages WHERE id=$1 AND room_id=$2 AND author_id=$3
+       AND deleted_at IS NULL AND presentation='message'`,
+    [input.replyId, input.roomId, input.agentId])).rows[0];
+  if (!reply) return undefined;
   let steps: unknown[] = [];
   try {
     if (replySteps(input.steps)) steps = input.steps as unknown[];
@@ -61,10 +68,11 @@ export async function recordSuppressedFinal(db: SqlDatabase, input: {
   } catch {
     activity = replySteps(notes.slice(0, MAX_REPLY_STEPS));
   }
-  if (!activity) return;
-  await db.query(
+  assertMemberTranscript(input.agentId);
+  if (activity) await db.query(
     `INSERT INTO messages(id,room_id,author_id,text,presentation,request_id,activity,agent_model)
      VALUES($1,$2,$3,'','activity',$4,$5::jsonb,(SELECT selected_model FROM agents WHERE agent_id=$3))
      ON CONFLICT(id) DO NOTHING`,
     [input.id, input.roomId, input.agentId, input.requestId, activity]);
+  return reply;
 }

@@ -18,6 +18,7 @@ const MEMBER_INSERTS = new Map([
   [SERVER + 'agent-command.ts#postMessage', 'assertMemberTranscript(input.authorId, input.presentation)'],
   [SERVER + 'agent-messaging.ts#sendMessage', 'assertMemberTranscript(input.route.from.agent)'],
   [SERVER + 'daemon/turn-receipts.ts#daemonActivity', 'assertMemberTranscript(agentId)'],
+  [SERVER + 'answer-activity.ts#holdFinalAfterReply', 'assertMemberTranscript(input.agentId)'],
 ]);
 
 const BODY_COMPONENTS = new Set([
