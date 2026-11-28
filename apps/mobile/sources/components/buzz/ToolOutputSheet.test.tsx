@@ -438,6 +438,7 @@ describe('ToolOutputSheet (v3 result-first)', () => {
     expect(fileStatus.props.color).toBe('ink');
     expect(diffTexts.some((n: any) => n.props.color === 'added' && n.props.children === '+new line')).toBe(true);
     expect(diffTexts.some((n: any) => n.props.color === 'removed' && n.props.children === '-old line')).toBe(true);
+    expect(diffSheet.root.findByProps({ testID: 'tool-output-copy' }).props.variant).toBe('quiet');
 
     // Checklist uses monochrome Stone (zero added/needsYou/removed).
     const checklistSheet = render(

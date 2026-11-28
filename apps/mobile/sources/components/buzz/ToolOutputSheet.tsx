@@ -735,6 +735,7 @@ export function ToolOutputSheet({
                         {hiddenLocalCards > 0 ? (
                           <Button
                             size="inline"
+                            variant="quiet"
                             label={`Show ${hiddenLocalCards} more`}
                             alignSelf="flex-start"
                             onPress={() => setShowAllCards(true)}
@@ -931,6 +932,7 @@ export function ToolOutputSheet({
           {canCopy ? (
             <Button
               size="inline"
+              variant="quiet"
               alignSelf="center"
               label={copied ? 'Copied' : presentation.copyLabel}
               onPress={copy}
