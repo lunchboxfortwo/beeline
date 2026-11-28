@@ -41,6 +41,7 @@ it('pi-skills-1123: a new Room starts its Pi harness with the skills its rules n
     })),
     canLoadSession: () => false,
     canPromptWithImages: () => false,
+    promptDelivery: () => undefined,
   });
   const spawn = vi.fn(
     (_options: { agentEnv?: Record<string, string> }) => client as unknown as AcpClient,

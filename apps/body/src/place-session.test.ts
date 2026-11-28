@@ -4,9 +4,11 @@ import { dirname, join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import type { AcpClient } from './acp.js';
 import { installCornerGitHubWrappers } from './corner-github-auth.js';
+import { harnessEnforcement, roomShellCapability } from './harness-capabilities.js';
 import { distillTurnFailureReason } from './turn-failure-reason.js';
 import { sharedSquireMcpClient } from './squire-mcp-client.js';
 import { prepareWorkspace } from './workspace-checkout.js';
+
 import { runOwnedFile as execFileAsync } from './wait.js';
 import { fixture, pendingRead, roots } from './place-session.test-support.js';
 import { testTmpDir } from '../../../packages/test-helpers/helpers/helper.js';
@@ -30,6 +32,41 @@ vi.mock('./squire-mcp-client.js', async (original) => ({
   ...(await original<typeof import('./squire-mcp-client.js')>()),
   sharedSquireMcpClient: vi.fn(),
 }));
+
+it.each(['agy', 'opencode', 'goose'])(
+  'uses native file tools for %s only where Beeline supplies the OS boundary',
+  async (harness) => {
+    expect(harnessEnforcement(harness).enforcement).toBe('unknown');
+    expect(roomShellCapability(harness)).toBe('unknown');
+    for (const { corner, sandboxed } of [
+      { corner: false, sandboxed: true },
+      { corner: true, sandboxed: true },
+      { corner: false, sandboxed: false },
+      { corner: true, sandboxed: false },
+    ]) {
+      const f = await fixture(corner);
+      f.config.agentBinary = harness;
+      if (sandboxed) f.config.bwrapPath = '/usr/bin/bwrap';
+      try {
+        await f.session.start(f.item);
+        const { mcpServers } = vi.mocked(f.session.client!.sessionNew).mock.calls[0]![0];
+        expect(mcpServers?.some(({ name }) => name === 'beeline-readonly-mcp')).toBe(!sandboxed);
+        const agentTools = mcpServers?.find(({ name }) => name === 'beeline-agent');
+        expect(agentTools?.env).toContainEqual({
+          name: 'BEELINE_NATIVE_IO_PROVEN', value: sandboxed ? '1' : '0',
+        });
+        const launch = f.spawn.mock.calls[0]![0];
+        expect(launch.autoApprovePermissions).toBe(corner && sandboxed);
+        if (!sandboxed) {
+          await expect(launch.permissionHandler!({ toolCall: { kind: 'execute' } }))
+            .resolves.toBe('reject');
+        }
+      } finally {
+        await f.session.dispose();
+      }
+    }
+  },
+);
 
 it('rewrites pruned-release git/gh launchers before reusing a retained thread', async () => {
   const f = await fixture(true);

@@ -521,13 +521,12 @@ export class AcpClient extends EventEmitter {
     this.supportsStructuredSystemPrompt =
       agentCapabilities?.sessionCapabilities?.systemPrompt != null;
     const info = initResult.agentInfo as { version?: string } | undefined;
-    // This adapter version was verified to emit all automatic and manual
-    // compactions when the client advertises session.compaction. Unknown
-    // adapters keep full delivery until their behavior is measured.
+    // These adapter versions report automatic and manual compactions when
+    // the client advertises session.compaction.
     this.codexBlockDelivery =
       (/(^|[/\\])codex-acp(\.[a-z]+)?$/i.test(this.agentLabel) &&
         this.supportsStructuredSystemPrompt &&
-        info?.version === '2.3.0') ||
+        (info?.version === '2.3.0' || info?.version === '2.10.0')) ||
       (/(^|[/\\])claude-(agent|code)-acp(\.[a-z]+)?$/i.test(this.agentLabel) &&
         info?.version === '0.97.0') ||
       isPiAcpHarness(this.agentLabel);
