@@ -88,10 +88,14 @@ function rowColumns(tree: any, rowTestID: string) {
   // The stem is the vertical line the glyph's second path starts with.
   const stem = glyph.findAll((n: any) => typeof n.props.d === 'string' && /^M[\d.]+ [\d.]+v/.test(n.props.d));
   const stemUnits = Number(stem[0].props.d.match(/^M([\d.]+)/)![1]);
+  // The slot starts its box at the row's left edge; the box ends the glyph on its right edge.
+  const box = slot.find((n: any) => n.type === 'YStack' && n.props.testID === 'transcript-action-lead-stem');
+  expect(slot.props.alignItems).toBe('flex-start');
+  expect(box.props.alignItems).toBe('flex-end');
   return {
     slot,
     glyph,
-    stemX: space(slot.props.paddingLeft) + (glyph.props.size * stemUnits) / GLYPH_BOX_UNITS,
+    stemX: box.props.width - glyph.props.size + (glyph.props.size * stemUnits) / GLYPH_BOX_UNITS,
     labelX: slot.props.width + space(row.props.gap),
   };
 }
