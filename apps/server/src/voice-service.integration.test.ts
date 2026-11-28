@@ -800,7 +800,9 @@ it.each([false,true])('voice closing text answers its own request after an expli
   const eligible=(await db.query(`SELECT m.id FROM voice_orders o JOIN agent_commands c ON c.source_message_id=o.source_message_id AND c.agent_id=o.agent_id
     JOIN messages m ON m.author_id=o.agent_id AND m.room_id=$2 AND (m.id=c.result_message_id OR m.request_id=c.id OR m.request_id=c.turn_request_id)
     WHERE o.call_id=$1 AND o.spoken_message_id IS NULL AND m.presentation='message' AND m.deleted_at IS NULL`,[joined.call.id,room])).rows;
-  expect(eligible.map(row=>row.id).sort()).toEqual((unrelated ? [final.id] : [reply.id,final.id]).sort());
+  // A same-place reply already answers the request, so the closing text is not posted again.
+  if(!unrelated)expect(final.id).toBe(reply.id);
+  expect(eligible.map(row=>row.id)).toEqual([final.id]);
   expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[current.id])).rows).toEqual([{state:'complete'}]);
  }finally{await service.leave(joined.call.id,H);await db.query('DELETE FROM rooms WHERE id=$1',[room]);}
 });

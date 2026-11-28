@@ -3,7 +3,7 @@ import { beginAgentInvocation } from './agent-invocation.js';
 import { it,expect } from 'vitest';
 import { sendMessage,replyToMessage } from './agent-messaging.js';
 import { answerQueuedMessage } from './agent-command.js';
-import { H,B,CHAT,OTHER,db } from './messaging.test-support.js';
+import { H,B,CHAT,OTHER,daemon,db } from './messaging.test-support.js';
 
 const task=()=>sendMessage(db,{route:{from:{agent:H,place:CHAT},to:{agent:B,place:CHAT}},text:'Please answer'});
 const answers=async(place=CHAT)=>(await db.query('SELECT id,text FROM messages WHERE author_id=$1 AND room_id=$2 AND presentation<>\'activity\'',[B,place])).rows;
@@ -85,4 +85,72 @@ it('an earlier ask in the batch prevents a later reply from ending the native tu
  const context={roomId:CHAT,queuedRequestIds:[first.id,second.id]};
  expect(await replyToMessage(db,B,{...context,id:first.id,text:'Which output?',ask:{question:'Which output?',options:['Web','Phone']}})).not.toHaveProperty('_meta');
  expect(await replyToMessage(db,B,{...context,id:second.id,text:'Done'})).not.toHaveProperty('_meta');
+});
+
+const activityNotes=async()=>(await db.query(`SELECT activity FROM messages WHERE author_id=$1 AND room_id=$2 AND presentation='activity'`,[B,CHAT])).rows
+ .flatMap(row=>(row.activity as {kind:string;text?:string}[]).filter(step=>step.kind==='note').map(step=>step.text));
+it.each(['replyToMessage','native message','native message after the question is deleted'])('grunt-dup-1127: a same-place reply (%s) keeps the reworded closing text out of the chat',async path=>{
+ const request=await task();
+ const invocation={id:randomUUID(),requestId:request.id};
+ const text='Squire needs an upgrade.';
+ // The native message tool records the reply and leaves the owed command pending.
+ if(path.startsWith('native message')){
+  await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:request.id,invocationId:invocation.id},B);
+  // The stored reply then has no link to the deleted question.
+  if(path.endsWith('deleted'))await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1',[request.id]);
+  await daemon.execute('message',{roomId:CHAT,type:'reply',quoteMsgId:request.id,text},B);
+  expect((await db.query('SELECT state FROM agent_commands WHERE id=$1',[request.id])).rows).toEqual([{state:'pending'}]);
+ }else{
+  await beginAgentInvocation(db,B,CHAT,request.id,invocation.id);
+  await replyToMessage(db,B,{roomId:CHAT,id:request.id,text,invocation});
+ }
+ const reply=(await answers())[0]!;
+ // The Claude SDK "no visible output" retry produces this text after the reply.
+ const input={roomId:CHAT,requestId:request.id,text:'I replied in #grunt. Squire needs an upgrade before the next run.',harnessEnded:true,invocation,
+  steps:[{kind:'tool',title:'message',operation:'tool',status:'completed'}]};
+ expect(await answerQueuedMessage(db,B,input)).toMatchObject({messageId:reply.id,completed:true,published:true});
+ expect(await answerQueuedMessage(db,B,input)).toMatchObject({messageId:reply.id,completed:true});
+ expect((await answers()).map(row=>row.text)).toEqual(['Squire needs an upgrade.']);
+ expect(await activityNotes()).toEqual([input.text]);
+ expect((await db.query('SELECT state,result_message_id FROM agent_commands WHERE id=$1',[request.id])).rows)
+  .toEqual([{state:'complete',result_message_id:reply.id}]);
+});
+it('a same-place progress post leaves the closing answer in the chat',async()=>{
+ const request=await task();
+ const invocation={id:randomUUID(),requestId:request.id};
+ await daemon.execute('startAgentTurn',{roomId:CHAT,requestId:request.id,invocationId:invocation.id},B);
+ await daemon.execute('postRoomMessage',{roomId:CHAT,requestId:request.id,invocation,text:'Working on it.'},B);
+ const progress=(await answers())[0]!;
+ expect((await db.query('SELECT posted_reply_id FROM agent_commands WHERE id=$1',[request.id])).rows).toEqual([{posted_reply_id:progress.id}]);
+ const final=await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'Here is the answer.',harnessEnded:true,invocation});
+ expect(final.messageId).not.toBe(progress.id);
+ expect((await answers()).map(row=>row.text).sort()).toEqual(['Here is the answer.','Working on it.']);
+ expect(await activityNotes()).toEqual([]);
+});
+it('a same-place reply suppresses closing text without an invocation too',async()=>{
+ const request=await task();
+ await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Done'});
+ await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'All done, see above.',harnessEnded:true});
+ expect((await answers()).map(row=>row.text)).toEqual(['Done']);
+ expect(await activityNotes()).toEqual(['All done, see above.']);
+});
+it('a reply in another place leaves the closing text published here',async()=>{
+ const request=await task();const reply=await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Answer'});
+ await db.query('UPDATE messages SET room_id=$2 WHERE id=$1',[reply.id,OTHER]);
+ await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'Final here',harnessEnded:true});
+ expect((await answers()).map(row=>row.text)).toEqual(['Final here']);
+ expect(await activityNotes()).toEqual([]);
+});
+it('a deleted same-place reply leaves the closing text published',async()=>{
+ const request=await task();const reply=await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Answer'});
+ await db.query('UPDATE messages SET deleted_at=now() WHERE id=$1',[reply.id]);
+ await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'Final here',harnessEnded:true});
+ expect((await db.query('SELECT text FROM messages WHERE author_id=$1 AND room_id=$2 AND presentation<>\'activity\' AND deleted_at IS NULL',[B,CHAT])).rows)
+  .toEqual([{text:'Final here'}]);
+});
+it('a verdict that must publish still posts after a same-place reply',async()=>{
+ const request=await task();
+ await replyToMessage(db,B,{roomId:CHAT,id:request.id,text:'Looking'});
+ await answerQueuedMessage(db,B,{roomId:CHAT,requestId:request.id,text:'Approved',harnessEnded:true,keepFinal:true});
+ expect((await answers()).map(row=>row.text).sort()).toEqual(['Approved','Looking']);
 });
