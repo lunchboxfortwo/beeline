@@ -14,6 +14,7 @@ export type RepositoryOnboardingCard = {
   readonly kind: 'repository';
   readonly state: 'install_missing' | 'no_repo_linked' | 'repo_linked';
   readonly status: 'open' | 'settled';
+  readonly resolution?: 'linked' | 'created' | 'superseded';
   readonly canLink: boolean;
   readonly ownerHandle?: string;
   readonly githubLinked?: boolean;
@@ -33,6 +34,18 @@ export type RepositoryOnboardingAction = {
   readonly redirectUri?: string;
 };
 
+/** Single repository name rule shared by server sanitization, validation, and the mobile editor. */
+export function isValidRepositoryName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= 100 &&
+    name !== '.' &&
+    name !== '..' &&
+    !/\.git$/i.test(name) &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
+  );
+}
+
 export function readRepositoryOnboardingCard(value: unknown): RepositoryOnboardingCard | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const v = value as Record<string, unknown>;
@@ -43,7 +56,9 @@ export function readRepositoryOnboardingCard(value: unknown): RepositoryOnboardi
   if (!key(v.id) || !uuid(v.roomId) || !key(v.agentId) || !key(v.requesterId) ||
       v.kind !== 'repository' ||
       !['install_missing', 'no_repo_linked', 'repo_linked'].includes(String(v.state)) ||
-      !['open', 'settled'].includes(String(v.status)) || typeof v.canLink !== 'boolean' || !text(v.defaultName) ||
+      !['open', 'settled'].includes(String(v.status)) ||
+      (v.resolution !== undefined && !['linked', 'created', 'superseded'].includes(String(v.resolution))) ||
+      typeof v.canLink !== 'boolean' || !text(v.defaultName) ||
       (v.repository !== undefined && !text(v.repository)) ||
       (v.ownerHandle !== undefined && !text(v.ownerHandle)) ||
       (v.githubLinked !== undefined && typeof v.githubLinked !== 'boolean') ||
@@ -52,5 +67,29 @@ export function readRepositoryOnboardingCard(value: unknown): RepositoryOnboardi
       (v.selected !== undefined && !text(v.selected)) ||
       !Array.isArray(v.repositories) || !v.repositories.every(r => r && positive(r.id) &&
         positive(r.installationId) && text(r.fullName) && text(r.defaultBranch) && typeof r.current === 'boolean')) return undefined;
-  return v as unknown as RepositoryOnboardingCard;
+  return {
+    id: v.id as string,
+    roomId: v.roomId as string,
+    agentId: v.agentId as string,
+    requesterId: v.requesterId as string,
+    kind: 'repository',
+    state: v.state as RepositoryOnboardingCard['state'],
+    status: v.status as RepositoryOnboardingCard['status'],
+    ...(v.resolution !== undefined ? { resolution: v.resolution as RepositoryOnboardingCard['resolution'] } : {}),
+    canLink: v.canLink as boolean,
+    ...(v.ownerHandle !== undefined ? { ownerHandle: v.ownerHandle as string } : {}),
+    ...(v.githubLinked !== undefined ? { githubLinked: v.githubLinked as boolean } : {}),
+    ...(v.repository !== undefined ? { repository: v.repository as string } : {}),
+    defaultName: v.defaultName as string,
+    ...(v.installationId !== undefined ? { installationId: v.installationId as number } : {}),
+    ...(v.installationAccount !== undefined ? { installationAccount: v.installationAccount as string } : {}),
+    repositories: (v.repositories as OnboardingRepository[]).map(r => ({
+      id: r.id,
+      fullName: r.fullName,
+      installationId: r.installationId,
+      defaultBranch: r.defaultBranch,
+      current: r.current,
+    })),
+    ...(v.selected !== undefined ? { selected: v.selected as string } : {}),
+  };
 }

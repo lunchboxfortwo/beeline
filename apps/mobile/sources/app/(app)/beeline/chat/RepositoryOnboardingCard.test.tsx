@@ -248,13 +248,25 @@ it('shows action-specific errors for create and link failures instead of GitHub 
 
 it('collapses a linked repository using its existing name without inventing visibility', async () => {
   let renderer: any;
-  await act(async () => { renderer=create(<RepositoryOnboardingCard card={{...card,status:'settled'}} viewerId={H} />); });
+  await act(async () => { renderer=create(<RepositoryOnboardingCard card={{...card,status:'settled',resolution:'linked'}} viewerId={H} />); });
   const props=renderer.root.findByType('TranscriptCard').props;
   expect(props.title).toBe('Repository linked');
   expect(props.subline).toBe('test/current');
   expect(props.body).toBeUndefined();
   expect(props.actions).toEqual([]);
   expect(props.identity).toBeTruthy();
+  await act(async () => renderer.unmount());
+});
+it('renders a superseded switch card as replaced instead of Repository linked', async () => {
+  let renderer: any;
+  await act(async () => { renderer = create(<RepositoryOnboardingCard card={{ ...card, status: 'settled', resolution: 'superseded' }} viewerId={H} />); });
+  const props = renderer.root.findByType('TranscriptCard').props;
+  expect(props.title).toBe('Switch repository');
+  expect(props.subline).toBe('Replaced by a newer card');
+  expect(props.tier).toBe('record');
+  expect(props.body).toBeUndefined();
+  expect(props.choices).toEqual([]);
+  expect(props.actions).toEqual([]);
   await act(async () => renderer.unmount());
 });
 it('dismisses a failed connect permanently while preserving the installation result', async () => {

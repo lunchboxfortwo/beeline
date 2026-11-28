@@ -10,7 +10,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppState, Platform } from 'react-native';
 import { YStack } from 'tamagui';
-import type { RepositoryOnboardingAction, RepositoryOnboardingCard as Card } from '@beeline/api-contract/phone';
+import { isValidRepositoryName, type RepositoryOnboardingAction, type RepositoryOnboardingCard as Card } from '@beeline/api-contract/phone';
 import { TranscriptCard, type TranscriptCardAction, type TranscriptCardChoice } from '@/components/buzz/TranscriptCard';
 import { monolithPhoneOperation } from '@/sync/transport/monolith-operation';
 import { T } from '@/ui/grammar';
@@ -43,12 +43,7 @@ function repositoryActionError(action: RepositoryOnboardingAction['action'], rea
 }
 
 function isInvalidRepositoryName(name: string): boolean {
-  return name.length > 0 && (
-    name === '.' ||
-    name === '..' ||
-    /\.git$/i.test(name) ||
-    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
-  );
+  return name.length > 0 && !isValidRepositoryName(name);
 }
 
 /** Reuses the shared ask-card anatomy; selections remain authoritative on the server. */
@@ -144,10 +139,11 @@ function EnabledRepositoryOnboardingCard({ card, viewerId, author, agent }: Prop
       loading: busy, disabled: !canAct, onPress: () => void act('install'), testID: 'repo-card-install' }]),
 
   ] : [];
-  const linked = card.status === 'settled' && Boolean(card.repository);
+  const superseded = card.status === 'settled' && card.resolution === 'superseded';
+  const linked = card.status === 'settled' && !superseded && Boolean(card.repository);
   const needsConnection = card.githubLinked === false && !card.installationId;
-  const showCreateInput = !linked && !error && !picker && card.canLink && card.status === 'open' && card.requesterId === viewerId && Boolean(card.installationId);
-  const shownActions: TranscriptCardAction[] = linked ? [] : error ? (canAct ? [
+  const showCreateInput = !linked && !superseded && !error && !picker && card.canLink && card.status === 'open' && card.requesterId === viewerId && Boolean(card.installationId);
+  const shownActions: TranscriptCardAction[] = linked || superseded ? [] : error ? (canAct ? [
     { label: 'Dismiss', dismiss: true, labelTone: 'quiet', onPress: () => { setError(null); setPicker(false); router.setParams({ githubConnectionError: undefined }); }, testID: 'repo-card-dismiss' },
     { label: 'Try again', primary: true, onPress: () => { router.setParams({ githubConnectionError: undefined }); void act(lastAction.current.action, lastAction.current.extra); }, testID: 'repo-card-retry' },
   ] : []) : actions;
@@ -166,18 +162,18 @@ function EnabledRepositoryOnboardingCard({ card, viewerId, author, agent }: Prop
     tier={linked || card.status !== 'open' ? 'record' : 'ask'}
     testID={`repository-onboarding-${card.kind}`}
     title={linked ? 'Repository linked' : card.repository ? 'Switch repository' : !card.canLink ? 'No repository yet' : 'Choose a repository'}
-    subline={linked ? card.repository : undefined}
+    subline={linked ? card.repository : superseded ? 'Replaced by a newer card' : undefined}
     compactBody primaryBody footerDivider={false}
     balancedFooterInset={Platform.OS !== 'web' && needsConnection && !error && card.status === 'open' && shownActions.length > 0}
-    inlineError={!linked && error ? error : undefined}
-    body={linked || error || showCreateInput || picker ? undefined : card.canLink ? needsConnection
+    inlineError={!linked && !superseded && error ? error : undefined}
+    body={linked || superseded || error || showCreateInput || picker ? undefined : card.canLink ? needsConnection
       ? 'Connect GitHub to link one you own or create a new private repo. You approve once on github.com, then come back here.'
       : card.installationId
         ? `New repo: ${card.defaultName}`
         : 'Install Beeline on GitHub to create a private repo or link one you own.'
       : card.ownerHandle ? `Ask @${card.ownerHandle} to link a repository for this chat` : 'Ask a Workspace owner or admin to choose a repository for this chat.'}
-    choices={linked || error ? [] : choices} actions={shownActions}
-    footerNote={!linked && busy ? 'Working…' : undefined}>
+    choices={linked || superseded || error ? [] : choices} actions={shownActions}
+    footerNote={!linked && !superseded && busy ? 'Working…' : undefined}>
     {showCreateInput ? (
       <YStack gap="2">
         <T v="meta" color="secondary">

@@ -2,7 +2,7 @@ import { githubProviderKey } from './providers/index.js';
 import { systemMessage } from '@beeline/api-contract/system-message-catalog';
 import { createHash } from 'node:crypto';
 import { CommandRefusalError } from './command-refusal.js';
-import type { RepositoryOnboardingCard } from '@beeline/api-contract/phone';
+import { isValidRepositoryName, type RepositoryOnboardingCard } from '@beeline/api-contract/phone';
 import type { SqlDatabase } from './database.js';
 import type { GitHubOperations } from './github-operations.js';
 import { systemLine } from './system-line.js';
@@ -14,27 +14,19 @@ export function sanitizeRepositoryName(raw: string): string | undefined {
   const tail = raw.trim().split('/').pop() ?? '';
   const cleaned = tail
     .replace(/^#+/, '')
-    .replace(/\.git$/i, '')
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^[.-]+|[.-]+$/g, '')
+    .replace(/^[^a-z0-9]+|[.-]+$/g, '')
+    .replace(/(?:\.git)+$/i, '')
     .slice(0, 100)
     .replace(/[.-]+$/g, '');
-  if (!cleaned || cleaned === '.' || cleaned === '..') return undefined;
-  return cleaned;
+  return isValidRepositoryName(cleaned) ? cleaned : undefined;
 }
 
 /** Validate a repository name chosen by a person before creating it on GitHub. */
 export function validateRepositoryName(raw: string): string {
   const name = raw.trim();
-  if (
-    !name ||
-    name.length > 100 ||
-    name === '.' ||
-    name === '..' ||
-    /\.git$/i.test(name) ||
-    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)
-  ) {
+  if (!isValidRepositoryName(name)) {
     throw new CommandRefusalError('Use letters, numbers, hyphens, dots, or underscores for the repository name.', 400);
   }
   return name;
@@ -107,7 +99,7 @@ export async function postRepositoryOnboarding(database: SqlDatabase, _github: G
       UPDATE messages SET card=$2::jsonb WHERE id=$1 AND author_id=$3
         AND card_type='repository-onboarding' AND card->>'status'='open' RETURNING id
     ), superseded AS (
-      UPDATE messages SET card=jsonb_set(card,'{status}','"settled"')
+      UPDATE messages SET card=card || '{"status":"settled","resolution":"superseded"}'::jsonb
       WHERE room_id=$4 AND id<>$1 AND card_type='repository-onboarding'
         AND card->>'kind'=$5 AND card->>'status'='open' AND card->>'requesterId'=$6
         AND EXISTS(SELECT 1 FROM applied)
