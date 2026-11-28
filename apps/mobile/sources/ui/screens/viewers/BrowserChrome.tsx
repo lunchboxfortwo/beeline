@@ -5,8 +5,8 @@ import { Btn, Copy, Glyph, SafeBottom, T } from '@/ui/grammar';
 import { ViewerAction, ViewerHeader } from './ViewerChrome';
 
 /** Pre-redesign browser card geometry, with Stone grammar surfaces and type. */
-export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowser, testID }: {
-    status: 'live' | 'ended' | string;
+export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowser, onRecheck, checking = false, testID }: {
+    status: 'live' | 'ended' | 'unavailable' | string;
     title: string;
     /** Streaming access exists: the frame and Open are offered. */
     live: boolean;
@@ -14,6 +14,8 @@ export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowse
     frame: React.ReactNode;
     onOpen: () => void;
     onOpenInBrowser?: () => void;
+    onRecheck?: () => void;
+    checking?: boolean;
     testID: string;
 }) {
     const ended = status === 'ended';
@@ -29,6 +31,8 @@ export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowse
             {live ? <XStack borderTopWidth={1} borderColor="stroke" paddingHorizontal="4" paddingVertical="2" alignItems="center" justifyContent="space-between">
                 <Btn kind="quiet" padding={0} label="Open in browser" accessibilityRole="link" role="link" onPress={onOpenInBrowser} testID="computer-session-card-open-browser"><XStack gap="2" alignItems="center"><T v="meta" color="secondary">Open in browser</T><Glyph icon={ExternalLink} size={14}/></XStack></Btn>
                 <Btn kind="quiet" label="Open live browser" accessibilityRole="link" role="link" onPress={onOpen} testID="computer-session-open"><XStack gap="2" alignItems="center"><T v="meta" color="needsYou">Open</T><Glyph icon={ChevronRight} size={14}/></XStack></Btn>
+            </XStack> : unavailable && onRecheck ? <XStack borderTopWidth={1} borderColor="stroke" paddingHorizontal="4" paddingVertical="2" alignItems="center" justifyContent="flex-end">
+                <Btn kind="quiet" padding={0} label="Check browser again" onPress={onRecheck} disabled={checking} testID="computer-session-recheck"><T v="meta" color="needsYou">{checking ? 'Checking…' : 'Check again'}</T></Btn>
             </XStack> : null}
         </Card>
     );

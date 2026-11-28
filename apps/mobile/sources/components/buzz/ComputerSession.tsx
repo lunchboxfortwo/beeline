@@ -163,14 +163,17 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   const visible = rowVisible && foreground;
   const fullViewer = React.useSyncExternalStore(subscribeViewers,
     () => fullViewers.has(session.id) || (Platform.OS !== 'web' && fullViewers.size > 0), () => false);
-  const [authorized, setAuthorized] = React.useState({ id: session.id, access: session.access ?? null });
+  const [authorized, setAuthorized] = React.useState<{ id: string; access: string | null }>({ id: session.id, access: null });
   const [streamState, setStreamState] = React.useState<{ id: string; status: 'ended' | 'unavailable' } | null>(null);
-  const access = session.access ?? (authorized.id === session.id ? authorized.access : null);
+  const [recheckingId, setRecheckingId] = React.useState<string | null>(null);
+  const [streamAttempt, setStreamAttempt] = React.useState(0);
+  const access = (authorized.id === session.id && authorized.access) ? authorized.access : (session.access ?? null);
   const effectiveStatus = session.status === 'ended'
     ? 'ended'
     : streamState?.id === session.id
       ? streamState.status
       : session.status;
+  const checking = recheckingId === session.id;
   const owner = React.useRef({ id: session.id, mounted: true });
   owner.current.id = session.id;
   React.useEffect(() => {
@@ -204,14 +207,37 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   };
   const openInBrowser = async () => {
     if (!visible || !access || effectiveStatus !== 'live') return;
+    let freshAccess: string;
     try {
-      const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
-      const url = new URL(session.url); url.searchParams.set('access', freshAccess);
-      await openExternalUrl(url.toString());
+      freshAccess = (await monolithPhoneOperation('openComputerSession', { id: session.id })).access;
     } catch {
       if (owner.current.mounted && owner.current.id === session.id)
         setStreamState({ id: session.id, status: 'unavailable' });
-      Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
+      Modal.alert('Could not open browser', 'The live browser is unavailable. Use Check again to reconnect.');
+      return;
+    }
+    try {
+      const url = new URL(session.url); url.searchParams.set('access', freshAccess);
+      await openExternalUrl(url.toString());
+    } catch {
+      Modal.alert('Could not open browser', 'Could not launch the external browser. Try again.');
+    }
+  };
+  const recheckBrowser = async () => {
+    if (!visible || session.status !== 'live' || checking) return;
+    setRecheckingId(session.id);
+    try {
+      const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
+      if (!owner.current.mounted || owner.current.id !== session.id) return;
+      retriedAccess.current = undefined;
+      setAuthorized({ id: session.id, access: freshAccess });
+      setStreamState(null);
+      setStreamAttempt((attempt) => attempt + 1);
+    } catch {
+      if (owner.current.mounted && owner.current.id === session.id)
+        setStreamState({ id: session.id, status: 'unavailable' });
+    } finally {
+      if (owner.current.mounted && owner.current.id === session.id) setRecheckingId(null);
     }
   };
   const handlePreviewAccessRejected = () => {
@@ -238,6 +264,7 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
       live={live}
       frame={live && visible && !fullViewer ? (
         <ComputerStream
+          key={`${session.id}:${streamAttempt}`}
           session={{ ...session, access: access! }}
           preview
           captureRef={captureRef}
@@ -248,6 +275,8 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
       ) : null}
       onOpenInBrowser={() => void openInBrowser()}
       onOpen={() => void open()}
+      onRecheck={effectiveStatus === 'unavailable' ? () => void recheckBrowser() : undefined}
+      checking={checking}
       testID={`computer-session-card-${effectiveStatus}`}
     />
   );
