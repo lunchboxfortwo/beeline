@@ -23,6 +23,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
       throw new CommandRefusalError('Send text with type "reply", "blocked", or "normal".',400);
     let to: MessageAddress;
     let quote: string | undefined;
+    let attachments: CommandRow['answer_attachments'];
     let openBlockIds: string[] = [];
     let existed = false;
     if (input.type === 'normal' && typeof input.address === 'string' && input.quoteMsgId === undefined) {
@@ -42,6 +43,11 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
         throw new CommandRefusalError('Quote a message that woke this turn, or omit quoteMsgId to reply to the current request.', 400);
       to = (await recordedMessageRoute(db, parent)).from;
       quote = wake.id;
+      // Files uploaded this turn go with a reply to a person in this place.
+      // Elsewhere they stay with the closing text, so this place still gets them.
+      if (parent.answer_attachments?.length && to.place === input.roomId &&
+          (await db.query("SELECT 1 FROM identities WHERE id=$1 AND kind='human'", [to.agent])).rowCount)
+        attachments = parent.answer_attachments;
     } else if (input.type === 'blocked' && input.address === undefined && input.quoteMsgId === undefined) {
       const room = (await db.query<{ parent_id: string | null; created_by: string }>(
         'SELECT parent_id,created_by FROM rooms WHERE id=$1 FOR UPDATE', [input.roomId])).rows[0];
@@ -74,7 +80,7 @@ export async function sendSessionMessage(database: SqlDatabase, agent: string, i
     } else {
       throw new CommandRefusalError('Send type "reply" with text to answer this turn. Send type "normal" with text and address to ask another agent. Send type "blocked" with text to report a block.',400);
     }
-    const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id});
+    const saved = await sendMessage(db,{type:input.type,route:{from,to},text:input.text,replyTo:quote,parent,id,attachments});
     const replayed = existed && saved.messageId === id;
     if (parent && saved.messageId && !replayed && (quote || input.type === 'blocked')) await db.query(
       // Only the reply tool records reply_tool_message_id; a later closing text checks it.
