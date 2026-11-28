@@ -384,10 +384,10 @@ export async function postRepositoryOnboardingOperation<Name extends keyof Daemo
         const owner = requester.kind === 'human' ? requester.id : (await ctx.database.query<{ owner_id: string }>(
           `SELECT owner_id FROM agents WHERE agent_id=$1`, [authenticatedAgentId])).rows[0]?.owner_id;
         if (!owner) throw new Error('repository onboarding unavailable');
-        if (!['repository', 'starters'].includes(request.kind)) throw new Error('invalid repository card kind');
-        if (request.kind === 'repository') await ctx.github?.refresh(owner);
+        if (request.kind !== undefined && request.kind !== 'repository') throw new Error('invalid repository card kind');
+        await ctx.github?.refresh(owner);
         const card = await ctx.database.transaction(database => postRepositoryOnboarding(database, ctx.github, {
-          roomId: request.roomId, agentId: authenticatedAgentId, requesterId: owner, kind: request.kind,
+          roomId: request.roomId, agentId: authenticatedAgentId, requesterId: owner, kind: 'repository',
           ...(request.repository ? { repository: request.repository } : {}),
         }));
         ctx.live.publish({ type: 'invalidate', roomId: request.roomId, reason: 'message', agentId: authenticatedAgentId });

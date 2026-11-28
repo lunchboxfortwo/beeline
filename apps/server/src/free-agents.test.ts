@@ -501,30 +501,27 @@ describe('free starter agents', () => {
     expect((await freeAgentOf(id)).agent_id).toBe(agent.agent_id);
   });
 
-  it('onboarding-invite-1: an eligible invitee selects a starter from an existing Beebee without repository-management rights', async () => {
+  it('onboarding-invite-1: an eligible invitee can ask Beebee for work without repository-management rights', async () => {
     const { id, roomId } = await phone.execute('createWorkspace', { name: 'Existing workspace' }, OWNER) as { id: string; roomId: string };
     await finishWelcome(roomId!, OWNER);
     const agent = await freeAgentOf(id);
     await db.query(`UPDATE rooms SET repository_name='tester/existing',repository_key='github:42',
       repository_remote='git://github.com/tester/existing',repository_resolution='repository' WHERE id=$1`, [roomId]);
-    const github = { onboardingSignals: vi.fn(async () => ({ commits: [], failingChecks: [], issues: [], branches: [], files: [] })) } as unknown as GitHubOperations;
-    phone = new PhoneService(db, 'https://server.test', github, undefined, live);
+    phone = new PhoneService(db, 'https://server.test', undefined, undefined, live);
     await db.query(`UPDATE identities SET github_subject='296966200' WHERE id=$1`, [FRIEND]);
     const invite = await phone.execute('createInvite', { workspaceId: id }, OWNER);
     await phone.execute('redeemInvite', { token: invite.token }, FRIEND);
     expect((await phone.readRoom(roomId, FRIEND))?.messages.some(message => message.onboarding)).toBe(false);
-    // A subsequent coding request can still offer the existing repository's starters.
-    await postRepositoryOnboarding(db, github, { roomId, agentId: agent.agent_id, requesterId: FRIEND, kind: 'starters' });
+    await postRepositoryOnboarding(db, undefined, { roomId, agentId: agent.agent_id, requesterId: FRIEND, kind: 'repository' });
     const joined = await phone.readRoom(roomId, FRIEND);
     const card = joined?.messages.find(message => message.onboarding?.requesterId === FRIEND)?.onboarding;
-    expect(card).toMatchObject({ kind: 'starters', requesterId: FRIEND, repository: 'tester/existing', canLink: false });
-    expect(card?.starters).toHaveLength(3);
+    expect(card).toMatchObject({ kind: 'repository', requesterId: FRIEND, repository: 'tester/existing', canLink: false });
     expect((await phone.readRoom(roomId, OWNER))?.messages.some(message => message.onboarding)).toBe(false);
     await expect(phone.execute('actOnRepositoryCard', { roomId, cardId: card!.id, action: 'link', repositoryId: 42 }, FRIEND)).rejects.toThrow();
-    await phone.execute('actOnRepositoryCard', { roomId, cardId: card!.id, action: 'starter', starterId: 'readme' }, FRIEND);
+    await phone.sendMessage({ roomId, text: `@beebee Help me fix the login bug`, mentions: [agent.agent_id] }, FRIEND);
     const command = (await db.query<{ id: string; turn_request_id: string }>(
       `SELECT c.id,c.turn_request_id FROM agent_commands c JOIN messages m ON m.id=c.root_source_message_id
-       WHERE c.agent_id=$1 AND c.room_id=$2 AND m.author_id=$3 AND m.text LIKE '%Make the README useful%'`, [agent.agent_id, roomId, FRIEND])).rows[0]!;
+       WHERE c.agent_id=$1 AND c.room_id=$2 AND m.author_id=$3 AND m.text LIKE '%Help me fix the login bug%'`, [agent.agent_id, roomId, FRIEND])).rows[0]!;
     expect(command).toBeDefined();
     await startQueuedTurn(db, roomId, agent.agent_id, command.id);
     const daemon = new DaemonService(db, live);

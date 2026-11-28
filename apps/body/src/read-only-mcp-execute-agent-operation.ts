@@ -681,9 +681,8 @@ async function executeResourceOperation(name:string,args:JsonObject,toolCallId:s
     case 'post_chat_invite':
       return JSON.stringify(await daemonExecute('postRoomInvite', { ...await activeCommandContext() }));
     case 'post_repository_card':
-    case 'post_starters_card':
       return JSON.stringify(await daemonExecute('postRepositoryOnboarding', {
-        ...await activeCommandContext(), kind: name === 'post_repository_card' ? 'repository' : 'starters',
+        ...await activeCommandContext(), kind: 'repository',
         ...(typeof args.repository === 'string' && args.repository.trim() ? { repository: args.repository.trim() } : {}),
       }));
     case 'store_secret':

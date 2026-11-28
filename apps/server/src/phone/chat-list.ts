@@ -130,7 +130,7 @@ import { turnRootMessageSql } from '../agent-command.js';
       LEFT JOIN LATERAL (
         SELECT ${phoneMessageColumns('message')} FROM messages message
         WHERE message.room_id=r.id AND ${visibleChatMessageSql('message')}
-          AND (message.card_type IS DISTINCT FROM 'repository-onboarding' OR message.card->>'requesterId'=$2)
+          AND (message.card_type IS DISTINCT FROM 'repository-onboarding' OR (message.card->>'kind'='repository' AND message.card->>'requesterId'=$2))
         ORDER BY created_at DESC,id DESC LIMIT 1
       ) lm ON true
       LEFT JOIN identities li ON li.id=lm.author_id

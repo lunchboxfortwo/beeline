@@ -584,7 +584,6 @@ describe('mounted monolith auth', () => {
     const refreshed = await postRepositoryOnboarding(database, githubOperations, {roomId,agentId:agent,requesterId:id,kind:'repository'});
     expect(refreshed.state).toBe('no_repo_linked');
     expect(refreshed.repositories.map(repo => repo.fullName)).toEqual(['owner/widgets']);
-    vi.spyOn(githubOperations, 'onboardingSignals').mockResolvedValue({commits:[],failingChecks:[],issues:[],branches:[],files:[]});
     await phone.execute('actOnRepositoryCard', {roomId,cardId:refreshed.id,action:'link',repositoryId:101}, id);
     expect((await phone.readRoom(roomId,id))?.repository?.name).toBe('owner/widgets');
     const corner = await phone.execute('createHumanCorner', {roomId,title:'first-google-owner-work'}, id);

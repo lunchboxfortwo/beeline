@@ -118,7 +118,6 @@ const APP_ROUTES: Record<string, Record<string, Route | string>> = {
     game: { op: 'post_starter_game', required: [], description: 'Play tic-tac-toe when the person asks.' },
     invite: { op: 'post_chat_invite', required: [], description: 'Post an invite link for this chat. Workspace manager membership is required.' },
     repository: { op: 'post_repository_card', required: [], description: 'Post the chat repository card.' },
-    starters: { op: 'post_starters_card', required: [], description: 'Post 3 to 4 one-tap starter tasks for the linked repository.' },
   },
   workflow: {
     save: { op: 'save_workflow', required: ['contract'], description: 'Save a versioned Workspace workflow from its whole JSON contract.' },
@@ -711,7 +710,6 @@ export class RoomsMcpAgentTools {
         case 'post_starter_game': return exec('postStarterGame', context);
         case 'post_chat_invite': return exec('postRoomInvite', context);
         case 'post_repository_card': return exec('postRepositoryOnboarding', { ...context, kind: 'repository', ...(typeof input.repository === 'string' ? { repository: input.repository } : {}) });
-        case 'post_starters_card': return exec('postRepositoryOnboarding', { ...context, kind: 'starters' });
         case 'save_workflow': return exec('saveWorkflow', { ...base, contract: input.contract });
         case 'load_workspace_skill': return exec('loadWorkspaceSkill', { ...base, slug: input.slug });
         case 'start_workflow': return exec('startWorkflow', { ...base, name: input.name, roleBindings: input.roleBindings });

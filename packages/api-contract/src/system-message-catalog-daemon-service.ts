@@ -357,11 +357,6 @@ export const SYSTEM_MESSAGE_DAEMON_SERVICE = {
     variables: [],
   },
 
-  'repository-onboarding.suggested-work': {
-    parts: ['suggested work'],
-    variables: [],
-  },
-
   'repository-onboarding.offered-a-repository': {
     parts: ['offered a repository'],
     variables: [],
