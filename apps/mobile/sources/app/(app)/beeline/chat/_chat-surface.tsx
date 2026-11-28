@@ -240,6 +240,7 @@ export function BuzzChatSurface({
     isCorner, roomSurface, resolvedChannelName, decodedId, parentChannelId,
     state: cornerHeaderSource?.state,
     objective: cornerObjectiveText, isArchived, isDesktop, positions: transcriptPositions,
+    conversationIdentities, agentByPubkey,
   });
   const [
     desktopScrollNodeRef, heldLandingFromOldestRef, phoneContentHeightRef, phoneScrollOffsetRef,
