@@ -78,7 +78,7 @@ it('pi-skills-1123: a new Room starts its Pi harness with the skills its rules n
   const env = spawn.mock.calls[0]![0].agentEnv!;
   roots.push(env.TMPDIR!);
   expect(env.PI_CODING_AGENT_DIR).toBe(join(agentHomeRoot, 'pi'));
-  expect(atStart).toEqual(expect.arrayContaining(['beeline-triage', 'beeline-spec']));
+  expect(atStart).toEqual(expect.arrayContaining(['beeline-triage', 'beeline-spec', 'beeline-onboarding', 'draw-avatar']));
   const item = {
     id: 'item',
     rootCommandId: 'task',

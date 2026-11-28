@@ -187,7 +187,7 @@ async function callServer(server, request, signal) {
             // Only the answer to OUR id: the initialize reply and any
             // notification the server writes share this stream.
             if (message && message.id === request.id) {
-              if (message.error) settle.reject(new Error(message.error.message || 'MCP error'));
+              if (message.error) settle.reject(new Error(boundedText(message.error.message || 'MCP error')));
               else settle.resolve(message.result ?? {});
               return;
             }
@@ -251,6 +251,31 @@ async function authorizeSquire(signal) {
   if (result?.allowed !== true) throw new Error('Squire requires approval from its owner for this requester.');
 }
 
+function catalog(tools, params) {
+  const names = params?.describe?.split(',').map(name => name.trim());
+  const query = params?.query?.trim().toLowerCase();
+  if (names || params?.query !== undefined) {
+    const matches = tools.filter(({ name, description }) =>
+      names?.includes(name) || (query && (name + ' ' + (description ?? '')).toLowerCase().includes(query)));
+    return JSON.stringify(matches.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })));
+  }
+  const lines = tools.map(({ name, description }) => {
+    const summary = (description ?? '').trim().split(/[.!?](?:\\s|$)/, 1)[0].replace(/\\s+/g, ' ');
+    const short = summary.length > 72 ? summary.slice(0, 69).replace(/\\s+\\S*$/, '') + '…' : summary;
+    return short ? name + ' — ' + short : name;
+  });
+  lines.push('Pass describe:"name[,name]" or query:"keyword" for full inputSchema, or name + arguments to call.');
+  return lines.join('\\n');
+}
+
+function boundedText(text) {
+  if (Buffer.byteLength(text) <= 32768) return text;
+  const bytes = Buffer.from(text);
+  return bytes.subarray(0, 6144).toString('utf8') +
+    '\\n[Output truncated from ' + bytes.length + ' bytes. Narrow the request for more detail.]\\n' +
+    bytes.subarray(-6144).toString('utf8');
+}
+
 function textOf(result) {
   const content = Array.isArray(result?.content) ? result.content : [];
   const text = content
@@ -268,16 +293,16 @@ export default function (pi) {
   for (const server of SERVERS) pi.registerTool({
     name: server.name + '__mcp',
     label: labelOf(server.name),
-    description: 'Use with no name to list this MCP server tools, then supply a listed name and arguments to call one. Discovery runs only when you request it.',
-    parameters: { type: 'object', properties: { name: { type: 'string' }, arguments: { type: 'object', additionalProperties: true } } },
+    description: 'List tools with {}, inspect schemas with describe (names) or query (keyword), or call with name and arguments.',
+    parameters: { type: 'object', properties: { describe: { type: 'string' }, query: { type: 'string' }, name: { type: 'string' }, arguments: { type: 'object', additionalProperties: true } } },
     async execute(toolCallId, params, signal) {
       if (params?.name && server.requiresSquireAuthorization) await authorizeSquire(signal);
       const result = await callServer(server, params?.name ? {
         jsonrpc: '2.0', id: 1, method: 'tools/call',
         params: { name: params.name, arguments: params.arguments ?? {}, _meta: { beelineToolCallId: toolCallId } },
       } : { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }, signal);
-      if (result?.isError) throw new Error(textOf(result));
-      return { content: [{ type: 'text', text: Array.isArray(result?.tools) ? JSON.stringify(result) : textOf(result) }], details: {} };
+      if (result?.isError) throw new Error(boundedText(textOf(result)));
+      return { content: [{ type: 'text', text: !params?.name && Array.isArray(result?.tools) ? catalog(result.tools, params) : boundedText(textOf(result)) }], details: {} };
     },
   });
 }

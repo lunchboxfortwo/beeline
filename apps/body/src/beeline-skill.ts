@@ -21,9 +21,19 @@ export function runningBeelineReleaseId(
 }
 
 
+const catalogDescriptions: Record<string, string> = {
+  'beeline-triage': 'Triage before open_thread and reproduce bugs during implementation.',
+  'beeline-spec': 'Write or revise a thread brief before repository work.',
+};
+
 /** Helper environment defaults stay at the helper boundary. */
 export function beelineManagedSkills(releaseId: string, options: Parameters<typeof sharedManagedSkills>[1]) {
   return sharedManagedSkills(releaseId, {
     ...options, freeAgent: options.freeAgent ?? Boolean(process.env.BEELINE_FREE_AGENT_ID),
+  }).map(skill => {
+    const description = catalogDescriptions[skill.name];
+    return description
+      ? { ...skill, content: skill.content.replace(/^description: .*$/m, 'description: ' + description) }
+      : skill;
   });
 }
