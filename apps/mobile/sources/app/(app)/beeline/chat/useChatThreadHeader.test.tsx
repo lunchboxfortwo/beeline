@@ -139,3 +139,79 @@ it('thread-working-idle: resolves working and reviewing labels from the live tur
   expect(labelOf(tree.root.findByType('ThreadTitleBlock').props.h)).toBeUndefined();
   act(() => tree.unmount());
 });
+
+it('thread-working-idle: classifies live turns by turn role and agent ID even when worker and reviewer share a display name on a stale Review row', () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  opening.record = {
+    header: { room: { name: 'beeline', reviewerAgentId: 'reviewer-1' } },
+    rows: [],
+    openMore: [],
+    summary: { openCorners: [{ id: 'thread', name: 'beeline/shared-name', state: 'review', workingAgentName: 'Helper' }] },
+  } as any;
+  const surface = (
+    latestAgentTurns: Array<{ agentPubkey: string; requestId: string; status: string; createdAt: number; role?: 'review' }>,
+    reviewerAgentId?: string,
+  ) => ({
+    room: { id: 'thread', workspaceId: 'ws', name: 'beeline/shared-name' },
+    parent: { id: 'room', name: 'beeline', ...(reviewerAgentId ? { reviewerAgentId } : {}) },
+    cornerOpenerAgentId: 'worker-1',
+    members: [
+      { identity: { pubkey: 'worker-1', kind: 'agent', name: 'Helper' } },
+      { identity: { pubkey: 'reviewer-1', kind: 'agent', name: 'Helper' } },
+    ],
+    latestAgentTurns,
+  }) as any;
+  function Header({ roomSurface }: { roomSurface: any }) {
+    const { titleBlock } = useChatThreadHeader({
+      isCorner: true, roomSurface, resolvedChannelName: 'beeline/shared-name',
+      decodedId: 'thread', parentChannelId: 'room', state: 'review',
+      objective: '', isArchived: false, isDesktop: false,
+    });
+    return titleBlock;
+  }
+  const labelOf = (h: any) => threadActivityLabel({ state: h.activityState ?? h.state, workingAgentName: h.workingAgentName });
+  let tree!: ReturnType<typeof create>;
+  // Implementer turn with the same display name as the stale Review row's reviewer must say "is working", not "is reviewing".
+  act(() => {
+    tree = create(
+      <Header roomSurface={surface([{ agentPubkey: 'worker-1', requestId: 'r1', status: 'working', createdAt: 100 }], 'reviewer-1')} />,
+    );
+  });
+  expect(tree.root.findByType('ThreadTitleBlock').props.h).toMatchObject({
+    state: 'review',
+    activityState: 'working',
+    workingAgentName: 'Helper',
+  });
+  expect(labelOf(tree.root.findByType('ThreadTitleBlock').props.h)).toBe('Helper is working');
+
+  // Same when no configured reviewer is present on the parent Room.
+  opening.record = {
+    ...opening.record,
+    header: { room: { name: 'beeline' } },
+  } as any;
+  act(() => {
+    tree.update(
+      <Header roomSurface={surface([{ agentPubkey: 'worker-1', requestId: 'r1', status: 'working', createdAt: 100 }], undefined)} />,
+    );
+  });
+  expect(tree.root.findByType('ThreadTitleBlock').props.h).toMatchObject({
+    state: 'review',
+    activityState: 'working',
+    workingAgentName: 'Helper',
+  });
+  expect(labelOf(tree.root.findByType('ThreadTitleBlock').props.h)).toBe('Helper is working');
+
+  // Dispatched review turn carries role: 'review' and says "is reviewing".
+  act(() => {
+    tree.update(
+      <Header roomSurface={surface([{ agentPubkey: 'reviewer-1', requestId: 'r2', status: 'working', createdAt: 200, role: 'review' }], undefined)} />,
+    );
+  });
+  expect(tree.root.findByType('ThreadTitleBlock').props.h).toMatchObject({
+    state: 'review',
+    activityState: 'review',
+    workingAgentName: 'Helper',
+  });
+  expect(labelOf(tree.root.findByType('ThreadTitleBlock').props.h)).toBe('Helper is reviewing');
+  act(() => tree.unmount());
+});

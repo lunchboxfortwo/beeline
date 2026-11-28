@@ -91,10 +91,7 @@ export function useChatThreadHeader({
     const implementerId = openingRow?.agent?.pubkey ?? roomSurface.cornerOpenerAgentId;
     const isReviewerTurn = (turn: RoomViewAgentTurn) =>
       turn.role === 'review' ||
-      (reviewerId !== undefined && turn.agentPubkey === reviewerId) ||
-      (cachedState === 'review' &&
-        cachedWorkingAgentName !== undefined &&
-        nameOf(turn.agentPubkey) === cachedWorkingAgentName);
+      (reviewerId !== undefined && turn.agentPubkey === reviewerId);
     const reviewerTurn = activeTurns.find(isReviewerTurn);
     const implementerTurn = implementerId
       ? activeTurns.find((turn) => turn.agentPubkey === implementerId && turn !== reviewerTurn)
