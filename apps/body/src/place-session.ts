@@ -40,7 +40,7 @@ import { installCornerGitHubWrappers } from './corner-github-auth.js';
 import { harnessIdentityLabel, sessionNewMcpServers } from './cursor-acp-bridge.js';
 import type { DaemonApiClient } from './daemon-api-client.js';
 import type { GrantRunnerEndpoint, GrantRunnerRoom } from './grant-runner.js';
-import { harnessEnforcement, roomShellCapability } from './harness-capabilities.js';
+import { harnessNativeIo, roomShellCapability } from './harness-capabilities.js';
 import { postChangedAgentUsage } from './helper-usage-binding.js';
 import { grantedHostRouteWires, grantedSquireHostRouteNames } from './host-mcp-route.js';
 import { CODE_OWNED_HOST_MCP_NAMES } from './mcp-route-class.js';
@@ -503,10 +503,11 @@ export class PlaceSession {
       command,
       args: agentArgs,
     });
-    const nativeIoProven = harnessEnforcement(harnessLabel).enforcement !== 'unknown';
+    const nativeIo = harnessNativeIo(harnessLabel);
+    const sandboxNativeIo = nativeIo === 'sandboxed' && sandboxed;
     const shellCapability = roomShellCapability(harnessLabel, { osSandbox: sandboxed });
     const inspection =
-      (nativeIoProven && corner) || shellCapability === 'runs'
+      (nativeIo === 'available' && corner) || sandboxNativeIo || shellCapability === 'runs'
         ? undefined
         : await this.optional(
             'File inspection tools',
@@ -523,7 +524,7 @@ export class PlaceSession {
           ...(corner ? { cornerId: placeId, repositoryBacked: true } : {}),
           reviewer: configuration?.isReviewer === true,
           directMessage: repository?.directParticipants?.length === 2,
-          nativeIoProven,
+          nativeIoProven: nativeIo === 'available' || sandboxNativeIo,
           agentCommand: harnessLabel,
           attachRoot: folder,
           ...(attachScratchRoot ? { attachScratchRoot } : {}),
@@ -810,20 +811,6 @@ export class PlaceSession {
     await this.refreshFeatureBranch();
     // A stopped machine proxy starts again at the endpoint this session holds; the turn never waits for it.
     void machineCliProxy();
-    const options = {
-      names: this.names,
-      notes: this.notes,
-      turnPrefix: this.turnPrefix,
-      threads: memberThreads(this.surface, this.resources.threadsForDelivery(batch.length ? batch : [item]), this.options),
-      tasks: memberTasks(this.surface, this.resources.tasksForDelivery(batch.length ? batch : [item])),
-      fresh: !this.windowDelivered,
-    };
-    this.windowDelivered = true;
-    const prompt =
-      batch.length > 1 || item.offlineSeconds !== undefined
-        ? offlineBatchPrompt(batch.length ? batch : [item], options)
-        : itemPrompt(item, options);
-    this.notes = [];
     // A received picture rides inline as before, within MAX_INLINE_IMAGE_BYTES each.
     const pictures = (batch.length ? batch : [item])
       .flatMap((next) => next.source.attachments ?? [])
@@ -841,7 +828,25 @@ export class PlaceSession {
               : [],
           )
         : [];
+    const delivery = this.turnPrefix ? client.promptDelivery(sessionId) : undefined;
+    if (delivery) await client.preparePromptDelivery(sessionId);
     signal.throwIfAborted();
+    const options = {
+      names: this.names,
+      notes: this.notes,
+      turnPrefix: delivery
+        ? delivery.select([{ id: 'turn.session', text: this.turnPrefix }])[0]?.text
+        : client.supportsStructuredSystemPrompt ? '' : this.turnPrefix,
+      threads: memberThreads(this.surface, this.resources.threadsForDelivery(batch.length ? batch : [item]), this.options),
+      tasks: memberTasks(this.surface, this.resources.tasksForDelivery(batch.length ? batch : [item])),
+      fresh: !this.windowDelivered,
+    };
+    this.windowDelivered = true;
+    const prompt =
+      batch.length > 1 || item.offlineSeconds !== undefined
+        ? offlineBatchPrompt(batch.length ? batch : [item], options)
+        : itemPrompt(item, options);
+    this.notes = [];
     const stream = this.stream = new AgentTurnStream({
       api: this.options.api,
       agentId: this.options.agent.publicKey,
@@ -880,6 +885,7 @@ export class PlaceSession {
       result = await answering;
       const reply = result.agentText.trim();
       if (CLIPROXY_SIGNED_OUT.exec(reply)?.[0] === reply) throw wall('signed-in', reply);
+      if (!delivery && this.client === client && result.stopReason !== 'cancelled') this.turnPrefix = '';
     } catch (error) {
       void stream.retract();
       throw error;

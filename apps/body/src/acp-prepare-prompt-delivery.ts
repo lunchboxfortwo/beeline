@@ -349,7 +349,7 @@ export async function acpClientSessionPrompt(
     const agentText = finalAgentMessageText(updates, ctx.agentLabel);
 
     const toolCalls = [...toolCallEntries(updates), ...asyncTasks.values()];
-    completed = true;
+    completed = result?.stopReason !== 'cancelled';
     const tokenUsage = harnessTurnTokens(result, updates);
 
     return {

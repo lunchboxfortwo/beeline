@@ -2,6 +2,7 @@ import type { AgentCommand } from '@beeline/api-contract/daemon';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
+import { AcpClient } from './acp.js';
 import { GrantCommandRunner } from './grant-runner.js';
 import { readGrantScript } from './read-only-mcp-agent-grant-deps.js';
 import { parseCommandGrantTarget } from '@beeline/api-contract/agent-grants';
@@ -28,6 +29,92 @@ vi.mock('./squire-mcp-client.js', async (original) => ({
   ...(await original<typeof import('./squire-mcp-client.js')>()),
   sharedSquireMcpClient: vi.fn(),
 }));
+
+it.each([false, true])(
+  'sends session rules once on a fresh conversation (structured prompt: %s)',
+  async (structured) => {
+    const f = await fixture();
+    Object.assign(f.client, { supportsStructuredSystemPrompt: structured });
+    const rules = 'Use the blue notebook for this session.';
+    f.session.resources.context.configuration = {
+      commands: [], yoloMode: false, soul: { name: 'Agent', instructions: rules },
+    };
+    try {
+      await f.session.start(f.item);
+      expect(vi.mocked(f.session.client!.sessionNew).mock.calls[0]?.[0].systemPrompt).toContain(rules);
+      if (!structured) {
+        f.prompt.mockRejectedValueOnce(new Error('Prompt did not reach the harness'));
+        await expect(f.session.deliver(f.item)).rejects.toThrow('Prompt did not reach the harness');
+      }
+      await f.session.deliver(f.item);
+      expect(f.prompt.mock.calls.at(-1)?.[1]?.includes(rules)).toBe(!structured);
+      const next = { ...f.item, id: 'next', turnRequestId: 'next', offlineSeconds: 60 };
+      await f.session.deliver(next);
+      expect(f.prompt.mock.calls.at(-1)?.[1]).not.toContain(rules);
+      expect(f.prompt.mock.calls.at(-1)?.[1]).toContain(next.source.body);
+      f.session.stale = true;
+      await f.session.start(next);
+      await f.session.deliver(next);
+      expect(f.prompt.mock.calls.at(-1)?.[1]?.includes(rules)).toBe(!structured);
+    } finally {
+      await f.session.dispose();
+    }
+  },
+);
+
+it('restores session rules after the ACP conversation reports compaction', async () => {
+  const f = await fixture();
+  f.config.agentBinary = 'codex-acp';
+  f.execute.mockImplementation(pendingRead);
+  const rules = 'Use the blue notebook for this session.';
+  f.session.resources.context.configuration = {
+    commands: [], yoloMode: false, soul: { name: 'Agent', instructions: rules },
+  };
+  const prompts: string[] = [];
+  const systemPrompts: unknown[] = [];
+  f.spawn.mockImplementation((options) => {
+    const client = new AcpClient(options);
+    vi.spyOn(client, 'startProcess').mockImplementation(async () => {
+      client.supportsStructuredSystemPrompt = true;
+      client.codexBlockDelivery = true;
+    });
+    vi.spyOn(client, 'request').mockImplementation(async (method, params) => {
+      if (method === 'session/new') {
+        systemPrompts.push((params as { systemPrompt: unknown }).systemPrompt);
+        return { sessionId: 'live' };
+      }
+      if (method !== 'session/prompt') throw new Error(`Unexpected request ${method}`);
+      const { sessionId, prompt } = params as { sessionId: string; prompt: { text: string }[] };
+      prompts.push(prompt[0]!.text);
+      if (prompt[0]!.text.includes('Compact now')) {
+        client.handleMessage({
+          method: 'session/update',
+          params: { sessionId, update: { sessionUpdate: 'compaction_update', status: 'completed' } },
+        });
+      }
+      return { stopReason: prompt[0]!.text.includes('Cancelled restore') ? 'cancelled' : 'end_turn' };
+    });
+    return client;
+  });
+  try {
+    await f.session.start(f.item);
+    expect(systemPrompts).toEqual([{
+      mode: 'append',
+      content: [{ type: 'text', text: expect.stringContaining(rules) }],
+    }]);
+    for (const body of [
+      'First prompt', 'Warm prompt', 'Compact now', 'Cancelled restore', 'After compaction', 'Warm again',
+    ]) {
+      await f.session.deliver({
+        ...f.item, id: body, turnRequestId: body, source: { ...f.item.source, body },
+      });
+      expect(prompts.at(-1)).toContain(body);
+    }
+    expect(prompts.map((prompt) => prompt.includes(rules))).toEqual([false, false, false, true, true, false]);
+  } finally {
+    await f.session.dispose();
+  }
+});
 
 it('sends a received picture to an image-capable harness as image content, bounded per image', async () => {
   const f = await fixture();
