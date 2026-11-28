@@ -513,6 +513,38 @@ it('Reproduction R1: a worker order waiting on an offline helper stays working',
   expect(await state()).toBe('idle');
 });
 
+it('Reproduction <thread-working-idle>: workingAgentName is populated only while the named agent has a running turn', async () => {
+  const command = (await wake(WORKER, 'queued-no-turn'))!;
+  await db.query(`DELETE FROM agent_turns WHERE room_id=$1`, [C]);
+  expect(await state()).toBe('working');
+  // Queued command with no active turn keeps lifecycle working without naming an active worker.
+  const idleRow = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
+  const idleChat = (await phone.readChats(WS, HUMAN))!.chats.find((chat) => chat.room.id === ROOM)?.openCorners?.[0];
+  expect(idleRow.state).toBe('working');
+  expect(idleRow.workingAgentName).toBeUndefined();
+  expect(idleChat?.state).toBe('working');
+  expect(idleChat?.workingAgentName).toBeUndefined();
+
+  // Starting an actual turn names the worker on both thread and chat list reads.
+  await startQueuedCommand(daemon, { roomId: C, commandId: command.id }, WORKER);
+  expect(await state()).toBe('working');
+  const activeRow = (await phone.readCorners(ROOM, HUMAN))!.corners[0]!;
+  const activeChat = (await phone.readChats(WS, HUMAN))!.chats.find((chat) => chat.room.id === ROOM)?.openCorners?.[0];
+  expect(activeRow).toMatchObject({ state: 'working', workingAgentName: 'Worker' });
+  expect(activeChat).toMatchObject({ state: 'working', workingAgentName: 'Worker' });
+
+  // Interrupting the turn while the command stays pending clears workingAgentName immediately.
+  await db.query(`UPDATE agent_turns SET status='cancelled' WHERE room_id=$1 AND agent_id=$2`, [C, WORKER]);
+  expect(await state()).toBe('working');
+  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]!.workingAgentName).toBeUndefined();
+  expect((await phone.readChats(WS, HUMAN))!.chats.find((chat) => chat.room.id === ROOM)?.openCorners?.[0]?.workingAgentName).toBeUndefined();
+
+  // Completing the command returns the thread to idle.
+  await db.query(`UPDATE agent_commands SET state='complete',completed_at=now() WHERE id=$1`, [command.id]);
+  expect(await state()).toBe('idle');
+  expect((await phone.readCorners(ROOM, HUMAN))!.corners[0]!.workingAgentName).toBeUndefined();
+});
+
 it('WORKER-BLOCK: the addressee’s threaded answer retains the block until explicit closure', async () => {
   const command = (await createAgentCommand(db,{
     roomId:C,agentId:WORKER,sourceMessageId:null,reason:'order',

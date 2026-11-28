@@ -89,7 +89,9 @@ export function cornerFactsSql(viewerExpr: string): {
       blocker.item_id waiting_item_id,blocker.reason waiting_reason,
       blocker.kind waiting_kind,blocker.person_name waiting_person_name,
       blocker.person_id waiting_person_id,
-      (SELECT identity.name FROM identities identity WHERE identity.id=f.machine->>'agent') working_agent_name,
+      (SELECT identity.name FROM identities identity WHERE identity.id=f.machine->>'agent'
+        AND EXISTS (SELECT 1 FROM agent_turns running
+          WHERE running.room_id=c.id AND running.agent_id=identity.id AND ${workingTurnFreshSql('running')})) working_agent_name,
       turn.status latest_turn_status,turn.created_at latest_turn_created_at,
       lm.created_at latest_created_at,
       ${followsCornerSql('c', viewerExpr)} follows_viewer,

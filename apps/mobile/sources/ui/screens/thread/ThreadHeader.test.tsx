@@ -244,6 +244,9 @@ it('says who the state names: the implementer working, the reviewer reviewing', 
   let tree: any;
   act(() => { tree = create(<ThreadBar h={{ ...reconnect, state: 'working', workingAgentName: 'Ruby' }} collapsed back={() => {}} openChat={() => {}} />); });
   expect(tree.root.findByProps({ testID: 'thread-header-working' }).props.children).toBe('Ruby is working');
+  // In-progress lifecycle without a running turn omits "<agent> is working".
+  act(() => tree.update(<ThreadBar h={{ ...reconnect, state: 'working' }} collapsed back={() => {}} openChat={() => {}} />));
+  expect(tree.root.findAllByProps({ testID: 'thread-header-working' })).toHaveLength(0);
   act(() => tree.update(<ThreadBar h={{ ...reconnect, workingAgentName: 'Speedy' }} collapsed back={() => {}} openChat={() => {}} />));
   expect(tree.root.findByProps({ testID: 'thread-header-working' }).props.children).toBe('Speedy is reviewing');
   act(() => tree.update(<ThreadBar h={reconnect} collapsed back={() => {}} openChat={() => {}} />));
