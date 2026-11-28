@@ -60,14 +60,17 @@ export async function syncCornerBranch(input: {
   // Nothing has been pushed to this branch yet: this checkout is all of it.
   if (!fetched) return 'unchanged';
   const remote = (await git(['rev-parse', remoteRef])).trim();
-  const local = (await git(['rev-parse', 'HEAD'])).trim();
+  const local = await git(['rev-parse', '--verify', 'HEAD']).then(
+    (out) => out.trim(),
+    () => undefined,
+  );
   const contains = (head: string, ancestor: string) =>
     git(['merge-base', '--is-ancestor', ancestor, head]).then(
       () => true,
       () => false,
     );
   // Equal, or ahead: this checkout's push will fast-forward the branch.
-  if (local === remote || (await contains(local, remote))) return 'unchanged';
+  if (local && (local === remote || (await contains(local, remote)))) return 'unchanged';
   // Exclude node_modules only from the untracked scan. Prepared dependencies
   // can be symlinks, which a directory-only gitignore rule does not match.
   // Keep file paths so a symlink in a removed workspace remains visible.
@@ -91,6 +94,10 @@ export async function syncCornerBranch(input: {
     throw new Error(
       `Local changes in ${dirtyPaths.join(', ')} were preserved. Commit or stash them before syncing with the remote branch.`,
     );
+  if (!local) {
+    await git(['checkout', '--quiet', '-B', input.featureBranch, remote]);
+    return 'fast-forwarded';
+  }
   const behind = await contains(remote, local);
   try {
     await git(behind ? ['merge', '--ff-only', remote] : ['rebase', remote]);

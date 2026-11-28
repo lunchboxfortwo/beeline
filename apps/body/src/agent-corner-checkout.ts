@@ -20,6 +20,26 @@ import { workspaceDependenciesDir } from './dependency-generation.js';
 
 const git = (args: string[], env?: NodeJS.ProcessEnv) => runOwnedFile('git', args, { env });
 
+export function isMissingRemoteRefError(error: unknown): boolean {
+  return /remote ref does not exist|remote reference does not exist|couldn't find remote ref/i.test(
+    String(error),
+  );
+}
+
+async function remoteHeadCount(gitDir: string, env?: NodeJS.ProcessEnv): Promise<number> {
+  const heads = (await git([`--git-dir=${gitDir}`, 'ls-remote', '--heads', 'origin'], env)).stdout
+    .trim();
+  return heads ? heads.split('\n').filter(Boolean).length : 0;
+}
+
+/** True only when `origin` advertises zero branch heads (an empty repository). */
+export async function isRemoteRepositoryEmpty(
+  gitDir: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  return (await remoteHeadCount(gitDir, env)) === 0;
+}
+
 /** Private refs let agents check out the same public branch independently. */
 export function agentCornerCheckoutPaths(root: string, cornerId: string, agentId: string) {
   for (const value of [cornerId, agentId]) {
@@ -98,6 +118,8 @@ export async function materializeAgentCornerCheckout(input: {
   startRef: string;
   targetBranch?: string;
   env?: NodeJS.ProcessEnv;
+  /** Called once if `targetBranch` is missing and `origin` has zero branches. Returns true if bootstrapped. */
+  onEmptyRemote?: () => Promise<boolean>;
 }): Promise<{ path: string; gitCommonDir: string }> {
   const paths = agentCornerCheckoutPaths(input.root, input.cornerId, input.agentId);
   await mkdir(dirname(paths.gitCommonDir), { recursive: true });
@@ -105,6 +127,36 @@ export async function materializeAgentCornerCheckout(input: {
     throw new Error('refusing symlinked agent checkout');
   const creating = !existsSync(resolve(paths.gitCommonDir, 'HEAD'));
   const label = `repositories/${basename(paths.gitCommonDir)}`;
+  const fetchTargetOrBootstrap = async (gitDir: string, targetBranch: string): Promise<'fetched' | 'empty'> => {
+    const fetchTarget = () =>
+      fetchRepositoryCache({
+        gitDir,
+        label,
+        args: ['origin', `+refs/heads/${targetBranch}:refs/remotes/origin/${targetBranch}`],
+        env: input.env,
+      });
+    try {
+      await fetchTarget();
+      return 'fetched';
+    } catch (error) {
+      if (!isMissingRemoteRefError(error)) throw error;
+      const heads = await remoteHeadCount(gitDir, input.env);
+      if (heads === 0) {
+        if (input.onEmptyRemote && (await input.onEmptyRemote())) {
+          await fetchTarget();
+          return 'fetched';
+        }
+        return 'empty';
+      }
+      // A single branch on origin may be an interrupted Beeline bootstrap commit
+      // whose custom target branch was not created yet; let onEmptyRemote verify it.
+      if (heads === 1 && input.onEmptyRemote && (await input.onEmptyRemote())) {
+        await fetchTarget();
+        return 'fetched';
+      }
+      throw error;
+    }
+  };
   const staging = `${paths.gitCommonDir}.creating`;
   // A stopped owner may have installed HEAD before it could remove staging.
   await rm(staging, { recursive: true, force: true });
@@ -133,33 +185,33 @@ export async function materializeAgentCornerCheckout(input: {
         '+refs/heads/*:refs/remotes/origin/*',
       ]);
       let startRef = input.startRef;
+      let unborn = false;
       if (input.targetBranch) {
-        const fetchBranch = (branch: string) =>
-          fetchRepositoryCache({
+        const targetState = await fetchTargetOrBootstrap(staging, input.targetBranch);
+        if (targetState === 'empty') {
+          unborn = true;
+        } else {
+          const published = await fetchRepositoryCache({
             gitDir: staging,
             label,
-            args: ['origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+            args: ['origin', `+refs/heads/${input.branch}:refs/remotes/origin/${input.branch}`],
             env: input.env,
-          });
-        await fetchBranch(input.targetBranch);
-        const published = await fetchBranch(input.branch).then(
-          () => true,
-          (error) => {
-            if (
-              /remote ref does not exist|remote reference does not exist|couldn't find remote ref/i.test(
-                String(error),
-              )
-            )
-              return false;
-            throw error;
-          },
-        );
-        startRef = `refs/remotes/origin/${published ? input.branch : input.targetBranch}`;
+          }).then(
+            () => true,
+            (error) => {
+              if (isMissingRemoteRefError(error)) return false;
+              throw error;
+            },
+          );
+          startRef = `refs/remotes/origin/${published ? input.branch : input.targetBranch}`;
+        }
       }
-      const head = (
-        await git([`--git-dir=${staging}`, 'rev-parse', '--verify', startRef])
-      ).stdout.trim();
-      await git([`--git-dir=${staging}`, 'update-ref', `refs/heads/${input.branch}`, head]);
+      if (!unborn) {
+        const head = (
+          await git([`--git-dir=${staging}`, 'rev-parse', '--verify', startRef])
+        ).stdout.trim();
+        await git([`--git-dir=${staging}`, 'update-ref', `refs/heads/${input.branch}`, head]);
+      }
       await git([`--git-dir=${staging}`, 'symbolic-ref', 'HEAD', `refs/heads/${input.branch}`]);
       // Seed objects are shared; inherited local branches are not this agent's
       // work. Keep only its branch so later publication checks cover every
@@ -201,15 +253,7 @@ export async function materializeAgentCornerCheckout(input: {
     '+refs/heads/*:refs/remotes/origin/*',
   ]);
   if (!creating && input.targetBranch)
-    await fetchRepositoryCache({
-      gitDir: paths.gitCommonDir,
-      label,
-      args: [
-        'origin',
-        `+refs/heads/${input.targetBranch}:refs/remotes/origin/${input.targetBranch}`,
-      ],
-      env: input.env,
-    });
+    await fetchTargetOrBootstrap(paths.gitCommonDir, input.targetBranch);
   await git([`--git-dir=${paths.gitCommonDir}`, 'config', 'extensions.worktreeConfig', 'true']);
   const gitFile = resolve(paths.path, '.git');
   const pendingFiles = resolve(paths.gitCommonDir, 'beeline-worktree-pending');
@@ -275,18 +319,39 @@ export async function materializeAgentCornerCheckout(input: {
       const temporary = await mkdtemp(resolve(checkoutParent, '.reattach-'));
       try {
         const worktree = resolve(temporary, 'worktree');
-        await git([
+        const hasBranchCommit = await git([
           `--git-dir=${paths.gitCommonDir}`,
-          'worktree',
-          'add',
-          '--no-checkout',
-          worktree,
-          input.branch,
-        ]);
+          'rev-parse',
+          '--verify',
+          `refs/heads/${input.branch}`,
+        ]).then(
+          () => true,
+          () => false,
+        );
+        await git(
+          hasBranchCommit
+            ? [
+                `--git-dir=${paths.gitCommonDir}`,
+                'worktree',
+                'add',
+                '--no-checkout',
+                worktree,
+                input.branch,
+              ]
+            : [
+                `--git-dir=${paths.gitCommonDir}`,
+                'worktree',
+                'add',
+                '--orphan',
+                '-b',
+                input.branch,
+                worktree,
+              ],
+        );
         await rename(resolve(worktree, '.git'), gitFile);
         await git([`--git-dir=${paths.gitCommonDir}`, 'worktree', 'repair', paths.path]);
         await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
-        await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
+        if (hasBranchCommit) await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
       } finally {
         await rm(temporary, { recursive: true, force: true });
       }
@@ -294,15 +359,21 @@ export async function materializeAgentCornerCheckout(input: {
   }
   await git(['-C', paths.path, 'config', '--worktree', 'core.bare', 'false']);
   if (existsSync(pendingFiles)) {
-    const index = (await git(['-C', paths.path, 'rev-parse', '--git-path', 'index'])).stdout.trim();
-    if (!existsSync(resolve(paths.path, index)))
-      await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
-    // Restore only missing paths from the index and keep any surviving files.
-    const missing = (
-      await git(['-C', paths.path, '-c', 'core.quotePath=true', 'ls-files', '--deleted'])
-    ).stdout;
-    if (missing)
-      await runOwnedFile('git', ['-C', paths.path, 'checkout-index', '--stdin'], { input: missing });
+    const hasHead = await git(['-C', paths.path, 'rev-parse', '--verify', 'HEAD']).then(
+      () => true,
+      () => false,
+    );
+    if (hasHead) {
+      const index = (await git(['-C', paths.path, 'rev-parse', '--git-path', 'index'])).stdout.trim();
+      if (!existsSync(resolve(paths.path, index)))
+        await git(['-C', paths.path, 'reset', '--mixed', 'HEAD']);
+      // Restore only missing paths from the index and keep any surviving files.
+      const missing = (
+        await git(['-C', paths.path, '-c', 'core.quotePath=true', 'ls-files', '--deleted'])
+      ).stdout;
+      if (missing)
+        await runOwnedFile('git', ['-C', paths.path, 'checkout-index', '--stdin'], { input: missing });
+    }
     await rm(pendingFiles);
   }
   // An import an older helper left unfinished is never resumed from here.
