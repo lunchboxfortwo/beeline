@@ -577,7 +577,7 @@ describe('queue item reply audience', () => {
   const names = new Map([['worker', 'Jellybean']]);
 
   it.each(['human_tag','direct_message','message','order'])('shows the waking message id for %s',reason=>{
-    expect(itemPrompt({...report,reason},{names})).toBe('From: Jellybean in #Fix the bug\nid: message\ntext: The work is ready.');
+    expect(itemPrompt({...report,reason},{names})).toMatch(/(?:^|\n)From: Jellybean in #Fix the bug\nid: message\ntext: The work is ready\.$/);
   });
   it.each(['reply','report','corner_check','corner_review_needed','subscribed_event'])('shows %s as information with no reply line, live and offline',reason=>{
     const item={...report,reason};

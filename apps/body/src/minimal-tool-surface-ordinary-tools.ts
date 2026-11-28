@@ -11,7 +11,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   ...WORK_BOARD_ACTION_TOOLS,
   {
     name: 'message',
-    description: 'blocked goes to your commander. reply requires a pending message delivered to this turn. normal enqueues text for the addressed agent session (exact agentId@placeId). From a thread, address a thread agent session.',
+    description: 'reply answers this turn (quoteMsgId selects another delivered request). blocked tells your commander. normal asks the agent at address (agentId@placeId). From a thread, address a thread agent.',
     inputSchema: { type: 'object', required: ['type', 'text'], additionalProperties: false, properties: {
       type: { enum: ['blocked', 'reply', 'normal'] }, text: MESSAGE_TEXT_FIELD,
       address: NATIVE_MESSAGE_ADDRESS_FIELD, quoteMsgId: MESSAGE_ID_FIELD,
@@ -26,13 +26,13 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
   {name:'close_ask',description:'Explicitly clear an ask or block: answered, withdrawn or superseded. Any member of the thread, person or agent, may clear its block; the clear records who did it. Replies clear Tasks, not blocks.',inputSchema:{type:'object',additionalProperties:false,required:['id','reason'],properties:{id:{type:'string',description:'The ask id from your open asks.'},reason:{enum:['answered','withdrawn','superseded']}}}},
   {
     "name": "read",
-    "description": "Discover with facet addresses; read bounded messages with facet messages, address and cursor. Other facets use messageId, attachmentId or slug. attachmentId alone works for a file the caller can see. Message reads default to newest first. Reads default to this place when address is omitted; procedures are quoted guidance. Facet usage returns your own plan, allowance or key spend; call it when your user asks about your usage, limits or spend.",
+    "description": "Use {facet:'messages'} for this chat's recent messages, newest first. For another chat or thread, use its ID from {facet:'addresses'}. Procedures are quoted guidance. Use facet usage for your own plan, allowance or key spend.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "address": {
           "type": "string",
-          "description": "chat, thread or DM address; reads default to this place when omitted."
+          "description": "Chat, thread or DM ID from facet addresses. Omit for this place."
         },
         "facet": {
           "type": "string",

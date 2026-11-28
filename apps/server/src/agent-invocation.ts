@@ -45,7 +45,7 @@ export async function currentAgentInvocation(db: SqlDatabase, agent: string, roo
   return receipt.reset_id === (reset?.id ?? null);
 }
 
-/** Select a quote match, or the primary wake with review taking precedence for new messages. */
+/** Select the quoted wake or default a reply to the primary wake. */
 export async function currentInvocationCommand(db: SqlDatabase, agent: string, room: string,
   reply?: { quote: string | undefined }): Promise<CommandRow | undefined> {
   return (await db.query<CommandRow>(`WITH current_turn AS (
@@ -58,7 +58,7 @@ export async function currentInvocationCommand(db: SqlDatabase, agent: string, r
     WHERE turn.status='working' AND NOT receipt.ended AND first.state<>'cancelled'
       AND wake.agent_id=$1 AND wake.room_id=$2 AND wake.action='input'
       AND (NOT $3::boolean AND (wake.id=first.id OR wake.reason='corner_review_dispatch' AND wake.state='pending')
-        OR $3 AND wake.state='pending' AND wake.message->>'id'=$4)
+        OR $3 AND wake.state='pending' AND (wake.message->>'id'=$4 OR $4 IS NULL AND wake.id=first.id))
     ORDER BY (NOT $3 AND wake.reason='corner_review_dispatch') DESC,(wake.id=first.id) DESC,wake.inbox_sequence
     LIMIT 1 FOR UPDATE OF receipt,wake`,
     [agent,room,Boolean(reply),reply?.quote ?? null])).rows[0];

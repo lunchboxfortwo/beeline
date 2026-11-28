@@ -46,7 +46,7 @@ async function fixture(parentRoomId?: string) {
     createAcpClient: () => client as unknown as AcpClient,
   });
   const item = { id: 'item', rootCommandId: 'task', roomId: 'room', returnRoomId: 'room',
-    turnRequestId: 'item', reason: 'human_tag', agentId: agent.publicKey,
+    turnRequestId: 'item', reason: 'message', agentId: agent.publicKey,
     source: { id: 'message', authorId: 'human', body: 'Fix the code', attachments: [], type: 'message' },
   } as AgentCommand;
   return { root, agent, session, item, prompt, execute };
