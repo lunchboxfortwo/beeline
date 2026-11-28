@@ -253,7 +253,9 @@ async function attachQueuedConversation(
       ).rows.reverse();
       const afterSnippet = selectPersonTagSnippet(afterRaw);
       after = afterSnippet.rows;
-      allPersonTagDelivered = afterSnippet.complete;
+      const windowIds = new Set(window.map((row) => row.id));
+      allPersonTagDelivered =
+        afterSnippet.complete && after.every((row) => windowIds.has(row.id));
     } else {
       after = (
         await db.query<ConversationRow>(

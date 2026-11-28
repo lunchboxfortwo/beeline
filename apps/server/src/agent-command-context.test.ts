@@ -175,6 +175,46 @@ it('Reproduction context-seen-skip: never advances contextSeen past messages omi
   expect(t10!.source.conversationContext).toContain('LONG_TAIL');
 });
 
+it('holds contextSeen when a person tag fresh conversationWindow drops an unseen human message behind agent messages', async () => {
+  await queueAgentRequest('T1 saved watermark');
+  await send('T2 unseen human message before agent replies');
+  for (let index = 1; index <= PERSON_TAG_CONTEXT_MESSAGES; index += 1) {
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,$4,'message')`,
+      [`${index}`.repeat(64), R, A, `Agent self reply ${index}`],
+    );
+  }
+  await send('@hoots T3 tag after agent chatter');
+  await queueAgentRequest('T4 next non-tag wake');
+  const [t1, t3, t4] = await commands(A);
+  expect(t3!.reason).toBe('human_tag');
+  // Live delta includes T2, but a fresh session renders conversationWindow which drops T2 behind 4 agent replies.
+  expect(t3!.source.conversationContext).toContain('T2 unseen human message before agent replies');
+  const freshPrompt = itemPrompt(t3!, { names: new Map(), fresh: true });
+  expect(freshPrompt).not.toContain('T2 unseen human message before agent replies');
+  expect(freshPrompt).toContain(`Agent self reply ${PERSON_TAG_CONTEXT_MESSAGES}`);
+  expect(t3!.source.contextSeen?.messageId).toBe(t1!.sourceMessageId);
+  // Subsequent non-tag wake recovers T2.
+  expect(t4!.source.conversationContext).toContain('T2 unseen human message before agent replies');
+  expect(t4!.source.contextSeen?.messageId).toBe(t4!.sourceMessageId);
+
+  // Same guarantee when agent replies evict an unseen human message via the char cap instead of count cap.
+  const big = 'z'.repeat(Math.floor(PERSON_TAG_MESSAGE_CHARS * 0.9));
+  await send(`T5 unseen human message before long agent replies ${big}`);
+  for (let index = 5; index <= 6; index += 1) {
+    await rootFixture.db.query(
+      `INSERT INTO messages(id,room_id,author_id,text,presentation) VALUES($1,$2,$3,$4,'message')`,
+      [`${index}`.repeat(64), R, A, `Agent long reply ${index} ${big}`],
+    );
+  }
+  await send('@hoots T6 tag after long agent replies');
+  await queueAgentRequest('T7 non-tag recovery');
+  const [, , , t6, t7] = await commands(A);
+  expect(itemPrompt(t6!, { names: new Map(), fresh: true })).not.toContain('T5 unseen human message before long agent replies');
+  expect(t6!.source.contextSeen?.messageId).toBe(t4!.sourceMessageId);
+  expect(t7!.source.conversationContext).toContain('T5 unseen human message before long agent replies');
+});
+
 it('caps total person-tag snippet chars, sanitizes fence tags, and preserves unseen history after a fresh person tag', async () => {
   await send('M1 unseen before fresh tag');
   const chunk = 'a'.repeat(Math.floor(PERSON_TAG_MESSAGE_CHARS * 0.9));
