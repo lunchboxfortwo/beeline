@@ -496,3 +496,90 @@ it('settles an unfinished preview capture when the session ends', async () => {
     await expect(capture).resolves.toBeNull();
   } finally { await act(async () => tree.unmount()); }
 });
+
+it('disables card click and actions when the preview stream reports computer-ended or HTTP 410', async () => {
+  for (const trigger of ['message', 'http410'] as const) {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+    const webview = tree.root.findByType('WebView');
+    await act(async () => {
+      if (trigger === 'message') webview.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-ended', id: session.id }) } });
+      else webview.props.onHttpError({ nativeEvent: { statusCode: 410 } });
+    });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-ended' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+    expect(tree.root.findAllByType('WebView')).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+    expect(tree.root.findAllByType('Text').some((node: any) => node.props.children === 'Session ended')).toBe(true);
+    await act(async () => tree.unmount());
+  }
+});
+
+it('disables card click and actions when the preview stream stops loading', async () => {
+  for (const trigger of ['unavailable', 'error', 'http503'] as const) {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+    const webview = tree.root.findByType('WebView');
+    await act(async () => {
+      if (trigger === 'unavailable') webview.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-unavailable', id: session.id }) } });
+      else if (trigger === 'error') webview.props.onError();
+      else webview.props.onHttpError({ nativeEvent: { statusCode: 503 } });
+    });
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' })).toHaveLength(0);
+    expect(tree.root.findAllByType('WebView')).toHaveLength(0);
+    expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+    expect(tree.root.findAllByType('Text').some((node: any) => node.props.children === 'Browser unavailable')).toBe(true);
+    await act(async () => tree.unmount());
+  }
+});
+
+it('disables web card click and actions when the iframe posts computer-unavailable or computer-ended', async () => {
+  const previous = Platform.OS;
+  const globals = globalThis as { window?: any };
+  const hadWindow = 'window' in globals;
+  const listeners = new Set<(event: MessageEvent) => void>();
+  globals.window = {
+    addEventListener: (_type: string, fn: (event: MessageEvent) => void) => { listeners.add(fn); },
+    removeEventListener: (_type: string, fn: (event: MessageEvent) => void) => { listeners.delete(fn); },
+  };
+  Platform.OS = 'web';
+  try {
+    for (const [type, expectedStatus] of [['computer-unavailable', 'unavailable'], ['computer-ended', 'ended']] as const) {
+      let tree!: ReturnType<typeof create>;
+      await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+      expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+      await act(async () => {
+        for (const listener of listeners) listener({ origin: 'https://server.usebeeline.app', data: { type, id: session.id } } as MessageEvent);
+      });
+      expect(tree.root.findAllByProps({ testID: `computer-session-card-${expectedStatus}` }).length).toBeGreaterThan(0);
+      expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+      expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+      await act(async () => tree.unmount());
+    }
+  } finally {
+    Platform.OS = previous;
+    if (!hadWindow) delete globals.window;
+  }
+});
+
+it('refreshes preview authorization once on 403 and disables the card if access is refused', async () => {
+  phoneOperation
+    .mockResolvedValueOnce({ access: 'initial-token' })
+    .mockRejectedValueOnce(new Error('computer session access denied'));
+  let tree!: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={{ ...session, access: undefined }} />); });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+  await act(async () => {
+    tree.root.findByType('WebView').props.onHttpError({ nativeEvent: { statusCode: 403 } });
+  });
+  expect(phoneOperation).toHaveBeenCalledTimes(2);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-unavailable' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+  expect(tree.root.findByType('ListItem').props.onPress).toBeUndefined();
+  await act(async () => tree.unmount());
+});

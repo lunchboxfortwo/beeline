@@ -17,12 +17,13 @@ export function BrowserCard({ status, title, live, frame, onOpen, onOpenInBrowse
     testID: string;
 }) {
     const ended = status === 'ended';
+    const unavailable = status === 'unavailable';
     return (
         <Card backgroundColor="canvas" borderWidth={1} borderColor="strongStroke" borderRadius="transcript" overflow="hidden" width="100%" marginTop="2" testID={testID}>
-            <ListItem padding="0" backgroundColor="canvas" onPress={live ? onOpen : undefined} accessibilityRole={live ? "button" : undefined} accessibilityLabel={`Open ${title} browser`}>
+            <ListItem padding="0" backgroundColor="canvas" onPress={live ? onOpen : undefined} accessibilityRole={live ? "button" : undefined} accessibilityLabel={live ? `Open ${title} browser` : title}>
                 <YStack flex={1}>
                     {live ? <YStack height={218} width="100%" backgroundColor="canvas" pointerEvents="none" testID="computer-session-preview">{frame}</YStack> : null}
-                    <YStack paddingHorizontal="4" paddingVertical="2" gap="1"><Copy strong numberOfLines={1}>{title}</Copy><Copy small quiet>{ended ? 'Session ended' : 'Live browser'}</Copy></YStack>
+                    <YStack paddingHorizontal="4" paddingVertical="2" gap="1"><Copy strong numberOfLines={1}>{title}</Copy><Copy small quiet>{ended ? 'Session ended' : unavailable ? 'Browser unavailable' : 'Live browser'}</Copy></YStack>
                 </YStack>
             </ListItem>
             {live ? <XStack borderTopWidth={1} borderColor="stroke" paddingHorizontal="4" paddingVertical="2" alignItems="center" justifyContent="space-between">

@@ -9,7 +9,7 @@ import { systemLine } from "./system-line.js";
 import { SYSTEM_IDENTITY_ID } from "@beeline/api-contract/system-identity";
 import { isIP } from "node:net";
 import { systemMessage } from "@beeline/api-contract/system-message-catalog";
-import { bodyChannels, squireChannels, replayToSourceMachine, bodyChannel, upgradeBodyViewer, squireChannel, computerViewerHtml } from './computer-session-computer-viewer-html.js';
+import { bodyChannels, squireChannels, replayToSourceMachine, bodyChannel, upgradeBodyViewer, squireChannel, computerViewerHtml, serveComputerEnded, serveComputerRetry } from './computer-session-computer-viewer-html.js';
 
 
 
@@ -74,10 +74,37 @@ export async function mayViewComputer(database: SqlDatabase, row: ComputerSessio
 
 
 
+function isComputerSessionExpired(row: ComputerSessionRow): boolean {
+  return row.expires_at != null && new Date(row.expires_at).getTime() <= Date.now();
+}
+
+async function reconcileExpiredComputerSession(
+  database: SqlDatabase,
+  live: LiveHub | undefined,
+  row: ComputerSessionRow,
+): Promise<ComputerSessionRow> {
+  if (row.status !== 'live' || !isComputerSessionExpired(row)) return row;
+  if (await endComputerSession(database, live, row, true)) return { ...row, status: 'ended' };
+  return (await getComputerSession(database, row.id)) ?? { ...row, status: 'ended' };
+}
+
+function isMissingUpstreamHost(error: unknown): boolean {
+  const cause = (error as { cause?: { code?: unknown }; code?: unknown } | undefined);
+  const code = cause?.cause?.code ?? cause?.code;
+  return code === 'ENOTFOUND';
+}
+
 /** A Room reader obtains a short-lived, viewer-bound URL only through phone auth. */
-export async function computerViewToken(database: SqlDatabase, id: string, viewerId: string): Promise<string | null> {
-  const row = await getComputerSession(database, id);
-  if (!row || row.status !== 'live' || !row.view_secret || !(await mayViewComputer(database, row, viewerId))) return null;
+export async function computerViewToken(
+  database: SqlDatabase,
+  id: string,
+  viewerId: string,
+  live?: LiveHub,
+): Promise<string | null> {
+  const loaded = await getComputerSession(database, id);
+  if (!loaded || loaded.status !== 'live' || !loaded.view_secret) return null;
+  const row = await reconcileExpiredComputerSession(database, live, loaded);
+  if (row.status !== 'live' || !row.view_secret || !(await mayViewComputer(database, row, viewerId))) return null;
   const expires = Date.now() + VIEW_TOKEN_LIFETIME_MS;
   const body = `${row.id}.${viewerId}.${expires}`;
   const signature = createHmac('sha256', row.view_secret).update(body).digest('hex');
@@ -278,8 +305,8 @@ export async function endComputerSession(
   live: LiveHub | undefined,
   row: ComputerSessionRow,
   expiredOnly = false,
-): Promise<void> {
-  if (row.status === 'ended') return;
+): Promise<boolean> {
+  if (row.status === 'ended') return false;
   const changed = await database.transaction(async (db) => {
     const update = await db.query(
       `UPDATE computer_sessions SET status='ended',ended_at=now()
@@ -295,6 +322,7 @@ export async function endComputerSession(
   });
   if (changed) live?.publish({ type: 'invalidate', roomId: row.room_id, reason: 'message', agentId: row.agent_id });
   if (changed) closeComputerChannels(row.id);
+  return changed;
 }
 
 
@@ -314,15 +342,22 @@ export function closeComputerChannels(id: string): void {
 
 
 /** One authoritative read when a live viewer's socket reconnects. */
-export async function serveComputerStatus(request: IncomingMessage, response: ServerResponse, database: SqlDatabase, id: string): Promise<void> {
-  const row = await getComputerSession(database, id);
-  if (!row || !(await authorizedViewer(request, database, row))) { response.writeHead(403).end(); return; }
-  response.writeHead(row ? 200 : 404, {
+export async function serveComputerStatus(
+  request: IncomingMessage,
+  response: ServerResponse,
+  database: SqlDatabase,
+  id: string,
+  live?: LiveHub,
+): Promise<void> {
+  const loaded = await getComputerSession(database, id);
+  if (!loaded || !(await authorizedViewer(request, database, loaded))) { response.writeHead(403).end(); return; }
+  const row = await reconcileExpiredComputerSession(database, live, loaded);
+  response.writeHead(200, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'x-content-type-options': 'nosniff',
   });
-  response.end(JSON.stringify({ status: row?.status ?? 'ended' }));
+  response.end(JSON.stringify({ status: row.status }));
 }
 
 
@@ -359,20 +394,7 @@ function viewerZoomAt(state,zoom,x,y){const next=Math.min(4,Math.max(state.minZo
 
 
 
-export function serveComputerRetry(_request: IncomingMessage, response: ServerResponse): void {
-  response.writeHead(200, {
-    'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'",
-    'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
-  });
-  response.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>
-    body{margin:0;display:grid;place-items:center;height:100vh;background:var(--beeline-canvas,Canvas);color:var(--beeline-ink,CanvasText);font:15px system-ui,sans-serif}
-    button{border:1px solid var(--beeline-strongStroke,ButtonBorder);border-radius:12px;background:var(--beeline-canvas,Canvas);color:inherit;padding:10px 14px}
-    </style><div><button id="retry">Try again</button></div><script>
-    const next=new URL(location.href);next.searchParams.delete('retry');
-    document.getElementById('retry').onclick=event=>{if(event.isTrusted)location.replace(next.href);};
-    </script>`);
-}
+export { serveComputerRetry } from './computer-session-computer-viewer-html.js';
 
 
 
@@ -402,8 +424,8 @@ export async function serveComputerSession(
     computerSharePage(response, 200, 'Open Beeline and sign in to view this shared browser.', id);
     return;
   }
-  const row = await getComputerSession(database, id);
-  if (!row || !(await authorizedViewer(request, database, row))) {
+  const loaded = await getComputerSession(database, id);
+  if (!loaded || !(await authorizedViewer(request, database, loaded))) {
     const parts = /^([0-9a-f]{64})\.([0-9]{13})\.([0-9a-f]{64})$/.exec(token);
     const expired = parts && Number(parts[2]) <= Date.now();
     computerSharePage(response, 403, expired
@@ -411,9 +433,9 @@ export async function serveComputerSession(
       : 'You do not have access to this shared browser. Open Beeline with an allowed account.', id);
     return;
   }
+  const row = await reconcileExpiredComputerSession(database, live, loaded);
   if (row.status !== 'live') {
-    response.writeHead(410, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-    response.end('This browser session has ended.');
+    serveComputerEnded(response, id);
     return;
   }
   // HTTP and WebSocket requests must reach the same machine: the warm
@@ -431,17 +453,29 @@ export async function serveComputerSession(
     const fetchStartedAt = Date.now();
     const channel = squireChannel(id);
     const htmlWasCached = Boolean(channel.html);
+    let upstreamError: unknown;
     const upstream = channel.html ? undefined : await fetch(row.upstream_url, { redirect: 'error',  })
-      .catch(() => undefined);
-    if (!upstream && !channel.html) { console.warn(`[computer-share] Squire HTML unavailable session=${id.slice(0, 8)}`); serveComputerRetry(request, response); return; }
+      .catch((error: unknown) => { upstreamError = error; return undefined; });
+    if (!upstream && !channel.html) {
+      console.warn(`[computer-share] Squire HTML unavailable session=${id.slice(0, 8)}`);
+      if (row.expires_at == null && isMissingUpstreamHost(upstreamError)) {
+        await endComputerSession(database, live, row);
+        serveComputerEnded(response, id);
+        return;
+      }
+      serveComputerRetry(request, response, id);
+      return;
+    }
     if (upstream && !upstream.ok) {
       console.warn(`[computer-share] Squire HTML status=${upstream.status} session=${id.slice(0, 8)}`);
-      if (upstream.status === 410 || upstream.status === 404) response.writeHead(410, { 'cache-control': 'no-store' }).end();
-      else serveComputerRetry(request, response);
+      if (upstream.status === 410 || upstream.status === 404 || (upstream.status === 530 && row.expires_at == null)) {
+        await endComputerSession(database, live, row);
+        serveComputerEnded(response, id);
+      } else serveComputerRetry(request, response, id);
       return;
     }
     const html = channel.html ?? await upstream!.text().catch(() => undefined);
-    if (!html) { squireChannels.delete(id); serveComputerRetry(request, response); return; }
+    if (!html) { squireChannels.delete(id); serveComputerRetry(request, response, id); return; }
     channel.html = html;
     // The Squire page uses a relative "stream" URL. This small host bridge
     // reconciles one close with our session row and notifies the artifact view.
@@ -581,19 +615,17 @@ export async function serveComputerSession(
             parent.postMessage(value,'*');window.ReactNativeWebView?.postMessage(JSON.stringify(value));}));};}
       ${channel.lastFrame ? `if(!beelinePreview)socket.dispatchEvent(new MessageEvent('message',{data:atob('${channel.lastFrame.data.toString('base64')}')}));` : ''}
       socket.addEventListener('close',async()=>{
+        const notify=type=>{const value={type,id:'${id}'};parent.postMessage(value,'*');window.ReactNativeWebView?.postMessage(JSON.stringify(value));};
         try{const reply=await fetch('status'+location.search,{cache:'no-store'});const state=await reply.json();
           if(state.status==='live'&&!new URLSearchParams(location.search).has('reconnected')){
             const next=new URL(location.href);next.searchParams.set('reconnected','1');location.replace(next.href);return;
           }
-          if(state.status==='ended'){
-            const value={type:'computer-ended',id:'${id}'};
-            parent.postMessage(value,'*');window.ReactNativeWebView?.postMessage(JSON.stringify(value));
-          }
-        }catch{}
+          notify(state.status==='ended'?'computer-ended':'computer-unavailable');
+        }catch{notify('computer-unavailable');}
       });
     </script>`;
     const securedHtml = html.replace('new URL("stream", location.href)', 'new URL("stream" + location.search, location.href)');
-    if (securedHtml === html) { serveComputerRetry(request, response); return; }
+    if (securedHtml === html) { serveComputerRetry(request, response, id); return; }
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
       'server-timing': `squire-html;dur=${Date.now() - fetchStartedAt};desc="${htmlWasCached ? 'cached' : 'fetched'}"`,
@@ -623,9 +655,16 @@ export const computerWebSockets = new WebSocketServer({ noServer: true, maxPaylo
 
 
 /** Only an authenticated person's explicit action completes a share. */
-export async function handBackComputerSession(database: SqlDatabase, id: string, viewerId: string): Promise<void> {
-  const row = await getComputerSession(database, id);
-  if (!row || row.status !== 'live' || !(await mayViewComputer(database, row, viewerId)))
+export async function handBackComputerSession(
+  database: SqlDatabase,
+  id: string,
+  viewerId: string,
+  live?: LiveHub,
+): Promise<void> {
+  const loaded = await getComputerSession(database, id);
+  if (!loaded || loaded.status !== 'live') throw new Error('computer session access denied');
+  const row = await reconcileExpiredComputerSession(database, live, loaded);
+  if (row.status !== 'live' || !(await mayViewComputer(database, row, viewerId)))
     throw new Error('computer session access denied');
   const body = bodyChannels.get(id);
   if (body) {
@@ -755,9 +794,11 @@ export async function upgradeComputerSession(
   live: LiveHub,
   id: string,
 ): Promise<void> {
-  const row = await getComputerSession(database, id);
-  if (!row || row.status !== 'live') { socket.destroy(); return; }
-  if (!(await authorizedViewer(request, database, row))) { socket.destroy(); return; }
+  const loaded = await getComputerSession(database, id);
+  if (!loaded || loaded.status !== 'live') { socket.destroy(); return; }
+  if (!(await authorizedViewer(request, database, loaded))) { socket.destroy(); return; }
+  const row = await reconcileExpiredComputerSession(database, live, loaded);
+  if (row.status !== 'live') { socket.destroy(); return; }
   if (replayToSourceMachine(socket, row)) return;
   const path = new URL(request.url ?? '/', 'http://beeline.local').pathname;
   if (row.upstream_url === 'body:') {
@@ -907,25 +948,34 @@ export async function upgradeComputerSession(
       }
     });
     const closeViewers = () => { for (const recipient of channel.viewers) recipient.close(); };
+    const notifyEnded = () => {
+      for (const recipient of channel.viewers) if (recipient.readyState === WebSocket.OPEN)
+        recipient.send(JSON.stringify({ type: 'ended' }));
+    };
     source.once('close', (code, reason) => {
       channel.upstreams.delete(source);
       if (squireChannels.get(id) === channel) squireChannels.delete(id);
       if (!channel.viewers.size) return;
       if (code === 1000 && reason.toString() === 'share ended') {
+        notifyEnded();
         void endComputerSession(database, live, row).finally(closeViewers);
         return;
       }
-      // Tunnel loss is not share expiry. Reconcile the upstream status once.
-      void fetch(row.upstream_url, { redirect: 'error',  })
-        .then(async (reply) => {
-          if (reply.status === 404 || reply.status === 410) {
-            for (const recipient of channel.viewers) if (recipient.readyState === WebSocket.OPEN)
-              recipient.send(JSON.stringify({ type: 'ended' }));
-            await endComputerSession(database, live, row);
-          }
-        }).finally(closeViewers).catch(() => {});
+      // Tunnel loss is not share expiry. Reconcile expiry and upstream status once.
+      void (async () => {
+        const current = await reconcileExpiredComputerSession(database, live, row);
+        if (current.status === 'ended') { notifyEnded(); return; }
+        let fetchError: unknown;
+        const reply = await fetch(row.upstream_url, { redirect: 'error',  })
+          .catch((error: unknown) => { fetchError = error; return undefined; });
+        if ((reply && (reply.status === 404 || reply.status === 410 || (reply.status === 530 && row.expires_at == null)))
+          || (!reply && row.expires_at == null && isMissingUpstreamHost(fetchError))) {
+          notifyEnded();
+          await endComputerSession(database, live, row);
+        }
+      })().finally(closeViewers).catch(() => {});
     });
-    source.once('error', closeViewers);
+    source.once('error', () => { source.terminate(); });
   });
 }
 export { computerViewerHtml } from './computer-session-computer-viewer-html.js';

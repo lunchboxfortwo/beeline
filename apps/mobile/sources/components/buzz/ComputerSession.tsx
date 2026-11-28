@@ -50,8 +50,8 @@ function useViewerRoomFocused(roomId: string | undefined): boolean {
 import type { ComputerSessionView } from '@/buzz/computer-session';
 export type { ComputerSessionView } from '@/buzz/computer-session';
 
-function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAccessRejected, captureRef, warm = false, interactive = true }: {
-  session: ComputerSessionView; preview?: boolean; onEnded?: () => void; onFirstFrame?: () => void;
+function ComputerStream({ session, preview = false, onEnded, onUnavailable, onFirstFrame, onAccessRejected, captureRef, warm = false, interactive = true }: {
+  session: ComputerSessionView; preview?: boolean; onEnded?: () => void; onUnavailable?: () => void; onFirstFrame?: () => void;
   onAccessRejected?: () => void; warm?: boolean; interactive?: boolean;
   captureRef?: React.MutableRefObject<(() => Promise<string | null>) | null>;
 }) {
@@ -81,6 +81,7 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     const handle = (event: MessageEvent) => {
       if (event.origin !== origin || event.data?.id !== session.id) return;
       if (event.data.type === 'computer-ended') { releaseCaptures(); onEnded?.(); }
+      if (event.data.type === 'computer-unavailable') { releaseCaptures(); onUnavailable?.(); }
       if (event.data.type === 'computer-first-frame') onFirstFrame?.();
       if (event.data.type === 'computer-snapshot') {
         const resolve = pendingCaptures.current.get(event.data.requestId);
@@ -89,7 +90,7 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     };
     window.addEventListener('message', handle);
     return () => window.removeEventListener('message', handle);
-  }, [onEnded, onFirstFrame, releaseCaptures, session.id, session.url]);
+  }, [onEnded, onUnavailable, onFirstFrame, releaseCaptures, session.id, session.url]);
   React.useEffect(() => {
     if (!captureRef) return;
     if (session.status === 'ended') { captureRef.current = null; releaseCaptures(); return; }
@@ -120,6 +121,7 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
       }).catch(() => {});
       if (message.type === 'computer-copy' && typeof message.text === 'string') void Clipboard.setStringAsync(message.text).catch(() => {});
       if (message.type === 'computer-ended') { releaseCaptures(); onEnded?.(); }
+      if (message.type === 'computer-unavailable') { releaseCaptures(); onUnavailable?.(); }
       if (message.type === 'computer-first-frame') onFirstFrame?.();
       if (message.type === 'computer-snapshot' && message.requestId !== undefined) {
         const resolve = pendingCaptures.current.get(message.requestId);
@@ -142,9 +144,11 @@ function ComputerStream({ session, preview = false, onEnded, onFirstFrame, onAcc
     return (
       <FillView view={WebView} backgroundColor="canvas" ref={webViewRef} source={{ uri: url }} javaScriptEnabled domStorageEnabled
     onMessage={onStreamMessage} onLoadEnd={setViewerMode}
+    onError={() => { releaseCaptures(); onUnavailable?.(); }}
     onHttpError={(event: { nativeEvent: { statusCode: number } }) => {
       if (event.nativeEvent.statusCode === 401 || event.nativeEvent.statusCode === 403) onAccessRejected?.();
-      if (event.nativeEvent.statusCode === 410) onEnded?.();
+      else if (event.nativeEvent.statusCode === 410) { releaseCaptures(); onEnded?.(); }
+      else if (event.nativeEvent.statusCode >= 500) { releaseCaptures(); onUnavailable?.(); }
     }}
     scrollEnabled={false} setBuiltInZoomControls={false} setDisplayZoomControls={false}
     automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" testID={preview ? 'computer-session-preview-webview' : 'computer-session-view-webview'} />
@@ -160,7 +164,13 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   const fullViewer = React.useSyncExternalStore(subscribeViewers,
     () => fullViewers.has(session.id) || (Platform.OS !== 'web' && fullViewers.size > 0), () => false);
   const [authorized, setAuthorized] = React.useState({ id: session.id, access: session.access ?? null });
+  const [streamState, setStreamState] = React.useState<{ id: string; status: 'ended' | 'unavailable' } | null>(null);
   const access = session.access ?? (authorized.id === session.id ? authorized.access : null);
+  const effectiveStatus = session.status === 'ended'
+    ? 'ended'
+    : streamState?.id === session.id
+      ? streamState.status
+      : session.status;
   const owner = React.useRef({ id: session.id, mounted: true });
   owner.current.id = session.id;
   React.useEffect(() => {
@@ -169,8 +179,9 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   }, []);
   const captureRef = React.useRef<(() => Promise<string | null>) | null>(null);
   const requested = React.useRef<string | undefined>(undefined);
+  const retriedAccess = React.useRef<string | undefined>(undefined);
   React.useEffect(() => {
-    if (!visible || session.status !== 'live' || session.access || requested.current === session.id) return;
+    if (!visible || effectiveStatus !== 'live' || session.access || requested.current === session.id) return;
     requested.current = session.id;
     void monolithPhoneOperation('openComputerSession', { id: session.id })
       .then(({ access: token }) => {
@@ -179,36 +190,65 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
       .catch(() => {
         if (owner.current.mounted && owner.current.id === session.id) setAuthorized({ id: session.id, access: null });
       });
-  }, [session.id, session.status, session.access, visible]);
+  }, [session.id, effectiveStatus, session.access, visible]);
   React.useEffect(() => {
-    if (!visible || Platform.OS === 'web' || !access || session.status !== 'live') return;
+    if (!visible || Platform.OS === 'web' || !access || effectiveStatus !== 'live') return;
     return warmComputerSession({ ...session, access }, roomId, agentHandle);
-  }, [session.id, session.url, session.title, session.status, access, agentHandle, visible, roomId]);
+  }, [session.id, session.url, session.title, effectiveStatus, access, agentHandle, visible, roomId]);
   const open = async () => {
-    if (!visible || !access || session.status !== 'live') return;
+    if (!visible || !access || effectiveStatus !== 'live') return;
     // Keep the preview on its existing authorized stream. Replacing its URL
     // tears down the warm connection just as the full viewer needs its frame.
     await openComputerSessionViewer({ ...session, access,
       previewFrame: captureRef.current?.() }, isDesktop, roomId, agentHandle);
   };
   const openInBrowser = async () => {
-    if (!visible || !access || session.status !== 'live') return;
+    if (!visible || !access || effectiveStatus !== 'live') return;
     try {
       const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
       const url = new URL(session.url); url.searchParams.set('access', freshAccess);
       await openExternalUrl(url.toString());
-    } catch { Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.'); }
+    } catch {
+      if (owner.current.mounted && owner.current.id === session.id)
+        setStreamState({ id: session.id, status: 'unavailable' });
+      Modal.alert('Could not open browser', 'The live browser is unavailable. Try again.');
+    }
   };
-  const live = session.status === 'live' && Boolean(access);
+  const handlePreviewAccessRejected = () => {
+    if (session.access || retriedAccess.current === session.id) {
+      setStreamState({ id: session.id, status: 'unavailable' });
+      return;
+    }
+    retriedAccess.current = session.id;
+    setAuthorized({ id: session.id, access: null });
+    void monolithPhoneOperation('openComputerSession', { id: session.id })
+      .then(({ access: token }) => {
+        if (owner.current.mounted && owner.current.id === session.id) setAuthorized({ id: session.id, access: token });
+      })
+      .catch(() => {
+        if (owner.current.mounted && owner.current.id === session.id)
+          setStreamState({ id: session.id, status: 'unavailable' });
+      });
+  };
+  const live = effectiveStatus === 'live' && Boolean(access);
   return (
     <BrowserCard
-      status={session.status}
+      status={effectiveStatus}
       title={session.title}
       live={live}
-      frame={live && visible && !fullViewer ? <ComputerStream session={{ ...session, access: access! }} preview captureRef={captureRef} /> : null}
+      frame={live && visible && !fullViewer ? (
+        <ComputerStream
+          session={{ ...session, access: access! }}
+          preview
+          captureRef={captureRef}
+          onEnded={() => setStreamState({ id: session.id, status: 'ended' })}
+          onUnavailable={() => setStreamState({ id: session.id, status: 'unavailable' })}
+          onAccessRejected={handlePreviewAccessRejected}
+        />
+      ) : null}
       onOpenInBrowser={() => void openInBrowser()}
       onOpen={() => void open()}
-      testID={`computer-session-card-${session.status}`}
+      testID={`computer-session-card-${effectiveStatus}`}
     />
   );
 }

@@ -2,8 +2,38 @@ import type { WebSocket } from "ws";
 import type { SqlDatabase } from "./database.js";
 import type { LiveHub } from "./live.js";
 import type { Duplex } from "node:stream";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { VIEWER_LAYOUT_SCRIPT, getComputerSession, mayViewComputer, endComputerSession, ComputerSessionRow, computerWebSockets, recordComputerActivity, noteComputerHandback } from './computer-session.js';
+
+export function serveComputerEnded(response: ServerResponse, id: string): void {
+  response.writeHead(410, {
+    'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'",
+    'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
+  });
+  response.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+    body{margin:0;display:grid;place-items:center;height:100vh;background:var(--beeline-canvas,Canvas);color:var(--beeline-ink,CanvasText);font:15px system-ui,sans-serif}
+    </style><div>This browser session has ended.</div><script>
+    const notice={type:'computer-ended',id:'${id}'};
+    parent.postMessage(notice,'*');window.ReactNativeWebView?.postMessage(JSON.stringify(notice));
+    </script>`);
+}
+
+export function serveComputerRetry(_request: IncomingMessage, response: ServerResponse, id?: string): void {
+  response.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'",
+    'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
+  });
+  response.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+    body{margin:0;display:grid;place-items:center;height:100vh;background:var(--beeline-canvas,Canvas);color:var(--beeline-ink,CanvasText);font:15px system-ui,sans-serif}
+    button{border:1px solid var(--beeline-strongStroke,ButtonBorder);border-radius:12px;background:var(--beeline-canvas,Canvas);color:inherit;padding:10px 14px}
+    </style><div><button id="retry">Try again</button></div><script>
+    const next=new URL(location.href);next.searchParams.delete('retry');
+    document.getElementById('retry').onclick=event=>{if(event.isTrusted)location.replace(next.href);};
+    ${id ? `const notice={type:'computer-unavailable',id:'${id}'};parent.postMessage(notice,'*');window.ReactNativeWebView?.postMessage(JSON.stringify(notice));` : ''}
+    </script>`);
+}
 
 
 
@@ -48,7 +78,8 @@ export function computerViewerHtml(id: string): string {
   function finish(){if(leaving)return;leaving=true;if(!preview)send({type:'leave'});}
   function showEnded(){endedSession=true;image.style.display='none';ended.textContent='Browser session ended';ended.style.display='grid';
     const notice=JSON.stringify({type:'computer-ended',id:'${id}'});parent.postMessage({type:'computer-ended',id:'${id}'},'*');window.ReactNativeWebView?.postMessage(notice);}
-  function showLost(){ended.textContent='Connection lost · reopen to retry';ended.style.display='grid';}
+  function showLost(){ended.textContent='Connection lost · reopen to retry';ended.style.display='grid';
+    const notice=JSON.stringify({type:'computer-unavailable',id:'${id}'});parent.postMessage({type:'computer-unavailable',id:'${id}'},'*');window.ReactNativeWebView?.postMessage(notice);}
   function connect(){wire=new WebSocket(socketUrl);
     wire.onopen=()=>{if(query.has('warm'))send({type:'viewer-mode',interactive:!preview});if(document.hidden)send({type:'pause-view'});};
     wire.onmessage=event=>{try{const message=JSON.parse(event.data);

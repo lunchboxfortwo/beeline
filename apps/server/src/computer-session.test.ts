@@ -596,4 +596,97 @@ const scope1 = fixtureScope1();
       await new Promise<void>((resolve) => debuggerServer.close(() => resolve()));
     }
   });
+
+
+  it('ends expired sessions on token mint, status read, and viewer load', async () => {
+    const expiredShare = await createComputerSession(scope1.database, scope1.live, {
+      roomId: ROOM, agentId: AGENT, sessionId: 'expired-on-open', upstreamUrl: 'body:',
+      expiresAt: Date.now() - 1_000,
+    });
+    expect(await computerViewToken(scope1.database, expiredShare.id, HUMAN, scope1.live)).toBeNull();
+    expect((await getComputerSession(scope1.database, expiredShare.id))?.status).toBe('ended');
+    expect((await scope1.phone.readRoom(ROOM, HUMAN))?.messages.find((m) => m.id === expiredShare.messageId)?.computerSession?.status).toBe('ended');
+
+    const expiringShare = await createComputerSession(scope1.database, scope1.live, {
+      roomId: ROOM, agentId: AGENT, sessionId: 'expired-after-token', upstreamUrl: 'body:',
+      expiresAt: Date.now() + 60_000,
+    });
+    const access = await computerViewToken(scope1.database, expiringShare.id, HUMAN, scope1.live);
+    expect(access).toBeTruthy();
+    await scope1.database.query(`UPDATE computer_sessions SET expires_at=now()-interval '1 second' WHERE id=$1`, [expiringShare.id]);
+    const statusReply = await fetch(`${scope1.origin}/s/${expiringShare.id}/status?access=${access}`);
+    expect(statusReply.status).toBe(200);
+    expect(await statusReply.json()).toEqual({ status: 'ended' });
+    expect((await getComputerSession(scope1.database, expiringShare.id))?.status).toBe('ended');
+    expect((await scope1.phone.readRoom(ROOM, HUMAN))?.messages.find((m) => m.id === expiringShare.messageId)?.computerSession?.status).toBe('ended');
+    const pageReply = await fetch(`${scope1.origin}/s/${expiringShare.id}/?access=${access}`);
+    expect(pageReply.status).toBe(410);
+    expect(await pageReply.text()).toContain("type:'computer-ended'");
+  });
+
+
+  it('ends Squire sessions on upstream 404/410, dead legacy 530 tunnels, and failed WS upgrades while signaling unavailable on retry', async () => {
+    let mode: '503' | '410' | '530' | 'html-then-dead-ws' = '503';
+    let wsDead = false;
+    const squire = createServer((_request, response) => {
+      if (mode === '503') { response.writeHead(503).end(); return; }
+      if (mode === '410') { response.writeHead(410).end(); return; }
+      if (mode === '530') { response.writeHead(530).end(); return; }
+      if (wsDead) { response.writeHead(410).end(); return; }
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end('<!doctype html><head></head><body><div id="bar"></div><script>const socket=new WebSocket(new URL("stream", location.href));</script></body>');
+    });
+    squire.on('upgrade', (_request, socket) => {
+      socket.write('HTTP/1.1 410 Gone\r\ncontent-length: 0\r\n\r\n');
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => squire.listen(0, '127.0.0.1', resolve));
+    const upstreamUrl = `http://127.0.0.1:${(squire.address() as AddressInfo).port}/s/${'d'.repeat(43)}/`;
+    try {
+      const retryShare = await createComputerSession(scope1.database, scope1.live, {
+        roomId: ROOM, agentId: AGENT, sessionId: 'squire-503-then-410', upstreamUrl,
+        expiresAt: Date.now() + 60_000,
+      }, testSquire);
+      const retryAccess = await computerViewToken(scope1.database, retryShare.id, HUMAN, scope1.live);
+      const retryReply = await fetch(`${scope1.origin}/s/${retryShare.id}/?access=${retryAccess}`);
+      expect(retryReply.status).toBe(200);
+      const retryHtml = await retryReply.text();
+      expect(retryHtml).toContain('Try again');
+      expect(retryHtml).toContain(`type:'computer-unavailable',id:'${retryShare.id}'`);
+      expect((await getComputerSession(scope1.database, retryShare.id))?.status).toBe('live');
+
+      mode = '410';
+      const goneReply = await fetch(`${scope1.origin}/s/${retryShare.id}/?access=${retryAccess}`);
+      expect(goneReply.status).toBe(410);
+      expect(await goneReply.text()).toContain(`type:'computer-ended',id:'${retryShare.id}'`);
+      expect((await getComputerSession(scope1.database, retryShare.id))?.status).toBe('ended');
+      expect((await scope1.phone.readRoom(ROOM, HUMAN))?.messages.find((m) => m.id === retryShare.messageId)?.computerSession?.status).toBe('ended');
+
+      mode = '530';
+      const legacyShare = await createComputerSession(scope1.database, scope1.live, {
+        roomId: ROOM, agentId: AGENT, sessionId: 'squire-legacy-530', upstreamUrl,
+      }, testSquire);
+      const legacyAccess = await computerViewToken(scope1.database, legacyShare.id, HUMAN, scope1.live);
+      const legacyReply = await fetch(`${scope1.origin}/s/${legacyShare.id}/?access=${legacyAccess}`);
+      expect(legacyReply.status).toBe(410);
+      expect((await getComputerSession(scope1.database, legacyShare.id))?.status).toBe('ended');
+
+      mode = 'html-then-dead-ws';
+      const wsShare = await createComputerSession(scope1.database, scope1.live, {
+        roomId: ROOM, agentId: AGENT, sessionId: 'squire-ws-410', upstreamUrl,
+        expiresAt: Date.now() + 60_000,
+      }, testSquire);
+      const wsAccess = await computerViewToken(scope1.database, wsShare.id, HUMAN, scope1.live);
+      expect((await fetch(`${scope1.origin}/s/${wsShare.id}/?access=${wsAccess}`)).status).toBe(200);
+      wsDead = true;
+      const viewer = new WebSocket(`${scope1.origin.replace('http:', 'ws:')}/s/${wsShare.id}/stream?access=${wsAccess}`);
+      const endedNotice = next(viewer);
+      await opened(viewer);
+      expect(JSON.parse(await endedNotice)).toEqual({ type: 'ended' });
+      await until(async () => (await getComputerSession(scope1.database, wsShare.id))?.status === 'ended' ? true : undefined);
+      expect((await scope1.phone.readRoom(ROOM, HUMAN))?.messages.find((m) => m.id === wsShare.messageId)?.computerSession?.status).toBe('ended');
+    } finally {
+      await new Promise<void>((resolve) => squire.close(() => resolve()));
+    }
+  });
 });
