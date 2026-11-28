@@ -176,18 +176,29 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
       : session.status;
   const owner = React.useRef({ id: session.id, mounted: true });
   owner.current.id = session.id;
-  React.useEffect(() => {
-    owner.current.mounted = true;
-    return () => { owner.current.mounted = false; };
-  }, []);
   const captureRef = React.useRef<(() => Promise<string | null>) | null>(null);
   const requested = React.useRef<string | undefined>(undefined);
   const retriedAccess = React.useRef<string | undefined>(undefined);
   const attemptRef = React.useRef(0);
+  const recheckSerial = React.useRef(0);
+  const activeRecheck = React.useRef<number | null>(null);
   React.useEffect(() => {
-    if (!visible && streamState?.id === session.id && streamState.status === 'checking') {
-      setProbeStream(null);
-      setStreamState({ id: session.id, status: 'unavailable' });
+    owner.current.mounted = true;
+    return () => {
+      owner.current.mounted = false;
+      activeRecheck.current = null;
+    };
+  }, []);
+  React.useEffect(() => {
+    activeRecheck.current = null;
+  }, [session.id]);
+  React.useEffect(() => {
+    if (!visible) {
+      activeRecheck.current = null;
+      if (streamState?.id === session.id && streamState.status === 'checking') {
+        setProbeStream(null);
+        setStreamState({ id: session.id, status: 'unavailable' });
+      }
     }
   }, [visible, streamState, session.id]);
   React.useEffect(() => {
@@ -234,25 +245,28 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
   };
   const recheckBrowser = async () => {
     if (!visible || session.status !== 'live' || checking) return;
+    const recheckId = ++recheckSerial.current;
+    activeRecheck.current = recheckId;
     setProbeStream(null);
     setStreamState({ id: session.id, status: 'checking' });
     try {
       const { access: freshAccess } = await monolithPhoneOperation('openComputerSession', { id: session.id });
-      if (!owner.current.mounted || owner.current.id !== session.id) return;
+      if (!owner.current.mounted || owner.current.id !== session.id || activeRecheck.current !== recheckId) return;
       retriedAccess.current = undefined;
       const nextAttempt = ++attemptRef.current;
       setAuthorized({ id: session.id, access: freshAccess });
       setStreamAttempt(nextAttempt);
       setProbeStream({ id: session.id, attempt: nextAttempt });
     } catch {
-      if (owner.current.mounted && owner.current.id === session.id) {
-        setProbeStream(null);
-        setStreamState({ id: session.id, status: 'unavailable' });
-      }
+      if (!owner.current.mounted || owner.current.id !== session.id || activeRecheck.current !== recheckId) return;
+      activeRecheck.current = null;
+      setProbeStream(null);
+      setStreamState({ id: session.id, status: 'unavailable' });
     }
   };
   const handlePreviewAccessRejected = () => {
     if (checking || session.access || retriedAccess.current === session.id) {
+      activeRecheck.current = null;
       setProbeStream(null);
       setStreamState({ id: session.id, status: 'unavailable' });
       return;
@@ -265,6 +279,7 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
       })
       .catch(() => {
         if (owner.current.mounted && owner.current.id === session.id) {
+          activeRecheck.current = null;
           setProbeStream(null);
           setStreamState({ id: session.id, status: 'unavailable' });
         }
@@ -285,15 +300,18 @@ export function ComputerSessionCard({ session, messageId, roomId, isDesktop, age
           captureRef={captureRef}
           onFirstFrame={() => {
             if (streamState?.id === session.id && streamState.status === 'checking') {
+              activeRecheck.current = null;
               setProbeStream(null);
               setStreamState(null);
             }
           }}
           onEnded={() => {
+            activeRecheck.current = null;
             setProbeStream(null);
             setStreamState({ id: session.id, status: 'ended' });
           }}
           onUnavailable={() => {
+            activeRecheck.current = null;
             setProbeStream(null);
             setStreamState({ id: session.id, status: 'unavailable' });
           }}

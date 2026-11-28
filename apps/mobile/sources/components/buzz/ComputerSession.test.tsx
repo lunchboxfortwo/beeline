@@ -609,6 +609,42 @@ it('keeps the live card intact if launching the external browser fails, and reco
   await act(async () => tree.unmount());
 });
 
+it('ignores a canceled retry that rejects late after returning from background and starting a newer retry', async () => {
+  let rejectFirst!: (error: Error) => void;
+  let resolveSecond!: (value: { access: string }) => void;
+  phoneOperation
+    .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
+    .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+  let tree!: ReturnType<typeof create>;
+  await act(async () => { tree = create(<ComputerSessionCard messageId="message-1" roomId="computer-test" session={session} />); });
+  await act(async () => {
+    tree.root.findByType('WebView').props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-unavailable', id: session.id }) } });
+  });
+  // Start first retry, then background while its access request is still pending.
+  await act(async () => { tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+  await act(async () => { foreground.state = 'background'; for (const listener of foreground.listeners) listener(); });
+  // Return to foreground and start a second retry.
+  await act(async () => { foreground.state = 'active'; for (const listener of foreground.listeners) listener(); });
+  await act(async () => { tree.root.findAllByProps({ testID: 'computer-session-recheck' })[0]!.props.onPress(); });
+  // Newer retry resolves first, mounting the probe preview.
+  await act(async () => { resolveSecond({ access: 'newer-token' }); });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' })).toHaveLength(0);
+  expect(tree.root.findByType('WebView').props.source.uri).toContain('access=newer-token');
+  // Canceled first retry rejects late — must not tear down the newer probe preview.
+  await act(async () => { rejectFirst(new Error('stale failure')); });
+  const probe = tree.root.findByType('WebView');
+  expect(probe.props.source.uri).toContain('access=newer-token');
+  // Probe delivers its first frame — Open returns.
+  await act(async () => {
+    probe.props.onMessage({ nativeEvent: { data: JSON.stringify({ type: 'computer-first-frame', id: session.id }) } });
+  });
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-live' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-open' }).length).toBeGreaterThan(0);
+  expect(tree.root.findAllByProps({ testID: 'computer-session-card-open-browser' }).length).toBeGreaterThan(0);
+  expect(tree.root.findByType('ListItem').props.onPress).toBeTypeOf('function');
+  await act(async () => tree.unmount());
+});
+
 it('disables web card click and actions when the iframe posts computer-unavailable or computer-ended', async () => {
   const previous = Platform.OS;
   const globals = globalThis as { window?: any };
