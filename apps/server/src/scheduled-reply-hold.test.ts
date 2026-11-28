@@ -69,6 +69,24 @@ it('a retried reply with files returns the saved reply and posts once', async ()
   expect(await notes()).toEqual([closing]);
 });
 
+it('a transport ID reused in another chat does not copy the earlier reply\'s files', async () => {
+  const send = async (place: string, upload_: boolean) => {
+    const request = await sendMessage(db, { route: { from: { agent: H, place }, to: { agent: B, place } }, text: 'Send me a morning card.' });
+    const invocation = { id: randomUUID(), requestId: request.id };
+    await daemon.execute('startAgentTurn', { roomId: place, requestId: request.id, invocationId: invocation.id }, B);
+    if (upload_) await upload(request.id);
+    const saved = await daemon.execute('message', { type: 'reply', roomId: place, requestId: request.id, invocation,
+      quoteMsgId: request.id, text: 'Morning card.', transportRequestId: 'shared' }, B);
+    await answerQueuedMessage(db, B, { roomId: place, requestId: request.id, text: closing, harnessEnded: true, invocation });
+    return saved;
+  };
+  const first = await send(CHAT, true);
+  const second = await send(OTHER, false);
+  expect(second.messageId).not.toBe(first.messageId);
+  expect(await posts()).toEqual([{ text: 'Morning card.', files: ['insights.json'] }]);
+  expect(await posts(OTHER)).toEqual([{ text: 'Morning card.', files: [] }]);
+});
+
 it('a reply to a person in another place leaves the files with the closing text here', async () => {
   const request = await ask({ agent: H, place: OTHER });
   await turn(request.id, request.id);
