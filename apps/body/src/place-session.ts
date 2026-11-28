@@ -884,8 +884,8 @@ export class PlaceSession {
       result = await answering;
       const reply = result.agentText.trim();
       if (CLIPROXY_SIGNED_OUT.exec(reply)?.[0] === reply) throw wall('signed-in', reply);
-      if (!delivery && this.client === client && result.stopReason !== 'cancelled') this.turnPrefix = '';
     } catch (error) {
+      delivery?.invalidate();
       void stream.retract();
       throw error;
     } finally {

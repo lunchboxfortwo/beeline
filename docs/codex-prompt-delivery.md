@@ -9,17 +9,16 @@ Other adapters receive a fallback copy in the first successful prompt of each
 fresh conversation.
 
 In `PlaceSession`, successful prompts let later turns reuse the rules already
-in the conversation. For Codex ACP versions `2.3.0` and `2.10.0` with
-structured system prompts, ACP compaction notifications invalidate that
-delivery state, including during an active prompt. The next prompt restores the
-rules. The installed `2.10.0` adapter stores the append text as developer
-instructions and includes compaction notifications when the client advertises
-`session.compaction`. A failed or cancelled prompt also clears the tracked
-delivery state.
+in the conversation. ACP compaction notifications invalidate the delivery state
+for any adapter, including during an active prompt. The next prompt restores
+the rules. Codex ACP versions `2.3.0` and `2.10.0` support structured system
+prompts. The installed `2.10.0` adapter stores the append text as developer
+instructions and reports compaction when the client advertises
+`session.compaction`. A failed or cancelled prompt also clears the delivery state.
 
-The Codex cache begins empty after a native load, so the first prompt after
-load restores the rules. Other adapters without tracked compaction signals
-reuse their first successful delivery for the lifetime of the live session.
+The cache begins empty after a native load, so the first prompt after load
+restores any rules that use the turn prefix. Adapters without compaction signals
+reuse their successful delivery during the live session.
 Beeline has no signal to restore fallback rules after silent compaction in
 that session. Starting a new conversation restores its startup delivery. The
 Cursor bridge starts a new CLI invocation per turn and supplies the stored

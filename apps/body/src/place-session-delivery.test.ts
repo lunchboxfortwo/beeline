@@ -30,41 +30,13 @@ vi.mock('./squire-mcp-client.js', async (original) => ({
   sharedSquireMcpClient: vi.fn(),
 }));
 
-it.each([false, true])(
-  'sends session rules once on a fresh conversation (structured prompt: %s)',
-  async (structured) => {
-    const f = await fixture();
-    Object.assign(f.client, { supportsStructuredSystemPrompt: structured });
-    const rules = 'Use the blue notebook for this session.';
-    f.session.resources.context.configuration = {
-      commands: [], yoloMode: false, soul: { name: 'Agent', instructions: rules },
-    };
-    try {
-      await f.session.start(f.item);
-      expect(vi.mocked(f.session.client!.sessionNew).mock.calls[0]?.[0].systemPrompt).toContain(rules);
-      if (!structured) {
-        f.prompt.mockRejectedValueOnce(new Error('Prompt did not reach the harness'));
-        await expect(f.session.deliver(f.item)).rejects.toThrow('Prompt did not reach the harness');
-      }
-      await f.session.deliver(f.item);
-      expect(f.prompt.mock.calls.at(-1)?.[1]?.includes(rules)).toBe(!structured);
-      const next = { ...f.item, id: 'next', turnRequestId: 'next', offlineSeconds: 60 };
-      await f.session.deliver(next);
-      expect(f.prompt.mock.calls.at(-1)?.[1]).not.toContain(rules);
-      expect(f.prompt.mock.calls.at(-1)?.[1]).toContain(next.source.body);
-      f.session.stale = true;
-      await f.session.start(next);
-      await f.session.deliver(next);
-      expect(f.prompt.mock.calls.at(-1)?.[1]?.includes(rules)).toBe(!structured);
-    } finally {
-      await f.session.dispose();
-    }
-  },
-);
-
-it('restores session rules after the ACP conversation reports compaction', async () => {
+it.each([
+  { adapter: 'Codex', structured: true, pinned: true },
+  { adapter: 'unpinned structured', structured: true, pinned: false },
+  { adapter: 'fallback', structured: false, pinned: false },
+])('reuses and restores session rules for the $adapter adapter', async ({ structured, pinned }) => {
   const f = await fixture();
-  f.config.agentBinary = 'codex-acp';
+  if (pinned) f.config.agentBinary = 'codex-acp';
   f.execute.mockImplementation(pendingRead);
   const rules = 'Use the blue notebook for this session.';
   f.session.resources.context.configuration = {
@@ -75,8 +47,8 @@ it('restores session rules after the ACP conversation reports compaction', async
   f.spawn.mockImplementation((options) => {
     const client = new AcpClient(options);
     vi.spyOn(client, 'startProcess').mockImplementation(async () => {
-      client.supportsStructuredSystemPrompt = true;
-      client.codexBlockDelivery = true;
+      client.supportsStructuredSystemPrompt = structured;
+      client.codexBlockDelivery = pinned;
     });
     vi.spyOn(client, 'request').mockImplementation(async (method, params) => {
       if (method === 'session/new') {
@@ -85,6 +57,7 @@ it('restores session rules after the ACP conversation reports compaction', async
       }
       if (method !== 'session/prompt') throw new Error(`Unexpected request ${method}`);
       const { sessionId, prompt } = params as { sessionId: string; prompt: { text: string }[] };
+      if (prompt[0]!.text.includes('Reject first prompt')) throw new Error('Prompt rejected');
       prompts.push(prompt[0]!.text);
       if (prompt[0]!.text.includes('Compact now')) {
         client.handleMessage({
@@ -96,21 +69,30 @@ it('restores session rules after the ACP conversation reports compaction', async
     });
     return client;
   });
+  const turn = (body: string, offlineSeconds?: number) => f.session.deliver({
+    ...f.item, id: body, turnRequestId: body, source: { ...f.item.source, body }, offlineSeconds,
+  });
   try {
     await f.session.start(f.item);
-    expect(systemPrompts).toEqual([{
-      mode: 'append',
-      content: [{ type: 'text', text: expect.stringContaining(rules) }],
-    }]);
+    expect(systemPrompts).toEqual([
+      structured
+        ? { mode: 'append', content: [{ type: 'text', text: expect.stringContaining(rules) }] }
+        : expect.stringContaining(rules),
+    ]);
+    if (!structured) await expect(turn('Reject first prompt')).rejects.toThrow('Prompt rejected');
     for (const body of [
       'First prompt', 'Warm prompt', 'Compact now', 'Cancelled restore', 'After compaction', 'Warm again',
     ]) {
-      await f.session.deliver({
-        ...f.item, id: body, turnRequestId: body, source: { ...f.item.source, body },
-      });
+      await turn(body, body === 'Warm prompt' ? 60 : undefined);
       expect(prompts.at(-1)).toContain(body);
     }
-    expect(prompts.map((prompt) => prompt.includes(rules))).toEqual([false, false, false, true, true, false]);
+    expect(prompts.map((prompt) => prompt.includes(rules))).toEqual([
+      !structured, false, false, true, true, false,
+    ]);
+    f.session.stale = true;
+    await f.session.start(f.item);
+    await turn('Fresh conversation');
+    expect(prompts.at(-1)?.includes(rules)).toBe(!structured);
   } finally {
     await f.session.dispose();
   }
