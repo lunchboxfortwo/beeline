@@ -363,7 +363,7 @@ const cardRendererCases: Array<{ name: string; patch: Record<string, unknown> }>
   { name: 'target branch approval', patch: { targetBranchProposal: { proposalId: 'synthetic-proposal', from: 'main', to: 'sample' } } },
   { name: 'GitHub event', patch: { githubEvent: {} } },
   { name: 'daemon fact', patch: { daemonFact: {} } },
-  { name: 'workflow handoff', patch: { isSystemNotice: true, systemEvent: { kind: 'workflow-handoff' } } },
+  { name: 'failed workflow handoff', patch: { isSystemNotice: true, workflowRunEnd: 'failed', systemEvent: { kind: 'workflow-handoff' } } },
   { name: 'ended voice call', patch: { isSystemNotice: true, voiceCall: { endedAt: 1 } } },
   { name: 'durable fact', patch: { durableFact: { kind: 'action' } } },
   { name: 'unknown future card', patch: {} },
@@ -448,15 +448,31 @@ it('renders the morning workflow approval as its question and choices only', () 
         consequence: 'run af0d790d',
       },
     },
+    // The gate's answer and a same-time handoff are routine workflow lines: hidden, never the gate card.
+    {
+      id: 'a'.repeat(64), text: 'lunchboxfortwo picked approve_all · at approve so run af0d790d went to fix_all',
+      systemEvent: {
+        kind: 'workflow-handoff', verb: 'picked', object: { text: 'approve_all' },
+        subject: { id: owner, kind: 'person', name: 'lunchboxfortwo' },
+        consequence: 'at approve so run af0d790d went to fix_all',
+      },
+    },
+    {
+      id: 'b'.repeat(64), text: 'Ruby handed off done · run af0d790d of morning-card-2026-11-18',
+      systemEvent: {
+        kind: 'workflow-handoff', verb: 'handed off', object: { text: 'done' },
+        subject: { id: agent.pubkey, kind: 'agent', name: 'Ruby' },
+        consequence: 'run af0d790d of morning-card-2026-11-18',
+      },
+    },
   ];
   const projected = source.map(row => displayRoomMessage(readRoomViewMessage({
     ...row, author: agent, presentation: 'card',
     createdAt: Math.floor(createdAtMs / 1000), createdAtMs,
   })!, owner));
   const folded = foldTranscriptRows(projected, null);
-  expect(folded.rows.map(row => row.id)).toEqual([askId, runId]);
+  expect(folded.rows.map(row => row.id)).toEqual([askId]);
   expect(folded.hostIds.get(askId)).toBe(askId);
-  expect(folded.hostIds.get(runId)).toBe(runId);
   function Fixture() {
     const args: unknown[] = Array(68).fill(undefined);
     Object.assign(args, {
@@ -485,6 +501,37 @@ it('renders the morning workflow approval as its question and choices only', () 
     act(() => plate.props.choice.onPress());
     expect(onAnswer).toHaveBeenLastCalledWith(choiceId, plate.props.choice.id);
   }
+});
+
+it('keeps one line when a workflow run fails or is cancelled, and hides a normal finish', () => {
+  const owner = '34cf4160723acd12d205dfbe292614bfec9489b78812d1cd9846c00346903334';
+  const system = { pubkey: 'e'.repeat(64), kind: 'agent', name: 'System', handle: 'system' };
+  const createdAtMs = Date.parse('2026-11-28T09:00:00Z');
+  const line = (id: string, text: string, patch: Record<string, unknown>) => ({
+    id, text, author: system, createdAt: Math.floor(createdAtMs / 1000), createdAtMs,
+    systemTranscript: { origin: 'system', visibility: patch.presentation === 'system' ? 'notice' : 'card' },
+    presentation: 'card', ...patch,
+  });
+  const failed = line('1'.repeat(64), 'Ruby handed off blocked · run 215b8d09 went to failed', {
+    workflowRunEnd: 'failed',
+    systemEvent: { kind: 'workflow-handoff', verb: 'handed off', subject: { kind: 'agent', name: 'Ruby' } },
+  });
+  // A cancellation is a closed-run record: no event kind, ended `abandoned`.
+  const cancelled = line('2'.repeat(64), 'lunchboxfortwo cancelled run 215b8d09', {
+    presentation: 'system', workflowRunEnd: 'abandoned',
+    systemEvent: { verb: 'cancelled', subject: { kind: 'person', name: 'lunchboxfortwo' } },
+  });
+  const finished = line('3'.repeat(64), 'Ruby handed off done · run 215b8d09 went to done', {
+    workflowRunEnd: 'done',
+    systemEvent: { kind: 'workflow-handoff', verb: 'handed off', subject: { kind: 'agent', name: 'Ruby' } },
+  });
+  const projected = [failed, cancelled, finished].map(row => displayRoomMessage(readRoomViewMessage(row)!, owner));
+  expect(projected.map(row => row.workflowRunEnd)).toEqual(['failed', 'abandoned', 'done']);
+  const folded = foldTranscriptRows(projected, null);
+  const shown = folded.rows.flatMap(row => [row.id, ...(row.pillRun?.map(item => item.id) ?? [])]);
+  expect(shown).toContain(failed.id);
+  expect(shown).toContain(cancelled.id);
+  expect(shown).not.toContain(finished.id);
 });
 
 let renderer: ReactTestRenderer;

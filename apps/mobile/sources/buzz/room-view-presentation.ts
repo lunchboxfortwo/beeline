@@ -212,6 +212,8 @@ export type ChatDisplayMessage = {
   deleted?: boolean;
   /** The server-phrased event behind a system line or card header (`buzz/system-lines.ts`). */
   systemEvent?: SystemEvent;
+  /** How a workflow run ended, on the run card that ended it. */
+  workflowRunEnd?: RoomViewMessage['workflowRunEnd'];
   awayWarning?: boolean;
   isAgentAuthor?: boolean;
   isAgentActivity?: boolean;
@@ -408,6 +410,7 @@ export function displayRoomMessage(
     ...(message.deleted ? { deleted: true } : {}),
     ...(message.awayWarning ? { awayWarning: true } : {}),
     ...(message.systemEvent ? { systemEvent: message.systemEvent } : {}),
+    ...(message.workflowRunEnd ? { workflowRunEnd: message.workflowRunEnd } : {}),
     ...(message.presentation === 'activity' ? { isAgentActivity: true } : {}),
     ...(message.activity ? { activity: activityItems(message) } : {}),
     ...(message.attachments ? { attachments: [...message.attachments] } : {}),

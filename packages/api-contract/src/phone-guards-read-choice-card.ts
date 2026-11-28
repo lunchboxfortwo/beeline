@@ -461,6 +461,7 @@ export function readRoomViewMessage(value: unknown): RoomViewMessage | null {
     ...field('reactions', readList(item.reactions, readReaction)),
     ...field('activity', readList(item.activity, readActivity)),
     ...field('durableFact', oneOf(item.durableFact, ['failure', 'merge', 'action'])),
+    ...field('workflowRunEnd', oneOf(item.workflowRunEnd, ['done', 'failed', 'abandoned'])),
     ...field('corner', readMessageCorner(item.corner)),
     ...field('permission', readPermission(item.permission)),
     ...field('grantRequest', readGrantRequest(item.grantRequest)),
