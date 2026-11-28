@@ -418,11 +418,14 @@ export class RoomsMcpAgentTools {
     validateToolArguments(definition, args);
     if (args.commandId !== undefined && name !== 'no_reply_needed') {
       if (typeof args.commandId !== 'string' || !/^[0-9a-f]{64}$/.test(args.commandId)) throw new McpToolError('Invalid commandId');
-      const target = addressArg(args.address ?? args.room ?? args.roomId ?? object(args.about).roomId);
+      const target = name === 'close_thread'
+        ? undefined
+        : addressArg(args.address ?? args.room ?? args.roomId ?? object(args.about).roomId);
       const turn = await this.db.transaction(async tx => {
         const selected = await selectMcpMessage(tx, member, args.commandId as string, target);
-        await beginAgentInvocation(tx, member, target, selected.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
-        return { roomId: target, requestId: selected.turn_request_id, commandId: selected.id, received: true };
+        const turnRoomId = selected.room_id;
+        await beginAgentInvocation(tx, member, turnRoomId, selected.turn_request_id, `mcp:${randomBytes(16).toString('hex')}`);
+        return { roomId: turnRoomId, requestId: selected.turn_request_id, commandId: selected.id, received: true };
       });
       const { commandId: _, ...input } = args;
       return this.boundTurn.run(turn, async () => {
