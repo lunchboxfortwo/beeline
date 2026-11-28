@@ -511,17 +511,21 @@ export const CAPABILITY_TOOLS: Record<string, Record<string, ToolDefinition>> = 
 };
 
 
+/** Optional on every tool but message; checked server-side and not advertised. */
+export const REQUEST_ID_PROPERTY = {type:'string',minLength:1,description:'The claimed request this tool serves.'};
+
 /**
  * Claude Code skips root combinators on deployments without its optional
  * rewrite. All harnesses receive the same object schema; branch constraints
  * remain visible in the description and mandatory in server-side validation.
  * Nested schemas are left intact. Never depend on a harness feature flag.
+ * invocationTool adds requestId to the server-side validation schema only.
  */
 export function invocationTool(tool: ToolDefinition): ToolDefinition {
   if (tool.name === 'message') return tool;
   return {...tool,inputSchema:{...tool.inputSchema,properties:{
     ...(tool.inputSchema.properties as Record<string,unknown>),
-    requestId:{type:'string',minLength:1,description:'The claimed request this tool serves.'},
+    requestId:REQUEST_ID_PROPERTY,
   }}};
 }
 export { RUNNER_TOOL } from './minimal-tool-surface-repository-tools.js';

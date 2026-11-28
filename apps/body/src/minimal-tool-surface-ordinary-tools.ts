@@ -624,7 +624,7 @@ export const ORDINARY_TOOLS: ToolDefinition[] = [
         },
         "prompt": {
           "type": "string",
-          "description": "The action to perform on each event. Schedule prompts allow at most 2000 UTF-16 code units. For a workflow, tell yourself to call start_workflow for the saved workflow."
+          "description": "The action to perform on each event. Schedule prompts allow at most 2000 UTF-16 code units. For a workflow, tell yourself to call app_tool(app:\"beeline:workflow\", tool:\"start\", args:{...}) for the saved workflow."
         },
         "cadence": {
           "type": "object",

@@ -11,6 +11,7 @@ import { Check, Errors } from 'typebox/value';
 import {
   CAPABILITY_ROUTES,
   CAPABILITY_TOOLS,
+  REQUEST_ID_PROPERTY,
   SCRATCH_ROUTES,
   agentToolsFor,
   placeBeelineApps,
@@ -150,10 +151,12 @@ export function validateAdvertisedToolInput(tool: ToolDefinition, args: JsonObje
   // Restore root combinations while retaining surface-specific restrictions
   // such as scratch_io without quota. App operations have their own contracts
   // and may share a name (e.g. workflow read) with an ordinary tool.
-  validateToolInput(
-    { ...tool, inputSchema: { ...toolValidationSchema(tool.name), ...tool.inputSchema } },
-    args,
-  );
+  // requestId is not advertised, but explicit callers may still pass it on
+  // every tool except message; it is checked here and stripped by callAgentTool.
+  const inputSchema = { ...toolValidationSchema(tool.name), ...tool.inputSchema };
+  if (tool.name !== 'message')
+    inputSchema.properties = { ...(inputSchema.properties as JsonObject | undefined), requestId: REQUEST_ID_PROPERTY };
+  validateToolInput({ ...tool, inputSchema }, args);
 }
 
 /** Name a string that misses its advertised length, including a matching allOf branch. */

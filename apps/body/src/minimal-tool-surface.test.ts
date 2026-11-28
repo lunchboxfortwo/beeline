@@ -6,6 +6,9 @@ import { institutionalMemoryKeywords } from '@beeline/api-contract/daemon';
 import { agentToolsFor, callAgentTool } from './read-only-mcp.js';
 import { advertisedAgentTool, normalizeAgentToolArgs, validateAdvertisedToolInput } from './read-only-mcp-open-poll.js';
 import { toolValidationSchema, type ToolDefinition } from './minimal-tool-surface.js';
+import { combinationSummary } from './minimal-tool-surface-repository-tools.js';
+import { drawAvatarSkillMarkdown } from './draw-avatar-skill.js';
+import { beelineManagedSkills } from '@beeline/api-contract/beeline-guides';
 import { assembleSessionPrompt, PROMPT_SURFACES } from './prompt-assembly.js';
 
 const harnesses = ['claude-agent-acp', 'claude-code-acp', 'codex-acp', 'pi-acp', 'grok', 'buzz-agent', 'cursor-acp-bridge'];
@@ -126,14 +129,60 @@ describe('Beeline tool surface across harnesses', () => {
     for (const tool of agentToolsFor(true, false, false, false, true, true, true)) {
       const canonical = toolValidationSchema(tool.name);
       if (!canonical) continue;
-      expect(tool.inputSchema.properties).toEqual(canonical.properties);
+      const { requestId, ...canonicalProperties } = canonical.properties as Record<string, unknown>;
+      if (tool.name !== 'message') expect(requestId).toMatchObject({ type: 'string', minLength: 1 });
+      expect(tool.inputSchema.properties).toEqual(canonicalProperties);
+      expect(tool.inputSchema.properties).not.toHaveProperty('requestId');
       expect(tool.inputSchema.required).toEqual(canonical.required);
       const rules = Object.fromEntries(rootCombinators.filter(key => key in canonical).map(key => [key, canonical[key]]));
-      if (Object.keys(rules).length) expect(tool.description).toContain(JSON.stringify(rules));
+      expect(tool.description).not.toContain('Argument combinations');
+      expect(tool.description).not.toContain('"anyOf"');
+      if (Object.keys(rules).length) expect(tool.description).toContain(combinationSummary(rules));
     }
     const valid = { kind: 'procedure', action: 'save', slug: 'widget', description: 'Build widgets', markdown: 'Steps' };
     expect(Check(toolValidationSchema('remember')!, valid)).toBe(true);
     expect(Check(toolValidationSchema('remember')!, { ...valid, action: 'update' })).toBe(false);
+  });
+
+  it('summarizes argument sets in a few words generated from the validated schema', () => {
+    const tools = agentToolsFor(true, false, false, false, true, true, true);
+    const description = (name: string) => tools.find(tool => tool.name === name)!.description;
+    expect(description('request_grant')).toContain('Needs: mode=request: kind,target,reason,action,purpose.');
+    expect(description('remember')).toContain('kind=procedure (action=save: slug,description,markdown; action=delete: slug,version,source_message_ids).');
+    expect(description('wake')).toContain('action=create (trigger=schedule: title; trigger=event: title,when);');
+    expect(description('wake')).toContain('Rules: if trigger=schedule: prompt max 2000 chars.');
+    expect(description('revise_thread')).toContain('if action=metadata: name,no brief;');
+    expect(description('report_feedback')).toContain('Needs: category,summary,no action; action=fixed: item_ids,title,pr_url.');
+    expect(description('app_tool')).toContain('Needs: no tool/args/arguments; tool,args; tool,arguments.');
+    // An unfamiliar branch shape keeps its full JSON rather than losing a rule.
+    expect(combinationSummary({ anyOf: [{ minProperties: 2 }] })).toBe('Needs: {"minProperties":2}.');
+    // All nine summaries together stay well under the raw JSON they replace.
+    const summaries = [...agentToolsFor(false, false), ...tools, ...agentToolsFor(true, false, false, false, false, true, false)]
+      .filter((tool, index, all) => all.findIndex(other => other.name === tool.name) === index)
+      .map(tool => combinationSummary(toolValidationSchema(tool.name) ?? {})).filter(Boolean);
+    expect(summaries).toHaveLength(9);
+    expect(Buffer.byteLength(summaries.join(' '))).toBeLessThan(1210);
+  });
+
+  it('accepts and checks an unadvertised requestId on every tool but message', () => {
+    const tool = advertisedAgentTool('wake');
+    const args = { action: 'pause', scheduleId: 'sched-1' };
+    expect(() => validateAdvertisedToolInput(tool, { ...args, requestId: 'req-1' })).not.toThrow();
+    expect(() => validateAdvertisedToolInput(tool, { ...args, requestId: '' })).toThrow(/invalid arguments/);
+    expect(() => validateAdvertisedToolInput(tool, { ...args, requestId: 7 })).toThrow(/invalid arguments/);
+    expect(() => validateAdvertisedToolInput(advertisedAgentTool('message'), { type: 'reply', quoteMsgId: 'q1', text: 'Done', requestId: 'req-1' })).toThrow(/message: invalid arguments/);
+    expect(() => validateAdvertisedToolInput(advertisedAgentTool('message'), { type: 'reply', quoteMsgId: 'q1', text: 'Done' })).not.toThrow();
+  });
+
+  it('names only live tools and fields in managed skills, schemas and prompts', () => {
+    const tools = agentToolsFor(true, false, true, true, true, true, false);
+    const surface = [
+      drawAvatarSkillMarkdown('test'), ...beelineManagedSkills('test', { isReviewer: true }).map(skill => skill.content), JSON.stringify(tools),
+      ...PROMPT_SURFACES.map(surface => assembleSessionPrompt({ surface, agentName: 'Bee', agentCommand: 'claude-agent-acp' }).systemPrompt),
+    ].join('\n');
+    for (const stale of ['get_avatar', 'start_workflow', 'request_grant(action:', 'open_thread(chat', 'report_feedback(category:bug']) expect(surface).not.toContain(stale);
+    expect(surface).toContain('app_tool(app:"beeline:avatar", tool:"read", args:{})');
+    expect(surface).toContain('request_grant(mode:"request", kind, target, action, purpose, reason)');
   });
 
   it('also preserves the fallback repository and scratch tools under Claude schema rules', () => {
@@ -163,7 +212,9 @@ describe('Beeline tool surface across harnesses', () => {
       });
       const requests = [
         { jsonrpc: '2.0', id: 1, method: 'tools/list' },
-        ...invalidInputs.map(([name, args], index) => ({ jsonrpc: '2.0', id: index + 2, method: 'tools/call', params: { name, arguments: args } })),
+        ...invalidInputs.map(([name, args], index) => ({ jsonrpc: '2.0', id: index + 2, method: 'tools/call', params: { name, arguments: { ...args, requestId: 'req-1' } } })),
+        { jsonrpc: '2.0', id: 100, method: 'tools/call', params: { name: 'wake', arguments: { action: 'pause', scheduleId: 'sched-1', requestId: 'req-1' } } },
+        { jsonrpc: '2.0', id: 101, method: 'tools/call', params: { name: 'wake', arguments: { action: 'pause', scheduleId: 'sched-1', requestId: 7 } } },
       ];
       child.stdin.end(requests.map(request => JSON.stringify(request)).join('\n') + '\n');
       expect(await closed, stderr).toBe(0);
@@ -173,6 +224,11 @@ describe('Beeline tool surface across harnesses', () => {
       const tools = responses.find(response => response.id === 1)!.result.tools;
       expect(tools).toEqual(agentToolsFor(true, false, false, false, true, true, true));
       expect(tools.every(tool => rootCombinators.every(key => !(key in tool.inputSchema)))).toBe(true);
+      expect(tools.filter(tool => 'requestId' in (tool.inputSchema.properties as object)).map(tool => tool.name)).toEqual([]);
+      // A valid call carrying requestId passes validation and stops only at the missing host.
+      const accepted = responses.find(response => response.id === 100)!.result.content?.[0]?.text;
+      expect(accepted).not.toMatch(/invalid arguments|unknown fields/);
+      expect(responses.find(response => response.id === 101)!.result.content?.[0]?.text).toMatch(/wake: invalid arguments/);
       for (let index = 0; index < invalidInputs.length; index++) {
         const response = responses.find(response => response.id === index + 2)!;
         expect(response.result.isError).toBe(true);

@@ -387,7 +387,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
         'Describe work by what it does for the user; numbers only in parentheses.',
         'Do the assigned work yourself unless instructed to delegate or a verified capability gap requires it. Follow tool results.',
         'Never claim an action, result, or reply happened unless the prompt or a tool result proves it. State real doubt once, plainly; skip filler hedges.',
-        'After Beeline errors, retries, refusals, contradictions, context gaps or corrections, call report_feedback(category:bug, summary:<one sentence>) once. Otherwise skip feedback.',
+        'After Beeline errors, retries, refusals, contradictions, context gaps or corrections, call report_feedback(category, summary:<one sentence>) once. Otherwise skip feedback.',
         surface === 'room' &&
           [
             'Code work happens only in a thread.',
@@ -396,7 +396,7 @@ export const SESSION_SECTIONS: readonly PromptSection<SessionPromptContext>[] = 
             'Landing archives a repository thread and cancels its work, including saved runs. The surviving commander owns follow-up. Repo-less and repositoryWork:false work delivers its artifact without a PR.',
           ].join(' '),
         surface === 'dm' &&
-          'Use read(facet:addresses) to discover addresses, then open_thread(chat, implementer, brief), message and read across member chats. Do repository work in a thread.',
+          'Use read(facet:addresses) to discover addresses, then open_thread(room, implementer, brief), message and read across member chats. Do repository work in a thread.',
       ),
   },
   {
